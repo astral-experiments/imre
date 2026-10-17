@@ -10,6 +10,7 @@ pub(crate) enum Type {
     Class(usize),
     List(usize),
     Dict(usize),
+    Set(usize),
     Tuple(usize),
     Optional(usize),
     /// An internal mapping cursor, never available in user annotations.
@@ -25,6 +26,7 @@ impl std::fmt::Display for Type {
         match self {
             Self::List(id) => return write!(f, "list#{id}"),
             Self::Dict(id) => return write!(f, "dict#{id}"),
+            Self::Set(id) => return write!(f, "set#{id}"),
             Self::Tuple(id) => return write!(f, "tuple#{id}"),
             Self::Optional(id) => return write!(f, "optional#{id}"),
             _ => {}
@@ -36,7 +38,12 @@ impl std::fmt::Display for Type {
             Self::ListInt => "list[int]",
             Self::None => "None",
             Self::Iterator => "iterator",
-            Self::Class(_) | Self::List(_) | Self::Dict(_) | Self::Tuple(_) | Self::Optional(_) => {
+            Self::Class(_)
+            | Self::List(_)
+            | Self::Dict(_)
+            | Self::Set(_)
+            | Self::Tuple(_)
+            | Self::Optional(_) => {
                 unreachable!()
             }
         })
@@ -73,6 +80,10 @@ pub(crate) enum ExprKind {
         key: Type,
         value: Type,
         entries: Vec<(Expr, Expr)>,
+    },
+    Set {
+        element: Type,
+        values: Vec<Expr>,
     },
     Tuple(Vec<Expr>),
     Present(Box<Expr>),
@@ -135,6 +146,11 @@ pub(crate) enum Builtin {
     DictDelete,
     /// False visits keys; true visits key/value pairs without an intermediate tuple.
     DictIter(bool),
+    /// Arguments are the element then set, matching membership evaluation order.
+    SetContains,
+    SetAdd,
+    SetDiscard,
+    SetIter,
 }
 
 pub(crate) enum Statement {

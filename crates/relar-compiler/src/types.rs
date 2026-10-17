@@ -9,6 +9,7 @@ use crate::ir::Type;
 enum Shape {
     List(Type),
     Dict(Type, Type),
+    Set(Type),
     Tuple(Vec<Type>),
     Optional(Type),
 }
@@ -51,6 +52,21 @@ impl Types {
 
     pub(crate) fn dict(&self, key: Type, value: Type) -> Type {
         Type::Dict(self.intern(Shape::Dict(key, value)))
+    }
+
+    pub(crate) fn set(&self, element: Type) -> Type {
+        Type::Set(self.intern(Shape::Set(element)))
+    }
+
+    /// Kept separate from list elements so sets cannot acquire indexed operations.
+    pub(crate) fn set_element(&self, ty: Type) -> Option<Type> {
+        let Type::Set(id) = ty else {
+            return None;
+        };
+        match self.0.borrow().shapes[id] {
+            Shape::Set(element) => Some(element),
+            _ => unreachable!("set type identity has a set shape"),
+        }
     }
 
     pub(crate) fn optional(&self, element: Type) -> Type {
@@ -104,7 +120,11 @@ impl Types {
 
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
-        if let Some(element) = self.element(ty).or_else(|| self.payload(ty)) {
+        if let Some(element) = self
+            .element(ty)
+            .or_else(|| self.payload(ty))
+            .or_else(|| self.set_element(ty))
+        {
             vec![element]
         } else if let Some((key, value)) = self.mapping(ty) {
             vec![key, value]
@@ -137,6 +157,10 @@ impl Types {
                     self.describe(value, class_name)
                 )
             }
+            Type::Set(_) => format!(
+                "set[{}]",
+                self.describe(self.set_element(ty).unwrap(), class_name)
+            ),
             Type::Optional(_) => format!(
                 "{} | None",
                 self.describe(self.payload(ty).unwrap(), class_name)

@@ -629,9 +629,11 @@ impl Analyzer {
                     .collect::<Vec<_>>();
                 match builtin {
                     Builtin::Len => match args[0].ty {
-                        Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Tuple(_) => {
-                            Interval::bounded(0, MAX_LIST_LEN)
-                        }
+                        Type::ListInt
+                        | Type::List(_)
+                        | Type::Dict(_)
+                        | Type::Set(_)
+                        | Type::Tuple(_) => Interval::bounded(0, MAX_LIST_LEN),
                         Type::Str => Interval {
                             min: Some(0),
                             max: None,
@@ -644,6 +646,7 @@ impl Analyzer {
                 }
             }
             ExprKind::List(values)
+            | ExprKind::Set { values, .. }
             | ExprKind::Tuple(values)
             | ExprKind::Call(_, values)
             | ExprKind::Construct { args: values, .. } => {
@@ -977,6 +980,7 @@ mod tests {
             output.push(value);
             match &value.kind {
                 ExprKind::List(values)
+                | ExprKind::Set { values, .. }
                 | ExprKind::Tuple(values)
                 | ExprKind::Compare(values, _)
                 | ExprKind::Boolean(_, values)

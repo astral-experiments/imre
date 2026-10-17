@@ -15,6 +15,7 @@ impl Type {
             | Self::Class(_)
             | Self::List(_)
             | Self::Dict(_)
+            | Self::Set(_)
             | Self::Iterator
             | Self::Tuple(_)
             | Self::Optional(_) => "ptr",
@@ -30,6 +31,7 @@ impl Type {
             | Self::Class(_)
             | Self::List(_)
             | Self::Dict(_)
+            | Self::Set(_)
             | Self::Iterator
             | Self::Tuple(_)
             | Self::Optional(_) => "null",
@@ -178,6 +180,7 @@ impl Emitter<'_, '_> {
             Type::Class(_)
             | Type::List(_)
             | Type::Dict(_)
+            | Type::Set(_)
             | Type::Iterator
             | Type::Tuple(_)
             | Type::Optional(_) => "relar_object_retain",
@@ -197,6 +200,7 @@ impl Emitter<'_, '_> {
             Type::Class(_)
             | Type::List(_)
             | Type::Dict(_)
+            | Type::Set(_)
             | Type::Iterator
             | Type::Tuple(_)
             | Type::Optional(_) => "relar_object_release",
@@ -667,6 +671,22 @@ impl Emitter<'_, '_> {
                 }
                 dict
             }
+            ExprKind::Set { element, values } => {
+                let set = Value {
+                    ty: expression.ty,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_set_new(i32 {})",
+                        representation_kind(*element)
+                    )),
+                    small_integer: false,
+                };
+                for value in values {
+                    let value = self.operand(value);
+                    self.set_member(&set, &value.value, true);
+                    self.release_operand(&value);
+                }
+                set
+            }
             ExprKind::Tuple(values) => {
                 let object = Value {
                     ty: expression.ty,
@@ -942,6 +962,7 @@ impl Emitter<'_, '_> {
             Type::ListInt
             | Type::List(_)
             | Type::Dict(_)
+            | Type::Set(_)
             | Type::Iterator
             | Type::Tuple(_)
             | Type::Optional(_) => {
@@ -1082,6 +1103,7 @@ impl Emitter<'_, '_> {
                     Type::ListInt => "relar_list_len",
                     Type::List(_) => "relar_seq_len",
                     Type::Dict(_) => "relar_dict_len",
+                    Type::Set(_) => "relar_set_len",
                     Type::Tuple(_) => "relar_object_len",
                     _ => unreachable!("len input was checked"),
                 },
@@ -1105,10 +1127,15 @@ impl Emitter<'_, '_> {
                 self.unpack_word(word, returns)
             }
             Builtin::DictTryGet(stored) => self.dict_try_get(*stored, &args, returns),
-            Builtin::DictContains => {
+            Builtin::DictContains | Builtin::SetContains => {
                 let key = self.word(&args[0].value);
+                let family = if matches!(builtin, Builtin::SetContains) {
+                    "set"
+                } else {
+                    "dict"
+                };
                 let byte = self.instruction(format!(
-                    "call i8 @relar_dict_contains(ptr {}, i64 {key})",
+                    "call i8 @relar_{family}_contains(ptr {}, i64 {key})",
                     args[1].value.operand
                 ));
                 Value {
@@ -1134,6 +1161,15 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::SetAdd | Builtin::SetDiscard => {
+                self.set_member(
+                    &args[0].value,
+                    &args[1].value,
+                    matches!(builtin, Builtin::SetAdd),
+                );
+                none()
+            }
+            Builtin::SetIter => self.call("relar_set_iter", Type::Iterator, &[&args[0].value]),
             Builtin::Append => {
                 self.append(&args[0].value, &args[1].value);
                 none()
@@ -1175,6 +1211,7 @@ impl Emitter<'_, '_> {
                     | Type::Class(_)
                     | Type::List(_)
                     | Type::Dict(_)
+                    | Type::Set(_)
                     | Type::Iterator
                     | Type::Tuple(_)
                     | Type::Optional(_) => {
@@ -1302,6 +1339,7 @@ impl Emitter<'_, '_> {
             | Type::Class(_)
             | Type::List(_)
             | Type::Dict(_)
+            | Type::Set(_)
             | Type::Iterator
             | Type::Tuple(_)
             | Type::Optional(_) => {
@@ -1322,6 +1360,7 @@ impl Emitter<'_, '_> {
             | Type::Class(_)
             | Type::List(_)
             | Type::Dict(_)
+            | Type::Set(_)
             | Type::Iterator
             | Type::Tuple(_)
             | Type::Optional(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
@@ -1362,6 +1401,20 @@ impl Emitter<'_, '_> {
                 representation_kind(value.ty)
             ));
         }
+    }
+
+    /// Passes a rooted canonical int/str key without index decoding. The runtime
+    /// acquires a newly stored element and drops removed owners before returning;
+    /// the caller keeps both operands rooted throughout either operation.
+    fn set_member(&mut self, set: &Value, value: &Value, insert: bool) {
+        debug_assert!(matches!(set.ty, Type::Set(_)));
+        debug_assert!(matches!(value.ty, Type::Int | Type::Str));
+        let word = self.word(value);
+        let operation = if insert { "add" } else { "discard" };
+        self.line(format!(
+            "call void @relar_set_{operation}(ptr {}, i64 {word})",
+            set.operand
+        ));
     }
 
     fn nonnegative_index(&self, expression: &Expr) -> bool {
@@ -1520,6 +1573,7 @@ fn representation_kind(ty: Type) -> u32 {
         Type::Class(_)
         | Type::List(_)
         | Type::Dict(_)
+        | Type::Set(_)
         | Type::Iterator
         | Type::Tuple(_)
         | Type::Optional(_) => 5,
@@ -1607,6 +1661,12 @@ declare i64 @relar_dict_get_default(ptr, i64, i64)
 declare void @relar_dict_set(ptr, i64, i64)
 declare void @relar_dict_delete(ptr, i64)
 declare ptr @relar_dict_iter(ptr, i32)
+declare ptr @relar_set_new(i32)
+declare i64 @relar_set_len(ptr)
+declare i8 @relar_set_contains(ptr, i64)
+declare void @relar_set_add(ptr, i64)
+declare void @relar_set_discard(ptr, i64)
+declare ptr @relar_set_iter(ptr)
 declare i8 @relar_mapping_iter_next(ptr, ptr, ptr)
 declare ptr @relar_str_concat(ptr, ptr)
 declare ptr @relar_str_split_whitespace(ptr)
