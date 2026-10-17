@@ -117,6 +117,19 @@ def compare(args: argparse.Namespace) -> dict:
         "validator": HERE / "dependency_validate.py",
         "boundary_harness": REFERENCE / "check_boundaries.py",
     }
+    build_flags = []
+    recorded_build_flags = []
+    if args.lto_linker is not None:
+        # Keep the lexical name: ld.lld symlinks select LLD's flavor via argv[0].
+        inputs["lto_linker"] = args.lto_linker.absolute()
+        build_flags += ["--lto-linker", str(inputs["lto_linker"])]
+        recorded_build_flags += [
+            "--lto-linker",
+            f"<lto-linker-dir>/{inputs['lto_linker'].name}",
+        ]
+    if args.target is not None:
+        build_flags += ["--target", args.target]
+        recorded_build_flags += ["--target", args.target]
     source_paths = validator.package_sources()
     sources = {
         str(path.relative_to(validator.PACKAGE_ROOT)): shared.sha256(path)
@@ -185,6 +198,17 @@ def compare(args: argparse.Namespace) -> dict:
     clang_version = shared.run([str(inputs["clang"]), "--version"], b"", args.timeout)[
         "stdout"
     ].strip()
+    target_flags = [f"--target={args.target}"] if args.target is not None else []
+    effective_target = shared.run(
+        [str(inputs["clang"]), *target_flags, "-dumpmachine"], b"", args.timeout
+    )["stdout"].strip()
+    linker_version = (
+        shared.run([str(inputs["lto_linker"]), "--version"], b"", args.timeout)[
+            "stdout"
+        ].strip()
+        if args.lto_linker is not None
+        else None
+    )
     artifacts.mkdir(parents=True, exist_ok=True)
     compilation = shared.run(
         [
@@ -203,7 +227,8 @@ def compare(args: argparse.Namespace) -> dict:
             "3",
             "--emit-llvm",
             str(llvm),
-        ],
+        ]
+        + build_flags,
         b"",
         args.timeout,
     )
@@ -320,6 +345,7 @@ def compare(args: argparse.Namespace) -> dict:
         "tools": {
             "relar": compiler_version,
             "clang": clang_version,
+            "lto_linker": linker_version,
             "cpython": python_info,
             "harness_python": sys.version,
         },
@@ -332,6 +358,10 @@ def compare(args: argparse.Namespace) -> dict:
         },
         "clock": vars(time.get_clock_info("perf_counter")),
         "options": {
+            "optimization_level": 3,
+            "target": effective_target,
+            "requested_target": args.target,
+            "lto": "thin" if args.lto_linker is not None else None,
             "sizes": args.sizes,
             "shapes": args.shapes,
             "samples": args.samples,
@@ -376,7 +406,8 @@ def compare(args: argparse.Namespace) -> dict:
                 "3",
                 "--emit-llvm",
                 "<artifact-dir>/dependency_planner.ll",
-            ],
+            ]
+            + recorded_build_flags,
             "output": "complete expected stdout retained once per workload; every run must match it exactly and retain status, stderr, duration, output SHA256 and byte length",
             "integer_semantics": "Rust BigInt validates arbitrary-precision durations/dependencies; checked i64 excludes explicitly listed unrepresentable cases and aborts on overflow, so it is a narrower numerical contract",
             "scope": "whole-process dependency-planner comparison; Rust is a direct implementation of the same algorithm, not the same compiled source; no general Python/Rust/C performance claim",
@@ -399,6 +430,8 @@ def main() -> None:
     parser.add_argument("--runtime", type=Path, required=True)
     parser.add_argument("--python", default="python3.14")
     parser.add_argument("--clang", default="clang")
+    parser.add_argument("--lto-linker", type=Path)
+    parser.add_argument("--target")
     parser.add_argument(
         "--artifact-dir", type=Path, default=HERE / "local/dependency-planner-optimized"
     )

@@ -16,6 +16,212 @@ class Item:
         self.name = name
 """
 
+# Projection-only tuple locals may be scalarized. These cases protect snapshot
+# ownership, evaluation order, control-flow rebinding, and boxed escape paths.
+ACCEPTED = {
+    "tuple_scalar_snapshots": """
+class Box:
+    number: int
+    name: str
+    values: list[int]
+
+    def __init__(self, number: int, name: str, values: list[int]) -> None:
+        self.number = number
+        self.name = name
+        self.values = values
+
+
+class Owner:
+    box: Box
+
+    def __init__(self, box: Box) -> None:
+        self.box = box
+
+
+def replace_owner(owner: Owner) -> int:
+    owner.box = Box(8, "new", [0])
+    return 0
+
+
+def replace(box: Box, log: list[int]) -> int:
+    log.append(4)
+    box.values.append(9)
+    box.number = 7
+    box.name = "changed"
+    box.values = [100]
+    return 4
+
+
+def snapshots(box: Box, log: list[int]) -> tuple[int, str, list[int], Box, int]:
+    return (box.number, box.name, box.values, box, replace(box, log))
+
+
+def first_argument(box: Box, log: list[int]) -> Box:
+    log.append(1)
+    return box
+
+
+def second_argument(box: Box, log: list[int]) -> int:
+    log.append(2)
+    box.number = 2000000000000000000000000000000
+    return 2
+
+
+def event(log: list[int], value: int) -> int:
+    log.append(value)
+    return value
+
+
+def projected(box: Box, ignored: int, log: list[int]) -> tuple[int, int]:
+    return (box.number, event(log, 3))
+
+
+def main() -> None:
+    log: list[int] = []
+    box = Box(1000000000000000000000000000000, "original", [5])
+    captured = snapshots(box, log)
+    print(captured[0])
+    print(captured[1])
+    print(captured[2][0])
+    print(captured[2][1])
+    captured[2].append(11)
+    print(captured[2][-1])
+    print(captured[3] == box)
+    print(captured[3].values[0])
+    print(captured[-1])
+    print(len(captured))
+    print(box.number)
+    print(box.name)
+
+    pair = projected(first_argument(box, log), second_argument(box, log), log)
+    print(pair[0])
+    # The second component is unused, but its effect must still occur.
+    direct = (event(log, 5), event(log, 6))
+    print(direct[0])
+
+    # The first argument loses its last external root while evaluating the next.
+    owner = Owner(Box(3000000000000000000000000000000, "temporary", [8]))
+    temporary = projected(owner.box, replace_owner(owner), log)
+    print(temporary[0])
+    print(owner.box.number)
+    for index in range(len(log)):
+        print(log[index])
+
+
+main()
+""",
+    "tuple_scalar_rebinding": """
+def pair(name: str, value: int) -> tuple[str, int]:
+    return (name, value)
+
+
+def exercise(flag: bool) -> None:
+    swapped = (1000000000000000000000000000001, 1000000000000000000000000000002)
+    swapped = (swapped[1], swapped[0])
+    print(swapped[0])
+    print(swapped[1])
+    names = ("left", "right")
+    names = (names[1], names[0])
+    print(names[0])
+    print(names[-1])
+    names = (names[0], names[1])
+    print(names[0])
+
+    if flag:
+        current = pair("yes", 1000000000000000000000000000000)
+    else:
+        current = ("no", 2000000000000000000000000000000)
+    for index in range(6):
+        if index % 2 == 0:
+            current = (current[0] + "x", current[1] + index)
+        else:
+            current = pair(current[0] + "y", current[1] + index)
+        if index == 1:
+            continue
+        print(current[0])
+        print(current[1])
+        if index == 4:
+            break
+    remaining = 2
+    while remaining > 0:
+        current = pair(current[0] + "z", current[1] + remaining)
+        remaining -= 1
+    print(current[0])
+    print(current[1])
+    print(len(current))
+    if flag:
+        return
+    current = ("last", current[1])
+    print(current[0])
+
+
+exercise(True)
+exercise(False)
+""",
+    "tuple_scalar_boxed_boundaries": """
+class Holder:
+    pair: tuple[list[int], str]
+
+    def __init__(self, pair: tuple[list[int], str]) -> None:
+        self.pair = pair
+
+
+def make_pair(value: int) -> tuple[list[int], str]:
+    return ([value], "saved")
+
+
+def identity(pair: tuple[list[int], str]) -> tuple[list[int], str]:
+    return pair
+
+
+def main() -> None:
+    original = make_pair(1000000000000000000000000000000)
+    alias = original
+    returned = identity(alias)
+    original[0].append(2)
+    print(returned[0][0])
+    print(returned[0][-1])
+    print(returned[1])
+
+    pairs: list[tuple[list[int], str]] = [make_pair(3)]
+    held = pairs[0]
+    pairs[0] = make_pair(4)
+    print(held[0][0])
+    print(pairs[0][0][0])
+    popped = pairs.pop()
+    print(popped[1])
+
+    holder = Holder(make_pair(5))
+    old = holder.pair
+    holder.pair = make_pair(6)
+    print(old[0][0])
+    print(holder.pair[0][0])
+
+    nested = (make_pair(7), 8)
+    print(nested[0][0][0])
+    print(nested[0][1])
+    print(nested[-1])
+
+    optional: tuple[list[int], str] | None = make_pair(9)
+    if optional is not None:
+        kept = optional
+        optional = None
+        print(kept[0][0])
+        print(kept[1])
+    print(optional is None)
+
+    # Rebinding the container field cannot change an earlier scalar snapshot.
+    snapshot = (holder.pair[0], holder.pair[1])
+    holder.pair = make_pair(10)
+    print(snapshot[0][0])
+    print(snapshot[1])
+    print(holder.pair[0][0])
+
+
+main()
+""",
+}
+
 # Every rejected program must reach the checker. Cycle cases additionally require
 # the ownership-graph diagnostic, rather than an unsupported-annotation rejection.
 REJECTED = {
@@ -203,6 +409,11 @@ show(Box(Item("x")))
 }
 
 ERRORS = {
+    "tuple_unused_element_error": (
+        'def broken() -> tuple[int, int]:\n    return (7, 1 // 0)\n'
+        'print("before")\npair = broken()\nprint(pair[0])\n',
+        "ZeroDivisionError",
+    ),
     "string_bounds": ('values: list[str] = ["x"]\nprint(values[1])\n', "IndexError"),
     "string_negative_bounds": (
         'values: list[str] = ["x"]\nprint(values[-2])\n',
@@ -238,9 +449,16 @@ def main() -> None:
     parser.add_argument("--runtime", required=True, type=Path)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--clang", default="clang")
+    parser.add_argument("--lto-linker", type=Path)
+    parser.add_argument("--target")
     parser.add_argument("--opt-levels", nargs="+", default=["0", "3"])
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
+    build_flags = []
+    if args.lto_linker is not None:
+        build_flags += ["--lto-linker", str(args.lto_linker.absolute())]
+    if args.target is not None:
+        build_flags += ["--target", args.target]
     compiler = str(args.compiler.resolve())
     runtime = str(args.runtime.resolve())
     passed = 0
@@ -260,6 +478,7 @@ def main() -> None:
             for path in sorted(FIXTURES.glob("*.py"))
         ]
         assert cases, f"No fixtures found in {FIXTURES}"
+        cases.extend((name, source, None) for name, source in ACCEPTED.items())
         cases.extend((name, source, error) for name, (source, error) in ERRORS.items())
         for name, source, expected_error in cases:
             path = temporary / f"{name}.py"
@@ -291,6 +510,7 @@ def main() -> None:
                 ]
                 if args.sanitize:
                     command.append("--sanitize")
+                command += build_flags
                 built = run(command)
                 assert built.returncode == 0, (name, level, built.stderr)
                 actual = run([str(binary)])

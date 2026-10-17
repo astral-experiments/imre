@@ -94,6 +94,17 @@ ERRORS = {
     "big_bounds": ("x = [1]\nprint(x[1000000000000000000000000])\n", "IndexError"),
     "empty_pop": ("x: list[int] = []\nprint(x.pop())\n", "IndexError"),
     "bad_integer": ('print(int("12__3"))\n', "ValueError"),
+    "empty_integer": ('print(int(""))\n', "ValueError"),
+    "sign_only_integer": ('print(int("+"))\n', "ValueError"),
+    "double_sign_integer": ('print(int("-+1"))\n', "ValueError"),
+    "leading_separator_integer": ('print(int("+_1"))\n', "ValueError"),
+    "trailing_separator_integer": ('print(int("1_"))\n', "ValueError"),
+    "embedded_space_integer": ('print(int("1 2"))\n', "ValueError"),
+    "control_separator_integer": ('print(int("\\x1c1"))\n', "ValueError"),
+    "invalid_after_large_integer": (
+        'print(int("999999999999999999999999999999999999999999999__1"))\n',
+        "ValueError",
+    ),
     "zero_step": ("for x in range(0, 1, 0):\n    print(x)\n", "ValueError"),
     "assertion": ("assert False\n", "AssertionError"),
     "repeat_overflow": ("x = [1] * -100000000000000000000000\n", "OverflowError"),
@@ -107,9 +118,16 @@ def main() -> None:
     parser.add_argument("--runtime", required=True, type=Path)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--clang", default="clang")
+    parser.add_argument("--lto-linker", type=Path)
+    parser.add_argument("--target")
     parser.add_argument("--opt-levels", nargs="+", default=["0", "3"])
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
+    build_flags = []
+    if args.lto_linker is not None:
+        build_flags += ["--lto-linker", str(args.lto_linker.absolute())]
+    if args.target is not None:
+        build_flags += ["--target", args.target]
     compiler = str(args.compiler.resolve())
     runtime = str(args.runtime.resolve())
     passed = 0
@@ -132,6 +150,7 @@ def main() -> None:
             for level in args.opt_levels:
                 binary = temporary / f"{name}-O{level}"
                 command = [compiler, "build", str(path), "-o", str(binary), "--runtime", runtime, "--opt-level", level, "--clang", args.clang]
+                command += build_flags
                 if args.sanitize:
                     command.append("--sanitize")
                 built = run(command)

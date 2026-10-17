@@ -43,14 +43,29 @@ def main() -> None:
     parser.add_argument(
         "--build-cache", type=Path, help="override CARGO_BUILD_BUILD_DIR"
     )
+    parser.add_argument(
+        "--llvm-budget",
+        type=int,
+        metavar="POSITIVE_INT",
+        help="set LLVM import and inlining budgets explicitly",
+    )
     parser.add_argument("--offline", action="store_true")
     args = parser.parse_args()
+    if args.llvm_budget is not None and args.llvm_budget <= 0:
+        parser.error("--llvm-budget must be a positive integer")
     target = args.target_dir.resolve()
     artifacts = args.artifact_dir.resolve()
     environment = os.environ.copy()
     environment.update(
         CARGO_TARGET_DIR=str(target), RUSTFLAGS="", CARGO_ENCODED_RUSTFLAGS=""
     )
+    if args.llvm_budget is not None:
+        # Even an empty encoded value would take precedence over RUSTFLAGS.
+        environment.pop("CARGO_ENCODED_RUSTFLAGS")
+        environment["RUSTFLAGS"] = (
+            f"-Cllvm-args=-import-instr-limit={args.llvm_budget} "
+            f"-Cllvm-args=-inline-threshold={args.llvm_budget}"
+        )
     if args.build_cache is not None:
         environment["CARGO_BUILD_BUILD_DIR"] = str(args.build_cache.resolve())
     cache = environment.get("CARGO_BUILD_BUILD_DIR")
@@ -168,12 +183,13 @@ def main() -> None:
         "cargo_version": cargo_version,
         "tool_sha256": tool_hashes,
         "tool_hash_scope": "rustup-selected binaries when using rustup shims; otherwise command entrypoints",
+        "llvm_budget": args.llvm_budget,
         "environment": {
             "CARGO_TARGET_DIR": "<target-dir>",
             "CARGO_BUILD_BUILD_DIR": "<shared-build-cache>" if cache else None,
             "CARGO_HOME": "<cargo-home>" if environment.get("CARGO_HOME") else None,
-            "RUSTFLAGS": "",
-            "CARGO_ENCODED_RUSTFLAGS": "",
+            "RUSTFLAGS": environment["RUSTFLAGS"],
+            "CARGO_ENCODED_RUSTFLAGS": environment.get("CARGO_ENCODED_RUSTFLAGS"),
             **{
                 name: value
                 for name, value in environment.items()
@@ -187,7 +203,7 @@ def main() -> None:
         },
         "build_script_sha256": script_hash,
         "build_script": script,
-        "profile": "Cargo.toml [profile.release] with any recorded CARGO_PROFILE_RELEASE_* overrides; explicit target flags cleared; Ohm experimental defaults disabled when selected",
+        "profile": "Cargo.toml [profile.release] with any recorded CARGO_PROFILE_RELEASE_* overrides; inherited Rust flags cleared; optional explicit LLVM budgets; Ohm experimental defaults disabled when selected",
     }
     path = artifacts / "build-record.json"
     path.write_text(json.dumps(record, indent=2) + "\n")

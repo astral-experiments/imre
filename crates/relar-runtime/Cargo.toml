@@ -11,6 +11,8 @@ crate-type = ["rlib", "staticlib"]
 [dependencies]
 num-bigint.workspace = true
 num-traits.workspace = true
+compact_str.workspace = true
+itoa.workspace = true
 
 [lints]
 workspace = true

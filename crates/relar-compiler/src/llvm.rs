@@ -230,6 +230,19 @@ impl Emitter {
         }
     }
 
+    /// Transfers a local's ownership to the returned value and leaves a valid
+    /// empty/immediate value behind for subsequent reassignment or cleanup.
+    fn take_slot(&mut self, slot: usize) -> Value {
+        debug_assert!(!self.borrowed_params[slot]);
+        let value = self.borrow_slot(slot);
+        self.line(format!(
+            "store {} {}, ptr %local{slot}",
+            value.ty.llvm(),
+            value.ty.initial()
+        ));
+        value
+    }
+
     /// Publishes the new owned value before releasing the replaced reference.
     fn store(&mut self, slot: usize, value: &Value) {
         debug_assert!(!self.borrowed_params[slot]);
@@ -335,6 +348,15 @@ impl Emitter {
             Statement::Assign(slot, expression) => {
                 let value = self.expr(expression);
                 self.store(*slot, &value);
+            }
+            Statement::Move(target, source) => {
+                debug_assert_eq!(self.locals[*target], self.locals[*source]);
+                let value = self.take_slot(*source);
+                self.store(*target, &value);
+            }
+            Statement::Clear(slot) => {
+                let value = self.take_slot(*slot);
+                self.release(&value);
             }
             Statement::SetItem(list, index, expression) => {
                 // Python evaluates an assignment's RHS before its target expressions.
@@ -973,7 +995,11 @@ fn representation_kind(ty: Type) -> u32 {
 fn mark_rebound(statements: &[Statement], rebound: &mut [bool]) {
     for statement in statements {
         match statement {
-            Statement::Assign(slot, _) => rebound[*slot] = true,
+            Statement::Assign(slot, _) | Statement::Clear(slot) => rebound[*slot] = true,
+            Statement::Move(target, source) => {
+                rebound[*target] = true;
+                rebound[*source] = true;
+            }
             Statement::If(_, yes, no) => {
                 mark_rebound(yes, rebound);
                 mark_rebound(no, rebound);

@@ -5,7 +5,7 @@ use std::process::{Command, ExitCode};
 
 use relar_compiler::CompileOptions;
 
-const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY]\n       relar build SOURCE.py -o OUTPUT [--module-root DIRECTORY]\n           [--runtime LIBRARY.a] [--emit-llvm FILE.ll] [--clang CLANG]\n           [--opt-level 0|1|2|3] [--sanitize]";
+const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY]\n       relar build SOURCE.py -o OUTPUT [--module-root DIRECTORY]\n           [--runtime LIBRARY.a] [--emit-llvm FILE.ll] [--clang CLANG]\n           [--opt-level 0|1|2|3] [--sanitize]\n           [--target TRIPLE] [--lto-linker PATH]\n\nThinLTO (--lto-linker) requires explicit --runtime and --target.";
 
 fn main() -> ExitCode {
     match run() {
@@ -39,6 +39,8 @@ fn run() -> Result<(), String> {
     let mut runtime = None;
     let mut llvm_path = None;
     let mut module_root = None;
+    let mut lto_linker = None;
+    let mut target = None;
     let mut clang = OsString::from("clang");
     let mut optimization = OsString::from("3");
     let mut options = CompileOptions::default();
@@ -57,6 +59,8 @@ fn run() -> Result<(), String> {
             Some("--runtime") => runtime = Some(PathBuf::from(value)),
             Some("--emit-llvm") => llvm_path = Some(PathBuf::from(value)),
             Some("--clang") => clang = value,
+            Some("--lto-linker") => lto_linker = Some(PathBuf::from(value)),
+            Some("--target") => target = Some(value),
             Some("--opt-level") if matches!(value.to_str(), Some("0" | "1" | "2" | "3")) => {
                 optimization = value
             }
@@ -75,6 +79,27 @@ fn run() -> Result<(), String> {
         return Err("The prototype currently supports 64-bit Linux hosts".to_owned());
     }
     let output = output.ok_or(USAGE)?;
+    if lto_linker.is_some() && (runtime.is_none() || target.is_none()) {
+        return Err("--lto-linker requires explicit --runtime and --target".to_owned());
+    }
+    let lto_linker = lto_linker
+        .map(|path| {
+            if !path.is_file() {
+                return Err(format!(
+                    "ThinLTO linker is not an existing file: {}",
+                    path.display()
+                ));
+            }
+            // Linker symlinks such as ld.lld select a flavor through argv[0].
+            // Resolve identities below, but preserve that name when invoking it.
+            std::path::absolute(&path).map_err(|error| {
+                format!(
+                    "Could not resolve ThinLTO linker {}: {error}",
+                    path.display()
+                )
+            })
+        })
+        .transpose()?;
     let runtime = runtime.unwrap_or(
         std::env::current_exe()
             .map_err(|error| error.to_string())?
@@ -96,6 +121,9 @@ fn run() -> Result<(), String> {
     if let Some(path) = &llvm_path {
         paths.push(path);
     }
+    if let Some(path) = &lto_linker {
+        paths.push(path);
+    }
     let identities = paths
         .iter()
         .map(|path| identity(path))
@@ -106,7 +134,7 @@ fn run() -> Result<(), String> {
             .any(|previous| previous == path || same_file(previous, path))
         {
             return Err(
-                "All source modules, runtime, executable, and LLVM output must have distinct paths"
+                "All source modules, runtime, ThinLTO linker, executable, and LLVM output must have distinct paths"
                     .to_owned(),
             );
         }
@@ -134,6 +162,21 @@ fn run() -> Result<(), String> {
         .arg(&output);
     if options.address_sanitizer {
         linker.args(["-fsanitize=address", "-fno-omit-frame-pointer"]);
+    }
+    if let Some(path) = &lto_linker {
+        let mut argument = OsString::from("-fuse-ld=");
+        argument.push(path.as_os_str());
+        linker.arg("-flto=thin").arg(argument);
+        if optimization == "3" {
+            // Runtime accessors cross a language boundary and exceed LLVM's
+            // default import/inlining budgets even when their hot paths are small.
+            linker.arg("-Wl,-mllvm,-import-instr-limit=1000,-mllvm,-inline-threshold=1000");
+        }
+    }
+    if let Some(target) = target {
+        let mut argument = OsString::from("--target=");
+        argument.push(target);
+        linker.arg(argument);
     }
     let status = linker
         .status()
