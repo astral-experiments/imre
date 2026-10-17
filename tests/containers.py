@@ -409,9 +409,155 @@ show(Box(Item("x")))
 }
 
 ERRORS = {
+    "index_copy_both_bounds": (
+        'values: list[int] = []\nprint("before")\nvalues[1] = values[0]\n',
+        "IndexError",
+    ),
+    "index_copy_destination_bounds": (
+        "values = [1000000000000000000000000000000]\nvalues[1] = values[0]\n",
+        "IndexError",
+    ),
+    "index_copy_source_before_target_arithmetic": (
+        "values: list[int] = []\nvalues[1 // 0] = values[0]\n",
+        "IndexError",
+    ),
+    "index_copy_source_before_target_call": (
+        (
+            "def target(values: list[int]) -> list[int]:\n"
+            '    print("target")\n    return values\n'
+            "values: list[int] = []\ntarget(values)[0] = values[0]\n"
+        ),
+        "IndexError",
+    ),
+    "index_compare_read_before_division": (
+        "values: list[int] = []\nprint(values[0] < 1 // 0)\n",
+        "IndexError",
+    ),
+    "index_compare_division_before_read": (
+        "values: list[int] = []\nprint(1 // 0 < values[0])\n",
+        "ZeroDivisionError",
+    ),
+    "index_proof_alias_shrink": (
+        (
+            "values = [10, 20]\nalias = values\nindex = 1\n"
+            "if 0 <= index and index < len(values):\n"
+            "    print(alias.pop())\n    print(values[index])\n"
+        ),
+        "IndexError",
+    ),
+    "index_proof_range_shrink": (
+        (
+            "values = [10, 20]\nfor index in range(len(values)):\n"
+            "    if index == 0:\n        print(values.pop())\n        continue\n"
+            "    print(values[index])\n"
+        ),
+        "IndexError",
+    ),
+    "index_proof_nested_alias_shrink": (
+        (
+            "row = [10, 20]\nrows = [row, row]\nindex = 1\n"
+            "if 0 <= index and index < len(rows[0]):\n"
+            "    print(rows[1].pop())\n    print(rows[0][index])\n"
+        ),
+        "IndexError",
+    ),
+    "index_proof_rebound_list": (
+        (
+            "values = [10]\nindex = 0\n"
+            "if 0 <= index and index < len(values):\n"
+            '    values = []\n    print("rebound")\n    print(values[index])\n'
+        ),
+        "IndexError",
+    ),
+    "index_proof_call_in_guard": (
+        (
+            "def shrink(values: list[int]) -> bool:\n"
+            '    print("shrink")\n    values.pop()\n    return True\n'
+            "values = [10]\nindex = 0\n"
+            "if 0 <= index and index < len(values) and shrink(values):\n"
+            "    print(values[index])\n"
+        ),
+        "IndexError",
+    ),
+    "index_proof_set_rhs_shrink": (
+        (
+            "def right(values: list[int]) -> int:\n"
+            '    print("right")\n    values.pop()\n    return 7\n'
+            "values = [1000000000000000000000000000000]\nindex = 0\n"
+            "if 0 <= index and index < len(values):\n"
+            "    values[index] = right(values)\n"
+        ),
+        "IndexError",
+    ),
+    "index_proof_aug_rhs_shrink": (
+        (
+            "def right(values: list[int]) -> int:\n"
+            '    print("right")\n    values.pop()\n    return 7\n'
+            "values = [1000000000000000000000000000000]\nindex = 0\n"
+            "if 0 <= index and index < len(values):\n"
+            "    values[index] += right(values)\n"
+        ),
+        "IndexError",
+    ),
+    "index_proof_aug_get_before_rhs": (
+        (
+            'def right() -> int:\n    print("right")\n    return 1 // 0\n'
+            "values = [10]\nindex = 1\nif index >= 0:\n"
+            "    values[index] += right()\n"
+        ),
+        "IndexError",
+    ),
+    "index_proof_set_rhs_before_bounds": (
+        (
+            'def right() -> int:\n    print("right")\n    return 1 // 0\n'
+            "values = [10]\nindex = 1\nif index >= 0:\n"
+            "    values[index] = right()\n"
+        ),
+        "ZeroDivisionError",
+    ),
+    "index_proof_huge_nonnegative": (
+        (
+            "def read(values: list[int], index: int) -> int:\n"
+            "    if index >= 0:\n        return values[index]\n    return 0\n"
+            "print(read([10], 18446744073709551616))\n"
+        ),
+        "IndexError",
+    ),
+    "index_proof_promoted_index": (
+        (
+            "values = [10]\nindex = 4611686018427387903\n"
+            "index += 1\nindex *= 2\nprint(index)\nprint(values[index])\n"
+        ),
+        "IndexError",
+    ),
+    "index_proof_divisor_loop_zero": (
+        (
+            "divisor = 1\nfor turn in range(2):\n"
+            "    if turn == 1:\n        divisor = 0\n"
+            "    print(7 // divisor)\n"
+        ),
+        "ZeroDivisionError",
+    ),
+    "index_proof_modulo_branch_zero": (
+        (
+            "def remainder(flag: bool) -> None:\n    divisor = 2\n"
+            "    if flag:\n        divisor = 0\n    print(7 % divisor)\n"
+            "remainder(False)\nremainder(True)\n"
+        ),
+        "ZeroDivisionError",
+    ),
+    "index_proof_divisor_guard_reassigned": (
+        (
+            "divisor = 1\nif divisor > 0:\n    divisor -= 1\n"
+            '    print("zero")\n    print(7 // divisor)\n'
+        ),
+        "ZeroDivisionError",
+    ),
     "tuple_unused_element_error": (
-        'def broken() -> tuple[int, int]:\n    return (7, 1 // 0)\n'
-        'print("before")\npair = broken()\nprint(pair[0])\n',
+        (
+            "def broken() -> tuple[int, int]:\n    return (7, 1 // 0)\n"
+            'print("before")\npair = broken()\nprint(pair[0])\n'
+        ),
         "ZeroDivisionError",
     ),
     "string_bounds": ('values: list[str] = ["x"]\nprint(values[1])\n', "IndexError"),
