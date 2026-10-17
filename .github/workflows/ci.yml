@@ -67,3 +67,9 @@ jobs:
         run: |
           python3 benchmarks/reference/dependency_planner/build.py --artifact-dir /tmp/relar-rust-reference --target-dir target/rust-reference
           python3 benchmarks/reference/dependency_planner/check_boundaries.py --python python3 --relar /tmp/dependency-planner --rust-bigint /tmp/relar-rust-reference/planner-bigint --rust-i64 /tmp/relar-rust-reference/planner-i64 --output /tmp/relar-rust-reference/validation.json
+      - name: Validate the incremental planner and numeric reference boundaries
+        run: |
+          target/release/relar build examples/incremental_planner/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/incremental-planner
+          python3 benchmarks/reference/incremental_planner/build.py --artifact-dir /tmp/relar-incremental-reference --target-dir target/incremental-reference
+          # Checked i64 compares only in-range cases and must reject every excluded overflow case.
+          python3 benchmarks/incremental_validate.py --python python3 --binary /tmp/incremental-planner --rust-bigint /tmp/relar-incremental-reference/planner-bigint --rust-i64 /tmp/relar-incremental-reference/planner-i64 --output /tmp/relar-incremental-reference/validation.json

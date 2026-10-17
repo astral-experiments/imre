@@ -28,3 +28,14 @@ python3 benchmarks/dependency_validate.py --binary /tmp/dependency-planner
 ```
 
 The independent oracle checks 135 inputs, including cycles, forward dependencies, Unicode labels, and arbitrary-precision durations. At 16,384 tasks, the [range-proof and container-access comparison](benchmarks/results/2026-10-17-dependency-index-specialization.md) records 4.04× faster execution than CPython for layered graphs and 6.67× for independent tasks, including the complete report. With matched ThinLTO settings, Relar takes 11% less time than the arbitrary-precision Rust reference on the layered graph and 16% more on the wide graph. The [earlier profile](benchmarks/results/2026-10-17-dependency-planner.md), [initial baseline](benchmarks/results/2026-10-17-dependency-planner-baseline.md), and raw samples are preserved; the package README describes input format and reproduction.
+
+The [incremental planner](examples/incremental_planner/README.md) adds named targets, dictionary lookup, sets, and direct iteration. It validates the whole graph, finds everything affected by a set of changed targets, and emits a deterministic rebuild schedule:
+
+```sh
+target/release/relar build examples/incremental_planner/__main__.py \
+  --module-root examples --runtime target/release/librelar_runtime.a \
+  --clang clang-18 -o /tmp/incremental-planner
+python3 benchmarks/incremental_validate.py --binary /tmp/incremental-planner
+```
+
+Its independent checks cover 155 graph cases and 17 parser cases. The [Rust references and four-engine benchmark](benchmarks/reference/incremental_planner/README.md) preserve the same algorithm and distinguish arbitrary-precision arithmetic from checked-i64 limits.

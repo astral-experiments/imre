@@ -83,3 +83,24 @@ python3 benchmarks/dependency_profile.py \
 ```
 
 This runs Callgrind and DHAT separately, requires a new output directory, and verifies exit status, complete output, and executable hashes. Supply `--build-record optimized=/path/to/build-record.json` to preserve additional build provenance. Instrumented runs are excluded from timing results; the output includes trace/log hashes and instruction/allocation summaries. Valgrind is discovered on `PATH` or in the Relar tool cache, or can be selected with `--valgrind` and `--valgrind-lib`.
+
+## Incremental planner
+
+The [named incremental planner](../examples/incremental_planner/README.md) uses dictionaries, sets, and direct iteration to validate a named graph and schedule the targets affected by changes. The unchanged package runs on CPython and Relar; [Rust references](reference/incremental_planner/README.md) implement the same algorithm with either arbitrary-precision or checked-i64 arithmetic.
+
+Build and validate all four implementations before measuring:
+
+```sh
+target/release/relar build examples/incremental_planner/__main__.py \
+  --module-root examples --runtime target/release/librelar_runtime.a \
+  --clang clang-18 --opt-level 3 -o /tmp/incremental-planner
+python3 benchmarks/reference/incremental_planner/build.py \
+  --artifact-dir benchmarks/local/incremental-reference-normal \
+  --target-dir target/incremental-reference
+python3 benchmarks/incremental_validate.py --binary /tmp/incremental-planner \
+  --rust-bigint benchmarks/local/incremental-reference-normal/planner-bigint \
+  --rust-i64 benchmarks/local/incremental-reference-normal/planner-i64 \
+  --python python3.14
+```
+
+Validation checks 155 graph cases and 17 separate parser cases, including complete output and fatal error categories. Checked i64 matches 138 graph cases and must explicitly reject the other 17 for overflow; all parser cases are in range. The reference guide gives ordinary and ThinLTO build commands, local Ohm options, and `incremental_benchmark.py` reproduction commands. Its four-engine comparisons use 32 measured rounds with balanced Williams orders, two warmups, one pinned CPU, fresh processes, exact output checks, and preserved source/tool/build provenance. Default workloads cover sparse and full changes in 16,384-target layered and wide graphs plus a smaller integer-boundary case. These are whole-process measurements, including parsing, whole-graph validation, scheduling, and the complete report.
