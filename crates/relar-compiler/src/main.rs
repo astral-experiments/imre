@@ -5,7 +5,7 @@ use std::process::{Command, ExitCode};
 
 use relar_compiler::CompileOptions;
 
-const USAGE: &str = "Usage: relar check SOURCE.py\n       relar build SOURCE.py -o OUTPUT [--runtime LIBRARY.a] [--emit-llvm FILE.ll]\n           [--clang CLANG] [--opt-level 0|1|2|3] [--sanitize]";
+const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY]\n       relar build SOURCE.py -o OUTPUT [--module-root DIRECTORY]\n           [--runtime LIBRARY.a] [--emit-llvm FILE.ll] [--clang CLANG]\n           [--opt-level 0|1|2|3] [--sanitize]";
 
 fn main() -> ExitCode {
     match run() {
@@ -38,11 +38,12 @@ fn run() -> Result<(), String> {
     let mut output = None;
     let mut runtime = None;
     let mut llvm_path = None;
+    let mut module_root = None;
     let mut clang = OsString::from("clang");
     let mut optimization = OsString::from("3");
     let mut options = CompileOptions::default();
     while let Some(flag) = args.next() {
-        if command == "check" {
+        if command == "check" && flag != "--module-root" {
             return Err(USAGE.to_owned());
         }
         if flag == "--sanitize" {
@@ -51,6 +52,7 @@ fn run() -> Result<(), String> {
         }
         let value = args.next().ok_or(USAGE)?;
         match flag.to_str() {
+            Some("--module-root") => module_root = Some(PathBuf::from(value)),
             Some("-o") => output = Some(PathBuf::from(value)),
             Some("--runtime") => runtime = Some(PathBuf::from(value)),
             Some("--emit-llvm") => llvm_path = Some(PathBuf::from(value)),
@@ -66,10 +68,8 @@ fn run() -> Result<(), String> {
             }
         }
     }
-    let source = std::fs::read_to_string(&source_path)
-        .map_err(|error| format!("{}: {error}", source_path.display()))?;
     if command == "check" {
-        return relar_compiler::check(&source);
+        return relar_compiler::check_file(&source_path, module_root.as_deref());
     }
     if !cfg!(all(target_os = "linux", target_pointer_width = "64")) {
         return Err("The prototype currently supports 64-bit Linux hosts".to_owned());
@@ -86,7 +86,13 @@ fn run() -> Result<(), String> {
             runtime.display()
         ));
     }
-    let mut paths = vec![source_path.as_path(), runtime.as_path(), output.as_path()];
+    let compilation = relar_compiler::compile_file(&source_path, module_root.as_deref(), &options)?;
+    let mut paths = compilation
+        .input_paths
+        .iter()
+        .map(PathBuf::as_path)
+        .collect::<Vec<_>>();
+    paths.extend([runtime.as_path(), output.as_path()]);
     if let Some(path) = &llvm_path {
         paths.push(path);
     }
@@ -95,13 +101,17 @@ fn run() -> Result<(), String> {
         .map(|path| identity(path))
         .collect::<Result<Vec<_>, _>>()?;
     for (i, path) in identities.iter().enumerate() {
-        if identities[..i].contains(path) {
+        if identities[..i]
+            .iter()
+            .any(|previous| previous == path || same_file(previous, path))
+        {
             return Err(
-                "Source, runtime, executable, and LLVM output must have distinct paths".to_owned(),
+                "All source modules, runtime, executable, and LLVM output must have distinct paths"
+                    .to_owned(),
             );
         }
     }
-    let ir = relar_compiler::compile(&source, &options)?;
+    let ir = compilation.llvm_ir;
     let mut temporary = tempfile::Builder::new()
         .prefix("relar-")
         .suffix(".ll")
@@ -145,4 +155,16 @@ fn identity(path: &Path) -> Result<PathBuf, String> {
         .canonicalize()
         .map_err(|error| error.to_string())?;
     Ok(parent.join(absolute.file_name().ok_or("output path has no filename")?))
+}
+
+/// Canonical paths catch symlinks; inode identity also protects hard-linked inputs.
+fn same_file(left: &Path, right: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(left), Ok(right)) = (left.metadata(), right.metadata()) {
+            return left.dev() == right.dev() && left.ino() == right.ino();
+        }
+    }
+    false
 }

@@ -6,7 +6,8 @@ This is a deliberately restricted Python dialect for closed first-party programs
 
 | Area | Supported behavior |
 | --- | --- |
-| Module | One UTF-8 source file; named functions precede executable statements; optional module/function docstrings |
+| Modules | Closed first-party UTF-8 source graph; definitions and imports precede executable entry statements; optional module/function docstrings |
+| Imports | Absolute, `from`, and package-relative imports; aliases and package re-exports; fixed module and definition bindings; no import cycles |
 | Functions | Required parameter and return annotations; positional calls; direct, fixed bindings; no recursive call cycles |
 | Types | `int`, `bool`, `str`, `None`, `list[int]`; locals have one inferred or declared type |
 | Statements | Single-target assignment, annotated assignment, integer augmented assignment, `if`/`elif`/`else`, `while`, `for name in range(...)`, `break`, `continue`, `return`, `pass`, `assert condition` |
@@ -20,7 +21,17 @@ Booleans have a separate exact type: use `int(flag)` to store one in an integer 
 
 Indentation must use spaces; tabs and form feeds remain valid inside string data. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
 
-Function globals, first-class functions, closures, imports, classes, decorators, reflection, arbitrary attributes, generators, async, comprehensions, slicing, unpacking, keyword/default arguments, loop `else`, mutable-list augmented assignment, and identity comparisons are currently rejected. Conditions cannot rely on implicit truthiness. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion; a future recursion feature needs an explicit stack policy.
+Mutable global values, first-class functions, closures, classes, decorators, reflection, arbitrary value attributes, generators, async, comprehensions, slicing, unpacking, keyword/default arguments, loop `else`, mutable-list augmented assignment, and identity comparisons are currently rejected. Conditions cannot rely on implicit truthiness. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion; a future recursion feature needs an explicit stack policy.
+
+## First-party module graphs
+
+`relar check` and `relar build` resolve imports under one module root. By default this is the entry file's directory, or the parent of its outermost package when enclosing directories contain `__init__.py`. `--module-root DIRECTORY` selects the root explicitly. An entry inside a package follows `python -m package.program` semantics: enclosing package initializers are loaded and relative imports are valid. A package `__main__.py` can be the entry; `__init__.py` itself cannot.
+
+For example, `import package.operations` binds `package`, `import package.operations as operations` binds the child module, and `from package.operations import solve as run` binds the same function under `run`. Module-qualified calls and imported calls resolve to their defining module's namespace. Function bodies can call a name imported later in that module, provided all definitions and imports precede executable statements. Module and definition bindings cannot be reassigned or shadowed by parameters or locals.
+
+Imported modules, including every package `__init__.py`, may contain only definitions, imports, docstrings, and an optional `if __name__ == "__main__":` guard without an `else`. Every loaded module is type-checked and lowered for validation, including unused functions and inactive guards. Only the entry module's executable statements run. The fixed `__name__` string is `"__main__"` in the entry and the qualified module name in imported code.
+
+Imports are resolved statically from `.py` files and packages with `__init__.py`. Wildcards, dynamic or function-local imports, namespace packages, import cycles, external dependencies, and standard-library imports or shadowing are rejected. A package can re-export definitions from its children; reading an unfinished parent's definitions through a circular import is rejected. Symlinks cannot escape the module root or give one source file multiple module identities. The source-string library APIs remain isolated; filesystem imports use the path-based APIs.
 
 The I/O surface is intentionally small. `input()` reads a UTF-8 line and strips its LF or CRLF terminator. `int(str)` accepts signed ASCII decimal digits with optional separators between digits and surrounding whitespace. Other bases and Unicode decimal digits in input strings are outside this prototype's input format. Surrogate escapes in non-raw string literals are rejected: Ruff's analysis AST substitutes replacement characters for them, which is unsuitable for executable semantics. String methods, formatting, concatenation, and arbitrary codecs are not implemented. CPython's configurable integer conversion digit limit is not reproduced.
 
@@ -44,10 +55,13 @@ target/release/relar check tests/programs/ownership.py
 target/release/relar build tests/programs/ownership.py -o /tmp/ownership --emit-llvm /tmp/ownership.ll
 /tmp/ownership
 python3 tests/differential.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+python3 tests/imports.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 ```
 
-`--runtime` selects a static library explicitly; otherwise it is found beside the compiler executable. `--clang` selects the Clang driver and `--opt-level` selects 0 through 3 (default 3). Source, executable, runtime, and saved LLVM output paths must be distinct.
+`--runtime` selects a static library explicitly; otherwise it is found beside the compiler executable. `--clang` selects the Clang driver and `--opt-level` selects 0 through 3 (default 3). Every input module, executable, runtime, and saved LLVM output must have a distinct file identity; symlinks and hard links cannot bypass the input overwrite check.
 
 `--sanitize` marks generated functions for AddressSanitizer and links its runtime. This instruments generated code; it does not retroactively instrument a prebuilt Rust static library. Instrumenting Rust runtime code requires a separate sanitizer build of that library. The differential suite accepts `--sanitize --opt-levels 1` to exercise this configuration, including leak checks on normal exits.
 
 The differential suite compares full stdout with CPython at `-O0` and `-O3`, covering 260 integer pairs, aliases, ownership across calls and replacement, evaluation order, short-circuiting, loops, and runtime errors. Separate rejection cases cover type violations, ignored errors, unsupported dynamic operations, and recursive calls. These are correctness checks, not performance measurements.
+
+The imports suite compares multi-file programs with CPython at `-O0` and `-O3`, including package entry points, aliases, re-exports, relative imports, late function-global lookup, and mutation across module boundaries. It also checks invalid imports, unused invalid code, source diagnostics, and protection of imported files from output writes.

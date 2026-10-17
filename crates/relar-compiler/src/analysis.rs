@@ -1,12 +1,13 @@
 //! Hosts ty's real semantic analysis and Ruff's cached parser over one source snapshot.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use ruff_db::diagnostic::{Diagnostic, DisplayDiagnosticConfig, Severity};
 use ruff_db::files::{File, Files, system_path_to_file};
-use ruff_db::system::{InMemorySystem, System};
+use ruff_db::parsed::ParsedModuleRef;
+use ruff_db::system::{InMemorySystem, System, SystemPathBuf};
 use ruff_db::vendored::VendoredFileSystem;
-use ruff_python_ast::ModModule;
 use ruff_python_ast::token::{TokenAt, TokenKind, Tokens};
 use ruff_text_size::{Ranged, TextSize};
 use ty_python_core::program::ProgramSettings;
@@ -28,55 +29,90 @@ struct Database {
     analysis: Arc<AnalysisSettings>,
 }
 
-/// Checks with ty, then exposes the same Ruff AST to Relar's stricter lowering.
-///
-/// ty diagnostics are useful general Python checks, not a code-generation proof:
-/// Relar still checks closed bindings, exact representations, and every mutation.
-pub(crate) fn with_module<T>(
-    source: &str,
-    lower: impl FnOnce(&ModModule) -> Result<T, String>,
-) -> Result<T, String> {
-    let vendored = ty_vendored::file_system().clone();
-    let mut settings = ProgramSettings::empty(&vendored);
-    settings.python_version.version = ruff_python_ast::PythonVersion::PY312;
-    let db = Database {
-        storage: salsa::Storage::default(),
-        files: Files::default(),
-        system: InMemorySystem::default(),
-        vendored,
-        settings,
-        rules: Arc::new(RuleSelection::from_registry(default_lint_registry())),
-        analysis: Arc::new(AnalysisSettings {
-            respect_type_ignore_comments: false,
-            ..AnalysisSettings::default()
-        }),
-    };
-    db.settings.search_paths.try_register_static_roots(&db);
-    db.system
-        .fs()
-        .write_file("/input.py", source)
-        .map_err(|error| error.to_string())?;
-    let file = system_path_to_file(&db, "/input.py").map_err(|error| error.to_string())?;
-    let diagnostics = db.check_file(file);
-    let errors = diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.severity() >= Severity::Error)
-        .map(|diagnostic| {
-            diagnostic
-                .display(&db, &DisplayDiagnosticConfig::new("relar"))
-                .to_string()
+/// One immutable project snapshot shared by ty's checks and Ruff's cached parser.
+pub(crate) struct Session {
+    db: Database,
+    files: Vec<File>,
+}
+
+impl Session {
+    pub(crate) fn new(root: &Path) -> Result<Self, String> {
+        let root = root.to_str().ok_or("module paths must be valid UTF-8")?;
+        let system = InMemorySystem::default();
+        system
+            .fs()
+            .create_directory_all(root)
+            .map_err(|error| error.to_string())?;
+        let vendored = ty_vendored::file_system().clone();
+        let mut settings = ProgramSettings::empty(&vendored);
+        settings.python_version.version = ruff_python_ast::PythonVersion::PY312;
+        settings.search_paths =
+            ty_module_resolver::SearchPathSettings::new(vec![SystemPathBuf::from(root)])
+                .to_search_paths(&system, &vendored, &ty_module_resolver::FallibleStrategy)
+                .map_err(|error| error.to_string())?;
+        let db = Database {
+            storage: salsa::Storage::default(),
+            files: Files::default(),
+            system,
+            vendored,
+            settings,
+            rules: Arc::new(RuleSelection::from_registry(default_lint_registry())),
+            analysis: Arc::new(AnalysisSettings {
+                respect_type_ignore_comments: false,
+                ..AnalysisSettings::default()
+            }),
+        };
+        db.settings.search_paths.try_register_static_roots(&db);
+        Ok(Self {
+            db,
+            files: Vec::new(),
         })
-        .collect::<Vec<_>>();
-    if !errors.is_empty() {
-        return Err(errors.join("\n"));
     }
-    let parsed =
-        ruff_db::parsed::parsed_module(&db, db.program_file(file).python_file(&db)).load(&db);
-    if let Some(error) = parsed.errors().first() {
-        return Err(error.to_string());
+
+    /// Parses a normalized source once; semantic checks wait until every import is present.
+    pub(crate) fn add(&mut self, path: &Path, source: &str) -> Result<ParsedModuleRef, String> {
+        let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
+        self.db
+            .system
+            .fs()
+            .write_file_all(path, source)
+            .map_err(|error| error.to_string())?;
+        let file = system_path_to_file(&self.db, path).map_err(|error| error.to_string())?;
+        let parsed = ruff_db::parsed::parsed_module(
+            &self.db,
+            self.db.program_file(file).python_file(&self.db),
+        )
+        .load(&self.db);
+        if let Some(error) = parsed.errors().first() {
+            return Err(format!("{path}: {error}"));
+        }
+        check_indentation(source, parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
+        self.files.push(file);
+        Ok(parsed)
     }
-    check_indentation(source, parsed.tokens())?;
-    lower(parsed.syntax())
+
+    /// Checks every loaded file, including unused functions and inactive main guards.
+    pub(crate) fn check(&self) -> Result<(), String> {
+        let mut errors = Vec::new();
+        for &file in &self.files {
+            errors.extend(
+                self.db
+                    .check_file(file)
+                    .iter()
+                    .filter(|diagnostic| diagnostic.severity() >= Severity::Error)
+                    .map(|diagnostic| {
+                        diagnostic
+                            .display(&self.db, &DisplayDiagnosticConfig::new("relar"))
+                            .to_string()
+                    }),
+            );
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("\n"))
+        }
+    }
 }
 
 /// Rejects ambiguous indentation while preserving whitespace inside string tokens.

@@ -1,0 +1,164 @@
+"""Check closed module graphs against CPython and exercise rejected import boundaries."""
+
+import argparse
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "imports"
+HELPER = "def f(value: int) -> int:\n    return value + 1\n"
+IMPORT = "from helper import f\nprint(f(2))\n"
+
+
+REJECTED = {
+    "external": ({"main.py": "import math\n"}, "standard-library"),
+    "missing": ({"main.py": "import missing_dependency\n"}, "cannot resolve first-party"),
+    "wildcard": ({"main.py": "from helper import *\n", "helper.py": HELPER}, "wildcard"),
+    "dynamic": ({"main.py": '__import__("helper")\n', "helper.py": HELPER}, "unsupported"),
+    "nested": ({"main.py": "def f() -> None:\n    import math\nf()\n"}, "unsupported"),
+    "conditional": ({"main.py": "if False:\n    import math\n"}, "unsupported"),
+    "library_effect": ({"main.py": IMPORT, "helper.py": "print(7)\n" + HELPER}, "helper.py:1:"),
+    "library_state": ({"main.py": IMPORT, "helper.py": "values = [1]\n" + HELPER}, "library modules"),
+    "package_effect": ({"main.py": "import package\n", "package/__init__.py": "print(1)\n"}, "library modules"),
+    "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
+    "unused_unsupported": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return eval("1")\n'}, "unsupported"),
+    "inactive_guard": ({"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    eval("1")\n'}, "unsupported"),
+    "active_library_else": ({"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    print(1)\nelse:\n    print(2)\n'}, "library modules"),
+    "wrong_imported_argument": ({"main.py": 'from helper import f\nprint(f("wrong"))\n', "helper.py": HELPER}, "int"),
+    "missing_annotation": ({"main.py": IMPORT, "helper.py": "def f(value):\n    return value\n"}, "annotation"),
+    "cycle": ({"main.py": "import first\n", "first.py": "import second\n", "second.py": "import first\n"}, "cyclic import"),
+    "relative_beyond_root": ({"main.py": "from .helper import f\n", "helper.py": HELPER}, "relative import"),
+    "parameter_module_shadow": ({"main.py": "import helper\ndef f(helper: int) -> int:\n    return helper\n", "helper.py": HELPER}, "rebinding"),
+    "parameter_function_shadow": ({"main.py": "from helper import f\ndef g(f: int) -> int:\n    return f\n", "helper.py": HELPER}, "rebinding"),
+    "local_module_shadow": ({"main.py": "import helper\ndef g() -> None:\n    helper = 1\n", "helper.py": HELPER}, "rebinding"),
+    "local_function_shadow": ({"main.py": "from helper import f\ndef g() -> None:\n    f = 1\n", "helper.py": HELPER}, "rebinding"),
+    "module_rebinding": ({"main.py": "from helper import f\ndef f(value: int) -> int:\n    return value\n", "helper.py": HELPER}, "cannot be rebound"),
+    "imports_after_execution": ({"main.py": "print(1)\nimport helper\n", "helper.py": HELPER}, "imports must precede"),
+    "definition_after_execution": ({"main.py": "print(1)\n" + HELPER}, "definitions must precede"),
+    "namespace_package": ({"main.py": "import package.child\n", "package/child.py": HELPER}, "namespace-package"),
+    "child_overwrites_definition": ({"main.py": "import package.child\n", "package/__init__.py": "def child() -> int:\n    return 1\n", "package/child.py": HELPER}, "overwrite"),
+    "entry_self_import": ({"main.py": "import main\n"}, "entry module"),
+    "reserved_alias": ({"main.py": "from helper import f as int\n", "helper.py": HELPER}, "reserved"),
+    "normalized_reserved_alias": ({"main.py": "from helper import f as ℕone\n", "helper.py": HELPER}, "reserved"),
+    "stdlib_shadow": ({"main.py": "import sys\n", "sys.py": HELPER}, "standard-library"),
+    "unstubbed_builtin_shadow": ({"main.py": "import _types\n", "_types.py": HELPER}, "standard-library"),
+    "frozen_shadow": ({"main.py": "import __hello__\n", "__hello__.py": HELPER}, "standard-library"),
+    "imported_surrogate": ({"main.py": IMPORT, "helper.py": '"\\ud800"\n' + HELPER}, "surrogate"),
+    "imported_encoding": ({"main.py": IMPORT, "helper.py": "# coding: latin1\n" + HELPER}, "encoding"),
+    "imported_tabs": ({"main.py": IMPORT, "helper.py": "def f(value: int) -> int:\n\treturn value\n"}, "indentation"),
+}
+
+
+def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, cwd=cwd, text=True, capture_output=True, timeout=60,
+                          env={**os.environ, "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1"})
+
+
+def write_files(root: Path, files: dict[str, str]) -> None:
+    for name, source in files.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source)
+
+
+def require_success(result: subprocess.CompletedProcess[str]) -> None:
+    assert result.returncode == 0, (result.args, result.stdout, result.stderr)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--compiler", type=Path, required=True)
+    parser.add_argument("--runtime", type=Path, required=True)
+    parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--clang", default="clang")
+    parser.add_argument("--opt-levels", type=int, nargs="+", default=[0, 3])
+    parser.add_argument("--sanitize", action="store_true")
+    args = parser.parse_args()
+    compiler, runtime = str(args.compiler.resolve()), str(args.runtime.resolve())
+    checks = 0
+    with tempfile.TemporaryDirectory(prefix="relar-imports-") as directory:
+        temporary = Path(directory)
+        root = temporary / "project"
+        shutil.copytree(FIXTURES, root)
+        for entry, module in [("entry.py", "entry"), ("package/program.py", "package.program"),
+                              ("package/__main__.py", "package")]:
+            baseline = run([args.python, "-E", "-m", module], root)
+            require_success(baseline)
+            require_success(run([compiler, "check", str(root / entry)], temporary))
+            for level in args.opt_levels:
+                executable = temporary / f"program-{module}-{level}"
+                command = [compiler, "build", str(root / entry), "-o", str(executable), "--runtime", runtime,
+                           "--opt-level", str(level), "--clang", args.clang]
+                # Exercise explicit and inferred roots independently of the current directory.
+                if level == args.opt_levels[-1]:
+                    command += ["--module-root", str(root)]
+                if args.sanitize:
+                    command += ["--sanitize"]
+                require_success(run(command, temporary))
+                result = run([str(executable)], temporary)
+                require_success(result)
+                assert result.stdout == baseline.stdout, (entry, level, result.stdout, baseline.stdout)
+                checks += 1
+
+        for name, (files, expected) in REJECTED.items():
+            case = temporary / name
+            write_files(case, files)
+            result = run([compiler, "check", str(case / "main.py")], temporary)
+            assert result.returncode != 0 and expected in result.stderr, (name, result.stdout, result.stderr)
+            checks += 1
+
+        collision = temporary / "collisions"
+        write_files(collision, {"main.py": IMPORT, "helper.py": HELPER})
+        dependency = collision / "helper.py"
+        for alias in [dependency, collision / "symlink.py", collision / "hardlink.py"]:
+            if alias.name == "symlink.py":
+                alias.symlink_to(dependency)
+            elif alias.name == "hardlink.py":
+                os.link(dependency, alias)
+            for output_flag in ["-o", "--emit-llvm"]:
+                command = [compiler, "build", str(collision / "main.py"), "--runtime", runtime,
+                           "-o", str(temporary / "collision-program"), output_flag, str(alias), "--clang", args.clang]
+                result = run(command, temporary)
+                assert result.returncode != 0 and "distinct paths" in result.stderr, result.stderr
+                assert dependency.read_text() == HELPER
+                checks += 1
+
+        alias_case = temporary / "module_alias"
+        write_files(alias_case, {"main.py": "import helper\nimport alias\n",
+                                "helper.py": HELPER + "def label() -> str:\n    return __name__\n"})
+        (alias_case / "alias.py").symlink_to(alias_case / "helper.py")
+        result = run([compiler, "check", str(alias_case / "main.py")], temporary)
+        assert result.returncode != 0 and "multiple module identities" in result.stderr, result.stderr
+        checks += 1
+
+        # A single internal symlink keeps its logical import name in both ty and codegen.
+        (alias_case / "main.py").write_text("import alias\nprint(alias.label())\nprint(alias.f(4))\n")
+        baseline = run([args.python, "-E", "-m", "main"], alias_case)
+        require_success(baseline)
+        for level in args.opt_levels:
+            executable = temporary / f"symlink-program-{level}"
+            command = [compiler, "build", str(alias_case / "main.py"), "-o", str(executable),
+                       "--runtime", runtime, "--opt-level", str(level), "--clang", args.clang]
+            if args.sanitize:
+                command += ["--sanitize"]
+            require_success(run(command, temporary))
+            result = run([str(executable)], temporary)
+            require_success(result)
+            assert result.stdout == baseline.stdout, (result.stdout, baseline.stdout)
+            checks += 1
+
+        escape = temporary / "escape"
+        write_files(escape, {"main.py": "import helper\n"})
+        (escape / "helper.py").symlink_to(dependency)
+        result = run([compiler, "check", str(escape / "main.py")], temporary)
+        assert result.returncode != 0 and "outside" in result.stderr, result.stderr
+        checks += 1
+    print(f"{checks} import checks passed")
+
+
+if __name__ == "__main__":
+    main()

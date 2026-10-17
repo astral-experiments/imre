@@ -6,6 +6,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use crate::ir::{self, Binary, Builtin, Compare, Expr, ExprKind, Statement, Type};
+use crate::modules::{Binding, DefinitionId, ModuleId, SourceGraph};
 
 struct Signature {
     id: usize,
@@ -15,114 +16,88 @@ struct Signature {
 
 const RESERVED: &[&str] = &[
     "int", "bool", "str", "list", "len", "input", "print", "range", "None", "True", "False",
+    "__name__",
 ];
 
-/// Resolves a closed call graph and checks exact types before constructing executable IR.
-pub(crate) fn lower(module: &ast::ModModule, source: &str) -> Result<ir::Module, String> {
+/// Resolves the project-wide call graph without changing source-level namespaces.
+pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     let mut signatures = HashMap::new();
     let mut definitions = Vec::new();
-    let mut entry = Vec::new();
-    for statement in &module.body {
-        if let ast::Stmt::FunctionDef(function) = statement {
-            if !entry.is_empty() {
-                return Err(error(
-                    source,
-                    statement,
-                    "function definitions must precede executable module statements",
+    for (module_id, module) in graph.modules.iter().enumerate() {
+        for name in module.bindings.keys() {
+            if RESERVED.contains(&name.as_str()) {
+                return Err(module.error(
+                    module.parsed.syntax(),
+                    "a static binding uses a reserved builtin name",
                 ));
             }
-            if function.is_async
-                || !function.decorator_list.is_empty()
-                || function.type_params.is_some()
-                || function.parameters.vararg.is_some()
-                || function.parameters.kwarg.is_some()
-                || !function.parameters.kwonlyargs.is_empty()
-            {
-                return Err(error(
-                    source,
-                    function,
-                    "async, decorators, type parameters, and variadic or keyword-only parameters are unsupported",
-                ));
-            }
-            let name = function.name.as_str();
-            if signatures.contains_key(name) || RESERVED.contains(&name) {
-                return Err(error(
-                    source,
-                    function,
-                    "function binding is duplicated or reserved",
-                ));
-            }
-            let mut params = Vec::new();
-            for parameter in function.parameters.iter_non_variadic_params() {
-                if parameter.default.is_some() {
-                    return Err(error(
-                        source,
-                        parameter,
-                        "default parameter values are unsupported",
-                    ));
+        }
+        for (statement_id, statement) in module.parsed.syntax().body.iter().enumerate() {
+            match statement {
+                ast::Stmt::FunctionDef(function) => {
+                    let id = DefinitionId {
+                        module: module_id,
+                        statement: statement_id,
+                    };
+                    let signature = signature(function, &module.source, definitions.len())
+                        .map_err(|error| format!("{}:{error}", module.path.display()))?;
+                    signatures.insert(id, signature);
+                    definitions.push((id, function));
                 }
-                params.push(annotation(
-                    parameter.annotation().ok_or_else(|| {
-                        error(source, parameter, "parameter requires a type annotation")
-                    })?,
-                    source,
-                )?);
+                ast::Stmt::ClassDef(_) => {
+                    return Err(
+                        module.error(statement, "classes are unsupported in this prototype")
+                    );
+                }
+                ast::Stmt::Expr(value) => {
+                    if let ast::Expr::StringLiteral(value) = &*value.value {
+                        check_string(value, &module.source)
+                            .map_err(|error| format!("{}:{error}", module.path.display()))?;
+                    }
+                }
+                _ => {}
             }
-            let returns = annotation(
-                function.returns.as_deref().ok_or_else(|| {
-                    error(source, function, "function requires a return annotation")
-                })?,
-                source,
-            )?;
-            signatures.insert(
-                name.to_owned(),
-                Signature {
-                    id: definitions.len(),
-                    params,
-                    returns,
-                },
-            );
-            definitions.push(function);
-        } else if let ast::Stmt::Expr(value) = statement
-            && let ast::Expr::StringLiteral(value) = &*value.value
-            && entry.is_empty()
-        {
-            check_string(value, source)?;
-            // A leading module docstring has no observable effect in this subset.
-        } else {
-            entry.push(statement.clone());
         }
     }
     let mut functions = Vec::new();
     let mut call_graph = Vec::new();
-    for definition in &definitions {
-        let signature = &signatures[definition.name.as_str()];
-        let mut checker = Checker::new(source, &signatures, signature.returns);
-        let mut params = Vec::new();
-        for (parameter, &ty) in definition
-            .parameters
-            .iter_non_variadic_params()
-            .zip(&signature.params)
-        {
-            let slot = checker.declare(parameter.name().as_str(), ty, parameter)?;
-            checker.assigned.insert(slot);
-            params.push(slot);
-        }
-        let (body, falls_through) = checker.block(&definition.body)?;
-        if falls_through && signature.returns != Type::None {
-            return Err(error(
-                source,
-                definition,
-                "not every path returns the declared type",
-            ));
-        }
-        call_graph.push(checker.calls);
-        functions.push(ir::Function {
-            params,
-            returns: signature.returns,
-            locals: checker.locals,
-            body,
-        });
+    for (id, definition) in &definitions {
+        let signature = &signatures[id];
+        let module = &graph.modules[id.module];
+        let result = (|| {
+            let mut checker = Checker::new(graph, id.module, &signatures, signature.returns);
+            let mut params = Vec::new();
+            for (parameter, &ty) in definition
+                .parameters
+                .iter_non_variadic_params()
+                .zip(&signature.params)
+            {
+                let slot = checker.declare(parameter.name().as_str(), ty, parameter)?;
+                checker.assigned.insert(slot);
+                params.push(slot);
+            }
+            let (body, falls_through) = checker.block(&definition.body)?;
+            if falls_through && signature.returns != Type::None {
+                return Err(error(
+                    &module.source,
+                    definition,
+                    "not every path returns the declared type",
+                ));
+            }
+            Ok((
+                ir::Function {
+                    params,
+                    returns: signature.returns,
+                    locals: checker.locals,
+                    body,
+                },
+                checker.calls,
+            ))
+        })();
+        let (function, calls) =
+            result.map_err(|error| format!("{}:{error}", module.path.display()))?;
+        functions.push(function);
+        call_graph.push(calls);
     }
     // Acyclic direct calls bound native call depth independently of input values.
     fn visit(id: usize, graph: &[HashSet<usize>], states: &mut [u8]) -> bool {
@@ -142,22 +117,84 @@ pub(crate) fn lower(module: &ast::ModModule, source: &str) -> Result<ir::Module,
         true
     }
     let mut states = vec![0; functions.len()];
-    for id in 0..functions.len() {
+    for (id, &(definition, node)) in definitions.iter().enumerate() {
         if !visit(id, &call_graph, &mut states) {
-            return Err("Relar: recursive calls are unsupported in this prototype".to_owned());
+            return Err(graph.modules[definition.module]
+                .error(node, "recursive calls are unsupported in this prototype"));
         }
     }
-    let mut checker = Checker::new(source, &signatures, Type::None);
-    checker.module_scope = true;
-    let (body, _) = checker.block(&entry)?;
+    let mut entry = None;
+    for (module_id, module) in graph.modules.iter().enumerate() {
+        let mut checker = Checker::new(graph, module_id, &signatures, Type::None);
+        checker.module_scope = true;
+        let statements = module
+            .executable
+            .iter()
+            .map(|&index| module.parsed.syntax().body[index].clone())
+            .collect::<Vec<_>>();
+        let (body, _) = checker
+            .block(&statements)
+            .map_err(|error| format!("{}:{error}", module.path.display()))?;
+        if module_id == graph.entry {
+            entry = Some(ir::Function {
+                params: Vec::new(),
+                returns: Type::None,
+                locals: checker.locals,
+                body,
+            });
+        }
+    }
     Ok(ir::Module {
         functions,
-        entry: ir::Function {
-            params: Vec::new(),
-            returns: Type::None,
-            locals: checker.locals,
-            body,
-        },
+        entry: entry.expect("source graph has an entry module"),
+    })
+}
+
+fn signature(
+    function: &ast::StmtFunctionDef,
+    source: &str,
+    id: usize,
+) -> Result<Signature, String> {
+    if function.is_async
+        || !function.decorator_list.is_empty()
+        || function.type_params.is_some()
+        || function.parameters.vararg.is_some()
+        || function.parameters.kwarg.is_some()
+        || !function.parameters.kwonlyargs.is_empty()
+    {
+        return Err(error(
+            source,
+            function,
+            "async, decorators, type parameters, and variadic or keyword-only parameters are unsupported",
+        ));
+    }
+    let mut params = Vec::new();
+    for parameter in function.parameters.iter_non_variadic_params() {
+        if parameter.default.is_some() {
+            return Err(error(
+                source,
+                parameter,
+                "default parameter values are unsupported",
+            ));
+        }
+        params.push(annotation(
+            parameter
+                .annotation()
+                .ok_or_else(|| error(source, parameter, "parameter requires a type annotation"))?,
+            source,
+        )?);
+    }
+    let returns = annotation(
+        function
+            .returns
+            .as_deref()
+            .ok_or_else(|| error(source, function, "function requires a return annotation"))?,
+        source,
+    )?;
+    Ok(Signature {
+        id,
+        params,
+        returns,
     })
 }
 
@@ -166,7 +203,7 @@ fn error(source: &str, node: &impl Ranged, message: &str) -> String {
     let prefix = &source[..offset];
     let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
     let column = prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1;
-    format!("Relar:{line}:{column}: {message}")
+    format!("{line}:{column}: Relar: {message}")
 }
 
 fn annotation(expression: &ast::Expr, source: &str) -> Result<Type, String> {
@@ -235,7 +272,9 @@ fn check_string(value: &ast::ExprStringLiteral, source: &str) -> Result<(), Stri
 
 struct Checker<'a> {
     source: &'a str,
-    functions: &'a HashMap<String, Signature>,
+    graph: &'a SourceGraph,
+    module: ModuleId,
+    functions: &'a HashMap<DefinitionId, Signature>,
     returns: Type,
     names: HashMap<String, usize>,
     locals: Vec<Type>,
@@ -246,9 +285,16 @@ struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
-    fn new(source: &'a str, functions: &'a HashMap<String, Signature>, returns: Type) -> Self {
+    fn new(
+        graph: &'a SourceGraph,
+        module: ModuleId,
+        functions: &'a HashMap<DefinitionId, Signature>,
+        returns: Type,
+    ) -> Self {
         Self {
-            source,
+            source: &graph.modules[module].source,
+            graph,
+            module,
             functions,
             returns,
             names: HashMap::new(),
@@ -262,11 +308,11 @@ impl<'a> Checker<'a> {
 
     /// Reuses a slot only at its original type and prevents rebinding fixed call targets.
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
-        if RESERVED.contains(&name) || self.functions.contains_key(name) {
+        if RESERVED.contains(&name) || self.graph.modules[self.module].bindings.contains_key(name) {
             return Err(error(
                 self.source,
                 node,
-                "rebinding a builtin or function is unsupported",
+                "rebinding a builtin, definition, or imported module is unsupported",
             ));
         }
         if let Some(&slot) = self.names.get(name) {
@@ -565,6 +611,14 @@ impl<'a> Checker<'a> {
                 (Type::Str, ExprKind::Str(value.value.to_string()))
             }
             ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
+            ast::Expr::Name(name) if name.id == "__name__" => {
+                let name = if self.module == self.graph.entry {
+                    "__main__"
+                } else {
+                    &self.graph.modules[self.module].name
+                };
+                (Type::Str, ExprKind::Str(name.to_owned()))
+            }
             ast::Expr::Name(name) => {
                 let slot = self.names.get(name.id.as_str()).copied().ok_or_else(|| error(self.source, expression, "name is not a local value; globals and first-class functions are unsupported"))?;
                 if !self.assigned.contains(&slot) {
@@ -685,6 +739,36 @@ impl<'a> Checker<'a> {
                 "keyword arguments are unsupported",
             ));
         }
+        if let Some(binding) = self.graph.resolve(self.module, &call.func) {
+            let Binding::Definition(definition) = binding else {
+                return Err(error(self.source, call, "a module is not callable"));
+            };
+            let signature = self
+                .functions
+                .get(&definition)
+                .ok_or_else(|| error(self.source, call, "definition is not a callable function"))?;
+            let args = call
+                .arguments
+                .args
+                .iter()
+                .map(|arg| self.expr(arg))
+                .collect::<Result<Vec<_>, _>>()?;
+            if args.len() != signature.params.len() {
+                return Err(error(
+                    self.source,
+                    call,
+                    "incorrect number of function arguments",
+                ));
+            }
+            for (arg, &expected) in args.iter().zip(&signature.params) {
+                self.expect(expected, arg.ty, call)?;
+            }
+            self.calls.insert(signature.id);
+            return Ok(Expr {
+                ty: signature.returns,
+                kind: ExprKind::Call(signature.id, args),
+            });
+        }
         if let ast::Expr::Attribute(attribute) = &*call.func {
             let receiver = self.expr(&attribute.value)?;
             self.expect(Type::ListInt, receiver.ty, call)?;
@@ -724,23 +808,6 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
-        if let Some(signature) = self.functions.get(name.id.as_str()) {
-            if args.len() != signature.params.len() {
-                return Err(error(
-                    self.source,
-                    call,
-                    "incorrect number of function arguments",
-                ));
-            }
-            for (arg, &expected) in args.iter().zip(&signature.params) {
-                self.expect(expected, arg.ty, call)?;
-            }
-            self.calls.insert(signature.id);
-            return Ok(Expr {
-                ty: signature.returns,
-                kind: ExprKind::Call(signature.id, args),
-            });
-        }
         let (builtin, ty) = match name.id.as_str() {
             "input" if args.is_empty() => (Builtin::Input, Type::Str),
             "int"

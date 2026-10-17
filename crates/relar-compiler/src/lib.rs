@@ -2,8 +2,10 @@ mod analysis;
 mod frontend;
 mod ir;
 mod llvm;
+mod modules;
 
 use std::borrow::Cow;
+use std::path::{Path, PathBuf};
 
 #[derive(Default)]
 pub struct CompileOptions {
@@ -13,16 +15,46 @@ pub struct CompileOptions {
 
 /// Checks Python syntax and general type correctness with Ruff and ty.
 pub fn check(source: &str) -> Result<(), String> {
-    checked_module(source).map(|_| ())
+    frontend::lower(&modules::SourceGraph::single(source)?).map(|_| ())
 }
 
 /// Compiles a checked module to LLVM IR; the resulting executable uses no CPython.
 pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String> {
-    checked_module(source).map(|module| llvm::emit(&module, options.address_sanitizer))
+    let module = frontend::lower(&modules::SourceGraph::single(source)?)?;
+    Ok(llvm::emit(&module, options.address_sanitizer))
 }
 
-/// Applies Python's source preprocessing before Ruff, ty, and our source-range checks.
-fn checked_module(source: &str) -> Result<ir::Module, String> {
+/// The generated IR and every source file that must be protected from output writes.
+pub struct Compilation {
+    pub llvm_ir: String,
+    pub input_paths: Vec<PathBuf>,
+}
+
+/// Checks a closed first-party module graph, inferring its package root when omitted.
+pub fn check_file(path: &Path, module_root: Option<&Path>) -> Result<(), String> {
+    frontend::lower(&modules::SourceGraph::load(path, module_root)?).map(|_| ())
+}
+
+/// Compiles one entry module and its statically resolved first-party dependencies.
+pub fn compile_file(
+    path: &Path,
+    module_root: Option<&Path>,
+    options: &CompileOptions,
+) -> Result<Compilation, String> {
+    let graph = modules::SourceGraph::load(path, module_root)?;
+    let module = frontend::lower(&graph)?;
+    Ok(Compilation {
+        llvm_ir: llvm::emit(&module, options.address_sanitizer),
+        input_paths: graph
+            .modules
+            .into_iter()
+            .map(|module| module.path)
+            .collect(),
+    })
+}
+
+/// Applies Python's source preprocessing before Ruff, ty, and source-range checks.
+fn normalize_source(source: &str) -> Result<Cow<'_, str>, String> {
     if source.contains('\0') {
         return Err("source code cannot contain null bytes".into());
     }
@@ -34,7 +66,7 @@ fn checked_module(source: &str) -> Result<ir::Module, String> {
         Cow::Borrowed(source)
     };
     check_encoding(&source)?;
-    analysis::with_module(&source, |module| frontend::lower(module, &source))
+    Ok(source)
 }
 
 /// Recognizes Python's first-two-line encoding cookie while restricting it to UTF-8.
