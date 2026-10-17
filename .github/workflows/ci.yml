@@ -44,3 +44,7 @@ jobs:
         run: |
           target/release/relar build examples/route_planner.py -o /tmp/route-planner --clang clang-18
           python3 benchmarks/validate.py --binary /tmp/route-planner
+      - name: Validate the dependency planner against an independent oracle
+        run: |
+          target/release/relar build examples/dependency_planner/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/dependency-planner
+          python3 benchmarks/dependency_validate.py --binary /tmp/dependency-planner
