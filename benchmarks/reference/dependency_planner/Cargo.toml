@@ -1,0 +1,24 @@
+[package]
+name = "relar-planner-reference"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+[workspace]
+
+[features]
+default = ["bigint"]
+bigint = ["dep:num-bigint", "dep:num-traits"]
+checked-i64 = []
+
+[dependencies]
+num-bigint = { version = "=0.4.8", optional = true }
+num-traits = { version = "=0.2.19", optional = true }
+
+[[bin]]
+name = "planner-reference"
+path = "src/main.rs"
+
+[profile.release]
+debug = "line-tables-only"
