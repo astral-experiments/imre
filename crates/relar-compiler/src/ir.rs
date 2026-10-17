@@ -1,13 +1,16 @@
 //! Closed, representation-checked IR. Lowering preserves owned results and may
 //! borrow rooted locals for the duration of operator and call evaluation.
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
     Int,
     Bool,
     Str,
     ListInt,
     Class(usize),
+    List(usize),
+    Tuple(usize),
+    Optional(usize),
     None,
 }
 
@@ -16,13 +19,19 @@ impl std::fmt::Display for Type {
         if let Self::Class(id) = self {
             return write!(f, "class#{id}");
         }
+        match self {
+            Self::List(id) => return write!(f, "list#{id}"),
+            Self::Tuple(id) => return write!(f, "tuple#{id}"),
+            Self::Optional(id) => return write!(f, "optional#{id}"),
+            _ => {}
+        }
         f.write_str(match self {
             Self::Int => "int",
             Self::Bool => "bool",
             Self::Str => "str",
             Self::ListInt => "list[int]",
             Self::None => "None",
-            Self::Class(_) => unreachable!(),
+            Self::Class(_) | Self::List(_) | Self::Tuple(_) | Self::Optional(_) => unreachable!(),
         })
     }
 }
@@ -51,6 +60,10 @@ pub(crate) enum ExprKind {
     None,
     Local(usize),
     List(Vec<Expr>),
+    Tuple(Vec<Expr>),
+    Present(Box<Expr>),
+    Absent(Box<Expr>),
+    Unwrap(Box<Expr>),
     Binary(Binary, Box<Expr>, Box<Expr>),
     Compare(Vec<Expr>, Vec<Compare>),
     Boolean(bool, Vec<Expr>),
@@ -74,6 +87,7 @@ pub(crate) enum Binary {
     FloorDivide,
     Modulo,
     Repeat,
+    Concat,
 }
 
 #[derive(Clone, Copy)]
@@ -94,6 +108,8 @@ pub(crate) enum Builtin {
     ListGet,
     Append,
     Pop,
+    IsNone,
+    Split,
 }
 
 pub(crate) enum Statement {

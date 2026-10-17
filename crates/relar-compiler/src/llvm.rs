@@ -9,7 +9,12 @@ impl Type {
         match self {
             Self::Int => "i64",
             Self::Bool => "i1",
-            Self::Str | Self::ListInt | Self::Class(_) => "ptr",
+            Self::Str
+            | Self::ListInt
+            | Self::Class(_)
+            | Self::List(_)
+            | Self::Tuple(_)
+            | Self::Optional(_) => "ptr",
             Self::None => "i8",
         }
     }
@@ -17,7 +22,12 @@ impl Type {
     fn initial(self) -> &'static str {
         match self {
             Self::Int => "1",
-            Self::Str | Self::ListInt | Self::Class(_) => "null",
+            Self::Str
+            | Self::ListInt
+            | Self::Class(_)
+            | Self::List(_)
+            | Self::Tuple(_)
+            | Self::Optional(_) => "null",
             Self::Bool | Self::None => "0",
         }
     }
@@ -151,7 +161,9 @@ impl Emitter {
             Type::Int => "retain_int",
             Type::Str => "relar_str_retain",
             Type::ListInt => "relar_list_retain",
-            Type::Class(_) => "relar_object_retain",
+            Type::Class(_) | Type::List(_) | Type::Tuple(_) | Type::Optional(_) => {
+                "relar_object_retain"
+            }
             Type::Bool | Type::None => return,
         };
         self.void_call(name, &[value]);
@@ -162,7 +174,9 @@ impl Emitter {
             Type::Int => "release_int",
             Type::Str => "relar_str_release",
             Type::ListInt => "relar_list_release",
-            Type::Class(_) => "relar_object_release",
+            Type::Class(_) | Type::List(_) | Type::Tuple(_) | Type::Optional(_) => {
+                "relar_object_release"
+            }
             Type::Bool | Type::None => return,
         };
         self.void_call(name, &[value]);
@@ -324,7 +338,7 @@ impl Emitter {
                 let value = self.operand(expression);
                 let list = self.operand(list);
                 let index = self.operand(index);
-                self.void_call("relar_list_set", &[&list.value, &index.value, &value.value]);
+                self.set_item(&list.value, &index.value, &value.value);
                 self.release_operand(&value);
                 self.release_operand(&index);
                 self.release_operand(&list);
@@ -519,13 +533,55 @@ impl Emitter {
             ExprKind::None => none(),
             ExprKind::Local(slot) => self.load(*slot),
             ExprKind::List(values) => {
-                let list = self.call("relar_list_new", Type::ListInt, &[]);
+                let name = if expression.ty == Type::ListInt {
+                    "relar_list_new"
+                } else {
+                    "relar_seq_new"
+                };
+                let list = self.call(name, expression.ty, &[]);
                 for value in values {
                     let value = self.operand(value);
-                    self.void_call("relar_list_append", &[&list, &value.value]);
+                    self.append(&list, &value.value);
                     self.release_operand(&value);
                 }
                 list
+            }
+            ExprKind::Tuple(values) => {
+                let object = Value {
+                    ty: expression.ty,
+                    operand: self
+                        .instruction(format!("call ptr @relar_object_new(i64 {})", values.len())),
+                };
+                for (field, value) in values.iter().enumerate() {
+                    let value = self.operand(value);
+                    self.set_field(&object, field, &value.value);
+                    self.release_operand(&value);
+                }
+                object
+            }
+            ExprKind::Present(expression_value) => {
+                let value = self.operand(expression_value);
+                let object = Value {
+                    ty: expression.ty,
+                    operand: self.instruction("call ptr @relar_object_new(i64 1)"),
+                };
+                self.set_field(&object, 0, &value.value);
+                self.release_operand(&value);
+                object
+            }
+            ExprKind::Absent(expression_value) => {
+                let value = self.expr(expression_value);
+                self.release(&value);
+                Value {
+                    ty: expression.ty,
+                    operand: "null".to_owned(),
+                }
+            }
+            ExprKind::Unwrap(receiver) => {
+                let receiver = self.operand(receiver);
+                let value = self.get_field(&receiver.value, 0, expression.ty);
+                self.release_operand(&receiver);
+                value
             }
             ExprKind::Binary(op, left, right) => {
                 let left = self.operand(left);
@@ -587,20 +643,26 @@ impl Emitter {
                 self.release_operand(&receiver);
                 value
             }
-            ExprKind::Builtin(builtin, args) => self.builtin(builtin, args),
+            ExprKind::Builtin(builtin, args) => self.builtin(builtin, args, expression.ty),
         }
     }
 
     fn binary(&mut self, op: Binary, left: &Value, right: &Value) -> Value {
         match op {
             Binary::Repeat => {
-                let (list, count) = if left.ty == Type::ListInt {
+                let (list, count) = if matches!(left.ty, Type::ListInt | Type::List(_)) {
                     (left, right)
                 } else {
                     (right, left)
                 };
-                self.call("relar_list_repeat", Type::ListInt, &[list, count])
+                let name = if list.ty == Type::ListInt {
+                    "relar_list_repeat"
+                } else {
+                    "relar_seq_repeat"
+                };
+                self.call(name, list.ty, &[list, count])
             }
+            Binary::Concat => self.call("relar_str_concat", Type::Str, &[left, right]),
             Binary::Add => self.call("int_add", Type::Int, &[left, right]),
             Binary::Subtract => self.call("int_sub", Type::Int, &[left, right]),
             Binary::Multiply => self.call("int_mul", Type::Int, &[left, right]),
@@ -644,7 +706,9 @@ impl Emitter {
                 left.operand,
                 right.operand
             )),
-            Type::ListInt => unreachable!("list comparison is rejected by the frontend"),
+            Type::ListInt | Type::List(_) | Type::Tuple(_) | Type::Optional(_) => {
+                unreachable!("container comparison is rejected by the frontend")
+            }
         };
         Value {
             ty: Type::Bool,
@@ -708,7 +772,7 @@ impl Emitter {
         }
     }
 
-    fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr]) -> Value {
+    fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
         let args = expressions
             .iter()
             .map(|arg| self.operand(arg))
@@ -730,24 +794,57 @@ impl Emitter {
                 _ => unreachable!("int conversion was checked"),
             },
             Builtin::Len => self.call(
-                if args[0].value.ty == Type::Str {
-                    "relar_str_len"
-                } else {
-                    "relar_list_len"
+                match args[0].value.ty {
+                    Type::Str => "relar_str_len",
+                    Type::ListInt => "relar_list_len",
+                    Type::List(_) => "relar_seq_len",
+                    Type::Tuple(_) => "relar_object_len",
+                    _ => unreachable!("len input was checked"),
                 },
                 Type::Int,
                 &[&args[0].value],
             ),
-            Builtin::ListGet => self.call(
-                "relar_list_get",
-                Type::Int,
-                &[&args[0].value, &args[1].value],
-            ),
+            Builtin::ListGet => {
+                if args[0].value.ty == Type::ListInt {
+                    self.call(
+                        "relar_list_get",
+                        Type::Int,
+                        &[&args[0].value, &args[1].value],
+                    )
+                } else {
+                    let word = self.instruction(format!(
+                        "call i64 @relar_seq_get(ptr {}, i64 {})",
+                        args[0].value.operand, args[1].value.operand
+                    ));
+                    self.unpack_word(word, returns)
+                }
+            }
             Builtin::Append => {
-                self.void_call("relar_list_append", &[&args[0].value, &args[1].value]);
+                self.append(&args[0].value, &args[1].value);
                 none()
             }
-            Builtin::Pop => self.call("relar_list_pop", Type::Int, &[&args[0].value]),
+            Builtin::Pop => {
+                if args[0].value.ty == Type::ListInt {
+                    self.call("relar_list_pop", Type::Int, &[&args[0].value])
+                } else {
+                    let word = self.instruction(format!(
+                        "call i64 @relar_seq_pop(ptr {})",
+                        args[0].value.operand
+                    ));
+                    self.unpack_word(word, returns)
+                }
+            }
+            Builtin::Split => self.call("relar_str_split_whitespace", returns, &[&args[0].value]),
+            Builtin::IsNone => Value {
+                ty: Type::Bool,
+                operand: match args[0].value.ty {
+                    Type::Optional(_) => {
+                        self.instruction(format!("icmp eq ptr {}, null", args[0].value.operand))
+                    }
+                    Type::None => "true".to_owned(),
+                    _ => "false".to_owned(),
+                },
+            },
             Builtin::Print => {
                 match args[0].value.ty {
                     Type::Int => self.void_call("relar_print_int", &[&args[0].value]),
@@ -758,7 +855,11 @@ impl Emitter {
                         self.line(format!("call void @relar_print_bool(i8 {byte})"));
                     }
                     Type::None => self.void_call("relar_print_none", &[]),
-                    Type::ListInt | Type::Class(_) => {
+                    Type::ListInt
+                    | Type::Class(_)
+                    | Type::List(_)
+                    | Type::Tuple(_)
+                    | Type::Optional(_) => {
                         unreachable!("container printing is rejected")
                     }
                 }
@@ -778,7 +879,12 @@ impl Emitter {
             Type::Int => value.operand.clone(),
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
-            Type::Str | Type::ListInt | Type::Class(_) => {
+            Type::Str
+            | Type::ListInt
+            | Type::Class(_)
+            | Type::List(_)
+            | Type::Tuple(_)
+            | Type::Optional(_) => {
                 self.instruction(format!("ptrtoint ptr {} to i64", value.operand))
             }
         }
@@ -791,9 +897,12 @@ impl Emitter {
             Type::Int => word,
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
-            Type::Str | Type::ListInt | Type::Class(_) => {
-                self.instruction(format!("inttoptr i64 {word} to ptr"))
-            }
+            Type::Str
+            | Type::ListInt
+            | Type::Class(_)
+            | Type::List(_)
+            | Type::Tuple(_)
+            | Type::Optional(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
         Value { ty, operand }
     }
@@ -815,6 +924,33 @@ impl Emitter {
             representation_kind(value.ty)
         ));
     }
+
+    fn append(&mut self, list: &Value, value: &Value) {
+        if list.ty == Type::ListInt {
+            self.void_call("relar_list_append", &[list, value]);
+        } else {
+            let word = self.word(value);
+            self.line(format!(
+                "call void @relar_seq_append(ptr {}, i64 {word}, i32 {})",
+                list.operand,
+                representation_kind(value.ty)
+            ));
+        }
+    }
+
+    fn set_item(&mut self, list: &Value, index: &Value, value: &Value) {
+        if list.ty == Type::ListInt {
+            self.void_call("relar_list_set", &[list, index, value]);
+        } else {
+            let word = self.word(value);
+            self.line(format!(
+                "call void @relar_seq_set(ptr {}, i64 {}, i64 {word}, i32 {})",
+                list.operand,
+                index.operand,
+                representation_kind(value.ty)
+            ));
+        }
+    }
 }
 
 /// Must match the owned-slot representation tags in the runtime's objects module.
@@ -825,7 +961,7 @@ fn representation_kind(ty: Type) -> u32 {
         Type::Int => 2,
         Type::Str => 3,
         Type::ListInt => 4,
-        Type::Class(_) => 5,
+        Type::Class(_) | Type::List(_) | Type::Tuple(_) | Type::Optional(_) => 5,
     }
 }
 
@@ -877,6 +1013,16 @@ declare i64 @relar_object_get(ptr, i64)
 declare void @relar_object_set(ptr, i64, i64, i32)
 declare void @relar_object_retain(ptr)
 declare void @relar_object_release(ptr)
+declare i64 @relar_object_len(ptr)
+declare ptr @relar_seq_new()
+declare i64 @relar_seq_get(ptr, i64)
+declare void @relar_seq_set(ptr, i64, i64, i32)
+declare void @relar_seq_append(ptr, i64, i32)
+declare i64 @relar_seq_pop(ptr)
+declare i64 @relar_seq_len(ptr)
+declare ptr @relar_seq_repeat(ptr, i64)
+declare ptr @relar_str_concat(ptr, ptr)
+declare ptr @relar_str_split_whitespace(ptr)
 declare void @relar_int_retain(i64)
 declare void @relar_int_release(i64)
 declare i64 @relar_int_literal(ptr, i64)

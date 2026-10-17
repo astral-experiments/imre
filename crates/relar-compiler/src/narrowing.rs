@@ -1,0 +1,74 @@
+//! Conservative local None facts, independent of checked types and IR lowering.
+
+use std::collections::{HashMap, HashSet};
+
+use ruff_python_ast as ast;
+use ruff_python_ast::visitor::{Visitor, walk_expr};
+
+/// Returns facts guaranteed when `test` has the requested truth value.
+/// A true fact means non-None. Only local names are eligible: attribute and
+/// subscript values can change through aliases without rebinding the receiver.
+pub(crate) fn facts(test: &ast::Expr, truth: bool) -> HashMap<String, bool> {
+    match test {
+        ast::Expr::Compare(compare) if compare.ops.len() == 1 => {
+            let present = match compare.ops[0] {
+                ast::CmpOp::Is => !truth,
+                ast::CmpOp::IsNot => truth,
+                _ => return HashMap::new(),
+            };
+            match compare.operands.as_ref() {
+                [ast::Expr::Name(name), ast::Expr::NoneLiteral(_)]
+                | [ast::Expr::NoneLiteral(_), ast::Expr::Name(name)] => {
+                    HashMap::from([(name.id.to_string(), present)])
+                }
+                _ => HashMap::new(),
+            }
+        }
+        ast::Expr::UnaryOp(unary) if unary.op == ast::UnaryOp::Not => facts(&unary.operand, !truth),
+        ast::Expr::BoolOp(boolean)
+            if (boolean.op == ast::BoolOp::And && truth)
+                || (boolean.op == ast::BoolOp::Or && !truth) =>
+        {
+            let mut result = HashMap::new();
+            let mut conflicting = HashSet::new();
+            for value in &boolean.values {
+                for (name, present) in facts(value, truth) {
+                    if let Some(previous) = result.insert(name.clone(), present)
+                        && previous != present
+                    {
+                        conflicting.insert(name);
+                    }
+                }
+            }
+            for name in conflicting {
+                result.remove(&name);
+            }
+            result
+        }
+        _ => HashMap::new(),
+    }
+}
+
+/// Finds local stores anywhere in a loop body, including its branches and loops.
+/// Callers must invalidate these names' incoming facts before checking a loop:
+/// later iterations can observe a value written on an earlier backedge.
+pub(crate) fn assigned_names(body: &[ast::Stmt]) -> HashSet<String> {
+    let mut visitor = Assignments(HashSet::new());
+    for statement in body {
+        visitor.visit_stmt(statement);
+    }
+    visitor.0
+}
+
+struct Assignments(HashSet<String>);
+
+impl<'a> Visitor<'a> for Assignments {
+    fn visit_expr(&mut self, expression: &'a ast::Expr) {
+        if let ast::Expr::Name(name) = expression
+            && name.ctx == ast::ExprContext::Store
+        {
+            self.0.insert(name.id.to_string());
+        }
+        walk_expr(self, expression);
+    }
+}
