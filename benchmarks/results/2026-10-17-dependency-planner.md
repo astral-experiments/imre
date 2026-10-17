@@ -25,7 +25,7 @@ The [comparison JSON](2026-10-17-dependency-planner-comparison.json) retains **2
 
 ## What changed
 
-Profiling the baseline showed tens of thousands of native `write` system calls while printing the report. The runtime now uses a bounded 8 KiB stdout buffer for pipes and files. Terminals still flush each printed line. Explicit flushes preserve output before `input()`, fatal errors, and normal program exit; write or flush failures produce a runtime error, while a secondary flush failure preserves the original fatal error category.
+Profiling the baseline showed tens of thousands of native `write` system calls while printing the report. The runtime now uses a bounded 8 KiB stdout buffer for pipes and files. Terminals still flush each printed line. Explicit flushes preserve output before `input()`, fatal errors, and normal program exit; returned write or flush errors produce a runtime error, while a secondary flush failure preserves the original fatal error category. Native signal handling is unchanged: a closed output pipe can terminate either native build with `SIGPIPE` before an I/O error is returned.
 
 Separate syscall profiles of the exact benchmark executables show the reduction:
 

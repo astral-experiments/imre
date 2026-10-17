@@ -83,6 +83,8 @@ Runtime errors print an exception category and exit with status 1. There are no 
 
 Standard output uses bounded buffering for pipes and files, and flushes each printed line on a terminal. Pending output is also flushed before `input()` waits, before a reported runtime error exits, and before the generated process entry returns normally. If a write or flush returns an error, Relar reports `OSError`; fatal-error flushing is best effort and preserves the original exception category. Generated code explicitly flushes at process exit because its LLVM entry point does not run Rust's standard `main` lifecycle.
 
+Signal handling remains native. Relar does not install CPython's signal handlers, so a closed output pipe can terminate the process with `SIGPIPE` before an I/O error is returned. This behavior predates output buffering.
+
 ## Build and validate
 
 Install the Rust toolchain specified in `rust-toolchain.toml`, Clang 18, and CPython 3.12 or later. Build the compiler and runtime together:
