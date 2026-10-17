@@ -1,0 +1,1520 @@
+{
+  "schema_version": 1,
+  "comparison": "prebuilt baseline vs optimized Relar vs unchanged CPython",
+  "started_at_utc": "2026-10-17T15:56:10.292288+00:00",
+  "completed_at_utc": "2026-10-17T15:56:24.535861+00:00",
+  "git": {
+    "revision": "2f8687ab3488445ded4554f44c8a9b1267963b0e",
+    "dirty": false
+  },
+  "sha256": {
+    "baseline": "e7d0e3df3eaf65a14bda32fbafc9354dece48a0a1bb98c4476c5da4bcdc0695f",
+    "optimized": "b9f2e7f0fa1918733da4aa5a7aca21d49c0c01974aef4ef1d68996462ad9e321",
+    "source": "220266102bfd11d0854e7cdb9809628e64ac5ddbfc97b17c95bc22798bec5fdb",
+    "comparison_harness": "d878c49d30863b2b47bc3e453003611752b7fda34b9250754a4b580887599724",
+    "benchmark_harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+    "validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+    "baseline_record": "31291e997f06e14b7cec5f1db2cf9301e2cf46d148bdf84e5cb7d91dc19b2beb",
+    "optimized_record": "22079adb8c32c56edc52ce3691e67b4937fd909dd1dee3d9de0e91b5bcfe2956",
+    "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+  },
+  "tools": {
+    "cpython": {
+      "implementation": "cpython",
+      "version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+      "version_number": "3.14.5",
+      "gil_enabled": true,
+      "free_threaded_build": false,
+      "jit_available": true,
+      "jit_enabled": false,
+      "debug_build": false,
+      "pgo": {
+        "configure_enable_optimizations": true,
+        "profile_use_flag_present": true
+      },
+      "lto": {
+        "configure_option": "--with-lto",
+        "lto_flag_present": true
+      },
+      "executable_name": "python3.14"
+    }
+  },
+  "native_build_records": {
+    "baseline": {
+      "record_name": "2026-10-17-route-planner.json",
+      "git": {
+        "revision": "312557ad1cfc94fcff05741f328c2596273a3f2c",
+        "dirty": false
+      },
+      "sha256": {
+        "source": "220266102bfd11d0854e7cdb9809628e64ac5ddbfc97b17c95bc22798bec5fdb",
+        "compiler": "54f0aa7233fc73279fc04692559e66ed11aa9e36b514ac0c125f5747eba60d76",
+        "runtime": "3de5151550dda9ab7d68a5465ecd58aa1bf985656278ae46d10159184ee9b440",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+        "harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+        "validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+        "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        "binary": "e7d0e3df3eaf65a14bda32fbafc9354dece48a0a1bb98c4476c5da4bcdc0695f",
+        "llvm_ir": "d65c178647480bdfc6fd783497171f8b126be157043d6478dac3ee73b0aaab09"
+      },
+      "tools": {
+        "relar": "relar 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
+        "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin",
+        "cpython": {
+          "implementation": "cpython",
+          "version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+          "version_number": "3.14.5",
+          "gil_enabled": true,
+          "free_threaded_build": false,
+          "jit_available": true,
+          "jit_enabled": false,
+          "debug_build": false,
+          "pgo": {
+            "configure_enable_optimizations": true,
+            "profile_use_flag_present": true
+          },
+          "lto": {
+            "configure_option": "--with-lto",
+            "lto_flag_present": true
+          },
+          "executable_name": "python3.14"
+        }
+      },
+      "compilation": {
+        "elapsed_ns": 514885909,
+        "stdout": "",
+        "stderr": "",
+        "returncode": 0
+      },
+      "compile_command": [
+        "relar",
+        "build",
+        "examples/route_planner.py",
+        "-o",
+        "<artifact-dir>/route_planner",
+        "--runtime",
+        "<runtime.a>",
+        "--clang",
+        "clang",
+        "--opt-level",
+        "3",
+        "--emit-llvm",
+        "<artifact-dir>/route_planner.ll"
+      ]
+    },
+    "optimized": {
+      "record_name": "optimized-build.json",
+      "git": {
+        "revision": "2f8687ab3488445ded4554f44c8a9b1267963b0e",
+        "dirty": false
+      },
+      "sha256": {
+        "source": "220266102bfd11d0854e7cdb9809628e64ac5ddbfc97b17c95bc22798bec5fdb",
+        "compiler": "de6e370634460a3e43056cb6ea14bd333d9c3d24f100bf2c5ea07d7eda8c2e69",
+        "runtime": "7d0d9a78c47c9a398e8e0f2249dc6ce4c7a953183b131da987450c842b0e80bc",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+        "harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+        "validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+        "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        "binary": "b9f2e7f0fa1918733da4aa5a7aca21d49c0c01974aef4ef1d68996462ad9e321",
+        "llvm_ir": "f2c59d959c798411e2b649f90858e1129b5b438b59e5aadd0b7425515d8e65b1"
+      },
+      "tools": {
+        "relar": "relar 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
+        "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin",
+        "cpython": {
+          "implementation": "cpython",
+          "version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+          "version_number": "3.14.5",
+          "gil_enabled": true,
+          "free_threaded_build": false,
+          "jit_available": true,
+          "jit_enabled": false,
+          "debug_build": false,
+          "pgo": {
+            "configure_enable_optimizations": true,
+            "profile_use_flag_present": true
+          },
+          "lto": {
+            "configure_option": "--with-lto",
+            "lto_flag_present": true
+          },
+          "executable_name": "python3.14"
+        }
+      },
+      "compilation": {
+        "elapsed_ns": 464158321,
+        "stdout": "",
+        "stderr": "",
+        "returncode": 0
+      },
+      "compile_command": [
+        "relar",
+        "build",
+        "examples/route_planner.py",
+        "-o",
+        "<artifact-dir>/route_planner",
+        "--runtime",
+        "<runtime.a>",
+        "--clang",
+        "clang",
+        "--opt-level",
+        "3",
+        "--emit-llvm",
+        "<artifact-dir>/route_planner.ll"
+      ]
+    }
+  },
+  "host": {
+    "os": "Linux",
+    "kernel_release": "6.8.0-146-generic",
+    "architecture": "x86_64",
+    "cpu": {
+      "model": "AMD EPYC-Milan Processor",
+      "allowed_cpus_before_pinning": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ],
+      "affinity": [
+        0
+      ]
+    }
+  },
+  "clock": {
+    "implementation": "clock_gettime(CLOCK_MONOTONIC)",
+    "monotonic": true,
+    "adjustable": false,
+    "resolution": 1e-09
+  },
+  "artifacts": {
+    "baseline": {
+      "executable_bytes": 2388656
+    },
+    "optimized": {
+      "executable_bytes": 2381192
+    }
+  },
+  "options": {
+    "sizes": [
+      32,
+      128,
+      256
+    ],
+    "routes": 3,
+    "seed": 42,
+    "samples": 12,
+    "warmups": 2,
+    "timeout_seconds": 120.0
+  },
+  "method": {
+    "timer": "time.perf_counter_ns around subprocess.run; shared with benchmark.py",
+    "includes": "fresh process startup, stdin/stdout pipes, complete route-planner execution, and process exit",
+    "excludes": "all native compilation, correctness validation, and warmups",
+    "ordering": "all six orders in a repeating cycle; adjacent orders reverse each other",
+    "order_cycle": [
+      [
+        "baseline",
+        "optimized",
+        "cpython"
+      ],
+      [
+        "cpython",
+        "optimized",
+        "baseline"
+      ],
+      [
+        "optimized",
+        "cpython",
+        "baseline"
+      ],
+      [
+        "baseline",
+        "cpython",
+        "optimized"
+      ],
+      [
+        "cpython",
+        "baseline",
+        "optimized"
+      ],
+      [
+        "optimized",
+        "baseline",
+        "cpython"
+      ]
+    ],
+    "fully_counterbalanced_samples": true,
+    "cpu": "harness and all child processes inherit the same single-CPU affinity",
+    "commands": {
+      "baseline": [
+        "<baseline-executable>"
+      ],
+      "optimized": [
+        "<optimized-executable>"
+      ],
+      "cpython": [
+        "python3.14",
+        "-I",
+        "examples/route_planner.py"
+      ]
+    },
+    "native_provenance": "optional build records verify source and executable hashes; toolchains are not inferred from prebuilt binaries",
+    "spread": "minimum, maximum and quartiles describe observed samples, not confidence intervals"
+  },
+  "validation": {
+    "baseline": {
+      "input_cases": 22,
+      "routes": 64,
+      "oracle": "Bellman-Ford repeated relaxation"
+    },
+    "optimized": {
+      "input_cases": 22,
+      "routes": 64,
+      "oracle": "Bellman-Ford repeated relaxation"
+    }
+  },
+  "workloads": [
+    {
+      "width": 32,
+      "routes": 3,
+      "seed": 42,
+      "input": "32\n3\n42\n",
+      "input_sha256": "255bb1185529dbd581d590f230f34f87af775193311e7cb29fbd4eb35b9dc14d",
+      "expected_stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+      "warmups": [
+        {
+          "index": 0,
+          "order": [
+            "baseline",
+            "optimized",
+            "cpython"
+          ],
+          "baseline": {
+            "elapsed_ns": 5709749,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 4134556,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 22892204,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 1,
+          "order": [
+            "cpython",
+            "optimized",
+            "baseline"
+          ],
+          "cpython": {
+            "elapsed_ns": 22892595,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 4024131,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 5598662,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        }
+      ],
+      "samples": [
+        {
+          "index": 0,
+          "order": [
+            "baseline",
+            "optimized",
+            "cpython"
+          ],
+          "baseline": {
+            "elapsed_ns": 5576912,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 4047956,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 22743868,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 1,
+          "order": [
+            "cpython",
+            "optimized",
+            "baseline"
+          ],
+          "cpython": {
+            "elapsed_ns": 22688645,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 3987683,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 5557205,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 2,
+          "order": [
+            "optimized",
+            "cpython",
+            "baseline"
+          ],
+          "optimized": {
+            "elapsed_ns": 3968768,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 22886855,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 5579166,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 3,
+          "order": [
+            "baseline",
+            "cpython",
+            "optimized"
+          ],
+          "baseline": {
+            "elapsed_ns": 5531317,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 22847992,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 3989717,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 4,
+          "order": [
+            "cpython",
+            "baseline",
+            "optimized"
+          ],
+          "cpython": {
+            "elapsed_ns": 22860386,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 5672268,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 4021687,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 5,
+          "order": [
+            "optimized",
+            "baseline",
+            "cpython"
+          ],
+          "optimized": {
+            "elapsed_ns": 3975911,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 5549201,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 22957637,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 6,
+          "order": [
+            "baseline",
+            "optimized",
+            "cpython"
+          ],
+          "baseline": {
+            "elapsed_ns": 5633798,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 4055429,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 23222641,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 7,
+          "order": [
+            "cpython",
+            "optimized",
+            "baseline"
+          ],
+          "cpython": {
+            "elapsed_ns": 25688880,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 4538209,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 5652714,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 8,
+          "order": [
+            "optimized",
+            "cpython",
+            "baseline"
+          ],
+          "optimized": {
+            "elapsed_ns": 4033188,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 23573423,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 5582673,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 9,
+          "order": [
+            "baseline",
+            "cpython",
+            "optimized"
+          ],
+          "baseline": {
+            "elapsed_ns": 5583634,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 22968437,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 3970641,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 10,
+          "order": [
+            "cpython",
+            "baseline",
+            "optimized"
+          ],
+          "cpython": {
+            "elapsed_ns": 22586827,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 5743561,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 3976632,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 11,
+          "order": [
+            "optimized",
+            "baseline",
+            "cpython"
+          ],
+          "optimized": {
+            "elapsed_ns": 4001620,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 5648374,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 22566998,
+            "stdout": "191\n62\n1012\n188\n62\n1023\n199\n62\n1024\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        }
+      ],
+      "summary": {
+        "baseline": {
+          "median_seconds": 0.0055831535,
+          "min_seconds": 0.005531317,
+          "max_seconds": 0.005743561,
+          "p25_seconds": 0.00557198525,
+          "p75_seconds": 0.005649459
+        },
+        "optimized": {
+          "median_seconds": 0.003995668500000001,
+          "min_seconds": 0.003968768,
+          "max_seconds": 0.004538209,
+          "p25_seconds": 0.00397645175,
+          "p75_seconds": 0.00403688
+        },
+        "cpython": {
+          "median_seconds": 0.0228736205,
+          "min_seconds": 0.022566998,
+          "max_seconds": 0.02568888,
+          "p25_seconds": 0.022730062250000002,
+          "p75_seconds": 0.023031988
+        },
+        "speedup_ratio_of_medians": {
+          "optimized_vs_baseline": 1.3973014778378134,
+          "baseline_vs_cpython": 4.096899807608729,
+          "optimized_vs_cpython": 5.72460415572513
+        }
+      }
+    },
+    {
+      "width": 128,
+      "routes": 3,
+      "seed": 42,
+      "input": "128\n3\n42\n",
+      "input_sha256": "c4a0d6ed3c2e32358dd64879dee892e6fb713cc6d936d25f9b288e92073078de",
+      "expected_stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+      "warmups": [
+        {
+          "index": 0,
+          "order": [
+            "baseline",
+            "optimized",
+            "cpython"
+          ],
+          "baseline": {
+            "elapsed_ns": 47100901,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 19170627,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 113634044,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 1,
+          "order": [
+            "cpython",
+            "optimized",
+            "baseline"
+          ],
+          "cpython": {
+            "elapsed_ns": 107573231,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 19568197,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 47244057,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        }
+      ],
+      "samples": [
+        {
+          "index": 0,
+          "order": [
+            "baseline",
+            "optimized",
+            "cpython"
+          ],
+          "baseline": {
+            "elapsed_ns": 46815318,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 19234365,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 109779759,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 1,
+          "order": [
+            "cpython",
+            "optimized",
+            "baseline"
+          ],
+          "cpython": {
+            "elapsed_ns": 107879351,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 19224196,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 46831447,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 2,
+          "order": [
+            "optimized",
+            "cpython",
+            "baseline"
+          ],
+          "optimized": {
+            "elapsed_ns": 19687099,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 108138574,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 46908171,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 3,
+          "order": [
+            "baseline",
+            "cpython",
+            "optimized"
+          ],
+          "baseline": {
+            "elapsed_ns": 46956833,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 108129947,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 19144598,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 4,
+          "order": [
+            "cpython",
+            "baseline",
+            "optimized"
+          ],
+          "cpython": {
+            "elapsed_ns": 107528578,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 46776356,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 19261506,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 5,
+          "order": [
+            "optimized",
+            "baseline",
+            "cpython"
+          ],
+          "optimized": {
+            "elapsed_ns": 19129271,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 46672642,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 110221117,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 6,
+          "order": [
+            "baseline",
+            "optimized",
+            "cpython"
+          ],
+          "baseline": {
+            "elapsed_ns": 48145125,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 19397980,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 109414188,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 7,
+          "order": [
+            "cpython",
+            "optimized",
+            "baseline"
+          ],
+          "cpython": {
+            "elapsed_ns": 108975170,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 19844510,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 47845296,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 8,
+          "order": [
+            "optimized",
+            "cpython",
+            "baseline"
+          ],
+          "optimized": {
+            "elapsed_ns": 19451430,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 109789848,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 47386391,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 9,
+          "order": [
+            "baseline",
+            "cpython",
+            "optimized"
+          ],
+          "baseline": {
+            "elapsed_ns": 46633519,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 110329823,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 19822599,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 10,
+          "order": [
+            "cpython",
+            "baseline",
+            "optimized"
+          ],
+          "cpython": {
+            "elapsed_ns": 111026880,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 49347112,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 19928027,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 11,
+          "order": [
+            "optimized",
+            "baseline",
+            "cpython"
+          ],
+          "optimized": {
+            "elapsed_ns": 23149074,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 49071027,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 109957179,
+            "stdout": "707\n258\n16382\n742\n256\n16384\n733\n254\n16372\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        }
+      ],
+      "summary": {
+        "baseline": {
+          "median_seconds": 0.046932502,
+          "min_seconds": 0.046633519,
+          "max_seconds": 0.049347112,
+          "p25_seconds": 0.0468055775,
+          "p75_seconds": 0.04792025325
+        },
+        "optimized": {
+          "median_seconds": 0.019424705,
+          "min_seconds": 0.019129271,
+          "max_seconds": 0.023149074,
+          "p25_seconds": 0.01923182275,
+          "p75_seconds": 0.01982807675
+        },
+        "cpython": {
+          "median_seconds": 0.1095969735,
+          "min_seconds": 0.107528578,
+          "max_seconds": 0.11102688,
+          "p25_seconds": 0.10813641725,
+          "p75_seconds": 0.11002316349999999
+        },
+        "speedup_ratio_of_medians": {
+          "optimized_vs_baseline": 2.4161243117977853,
+          "baseline_vs_cpython": 2.3352041512723956,
+          "optimized_vs_cpython": 5.642143522900348
+        }
+      }
+    },
+    {
+      "width": 256,
+      "routes": 3,
+      "seed": 42,
+      "input": "256\n3\n42\n",
+      "input_sha256": "728095cd150ff40eca8304f51aeb863d19d10413c815dc55d248296b04bd85c2",
+      "expected_stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+      "warmups": [
+        {
+          "index": 0,
+          "order": [
+            "baseline",
+            "optimized",
+            "cpython"
+          ],
+          "baseline": {
+            "elapsed_ns": 190845606,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 73061205,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 421944335,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 1,
+          "order": [
+            "cpython",
+            "optimized",
+            "baseline"
+          ],
+          "cpython": {
+            "elapsed_ns": 417964858,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 74114818,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 191964980,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        }
+      ],
+      "samples": [
+        {
+          "index": 0,
+          "order": [
+            "baseline",
+            "optimized",
+            "cpython"
+          ],
+          "baseline": {
+            "elapsed_ns": 190850966,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 73464147,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 423305534,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 1,
+          "order": [
+            "cpython",
+            "optimized",
+            "baseline"
+          ],
+          "cpython": {
+            "elapsed_ns": 420526176,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 74722339,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 196955721,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 2,
+          "order": [
+            "optimized",
+            "cpython",
+            "baseline"
+          ],
+          "optimized": {
+            "elapsed_ns": 73258514,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 414498684,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 190311331,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 3,
+          "order": [
+            "baseline",
+            "cpython",
+            "optimized"
+          ],
+          "baseline": {
+            "elapsed_ns": 189444188,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 419002184,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 74112122,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 4,
+          "order": [
+            "cpython",
+            "baseline",
+            "optimized"
+          ],
+          "cpython": {
+            "elapsed_ns": 416909574,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 193650278,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 76406144,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 5,
+          "order": [
+            "optimized",
+            "baseline",
+            "cpython"
+          ],
+          "optimized": {
+            "elapsed_ns": 75682857,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 191566388,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 423845295,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 6,
+          "order": [
+            "baseline",
+            "optimized",
+            "cpython"
+          ],
+          "baseline": {
+            "elapsed_ns": 193667881,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 74220154,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 416255488,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 7,
+          "order": [
+            "cpython",
+            "optimized",
+            "baseline"
+          ],
+          "cpython": {
+            "elapsed_ns": 413521237,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 73113945,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 192129959,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 8,
+          "order": [
+            "optimized",
+            "cpython",
+            "baseline"
+          ],
+          "optimized": {
+            "elapsed_ns": 73170430,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 423504502,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 193904060,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 9,
+          "order": [
+            "baseline",
+            "cpython",
+            "optimized"
+          ],
+          "baseline": {
+            "elapsed_ns": 189971921,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 418244008,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 73185338,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 10,
+          "order": [
+            "cpython",
+            "baseline",
+            "optimized"
+          ],
+          "cpython": {
+            "elapsed_ns": 426832657,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 195701191,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "optimized": {
+            "elapsed_ns": 77390836,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        },
+        {
+          "index": 11,
+          "order": [
+            "optimized",
+            "baseline",
+            "cpython"
+          ],
+          "optimized": {
+            "elapsed_ns": 75980721,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "baseline": {
+            "elapsed_ns": 197000605,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          },
+          "cpython": {
+            "elapsed_ns": 446384654,
+            "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "stderr": "",
+            "returncode": 0
+          }
+        }
+      ],
+      "summary": {
+        "baseline": {
+          "median_seconds": 0.19289011849999999,
+          "min_seconds": 0.189444188,
+          "max_seconds": 0.197000605,
+          "p25_seconds": 0.19071605725000002,
+          "p75_seconds": 0.19435334275
+        },
+        "optimized": {
+          "median_seconds": 0.07416613799999999,
+          "min_seconds": 0.073113945,
+          "max_seconds": 0.077390836,
+          "p25_seconds": 0.07324022,
+          "p75_seconds": 0.07575732300000002
+        },
+        "cpython": {
+          "median_seconds": 0.41976418,
+          "min_seconds": 0.413521237,
+          "max_seconds": 0.446384654,
+          "p25_seconds": 0.4167460525,
+          "p75_seconds": 0.42358970025
+        },
+        "speedup_ratio_of_medians": {
+          "optimized_vs_baseline": 2.6007841813200523,
+          "baseline_vs_cpython": 2.176182913174995,
+          "optimized_vs_cpython": 5.659782096244515
+        }
+      }
+    }
+  ]
+}

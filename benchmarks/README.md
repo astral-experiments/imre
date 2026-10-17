@@ -4,6 +4,8 @@ The example computes shortest routes across weighted grids using Dijkstra's algo
 
 The [first recorded result](results/2026-10-17-route-planner.md) includes raw samples and environment details: 2.17× faster than CPython 3.14.5 for three routes on 256 × 256 grids, using end-to-end process timings.
 
+The [profiling follow-up](results/2026-10-17-route-planner-optimized.md) records the native bottlenecks and their optimization: 2.60× faster than the preserved original native executable and 5.66× faster than CPython in a direct three-way comparison, with the Python source unchanged.
+
 Build the compiler and runtime once, then run the benchmark from the repository root:
 
 ```sh

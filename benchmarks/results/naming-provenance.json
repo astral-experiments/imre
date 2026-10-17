@@ -1,5 +1,65 @@
 {
   "files": {
+    "benchmarks/results/2026-10-17-route-planner-ablations.json": {
+      "normalized_bytes": 81181,
+      "normalized_sha256": "c26ca2f8db7ebd6bfa2b052ffd9f36b8c839d8fe78b0a678478f2e679cde139f",
+      "original_bytes": 81167,
+      "original_sha256": "7573d79b2b18b6c1a56b4047ef7fcaa6bda4d73cf17e8991245cc54e5bf8b9d1",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "positions_zlib_hex": "78dabbc8ccf84c8c8193612627c3f73438f31f82d99eceb8b1901100d7aa0aa0",
+        "replacement_count": 14
+      }
+    },
+    "benchmarks/results/2026-10-17-route-planner-comparison.json": {
+      "normalized_bytes": 44802,
+      "normalized_sha256": "036153767dd814d1d32db8a98626a4268eb372278d828a92e190d75649f4296e",
+      "original_bytes": 44795,
+      "original_sha256": "2d34c2fcae700610ff7b918f982c834a9f7eecbd1601975c66aea01e05b9c101",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "positions_zlib_hex": "78daf3647c2bc2c0c9f09a9d610517840600289703f4",
+        "replacement_count": 7
+      }
+    },
+    "benchmarks/results/2026-10-17-route-planner-optimized.json": {
+      "normalized_bytes": 26885,
+      "normalized_sha256": "a4bad6a7ab54f4fe3357a57baa84cb678f73a9d78af12e89ece06648422f90cd",
+      "original_bytes": 26799,
+      "original_sha256": "bd433ecd10b5e60d1a451388125e7f594b57fcf4015cc2263f7436ddd23c1f35",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "positions_zlib_hex": "78dadbcfcec0c9d0cdcf789f91218ee13607c313468666260633865fcc70e67d12980fc0ccb3cc0cd359195e33327481c43a58e0ccb7ccc433df8199e7981926b232bc6364e80589f5b1c0999f9989677e0133af33330000ee2b380b",
+        "replacement_count": 86
+      }
+    },
+    "benchmarks/results/2026-10-17-route-planner-optimized.md": {
+      "normalized_bytes": 9980,
+      "normalized_sha256": "3d173bb83dfb4f8f68978abf79b348189f20b72e954d0416bbcd06314a083203",
+      "original_bytes": 9969,
+      "original_sha256": "f6180609e6dad0ba805ffb07cf6aa0b8baf27807bf4c3e56bb80fa6cbf22fb86",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "positions_zlib_hex": "78da5362dccfce28c6d8cfcca8c5b8588ce10a13830443833cc31346866f4c8c0051a405e4",
+        "replacement_count": 11
+      }
+    },
+    "benchmarks/results/2026-10-17-route-planner-profile.json": {
+      "normalized_bytes": 165473,
+      "normalized_sha256": "992b0efbff56b400f3314f94a7f9c4e72937cde63e4e7b823a7fc4ecc0b2e581",
+      "original_bytes": 165422,
+      "original_sha256": "a7c5671a4f1ba68aa40f8046ef17e26de317f6b24649de8b78e4e66bc18fafc4",
+      "restoration": {
+        "encoding": "bytes",
+        "kind": "text",
+        "positions_zlib_hex": "78da1dce3b0ac2401485e1ff4c31a6b19f35a47701a9cdb2ac5c85a84113117c40d2c4ce573a1bb7602144b0b57266e05687ef1cee7cc088c790add889b5e80ca5b819ce8642ac44234e190bcbc1d1a75c2c939c4fabe0fcdd0d9502f5e55a1c33660aba72bc533acb6f4c9fb0afa3be1a366219877dd2465d584ac72bea69ce37e1e99ff903454d2950",
+        "replacement_count": 51
+      }
+    },
     "benchmarks/results/2026-10-17-route-planner.json": {
       "normalized_bytes": 26916,
       "normalized_sha256": "de293db0a0751aeb29c22aeef176d4218299947a2ee45b51d25f4c3a61c8ad40",
@@ -23,6 +83,96 @@
         "positions_zlib_hex": "78da5362ec67639cc4c9b8998301000c8f0211",
         "replacement_count": 4
       }
+    },
+    "benchmarks/results/profiles/2026-10-17-route-planner-after.callgrind.gz": {
+      "normalized_bytes": 40649,
+      "normalized_sha256": "ab1b9ea1f3ba083593ddb809df8b9d9f213b43d4024963804b35d50f990e47a8",
+      "original_bytes": 40648,
+      "original_sha256": "641feaf588b5236bbb678d9f0db7acc9a1bdcb907ef4203a1ebced94193249bc",
+      "restoration": {
+        "deflate": {
+          "level": 9,
+          "memory_level": 8,
+          "strategy": 0,
+          "window_bits": -15
+        },
+        "encoder_zlib_version": "1.3.1",
+        "header_hex": "1f8b0800000000000203",
+        "kind": "gzip-deflate",
+        "payload": {
+          "normalized_bytes": 233244,
+          "normalized_sha256": "8f93b6c86ca9a23f19e60f4d17289be643b41b2dce8a76f363a763f25a4d6dff",
+          "original_bytes": 233226,
+          "original_sha256": "7c901fcffb745ee7f6938e62a87e7bfd1e1877592fd81c66036800542ac8418c",
+          "restoration": {
+            "encoding": "bytes",
+            "kind": "text",
+            "positions_zlib_hex": "78da3b71979161771b27032f8332c3553686e36c0c1dc20c7f1819e63231ac6262486738c6c190cc30898be11613c36f7686262686e57c0c0070930cf7",
+            "replacement_count": 18
+          }
+        },
+        "trailer_hex": "a44513fc0a8f0300"
+      }
+    },
+    "benchmarks/results/profiles/2026-10-17-route-planner-before.callgrind.gz": {
+      "normalized_bytes": 42580,
+      "normalized_sha256": "efe31102f546e9714fc06c74a4fd56f07d7c302d5b40e8e8d2b873540a257554",
+      "original_bytes": 42577,
+      "original_sha256": "bfd960f658c67000d8e42870cdee0ee19afdce4844147a23343fe7719daabad6",
+      "restoration": {
+        "deflate": {
+          "level": 9,
+          "memory_level": 8,
+          "strategy": 0,
+          "window_bits": -15
+        },
+        "encoder_zlib_version": "1.3.1",
+        "header_hex": "1f8b0800000000000203",
+        "kind": "gzip-deflate",
+        "payload": {
+          "normalized_bytes": 254228,
+          "normalized_sha256": "8f0cc84df3d8fcb0c3574fd1e54a18ae75a407850692578c8f723eaae55fc334",
+          "original_bytes": 254208,
+          "original_sha256": "98e38b4aa364de1a1c6f6e23e569c42f9a8a19ab9779ee2646ceabbab1b60d84",
+          "restoration": {
+            "encoding": "bytes",
+            "kind": "text",
+            "positions_zlib_hex": "78da013b00c4ffb59f0200deff0700d001000d00cd130052005600970a005400f107009f0100a10300800c00e70a00f02700c66d00cb3000ba1a008eec0100b31600f9c310ac",
+            "replacement_count": 20
+          }
+        },
+        "trailer_hex": "6a44c80c00e10300"
+      }
+    },
+    "benchmarks/results/profiles/2026-10-17-route-planner-ownership-and-index-inlining.callgrind.gz": {
+      "normalized_bytes": 41295,
+      "normalized_sha256": "8333c4612461dda6a11bbc8c27074a7d02acc9bf1fc0783bbf649709d463347d",
+      "original_bytes": 41294,
+      "original_sha256": "e567f9da5dc754bf191b8cb20fc9a96ee7d4f7c7dc57b32844a6bc99eacd2520",
+      "restoration": {
+        "deflate": {
+          "level": 9,
+          "memory_level": 8,
+          "strategy": 0,
+          "window_bits": -15
+        },
+        "encoder_zlib_version": "1.3.1",
+        "header_hex": "1f8b0800000000000203",
+        "kind": "gzip-deflate",
+        "payload": {
+          "normalized_bytes": 233912,
+          "normalized_sha256": "64301674fde40301d97b4ec3528f06afff0bd9ff0a0b1e5069bc1a035f96dcc4",
+          "original_bytes": 233893,
+          "original_sha256": "3087d43239c09e33d56f91743c3120b38dd7591c7872e8743a6badfde11304b9",
+          "restoration": {
+            "encoding": "bytes",
+            "kind": "text",
+            "positions_zlib_hex": "78daeb98c0c4d0decfc17081918197e18c1943104318c3654e86108629ec0ccf99195a9918dad819f6b23174b030ec616498c9c4f0ac9591a1eb1023030095a70dea",
+            "replacement_count": 19
+          }
+        },
+        "trailer_hex": "10eb66bea5910300"
+      }
     }
   },
   "gzip_encoder": "Exact deflate recipes require a compatible zlib encoder; other streams retain an encoded original backup.",
@@ -36,10 +186,10 @@
       "sha256": "323375705e305220b9cc9c6403c70d794e3d6dbf5a531a6e393f78fb1436cfd4"
     },
     {
-      "bytes": 2149,
-      "data_zlib_hex": "78daad554b6f1b3710befb57103a4bca92cb7db03919a80b14087a307a2b0a818f61c464975c90946dc5c87fef70b59215347610b40769f998e7f70d679e6f08596939e543849d33e0b3cbc7dd1406a78fab5fc8ea7618c81461034f2e65e73f92bd4c7b486ba28e19880e079f7113e1c125173c2eb31b2165394eb8d6611ca537b84ae1103590e4e594f6a1a8e0399107e3322aa7c390137eb3749ee43db84842741f9d9703d9a35fdc685c8e203d86b0257f48f4414eb2a4785643f9c26322320291839309d296dc43d185176325e84414d872aaf7a03fcf29bdb858107028152246140fbeb844b37aef1e6009396d57eb821b781d0cc49d0f190a58f7f271f3ebdd6f1f6effbc2b59a151991115e2d2c919ea970836e87e33e3870b020f108f57210e416dc92d31ce5a88180df932384550282da6a4d6306559720e7e381267671c5e104386089285cc8d32a3e3f49e0494888f2e0139e0af8847d0211a8c6849e2ec01d10d7ed62b795f8cce52788299c888f14a4fe049ea8c2c1445200ac5f0dcc090e5028f750324c4e51937b85568633fcaf839bd5b287fc72ad66e68b5a1dd26860322330dd27b88db4f29f88b6641baf8da2dbe76f8efac038312391e607d96f2218e48fe1730bb9969bc676d5f57df13487bc99ab6b05609a99bde526bb995861b63804ae83a53554cd38681b50deb2bd35aad0df4755f5156e99ab546a8aee37a75317f46eb15ef97eb17df35658282109dad5aa05c751a7463a9514c5b515714f0cb5b4379af8ced39345a754650a3a9504c817af17d556f57c0e1059678016a95e1295fc46705045bc38825b69bdf310af5ed72ff75fe7e5dff3c73a3f95f78e394f56fd36641732dfaaa6958cd81f642d7429b8e83a9b9d65af2863329796b79d78b9a71d65181d4b6baa23d1782bf415b2d7af6166bba17ad01deb57d25ac945a510e922acd7b4dad696addd4b432cc0a51d99629dad0a605a154c59a1e6ad0ff81b5c282098ffedc73ae717c85d4fa5b4e6f165e57530c9f401789d5dde0e2e9cd5e05b44b3aba69beff4e019c0471303c949ea9613b1d5fb370851c67aab34dc7946da905c939b4552f3b00d921465433ab34951621e45c51a8bb4a98baaba54022f10dc8938b844d6d94688f2edb309dfa2f789c0ce6baa19fc33b8d87f7d8fab083e6287db2a5a8e6f63c412c9b447c20974c71c21ddc60d6e4012bcfcc82ebd34cd8c89ccb889b758325cbf434653e255c14f0cf13224d300cd83677d86edd1ce45f330bcfff2eed92009c79f8b6f20ed9f6bb3d3c1591d6b6d089ae5f5dbfd057ccddfdd81cff19731f7ebfffa139ec51a2399bc3ffbf6fbedefc03d5cb9c34",
+      "bytes": 6857,
+      "data_zlib_hex": "78daed594b6fdb4812bee757103e5b9e7e3f764e01360b2c30d843b0b7c542a8eeaeb63823910249c57182fcf7fd284b8e3c6bcb19441bec610c587c74b3aabbbefaea417e7ed3345799b6d36ee0655bb89bdae97eb9edd76dbebffa4b73f576bd6eb6032ff8633b4e6d77dbac685cf178dda4fb899bdcefba0917037f68c7b6ef703ab51b1e27da6c719efbcd86ba82b3b1df0d999bb1a3edb8eae74770bfa15d69273c3ceed6d388e3446dd74c2b6e87a61fdadbb6a375b3825e5c649c6e983a2ce1a6f9074147f330b79935a7f57ce4bbb1a1811b5ab734f278d3bce7f959fe2a6c5ef4d824aef3ddbce2fcdb7e4b5f551c2cd062563f6045c3ae9b55426c5eb51ff8b0e4f1e6ea7ab61b77b92f3c2cbb7ee2d958efe96ef1d7777ffbe5ed3fdfcdbb82509a6095a61d1f94e1f979050ba85feced8793863ff0707fb2c4759f6e9ab74d696be501ab693eaddbd460d278104539f376a279cf7db7be6fdabab7c3578b01a1066001b90d4d503cfedcf49831dcb523373bfccfd307cefd50b0a2c3268e1a60ddbedb3f37effb51e87e16ee60273460bdd435fc91f20414e607b9499886fb85d7131dcc53db358fb0cb675ce03241c66a43c36fe34f07c87f5242b985140be91743bf8365b66bea3a1e16d8ddde74e3cdaf63df3dca986d3e6b5d1eb42ef1dbd6960b664cc38eaf8fb3ba7ed8c00d3e7159ee31c77890d2f9e7268c2b52d6cdf879eb75f131a9244372599275c908e3b9fa9a895c2a648ad7b94acf2146a98ccdd91ab6a986148bbc7a147fb4db0bda1f874f742be1a8c8ecc96952d586e2431459062b5c4a46c55caab5c1d41ca2e594a2709565f15e24218a2c5f759f78de89e13000679f0d7535f1c7e971fafe01983df306ceb6dc331a93a4398c7fd91fbf5cff710cc1fe2d0d2df0bb1c88c6f868cf83a88a3659012ff64238296af529ca506350396843b17ae69c8a7442466fb373c424240b9b6296e21c884fb53f03628634a9ab71ca7b68cdde07c995b28d364929e14540ac6a264d82b928270c4949da242938f97c6110fd7763d86f11cf67035f0e42e57c8ce7214cc568cdb948912c3b7837192b75085259f6d546932c4c598d90e09f524e576fb42ba5289d65d5f60c844fb53f03a152c2472a2964adb2755cb25599b58b929d4f266a5f4b14b18072ccbac4c282a34c36e5ca2a42c665210cee82186eca45108cd1bd02607532082722bb4245240ac2d69a84cfd51189141255e583f0a99aac1951360551c9e55495aa29b8330082c6fa2c7e5e562b84b1da660300a3cdd10235a959675d9c91952b071b52a56214e984b5063812495f2c7d0f05673c4a7fd71deb81533bbe1466c577c3bb1dfa39d15e8ea0d259a3d47980c9c3b41ebcac32910b4446d4208ce339352a575823d8b9a48c336048483eb061e712f259a59acd19807fa7fe198865120092a3b6ae08a9e15f1e6424513d3c486a29c8979c1c2964c9aa755433b25ee6405a2121f80b53d4caefc5f092c13568711e3a11918f4295b59a9901889a2c912b7d1142656915d76a5510c5d59c019d0e422a8160e84a4cde9b7c36b89e6a7f06392d15e2688cbe0ac7d220e371b65596a4728d1a491847e38a3421951a5058e5e44b9425cbb928e3f47f175c2f15528d54e19590ca08671181d42a6d588698354a426f782e77724686443023e3aa41dda895411c44926297850c26c6738cd388a967ab9a10c168e35d10b11281638649a66c02b26db13a5b70aea81aa3a80eb5b395c89b3125a16c60e4f11f1b52f5b7627a089ce7ba903a0162f485ebdb010bbcb9fd7419b08533afa0bd4f53842e2024e08dfc989c0f2556519247ff17617e84b828d09a182534494e994b3472863ea673249db59fad80103f133198ef485b36d244a77d218fae44d7e8829b6929d0f220e04ac72a69891a5a6aaa88b6cce61be02e5cd1dff1939bb8bd462fbc9e73fcf5e9dd0d6ffae17e791c0c4f06c709f2f9767e57219e0cdc01b0fe6e99d0ad636c21ede3e09713073a76f0738fbd3c74c07b1bdce81b75ea882ba679de8a3fee87d1ef8920befe0183d3d94777befdd46e17c7cd9e8c6fe97edd53f9fdfe5f60c14bb54378764b3008bcfa71a9c254f43e9504852ab4105797a3c7c37b94ff013f94f5af74ea0945b843b4b1213bb479a2a0be50c10b642cd4e32c23d592d90403f785e36a6d74458e4348243877395760427b389bc46c626b32fb984999a218e94a6737fb4046db6735622eb2199b88fc1551e74aef0a9ac192904f6bf0fe4f7efc187e28f12dfc40fc44a193aa102c2fcc0fe42d586c852d525716583b7fc4efbaddbfc4bc3c6b505b99f3ac41a7e52b28604bf6d6a42ad1b8869c94a8c828d131fb62aacfa89ead4f5a813d84923d46a65c9455e21c6ba0fdecab918276c1451f19b53b69632ad2863268d673983b6887421d7560a688f5489d02b1b5c9a20c059966fff993353f28abc46f610d1ae5a46c5164e373ac797378f80a24f995f32cf7eaddba1d1ede0b9f00b81cf3d06ef7e3cf50ec61222ff8c3fc5e3ef3cdf6fe2509279e6654f2d57a95aa9b8b2883c65304f2cc6813ad935955b4a1a8ad74362649d65ec4a2bda688ea198d073da818f38a37341be470d96f1fdef173471b2ea71f0d8ecb7bf804f17333610c74a56eac330bf79f00b63ccc1763d3f5cde34eaf9bb46bd7e5baf900aa96fdc4eb87ef0e0b9aa6f933cafed9be36872f3465fe0632e26486ecf81562dcf21a41e57639706ef78bfcd71e85cfff1d0bf641e088c353a6eea61a8ee8baea90de7cb83a8d812f887bf7ba38f347c4fdf2f7f7af8a9b13ab3d8ac3efbfdf7c79f31fb0e0aa9d",
       "path_utf8_hex": "62656e63686d61726b732f726573756c74732f6e616d696e672d70726f76656e616e63652e6a736f6e",
-      "sha256": "567c019d98d77b304edd35970bf1019b0a286442f760d3f2005892389bc96923"
+      "sha256": "91feb71658db6f7262bff550238035bf8ea9e2ec0fbeea5fc2f970f3c852b730"
     },
     {
       "bytes": 24181,

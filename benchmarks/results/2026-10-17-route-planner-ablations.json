@@ -1,0 +1,2357 @@
+{
+  "schema_version": 1,
+  "description": "Exploratory comparisons of intermediate builds; six counterbalanced triplets at width256, three routes. Intermediate worktrees were dirty; executable and source hashes identify each measurement. The final clean-revision comparison is the primary result.",
+  "experiments": [
+    {
+      "change": "index inlining alone",
+      "record": {
+        "schema_version": 1,
+        "comparison": "prebuilt baseline vs optimized Relar vs unchanged CPython",
+        "started_at_utc": "2026-10-17T15:48:45.642975+00:00",
+        "completed_at_utc": "2026-10-17T15:48:53.524930+00:00",
+        "git": {
+          "revision": "8d5ee8e3809be3f135f6e3b0b8d6e18ce79d4bdd",
+          "dirty": true
+        },
+        "sha256": {
+          "baseline": "e7d0e3df3eaf65a14bda32fbafc9354dece48a0a1bb98c4476c5da4bcdc0695f",
+          "optimized": "89b6764ba9f2624f58dee68cad52b4f8515f89c35cfa8dce2a0d4826a68e0f85",
+          "source": "220266102bfd11d0854e7cdb9809628e64ac5ddbfc97b17c95bc22798bec5fdb",
+          "comparison_harness": "d878c49d30863b2b47bc3e453003611752b7fda34b9250754a4b580887599724",
+          "benchmark_harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+          "validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+          "baseline_record": "31291e997f06e14b7cec5f1db2cf9301e2cf46d148bdf84e5cb7d91dc19b2beb",
+          "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+        },
+        "tools": {
+          "cpython": {
+            "implementation": "cpython",
+            "version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+            "version_number": "3.14.5",
+            "gil_enabled": true,
+            "free_threaded_build": false,
+            "jit_available": true,
+            "jit_enabled": false,
+            "debug_build": false,
+            "pgo": {
+              "configure_enable_optimizations": true,
+              "profile_use_flag_present": true
+            },
+            "lto": {
+              "configure_option": "--with-lto",
+              "lto_flag_present": true
+            },
+            "executable_name": "python3.14"
+          }
+        },
+        "native_build_records": {
+          "baseline": {
+            "record_name": "2026-10-17-route-planner.json",
+            "git": {
+              "revision": "312557ad1cfc94fcff05741f328c2596273a3f2c",
+              "dirty": false
+            },
+            "sha256": {
+              "source": "220266102bfd11d0854e7cdb9809628e64ac5ddbfc97b17c95bc22798bec5fdb",
+              "compiler": "54f0aa7233fc73279fc04692559e66ed11aa9e36b514ac0c125f5747eba60d76",
+              "runtime": "3de5151550dda9ab7d68a5465ecd58aa1bf985656278ae46d10159184ee9b440",
+              "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+              "harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+              "validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+              "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+              "binary": "e7d0e3df3eaf65a14bda32fbafc9354dece48a0a1bb98c4476c5da4bcdc0695f",
+              "llvm_ir": "d65c178647480bdfc6fd783497171f8b126be157043d6478dac3ee73b0aaab09"
+            },
+            "tools": {
+              "relar": "relar 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
+              "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin",
+              "cpython": {
+                "implementation": "cpython",
+                "version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+                "version_number": "3.14.5",
+                "gil_enabled": true,
+                "free_threaded_build": false,
+                "jit_available": true,
+                "jit_enabled": false,
+                "debug_build": false,
+                "pgo": {
+                  "configure_enable_optimizations": true,
+                  "profile_use_flag_present": true
+                },
+                "lto": {
+                  "configure_option": "--with-lto",
+                  "lto_flag_present": true
+                },
+                "executable_name": "python3.14"
+              }
+            },
+            "compilation": {
+              "elapsed_ns": 514885909,
+              "stdout": "",
+              "stderr": "",
+              "returncode": 0
+            },
+            "compile_command": [
+              "relar",
+              "build",
+              "examples/route_planner.py",
+              "-o",
+              "<artifact-dir>/route_planner",
+              "--runtime",
+              "<runtime.a>",
+              "--clang",
+              "clang",
+              "--opt-level",
+              "3",
+              "--emit-llvm",
+              "<artifact-dir>/route_planner.ll"
+            ]
+          },
+          "optimized": null
+        },
+        "host": {
+          "os": "Linux",
+          "kernel_release": "6.8.0-146-generic",
+          "architecture": "x86_64",
+          "cpu": {
+            "model": "AMD EPYC-Milan Processor",
+            "allowed_cpus_before_pinning": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31
+            ],
+            "affinity": [
+              0
+            ]
+          }
+        },
+        "clock": {
+          "implementation": "clock_gettime(CLOCK_MONOTONIC)",
+          "monotonic": true,
+          "adjustable": false,
+          "resolution": 1e-09
+        },
+        "artifacts": {
+          "baseline": {
+            "executable_bytes": 2388656
+          },
+          "optimized": {
+            "executable_bytes": 2389616
+          }
+        },
+        "options": {
+          "sizes": [
+            256
+          ],
+          "routes": 3,
+          "seed": 42,
+          "samples": 6,
+          "warmups": 2,
+          "timeout_seconds": 120.0
+        },
+        "method": {
+          "timer": "time.perf_counter_ns around subprocess.run; shared with benchmark.py",
+          "includes": "fresh process startup, stdin/stdout pipes, complete route-planner execution, and process exit",
+          "excludes": "all native compilation, correctness validation, and warmups",
+          "ordering": "all six orders in a repeating cycle; adjacent orders reverse each other",
+          "order_cycle": [
+            [
+              "baseline",
+              "optimized",
+              "cpython"
+            ],
+            [
+              "cpython",
+              "optimized",
+              "baseline"
+            ],
+            [
+              "optimized",
+              "cpython",
+              "baseline"
+            ],
+            [
+              "baseline",
+              "cpython",
+              "optimized"
+            ],
+            [
+              "cpython",
+              "baseline",
+              "optimized"
+            ],
+            [
+              "optimized",
+              "baseline",
+              "cpython"
+            ]
+          ],
+          "fully_counterbalanced_samples": true,
+          "cpu": "harness and all child processes inherit the same single-CPU affinity",
+          "commands": {
+            "baseline": [
+              "<baseline-executable>"
+            ],
+            "optimized": [
+              "<optimized-executable>"
+            ],
+            "cpython": [
+              "python3.14",
+              "-I",
+              "examples/route_planner.py"
+            ]
+          },
+          "native_provenance": "optional build records verify source and executable hashes; toolchains are not inferred from prebuilt binaries",
+          "spread": "minimum, maximum and quartiles describe observed samples, not confidence intervals"
+        },
+        "validation": {
+          "baseline": {
+            "input_cases": 22,
+            "routes": 64,
+            "oracle": "Bellman-Ford repeated relaxation"
+          },
+          "optimized": {
+            "input_cases": 22,
+            "routes": 64,
+            "oracle": "Bellman-Ford repeated relaxation"
+          }
+        },
+        "workloads": [
+          {
+            "width": 256,
+            "routes": 3,
+            "seed": 42,
+            "input": "256\n3\n42\n",
+            "input_sha256": "728095cd150ff40eca8304f51aeb863d19d10413c815dc55d248296b04bd85c2",
+            "expected_stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "warmups": [
+              {
+                "index": 0,
+                "order": [
+                  "baseline",
+                  "optimized",
+                  "cpython"
+                ],
+                "baseline": {
+                  "elapsed_ns": 192843205,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 176629149,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 416676460,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 1,
+                "order": [
+                  "cpython",
+                  "optimized",
+                  "baseline"
+                ],
+                "cpython": {
+                  "elapsed_ns": 418279565,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 173163344,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 190764536,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              }
+            ],
+            "samples": [
+              {
+                "index": 0,
+                "order": [
+                  "baseline",
+                  "optimized",
+                  "cpython"
+                ],
+                "baseline": {
+                  "elapsed_ns": 191643512,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 172947384,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 420369041,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 1,
+                "order": [
+                  "cpython",
+                  "optimized",
+                  "baseline"
+                ],
+                "cpython": {
+                  "elapsed_ns": 419761493,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 178693061,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 194299787,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 2,
+                "order": [
+                  "optimized",
+                  "cpython",
+                  "baseline"
+                ],
+                "optimized": {
+                  "elapsed_ns": 176176014,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 419283804,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 202725785,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 3,
+                "order": [
+                  "baseline",
+                  "cpython",
+                  "optimized"
+                ],
+                "baseline": {
+                  "elapsed_ns": 192788729,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 420587662,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 175473786,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 4,
+                "order": [
+                  "cpython",
+                  "baseline",
+                  "optimized"
+                ],
+                "cpython": {
+                  "elapsed_ns": 421246269,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 193574117,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 178529766,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 5,
+                "order": [
+                  "optimized",
+                  "baseline",
+                  "cpython"
+                ],
+                "optimized": {
+                  "elapsed_ns": 176342263,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 190006074,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 427925454,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              }
+            ],
+            "summary": {
+              "baseline": {
+                "median_seconds": 0.193181423,
+                "min_seconds": 0.190006074,
+                "max_seconds": 0.202725785,
+                "p25_seconds": 0.19192981625,
+                "p75_seconds": 0.1941183695
+              },
+              "optimized": {
+                "median_seconds": 0.1762591385,
+                "min_seconds": 0.172947384,
+                "max_seconds": 0.178693061,
+                "p25_seconds": 0.175649343,
+                "p75_seconds": 0.17798289025
+              },
+              "cpython": {
+                "median_seconds": 0.4204783515,
+                "min_seconds": 0.419283804,
+                "max_seconds": 0.427925454,
+                "p25_seconds": 0.41991338,
+                "p75_seconds": 0.42108161725
+              },
+              "speedup_ratio_of_medians": {
+                "optimized_vs_baseline": 1.096007983722217,
+                "baseline_vs_cpython": 2.1765982720812653,
+                "optimized_vs_cpython": 2.385569083557049
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "change": "borrowed locals and parameters alone",
+      "record": {
+        "schema_version": 1,
+        "comparison": "prebuilt baseline vs optimized Relar vs unchanged CPython",
+        "started_at_utc": "2026-10-17T15:50:33.882291+00:00",
+        "completed_at_utc": "2026-10-17T15:50:41.114944+00:00",
+        "git": {
+          "revision": "8d5ee8e3809be3f135f6e3b0b8d6e18ce79d4bdd",
+          "dirty": true
+        },
+        "sha256": {
+          "baseline": "e7d0e3df3eaf65a14bda32fbafc9354dece48a0a1bb98c4476c5da4bcdc0695f",
+          "optimized": "a605625aed60ec1cd251ba31e76932771dac43267417462f0b64ff96523f0d4e",
+          "source": "220266102bfd11d0854e7cdb9809628e64ac5ddbfc97b17c95bc22798bec5fdb",
+          "comparison_harness": "d878c49d30863b2b47bc3e453003611752b7fda34b9250754a4b580887599724",
+          "benchmark_harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+          "validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+          "baseline_record": "31291e997f06e14b7cec5f1db2cf9301e2cf46d148bdf84e5cb7d91dc19b2beb",
+          "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+        },
+        "tools": {
+          "cpython": {
+            "implementation": "cpython",
+            "version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+            "version_number": "3.14.5",
+            "gil_enabled": true,
+            "free_threaded_build": false,
+            "jit_available": true,
+            "jit_enabled": false,
+            "debug_build": false,
+            "pgo": {
+              "configure_enable_optimizations": true,
+              "profile_use_flag_present": true
+            },
+            "lto": {
+              "configure_option": "--with-lto",
+              "lto_flag_present": true
+            },
+            "executable_name": "python3.14"
+          }
+        },
+        "native_build_records": {
+          "baseline": {
+            "record_name": "2026-10-17-route-planner.json",
+            "git": {
+              "revision": "312557ad1cfc94fcff05741f328c2596273a3f2c",
+              "dirty": false
+            },
+            "sha256": {
+              "source": "220266102bfd11d0854e7cdb9809628e64ac5ddbfc97b17c95bc22798bec5fdb",
+              "compiler": "54f0aa7233fc73279fc04692559e66ed11aa9e36b514ac0c125f5747eba60d76",
+              "runtime": "3de5151550dda9ab7d68a5465ecd58aa1bf985656278ae46d10159184ee9b440",
+              "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+              "harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+              "validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+              "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+              "binary": "e7d0e3df3eaf65a14bda32fbafc9354dece48a0a1bb98c4476c5da4bcdc0695f",
+              "llvm_ir": "d65c178647480bdfc6fd783497171f8b126be157043d6478dac3ee73b0aaab09"
+            },
+            "tools": {
+              "relar": "relar 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
+              "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin",
+              "cpython": {
+                "implementation": "cpython",
+                "version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+                "version_number": "3.14.5",
+                "gil_enabled": true,
+                "free_threaded_build": false,
+                "jit_available": true,
+                "jit_enabled": false,
+                "debug_build": false,
+                "pgo": {
+                  "configure_enable_optimizations": true,
+                  "profile_use_flag_present": true
+                },
+                "lto": {
+                  "configure_option": "--with-lto",
+                  "lto_flag_present": true
+                },
+                "executable_name": "python3.14"
+              }
+            },
+            "compilation": {
+              "elapsed_ns": 514885909,
+              "stdout": "",
+              "stderr": "",
+              "returncode": 0
+            },
+            "compile_command": [
+              "relar",
+              "build",
+              "examples/route_planner.py",
+              "-o",
+              "<artifact-dir>/route_planner",
+              "--runtime",
+              "<runtime.a>",
+              "--clang",
+              "clang",
+              "--opt-level",
+              "3",
+              "--emit-llvm",
+              "<artifact-dir>/route_planner.ll"
+            ]
+          },
+          "optimized": null
+        },
+        "host": {
+          "os": "Linux",
+          "kernel_release": "6.8.0-146-generic",
+          "architecture": "x86_64",
+          "cpu": {
+            "model": "AMD EPYC-Milan Processor",
+            "allowed_cpus_before_pinning": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31
+            ],
+            "affinity": [
+              0
+            ]
+          }
+        },
+        "clock": {
+          "implementation": "clock_gettime(CLOCK_MONOTONIC)",
+          "monotonic": true,
+          "adjustable": false,
+          "resolution": 1e-09
+        },
+        "artifacts": {
+          "baseline": {
+            "executable_bytes": 2388656
+          },
+          "optimized": {
+            "executable_bytes": 2380408
+          }
+        },
+        "options": {
+          "sizes": [
+            256
+          ],
+          "routes": 3,
+          "seed": 42,
+          "samples": 6,
+          "warmups": 2,
+          "timeout_seconds": 120.0
+        },
+        "method": {
+          "timer": "time.perf_counter_ns around subprocess.run; shared with benchmark.py",
+          "includes": "fresh process startup, stdin/stdout pipes, complete route-planner execution, and process exit",
+          "excludes": "all native compilation, correctness validation, and warmups",
+          "ordering": "all six orders in a repeating cycle; adjacent orders reverse each other",
+          "order_cycle": [
+            [
+              "baseline",
+              "optimized",
+              "cpython"
+            ],
+            [
+              "cpython",
+              "optimized",
+              "baseline"
+            ],
+            [
+              "optimized",
+              "cpython",
+              "baseline"
+            ],
+            [
+              "baseline",
+              "cpython",
+              "optimized"
+            ],
+            [
+              "cpython",
+              "baseline",
+              "optimized"
+            ],
+            [
+              "optimized",
+              "baseline",
+              "cpython"
+            ]
+          ],
+          "fully_counterbalanced_samples": true,
+          "cpu": "harness and all child processes inherit the same single-CPU affinity",
+          "commands": {
+            "baseline": [
+              "<baseline-executable>"
+            ],
+            "optimized": [
+              "<optimized-executable>"
+            ],
+            "cpython": [
+              "python3.14",
+              "-I",
+              "examples/route_planner.py"
+            ]
+          },
+          "native_provenance": "optional build records verify source and executable hashes; toolchains are not inferred from prebuilt binaries",
+          "spread": "minimum, maximum and quartiles describe observed samples, not confidence intervals"
+        },
+        "validation": {
+          "baseline": {
+            "input_cases": 22,
+            "routes": 64,
+            "oracle": "Bellman-Ford repeated relaxation"
+          },
+          "optimized": {
+            "input_cases": 22,
+            "routes": 64,
+            "oracle": "Bellman-Ford repeated relaxation"
+          }
+        },
+        "workloads": [
+          {
+            "width": 256,
+            "routes": 3,
+            "seed": 42,
+            "input": "256\n3\n42\n",
+            "input_sha256": "728095cd150ff40eca8304f51aeb863d19d10413c815dc55d248296b04bd85c2",
+            "expected_stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "warmups": [
+              {
+                "index": 0,
+                "order": [
+                  "baseline",
+                  "optimized",
+                  "cpython"
+                ],
+                "baseline": {
+                  "elapsed_ns": 196016004,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 96805659,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 423507306,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 1,
+                "order": [
+                  "cpython",
+                  "optimized",
+                  "baseline"
+                ],
+                "cpython": {
+                  "elapsed_ns": 421189823,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 99424595,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 196883650,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              }
+            ],
+            "samples": [
+              {
+                "index": 0,
+                "order": [
+                  "baseline",
+                  "optimized",
+                  "cpython"
+                ],
+                "baseline": {
+                  "elapsed_ns": 191463513,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 98172203,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 419352276,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 1,
+                "order": [
+                  "cpython",
+                  "optimized",
+                  "baseline"
+                ],
+                "cpython": {
+                  "elapsed_ns": 415831510,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 97396349,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 190666813,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 2,
+                "order": [
+                  "optimized",
+                  "cpython",
+                  "baseline"
+                ],
+                "optimized": {
+                  "elapsed_ns": 97269904,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 415639212,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 192101215,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 3,
+                "order": [
+                  "baseline",
+                  "cpython",
+                  "optimized"
+                ],
+                "baseline": {
+                  "elapsed_ns": 191301637,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 419291442,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 98553172,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 4,
+                "order": [
+                  "cpython",
+                  "baseline",
+                  "optimized"
+                ],
+                "cpython": {
+                  "elapsed_ns": 419088044,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 190549035,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 97659950,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 5,
+                "order": [
+                  "optimized",
+                  "baseline",
+                  "cpython"
+                ],
+                "optimized": {
+                  "elapsed_ns": 98409354,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 191140137,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 415591933,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              }
+            ],
+            "summary": {
+              "baseline": {
+                "median_seconds": 0.191220887,
+                "min_seconds": 0.190549035,
+                "max_seconds": 0.192101215,
+                "p25_seconds": 0.190785144,
+                "p75_seconds": 0.19142304400000001
+              },
+              "optimized": {
+                "median_seconds": 0.0979160765,
+                "min_seconds": 0.097269904,
+                "max_seconds": 0.098553172,
+                "p25_seconds": 0.09746224925,
+                "p75_seconds": 0.09835006625
+              },
+              "cpython": {
+                "median_seconds": 0.41745977700000003,
+                "min_seconds": 0.415591933,
+                "max_seconds": 0.419352276,
+                "p25_seconds": 0.41568728650000003,
+                "p75_seconds": 0.4192405925
+              },
+              "speedup_ratio_of_medians": {
+                "optimized_vs_baseline": 1.9529059357275207,
+                "baseline_vs_cpython": 2.1831285459940366,
+                "optimized_vs_cpython": 4.263444695927946
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "change": "ownership and index inlining",
+      "record": {
+        "schema_version": 1,
+        "comparison": "prebuilt baseline vs optimized Relar vs unchanged CPython",
+        "started_at_utc": "2026-10-17T15:50:41.227662+00:00",
+        "completed_at_utc": "2026-10-17T15:50:48.325818+00:00",
+        "git": {
+          "revision": "8d5ee8e3809be3f135f6e3b0b8d6e18ce79d4bdd",
+          "dirty": true
+        },
+        "sha256": {
+          "baseline": "e7d0e3df3eaf65a14bda32fbafc9354dece48a0a1bb98c4476c5da4bcdc0695f",
+          "optimized": "fc50e739dbb3c168d536baf0e794226f57bb6bc24d2c4d002f14725789013f8c",
+          "source": "220266102bfd11d0854e7cdb9809628e64ac5ddbfc97b17c95bc22798bec5fdb",
+          "comparison_harness": "d878c49d30863b2b47bc3e453003611752b7fda34b9250754a4b580887599724",
+          "benchmark_harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+          "validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+          "baseline_record": "31291e997f06e14b7cec5f1db2cf9301e2cf46d148bdf84e5cb7d91dc19b2beb",
+          "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+        },
+        "tools": {
+          "cpython": {
+            "implementation": "cpython",
+            "version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+            "version_number": "3.14.5",
+            "gil_enabled": true,
+            "free_threaded_build": false,
+            "jit_available": true,
+            "jit_enabled": false,
+            "debug_build": false,
+            "pgo": {
+              "configure_enable_optimizations": true,
+              "profile_use_flag_present": true
+            },
+            "lto": {
+              "configure_option": "--with-lto",
+              "lto_flag_present": true
+            },
+            "executable_name": "python3.14"
+          }
+        },
+        "native_build_records": {
+          "baseline": {
+            "record_name": "2026-10-17-route-planner.json",
+            "git": {
+              "revision": "312557ad1cfc94fcff05741f328c2596273a3f2c",
+              "dirty": false
+            },
+            "sha256": {
+              "source": "220266102bfd11d0854e7cdb9809628e64ac5ddbfc97b17c95bc22798bec5fdb",
+              "compiler": "54f0aa7233fc73279fc04692559e66ed11aa9e36b514ac0c125f5747eba60d76",
+              "runtime": "3de5151550dda9ab7d68a5465ecd58aa1bf985656278ae46d10159184ee9b440",
+              "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+              "harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+              "validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+              "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+              "binary": "e7d0e3df3eaf65a14bda32fbafc9354dece48a0a1bb98c4476c5da4bcdc0695f",
+              "llvm_ir": "d65c178647480bdfc6fd783497171f8b126be157043d6478dac3ee73b0aaab09"
+            },
+            "tools": {
+              "relar": "relar 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
+              "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin",
+              "cpython": {
+                "implementation": "cpython",
+                "version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+                "version_number": "3.14.5",
+                "gil_enabled": true,
+                "free_threaded_build": false,
+                "jit_available": true,
+                "jit_enabled": false,
+                "debug_build": false,
+                "pgo": {
+                  "configure_enable_optimizations": true,
+                  "profile_use_flag_present": true
+                },
+                "lto": {
+                  "configure_option": "--with-lto",
+                  "lto_flag_present": true
+                },
+                "executable_name": "python3.14"
+              }
+            },
+            "compilation": {
+              "elapsed_ns": 514885909,
+              "stdout": "",
+              "stderr": "",
+              "returncode": 0
+            },
+            "compile_command": [
+              "relar",
+              "build",
+              "examples/route_planner.py",
+              "-o",
+              "<artifact-dir>/route_planner",
+              "--runtime",
+              "<runtime.a>",
+              "--clang",
+              "clang",
+              "--opt-level",
+              "3",
+              "--emit-llvm",
+              "<artifact-dir>/route_planner.ll"
+            ]
+          },
+          "optimized": null
+        },
+        "host": {
+          "os": "Linux",
+          "kernel_release": "6.8.0-146-generic",
+          "architecture": "x86_64",
+          "cpu": {
+            "model": "AMD EPYC-Milan Processor",
+            "allowed_cpus_before_pinning": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31
+            ],
+            "affinity": [
+              0
+            ]
+          }
+        },
+        "clock": {
+          "implementation": "clock_gettime(CLOCK_MONOTONIC)",
+          "monotonic": true,
+          "adjustable": false,
+          "resolution": 1e-09
+        },
+        "artifacts": {
+          "baseline": {
+            "executable_bytes": 2388656
+          },
+          "optimized": {
+            "executable_bytes": 2381360
+          }
+        },
+        "options": {
+          "sizes": [
+            256
+          ],
+          "routes": 3,
+          "seed": 42,
+          "samples": 6,
+          "warmups": 2,
+          "timeout_seconds": 120.0
+        },
+        "method": {
+          "timer": "time.perf_counter_ns around subprocess.run; shared with benchmark.py",
+          "includes": "fresh process startup, stdin/stdout pipes, complete route-planner execution, and process exit",
+          "excludes": "all native compilation, correctness validation, and warmups",
+          "ordering": "all six orders in a repeating cycle; adjacent orders reverse each other",
+          "order_cycle": [
+            [
+              "baseline",
+              "optimized",
+              "cpython"
+            ],
+            [
+              "cpython",
+              "optimized",
+              "baseline"
+            ],
+            [
+              "optimized",
+              "cpython",
+              "baseline"
+            ],
+            [
+              "baseline",
+              "cpython",
+              "optimized"
+            ],
+            [
+              "cpython",
+              "baseline",
+              "optimized"
+            ],
+            [
+              "optimized",
+              "baseline",
+              "cpython"
+            ]
+          ],
+          "fully_counterbalanced_samples": true,
+          "cpu": "harness and all child processes inherit the same single-CPU affinity",
+          "commands": {
+            "baseline": [
+              "<baseline-executable>"
+            ],
+            "optimized": [
+              "<optimized-executable>"
+            ],
+            "cpython": [
+              "python3.14",
+              "-I",
+              "examples/route_planner.py"
+            ]
+          },
+          "native_provenance": "optional build records verify source and executable hashes; toolchains are not inferred from prebuilt binaries",
+          "spread": "minimum, maximum and quartiles describe observed samples, not confidence intervals"
+        },
+        "validation": {
+          "baseline": {
+            "input_cases": 22,
+            "routes": 64,
+            "oracle": "Bellman-Ford repeated relaxation"
+          },
+          "optimized": {
+            "input_cases": 22,
+            "routes": 64,
+            "oracle": "Bellman-Ford repeated relaxation"
+          }
+        },
+        "workloads": [
+          {
+            "width": 256,
+            "routes": 3,
+            "seed": 42,
+            "input": "256\n3\n42\n",
+            "input_sha256": "728095cd150ff40eca8304f51aeb863d19d10413c815dc55d248296b04bd85c2",
+            "expected_stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "warmups": [
+              {
+                "index": 0,
+                "order": [
+                  "baseline",
+                  "optimized",
+                  "cpython"
+                ],
+                "baseline": {
+                  "elapsed_ns": 191450955,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 79410752,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 413360720,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 1,
+                "order": [
+                  "cpython",
+                  "optimized",
+                  "baseline"
+                ],
+                "cpython": {
+                  "elapsed_ns": 414905486,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 79469642,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 190298750,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              }
+            ],
+            "samples": [
+              {
+                "index": 0,
+                "order": [
+                  "baseline",
+                  "optimized",
+                  "cpython"
+                ],
+                "baseline": {
+                  "elapsed_ns": 189434330,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 79709027,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 418893060,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 1,
+                "order": [
+                  "cpython",
+                  "optimized",
+                  "baseline"
+                ],
+                "cpython": {
+                  "elapsed_ns": 419863236,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 81455098,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 191418724,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 2,
+                "order": [
+                  "optimized",
+                  "cpython",
+                  "baseline"
+                ],
+                "optimized": {
+                  "elapsed_ns": 79827959,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 427069624,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 190639244,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 3,
+                "order": [
+                  "baseline",
+                  "cpython",
+                  "optimized"
+                ],
+                "baseline": {
+                  "elapsed_ns": 193232562,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 423136400,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 81543903,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 4,
+                "order": [
+                  "cpython",
+                  "baseline",
+                  "optimized"
+                ],
+                "cpython": {
+                  "elapsed_ns": 449778769,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 199225570,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 79862072,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 5,
+                "order": [
+                  "optimized",
+                  "baseline",
+                  "cpython"
+                ],
+                "optimized": {
+                  "elapsed_ns": 78880053,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 190838064,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 422745353,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              }
+            ],
+            "summary": {
+              "baseline": {
+                "median_seconds": 0.191128394,
+                "min_seconds": 0.18943433,
+                "max_seconds": 0.19922557,
+                "p25_seconds": 0.19068894900000002,
+                "p75_seconds": 0.19277910250000002
+              },
+              "optimized": {
+                "median_seconds": 0.0798450155,
+                "min_seconds": 0.078880053,
+                "max_seconds": 0.081543903,
+                "p25_seconds": 0.07973876,
+                "p75_seconds": 0.0810568415
+              },
+              "cpython": {
+                "median_seconds": 0.4229408765,
+                "min_seconds": 0.41889306,
+                "max_seconds": 0.449778769,
+                "p25_seconds": 0.42058376525,
+                "p75_seconds": 0.42608631799999996
+              },
+              "speedup_ratio_of_medians": {
+                "optimized_vs_baseline": 2.393742336990341,
+                "baseline_vs_cpython": 2.2128626084725016,
+                "optimized_vs_cpython": 5.2970229118435075
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "change": "simpler negative-index normalization added",
+      "record": {
+        "schema_version": 1,
+        "comparison": "prebuilt baseline vs optimized Relar vs unchanged CPython",
+        "started_at_utc": "2026-10-17T15:55:05.527392+00:00",
+        "completed_at_utc": "2026-10-17T15:55:11.644997+00:00",
+        "git": {
+          "revision": "8d5ee8e3809be3f135f6e3b0b8d6e18ce79d4bdd",
+          "dirty": true
+        },
+        "sha256": {
+          "baseline": "fc50e739dbb3c168d536baf0e794226f57bb6bc24d2c4d002f14725789013f8c",
+          "optimized": "ecc15819521d1d8bf9da895d70d69bd601a8bc6a54d283685b0f262a39090506",
+          "source": "220266102bfd11d0854e7cdb9809628e64ac5ddbfc97b17c95bc22798bec5fdb",
+          "comparison_harness": "d878c49d30863b2b47bc3e453003611752b7fda34b9250754a4b580887599724",
+          "benchmark_harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+          "validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+          "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+        },
+        "tools": {
+          "cpython": {
+            "implementation": "cpython",
+            "version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+            "version_number": "3.14.5",
+            "gil_enabled": true,
+            "free_threaded_build": false,
+            "jit_available": true,
+            "jit_enabled": false,
+            "debug_build": false,
+            "pgo": {
+              "configure_enable_optimizations": true,
+              "profile_use_flag_present": true
+            },
+            "lto": {
+              "configure_option": "--with-lto",
+              "lto_flag_present": true
+            },
+            "executable_name": "python3.14"
+          }
+        },
+        "native_build_records": {
+          "baseline": null,
+          "optimized": null
+        },
+        "host": {
+          "os": "Linux",
+          "kernel_release": "6.8.0-146-generic",
+          "architecture": "x86_64",
+          "cpu": {
+            "model": "AMD EPYC-Milan Processor",
+            "allowed_cpus_before_pinning": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31
+            ],
+            "affinity": [
+              0
+            ]
+          }
+        },
+        "clock": {
+          "implementation": "clock_gettime(CLOCK_MONOTONIC)",
+          "monotonic": true,
+          "adjustable": false,
+          "resolution": 1e-09
+        },
+        "artifacts": {
+          "baseline": {
+            "executable_bytes": 2381360
+          },
+          "optimized": {
+            "executable_bytes": 2381160
+          }
+        },
+        "options": {
+          "sizes": [
+            256
+          ],
+          "routes": 3,
+          "seed": 42,
+          "samples": 6,
+          "warmups": 2,
+          "timeout_seconds": 120.0
+        },
+        "method": {
+          "timer": "time.perf_counter_ns around subprocess.run; shared with benchmark.py",
+          "includes": "fresh process startup, stdin/stdout pipes, complete route-planner execution, and process exit",
+          "excludes": "all native compilation, correctness validation, and warmups",
+          "ordering": "all six orders in a repeating cycle; adjacent orders reverse each other",
+          "order_cycle": [
+            [
+              "baseline",
+              "optimized",
+              "cpython"
+            ],
+            [
+              "cpython",
+              "optimized",
+              "baseline"
+            ],
+            [
+              "optimized",
+              "cpython",
+              "baseline"
+            ],
+            [
+              "baseline",
+              "cpython",
+              "optimized"
+            ],
+            [
+              "cpython",
+              "baseline",
+              "optimized"
+            ],
+            [
+              "optimized",
+              "baseline",
+              "cpython"
+            ]
+          ],
+          "fully_counterbalanced_samples": true,
+          "cpu": "harness and all child processes inherit the same single-CPU affinity",
+          "commands": {
+            "baseline": [
+              "<baseline-executable>"
+            ],
+            "optimized": [
+              "<optimized-executable>"
+            ],
+            "cpython": [
+              "python3.14",
+              "-I",
+              "examples/route_planner.py"
+            ]
+          },
+          "native_provenance": "optional build records verify source and executable hashes; toolchains are not inferred from prebuilt binaries",
+          "spread": "minimum, maximum and quartiles describe observed samples, not confidence intervals"
+        },
+        "validation": {
+          "baseline": {
+            "input_cases": 22,
+            "routes": 64,
+            "oracle": "Bellman-Ford repeated relaxation"
+          },
+          "optimized": {
+            "input_cases": 22,
+            "routes": 64,
+            "oracle": "Bellman-Ford repeated relaxation"
+          }
+        },
+        "workloads": [
+          {
+            "width": 256,
+            "routes": 3,
+            "seed": 42,
+            "input": "256\n3\n42\n",
+            "input_sha256": "728095cd150ff40eca8304f51aeb863d19d10413c815dc55d248296b04bd85c2",
+            "expected_stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "warmups": [
+              {
+                "index": 0,
+                "order": [
+                  "baseline",
+                  "optimized",
+                  "cpython"
+                ],
+                "baseline": {
+                  "elapsed_ns": 80483009,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 76646667,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 415418068,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 1,
+                "order": [
+                  "cpython",
+                  "optimized",
+                  "baseline"
+                ],
+                "cpython": {
+                  "elapsed_ns": 412732869,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 77368862,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 79239805,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              }
+            ],
+            "samples": [
+              {
+                "index": 0,
+                "order": [
+                  "baseline",
+                  "optimized",
+                  "cpython"
+                ],
+                "baseline": {
+                  "elapsed_ns": 79692517,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 78287332,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 417737737,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 1,
+                "order": [
+                  "cpython",
+                  "optimized",
+                  "baseline"
+                ],
+                "cpython": {
+                  "elapsed_ns": 411802829,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 77093349,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 79318672,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 2,
+                "order": [
+                  "optimized",
+                  "cpython",
+                  "baseline"
+                ],
+                "optimized": {
+                  "elapsed_ns": 77046412,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 413830853,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 79065630,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 3,
+                "order": [
+                  "baseline",
+                  "cpython",
+                  "optimized"
+                ],
+                "baseline": {
+                  "elapsed_ns": 78771303,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 411316284,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 77401914,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 4,
+                "order": [
+                  "cpython",
+                  "baseline",
+                  "optimized"
+                ],
+                "cpython": {
+                  "elapsed_ns": 413189410,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 79965987,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 77251504,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 5,
+                "order": [
+                  "optimized",
+                  "baseline",
+                  "cpython"
+                ],
+                "optimized": {
+                  "elapsed_ns": 76708423,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 79499758,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 416409495,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              }
+            ],
+            "summary": {
+              "baseline": {
+                "median_seconds": 0.079409215,
+                "min_seconds": 0.078771303,
+                "max_seconds": 0.079965987,
+                "p25_seconds": 0.0791288905,
+                "p75_seconds": 0.07964432725000001
+              },
+              "optimized": {
+                "median_seconds": 0.0771724265,
+                "min_seconds": 0.076708423,
+                "max_seconds": 0.078287332,
+                "p25_seconds": 0.07705814624999999,
+                "p75_seconds": 0.0773643115
+              },
+              "cpython": {
+                "median_seconds": 0.4135101315,
+                "min_seconds": 0.411316284,
+                "max_seconds": 0.417737737,
+                "p25_seconds": 0.41214947425,
+                "p75_seconds": 0.4157648345
+              },
+              "speedup_ratio_of_medians": {
+                "optimized_vs_baseline": 1.0289842966127287,
+                "baseline_vs_cpython": 5.207331812812908,
+                "optimized_vs_cpython": 5.358262662636376
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "change": "inline small-integer floor division and modulo added",
+      "record": {
+        "schema_version": 1,
+        "comparison": "prebuilt baseline vs optimized Relar vs unchanged CPython",
+        "started_at_utc": "2026-10-17T15:55:11.754152+00:00",
+        "completed_at_utc": "2026-10-17T15:55:17.828744+00:00",
+        "git": {
+          "revision": "8d5ee8e3809be3f135f6e3b0b8d6e18ce79d4bdd",
+          "dirty": true
+        },
+        "sha256": {
+          "baseline": "ecc15819521d1d8bf9da895d70d69bd601a8bc6a54d283685b0f262a39090506",
+          "optimized": "970b7a45f9511f093c118c23d5534030ac6cd7de6a78b13813c580a9a276c388",
+          "source": "220266102bfd11d0854e7cdb9809628e64ac5ddbfc97b17c95bc22798bec5fdb",
+          "comparison_harness": "d878c49d30863b2b47bc3e453003611752b7fda34b9250754a4b580887599724",
+          "benchmark_harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+          "validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+          "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+        },
+        "tools": {
+          "cpython": {
+            "implementation": "cpython",
+            "version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+            "version_number": "3.14.5",
+            "gil_enabled": true,
+            "free_threaded_build": false,
+            "jit_available": true,
+            "jit_enabled": false,
+            "debug_build": false,
+            "pgo": {
+              "configure_enable_optimizations": true,
+              "profile_use_flag_present": true
+            },
+            "lto": {
+              "configure_option": "--with-lto",
+              "lto_flag_present": true
+            },
+            "executable_name": "python3.14"
+          }
+        },
+        "native_build_records": {
+          "baseline": null,
+          "optimized": null
+        },
+        "host": {
+          "os": "Linux",
+          "kernel_release": "6.8.0-146-generic",
+          "architecture": "x86_64",
+          "cpu": {
+            "model": "AMD EPYC-Milan Processor",
+            "allowed_cpus_before_pinning": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31
+            ],
+            "affinity": [
+              0
+            ]
+          }
+        },
+        "clock": {
+          "implementation": "clock_gettime(CLOCK_MONOTONIC)",
+          "monotonic": true,
+          "adjustable": false,
+          "resolution": 1e-09
+        },
+        "artifacts": {
+          "baseline": {
+            "executable_bytes": 2381160
+          },
+          "optimized": {
+            "executable_bytes": 2381192
+          }
+        },
+        "options": {
+          "sizes": [
+            256
+          ],
+          "routes": 3,
+          "seed": 42,
+          "samples": 6,
+          "warmups": 2,
+          "timeout_seconds": 120.0
+        },
+        "method": {
+          "timer": "time.perf_counter_ns around subprocess.run; shared with benchmark.py",
+          "includes": "fresh process startup, stdin/stdout pipes, complete route-planner execution, and process exit",
+          "excludes": "all native compilation, correctness validation, and warmups",
+          "ordering": "all six orders in a repeating cycle; adjacent orders reverse each other",
+          "order_cycle": [
+            [
+              "baseline",
+              "optimized",
+              "cpython"
+            ],
+            [
+              "cpython",
+              "optimized",
+              "baseline"
+            ],
+            [
+              "optimized",
+              "cpython",
+              "baseline"
+            ],
+            [
+              "baseline",
+              "cpython",
+              "optimized"
+            ],
+            [
+              "cpython",
+              "baseline",
+              "optimized"
+            ],
+            [
+              "optimized",
+              "baseline",
+              "cpython"
+            ]
+          ],
+          "fully_counterbalanced_samples": true,
+          "cpu": "harness and all child processes inherit the same single-CPU affinity",
+          "commands": {
+            "baseline": [
+              "<baseline-executable>"
+            ],
+            "optimized": [
+              "<optimized-executable>"
+            ],
+            "cpython": [
+              "python3.14",
+              "-I",
+              "examples/route_planner.py"
+            ]
+          },
+          "native_provenance": "optional build records verify source and executable hashes; toolchains are not inferred from prebuilt binaries",
+          "spread": "minimum, maximum and quartiles describe observed samples, not confidence intervals"
+        },
+        "validation": {
+          "baseline": {
+            "input_cases": 22,
+            "routes": 64,
+            "oracle": "Bellman-Ford repeated relaxation"
+          },
+          "optimized": {
+            "input_cases": 22,
+            "routes": 64,
+            "oracle": "Bellman-Ford repeated relaxation"
+          }
+        },
+        "workloads": [
+          {
+            "width": 256,
+            "routes": 3,
+            "seed": 42,
+            "input": "256\n3\n42\n",
+            "input_sha256": "728095cd150ff40eca8304f51aeb863d19d10413c815dc55d248296b04bd85c2",
+            "expected_stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+            "warmups": [
+              {
+                "index": 0,
+                "order": [
+                  "baseline",
+                  "optimized",
+                  "cpython"
+                ],
+                "baseline": {
+                  "elapsed_ns": 77651588,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 73150670,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 414602301,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 1,
+                "order": [
+                  "cpython",
+                  "optimized",
+                  "baseline"
+                ],
+                "cpython": {
+                  "elapsed_ns": 422423180,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 73477478,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 77311294,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              }
+            ],
+            "samples": [
+              {
+                "index": 0,
+                "order": [
+                  "baseline",
+                  "optimized",
+                  "cpython"
+                ],
+                "baseline": {
+                  "elapsed_ns": 77203243,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 72725729,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 412997876,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 1,
+                "order": [
+                  "cpython",
+                  "optimized",
+                  "baseline"
+                ],
+                "cpython": {
+                  "elapsed_ns": 418469430,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 73672992,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 77309922,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 2,
+                "order": [
+                  "optimized",
+                  "cpython",
+                  "baseline"
+                ],
+                "optimized": {
+                  "elapsed_ns": 72936320,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 415682503,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 77348205,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 3,
+                "order": [
+                  "baseline",
+                  "cpython",
+                  "optimized"
+                ],
+                "baseline": {
+                  "elapsed_ns": 77156697,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 416242646,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 73452691,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 4,
+                "order": [
+                  "cpython",
+                  "baseline",
+                  "optimized"
+                ],
+                "cpython": {
+                  "elapsed_ns": 413718487,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 77276881,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "optimized": {
+                  "elapsed_ns": 73675467,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              },
+              {
+                "index": 5,
+                "order": [
+                  "optimized",
+                  "baseline",
+                  "cpython"
+                ],
+                "optimized": {
+                  "elapsed_ns": 73684094,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "baseline": {
+                  "elapsed_ns": 78289164,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                },
+                "cpython": {
+                  "elapsed_ns": 415078138,
+                  "stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+                  "stderr": "",
+                  "returncode": 0
+                }
+              }
+            ],
+            "summary": {
+              "baseline": {
+                "median_seconds": 0.0772934015,
+                "min_seconds": 0.077156697,
+                "max_seconds": 0.078289164,
+                "p25_seconds": 0.0772216525,
+                "p75_seconds": 0.07733863425000001
+              },
+              "optimized": {
+                "median_seconds": 0.0735628415,
+                "min_seconds": 0.072725729,
+                "max_seconds": 0.073684094,
+                "p25_seconds": 0.07306541275,
+                "p75_seconds": 0.07367484825
+              },
+              "cpython": {
+                "median_seconds": 0.41538032049999996,
+                "min_seconds": 0.412997876,
+                "max_seconds": 0.41846943,
+                "p25_seconds": 0.41405839975,
+                "p75_seconds": 0.41610261025
+              },
+              "speedup_ratio_of_medians": {
+                "optimized_vs_baseline": 1.0507125598186686,
+                "baseline_vs_cpython": 5.3740722033044435,
+                "optimized_vs_cpython": 5.646605161384365
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

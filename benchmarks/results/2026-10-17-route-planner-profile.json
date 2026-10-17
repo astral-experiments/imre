@@ -1,0 +1,5856 @@
+{
+  "schema_version": 1,
+  "profiler": "Callgrind 3.22.0",
+  "events": [
+    "Ir"
+  ],
+  "event_description": "Executed machine instructions, not CPU cycles or wall-clock shares",
+  "method": {
+    "command": [
+      "valgrind",
+      "--tool=callgrind",
+      "--dump-instr=yes",
+      "--collect-jumps=yes",
+      "--callgrind-out-file=<trace>",
+      "<binary>"
+    ],
+    "input": "256\n3\n42\n",
+    "input_sha256": "728095cd150ff40eca8304f51aeb863d19d10413c815dc55d248296b04bd85c2",
+    "expected_stdout": "1431\n518\n65535\n1432\n514\n65531\n1471\n514\n65534\n",
+    "source_sha256": "220266102bfd11d0854e7cdb9809628e64ac5ddbfc97b17c95bc22798bec5fdb",
+    "aggregation": "Sum exclusive instruction records across source locations by function name; exclude inclusive call-cost records. Function sums were checked against the Callgrind summary total. Call counts sum incoming calls= records.",
+    "symbol_aliases": {
+      "relar_str_retain": "Shared machine-code address with relar_list_retain; this workload calls that entry for list retains."
+    },
+    "limitations": "Hardware perf counters are disabled on this devbox (perf_event_paranoid=4). Instruction profiles are separate from uninstrumented timing runs. Generated Python functions may be inlined into callers."
+  },
+  "host": {
+    "os": "Linux",
+    "kernel_release": "6.8.0-146-generic",
+    "architecture": "x86_64",
+    "cpu": {
+      "model": "AMD EPYC-Milan Processor",
+      "allowed_cpus_before_pinning": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ],
+      "affinity": [
+        0
+      ]
+    }
+  },
+  "profiles": {
+    "before": {
+      "binary_sha256": "e7d0e3df3eaf65a14bda32fbafc9354dece48a0a1bb98c4476c5da4bcdc0695f",
+      "llvm_ir_sha256": "d65c178647480bdfc6fd783497171f8b126be157043d6478dac3ee73b0aaab09",
+      "trace": "profiles/2026-10-17-route-planner-before.callgrind.gz",
+      "trace_sha256": "5be54ce79ca24d2ed143c60020c27753e6ccf9e494e59f27176d7b9dbccdf877",
+      "uncompressed_trace_sha256": "8b37b685a7100ae6bdb10bc12120d66f316c52a46766e379cb2d07800fda554e",
+      "stdout_sha256": "456b386057dde7f2648d9bed6575e1d5fe38d84a42732e6fcdf60366a100d62a",
+      "total_instructions": 1574194732,
+      "functions": [
+        {
+          "name": "fn_4",
+          "self_instructions": 408947913,
+          "fraction": 0.2597822903907418,
+          "calls": 3
+        },
+        {
+          "name": "relar_list_release",
+          "self_instructions": 240813924,
+          "fraction": 0.1529759432583338,
+          "calls": 28847354
+        },
+        {
+          "name": "relar_runtime::index",
+          "self_instructions": 223783461,
+          "fraction": 0.14215741956885167,
+          "calls": 13163733
+        },
+        {
+          "name": "relar_list_get",
+          "self_instructions": 203710188,
+          "fraction": 0.1294059647507447,
+          "calls": 9259554
+        },
+        {
+          "name": "relar_str_retain",
+          "self_instructions": 120721240,
+          "fraction": 0.0766876152905332,
+          "calls": 24144248
+        },
+        {
+          "name": "fn_3",
+          "self_instructions": 119892194,
+          "fraction": 0.07616096761274131,
+          "calls": 783326
+        },
+        {
+          "name": "relar_list_set",
+          "self_instructions": 105412833,
+          "fraction": 0.06696301979493602,
+          "calls": 3904179
+        },
+        {
+          "name": "relar_int_binary",
+          "self_instructions": 57653084,
+          "fraction": 0.03662385779093053,
+          "calls": 1019612
+        },
+        {
+          "name": "fn_0",
+          "self_instructions": 34731636,
+          "fraction": 0.02206311283730049,
+          "calls": 196608
+        },
+        {
+          "name": "relar_list_append",
+          "self_instructions": 18335095,
+          "fraction": 0.011647285197496138,
+          "calls": 591385
+        },
+        {
+          "name": "main",
+          "self_instructions": 16822260,
+          "fraction": 0.010686263686467476,
+          "calls": 1
+        },
+        {
+          "name": "relar_list_repeat",
+          "self_instructions": 8651226,
+          "fraction": 0.005495651728556286,
+          "calls": 6
+        },
+        {
+          "name": "relar_list_pop",
+          "self_instructions": 5898000,
+          "fraction": 0.003746677510797311,
+          "calls": 393200
+        },
+        {
+          "name": "relar_list_len",
+          "self_instructions": 4718512,
+          "fraction": 0.0029974131561253375,
+          "calls": 589814
+        },
+        {
+          "name": "<alloc::rc::Rc<relar_runtime::List>>::drop_slow",
+          "self_instructions": 3549432,
+          "fraction": 0.0022547604358264363,
+          "calls": 27
+        },
+        {
+          "name": "0x000000000000a530",
+          "self_instructions": 101257,
+          "fraction": 6.43230458987459e-05,
+          "calls": 300
+        },
+        {
+          "name": "0x0000000000188d80",
+          "self_instructions": 89658,
+          "fraction": 5.6954834225680794e-05,
+          "calls": 105
+        },
+        {
+          "name": "0x000000000000f240",
+          "self_instructions": 77268,
+          "fraction": 4.9084143422225606e-05,
+          "calls": 7
+        },
+        {
+          "name": "0x000000000000b0d0",
+          "self_instructions": 52904,
+          "fraction": 3.360702391170243e-05,
+          "calls": 300
+        },
+        {
+          "name": "0x00000000000158b0",
+          "self_instructions": 49057,
+          "fraction": 3.1163234765544874e-05,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000274e0",
+          "self_instructions": 28055,
+          "fraction": 1.7821810370535532e-05,
+          "calls": 754
+        },
+        {
+          "name": "0x000000000000a390",
+          "self_instructions": 18808,
+          "fraction": 1.194769593473649e-05,
+          "calls": 298
+        },
+        {
+          "name": "0x00000000000ab650",
+          "self_instructions": 18502,
+          "fraction": 1.175331083499014e-05,
+          "calls": 88
+        },
+        {
+          "name": "0x00000000000ab250",
+          "self_instructions": 14194,
+          "fraction": 9.016673548365045e-06,
+          "calls": 159
+        },
+        {
+          "name": "0x0000000000015c90",
+          "self_instructions": 12375,
+          "fraction": 7.86116212209507e-06,
+          "calls": 6
+        },
+        {
+          "name": "realloc",
+          "self_instructions": 9192,
+          "fraction": 5.839175937478617e-06,
+          "calls": 114
+        },
+        {
+          "name": "0x00000000000ad030",
+          "self_instructions": 8363,
+          "fraction": 5.312557480976248e-06,
+          "calls": 112
+        },
+        {
+          "name": "<alloc::raw_vec::RawVecInner>::finish_grow",
+          "self_instructions": 5883,
+          "fraction": 3.737148829437196e-06,
+          "calls": 147
+        },
+        {
+          "name": "0x0000000000018b30",
+          "self_instructions": 5364,
+          "fraction": 3.4074564543772085e-06,
+          "calls": 24
+        },
+        {
+          "name": "0x0000000000007a20",
+          "self_instructions": 5246,
+          "fraction": 3.332497494344302e-06,
+          "calls": 4
+        },
+        {
+          "name": "malloc",
+          "self_instructions": 3181,
+          "fraction": 2.0207156937684377e-06,
+          "calls": 71
+        },
+        {
+          "name": "__rustc::__rdl_realloc",
+          "self_instructions": 2508,
+          "fraction": 1.5931955234112675e-06,
+          "calls": 114
+        },
+        {
+          "name": "0x00000000000a9bb0",
+          "self_instructions": 2238,
+          "fraction": 1.4216792589291933e-06,
+          "calls": 79
+        },
+        {
+          "name": "0x000000000000c380",
+          "self_instructions": 2227,
+          "fraction": 1.4146915592651088e-06,
+          "calls": 80
+        },
+        {
+          "name": "0x0000000000016630",
+          "self_instructions": 2176,
+          "fraction": 1.382294042640717e-06,
+          "calls": 25
+        },
+        {
+          "name": "free",
+          "self_instructions": 2154,
+          "fraction": 1.368318643312548e-06,
+          "calls": 69
+        },
+        {
+          "name": "0x0000000000002a40",
+          "self_instructions": 1972,
+          "fraction": 1.2527039761431497e-06,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000020af0",
+          "self_instructions": 1777,
+          "fraction": 1.1288311184616517e-06,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000092f0",
+          "self_instructions": 1654,
+          "fraction": 1.0506959313087068e-06,
+          "calls": 10
+        },
+        {
+          "name": "core::slice::memchr::memrchr",
+          "self_instructions": 1116,
+          "fraction": 7.089338931925736e-07,
+          "calls": 18
+        },
+        {
+          "name": "<std::io::stdio::StdoutLock as std::io::Write>::write_all",
+          "self_instructions": 999,
+          "fraction": 6.346101785836747e-07,
+          "calls": 18
+        },
+        {
+          "name": "0x000000000000c6c0",
+          "self_instructions": 949,
+          "fraction": 6.028479073832907e-07,
+          "calls": 5
+        },
+        {
+          "name": "0x0000000000016710",
+          "self_instructions": 921,
+          "fraction": 5.850610355110756e-07,
+          "calls": 3
+        },
+        {
+          "name": "__tunable_get_val",
+          "self_instructions": 909,
+          "fraction": 5.774380904229833e-07,
+          "calls": 39
+        },
+        {
+          "name": "0x00000000000a9e50",
+          "self_instructions": 849,
+          "fraction": 5.393233649825223e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000028b00",
+          "self_instructions": 759,
+          "fraction": 4.821512768218309e-07,
+          "calls": 25
+        },
+        {
+          "name": "0x00000000000272b0",
+          "self_instructions": 758,
+          "fraction": 4.815160313978233e-07,
+          "calls": 24
+        },
+        {
+          "name": "core::fmt::write",
+          "self_instructions": 675,
+          "fraction": 4.287906612051856e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000000c070",
+          "self_instructions": 660,
+          "fraction": 4.192619798450704e-07,
+          "calls": 22
+        },
+        {
+          "name": "__rustc::__rdl_alloc",
+          "self_instructions": 639,
+          "fraction": 4.0592182594090905e-07,
+          "calls": 71
+        },
+        {
+          "name": "0x00000000000201d0",
+          "self_instructions": 636,
+          "fraction": 4.04016089668886e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000060a0",
+          "self_instructions": 573,
+          "fraction": 3.6399562795640205e-07,
+          "calls": 3
+        },
+        {
+          "name": "<u64>::_fmt_inner",
+          "self_instructions": 564,
+          "fraction": 3.582784191403329e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000000c1c0",
+          "self_instructions": 546,
+          "fraction": 3.468440015081946e-07,
+          "calls": 12
+        },
+        {
+          "name": "0x000000000001cfe0",
+          "self_instructions": 544,
+          "fraction": 3.4557351066017924e-07,
+          "calls": 11
+        },
+        {
+          "name": "<std::io::buffered::bufwriter::BufWriter<std::io::stdio::StdoutRaw>>::flush_buf",
+          "self_instructions": 531,
+          "fraction": 3.373153201480794e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000001e1d0",
+          "self_instructions": 525,
+          "fraction": 3.3350384760403327e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000018e00",
+          "self_instructions": 516,
+          "fraction": 3.2778663878796413e-07,
+          "calls": 12
+        },
+        {
+          "name": "<core::fmt::Formatter>::pad_integral",
+          "self_instructions": 513,
+          "fraction": 3.258809025159411e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x0000000000005c80",
+          "self_instructions": 512,
+          "fraction": 3.252456570919334e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x0000000000013290",
+          "self_instructions": 498,
+          "fraction": 3.1635222115582585e-07,
+          "calls": 12
+        },
+        {
+          "name": "0x000000000001c940",
+          "self_instructions": 494,
+          "fraction": 3.1381123945979513e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000026b10",
+          "self_instructions": 491,
+          "fraction": 3.1190550318777205e-07,
+          "calls": 11
+        },
+        {
+          "name": "0x0000000000025d00",
+          "self_instructions": 463,
+          "fraction": 2.9411863131555694e-07,
+          "calls": 20
+        },
+        {
+          "name": "relar_list_new",
+          "self_instructions": 462,
+          "fraction": 2.934833858915493e-07,
+          "calls": 21
+        },
+        {
+          "name": "_dl_catch_exception",
+          "self_instructions": 420,
+          "fraction": 2.6680307808322663e-07,
+          "calls": 10
+        },
+        {
+          "name": "0x000000000001a900",
+          "self_instructions": 411,
+          "fraction": 2.610858692671575e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000028930",
+          "self_instructions": 408,
+          "fraction": 2.591801329951344e-07,
+          "calls": 1
+        },
+        {
+          "name": "sbrk",
+          "self_instructions": 395,
+          "fraction": 2.5092194248303454e-07,
+          "calls": 14
+        },
+        {
+          "name": "relar_int_parse",
+          "self_instructions": 388,
+          "fraction": 2.464752245149808e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000004330",
+          "self_instructions": 383,
+          "fraction": 2.432989973949424e-07,
+          "calls": 6
+        },
+        {
+          "name": "num_bigint::biguint::convert::from_radix_digits_be",
+          "self_instructions": 381,
+          "fraction": 2.42028506546927e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000007840",
+          "self_instructions": 364,
+          "fraction": 2.312293343387964e-07,
+          "calls": 5
+        },
+        {
+          "name": "__cpu_indicator_init",
+          "self_instructions": 364,
+          "fraction": 2.312293343387964e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000133a0",
+          "self_instructions": 348,
+          "fraction": 2.2106540755467349e-07,
+          "calls": 2
+        },
+        {
+          "name": "0x00000000000141f0",
+          "self_instructions": 343,
+          "fraction": 2.1788918043463507e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000026910",
+          "self_instructions": 339,
+          "fraction": 2.1534819873860435e-07,
+          "calls": 23
+        },
+        {
+          "name": "0x00000000000073f0",
+          "self_instructions": 323,
+          "fraction": 2.0518427195448143e-07,
+          "calls": 1
+        },
+        {
+          "name": "std::io::read_until::<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>",
+          "self_instructions": 317,
+          "fraction": 2.0137279941043532e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000015770",
+          "self_instructions": 310,
+          "fraction": 1.9692608144238154e-07,
+          "calls": 5
+        },
+        {
+          "name": "core::str::converts::from_utf8",
+          "self_instructions": 309,
+          "fraction": 1.9629083601837387e-07,
+          "calls": 6
+        },
+        {
+          "name": "<num_bigint::biguint::BigUint as num_traits::Num>::from_str_radix",
+          "self_instructions": 306,
+          "fraction": 1.9438509974635082e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000005670",
+          "self_instructions": 304,
+          "fraction": 1.9311460889833546e-07,
+          "calls": 6
+        },
+        {
+          "name": "0x0000000000026920",
+          "self_instructions": 298,
+          "fraction": 1.8930313635428937e-07,
+          "calls": 21
+        },
+        {
+          "name": "<i64 as core::fmt::Display>::fmt",
+          "self_instructions": 297,
+          "fraction": 1.8866789093028168e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000000bca0",
+          "self_instructions": 274,
+          "fraction": 1.7405724617810498e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000005380",
+          "self_instructions": 270,
+          "fraction": 1.7151626448207426e-07,
+          "calls": 1
+        },
+        {
+          "name": "relar_print_int",
+          "self_instructions": 270,
+          "fraction": 1.7151626448207426e-07,
+          "calls": 9
+        },
+        {
+          "name": "<std::io::default_write_fmt::Adapter<std::io::stdio::StdoutLock> as core::fmt::Write>::write_str",
+          "self_instructions": 270,
+          "fraction": 1.7151626448207426e-07,
+          "calls": 18
+        },
+        {
+          "name": "0x000000000001ca20",
+          "self_instructions": 266,
+          "fraction": 1.6897528278604354e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000a92d0",
+          "self_instructions": 264,
+          "fraction": 1.6770479193802815e-07,
+          "calls": 66
+        },
+        {
+          "name": "0x000000000000c610",
+          "self_instructions": 255,
+          "fraction": 1.61987583121959e-07,
+          "calls": 5
+        },
+        {
+          "name": "0x000000000001d680",
+          "self_instructions": 248,
+          "fraction": 1.5754086515390523e-07,
+          "calls": 2
+        },
+        {
+          "name": "0x00000000000043a0",
+          "self_instructions": 246,
+          "fraction": 1.5627037430588987e-07,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000026000",
+          "self_instructions": 240,
+          "fraction": 1.524589017618438e-07,
+          "calls": 10
+        },
+        {
+          "name": "<str>::replace::<char>",
+          "self_instructions": 234,
+          "fraction": 1.4864742921779768e-07,
+          "calls": 3
+        },
+        {
+          "name": "__cxa_finalize",
+          "self_instructions": 232,
+          "fraction": 1.4737693836978231e-07,
+          "calls": 4
+        },
+        {
+          "name": "<std::io::stdio::Stdout>::lock",
+          "self_instructions": 225,
+          "fraction": 1.4293022040172854e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x00000000000185a0",
+          "self_instructions": 223,
+          "fraction": 1.4165972955371318e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000018ef0",
+          "self_instructions": 222,
+          "fraction": 1.410244841297055e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025b40",
+          "self_instructions": 215,
+          "fraction": 1.3657776616165173e-07,
+          "calls": 10
+        },
+        {
+          "name": "_dl_allocate_tls_init",
+          "self_instructions": 209,
+          "fraction": 1.3276629361760562e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000006b50",
+          "self_instructions": 207,
+          "fraction": 1.3149580276959026e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x0000000000001090",
+          "self_instructions": 207,
+          "fraction": 1.3149580276959026e-07,
+          "calls": 6
+        },
+        {
+          "name": "<alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>",
+          "self_instructions": 201,
+          "fraction": 1.2768433022554417e-07,
+          "calls": 6
+        },
+        {
+          "name": "0x00000000000029f0",
+          "self_instructions": 198,
+          "fraction": 1.2577859395352112e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x00000000000aa980",
+          "self_instructions": 189,
+          "fraction": 1.2006138513745198e-07,
+          "calls": 3
+        },
+        {
+          "name": "<core::fmt::Formatter>::pad_integral::write_prefix",
+          "self_instructions": 189,
+          "fraction": 1.2006138513745198e-07,
+          "calls": 9
+        },
+        {
+          "name": "<std::io::stdio::Stdin>::read_line",
+          "self_instructions": 189,
+          "fraction": 1.2006138513745198e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000004ab0",
+          "self_instructions": 184,
+          "fraction": 1.1688515801741356e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001d400",
+          "self_instructions": 172,
+          "fraction": 1.0926221292932138e-07,
+          "calls": 4
+        },
+        {
+          "name": "<std::io::stdio::StdoutLock as std::io::Write>::write_fmt",
+          "self_instructions": 171,
+          "fraction": 1.086269675053137e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x00000000000131b0",
+          "self_instructions": 162,
+          "fraction": 1.0290975868924455e-07,
+          "calls": 6
+        },
+        {
+          "name": "0x0000000000079f90",
+          "self_instructions": 162,
+          "fraction": 1.0290975868924455e-07,
+          "calls": 3
+        },
+        {
+          "name": "_IO_flush_all",
+          "self_instructions": 161,
+          "fraction": 1.0227451326523687e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000968c0",
+          "self_instructions": 152,
+          "fraction": 9.655730444916773e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000014000",
+          "self_instructions": 147,
+          "fraction": 9.338107732912931e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000006f30",
+          "self_instructions": 143,
+          "fraction": 9.084009563309859e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000005780",
+          "self_instructions": 142,
+          "fraction": 9.020485020909091e-08,
+          "calls": 1
+        },
+        {
+          "name": "relar_input",
+          "self_instructions": 141,
+          "fraction": 8.956960478508323e-08,
+          "calls": 3
+        },
+        {
+          "name": "__default_morecore",
+          "self_instructions": 140,
+          "fraction": 8.893435936107553e-08,
+          "calls": 14
+        },
+        {
+          "name": "<str>::trim_matches::<<char>::is_whitespace>",
+          "self_instructions": 136,
+          "fraction": 8.639337766504481e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000498b6b0",
+          "self_instructions": 126,
+          "fraction": 8.004092342496799e-08,
+          "calls": 63
+        },
+        {
+          "name": "0x0000000000006d90",
+          "self_instructions": 124,
+          "fraction": 7.877043257695262e-08,
+          "calls": 2
+        },
+        {
+          "name": "<relar_runtime::Int>::new",
+          "self_instructions": 120,
+          "fraction": 7.62294508809219e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x00000000000acef0",
+          "self_instructions": 114,
+          "fraction": 7.24179783368758e-08,
+          "calls": 1
+        },
+        {
+          "name": "__rustc::__rust_realloc",
+          "self_instructions": 114,
+          "fraction": 7.24179783368758e-08,
+          "calls": 114
+        },
+        {
+          "name": "0x000000000001d4d0",
+          "self_instructions": 111,
+          "fraction": 7.051224206485275e-08,
+          "calls": 1
+        },
+        {
+          "name": "<num_bigint::bigint::BigInt>::from_biguint",
+          "self_instructions": 105,
+          "fraction": 6.670076952080666e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000025c40",
+          "self_instructions": 100,
+          "fraction": 6.352454240076824e-08,
+          "calls": 4
+        },
+        {
+          "name": "0x0000000000028aa0",
+          "self_instructions": 98,
+          "fraction": 6.225405155275288e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x00000000000165a0",
+          "self_instructions": 98,
+          "fraction": 6.225405155275288e-08,
+          "calls": 1
+        },
+        {
+          "name": "<std::sys::sync::once::futex::Once>::call",
+          "self_instructions": 98,
+          "fraction": 6.225405155275288e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000020040",
+          "self_instructions": 95,
+          "fraction": 6.034831528072984e-08,
+          "calls": 1
+        },
+        {
+          "name": "(below main)",
+          "self_instructions": 93,
+          "fraction": 5.907782443271447e-08,
+          "calls": 2
+        },
+        {
+          "name": "__libc_early_init",
+          "self_instructions": 92,
+          "fraction": 5.844257900870678e-08,
+          "calls": 1
+        },
+        {
+          "name": "brk",
+          "self_instructions": 90,
+          "fraction": 5.717208816069142e-08,
+          "calls": 10
+        },
+        {
+          "name": "0x00000000000a94e0",
+          "self_instructions": 90,
+          "fraction": 5.717208816069142e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000014bd0",
+          "self_instructions": 84,
+          "fraction": 5.336061561664532e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000010e190",
+          "self_instructions": 80,
+          "fraction": 5.0819633920614593e-08,
+          "calls": 4
+        },
+        {
+          "name": "0x0000000000047910",
+          "self_instructions": 79,
+          "fraction": 5.018438849660691e-08,
+          "calls": 1
+        },
+        {
+          "name": "mmap",
+          "self_instructions": 78,
+          "fraction": 4.954914307259923e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000012a9d0",
+          "self_instructions": 75,
+          "fraction": 4.7643406800576183e-08,
+          "calls": 3
+        },
+        {
+          "name": "strnlen",
+          "self_instructions": 75,
+          "fraction": 4.7643406800576183e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000018400",
+          "self_instructions": 74,
+          "fraction": 4.7008161376568496e-08,
+          "calls": 1
+        },
+        {
+          "name": "write",
+          "self_instructions": 72,
+          "fraction": 4.5737670528553135e-08,
+          "calls": 9
+        },
+        {
+          "name": "bcmp",
+          "self_instructions": 72,
+          "fraction": 4.5737670528553135e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000020920",
+          "self_instructions": 71,
+          "fraction": 4.5102425104545454e-08,
+          "calls": 1
+        },
+        {
+          "name": "__rustc::__rust_alloc",
+          "self_instructions": 71,
+          "fraction": 4.5102425104545454e-08,
+          "calls": 71
+        },
+        {
+          "name": "__rustc::__rust_no_alloc_shim_is_unstable_v2",
+          "self_instructions": 71,
+          "fraction": 4.5102425104545454e-08,
+          "calls": 71
+        },
+        {
+          "name": "__rustc::__rdl_dealloc",
+          "self_instructions": 69,
+          "fraction": 4.3831934256530086e-08,
+          "calls": 69
+        },
+        {
+          "name": "__rustc::__rust_dealloc",
+          "self_instructions": 69,
+          "fraction": 4.3831934256530086e-08,
+          "calls": 69
+        },
+        {
+          "name": "<num_bigint::big_digit::BigDigits>::normalize",
+          "self_instructions": 60,
+          "fraction": 3.811472544046095e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000014ed0",
+          "self_instructions": 55,
+          "fraction": 3.493849832042253e-08,
+          "calls": 1
+        },
+        {
+          "name": "<alloc::rc::Rc<alloc::string::String>>::drop_slow",
+          "self_instructions": 51,
+          "fraction": 3.23975166243918e-08,
+          "calls": 3
+        },
+        {
+          "name": "wcschr",
+          "self_instructions": 50,
+          "fraction": 3.176227120038412e-08,
+          "calls": 2
+        },
+        {
+          "name": "strlen",
+          "self_instructions": 50,
+          "fraction": 3.176227120038412e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x000000000001ce80",
+          "self_instructions": 49,
+          "fraction": 3.112702577637644e-08,
+          "calls": 1
+        },
+        {
+          "name": "std::io::stdio::stdout",
+          "self_instructions": 49,
+          "fraction": 3.112702577637644e-08,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000002a060",
+          "self_instructions": 48,
+          "fraction": 3.049178035236876e-08,
+          "calls": 1
+        },
+        {
+          "name": "memset",
+          "self_instructions": 48,
+          "fraction": 3.049178035236876e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x000000000001d700",
+          "self_instructions": 47,
+          "fraction": 2.985653492836107e-08,
+          "calls": 1
+        },
+        {
+          "name": "wmemchr",
+          "self_instructions": 46,
+          "fraction": 2.922128950435339e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000025a00",
+          "self_instructions": 46,
+          "fraction": 2.922128950435339e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000000c2d0",
+          "self_instructions": 45,
+          "fraction": 2.858604408034571e-08,
+          "calls": 1
+        },
+        {
+          "name": "memcpy",
+          "self_instructions": 44,
+          "fraction": 2.7950798656338026e-08,
+          "calls": 2
+        },
+        {
+          "name": "pthread_mutex_lock",
+          "self_instructions": 44,
+          "fraction": 2.7950798656338026e-08,
+          "calls": 1
+        },
+        {
+          "name": "memmove",
+          "self_instructions": 44,
+          "fraction": 2.7950798656338026e-08,
+          "calls": 2
+        },
+        {
+          "name": "mremap",
+          "self_instructions": 42,
+          "fraction": 2.668030780832266e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x000000000498b720",
+          "self_instructions": 42,
+          "fraction": 2.668030780832266e-08,
+          "calls": 21
+        },
+        {
+          "name": "0x0000000000013d40",
+          "self_instructions": 40,
+          "fraction": 2.5409816960307297e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000004b60",
+          "self_instructions": 40,
+          "fraction": 2.5409816960307297e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000018d970",
+          "self_instructions": 39,
+          "fraction": 2.4774571536299616e-08,
+          "calls": 1
+        },
+        {
+          "name": "__cxa_atexit",
+          "self_instructions": 39,
+          "fraction": 2.4774571536299616e-08,
+          "calls": 1
+        },
+        {
+          "name": "ceil",
+          "self_instructions": 39,
+          "fraction": 2.4774571536299616e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000001eec0",
+          "self_instructions": 37,
+          "fraction": 2.3504080688284248e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025db0",
+          "self_instructions": 36,
+          "fraction": 2.2868835264276567e-08,
+          "calls": 6
+        },
+        {
+          "name": "__sigsetjmp",
+          "self_instructions": 35,
+          "fraction": 2.2233589840268883e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000002830",
+          "self_instructions": 35,
+          "fraction": 2.2233589840268883e-08,
+          "calls": 5
+        },
+        {
+          "name": "pthread_mutex_unlock",
+          "self_instructions": 34,
+          "fraction": 2.1598344416261203e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000002880",
+          "self_instructions": 34,
+          "fraction": 2.1598344416261203e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000047000",
+          "self_instructions": 33,
+          "fraction": 2.096309899225352e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001a9e0",
+          "self_instructions": 33,
+          "fraction": 2.096309899225352e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000017bc0",
+          "self_instructions": 33,
+          "fraction": 2.096309899225352e-08,
+          "calls": 1
+        },
+        {
+          "name": "relar_str_release",
+          "self_instructions": 33,
+          "fraction": 2.096309899225352e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000028ca0",
+          "self_instructions": 32,
+          "fraction": 2.0327853568245838e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025e10",
+          "self_instructions": 32,
+          "fraction": 2.0327853568245838e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x00000000000048f0",
+          "self_instructions": 32,
+          "fraction": 2.0327853568245838e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x00000000000258f0",
+          "self_instructions": 30,
+          "fraction": 1.9057362720230473e-08,
+          "calls": 5
+        },
+        {
+          "name": "0x0000000000025a20",
+          "self_instructions": 30,
+          "fraction": 1.9057362720230473e-08,
+          "calls": 5
+        },
+        {
+          "name": "0x000000000001acd0",
+          "self_instructions": 30,
+          "fraction": 1.9057362720230473e-08,
+          "calls": 6
+        },
+        {
+          "name": "0x00000000000c87b0",
+          "self_instructions": 28,
+          "fraction": 1.778687187221511e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000002a150",
+          "self_instructions": 28,
+          "fraction": 1.778687187221511e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000009f6f0",
+          "self_instructions": 27,
+          "fraction": 1.7151626448207425e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000098ef0",
+          "self_instructions": 26,
+          "fraction": 1.6516381024199744e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000001640",
+          "self_instructions": 26,
+          "fraction": 1.6516381024199744e-08,
+          "calls": 1
+        },
+        {
+          "name": "<std::sync::once::Once>::call_once_force::<<std::sync::once_lock::OnceLock<std::sync::poison::mutex::Mutex<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>>>::initialize<<std::sync::once_lock::OnceLock<std::sync::poison::mutex::Mutex<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>>>::get_or_init<std::io::stdio::stdin::{closure#0}>::{closure#0}, !>::{closure#0}>::{closure#0}",
+          "self_instructions": 26,
+          "fraction": 1.6516381024199744e-08,
+          "calls": 1
+        },
+        {
+          "name": "<std::sync::once::Once>::call_once_force::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !>::{closure#0}>::{closure#0}",
+          "self_instructions": 26,
+          "fraction": 1.6516381024199744e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcscmp",
+          "self_instructions": 25,
+          "fraction": 1.588113560019206e-08,
+          "calls": 1
+        },
+        {
+          "name": "strchrnul",
+          "self_instructions": 25,
+          "fraction": 1.588113560019206e-08,
+          "calls": 1
+        },
+        {
+          "name": "rindex",
+          "self_instructions": 25,
+          "fraction": 1.588113560019206e-08,
+          "calls": 1
+        },
+        {
+          "name": "memrchr",
+          "self_instructions": 25,
+          "fraction": 1.588113560019206e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000001000",
+          "self_instructions": 25,
+          "fraction": 1.588113560019206e-08,
+          "calls": 1
+        },
+        {
+          "name": "__memset_chk",
+          "self_instructions": 24,
+          "fraction": 1.524589017618438e-08,
+          "calls": 1
+        },
+        {
+          "name": "wmemcmp",
+          "self_instructions": 24,
+          "fraction": 1.524589017618438e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025be0",
+          "self_instructions": 24,
+          "fraction": 1.524589017618438e-08,
+          "calls": 4
+        },
+        {
+          "name": "0x0000000000013de0",
+          "self_instructions": 24,
+          "fraction": 1.524589017618438e-08,
+          "calls": 2
+        },
+        {
+          "name": "memchr",
+          "self_instructions": 23,
+          "fraction": 1.4610644752176695e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001f540",
+          "self_instructions": 23,
+          "fraction": 1.4610644752176695e-08,
+          "calls": 0
+        },
+        {
+          "name": "__mempcpy_chk",
+          "self_instructions": 22,
+          "fraction": 1.3975399328169013e-08,
+          "calls": 1
+        },
+        {
+          "name": "__memcpy_chk",
+          "self_instructions": 22,
+          "fraction": 1.3975399328169013e-08,
+          "calls": 1
+        },
+        {
+          "name": "mempcpy",
+          "self_instructions": 22,
+          "fraction": 1.3975399328169013e-08,
+          "calls": 1
+        },
+        {
+          "name": "__memmove_chk",
+          "self_instructions": 22,
+          "fraction": 1.3975399328169013e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000013e0",
+          "self_instructions": 22,
+          "fraction": 1.3975399328169013e-08,
+          "calls": 1
+        },
+        {
+          "name": "<std::sync::once_lock::OnceLock<std::sync::poison::mutex::Mutex<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::poison::mutex::Mutex<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>>>::get_or_init<std::io::stdio::stdin::{closure#0}>::{closure#0}, !>",
+          "self_instructions": 22,
+          "fraction": 1.3975399328169013e-08,
+          "calls": 1
+        },
+        {
+          "name": "<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !>",
+          "self_instructions": 22,
+          "fraction": 1.3975399328169013e-08,
+          "calls": 1
+        },
+        {
+          "name": "strcasecmp",
+          "self_instructions": 21,
+          "fraction": 1.334015390416133e-08,
+          "calls": 1
+        },
+        {
+          "name": "strncasecmp_l",
+          "self_instructions": 21,
+          "fraction": 1.334015390416133e-08,
+          "calls": 1
+        },
+        {
+          "name": "strcasecmp_l",
+          "self_instructions": 21,
+          "fraction": 1.334015390416133e-08,
+          "calls": 1
+        },
+        {
+          "name": "strncasecmp",
+          "self_instructions": 21,
+          "fraction": 1.334015390416133e-08,
+          "calls": 1
+        },
+        {
+          "name": "strncmp",
+          "self_instructions": 21,
+          "fraction": 1.334015390416133e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000014e60",
+          "self_instructions": 21,
+          "fraction": 1.334015390416133e-08,
+          "calls": 7
+        },
+        {
+          "name": "wmemset",
+          "self_instructions": 20,
+          "fraction": 1.2704908480153648e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x000000000001abb0",
+          "self_instructions": 20,
+          "fraction": 1.2704908480153648e-08,
+          "calls": 4
+        },
+        {
+          "name": "strncpy",
+          "self_instructions": 19,
+          "fraction": 1.2069663056145966e-08,
+          "calls": 1
+        },
+        {
+          "name": "index",
+          "self_instructions": 19,
+          "fraction": 1.2069663056145966e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcslen",
+          "self_instructions": 19,
+          "fraction": 1.2069663056145966e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcsnlen",
+          "self_instructions": 19,
+          "fraction": 1.2069663056145966e-08,
+          "calls": 1
+        },
+        {
+          "name": "strcmp",
+          "self_instructions": 19,
+          "fraction": 1.2069663056145966e-08,
+          "calls": 1
+        },
+        {
+          "name": "stpncpy",
+          "self_instructions": 19,
+          "fraction": 1.2069663056145966e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000026640",
+          "self_instructions": 19,
+          "fraction": 1.2069663056145966e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001f680",
+          "self_instructions": 19,
+          "fraction": 1.2069663056145966e-08,
+          "calls": 1
+        },
+        {
+          "name": "std::io::stdio::stdin",
+          "self_instructions": 19,
+          "fraction": 1.2069663056145966e-08,
+          "calls": 3
+        },
+        {
+          "name": "wcpncpy",
+          "self_instructions": 18,
+          "fraction": 1.1434417632138284e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcsncpy",
+          "self_instructions": 18,
+          "fraction": 1.1434417632138284e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcscat",
+          "self_instructions": 18,
+          "fraction": 1.1434417632138284e-08,
+          "calls": 1
+        },
+        {
+          "name": "munmap",
+          "self_instructions": 18,
+          "fraction": 1.1434417632138284e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000098f40",
+          "self_instructions": 18,
+          "fraction": 1.1434417632138284e-08,
+          "calls": 2
+        },
+        {
+          "name": "log2",
+          "self_instructions": 18,
+          "fraction": 1.1434417632138284e-08,
+          "calls": 2
+        },
+        {
+          "name": "strcat",
+          "self_instructions": 17,
+          "fraction": 1.0799172208130601e-08,
+          "calls": 1
+        },
+        {
+          "name": "__ctype_init",
+          "self_instructions": 17,
+          "fraction": 1.0799172208130601e-08,
+          "calls": 1
+        },
+        {
+          "name": "strcpy",
+          "self_instructions": 17,
+          "fraction": 1.0799172208130601e-08,
+          "calls": 1
+        },
+        {
+          "name": "stpcpy",
+          "self_instructions": 17,
+          "fraction": 1.0799172208130601e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000014e70",
+          "self_instructions": 17,
+          "fraction": 1.0799172208130601e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001a930",
+          "self_instructions": 17,
+          "fraction": 1.0799172208130601e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcscpy",
+          "self_instructions": 16,
+          "fraction": 1.0163926784122919e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025300",
+          "self_instructions": 16,
+          "fraction": 1.0163926784122919e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001fc70",
+          "self_instructions": 15,
+          "fraction": 9.528681360115237e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025bb0",
+          "self_instructions": 14,
+          "fraction": 8.893435936107554e-09,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000013370",
+          "self_instructions": 14,
+          "fraction": 8.893435936107554e-09,
+          "calls": 1
+        },
+        {
+          "name": "__call_tls_dtors",
+          "self_instructions": 13,
+          "fraction": 8.258190512099872e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001cf40",
+          "self_instructions": 13,
+          "fraction": 8.258190512099872e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000017390",
+          "self_instructions": 13,
+          "fraction": 8.258190512099872e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000104a0",
+          "self_instructions": 13,
+          "fraction": 8.258190512099872e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000017170",
+          "self_instructions": 13,
+          "fraction": 8.258190512099872e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000010d0",
+          "self_instructions": 13,
+          "fraction": 8.258190512099872e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000005ad0",
+          "self_instructions": 13,
+          "fraction": 8.258190512099872e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000002a0d0",
+          "self_instructions": 12,
+          "fraction": 7.62294508809219e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000104e0",
+          "self_instructions": 12,
+          "fraction": 7.62294508809219e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000171b0",
+          "self_instructions": 12,
+          "fraction": 7.62294508809219e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000001110",
+          "self_instructions": 12,
+          "fraction": 7.62294508809219e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000005b10",
+          "self_instructions": 12,
+          "fraction": 7.62294508809219e-09,
+          "calls": 1
+        },
+        {
+          "name": "getrlimit",
+          "self_instructions": 10,
+          "fraction": 6.352454240076824e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001d1f0",
+          "self_instructions": 10,
+          "fraction": 6.352454240076824e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000004940",
+          "self_instructions": 10,
+          "fraction": 6.352454240076824e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000258c0",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "cosf",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000002f300",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "__exp_finite",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "expf",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "__log_finite",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "sinf",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "cos",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "logf",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "sincosf",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "powf",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "expm1",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "exp2f",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "log2f",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "__atan2_finite",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "sin",
+          "self_instructions": 9,
+          "fraction": 5.717208816069142e-09,
+          "calls": 1
+        },
+        {
+          "name": "read",
+          "self_instructions": 8,
+          "fraction": 5.0819633920614595e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000249c0",
+          "self_instructions": 8,
+          "fraction": 5.0819633920614595e-09,
+          "calls": 1
+        },
+        {
+          "name": "sincos",
+          "self_instructions": 8,
+          "fraction": 5.0819633920614595e-09,
+          "calls": 1
+        },
+        {
+          "name": "__acos_finite",
+          "self_instructions": 8,
+          "fraction": 5.0819633920614595e-09,
+          "calls": 1
+        },
+        {
+          "name": "__asin_finite",
+          "self_instructions": 8,
+          "fraction": 5.0819633920614595e-09,
+          "calls": 1
+        },
+        {
+          "name": "__pow_finite",
+          "self_instructions": 8,
+          "fraction": 5.0819633920614595e-09,
+          "calls": 1
+        },
+        {
+          "name": "strspn",
+          "self_instructions": 7,
+          "fraction": 4.446717968053777e-09,
+          "calls": 1
+        },
+        {
+          "name": "exit",
+          "self_instructions": 7,
+          "fraction": 4.446717968053777e-09,
+          "calls": 1
+        },
+        {
+          "name": "strcspn",
+          "self_instructions": 7,
+          "fraction": 4.446717968053777e-09,
+          "calls": 1
+        },
+        {
+          "name": "strpbrk",
+          "self_instructions": 7,
+          "fraction": 4.446717968053777e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000004939000",
+          "self_instructions": 7,
+          "fraction": 4.446717968053777e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000485c000",
+          "self_instructions": 7,
+          "fraction": 4.446717968053777e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000118000",
+          "self_instructions": 7,
+          "fraction": 4.446717968053777e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000483d000",
+          "self_instructions": 7,
+          "fraction": 4.446717968053777e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025de0",
+          "self_instructions": 6,
+          "fraction": 3.811472544046095e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000013f00",
+          "self_instructions": 6,
+          "fraction": 3.811472544046095e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001a8d0",
+          "self_instructions": 6,
+          "fraction": 3.811472544046095e-09,
+          "calls": 1
+        },
+        {
+          "name": "fma",
+          "self_instructions": 6,
+          "fraction": 3.811472544046095e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000000c200",
+          "self_instructions": 5,
+          "fraction": 3.176227120038412e-09,
+          "calls": 1
+        },
+        {
+          "name": "_dl_audit_preinit",
+          "self_instructions": 5,
+          "fraction": 3.176227120038412e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000010430",
+          "self_instructions": 5,
+          "fraction": 3.176227120038412e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000017100",
+          "self_instructions": 5,
+          "fraction": 3.176227120038412e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000001060",
+          "self_instructions": 5,
+          "fraction": 3.176227120038412e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000005a60",
+          "self_instructions": 5,
+          "fraction": 3.176227120038412e-09,
+          "calls": 1
+        },
+        {
+          "name": "_Exit",
+          "self_instructions": 4,
+          "fraction": 2.5409816960307298e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000017b40",
+          "self_instructions": 4,
+          "fraction": 2.5409816960307298e-09,
+          "calls": 1
+        },
+        {
+          "name": "_dl_debug_state",
+          "self_instructions": 4,
+          "fraction": 2.5409816960307298e-09,
+          "calls": 2
+        },
+        {
+          "name": "0x00000000001ee71c",
+          "self_instructions": 4,
+          "fraction": 2.5409816960307298e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000048da3a8",
+          "self_instructions": 4,
+          "fraction": 2.5409816960307298e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000483d294",
+          "self_instructions": 4,
+          "fraction": 2.5409816960307298e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000495c748",
+          "self_instructions": 4,
+          "fraction": 2.5409816960307298e-09,
+          "calls": 1
+        },
+        {
+          "name": "std::sys::args::unix::imp::ARGV_INIT_ARRAY::init_wrapper",
+          "self_instructions": 4,
+          "fraction": 2.5409816960307298e-09,
+          "calls": 1
+        },
+        {
+          "name": "_setjmp",
+          "self_instructions": 3,
+          "fraction": 1.9057362720230474e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001ef80",
+          "self_instructions": 2,
+          "fraction": 1.2704908480153649e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000049393c0",
+          "self_instructions": 2,
+          "fraction": 1.2704908480153649e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000498b660",
+          "self_instructions": 2,
+          "fraction": 1.2704908480153649e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000498b7b0",
+          "self_instructions": 2,
+          "fraction": 1.2704908480153649e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000485c220",
+          "self_instructions": 2,
+          "fraction": 1.2704908480153649e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000483d030",
+          "self_instructions": 2,
+          "fraction": 1.2704908480153649e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000118050",
+          "self_instructions": 1,
+          "fraction": 6.352454240076824e-10,
+          "calls": 1
+        }
+      ],
+      "native_build_record": "2026-10-17-route-planner.json",
+      "original_uncompressed_trace_sha256": "b2a34199d9fb0f3e5a1899b992df30556d76ae520f8237d3068bb46116e2c570"
+    },
+    "ownership-and-index-inlining": {
+      "binary_sha256": "fc50e739dbb3c168d536baf0e794226f57bb6bc24d2c4d002f14725789013f8c",
+      "llvm_ir_sha256": "283612d7b76e94ea530e49951fb53113483b5a095a77138f76107e7cf2fe9034",
+      "trace": "profiles/2026-10-17-route-planner-ownership-and-index-inlining.callgrind.gz",
+      "trace_sha256": "d6716979e03da344fb3124f35c8e0e96f331dbca9cb213b8ae55b50d6ccf0020",
+      "uncompressed_trace_sha256": "89b90906af92cc63625fe13569ac5a952bf4722fc66f3548ac793a8f3a3f9283",
+      "stdout_sha256": "456b386057dde7f2648d9bed6575e1d5fe38d84a42732e6fcdf60366a100d62a",
+      "total_instructions": 811546892,
+      "functions": [
+        {
+          "name": "main",
+          "self_instructions": 290363689,
+          "fraction": 0.3577904023320442,
+          "calls": 1
+        },
+        {
+          "name": "relar_list_get",
+          "self_instructions": 277786620,
+          "fraction": 0.34229275318326274,
+          "calls": 9259554
+        },
+        {
+          "name": "relar_list_set",
+          "self_instructions": 124933728,
+          "fraction": 0.15394517461844953,
+          "calls": 3904179
+        },
+        {
+          "name": "relar_int_binary",
+          "self_instructions": 57653084,
+          "fraction": 0.07104097689034092,
+          "calls": 1019612
+        },
+        {
+          "name": "fn_0",
+          "self_instructions": 19103312,
+          "fraction": 0.023539381628239913,
+          "calls": 196608
+        },
+        {
+          "name": "relar_list_append",
+          "self_instructions": 18335095,
+          "fraction": 0.02259277335757451,
+          "calls": 591385
+        },
+        {
+          "name": "relar_list_repeat",
+          "self_instructions": 8651226,
+          "fraction": 0.010660167742962658,
+          "calls": 6
+        },
+        {
+          "name": "relar_list_pop",
+          "self_instructions": 5898000,
+          "fraction": 0.0072676022274754766,
+          "calls": 393200
+        },
+        {
+          "name": "relar_list_len",
+          "self_instructions": 4718512,
+          "fraction": 0.005814219790025393,
+          "calls": 589814
+        },
+        {
+          "name": "<alloc::rc::Rc<relar_runtime::List>>::drop_slow",
+          "self_instructions": 3549432,
+          "fraction": 0.004373662243043868,
+          "calls": 27
+        },
+        {
+          "name": "0x000000000000a530",
+          "self_instructions": 101257,
+          "fraction": 0.0001247703626224965,
+          "calls": 300
+        },
+        {
+          "name": "0x0000000000188d80",
+          "self_instructions": 89658,
+          "fraction": 0.0001104779044610031,
+          "calls": 105
+        },
+        {
+          "name": "0x000000000000f240",
+          "self_instructions": 77242,
+          "fraction": 9.517872689973903e-05,
+          "calls": 7
+        },
+        {
+          "name": "0x000000000000b0d0",
+          "self_instructions": 52904,
+          "fraction": 6.518908583288617e-05,
+          "calls": 300
+        },
+        {
+          "name": "0x00000000000158b0",
+          "self_instructions": 49057,
+          "fraction": 6.0448755929682004e-05,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000274e0",
+          "self_instructions": 28055,
+          "fraction": 3.4569783060668785e-05,
+          "calls": 754
+        },
+        {
+          "name": "0x000000000000a390",
+          "self_instructions": 18808,
+          "fraction": 2.3175493844414846e-05,
+          "calls": 298
+        },
+        {
+          "name": "0x00000000000ab650",
+          "self_instructions": 18502,
+          "fraction": 2.279843615000869e-05,
+          "calls": 88
+        },
+        {
+          "name": "0x00000000000ab250",
+          "self_instructions": 14194,
+          "fraction": 1.7490055275820095e-05,
+          "calls": 159
+        },
+        {
+          "name": "0x0000000000015c90",
+          "self_instructions": 12375,
+          "fraction": 1.52486567590724e-05,
+          "calls": 6
+        },
+        {
+          "name": "realloc",
+          "self_instructions": 9192,
+          "fraction": 1.1326517408435839e-05,
+          "calls": 114
+        },
+        {
+          "name": "0x00000000000ad030",
+          "self_instructions": 8363,
+          "fraction": 1.0305011432413939e-05,
+          "calls": 112
+        },
+        {
+          "name": "<alloc::raw_vec::RawVecInner>::finish_grow",
+          "self_instructions": 5883,
+          "fraction": 7.249119007161449e-06,
+          "calls": 147
+        },
+        {
+          "name": "0x0000000000018b30",
+          "self_instructions": 5364,
+          "fraction": 6.6095995842961096e-06,
+          "calls": 24
+        },
+        {
+          "name": "0x0000000000007a20",
+          "self_instructions": 5246,
+          "fraction": 6.464198251159096e-06,
+          "calls": 4
+        },
+        {
+          "name": "malloc",
+          "self_instructions": 3181,
+          "fraction": 3.919674921261358e-06,
+          "calls": 71
+        },
+        {
+          "name": "__rustc::__rdl_realloc",
+          "self_instructions": 2508,
+          "fraction": 3.09039443650534e-06,
+          "calls": 114
+        },
+        {
+          "name": "0x00000000000a9bb0",
+          "self_instructions": 2238,
+          "fraction": 2.757696470852851e-06,
+          "calls": 79
+        },
+        {
+          "name": "0x000000000000c380",
+          "self_instructions": 2227,
+          "fraction": 2.744142109289231e-06,
+          "calls": 80
+        },
+        {
+          "name": "0x0000000000016630",
+          "self_instructions": 2176,
+          "fraction": 2.681299160221539e-06,
+          "calls": 25
+        },
+        {
+          "name": "free",
+          "self_instructions": 2154,
+          "fraction": 2.654190437094299e-06,
+          "calls": 69
+        },
+        {
+          "name": "0x0000000000002a40",
+          "self_instructions": 1972,
+          "fraction": 2.4299273639507696e-06,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000020af0",
+          "self_instructions": 1777,
+          "fraction": 2.189645499868417e-06,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000092f0",
+          "self_instructions": 1654,
+          "fraction": 2.038083093293394e-06,
+          "calls": 10
+        },
+        {
+          "name": "core::slice::memchr::memrchr",
+          "self_instructions": 1116,
+          "fraction": 1.3751515913636203e-06,
+          "calls": 18
+        },
+        {
+          "name": "<std::io::stdio::StdoutLock as std::io::Write>::write_all",
+          "self_instructions": 999,
+          "fraction": 1.2309824729142085e-06,
+          "calls": 18
+        },
+        {
+          "name": "0x000000000000c6c0",
+          "self_instructions": 949,
+          "fraction": 1.169371738534118e-06,
+          "calls": 5
+        },
+        {
+          "name": "0x0000000000016710",
+          "self_instructions": 921,
+          "fraction": 1.1348697272812671e-06,
+          "calls": 3
+        },
+        {
+          "name": "__tunable_get_val",
+          "self_instructions": 909,
+          "fraction": 1.1200831510300454e-06,
+          "calls": 39
+        },
+        {
+          "name": "0x00000000000a9e50",
+          "self_instructions": 849,
+          "fraction": 1.046150269773937e-06,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000028b00",
+          "self_instructions": 759,
+          "fraction": 9.352509478897739e-07,
+          "calls": 25
+        },
+        {
+          "name": "0x00000000000272b0",
+          "self_instructions": 758,
+          "fraction": 9.340187332021721e-07,
+          "calls": 24
+        },
+        {
+          "name": "core::fmt::write",
+          "self_instructions": 675,
+          "fraction": 8.317449141312219e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000000c070",
+          "self_instructions": 660,
+          "fraction": 8.132616938171947e-07,
+          "calls": 22
+        },
+        {
+          "name": "__rustc::__rdl_alloc",
+          "self_instructions": 639,
+          "fraction": 7.873851853775567e-07,
+          "calls": 71
+        },
+        {
+          "name": "0x00000000000201d0",
+          "self_instructions": 636,
+          "fraction": 7.836885413147512e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000060a0",
+          "self_instructions": 573,
+          "fraction": 7.060590159958372e-07,
+          "calls": 3
+        },
+        {
+          "name": "<u64>::_fmt_inner",
+          "self_instructions": 564,
+          "fraction": 6.949690838074209e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000000c1c0",
+          "self_instructions": 546,
+          "fraction": 6.727892194305884e-07,
+          "calls": 12
+        },
+        {
+          "name": "0x000000000001cfe0",
+          "self_instructions": 544,
+          "fraction": 6.703247900553847e-07,
+          "calls": 11
+        },
+        {
+          "name": "<std::io::buffered::bufwriter::BufWriter<std::io::stdio::StdoutRaw>>::flush_buf",
+          "self_instructions": 531,
+          "fraction": 6.543059991165612e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000001e1d0",
+          "self_instructions": 525,
+          "fraction": 6.469127109909504e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000018e00",
+          "self_instructions": 516,
+          "fraction": 6.35822778802534e-07,
+          "calls": 12
+        },
+        {
+          "name": "<core::fmt::Formatter>::pad_integral",
+          "self_instructions": 513,
+          "fraction": 6.321261347397287e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x0000000000005c80",
+          "self_instructions": 512,
+          "fraction": 6.308939200521269e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x0000000000013290",
+          "self_instructions": 498,
+          "fraction": 6.136429144257015e-07,
+          "calls": 12
+        },
+        {
+          "name": "0x000000000001c940",
+          "self_instructions": 494,
+          "fraction": 6.087140556752942e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000026b10",
+          "self_instructions": 491,
+          "fraction": 6.050174116124888e-07,
+          "calls": 11
+        },
+        {
+          "name": "0x0000000000025d00",
+          "self_instructions": 463,
+          "fraction": 5.705154003596382e-07,
+          "calls": 20
+        },
+        {
+          "name": "relar_list_new",
+          "self_instructions": 462,
+          "fraction": 5.692831856720363e-07,
+          "calls": 21
+        },
+        {
+          "name": "relar_list_release",
+          "self_instructions": 456,
+          "fraction": 5.618898975464255e-07,
+          "calls": 54
+        },
+        {
+          "name": "_dl_catch_exception",
+          "self_instructions": 420,
+          "fraction": 5.175301687927602e-07,
+          "calls": 10
+        },
+        {
+          "name": "0x000000000001a900",
+          "self_instructions": 411,
+          "fraction": 5.06440236604344e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000028930",
+          "self_instructions": 408,
+          "fraction": 5.027435925415386e-07,
+          "calls": 1
+        },
+        {
+          "name": "sbrk",
+          "self_instructions": 395,
+          "fraction": 4.86724801602715e-07,
+          "calls": 14
+        },
+        {
+          "name": "relar_int_parse",
+          "self_instructions": 388,
+          "fraction": 4.780992987895024e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000004330",
+          "self_instructions": 383,
+          "fraction": 4.719382253514933e-07,
+          "calls": 6
+        },
+        {
+          "name": "num_bigint::biguint::convert::from_radix_digits_be",
+          "self_instructions": 381,
+          "fraction": 4.694737959762897e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000007840",
+          "self_instructions": 364,
+          "fraction": 4.485261462870589e-07,
+          "calls": 5
+        },
+        {
+          "name": "__cpu_indicator_init",
+          "self_instructions": 364,
+          "fraction": 4.485261462870589e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000133a0",
+          "self_instructions": 348,
+          "fraction": 4.2881071128542996e-07,
+          "calls": 2
+        },
+        {
+          "name": "0x00000000000141f0",
+          "self_instructions": 343,
+          "fraction": 4.226496378474209e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000026910",
+          "self_instructions": 339,
+          "fraction": 4.177207790970137e-07,
+          "calls": 23
+        },
+        {
+          "name": "0x00000000000073f0",
+          "self_instructions": 323,
+          "fraction": 3.980053440953847e-07,
+          "calls": 1
+        },
+        {
+          "name": "std::io::read_until::<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>",
+          "self_instructions": 317,
+          "fraction": 3.906120559697738e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000015770",
+          "self_instructions": 310,
+          "fraction": 3.8198655315656116e-07,
+          "calls": 5
+        },
+        {
+          "name": "core::str::converts::from_utf8",
+          "self_instructions": 309,
+          "fraction": 3.8075433846895935e-07,
+          "calls": 6
+        },
+        {
+          "name": "<num_bigint::biguint::BigUint as num_traits::Num>::from_str_radix",
+          "self_instructions": 306,
+          "fraction": 3.770576944061539e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000005670",
+          "self_instructions": 304,
+          "fraction": 3.745932650309503e-07,
+          "calls": 6
+        },
+        {
+          "name": "0x0000000000026920",
+          "self_instructions": 298,
+          "fraction": 3.6719997690533944e-07,
+          "calls": 21
+        },
+        {
+          "name": "<i64 as core::fmt::Display>::fmt",
+          "self_instructions": 297,
+          "fraction": 3.659677622177376e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000000bca0",
+          "self_instructions": 274,
+          "fraction": 3.37626824402896e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000005380",
+          "self_instructions": 270,
+          "fraction": 3.3269796565248873e-07,
+          "calls": 1
+        },
+        {
+          "name": "relar_print_int",
+          "self_instructions": 270,
+          "fraction": 3.3269796565248873e-07,
+          "calls": 9
+        },
+        {
+          "name": "<std::io::default_write_fmt::Adapter<std::io::stdio::StdoutLock> as core::fmt::Write>::write_str",
+          "self_instructions": 270,
+          "fraction": 3.3269796565248873e-07,
+          "calls": 18
+        },
+        {
+          "name": "0x000000000001ca20",
+          "self_instructions": 266,
+          "fraction": 3.2776910690208153e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000a92d0",
+          "self_instructions": 264,
+          "fraction": 3.253046775268779e-07,
+          "calls": 66
+        },
+        {
+          "name": "0x000000000000c610",
+          "self_instructions": 255,
+          "fraction": 3.142147453384616e-07,
+          "calls": 5
+        },
+        {
+          "name": "0x000000000001d680",
+          "self_instructions": 248,
+          "fraction": 3.055892425252489e-07,
+          "calls": 2
+        },
+        {
+          "name": "0x00000000000043a0",
+          "self_instructions": 246,
+          "fraction": 3.031248131500453e-07,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000026000",
+          "self_instructions": 240,
+          "fraction": 2.9573152502443445e-07,
+          "calls": 10
+        },
+        {
+          "name": "<str>::replace::<char>",
+          "self_instructions": 234,
+          "fraction": 2.8833823689882357e-07,
+          "calls": 3
+        },
+        {
+          "name": "__cxa_finalize",
+          "self_instructions": 232,
+          "fraction": 2.8587380752362e-07,
+          "calls": 4
+        },
+        {
+          "name": "<std::io::stdio::Stdout>::lock",
+          "self_instructions": 225,
+          "fraction": 2.772483047104073e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x00000000000185a0",
+          "self_instructions": 223,
+          "fraction": 2.7478387533520366e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000018ef0",
+          "self_instructions": 222,
+          "fraction": 2.7355166064760184e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025b40",
+          "self_instructions": 215,
+          "fraction": 2.649261578343892e-07,
+          "calls": 10
+        },
+        {
+          "name": "_dl_allocate_tls_init",
+          "self_instructions": 209,
+          "fraction": 2.575328697087783e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000006b50",
+          "self_instructions": 207,
+          "fraction": 2.5506844033357473e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x0000000000001090",
+          "self_instructions": 207,
+          "fraction": 2.5506844033357473e-07,
+          "calls": 6
+        },
+        {
+          "name": "<alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>",
+          "self_instructions": 201,
+          "fraction": 2.4767515220796384e-07,
+          "calls": 6
+        },
+        {
+          "name": "0x00000000000029f0",
+          "self_instructions": 198,
+          "fraction": 2.439785081451584e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x00000000000aa980",
+          "self_instructions": 189,
+          "fraction": 2.3288857595674212e-07,
+          "calls": 3
+        },
+        {
+          "name": "<core::fmt::Formatter>::pad_integral::write_prefix",
+          "self_instructions": 189,
+          "fraction": 2.3288857595674212e-07,
+          "calls": 9
+        },
+        {
+          "name": "<std::io::stdio::Stdin>::read_line",
+          "self_instructions": 189,
+          "fraction": 2.3288857595674212e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000004ab0",
+          "self_instructions": 184,
+          "fraction": 2.2672750251873307e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001d400",
+          "self_instructions": 172,
+          "fraction": 2.1194092626751135e-07,
+          "calls": 4
+        },
+        {
+          "name": "<std::io::stdio::StdoutLock as std::io::Write>::write_fmt",
+          "self_instructions": 171,
+          "fraction": 2.1070871157990953e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x00000000000131b0",
+          "self_instructions": 162,
+          "fraction": 1.9961877939149326e-07,
+          "calls": 6
+        },
+        {
+          "name": "0x0000000000079f90",
+          "self_instructions": 162,
+          "fraction": 1.9961877939149326e-07,
+          "calls": 3
+        },
+        {
+          "name": "_IO_flush_all",
+          "self_instructions": 161,
+          "fraction": 1.9838656470389144e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000968c0",
+          "self_instructions": 152,
+          "fraction": 1.8729663251547516e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000014000",
+          "self_instructions": 147,
+          "fraction": 1.811355590774661e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000006f30",
+          "self_instructions": 143,
+          "fraction": 1.7620670032705886e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000005780",
+          "self_instructions": 142,
+          "fraction": 1.7497448563945704e-07,
+          "calls": 1
+        },
+        {
+          "name": "relar_input",
+          "self_instructions": 141,
+          "fraction": 1.7374227095185523e-07,
+          "calls": 3
+        },
+        {
+          "name": "__default_morecore",
+          "self_instructions": 140,
+          "fraction": 1.7251005626425344e-07,
+          "calls": 14
+        },
+        {
+          "name": "<str>::trim_matches::<<char>::is_whitespace>",
+          "self_instructions": 136,
+          "fraction": 1.6758119751384618e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000498b6b0",
+          "self_instructions": 126,
+          "fraction": 1.552590506378281e-07,
+          "calls": 63
+        },
+        {
+          "name": "0x0000000000006d90",
+          "self_instructions": 124,
+          "fraction": 1.5279462126262446e-07,
+          "calls": 2
+        },
+        {
+          "name": "<relar_runtime::Int>::new",
+          "self_instructions": 120,
+          "fraction": 1.4786576251221723e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x00000000000acef0",
+          "self_instructions": 114,
+          "fraction": 1.4047247438660637e-07,
+          "calls": 1
+        },
+        {
+          "name": "__rustc::__rust_realloc",
+          "self_instructions": 114,
+          "fraction": 1.4047247438660637e-07,
+          "calls": 114
+        },
+        {
+          "name": "0x000000000001d4d0",
+          "self_instructions": 111,
+          "fraction": 1.3677583032380092e-07,
+          "calls": 1
+        },
+        {
+          "name": "<num_bigint::bigint::BigInt>::from_biguint",
+          "self_instructions": 105,
+          "fraction": 1.2938254219819006e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000025c40",
+          "self_instructions": 100,
+          "fraction": 1.2322146876018101e-07,
+          "calls": 4
+        },
+        {
+          "name": "0x00000000000165a0",
+          "self_instructions": 98,
+          "fraction": 1.207570393849774e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000028aa0",
+          "self_instructions": 98,
+          "fraction": 1.207570393849774e-07,
+          "calls": 3
+        },
+        {
+          "name": "<std::sys::sync::once::futex::Once>::call",
+          "self_instructions": 98,
+          "fraction": 1.207570393849774e-07,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000020040",
+          "self_instructions": 95,
+          "fraction": 1.1706039532217197e-07,
+          "calls": 1
+        },
+        {
+          "name": "(below main)",
+          "self_instructions": 93,
+          "fraction": 1.1459596594696835e-07,
+          "calls": 2
+        },
+        {
+          "name": "__libc_early_init",
+          "self_instructions": 92,
+          "fraction": 1.1336375125936654e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000a94e0",
+          "self_instructions": 90,
+          "fraction": 1.1089932188416292e-07,
+          "calls": 3
+        },
+        {
+          "name": "brk",
+          "self_instructions": 90,
+          "fraction": 1.1089932188416292e-07,
+          "calls": 10
+        },
+        {
+          "name": "0x0000000000014bd0",
+          "self_instructions": 84,
+          "fraction": 1.0350603375855206e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000010e190",
+          "self_instructions": 80,
+          "fraction": 9.857717500814481e-08,
+          "calls": 4
+        },
+        {
+          "name": "0x0000000000047910",
+          "self_instructions": 79,
+          "fraction": 9.734496032054301e-08,
+          "calls": 1
+        },
+        {
+          "name": "mmap",
+          "self_instructions": 78,
+          "fraction": 9.61127456329412e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000012a9d0",
+          "self_instructions": 75,
+          "fraction": 9.241610157013577e-08,
+          "calls": 3
+        },
+        {
+          "name": "strnlen",
+          "self_instructions": 75,
+          "fraction": 9.241610157013577e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000018400",
+          "self_instructions": 74,
+          "fraction": 9.118388688253395e-08,
+          "calls": 1
+        },
+        {
+          "name": "bcmp",
+          "self_instructions": 72,
+          "fraction": 8.871945750733034e-08,
+          "calls": 3
+        },
+        {
+          "name": "write",
+          "self_instructions": 72,
+          "fraction": 8.871945750733034e-08,
+          "calls": 9
+        },
+        {
+          "name": "0x0000000000020920",
+          "self_instructions": 71,
+          "fraction": 8.748724281972852e-08,
+          "calls": 1
+        },
+        {
+          "name": "__rustc::__rust_no_alloc_shim_is_unstable_v2",
+          "self_instructions": 71,
+          "fraction": 8.748724281972852e-08,
+          "calls": 71
+        },
+        {
+          "name": "__rustc::__rust_alloc",
+          "self_instructions": 71,
+          "fraction": 8.748724281972852e-08,
+          "calls": 71
+        },
+        {
+          "name": "__rustc::__rdl_dealloc",
+          "self_instructions": 69,
+          "fraction": 8.50228134445249e-08,
+          "calls": 69
+        },
+        {
+          "name": "__rustc::__rust_dealloc",
+          "self_instructions": 69,
+          "fraction": 8.50228134445249e-08,
+          "calls": 69
+        },
+        {
+          "name": "<num_bigint::big_digit::BigDigits>::normalize",
+          "self_instructions": 60,
+          "fraction": 7.393288125610861e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000014ed0",
+          "self_instructions": 55,
+          "fraction": 6.777180781809957e-08,
+          "calls": 1
+        },
+        {
+          "name": "<alloc::rc::Rc<alloc::string::String>>::drop_slow",
+          "self_instructions": 51,
+          "fraction": 6.284294906769232e-08,
+          "calls": 3
+        },
+        {
+          "name": "wcschr",
+          "self_instructions": 50,
+          "fraction": 6.161073438009051e-08,
+          "calls": 2
+        },
+        {
+          "name": "strlen",
+          "self_instructions": 50,
+          "fraction": 6.161073438009051e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x000000000001ce80",
+          "self_instructions": 49,
+          "fraction": 6.03785196924887e-08,
+          "calls": 1
+        },
+        {
+          "name": "std::io::stdio::stdout",
+          "self_instructions": 49,
+          "fraction": 6.03785196924887e-08,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000002a060",
+          "self_instructions": 48,
+          "fraction": 5.914630500488689e-08,
+          "calls": 1
+        },
+        {
+          "name": "memset",
+          "self_instructions": 48,
+          "fraction": 5.914630500488689e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x000000000001d700",
+          "self_instructions": 47,
+          "fraction": 5.7914090317285076e-08,
+          "calls": 1
+        },
+        {
+          "name": "wmemchr",
+          "self_instructions": 46,
+          "fraction": 5.668187562968327e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000025a00",
+          "self_instructions": 46,
+          "fraction": 5.668187562968327e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000000c2d0",
+          "self_instructions": 45,
+          "fraction": 5.544966094208146e-08,
+          "calls": 1
+        },
+        {
+          "name": "memcpy",
+          "self_instructions": 44,
+          "fraction": 5.4217446254479645e-08,
+          "calls": 2
+        },
+        {
+          "name": "memmove",
+          "self_instructions": 44,
+          "fraction": 5.4217446254479645e-08,
+          "calls": 2
+        },
+        {
+          "name": "pthread_mutex_lock",
+          "self_instructions": 44,
+          "fraction": 5.4217446254479645e-08,
+          "calls": 1
+        },
+        {
+          "name": "mremap",
+          "self_instructions": 42,
+          "fraction": 5.175301687927603e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x000000000498b720",
+          "self_instructions": 42,
+          "fraction": 5.175301687927603e-08,
+          "calls": 21
+        },
+        {
+          "name": "0x0000000000013d40",
+          "self_instructions": 40,
+          "fraction": 4.928858750407241e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000004b60",
+          "self_instructions": 40,
+          "fraction": 4.928858750407241e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000018d970",
+          "self_instructions": 39,
+          "fraction": 4.80563728164706e-08,
+          "calls": 1
+        },
+        {
+          "name": "__cxa_atexit",
+          "self_instructions": 39,
+          "fraction": 4.80563728164706e-08,
+          "calls": 1
+        },
+        {
+          "name": "ceil",
+          "self_instructions": 39,
+          "fraction": 4.80563728164706e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000001eec0",
+          "self_instructions": 37,
+          "fraction": 4.5591943441266976e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025db0",
+          "self_instructions": 36,
+          "fraction": 4.435972875366517e-08,
+          "calls": 6
+        },
+        {
+          "name": "__sigsetjmp",
+          "self_instructions": 35,
+          "fraction": 4.312751406606336e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000002830",
+          "self_instructions": 35,
+          "fraction": 4.312751406606336e-08,
+          "calls": 5
+        },
+        {
+          "name": "pthread_mutex_unlock",
+          "self_instructions": 34,
+          "fraction": 4.1895299378461545e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000002880",
+          "self_instructions": 34,
+          "fraction": 4.1895299378461545e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000047000",
+          "self_instructions": 33,
+          "fraction": 4.066308469085974e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001a9e0",
+          "self_instructions": 33,
+          "fraction": 4.066308469085974e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000017bc0",
+          "self_instructions": 33,
+          "fraction": 4.066308469085974e-08,
+          "calls": 1
+        },
+        {
+          "name": "relar_str_release",
+          "self_instructions": 33,
+          "fraction": 4.066308469085974e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000025e10",
+          "self_instructions": 32,
+          "fraction": 3.943087000325793e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000028ca0",
+          "self_instructions": 32,
+          "fraction": 3.943087000325793e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000048f0",
+          "self_instructions": 32,
+          "fraction": 3.943087000325793e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000025a20",
+          "self_instructions": 30,
+          "fraction": 3.696644062805431e-08,
+          "calls": 5
+        },
+        {
+          "name": "0x000000000001acd0",
+          "self_instructions": 30,
+          "fraction": 3.696644062805431e-08,
+          "calls": 6
+        },
+        {
+          "name": "0x00000000000258f0",
+          "self_instructions": 30,
+          "fraction": 3.696644062805431e-08,
+          "calls": 5
+        },
+        {
+          "name": "relar_str_retain",
+          "self_instructions": 30,
+          "fraction": 3.696644062805431e-08,
+          "calls": 6
+        },
+        {
+          "name": "0x00000000000c87b0",
+          "self_instructions": 28,
+          "fraction": 3.4502011252850684e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000002a150",
+          "self_instructions": 28,
+          "fraction": 3.4502011252850684e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000009f6f0",
+          "self_instructions": 27,
+          "fraction": 3.3269796565248876e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000098ef0",
+          "self_instructions": 26,
+          "fraction": 3.203758187764707e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000001640",
+          "self_instructions": 26,
+          "fraction": 3.203758187764707e-08,
+          "calls": 1
+        },
+        {
+          "name": "<std::sync::once::Once>::call_once_force::<<std::sync::once_lock::OnceLock<std::sync::poison::mutex::Mutex<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>>>::initialize<<std::sync::once_lock::OnceLock<std::sync::poison::mutex::Mutex<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>>>::get_or_init<std::io::stdio::stdin::{closure#0}>::{closure#0}, !>::{closure#0}>::{closure#0}",
+          "self_instructions": 26,
+          "fraction": 3.203758187764707e-08,
+          "calls": 1
+        },
+        {
+          "name": "<std::sync::once::Once>::call_once_force::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !>::{closure#0}>::{closure#0}",
+          "self_instructions": 26,
+          "fraction": 3.203758187764707e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcscmp",
+          "self_instructions": 25,
+          "fraction": 3.0805367190045253e-08,
+          "calls": 1
+        },
+        {
+          "name": "strchrnul",
+          "self_instructions": 25,
+          "fraction": 3.0805367190045253e-08,
+          "calls": 1
+        },
+        {
+          "name": "rindex",
+          "self_instructions": 25,
+          "fraction": 3.0805367190045253e-08,
+          "calls": 1
+        },
+        {
+          "name": "memrchr",
+          "self_instructions": 25,
+          "fraction": 3.0805367190045253e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000001000",
+          "self_instructions": 25,
+          "fraction": 3.0805367190045253e-08,
+          "calls": 1
+        },
+        {
+          "name": "__memset_chk",
+          "self_instructions": 24,
+          "fraction": 2.9573152502443445e-08,
+          "calls": 1
+        },
+        {
+          "name": "wmemcmp",
+          "self_instructions": 24,
+          "fraction": 2.9573152502443445e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025be0",
+          "self_instructions": 24,
+          "fraction": 2.9573152502443445e-08,
+          "calls": 4
+        },
+        {
+          "name": "0x0000000000013de0",
+          "self_instructions": 24,
+          "fraction": 2.9573152502443445e-08,
+          "calls": 2
+        },
+        {
+          "name": "memchr",
+          "self_instructions": 23,
+          "fraction": 2.8340937814841634e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001f540",
+          "self_instructions": 23,
+          "fraction": 2.8340937814841634e-08,
+          "calls": 0
+        },
+        {
+          "name": "__mempcpy_chk",
+          "self_instructions": 22,
+          "fraction": 2.7108723127239823e-08,
+          "calls": 1
+        },
+        {
+          "name": "__memcpy_chk",
+          "self_instructions": 22,
+          "fraction": 2.7108723127239823e-08,
+          "calls": 1
+        },
+        {
+          "name": "mempcpy",
+          "self_instructions": 22,
+          "fraction": 2.7108723127239823e-08,
+          "calls": 1
+        },
+        {
+          "name": "__memmove_chk",
+          "self_instructions": 22,
+          "fraction": 2.7108723127239823e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000013e0",
+          "self_instructions": 22,
+          "fraction": 2.7108723127239823e-08,
+          "calls": 1
+        },
+        {
+          "name": "<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !>",
+          "self_instructions": 22,
+          "fraction": 2.7108723127239823e-08,
+          "calls": 1
+        },
+        {
+          "name": "<std::sync::once_lock::OnceLock<std::sync::poison::mutex::Mutex<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::poison::mutex::Mutex<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>>>::get_or_init<std::io::stdio::stdin::{closure#0}>::{closure#0}, !>",
+          "self_instructions": 22,
+          "fraction": 2.7108723127239823e-08,
+          "calls": 1
+        },
+        {
+          "name": "strcasecmp",
+          "self_instructions": 21,
+          "fraction": 2.5876508439638015e-08,
+          "calls": 1
+        },
+        {
+          "name": "strncasecmp_l",
+          "self_instructions": 21,
+          "fraction": 2.5876508439638015e-08,
+          "calls": 1
+        },
+        {
+          "name": "strcasecmp_l",
+          "self_instructions": 21,
+          "fraction": 2.5876508439638015e-08,
+          "calls": 1
+        },
+        {
+          "name": "strncasecmp",
+          "self_instructions": 21,
+          "fraction": 2.5876508439638015e-08,
+          "calls": 1
+        },
+        {
+          "name": "strncmp",
+          "self_instructions": 21,
+          "fraction": 2.5876508439638015e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000014e60",
+          "self_instructions": 21,
+          "fraction": 2.5876508439638015e-08,
+          "calls": 7
+        },
+        {
+          "name": "wmemset",
+          "self_instructions": 20,
+          "fraction": 2.4644293752036203e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x000000000001abb0",
+          "self_instructions": 20,
+          "fraction": 2.4644293752036203e-08,
+          "calls": 4
+        },
+        {
+          "name": "strncpy",
+          "self_instructions": 19,
+          "fraction": 2.3412079064434395e-08,
+          "calls": 1
+        },
+        {
+          "name": "index",
+          "self_instructions": 19,
+          "fraction": 2.3412079064434395e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcslen",
+          "self_instructions": 19,
+          "fraction": 2.3412079064434395e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcsnlen",
+          "self_instructions": 19,
+          "fraction": 2.3412079064434395e-08,
+          "calls": 1
+        },
+        {
+          "name": "strcmp",
+          "self_instructions": 19,
+          "fraction": 2.3412079064434395e-08,
+          "calls": 1
+        },
+        {
+          "name": "stpncpy",
+          "self_instructions": 19,
+          "fraction": 2.3412079064434395e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001f680",
+          "self_instructions": 19,
+          "fraction": 2.3412079064434395e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000026640",
+          "self_instructions": 19,
+          "fraction": 2.3412079064434395e-08,
+          "calls": 1
+        },
+        {
+          "name": "std::io::stdio::stdin",
+          "self_instructions": 19,
+          "fraction": 2.3412079064434395e-08,
+          "calls": 3
+        },
+        {
+          "name": "wcpncpy",
+          "self_instructions": 18,
+          "fraction": 2.2179864376832584e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcsncpy",
+          "self_instructions": 18,
+          "fraction": 2.2179864376832584e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcscat",
+          "self_instructions": 18,
+          "fraction": 2.2179864376832584e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000098f40",
+          "self_instructions": 18,
+          "fraction": 2.2179864376832584e-08,
+          "calls": 2
+        },
+        {
+          "name": "munmap",
+          "self_instructions": 18,
+          "fraction": 2.2179864376832584e-08,
+          "calls": 3
+        },
+        {
+          "name": "log2",
+          "self_instructions": 18,
+          "fraction": 2.2179864376832584e-08,
+          "calls": 2
+        },
+        {
+          "name": "strcat",
+          "self_instructions": 17,
+          "fraction": 2.0947649689230773e-08,
+          "calls": 1
+        },
+        {
+          "name": "__ctype_init",
+          "self_instructions": 17,
+          "fraction": 2.0947649689230773e-08,
+          "calls": 1
+        },
+        {
+          "name": "strcpy",
+          "self_instructions": 17,
+          "fraction": 2.0947649689230773e-08,
+          "calls": 1
+        },
+        {
+          "name": "stpcpy",
+          "self_instructions": 17,
+          "fraction": 2.0947649689230773e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001a930",
+          "self_instructions": 17,
+          "fraction": 2.0947649689230773e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000014e70",
+          "self_instructions": 17,
+          "fraction": 2.0947649689230773e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcscpy",
+          "self_instructions": 16,
+          "fraction": 1.9715435001628965e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025300",
+          "self_instructions": 16,
+          "fraction": 1.9715435001628965e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001fc70",
+          "self_instructions": 15,
+          "fraction": 1.8483220314027153e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025bb0",
+          "self_instructions": 14,
+          "fraction": 1.7251005626425342e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000013370",
+          "self_instructions": 14,
+          "fraction": 1.7251005626425342e-08,
+          "calls": 1
+        },
+        {
+          "name": "__call_tls_dtors",
+          "self_instructions": 13,
+          "fraction": 1.6018790938823534e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001cf40",
+          "self_instructions": 13,
+          "fraction": 1.6018790938823534e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000017390",
+          "self_instructions": 13,
+          "fraction": 1.6018790938823534e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000104a0",
+          "self_instructions": 13,
+          "fraction": 1.6018790938823534e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000017170",
+          "self_instructions": 13,
+          "fraction": 1.6018790938823534e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000010d0",
+          "self_instructions": 13,
+          "fraction": 1.6018790938823534e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000005ad0",
+          "self_instructions": 13,
+          "fraction": 1.6018790938823534e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000002a0d0",
+          "self_instructions": 12,
+          "fraction": 1.4786576251221723e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000104e0",
+          "self_instructions": 12,
+          "fraction": 1.4786576251221723e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000171b0",
+          "self_instructions": 12,
+          "fraction": 1.4786576251221723e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000001110",
+          "self_instructions": 12,
+          "fraction": 1.4786576251221723e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000005b10",
+          "self_instructions": 12,
+          "fraction": 1.4786576251221723e-08,
+          "calls": 1
+        },
+        {
+          "name": "getrlimit",
+          "self_instructions": 10,
+          "fraction": 1.2322146876018102e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001d1f0",
+          "self_instructions": 10,
+          "fraction": 1.2322146876018102e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000004940",
+          "self_instructions": 10,
+          "fraction": 1.2322146876018102e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000258c0",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "cos",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "logf",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "sincosf",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "powf",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "expm1",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "exp2f",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "log2f",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "__atan2_finite",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "sin",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "cosf",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000002f300",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "__exp_finite",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "expf",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "__log_finite",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "sinf",
+          "self_instructions": 9,
+          "fraction": 1.1089932188416292e-08,
+          "calls": 1
+        },
+        {
+          "name": "read",
+          "self_instructions": 8,
+          "fraction": 9.857717500814482e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000249c0",
+          "self_instructions": 8,
+          "fraction": 9.857717500814482e-09,
+          "calls": 1
+        },
+        {
+          "name": "__acos_finite",
+          "self_instructions": 8,
+          "fraction": 9.857717500814482e-09,
+          "calls": 1
+        },
+        {
+          "name": "__asin_finite",
+          "self_instructions": 8,
+          "fraction": 9.857717500814482e-09,
+          "calls": 1
+        },
+        {
+          "name": "__pow_finite",
+          "self_instructions": 8,
+          "fraction": 9.857717500814482e-09,
+          "calls": 1
+        },
+        {
+          "name": "sincos",
+          "self_instructions": 8,
+          "fraction": 9.857717500814482e-09,
+          "calls": 1
+        },
+        {
+          "name": "exit",
+          "self_instructions": 7,
+          "fraction": 8.625502813212671e-09,
+          "calls": 1
+        },
+        {
+          "name": "strspn",
+          "self_instructions": 7,
+          "fraction": 8.625502813212671e-09,
+          "calls": 1
+        },
+        {
+          "name": "strcspn",
+          "self_instructions": 7,
+          "fraction": 8.625502813212671e-09,
+          "calls": 1
+        },
+        {
+          "name": "strpbrk",
+          "self_instructions": 7,
+          "fraction": 8.625502813212671e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000118000",
+          "self_instructions": 7,
+          "fraction": 8.625502813212671e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000483d000",
+          "self_instructions": 7,
+          "fraction": 8.625502813212671e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000004939000",
+          "self_instructions": 7,
+          "fraction": 8.625502813212671e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000485c000",
+          "self_instructions": 7,
+          "fraction": 8.625502813212671e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025de0",
+          "self_instructions": 6,
+          "fraction": 7.393288125610861e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000013f00",
+          "self_instructions": 6,
+          "fraction": 7.393288125610861e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001a8d0",
+          "self_instructions": 6,
+          "fraction": 7.393288125610861e-09,
+          "calls": 1
+        },
+        {
+          "name": "fma",
+          "self_instructions": 6,
+          "fraction": 7.393288125610861e-09,
+          "calls": 1
+        },
+        {
+          "name": "_dl_audit_preinit",
+          "self_instructions": 5,
+          "fraction": 6.161073438009051e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000000c200",
+          "self_instructions": 5,
+          "fraction": 6.161073438009051e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000010430",
+          "self_instructions": 5,
+          "fraction": 6.161073438009051e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000017100",
+          "self_instructions": 5,
+          "fraction": 6.161073438009051e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000001060",
+          "self_instructions": 5,
+          "fraction": 6.161073438009051e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000005a60",
+          "self_instructions": 5,
+          "fraction": 6.161073438009051e-09,
+          "calls": 1
+        },
+        {
+          "name": "_Exit",
+          "self_instructions": 4,
+          "fraction": 4.928858750407241e-09,
+          "calls": 1
+        },
+        {
+          "name": "_dl_debug_state",
+          "self_instructions": 4,
+          "fraction": 4.928858750407241e-09,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000017b40",
+          "self_instructions": 4,
+          "fraction": 4.928858750407241e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000001ecadc",
+          "self_instructions": 4,
+          "fraction": 4.928858750407241e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000048da3a8",
+          "self_instructions": 4,
+          "fraction": 4.928858750407241e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000483d294",
+          "self_instructions": 4,
+          "fraction": 4.928858750407241e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000495c748",
+          "self_instructions": 4,
+          "fraction": 4.928858750407241e-09,
+          "calls": 1
+        },
+        {
+          "name": "std::sys::args::unix::imp::ARGV_INIT_ARRAY::init_wrapper",
+          "self_instructions": 4,
+          "fraction": 4.928858750407241e-09,
+          "calls": 1
+        },
+        {
+          "name": "_setjmp",
+          "self_instructions": 3,
+          "fraction": 3.6966440628054307e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001ef80",
+          "self_instructions": 2,
+          "fraction": 2.4644293752036206e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000049393c0",
+          "self_instructions": 2,
+          "fraction": 2.4644293752036206e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000498b660",
+          "self_instructions": 2,
+          "fraction": 2.4644293752036206e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000498b7b0",
+          "self_instructions": 2,
+          "fraction": 2.4644293752036206e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000485c220",
+          "self_instructions": 2,
+          "fraction": 2.4644293752036206e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000483d030",
+          "self_instructions": 2,
+          "fraction": 2.4644293752036206e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000118050",
+          "self_instructions": 1,
+          "fraction": 1.2322146876018103e-09,
+          "calls": 1
+        }
+      ],
+      "build_description": "Exploratory intermediate build: borrowed locals/unchanged parameters plus #[inline] index; before wrapping normalization and inline floor/mod. See corresponding ablation record for hashes.",
+      "original_uncompressed_trace_sha256": "d6459d4189c8a73c6503bfdf8ebe77c1704402ac2845574559392d74d80b091b"
+    },
+    "after": {
+      "binary_sha256": "b9f2e7f0fa1918733da4aa5a7aca21d49c0c01974aef4ef1d68996462ad9e321",
+      "llvm_ir_sha256": "f2c59d959c798411e2b649f90858e1129b5b438b59e5aadd0b7425515d8e65b1",
+      "trace": "profiles/2026-10-17-route-planner-after.callgrind.gz",
+      "trace_sha256": "10abaee836a35e4149637da7a2f3f9686e5cb0bf80f716e2b3166a13af9f3ee4",
+      "uncompressed_trace_sha256": "352369a4ce67baeefc01988e6ed657aa0d6ac4f3a6565f6961f60e21fc218e3f",
+      "stdout_sha256": "456b386057dde7f2648d9bed6575e1d5fe38d84a42732e6fcdf60366a100d62a",
+      "total_instructions": 699985140,
+      "functions": [
+        {
+          "name": "fn_6",
+          "self_instructions": 302737009,
+          "fraction": 0.4324906225866452,
+          "calls": 1
+        },
+        {
+          "name": "relar_list_get",
+          "self_instructions": 231488850,
+          "fraction": 0.33070537754558615,
+          "calls": 9259554
+        },
+        {
+          "name": "relar_list_set",
+          "self_instructions": 105412833,
+          "fraction": 0.15059295830194339,
+          "calls": 3904179
+        },
+        {
+          "name": "fn_0",
+          "self_instructions": 18639984,
+          "fraction": 0.02662911386947443,
+          "calls": 196608
+        },
+        {
+          "name": "relar_list_append",
+          "self_instructions": 18335095,
+          "fraction": 0.026193548908766833,
+          "calls": 591385
+        },
+        {
+          "name": "relar_list_repeat",
+          "self_instructions": 8651226,
+          "fraction": 0.01235915665295409,
+          "calls": 6
+        },
+        {
+          "name": "relar_list_pop",
+          "self_instructions": 5898000,
+          "fraction": 0.008425893155388985,
+          "calls": 393200
+        },
+        {
+          "name": "relar_list_len",
+          "self_instructions": 4718512,
+          "fraction": 0.006740874527707831,
+          "calls": 589814
+        },
+        {
+          "name": "<alloc::rc::Rc<relar_runtime::List>>::drop_slow",
+          "self_instructions": 3549432,
+          "fraction": 0.005070724787100481,
+          "calls": 27
+        },
+        {
+          "name": "0x000000000000a530",
+          "self_instructions": 101257,
+          "fraction": 0.00014465592798155688,
+          "calls": 300
+        },
+        {
+          "name": "0x0000000000188d80",
+          "self_instructions": 89658,
+          "fraction": 0.00012808557621666082,
+          "calls": 105
+        },
+        {
+          "name": "0x000000000000f240",
+          "self_instructions": 77242,
+          "fraction": 0.00011034805681732044,
+          "calls": 7
+        },
+        {
+          "name": "0x000000000000b0d0",
+          "self_instructions": 52904,
+          "fraction": 7.55787472859781e-05,
+          "calls": 300
+        },
+        {
+          "name": "0x00000000000158b0",
+          "self_instructions": 49057,
+          "fraction": 7.008291633162384e-05,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000274e0",
+          "self_instructions": 28055,
+          "fraction": 4.0079422257449635e-05,
+          "calls": 754
+        },
+        {
+          "name": "0x000000000000a390",
+          "self_instructions": 18808,
+          "fraction": 2.6869141822067822e-05,
+          "calls": 298
+        },
+        {
+          "name": "0x00000000000ab650",
+          "self_instructions": 18502,
+          "fraction": 2.6431989684809594e-05,
+          "calls": 88
+        },
+        {
+          "name": "0x00000000000ab250",
+          "self_instructions": 14194,
+          "fraction": 2.0277573321056502e-05,
+          "calls": 159
+        },
+        {
+          "name": "0x0000000000015c90",
+          "self_instructions": 12375,
+          "fraction": 1.7678946727354812e-05,
+          "calls": 6
+        },
+        {
+          "name": "realloc",
+          "self_instructions": 9192,
+          "fraction": 1.3131707338815792e-05,
+          "calls": 114
+        },
+        {
+          "name": "0x00000000000ad030",
+          "self_instructions": 8363,
+          "fraction": 1.194739648330249e-05,
+          "calls": 112
+        },
+        {
+          "name": "<alloc::raw_vec::RawVecInner>::finish_grow",
+          "self_instructions": 5883,
+          "fraction": 8.404464129052797e-06,
+          "calls": 147
+        },
+        {
+          "name": "0x0000000000018b30",
+          "self_instructions": 5364,
+          "fraction": 7.663019817820703e-06,
+          "calls": 24
+        },
+        {
+          "name": "0x0000000000007a20",
+          "self_instructions": 5246,
+          "fraction": 7.494444810642694e-06,
+          "calls": 4
+        },
+        {
+          "name": "malloc",
+          "self_instructions": 3181,
+          "fraction": 4.544382185027528e-06,
+          "calls": 71
+        },
+        {
+          "name": "__rustc::__rdl_realloc",
+          "self_instructions": 2508,
+          "fraction": 3.5829332034105754e-06,
+          "calls": 114
+        },
+        {
+          "name": "0x00000000000a9bb0",
+          "self_instructions": 2238,
+          "fraction": 3.1972107293591974e-06,
+          "calls": 79
+        },
+        {
+          "name": "0x000000000000c380",
+          "self_instructions": 2227,
+          "fraction": 3.181496110045993e-06,
+          "calls": 80
+        },
+        {
+          "name": "0x0000000000016630",
+          "self_instructions": 2176,
+          "fraction": 3.1086374205029554e-06,
+          "calls": 25
+        },
+        {
+          "name": "free",
+          "self_instructions": 2154,
+          "fraction": 3.077208181876547e-06,
+          "calls": 69
+        },
+        {
+          "name": "0x0000000000002a40",
+          "self_instructions": 1972,
+          "fraction": 2.8172026623308032e-06,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000020af0",
+          "self_instructions": 1777,
+          "fraction": 2.5386253199603636e-06,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000092f0",
+          "self_instructions": 1654,
+          "fraction": 2.362907304003625e-06,
+          "calls": 10
+        },
+        {
+          "name": "core::slice::memchr::memrchr",
+          "self_instructions": 1116,
+          "fraction": 1.5943195594123613e-06,
+          "calls": 18
+        },
+        {
+          "name": "<std::io::stdio::StdoutLock as std::io::Write>::write_all",
+          "self_instructions": 999,
+          "fraction": 1.4271731539900976e-06,
+          "calls": 18
+        },
+        {
+          "name": "0x000000000000c6c0",
+          "self_instructions": 949,
+          "fraction": 1.3557430662028055e-06,
+          "calls": 5
+        },
+        {
+          "name": "0x0000000000016710",
+          "self_instructions": 921,
+          "fraction": 1.3157422170419219e-06,
+          "calls": 3
+        },
+        {
+          "name": "__tunable_get_val",
+          "self_instructions": 909,
+          "fraction": 1.2985989959729717e-06,
+          "calls": 39
+        },
+        {
+          "name": "0x00000000000a9e50",
+          "self_instructions": 849,
+          "fraction": 1.212882890628221e-06,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000028b00",
+          "self_instructions": 759,
+          "fraction": 1.0843087326110952e-06,
+          "calls": 25
+        },
+        {
+          "name": "0x00000000000272b0",
+          "self_instructions": 758,
+          "fraction": 1.0828801308553493e-06,
+          "calls": 24
+        },
+        {
+          "name": "core::fmt::write",
+          "self_instructions": 675,
+          "fraction": 9.643061851284442e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000000c070",
+          "self_instructions": 660,
+          "fraction": 9.428771587922566e-07,
+          "calls": 22
+        },
+        {
+          "name": "__rustc::__rdl_alloc",
+          "self_instructions": 639,
+          "fraction": 9.128765219215939e-07,
+          "calls": 71
+        },
+        {
+          "name": "0x00000000000201d0",
+          "self_instructions": 636,
+          "fraction": 9.085907166543564e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000060a0",
+          "self_instructions": 573,
+          "fraction": 8.185888060423683e-07,
+          "calls": 3
+        },
+        {
+          "name": "<u64>::_fmt_inner",
+          "self_instructions": 564,
+          "fraction": 8.057313902406556e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000000c1c0",
+          "self_instructions": 546,
+          "fraction": 7.800165586372305e-07,
+          "calls": 12
+        },
+        {
+          "name": "0x000000000001cfe0",
+          "self_instructions": 544,
+          "fraction": 7.771593551257389e-07,
+          "calls": 11
+        },
+        {
+          "name": "<std::io::buffered::bufwriter::BufWriter<std::io::stdio::StdoutRaw>>::flush_buf",
+          "self_instructions": 531,
+          "fraction": 7.585875323010428e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000001e1d0",
+          "self_instructions": 525,
+          "fraction": 7.500159217665677e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000018e00",
+          "self_instructions": 516,
+          "fraction": 7.371585059648552e-07,
+          "calls": 12
+        },
+        {
+          "name": "<core::fmt::Formatter>::pad_integral",
+          "self_instructions": 513,
+          "fraction": 7.328727006976177e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x0000000000005c80",
+          "self_instructions": 512,
+          "fraction": 7.314440989418718e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x0000000000013290",
+          "self_instructions": 498,
+          "fraction": 7.1144367436143e-07,
+          "calls": 12
+        },
+        {
+          "name": "0x000000000001c940",
+          "self_instructions": 494,
+          "fraction": 7.057292673384467e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000026b10",
+          "self_instructions": 491,
+          "fraction": 7.014434620712091e-07,
+          "calls": 11
+        },
+        {
+          "name": "0x0000000000025d00",
+          "self_instructions": 463,
+          "fraction": 6.614426129103255e-07,
+          "calls": 20
+        },
+        {
+          "name": "relar_list_new",
+          "self_instructions": 462,
+          "fraction": 6.600140111545796e-07,
+          "calls": 21
+        },
+        {
+          "name": "relar_list_release",
+          "self_instructions": 456,
+          "fraction": 6.514424006201045e-07,
+          "calls": 54
+        },
+        {
+          "name": "_dl_catch_exception",
+          "self_instructions": 420,
+          "fraction": 6.000127374132543e-07,
+          "calls": 10
+        },
+        {
+          "name": "0x000000000001a900",
+          "self_instructions": 411,
+          "fraction": 5.871553216115417e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000028930",
+          "self_instructions": 408,
+          "fraction": 5.828695163443041e-07,
+          "calls": 1
+        },
+        {
+          "name": "sbrk",
+          "self_instructions": 395,
+          "fraction": 5.642976935196082e-07,
+          "calls": 14
+        },
+        {
+          "name": "relar_int_parse",
+          "self_instructions": 388,
+          "fraction": 5.542974812293872e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000004330",
+          "self_instructions": 383,
+          "fraction": 5.47154472450658e-07,
+          "calls": 6
+        },
+        {
+          "name": "num_bigint::biguint::convert::from_radix_digits_be",
+          "self_instructions": 381,
+          "fraction": 5.442972689391664e-07,
+          "calls": 3
+        },
+        {
+          "name": "__cpu_indicator_init",
+          "self_instructions": 364,
+          "fraction": 5.20011039091487e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000007840",
+          "self_instructions": 364,
+          "fraction": 5.20011039091487e-07,
+          "calls": 5
+        },
+        {
+          "name": "0x00000000000133a0",
+          "self_instructions": 348,
+          "fraction": 4.971534109995535e-07,
+          "calls": 2
+        },
+        {
+          "name": "0x00000000000141f0",
+          "self_instructions": 343,
+          "fraction": 4.900104022208242e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000026910",
+          "self_instructions": 339,
+          "fraction": 4.842959951978409e-07,
+          "calls": 23
+        },
+        {
+          "name": "0x00000000000073f0",
+          "self_instructions": 323,
+          "fraction": 4.6143836710590743e-07,
+          "calls": 1
+        },
+        {
+          "name": "std::io::read_until::<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>",
+          "self_instructions": 317,
+          "fraction": 4.5286675657143234e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000015770",
+          "self_instructions": 310,
+          "fraction": 4.4286654428121145e-07,
+          "calls": 5
+        },
+        {
+          "name": "core::str::converts::from_utf8",
+          "self_instructions": 309,
+          "fraction": 4.4143794252546564e-07,
+          "calls": 6
+        },
+        {
+          "name": "<num_bigint::biguint::BigUint as num_traits::Num>::from_str_radix",
+          "self_instructions": 306,
+          "fraction": 4.371521372582281e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000005670",
+          "self_instructions": 304,
+          "fraction": 4.342949337467364e-07,
+          "calls": 6
+        },
+        {
+          "name": "0x0000000000026920",
+          "self_instructions": 298,
+          "fraction": 4.2572332321226133e-07,
+          "calls": 21
+        },
+        {
+          "name": "<i64 as core::fmt::Display>::fmt",
+          "self_instructions": 297,
+          "fraction": 4.2429472145651547e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000000bca0",
+          "self_instructions": 274,
+          "fraction": 3.914368810743611e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000005380",
+          "self_instructions": 270,
+          "fraction": 3.857224740513777e-07,
+          "calls": 1
+        },
+        {
+          "name": "relar_print_int",
+          "self_instructions": 270,
+          "fraction": 3.857224740513777e-07,
+          "calls": 9
+        },
+        {
+          "name": "<std::io::default_write_fmt::Adapter<std::io::stdio::StdoutLock> as core::fmt::Write>::write_str",
+          "self_instructions": 270,
+          "fraction": 3.857224740513777e-07,
+          "calls": 18
+        },
+        {
+          "name": "0x000000000001ca20",
+          "self_instructions": 266,
+          "fraction": 3.8000806702839435e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000a92d0",
+          "self_instructions": 264,
+          "fraction": 3.7715086351690267e-07,
+          "calls": 66
+        },
+        {
+          "name": "0x000000000000c610",
+          "self_instructions": 255,
+          "fraction": 3.6429344771519004e-07,
+          "calls": 5
+        },
+        {
+          "name": "0x000000000001d680",
+          "self_instructions": 248,
+          "fraction": 3.5429323542496915e-07,
+          "calls": 2
+        },
+        {
+          "name": "0x00000000000043a0",
+          "self_instructions": 246,
+          "fraction": 3.5143603191347747e-07,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000026000",
+          "self_instructions": 240,
+          "fraction": 3.4286442137900244e-07,
+          "calls": 10
+        },
+        {
+          "name": "<str>::replace::<char>",
+          "self_instructions": 234,
+          "fraction": 3.3429281084452736e-07,
+          "calls": 3
+        },
+        {
+          "name": "__cxa_finalize",
+          "self_instructions": 232,
+          "fraction": 3.314356073330357e-07,
+          "calls": 4
+        },
+        {
+          "name": "<std::io::stdio::Stdout>::lock",
+          "self_instructions": 225,
+          "fraction": 3.214353950428148e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x00000000000185a0",
+          "self_instructions": 223,
+          "fraction": 3.1857819153132306e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000018ef0",
+          "self_instructions": 222,
+          "fraction": 3.1714958977557724e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025b40",
+          "self_instructions": 215,
+          "fraction": 3.0714937748535635e-07,
+          "calls": 10
+        },
+        {
+          "name": "_dl_allocate_tls_init",
+          "self_instructions": 209,
+          "fraction": 2.9857776695088126e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000001090",
+          "self_instructions": 207,
+          "fraction": 2.957205634393896e-07,
+          "calls": 6
+        },
+        {
+          "name": "0x0000000000006b50",
+          "self_instructions": 207,
+          "fraction": 2.957205634393896e-07,
+          "calls": 9
+        },
+        {
+          "name": "<alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>",
+          "self_instructions": 201,
+          "fraction": 2.871489529049145e-07,
+          "calls": 6
+        },
+        {
+          "name": "0x00000000000029f0",
+          "self_instructions": 198,
+          "fraction": 2.82863147637677e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x00000000000aa980",
+          "self_instructions": 189,
+          "fraction": 2.700057318359644e-07,
+          "calls": 3
+        },
+        {
+          "name": "<std::io::stdio::Stdin>::read_line",
+          "self_instructions": 189,
+          "fraction": 2.700057318359644e-07,
+          "calls": 3
+        },
+        {
+          "name": "<core::fmt::Formatter>::pad_integral::write_prefix",
+          "self_instructions": 189,
+          "fraction": 2.700057318359644e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x0000000000004ab0",
+          "self_instructions": 184,
+          "fraction": 2.6286272305723517e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001d400",
+          "self_instructions": 172,
+          "fraction": 2.4571950198828506e-07,
+          "calls": 4
+        },
+        {
+          "name": "<std::io::stdio::StdoutLock as std::io::Write>::write_fmt",
+          "self_instructions": 171,
+          "fraction": 2.4429090023253925e-07,
+          "calls": 9
+        },
+        {
+          "name": "0x0000000000079f90",
+          "self_instructions": 162,
+          "fraction": 2.3143348443082662e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x00000000000131b0",
+          "self_instructions": 162,
+          "fraction": 2.3143348443082662e-07,
+          "calls": 6
+        },
+        {
+          "name": "_IO_flush_all",
+          "self_instructions": 161,
+          "fraction": 2.3000488267508078e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000968c0",
+          "self_instructions": 152,
+          "fraction": 2.171474668733682e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000014000",
+          "self_instructions": 147,
+          "fraction": 2.10004458094639e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000006f30",
+          "self_instructions": 143,
+          "fraction": 2.042900510716556e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000005780",
+          "self_instructions": 142,
+          "fraction": 2.0286144931590977e-07,
+          "calls": 1
+        },
+        {
+          "name": "relar_input",
+          "self_instructions": 141,
+          "fraction": 2.014328475601639e-07,
+          "calls": 3
+        },
+        {
+          "name": "__default_morecore",
+          "self_instructions": 140,
+          "fraction": 2.0000424580441807e-07,
+          "calls": 14
+        },
+        {
+          "name": "<str>::trim_matches::<<char>::is_whitespace>",
+          "self_instructions": 136,
+          "fraction": 1.9428983878143471e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000498b6b0",
+          "self_instructions": 126,
+          "fraction": 1.8000382122397628e-07,
+          "calls": 63
+        },
+        {
+          "name": "0x0000000000006d90",
+          "self_instructions": 124,
+          "fraction": 1.7714661771248457e-07,
+          "calls": 2
+        },
+        {
+          "name": "<relar_runtime::Int>::new",
+          "self_instructions": 120,
+          "fraction": 1.7143221068950122e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x00000000000acef0",
+          "self_instructions": 114,
+          "fraction": 1.6286060015502614e-07,
+          "calls": 1
+        },
+        {
+          "name": "__rustc::__rust_realloc",
+          "self_instructions": 114,
+          "fraction": 1.6286060015502614e-07,
+          "calls": 114
+        },
+        {
+          "name": "0x000000000001d4d0",
+          "self_instructions": 111,
+          "fraction": 1.5857479488778862e-07,
+          "calls": 1
+        },
+        {
+          "name": "<num_bigint::bigint::BigInt>::from_biguint",
+          "self_instructions": 105,
+          "fraction": 1.5000318435331356e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000025c40",
+          "self_instructions": 100,
+          "fraction": 1.4286017557458435e-07,
+          "calls": 4
+        },
+        {
+          "name": "0x00000000000165a0",
+          "self_instructions": 98,
+          "fraction": 1.4000297206309264e-07,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000028aa0",
+          "self_instructions": 98,
+          "fraction": 1.4000297206309264e-07,
+          "calls": 3
+        },
+        {
+          "name": "<std::sys::sync::once::futex::Once>::call",
+          "self_instructions": 98,
+          "fraction": 1.4000297206309264e-07,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000020040",
+          "self_instructions": 95,
+          "fraction": 1.3571716679585513e-07,
+          "calls": 1
+        },
+        {
+          "name": "(below main)",
+          "self_instructions": 93,
+          "fraction": 1.3285996328436342e-07,
+          "calls": 2
+        },
+        {
+          "name": "__libc_early_init",
+          "self_instructions": 92,
+          "fraction": 1.3143136152861759e-07,
+          "calls": 1
+        },
+        {
+          "name": "brk",
+          "self_instructions": 90,
+          "fraction": 1.285741580171259e-07,
+          "calls": 10
+        },
+        {
+          "name": "0x00000000000a94e0",
+          "self_instructions": 90,
+          "fraction": 1.285741580171259e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000014bd0",
+          "self_instructions": 84,
+          "fraction": 1.2000254748265085e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000010e190",
+          "self_instructions": 80,
+          "fraction": 1.1428814045966747e-07,
+          "calls": 4
+        },
+        {
+          "name": "0x0000000000047910",
+          "self_instructions": 79,
+          "fraction": 1.1285953870392163e-07,
+          "calls": 1
+        },
+        {
+          "name": "mmap",
+          "self_instructions": 78,
+          "fraction": 1.1143093694817578e-07,
+          "calls": 3
+        },
+        {
+          "name": "strnlen",
+          "self_instructions": 75,
+          "fraction": 1.0714513168093825e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000012a9d0",
+          "self_instructions": 75,
+          "fraction": 1.0714513168093825e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000018400",
+          "self_instructions": 74,
+          "fraction": 1.0571652992519241e-07,
+          "calls": 1
+        },
+        {
+          "name": "write",
+          "self_instructions": 72,
+          "fraction": 1.0285932641370072e-07,
+          "calls": 9
+        },
+        {
+          "name": "bcmp",
+          "self_instructions": 72,
+          "fraction": 1.0285932641370072e-07,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000020920",
+          "self_instructions": 71,
+          "fraction": 1.0143072465795489e-07,
+          "calls": 1
+        },
+        {
+          "name": "__rustc::__rust_alloc",
+          "self_instructions": 71,
+          "fraction": 1.0143072465795489e-07,
+          "calls": 71
+        },
+        {
+          "name": "__rustc::__rust_no_alloc_shim_is_unstable_v2",
+          "self_instructions": 71,
+          "fraction": 1.0143072465795489e-07,
+          "calls": 71
+        },
+        {
+          "name": "__rustc::__rust_dealloc",
+          "self_instructions": 69,
+          "fraction": 9.85735211464632e-08,
+          "calls": 69
+        },
+        {
+          "name": "__rustc::__rdl_dealloc",
+          "self_instructions": 69,
+          "fraction": 9.85735211464632e-08,
+          "calls": 69
+        },
+        {
+          "name": "<num_bigint::big_digit::BigDigits>::normalize",
+          "self_instructions": 60,
+          "fraction": 8.571610534475061e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000014ed0",
+          "self_instructions": 55,
+          "fraction": 7.857309656602139e-08,
+          "calls": 1
+        },
+        {
+          "name": "<alloc::rc::Rc<alloc::string::String>>::drop_slow",
+          "self_instructions": 51,
+          "fraction": 7.285868954303801e-08,
+          "calls": 3
+        },
+        {
+          "name": "wcschr",
+          "self_instructions": 50,
+          "fraction": 7.143008778729217e-08,
+          "calls": 2
+        },
+        {
+          "name": "strlen",
+          "self_instructions": 50,
+          "fraction": 7.143008778729217e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x000000000001ce80",
+          "self_instructions": 49,
+          "fraction": 7.000148603154632e-08,
+          "calls": 1
+        },
+        {
+          "name": "std::io::stdio::stdout",
+          "self_instructions": 49,
+          "fraction": 7.000148603154632e-08,
+          "calls": 9
+        },
+        {
+          "name": "0x000000000002a060",
+          "self_instructions": 48,
+          "fraction": 6.857288427580048e-08,
+          "calls": 1
+        },
+        {
+          "name": "memset",
+          "self_instructions": 48,
+          "fraction": 6.857288427580048e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x000000000001d700",
+          "self_instructions": 47,
+          "fraction": 6.714428252005464e-08,
+          "calls": 1
+        },
+        {
+          "name": "wmemchr",
+          "self_instructions": 46,
+          "fraction": 6.571568076430879e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000025a00",
+          "self_instructions": 46,
+          "fraction": 6.571568076430879e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000000c2d0",
+          "self_instructions": 45,
+          "fraction": 6.428707900856295e-08,
+          "calls": 1
+        },
+        {
+          "name": "memmove",
+          "self_instructions": 44,
+          "fraction": 6.285847725281712e-08,
+          "calls": 2
+        },
+        {
+          "name": "memcpy",
+          "self_instructions": 44,
+          "fraction": 6.285847725281712e-08,
+          "calls": 2
+        },
+        {
+          "name": "pthread_mutex_lock",
+          "self_instructions": 44,
+          "fraction": 6.285847725281712e-08,
+          "calls": 1
+        },
+        {
+          "name": "mremap",
+          "self_instructions": 42,
+          "fraction": 6.000127374132543e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x000000000498b720",
+          "self_instructions": 42,
+          "fraction": 6.000127374132543e-08,
+          "calls": 21
+        },
+        {
+          "name": "0x0000000000013d40",
+          "self_instructions": 40,
+          "fraction": 5.7144070229833736e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000004b60",
+          "self_instructions": 40,
+          "fraction": 5.7144070229833736e-08,
+          "calls": 1
+        },
+        {
+          "name": "__cxa_atexit",
+          "self_instructions": 39,
+          "fraction": 5.571546847408789e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000018d970",
+          "self_instructions": 39,
+          "fraction": 5.571546847408789e-08,
+          "calls": 1
+        },
+        {
+          "name": "ceil",
+          "self_instructions": 39,
+          "fraction": 5.571546847408789e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x000000000001eec0",
+          "self_instructions": 37,
+          "fraction": 5.285826496259621e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025db0",
+          "self_instructions": 36,
+          "fraction": 5.142966320685036e-08,
+          "calls": 6
+        },
+        {
+          "name": "__sigsetjmp",
+          "self_instructions": 35,
+          "fraction": 5.000106145110452e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000002830",
+          "self_instructions": 35,
+          "fraction": 5.000106145110452e-08,
+          "calls": 5
+        },
+        {
+          "name": "pthread_mutex_unlock",
+          "self_instructions": 34,
+          "fraction": 4.857245969535868e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000002880",
+          "self_instructions": 34,
+          "fraction": 4.857245969535868e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000047000",
+          "self_instructions": 33,
+          "fraction": 4.7143857939612834e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001a9e0",
+          "self_instructions": 33,
+          "fraction": 4.7143857939612834e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000017bc0",
+          "self_instructions": 33,
+          "fraction": 4.7143857939612834e-08,
+          "calls": 1
+        },
+        {
+          "name": "relar_str_release",
+          "self_instructions": 33,
+          "fraction": 4.7143857939612834e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x00000000000048f0",
+          "self_instructions": 32,
+          "fraction": 4.571525618386699e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000028ca0",
+          "self_instructions": 32,
+          "fraction": 4.571525618386699e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025e10",
+          "self_instructions": 32,
+          "fraction": 4.571525618386699e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x00000000000258f0",
+          "self_instructions": 30,
+          "fraction": 4.2858052672375305e-08,
+          "calls": 5
+        },
+        {
+          "name": "0x000000000001acd0",
+          "self_instructions": 30,
+          "fraction": 4.2858052672375305e-08,
+          "calls": 6
+        },
+        {
+          "name": "0x0000000000025a20",
+          "self_instructions": 30,
+          "fraction": 4.2858052672375305e-08,
+          "calls": 5
+        },
+        {
+          "name": "relar_str_retain",
+          "self_instructions": 30,
+          "fraction": 4.2858052672375305e-08,
+          "calls": 6
+        },
+        {
+          "name": "0x00000000000c87b0",
+          "self_instructions": 28,
+          "fraction": 4.0000849160883615e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000002a150",
+          "self_instructions": 28,
+          "fraction": 4.0000849160883615e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000009f6f0",
+          "self_instructions": 27,
+          "fraction": 3.857224740513777e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000098ef0",
+          "self_instructions": 26,
+          "fraction": 3.714364564939193e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000001640",
+          "self_instructions": 26,
+          "fraction": 3.714364564939193e-08,
+          "calls": 1
+        },
+        {
+          "name": "<std::sync::once::Once>::call_once_force::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !>::{closure#0}>::{closure#0}",
+          "self_instructions": 26,
+          "fraction": 3.714364564939193e-08,
+          "calls": 1
+        },
+        {
+          "name": "<std::sync::once::Once>::call_once_force::<<std::sync::once_lock::OnceLock<std::sync::poison::mutex::Mutex<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>>>::initialize<<std::sync::once_lock::OnceLock<std::sync::poison::mutex::Mutex<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>>>::get_or_init<std::io::stdio::stdin::{closure#0}>::{closure#0}, !>::{closure#0}>::{closure#0}",
+          "self_instructions": 26,
+          "fraction": 3.714364564939193e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcscmp",
+          "self_instructions": 25,
+          "fraction": 3.5715043893646087e-08,
+          "calls": 1
+        },
+        {
+          "name": "strchrnul",
+          "self_instructions": 25,
+          "fraction": 3.5715043893646087e-08,
+          "calls": 1
+        },
+        {
+          "name": "rindex",
+          "self_instructions": 25,
+          "fraction": 3.5715043893646087e-08,
+          "calls": 1
+        },
+        {
+          "name": "memrchr",
+          "self_instructions": 25,
+          "fraction": 3.5715043893646087e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000001000",
+          "self_instructions": 25,
+          "fraction": 3.5715043893646087e-08,
+          "calls": 1
+        },
+        {
+          "name": "__memset_chk",
+          "self_instructions": 24,
+          "fraction": 3.428644213790024e-08,
+          "calls": 1
+        },
+        {
+          "name": "wmemcmp",
+          "self_instructions": 24,
+          "fraction": 3.428644213790024e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025be0",
+          "self_instructions": 24,
+          "fraction": 3.428644213790024e-08,
+          "calls": 4
+        },
+        {
+          "name": "0x0000000000013de0",
+          "self_instructions": 24,
+          "fraction": 3.428644213790024e-08,
+          "calls": 2
+        },
+        {
+          "name": "memchr",
+          "self_instructions": 23,
+          "fraction": 3.2857840382154396e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001f540",
+          "self_instructions": 23,
+          "fraction": 3.2857840382154396e-08,
+          "calls": 0
+        },
+        {
+          "name": "__memmove_chk",
+          "self_instructions": 22,
+          "fraction": 3.142923862640856e-08,
+          "calls": 1
+        },
+        {
+          "name": "__mempcpy_chk",
+          "self_instructions": 22,
+          "fraction": 3.142923862640856e-08,
+          "calls": 1
+        },
+        {
+          "name": "__memcpy_chk",
+          "self_instructions": 22,
+          "fraction": 3.142923862640856e-08,
+          "calls": 1
+        },
+        {
+          "name": "mempcpy",
+          "self_instructions": 22,
+          "fraction": 3.142923862640856e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000013e0",
+          "self_instructions": 22,
+          "fraction": 3.142923862640856e-08,
+          "calls": 1
+        },
+        {
+          "name": "<std::sync::once_lock::OnceLock<std::sync::poison::mutex::Mutex<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::poison::mutex::Mutex<std::io::buffered::bufreader::BufReader<std::io::stdio::StdinRaw>>>>::get_or_init<std::io::stdio::stdin::{closure#0}>::{closure#0}, !>",
+          "self_instructions": 22,
+          "fraction": 3.142923862640856e-08,
+          "calls": 1
+        },
+        {
+          "name": "<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !>",
+          "self_instructions": 22,
+          "fraction": 3.142923862640856e-08,
+          "calls": 1
+        },
+        {
+          "name": "strcasecmp",
+          "self_instructions": 21,
+          "fraction": 3.000063687066271e-08,
+          "calls": 1
+        },
+        {
+          "name": "strncasecmp_l",
+          "self_instructions": 21,
+          "fraction": 3.000063687066271e-08,
+          "calls": 1
+        },
+        {
+          "name": "strcasecmp_l",
+          "self_instructions": 21,
+          "fraction": 3.000063687066271e-08,
+          "calls": 1
+        },
+        {
+          "name": "strncasecmp",
+          "self_instructions": 21,
+          "fraction": 3.000063687066271e-08,
+          "calls": 1
+        },
+        {
+          "name": "strncmp",
+          "self_instructions": 21,
+          "fraction": 3.000063687066271e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000014e60",
+          "self_instructions": 21,
+          "fraction": 3.000063687066271e-08,
+          "calls": 7
+        },
+        {
+          "name": "wmemset",
+          "self_instructions": 20,
+          "fraction": 2.8572035114916868e-08,
+          "calls": 2
+        },
+        {
+          "name": "0x000000000001abb0",
+          "self_instructions": 20,
+          "fraction": 2.8572035114916868e-08,
+          "calls": 4
+        },
+        {
+          "name": "strncpy",
+          "self_instructions": 19,
+          "fraction": 2.7143433359171026e-08,
+          "calls": 1
+        },
+        {
+          "name": "index",
+          "self_instructions": 19,
+          "fraction": 2.7143433359171026e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcslen",
+          "self_instructions": 19,
+          "fraction": 2.7143433359171026e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcsnlen",
+          "self_instructions": 19,
+          "fraction": 2.7143433359171026e-08,
+          "calls": 1
+        },
+        {
+          "name": "strcmp",
+          "self_instructions": 19,
+          "fraction": 2.7143433359171026e-08,
+          "calls": 1
+        },
+        {
+          "name": "stpncpy",
+          "self_instructions": 19,
+          "fraction": 2.7143433359171026e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001f680",
+          "self_instructions": 19,
+          "fraction": 2.7143433359171026e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000026640",
+          "self_instructions": 19,
+          "fraction": 2.7143433359171026e-08,
+          "calls": 1
+        },
+        {
+          "name": "std::io::stdio::stdin",
+          "self_instructions": 19,
+          "fraction": 2.7143433359171026e-08,
+          "calls": 3
+        },
+        {
+          "name": "0x0000000000098f40",
+          "self_instructions": 18,
+          "fraction": 2.571483160342518e-08,
+          "calls": 2
+        },
+        {
+          "name": "wcpncpy",
+          "self_instructions": 18,
+          "fraction": 2.571483160342518e-08,
+          "calls": 1
+        },
+        {
+          "name": "munmap",
+          "self_instructions": 18,
+          "fraction": 2.571483160342518e-08,
+          "calls": 3
+        },
+        {
+          "name": "wcsncpy",
+          "self_instructions": 18,
+          "fraction": 2.571483160342518e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcscat",
+          "self_instructions": 18,
+          "fraction": 2.571483160342518e-08,
+          "calls": 1
+        },
+        {
+          "name": "log2",
+          "self_instructions": 18,
+          "fraction": 2.571483160342518e-08,
+          "calls": 2
+        },
+        {
+          "name": "stpcpy",
+          "self_instructions": 17,
+          "fraction": 2.428622984767934e-08,
+          "calls": 1
+        },
+        {
+          "name": "strcat",
+          "self_instructions": 17,
+          "fraction": 2.428622984767934e-08,
+          "calls": 1
+        },
+        {
+          "name": "__ctype_init",
+          "self_instructions": 17,
+          "fraction": 2.428622984767934e-08,
+          "calls": 1
+        },
+        {
+          "name": "strcpy",
+          "self_instructions": 17,
+          "fraction": 2.428622984767934e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000014e70",
+          "self_instructions": 17,
+          "fraction": 2.428622984767934e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001a930",
+          "self_instructions": 17,
+          "fraction": 2.428622984767934e-08,
+          "calls": 1
+        },
+        {
+          "name": "wcscpy",
+          "self_instructions": 16,
+          "fraction": 2.2857628091933494e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025300",
+          "self_instructions": 16,
+          "fraction": 2.2857628091933494e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001fc70",
+          "self_instructions": 15,
+          "fraction": 2.1429026336187653e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000013370",
+          "self_instructions": 14,
+          "fraction": 2.0000424580441808e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025bb0",
+          "self_instructions": 14,
+          "fraction": 2.0000424580441808e-08,
+          "calls": 2
+        },
+        {
+          "name": "__call_tls_dtors",
+          "self_instructions": 13,
+          "fraction": 1.8571822824695966e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000104a0",
+          "self_instructions": 13,
+          "fraction": 1.8571822824695966e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000005ad0",
+          "self_instructions": 13,
+          "fraction": 1.8571822824695966e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001cf40",
+          "self_instructions": 13,
+          "fraction": 1.8571822824695966e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000017390",
+          "self_instructions": 13,
+          "fraction": 1.8571822824695966e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000010d0",
+          "self_instructions": 13,
+          "fraction": 1.8571822824695966e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000017170",
+          "self_instructions": 13,
+          "fraction": 1.8571822824695966e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000002a0d0",
+          "self_instructions": 12,
+          "fraction": 1.714322106895012e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000104e0",
+          "self_instructions": 12,
+          "fraction": 1.714322106895012e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000005b10",
+          "self_instructions": 12,
+          "fraction": 1.714322106895012e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000001110",
+          "self_instructions": 12,
+          "fraction": 1.714322106895012e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000171b0",
+          "self_instructions": 12,
+          "fraction": 1.714322106895012e-08,
+          "calls": 1
+        },
+        {
+          "name": "getrlimit",
+          "self_instructions": 10,
+          "fraction": 1.4286017557458434e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000004940",
+          "self_instructions": 10,
+          "fraction": 1.4286017557458434e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001d1f0",
+          "self_instructions": 10,
+          "fraction": 1.4286017557458434e-08,
+          "calls": 1
+        },
+        {
+          "name": "sincosf",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "sinf",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "powf",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "log2f",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "cosf",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000002f300",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "expm1",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "exp2f",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "__exp_finite",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "expf",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "__log_finite",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "__atan2_finite",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "sin",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "cos",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "logf",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000258c0",
+          "self_instructions": 9,
+          "fraction": 1.285741580171259e-08,
+          "calls": 1
+        },
+        {
+          "name": "read",
+          "self_instructions": 8,
+          "fraction": 1.1428814045966747e-08,
+          "calls": 1
+        },
+        {
+          "name": "__pow_finite",
+          "self_instructions": 8,
+          "fraction": 1.1428814045966747e-08,
+          "calls": 1
+        },
+        {
+          "name": "__asin_finite",
+          "self_instructions": 8,
+          "fraction": 1.1428814045966747e-08,
+          "calls": 1
+        },
+        {
+          "name": "__acos_finite",
+          "self_instructions": 8,
+          "fraction": 1.1428814045966747e-08,
+          "calls": 1
+        },
+        {
+          "name": "sincos",
+          "self_instructions": 8,
+          "fraction": 1.1428814045966747e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000000249c0",
+          "self_instructions": 8,
+          "fraction": 1.1428814045966747e-08,
+          "calls": 1
+        },
+        {
+          "name": "strspn",
+          "self_instructions": 7,
+          "fraction": 1.0000212290220904e-08,
+          "calls": 1
+        },
+        {
+          "name": "exit",
+          "self_instructions": 7,
+          "fraction": 1.0000212290220904e-08,
+          "calls": 1
+        },
+        {
+          "name": "strcspn",
+          "self_instructions": 7,
+          "fraction": 1.0000212290220904e-08,
+          "calls": 1
+        },
+        {
+          "name": "strpbrk",
+          "self_instructions": 7,
+          "fraction": 1.0000212290220904e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000485c000",
+          "self_instructions": 7,
+          "fraction": 1.0000212290220904e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000004939000",
+          "self_instructions": 7,
+          "fraction": 1.0000212290220904e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000118000",
+          "self_instructions": 7,
+          "fraction": 1.0000212290220904e-08,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000483d000",
+          "self_instructions": 7,
+          "fraction": 1.0000212290220904e-08,
+          "calls": 1
+        },
+        {
+          "name": "fma",
+          "self_instructions": 6,
+          "fraction": 8.57161053447506e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000025de0",
+          "self_instructions": 6,
+          "fraction": 8.57161053447506e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000013f00",
+          "self_instructions": 6,
+          "fraction": 8.57161053447506e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001a8d0",
+          "self_instructions": 6,
+          "fraction": 8.57161053447506e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000010430",
+          "self_instructions": 5,
+          "fraction": 7.143008778729217e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000005a60",
+          "self_instructions": 5,
+          "fraction": 7.143008778729217e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000000c200",
+          "self_instructions": 5,
+          "fraction": 7.143008778729217e-09,
+          "calls": 1
+        },
+        {
+          "name": "_dl_audit_preinit",
+          "self_instructions": 5,
+          "fraction": 7.143008778729217e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000001060",
+          "self_instructions": 5,
+          "fraction": 7.143008778729217e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000017100",
+          "self_instructions": 5,
+          "fraction": 7.143008778729217e-09,
+          "calls": 1
+        },
+        {
+          "name": "main",
+          "self_instructions": 5,
+          "fraction": 7.143008778729217e-09,
+          "calls": 1
+        },
+        {
+          "name": "_Exit",
+          "self_instructions": 4,
+          "fraction": 5.7144070229833736e-09,
+          "calls": 1
+        },
+        {
+          "name": "_dl_debug_state",
+          "self_instructions": 4,
+          "fraction": 5.7144070229833736e-09,
+          "calls": 2
+        },
+        {
+          "name": "0x0000000000017b40",
+          "self_instructions": 4,
+          "fraction": 5.7144070229833736e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000483d294",
+          "self_instructions": 4,
+          "fraction": 5.7144070229833736e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000495c748",
+          "self_instructions": 4,
+          "fraction": 5.7144070229833736e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000001ece1c",
+          "self_instructions": 4,
+          "fraction": 5.7144070229833736e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000048da3a8",
+          "self_instructions": 4,
+          "fraction": 5.7144070229833736e-09,
+          "calls": 1
+        },
+        {
+          "name": "std::sys::args::unix::imp::ARGV_INIT_ARRAY::init_wrapper",
+          "self_instructions": 4,
+          "fraction": 5.7144070229833736e-09,
+          "calls": 1
+        },
+        {
+          "name": "_setjmp",
+          "self_instructions": 3,
+          "fraction": 4.28580526723753e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000001ef80",
+          "self_instructions": 2,
+          "fraction": 2.8572035114916868e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x00000000049393c0",
+          "self_instructions": 2,
+          "fraction": 2.8572035114916868e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000498b7b0",
+          "self_instructions": 2,
+          "fraction": 2.8572035114916868e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000498b660",
+          "self_instructions": 2,
+          "fraction": 2.8572035114916868e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000485c220",
+          "self_instructions": 2,
+          "fraction": 2.8572035114916868e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x000000000483d030",
+          "self_instructions": 2,
+          "fraction": 2.8572035114916868e-09,
+          "calls": 1
+        },
+        {
+          "name": "0x0000000000118050",
+          "self_instructions": 1,
+          "fraction": 1.4286017557458434e-09,
+          "calls": 1
+        }
+      ],
+      "native_build_record": "2026-10-17-route-planner-optimized.json",
+      "original_uncompressed_trace_sha256": "5b7f4a213ad233239d3bad56a62a7fccbb67e138260c2ab35b20f63d56e52911"
+    }
+  },
+  "trace_path_normalization": "Environment-specific source/object prefixes are replaced by /relar/, /cargo-registry/, and /valgrind/. Instruction counts, call records, symbols, and all other trace content are unchanged. Trace hashes identify the published path-normalized files; original_uncompressed_trace_sha256 identifies the preserved local capture."
+}
