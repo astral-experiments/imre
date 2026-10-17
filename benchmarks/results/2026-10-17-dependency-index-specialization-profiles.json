@@ -1,0 +1,3476 @@
+{
+  "schema_version": 1,
+  "example": "dependency_planner",
+  "assembled_at_utc": "2026-10-17T22:00:48.683480+00:00",
+  "assembly_script_sha256": "b363a357f2bd15a374fe843616bdbdce5c2b05e95c3364db0c4791cde5e93dc1",
+  "summary_parser_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30",
+  "method": "Callgrind Ir counts executed instructions, not hardware CPU cycles or elapsed-time shares. Exclusive function counts reconcile with the profiler total; inclusive edge costs overlap. DHAT replaces allocator routines and records requested heap bytes, blocks, and lifetimes by allocation stack; these bytes are allocation traffic, not RSS. Instrumented elapsed times are excluded from performance comparisons.",
+  "verification": "All manifests, preserved binaries, frozen build snapshots, inputs and full stdout rechecked; raw traces reparsed with the shared driver and reconciled with stored summaries. No measured program was executed.",
+  "prior_profiles": {
+    "path": "benchmarks/results/2026-10-17-dependency-performance-profiles.json",
+    "sha256": "36ff94a68d881594fd0ec49f7ff6d9a05522340898cdfbcacb77bafa0b95ab7c"
+  },
+  "source_sha256": {
+    "dependency_planner/__init__.py": "aaf74d2ac584768a494d503c28e988df2ff095ff4b2bf00f8ab69a4fdb72f188",
+    "dependency_planner/__main__.py": "ebdaf69e5f174923d12644c89f580f056be931bcb263929ba26545b615fd997b",
+    "dependency_planner/model.py": "2dcd30aeb5fb9799a480a1ce8bd7d142dbaa4bde7efb055730ef2ef1df4e3c82",
+    "dependency_planner/parse.py": "3e9a6d2443472393c1d9987ac6d39b707b2c37f09af41f7b01ca6a129dfe0e89",
+    "dependency_planner/render.py": "74258c0da07a12cfefcb89103ed68ce70124fba1db32d44c17454d23b3e6fc51",
+    "dependency_planner/schedule.py": "ff4ff0e33b4d14a79c6fd59539d9390e7b58da6e94aa7d81ca3380b20987069b"
+  },
+  "workloads": {
+    "layered-16384": {
+      "shape": "layered",
+      "tasks": 16384,
+      "input_sha256": "4674892ec652a8fb6880df9e383d5de575b95dd01c62d96286eeeea116fb745e",
+      "input_bytes": 433540,
+      "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+      "stdout_bytes": 531728
+    },
+    "wide-16384": {
+      "shape": "wide",
+      "tasks": 16384,
+      "input_sha256": "b592b421eb1d3978d1426bc4bc0b00b84f9cf3aa19fc7f2a89d25006f5387ccc",
+      "input_bytes": 228011,
+      "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+      "stdout_bytes": 395810
+    }
+  },
+  "controls": [
+    {
+      "id": "final_measured_relar",
+      "description": "Exact clean-worktree Relar binary used in the final matched-budget five-way timing comparison",
+      "thin_lto": true,
+      "llvm_optimization_budgets": {
+        "import_instruction_limit": 1000,
+        "inline_threshold": 1000
+      },
+      "binary_path": "benchmarks/local/dependency-final-lto/dependency_planner",
+      "artifact_sha256": {
+        "compiler": "b4345600bcfaebd3f962edbf8f2027035ca54e3a1e8316a389f671a881b25401",
+        "runtime": "1aa6eacab1f2cbab75dc5679a69eba00ee74c11793b19144e1d64021e0b7a9a0",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+        "linker": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+        "binary": "251212b84f7df996b241fa21bd10a507e048ff48f86b117d806ab1e99ecdc0e9",
+        "llvm_ir": "2b7a18e139036a9b2d64bc971983c3f0813bd1869a3e31bd05f037e353a73217"
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-final-lto.json",
+        "sha256": "cd3115d1c268c56dc1e2082b90b9609d91ec76cada5bca2f297447bb08a50930",
+        "kind": "final timing comparison with captured build provenance"
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/final-measured-lto",
+        "summary_sha256": "26fba7cb6e80ae969b09b156acb75e826f59715295beb5fbe70391b0e8d19714",
+        "provenance_sha256": "bedd1b2b21454c9d6d6a54dd1eb3932cd7e19838d86e3d894478370ffd207de6",
+        "manifest_sha256": "6127a361cab6b92729fcd44ad199b91cd901ee1b5c43d23be75353d568ca0962",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30",
+        "manifest_entries_verified": 24
+      },
+      "workloads": {
+        "layered-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.relar_final.callgrind.trace",
+              "sha256": "e30a66c6383c7865ff162e75fc7efcec864977080ff40e9e9299767a8b8ebc5b",
+              "log_sha256": "7e9b202757645a6a3edaa99042591ed50e1f8b5f3b37fd63cbfcaf7fd0ed745b",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "layered-16384.relar_final.dhat.trace",
+              "sha256": "bc676f86b34463f08259532c5ea2fbf356f41f918fa1e6850a2d71fe3ea3fa65",
+              "log_sha256": "cb3f648997cfa3c0a35ee98ce50122d1ab48c78e4a91537f5b8ec1e8f6eb01bc",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 205147254,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "fn_6",
+              "self_instructions": 37825094,
+              "self_fraction": 0.18438021110436117,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 35453052,
+              "self_fraction": 0.17281758009785497,
+              "calls": 115934,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "main",
+              "self_instructions": 18110779,
+              "self_fraction": 0.08828184948554076,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 17126702,
+              "self_fraction": 0.08348491956904283,
+              "calls": 107311,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 15610081,
+              "self_fraction": 0.07609207871727106,
+              "calls": 233833,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_str_split_whitespace",
+              "self_instructions": 14720398,
+              "self_fraction": 0.07175527682178968,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 10295273,
+              "self_fraction": 0.05018479555178448,
+              "calls": 224634,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_int_parse",
+              "self_instructions": 7298301,
+              "self_fraction": 0.03557591368003395,
+              "calls": 55007,
+              "objects": [
+                "benchmarks/local/dependency-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 6963561,
+              "self_fraction": 0.033944207705553786,
+              "calls": 224631,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_runtime::output_bytes",
+              "self_instructions": 5265225,
+              "self_fraction": 0.025665588485040115,
+              "calls": 83573,
+              "objects": [
+                "benchmarks/local/dependency-final-lto/dependency_planner"
+              ]
+            }
+          ],
+          "allocated_bytes": 51543811,
+          "allocated_blocks": 233897,
+          "peak_live_bytes": 6055808,
+          "peak_live_blocks": 95873,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3
+        },
+        "wide-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.relar_final.callgrind.trace",
+              "sha256": "7fa54309145565e8ce1f8cb2d4f119a04a205ef58248dfbcbfbdc1e6c8a00d4d",
+              "log_sha256": "404916c85025fcb5683254be720f99be0c2f1d83e6deca030a7a3f659301dd76",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "wide-16384.relar_final.dhat.trace",
+              "sha256": "9f9a0d76cbcd16b428aedb3bb28d52169e4ac0b632a17c2673e69fb296c0455f",
+              "log_sha256": "46e68f43f3b51fd8b14c94a6deb840f1837ca6b70498ea3293caa058d6778a0c",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 145225371,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "fn_6",
+              "self_instructions": 54111356,
+              "self_fraction": 0.37260263566481094,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "main",
+              "self_instructions": 14953025,
+              "self_fraction": 0.10296427474783315,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 9344181,
+              "self_fraction": 0.0643426209598046,
+              "calls": 147530,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 9099905,
+              "self_fraction": 0.06266057326856476,
+              "calls": 65592,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_str_split_whitespace",
+              "self_instructions": 7978154,
+              "self_fraction": 0.054936365079074234,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 6769006,
+              "self_fraction": 0.04661035432989185,
+              "calls": 147510,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_runtime::output_bytes",
+              "self_instructions": 5161959,
+              "self_fraction": 0.035544471082811,
+              "calls": 81934,
+              "objects": [
+                "benchmarks/local/dependency-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 4572719,
+              "self_fraction": 0.03148705331935423,
+              "calls": 147507,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000a9c90",
+              "self_instructions": 3636110,
+              "self_fraction": 0.0250377050164327,
+              "calls": 2,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_print_int",
+              "self_instructions": 3315242,
+              "self_fraction": 0.022828256365755816,
+              "calls": 65541,
+              "objects": [
+                "benchmarks/local/dependency-final-lto/dependency_planner"
+              ]
+            }
+          ],
+          "allocated_bytes": 10078143,
+          "allocated_blocks": 147584,
+          "peak_live_bytes": 5130272,
+          "peak_live_blocks": 65564,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3
+        }
+      },
+      "profiler": {
+        "version": "valgrind-3.22.0",
+        "sha256": {
+          "valgrind": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+          "callgrind": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03",
+          "dhat": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc"
+        },
+        "affinity": [
+          0
+        ],
+        "host": {
+          "os": "Linux",
+          "architecture": "x86_64",
+          "kernel": "6.8.0-146-generic"
+        },
+        "io": "Captured input and full stdout use pipes; every stdout is saved and checked byte-for-byte."
+      },
+      "completed_at_utc": "2026-10-17T19:11:12.119003+00:00"
+    },
+    {
+      "id": "rust_bigint_matched_thin_lto",
+      "description": "Rust BigInt reference with ThinLTO import and inline budgets matched to Relar",
+      "thin_lto": true,
+      "llvm_optimization_budgets": {
+        "import_instruction_limit": 1000,
+        "inline_threshold": 1000
+      },
+      "binary_path": "benchmarks/local/dependency-reference-matched-lto/planner-bigint",
+      "artifact_sha256": {
+        "binary": "100c0f67cccac4178a55ac2a7a45dd986ad46d8c8f61f7d3059fa14d0b5a3ba6",
+        "tool_rustc": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba",
+        "tool_cargo": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e"
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-reference-matched-lto/build-record.json",
+        "sha256": "ae0ffa4c61ef90675cc63756ea977fcf2e6800f84ad44cc3049a3cd98885a099",
+        "source_sha256": {
+          "Cargo.toml": "432cd49b7ba3a91d9873c4f3386d4b77998373ae1be5898cd1c8d74917501544",
+          "Cargo.lock": "2fdd2959b414792a85eee5582a6ecf63778ddb4feba3f6c5863934d021e3cf89",
+          "src/main.rs": "f143a11379e87ebca2d5a89969132c0b2ce14e1ebcaad620e7f1829b46d5f9a4"
+        },
+        "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8",
+        "release_lto": "thin",
+        "llvm_budget": 1000,
+        "rustflags": "-Cllvm-args=-import-instr-limit=1000 -Cllvm-args=-inline-threshold=1000",
+        "encoded_rustflags": null
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/matched-rust-lto",
+        "summary_sha256": "e057e510c04d5d544d4eef71e455ecbdd352f1e3fa2f98f3ea1ed3cecc5e2469",
+        "provenance_sha256": "bb4ef57b9ea6e816851d2e7467e93f9607479ffd98a7fecd00b8322324156cf1",
+        "manifest_sha256": "7b96c874c9d1710c7a090ff1f2377c249c13fe149c65d893b1ceaf4899ae967a",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30",
+        "manifest_entries_verified": 40
+      },
+      "workloads": {
+        "layered-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.rust_bigint_matched_lto.callgrind.trace",
+              "sha256": "1a1c245efa912085b39826a4d0e23036f9b05fbd085311f6f0085edfc978291a",
+              "log_sha256": "28cb513b7666d7d2a6554449edbf1afb6f4884b995d260d6a5fdf909f8c1b320",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "layered-16384.rust_bigint_matched_lto.dhat.trace",
+              "sha256": "77b37c816bfd70e2ee508fd785240e0845f4a6ee61ea672947c06a135542abc6",
+              "log_sha256": "84ceddf4663848b0dfb01057df39bd9c6b629a904a8adf2513881f3fe456a28e",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 196808173,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 37820965,
+              "self_fraction": 0.19217171941329897,
+              "calls": 270917,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "planner_reference::parse_number",
+              "self_instructions": 20173175,
+              "self_fraction": 0.10250171368645346,
+              "calls": 55007,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-bigint"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 19996331,
+              "self_fraction": 0.10160315344220994,
+              "calls": 306130,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 14908230,
+              "self_fraction": 0.07575005535974362,
+              "calls": 105069,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "planner_reference::run::<std::io::stdio::StdinLock, std::io::stdio::StdoutLock>",
+              "self_instructions": 13099205,
+              "self_fraction": 0.06655823688785527,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-bigint"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 12901920,
+              "self_fraction": 0.06555581408705013,
+              "calls": 296937,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "<alloc::vec::Vec<&str> as alloc::vec::spec_from_iter::SpecFromIter<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<planner_reference::python_whitespace>, planner_reference::read_problem<std::io::stdio::StdinLock>::{closure#1}>>>::from_iter",
+              "self_instructions": 10826734,
+              "self_fraction": 0.05501160767342726,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-bigint"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 9205101,
+              "self_fraction": 0.04677194478097208,
+              "calls": 296938,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "num_bigint::biguint::convert::to_radix_le",
+              "self_instructions": 8066763,
+              "self_fraction": 0.04098794718245771,
+              "calls": 48190,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-bigint"
+              ]
+            },
+            {
+              "name": "num_bigint::biguint::convert::from_radix_digits_be",
+              "self_instructions": 7565121,
+              "self_fraction": 0.03843905913399237,
+              "calls": 55007,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-bigint"
+              ]
+            }
+          ],
+          "allocated_bytes": 49318538,
+          "allocated_blocks": 306204,
+          "peak_live_bytes": 6435646,
+          "peak_live_blocks": 101715,
+          "at_exit_bytes": 8736,
+          "at_exit_blocks": 2
+        },
+        "wide-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.rust_bigint_matched_lto.callgrind.trace",
+              "sha256": "a1c9ed6abb43d31dea0b04169d01b2052217724b146ced8f001fe935445265fb",
+              "log_sha256": "804d86f751a82fe71fdd7584f1cf9c6eeb5156267a3cae0e45085123d999f88e",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "wide-16384.rust_bigint_matched_lto.dhat.trace",
+              "sha256": "05aea29c0ebf77684ba3c2920ecc7dbc19f1fa80f4b057bb48e17a14721ddcb6",
+              "log_sha256": "3857f180fc0af3d74ee882319bbb1d05d4fae57a1a41860363c29ae383bbb9e3",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 81616504,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "planner_reference::run::<std::io::stdio::StdinLock, std::io::stdio::StdoutLock>",
+              "self_instructions": 9900692,
+              "self_fraction": 0.12130747477250435,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-bigint"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 8653868,
+              "self_fraction": 0.1060308586606454,
+              "calls": 147495,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "<std::io::buffered::bufwriter::BufWriter<std::io::stdio::StdoutLock> as std::io::Write>::write_fmt",
+              "self_instructions": 6471894,
+              "self_fraction": 0.07929638838732911,
+              "calls": 81923,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-bigint"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 6407362,
+              "self_fraction": 0.07850571497156997,
+              "calls": 147484,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "<alloc::vec::Vec<&str> as alloc::vec::spec_from_iter::SpecFromIter<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<planner_reference::python_whitespace>, planner_reference::read_problem<std::io::stdio::StdinLock>::{closure#1}>>>::from_iter",
+              "self_instructions": 5657876,
+              "self_fraction": 0.06932269483142772,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-bigint"
+              ]
+            },
+            {
+              "name": "<&num_bigint::bigint::BigInt as core::fmt::Display>::fmt",
+              "self_instructions": 5252660,
+              "self_fraction": 0.06435781664943649,
+              "calls": 49154,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-bigint"
+              ]
+            },
+            {
+              "name": "planner_reference::parse_number",
+              "self_instructions": 4758427,
+              "self_fraction": 0.05830226445376783,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-bigint"
+              ]
+            },
+            {
+              "name": "<std::io::stdio::StdinLock as std::io::BufRead>::read_line",
+              "self_instructions": 4747912,
+              "self_fraction": 0.05817343021700611,
+              "calls": 16386,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-bigint"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 4572058,
+              "self_fraction": 0.05601879247363989,
+              "calls": 147485,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "num_bigint::biguint::convert::to_radix_le",
+              "self_instructions": 4458904,
+              "self_fraction": 0.054632381705543284,
+              "calls": 32770,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-bigint"
+              ]
+            }
+          ],
+          "allocated_bytes": 7219551,
+          "allocated_blocks": 147562,
+          "peak_live_bytes": 3720814,
+          "peak_live_blocks": 32784,
+          "at_exit_bytes": 8736,
+          "at_exit_blocks": 2
+        }
+      },
+      "profiler": {
+        "version": "valgrind-3.22.0",
+        "sha256": {
+          "valgrind": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+          "callgrind": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03",
+          "dhat": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc"
+        },
+        "affinity": [
+          0
+        ],
+        "host": {
+          "os": "Linux",
+          "architecture": "x86_64",
+          "kernel": "6.8.0-146-generic"
+        },
+        "io": "Captured input and full stdout use pipes; every stdout is saved and checked byte-for-byte."
+      },
+      "completed_at_utc": "2026-10-17T19:06:55.019429+00:00"
+    },
+    {
+      "id": "rust_checked_i64_matched_thin_lto",
+      "description": "Rust checked-i64 reference with ThinLTO import and inline budgets matched to Relar",
+      "thin_lto": true,
+      "llvm_optimization_budgets": {
+        "import_instruction_limit": 1000,
+        "inline_threshold": 1000
+      },
+      "binary_path": "benchmarks/local/dependency-reference-matched-lto/planner-i64",
+      "artifact_sha256": {
+        "binary": "ce5a885e6cb140ab2d062771f67789fe779de5c54e1bf7501ef5737ed3105006",
+        "tool_rustc": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba",
+        "tool_cargo": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e"
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-reference-matched-lto/build-record.json",
+        "sha256": "ae0ffa4c61ef90675cc63756ea977fcf2e6800f84ad44cc3049a3cd98885a099",
+        "source_sha256": {
+          "Cargo.toml": "432cd49b7ba3a91d9873c4f3386d4b77998373ae1be5898cd1c8d74917501544",
+          "Cargo.lock": "2fdd2959b414792a85eee5582a6ecf63778ddb4feba3f6c5863934d021e3cf89",
+          "src/main.rs": "f143a11379e87ebca2d5a89969132c0b2ce14e1ebcaad620e7f1829b46d5f9a4"
+        },
+        "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8",
+        "release_lto": "thin",
+        "llvm_budget": 1000,
+        "rustflags": "-Cllvm-args=-import-instr-limit=1000 -Cllvm-args=-inline-threshold=1000",
+        "encoded_rustflags": null
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/matched-rust-lto",
+        "summary_sha256": "e057e510c04d5d544d4eef71e455ecbdd352f1e3fa2f98f3ea1ed3cecc5e2469",
+        "provenance_sha256": "bb4ef57b9ea6e816851d2e7467e93f9607479ffd98a7fecd00b8322324156cf1",
+        "manifest_sha256": "7b96c874c9d1710c7a090ff1f2377c249c13fe149c65d893b1ceaf4899ae967a",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30",
+        "manifest_entries_verified": 40
+      },
+      "workloads": {
+        "layered-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.rust_i64_matched_lto.callgrind.trace",
+              "sha256": "ff6af03d619da7c2033a382c0c6c1f1a75293f15754a15446acd50ecba2775ce",
+              "log_sha256": "eca0f2f542e54d8bdaeba451149565c0fb7404c11a0968e847fc45930644d30a",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "layered-16384.rust_i64_matched_lto.dhat.trace",
+              "sha256": "23ffb06a33c185f6d6870e0669b1f122837046e7c0d906d82370c37ae0df202b",
+              "log_sha256": "7a67199e23e0b182862a3cba960c8edd410d35cfd7464578114bd007e043af28",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 135349106,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 37871752,
+              "self_fraction": 0.27980792130241333,
+              "calls": 270898,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "planner_reference::parse_number",
+              "self_instructions": 14764295,
+              "self_fraction": 0.10908306258040597,
+              "calls": 55007,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-i64"
+              ]
+            },
+            {
+              "name": "<alloc::vec::Vec<&str> as alloc::vec::spec_from_iter::SpecFromIter<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<planner_reference::python_whitespace>, planner_reference::read_problem<std::io::stdio::StdinLock>::{closure#1}>>>::from_iter",
+              "self_instructions": 10826734,
+              "self_fraction": 0.07999117482164973,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-i64"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 9874933,
+              "self_fraction": 0.07295898208592527,
+              "calls": 146958,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 9595088,
+              "self_fraction": 0.07089140285861954,
+              "calls": 57771,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "planner_reference::main",
+              "self_instructions": 8439454,
+              "self_fraction": 0.06235323046758802,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-i64"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 6122212,
+              "self_fraction": 0.04523274797249122,
+              "calls": 137767,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "<std::io::buffered::bufwriter::BufWriter<std::io::stdio::StdoutLock> as std::io::Write>::write_fmt",
+              "self_instructions": 5980379,
+              "self_fraction": 0.044184843008863314,
+              "calls": 81923,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-i64"
+              ]
+            },
+            {
+              "name": "<i64 as core::fmt::Display>::fmt",
+              "self_instructions": 4567029,
+              "self_fraction": 0.03374258711394813,
+              "calls": 49154,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-i64"
+              ]
+            },
+            {
+              "name": "<std::io::stdio::StdinLock as std::io::BufRead>::read_line",
+              "self_instructions": 4515483,
+              "self_fraction": 0.033361749725927266,
+              "calls": 16386,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-i64"
+              ]
+            }
+          ],
+          "allocated_bytes": 45425869,
+          "allocated_blocks": 147036,
+          "peak_live_bytes": 3335630,
+          "peak_live_blocks": 46709,
+          "at_exit_bytes": 8736,
+          "at_exit_blocks": 2
+        },
+        "wide-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.rust_i64_matched_lto.callgrind.trace",
+              "sha256": "44146a477ca97651300413cad2d390351e3ed0539f7d42f081bf8448c36ce377",
+              "log_sha256": "5464ec94ccec0663719077bfb70ae2fce023ba385015bda5e46be9be3dd7cf3e",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "wide-16384.rust_i64_matched_lto.dhat.trace",
+              "sha256": "a176b376a496753a9477c0ad75a66af17c359a1a643494f6b1cbf257f7230249",
+              "log_sha256": "8ed26e9b49fd1f3dfe8382373586816109334d09ead52f47002eed6830c1d600",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 56356046,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "planner_reference::main",
+              "self_instructions": 7983441,
+              "self_fraction": 0.14166077229761648,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-i64"
+              ]
+            },
+            {
+              "name": "<std::io::buffered::bufwriter::BufWriter<std::io::stdio::StdoutLock> as std::io::Write>::write_fmt",
+              "self_instructions": 5980379,
+              "self_fraction": 0.10611778903012464,
+              "calls": 81923,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-i64"
+              ]
+            },
+            {
+              "name": "<alloc::vec::Vec<&str> as alloc::vec::spec_from_iter::SpecFromIter<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<planner_reference::python_whitespace>, planner_reference::read_problem<std::io::stdio::StdinLock>::{closure#1}>>>::from_iter",
+              "self_instructions": 5657876,
+              "self_fraction": 0.10039519096140989,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-i64"
+              ]
+            },
+            {
+              "name": "<std::io::stdio::StdinLock as std::io::BufRead>::read_line",
+              "self_instructions": 4747912,
+              "self_fraction": 0.08424849394153734,
+              "calls": 16386,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-i64"
+              ]
+            },
+            {
+              "name": "<i64 as core::fmt::Display>::fmt",
+              "self_instructions": 4050525,
+              "self_fraction": 0.07187383231250823,
+              "calls": 49154,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-i64"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 3886021,
+              "self_fraction": 0.06895481986085397,
+              "calls": 65572,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 3582240,
+              "self_fraction": 0.06356443104613833,
+              "calls": 213221,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "<std::io::default_write_fmt::Adapter<std::io::buffered::bufwriter::BufWriter<std::io::stdio::StdoutLock>> as core::fmt::Write>::write_str",
+              "self_instructions": 3441228,
+              "self_fraction": 0.061062268279076924,
+              "calls": 163868,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-i64"
+              ]
+            },
+            {
+              "name": "planner_reference::parse_number",
+              "self_instructions": 3400678,
+              "self_fraction": 0.06034273589740487,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-reference-matched-lto/planner-i64"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 2933708,
+              "self_fraction": 0.05205666841850473,
+              "calls": 65558,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            }
+          ],
+          "allocated_bytes": 5392751,
+          "allocated_blocks": 65638,
+          "peak_live_bytes": 2410094,
+          "peak_live_blocks": 16400,
+          "at_exit_bytes": 8736,
+          "at_exit_blocks": 2
+        }
+      },
+      "profiler": {
+        "version": "valgrind-3.22.0",
+        "sha256": {
+          "valgrind": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+          "callgrind": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03",
+          "dhat": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc"
+        },
+        "affinity": [
+          0
+        ],
+        "host": {
+          "os": "Linux",
+          "architecture": "x86_64",
+          "kernel": "6.8.0-146-generic"
+        },
+        "io": "Captured input and full stdout use pipes; every stdout is saved and checked byte-for-byte."
+      },
+      "completed_at_utc": "2026-10-17T19:06:55.019429+00:00"
+    }
+  ],
+  "stages": [
+    {
+      "id": "range",
+      "comparison": {
+        "path": "benchmarks/local/dependency-index-range-lto.json",
+        "sha256": "1ec7e7c210517cc754c2aa7855e752ad36ae99ff893a65dbcb8467ebf75e0ba2"
+      },
+      "git": {
+        "revision": "c1ed16f4c6b70ea7c7f641e09c64866b1c5b3592",
+        "dirty": true
+      },
+      "artifact_sha256": {
+        "baseline": "251212b84f7df996b241fa21bd10a507e048ff48f86b117d806ab1e99ecdc0e9",
+        "baseline_record": "cd3115d1c268c56dc1e2082b90b9609d91ec76cada5bca2f297447bb08a50930",
+        "rust_bigint": "100c0f67cccac4178a55ac2a7a45dd986ad46d8c8f61f7d3059fa14d0b5a3ba6",
+        "rust_i64": "ce5a885e6cb140ab2d062771f67789fe779de5c54e1bf7501ef5737ed3105006",
+        "rust_record": "ae0ffa4c61ef90675cc63756ea977fcf2e6800f84ad44cc3049a3cd98885a099",
+        "rust_build_script": "5e9f939cf701baefd6440b36bb676afde7549fc1ddcc53bb05d342f1acfd6e2c",
+        "compiler": "5d9965c962ec2a1b304c210fcfdc041ecebd24a319e3c6ac1f4fc383518c0ec5",
+        "runtime": "29e814a2b71dae13a69ac1be1a5377e4ddf2aa9efe68e0126a47b9a653e5fe73",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+        "harness": "f496e1e7659e15a2446427794f6184e173691b2e22c83439966c47b1cc7c0fc5",
+        "dependency_harness": "ddf4c986e24d5ea66dad3d492121ebe464a11e5bb7e0b5f075e3f3bc7989930d",
+        "shared_harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+        "route_validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+        "validator": "493bd16ecfc938c902b98f78adecc5f8dce2204c163fd05c64a1701e4996be2e",
+        "boundary_harness": "e0e83d31483c2983b1228c6403cb6ca43fc305b1300c78294e33d0f74edc1ac4",
+        "lto_linker": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+        "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        "binary": "833a9166d7967f583e6dd68930f8dd877bcde780bb87bedb1d3a6e91715dd221",
+        "llvm_ir": "a0ae937ce114dd0f678f12596b33560cbdd1d2de12e872699eb4a8b11869ff46"
+      },
+      "artifact_bytes": {
+        "baseline": {
+          "bytes": 2478088
+        },
+        "binary": {
+          "bytes": 2463448
+        },
+        "llvm_ir": {
+          "bytes": 96257
+        },
+        "rust_bigint": {
+          "bytes": 1514408
+        },
+        "rust_i64": {
+          "bytes": 740592
+        }
+      },
+      "text_section": {
+        "sha256": "f02d360123f19685c25e9a862aadb55ef30babd531458fd6f09f6e05d609ed07",
+        "bytes": 924480
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-index-range-lto/build-record.json",
+        "sha256": "d9cd2b9dcea1de9f8cd2e0f2ad97c85b6440688f85a6cffc604d500308d70d17"
+      },
+      "tools_build_record": {
+        "path": "benchmarks/local/dependency-index-range-tools/build-record.json",
+        "sha256": "6836efc44bf01541da8eb115c4716d27f60694e23c0b763f0135b33d3f760003",
+        "source_sha256": {
+          "Cargo.toml": "ce49064770ad21744c8ac6cea604da7408be1e5ec474e3f90206fa95f2af614f",
+          "Cargo.lock": "62b84d5f29e184143562b4a022bdb96eed14d9880c922cd36e3b38ce2d3ad2b9",
+          "crates/relar-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
+          "crates/relar-runtime/Cargo.toml": "ca46c91b45fcda42d7b6073c1de9178bf9e93ad7791bbd8b4c0e94caa739fb77",
+          "crates/relar-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
+          "crates/relar-compiler/src/classes.rs": "3d02a3968dcc28bf1c040e7bae4f1b2def6911fa9187813abc213b25a400914c",
+          "crates/relar-compiler/src/frontend.rs": "98026ca31bd572ef90a7603114be02d09024ef5b91bff21cb558646dcbd5a5be",
+          "crates/relar-compiler/src/ir.rs": "3371086ec43aeca6038383ba0492cf7b4d8ab6530374c601f53208d4048cf234",
+          "crates/relar-compiler/src/lib.rs": "9fafcca2352a05d26904d0202147356a9198fcd5afa95e215d2f4009d1ea133a",
+          "crates/relar-compiler/src/llvm.rs": "9f1502420a7858fd65da8dbf1fafb4e3f9dede6f53b42801c465d07cb725fcda",
+          "crates/relar-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+          "crates/relar-compiler/src/modules.rs": "7133088ce8840ab6e72237bb55e8d118bfa30ab2962b486d325af6a0186fe7d6",
+          "crates/relar-compiler/src/narrowing.rs": "bd97ee2f328de9b5985473c5d223a0d73f740bf56a8481a74bd1cf10e5f07d30",
+          "crates/relar-compiler/src/ranges.rs": "704a4688c3e958ec39bf9d0b9157a0964997a5d53f906c6f4a2e4ce496b1f244",
+          "crates/relar-compiler/src/tuples.rs": "adf794c6fc74bcf22d7e786b3da49a8393fb83a9b5a9b9e7a0ad411e94a2a78e",
+          "crates/relar-compiler/src/types.rs": "9f7ad86c6cb4388be30fe00a93a730e31c8ba480910d6490e4d723fd02528ff4",
+          "crates/relar-runtime/src/lib.rs": "e3c3a1c5eb43c2ff27a29b147233fbd1526fab18512bbea37d89e4cd5df14b28",
+          "crates/relar-runtime/src/objects.rs": "34d93fef5715a359b03d14db43feac5fcc19b41f3ccde3717c7728a9c60a2a71"
+        },
+        "source_snapshot_sha256": "3e0d72b01c6cc780dff165aea22f8753b78f5b7c92369ff4c3950de73d780e88",
+        "git_head": "c1ed16f4c6b70ea7c7f641e09c64866b1c5b3592",
+        "git_status": " M crates/relar-compiler/src/lib.rs\n M crates/relar-compiler/src/llvm.rs\n M crates/relar-runtime/src/lib.rs\n M crates/relar-runtime/src/objects.rs\n M tests/containers.py\n?? crates/relar-compiler/src/ranges.rs\n?? tests/fixtures/containers/index_proofs.py\n",
+        "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8\n",
+        "runtime_lto_rustflags": "-Clinker-plugin-lto"
+      },
+      "program_build": [
+        "relar",
+        "build",
+        "examples/dependency_planner/__main__.py",
+        "--module-root",
+        "examples",
+        "-o",
+        "<artifact-dir>/dependency_planner",
+        "--runtime",
+        "<runtime>",
+        "--clang",
+        "clang",
+        "--opt-level",
+        "3",
+        "--emit-llvm",
+        "<artifact-dir>/dependency_planner.ll",
+        "--lto-linker",
+        "<lto-linker-dir>/ld.lld",
+        "--target",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "compilation": {
+        "elapsed_ns": 4423935075,
+        "stdout": "",
+        "stderr": "",
+        "returncode": 0
+      },
+      "generated_ir_callsites": {
+        "relar_list_borrow_index": {},
+        "relar_list_copy_index": {}
+      },
+      "options": {
+        "optimization_level": 3,
+        "target": "x86_64-unknown-linux-gnu",
+        "requested_target": "x86_64-unknown-linux-gnu",
+        "lto": "thin",
+        "sizes": [
+          128,
+          2048,
+          16384
+        ],
+        "shapes": [
+          "layered",
+          "wide"
+        ],
+        "samples": 10,
+        "warmups": 2,
+        "timeout_seconds": 120.0,
+        "validation_timeout_seconds": 120
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-index-range-profile",
+        "summary_sha256": "b258bb460e546bd86b1b4658b43fbc9a35ed889aa9bb8d98cef07cb9858e9603",
+        "provenance_sha256": "6ca3c4f48ca0989f8b04d72342eded7a2180179fc9f398d5927511de4886332b",
+        "manifest_sha256": "67de41a59af1050aa8ff77007cec0fa7fc4d5e0cbb713e2cb82d671f21509754",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30",
+        "manifest_entries_verified": 24
+      },
+      "profiler": {
+        "version": "valgrind-3.22.0",
+        "sha256": {
+          "valgrind": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+          "callgrind": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03",
+          "dhat": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc"
+        },
+        "affinity": [
+          0
+        ],
+        "host": {
+          "os": "Linux",
+          "architecture": "x86_64",
+          "kernel": "6.8.0-146-generic"
+        },
+        "io": "Captured input and full stdout use pipes; every stdout is saved and checked byte-for-byte."
+      },
+      "workloads": {
+        "layered-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.ranges.callgrind.trace",
+              "sha256": "f70295149f2db2e170117221abde236b8cec1d99f7a70eb9d3a8ec2ab003a948",
+              "log_sha256": "c11bf2db35a9f92a10cf9f7280082875d97594dda01348f9310b36c1b0db5760",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "layered-16384.ranges.dhat.trace",
+              "sha256": "31726d7658d9ac9085446f137da2f06bf153bb179252e525269662f381811db7",
+              "log_sha256": "44bd7a4a3e6ca8d36f6d87fb5553b900b201754dee04c59d446da91fa4e23ac2",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 194584138,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "fn_0",
+              "self_instructions": 45732422,
+              "self_fraction": 0.2350264644901323,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-index-range-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 35453052,
+              "self_fraction": 0.1821990855184712,
+              "calls": 115934,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 17126702,
+              "self_fraction": 0.0880169482262732,
+              "calls": 107311,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 15610081,
+              "self_fraction": 0.08022278259906263,
+              "calls": 233833,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_str_split_whitespace",
+              "self_instructions": 14720398,
+              "self_fraction": 0.07565055482579983,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-range-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 10295273,
+              "self_fraction": 0.05290910711334549,
+              "calls": 224634,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_int_parse",
+              "self_instructions": 7298301,
+              "self_fraction": 0.03750717337504664,
+              "calls": 55007,
+              "objects": [
+                "benchmarks/local/dependency-index-range-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 6963561,
+              "self_fraction": 0.035786889268435644,
+              "calls": 224631,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_runtime::output_bytes",
+              "self_instructions": 5265225,
+              "self_fraction": 0.02705886026537271,
+              "calls": 83573,
+              "objects": [
+                "benchmarks/local/dependency-index-range-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "relar_print_int",
+              "self_instructions": 3932667,
+              "self_fraction": 0.02021062477353627,
+              "calls": 67180,
+              "objects": [
+                "benchmarks/local/dependency-index-range-lto/dependency_planner"
+              ]
+            }
+          ],
+          "allocated_bytes": 51543811,
+          "allocated_blocks": 233897,
+          "peak_live_bytes": 6055808,
+          "peak_live_blocks": 95873,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3
+        },
+        "wide-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.ranges.callgrind.trace",
+              "sha256": "a2a8616e61efa6cb28e0f3bc4489a5b5a7a5c3df93d90cd22e37c14c943edc11",
+              "log_sha256": "a49a96bf93b7cf2a0ac095c8786d5ca9c89cf5468b4ec45c1390d1fe99f6ee8a",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "wide-16384.ranges.dhat.trace",
+              "sha256": "827ca5318844745413279a5759657119f887b0d0df34245a62b46f7c9bb58e9e",
+              "log_sha256": "15b0136747eba34d1a0a0d71bc0e97ac422d1c8430d1a230b3b8ec3f410a8259",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 121441037,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "fn_0",
+              "self_instructions": 45689640,
+              "self_fraction": 0.37622900074543997,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-index-range-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 9344181,
+              "self_fraction": 0.07694417991506446,
+              "calls": 147530,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 9099905,
+              "self_fraction": 0.07493270170280249,
+              "calls": 65592,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_str_split_whitespace",
+              "self_instructions": 7978154,
+              "self_fraction": 0.06569570053984305,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-range-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 6769006,
+              "self_fraction": 0.05573903325611424,
+              "calls": 147510,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_runtime::output_bytes",
+              "self_instructions": 5161959,
+              "self_fraction": 0.04250588703388625,
+              "calls": 81934,
+              "objects": [
+                "benchmarks/local/dependency-index-range-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 4572719,
+              "self_fraction": 0.03765382042974485,
+              "calls": 147507,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000a9c90",
+              "self_instructions": 3636110,
+              "self_fraction": 0.029941361584387656,
+              "calls": 2,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_print_int",
+              "self_instructions": 3315242,
+              "self_fraction": 0.027299190470516158,
+              "calls": 65541,
+              "objects": [
+                "benchmarks/local/dependency-index-range-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "relar_int_parse",
+              "self_instructions": 1883170,
+              "self_fraction": 0.01550686692505763,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-range-lto/dependency_planner"
+              ]
+            }
+          ],
+          "allocated_bytes": 10078143,
+          "allocated_blocks": 147584,
+          "peak_live_bytes": 5130272,
+          "peak_live_blocks": 65564,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3
+        }
+      },
+      "completed_at_utc": "2026-10-17T21:36:07.697900+00:00"
+    },
+    {
+      "id": "storage",
+      "comparison": {
+        "path": "benchmarks/local/dependency-index-storage-lto.json",
+        "sha256": "2ba89d2961203f41b782b82b90cc737c33eec5a56764da875a2925f4bec61c18"
+      },
+      "git": {
+        "revision": "c1ed16f4c6b70ea7c7f641e09c64866b1c5b3592",
+        "dirty": true
+      },
+      "artifact_sha256": {
+        "baseline": "251212b84f7df996b241fa21bd10a507e048ff48f86b117d806ab1e99ecdc0e9",
+        "baseline_record": "cd3115d1c268c56dc1e2082b90b9609d91ec76cada5bca2f297447bb08a50930",
+        "rust_bigint": "100c0f67cccac4178a55ac2a7a45dd986ad46d8c8f61f7d3059fa14d0b5a3ba6",
+        "rust_i64": "ce5a885e6cb140ab2d062771f67789fe779de5c54e1bf7501ef5737ed3105006",
+        "rust_record": "ae0ffa4c61ef90675cc63756ea977fcf2e6800f84ad44cc3049a3cd98885a099",
+        "rust_build_script": "5e9f939cf701baefd6440b36bb676afde7549fc1ddcc53bb05d342f1acfd6e2c",
+        "compiler": "5d9965c962ec2a1b304c210fcfdc041ecebd24a319e3c6ac1f4fc383518c0ec5",
+        "runtime": "da05b5d29e239e7ae074cecaaad83d99f53abccf1e48997f6acd2879e502408f",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+        "harness": "f496e1e7659e15a2446427794f6184e173691b2e22c83439966c47b1cc7c0fc5",
+        "dependency_harness": "ddf4c986e24d5ea66dad3d492121ebe464a11e5bb7e0b5f075e3f3bc7989930d",
+        "shared_harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+        "route_validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+        "validator": "493bd16ecfc938c902b98f78adecc5f8dce2204c163fd05c64a1701e4996be2e",
+        "boundary_harness": "e0e83d31483c2983b1228c6403cb6ca43fc305b1300c78294e33d0f74edc1ac4",
+        "lto_linker": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+        "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        "binary": "ae41404cd8a6a7698f636fad14f51eb1f656e03128ab024d0231bd7165f025e7",
+        "llvm_ir": "a0ae937ce114dd0f678f12596b33560cbdd1d2de12e872699eb4a8b11869ff46"
+      },
+      "artifact_bytes": {
+        "baseline": {
+          "bytes": 2478088
+        },
+        "binary": {
+          "bytes": 2445360
+        },
+        "llvm_ir": {
+          "bytes": 96257
+        },
+        "rust_bigint": {
+          "bytes": 1514408
+        },
+        "rust_i64": {
+          "bytes": 740592
+        }
+      },
+      "text_section": {
+        "sha256": "a05f00aebcc6497a3a303bdca3d0d3bfd24e8410bbcffde949a2a2fc038a49e9",
+        "bytes": 916208
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-index-storage-lto/build-record.json",
+        "sha256": "5ddae874dd5732a7ad886fa61e8872bffe797b26df99d0c1f4dccc729b8d301d"
+      },
+      "tools_build_record": {
+        "path": "benchmarks/local/dependency-index-storage-tools/build-record.json",
+        "sha256": "7ad32b17dcc9c956166e5401e23293e2b95de5d38a5ecfd19f988a4808973d83",
+        "source_sha256": {
+          "Cargo.toml": "ce49064770ad21744c8ac6cea604da7408be1e5ec474e3f90206fa95f2af614f",
+          "Cargo.lock": "62b84d5f29e184143562b4a022bdb96eed14d9880c922cd36e3b38ce2d3ad2b9",
+          "crates/relar-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
+          "crates/relar-runtime/Cargo.toml": "ca46c91b45fcda42d7b6073c1de9178bf9e93ad7791bbd8b4c0e94caa739fb77",
+          "crates/relar-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
+          "crates/relar-compiler/src/classes.rs": "3d02a3968dcc28bf1c040e7bae4f1b2def6911fa9187813abc213b25a400914c",
+          "crates/relar-compiler/src/frontend.rs": "98026ca31bd572ef90a7603114be02d09024ef5b91bff21cb558646dcbd5a5be",
+          "crates/relar-compiler/src/ir.rs": "3371086ec43aeca6038383ba0492cf7b4d8ab6530374c601f53208d4048cf234",
+          "crates/relar-compiler/src/lib.rs": "9fafcca2352a05d26904d0202147356a9198fcd5afa95e215d2f4009d1ea133a",
+          "crates/relar-compiler/src/llvm.rs": "9f1502420a7858fd65da8dbf1fafb4e3f9dede6f53b42801c465d07cb725fcda",
+          "crates/relar-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+          "crates/relar-compiler/src/modules.rs": "7133088ce8840ab6e72237bb55e8d118bfa30ab2962b486d325af6a0186fe7d6",
+          "crates/relar-compiler/src/narrowing.rs": "bd97ee2f328de9b5985473c5d223a0d73f740bf56a8481a74bd1cf10e5f07d30",
+          "crates/relar-compiler/src/ranges.rs": "704a4688c3e958ec39bf9d0b9157a0964997a5d53f906c6f4a2e4ce496b1f244",
+          "crates/relar-compiler/src/tuples.rs": "adf794c6fc74bcf22d7e786b3da49a8393fb83a9b5a9b9e7a0ad411e94a2a78e",
+          "crates/relar-compiler/src/types.rs": "9f7ad86c6cb4388be30fe00a93a730e31c8ba480910d6490e4d723fd02528ff4",
+          "crates/relar-runtime/src/lib.rs": "c27af08319a870fcf7fd5c0fd031e1c9e45d210b6951e7b756d64ac0e10410f7",
+          "crates/relar-runtime/src/objects.rs": "a2d3f40d96555fe60def7b9487e9860586f4d9b6432a3321a28920dc3666fa65"
+        },
+        "source_snapshot_sha256": "b2f3f964798578d34094846f87a15e3c4acd53d8a7e7c5a00dc26b917dad126d",
+        "git_head": "c1ed16f4c6b70ea7c7f641e09c64866b1c5b3592",
+        "git_status": " M crates/relar-compiler/src/lib.rs\n M crates/relar-compiler/src/llvm.rs\n M crates/relar-runtime/src/lib.rs\n M crates/relar-runtime/src/objects.rs\n M tests/containers.py\n?? crates/relar-compiler/src/ranges.rs\n?? tests/fixtures/containers/index_proofs.py\n",
+        "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8\n",
+        "runtime_lto_rustflags": "-Clinker-plugin-lto"
+      },
+      "program_build": [
+        "relar",
+        "build",
+        "examples/dependency_planner/__main__.py",
+        "--module-root",
+        "examples",
+        "-o",
+        "<artifact-dir>/dependency_planner",
+        "--runtime",
+        "<runtime>",
+        "--clang",
+        "clang",
+        "--opt-level",
+        "3",
+        "--emit-llvm",
+        "<artifact-dir>/dependency_planner.ll",
+        "--lto-linker",
+        "<lto-linker-dir>/ld.lld",
+        "--target",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "compilation": {
+        "elapsed_ns": 4240890790,
+        "stdout": "",
+        "stderr": "",
+        "returncode": 0
+      },
+      "generated_ir_callsites": {
+        "relar_list_borrow_index": {},
+        "relar_list_copy_index": {}
+      },
+      "options": {
+        "optimization_level": 3,
+        "target": "x86_64-unknown-linux-gnu",
+        "requested_target": "x86_64-unknown-linux-gnu",
+        "lto": "thin",
+        "sizes": [
+          128,
+          2048,
+          16384
+        ],
+        "shapes": [
+          "layered",
+          "wide"
+        ],
+        "samples": 10,
+        "warmups": 2,
+        "timeout_seconds": 120.0,
+        "validation_timeout_seconds": 120
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-index-storage-profile",
+        "summary_sha256": "d2a3cee8802719487b12c5e12320fd6e9df150f3a84376f5108c6a8e8afe4c14",
+        "provenance_sha256": "b8a78e900aa0ebe19a538b309b3e4e2027c59100cb90306ca01abada2903dd46",
+        "manifest_sha256": "6d984d53ba5f919da6fbfd7c7ce608ebb29ba486f92426e6ed0660bdb55d7641",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30",
+        "manifest_entries_verified": 24
+      },
+      "profiler": {
+        "version": "valgrind-3.22.0",
+        "sha256": {
+          "valgrind": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+          "callgrind": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03",
+          "dhat": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc"
+        },
+        "affinity": [
+          0
+        ],
+        "host": {
+          "os": "Linux",
+          "architecture": "x86_64",
+          "kernel": "6.8.0-146-generic"
+        },
+        "io": "Captured input and full stdout use pipes; every stdout is saved and checked byte-for-byte."
+      },
+      "workloads": {
+        "layered-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.storage.callgrind.trace",
+              "sha256": "bb6cc4104291e5b822652b2b87bc34bd4244e394a4ee854c4c3e802bc6317deb",
+              "log_sha256": "44e202b34e447037b227a723bdc297c34517ce8b685fc2836838ec6bd014d111",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "layered-16384.storage.dhat.trace",
+              "sha256": "d41762e8f0a791c103a9e4f8cd2e15cd1a6d45e746c7cd5c18b81d30e50713ec",
+              "log_sha256": "04484d8a3617c323068f95b5f20872fb367f388ba81566735ea6983a668779f4",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 182650490,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "fn_0",
+              "self_instructions": 37961260,
+              "self_fraction": 0.20783552236843164,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-index-storage-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 35350456,
+              "self_fraction": 0.19354153388802844,
+              "calls": 115933,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 16466317,
+              "self_fraction": 0.09015205488909446,
+              "calls": 106934,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 15603106,
+              "self_fraction": 0.08542602869557044,
+              "calls": 233832,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_str_split_whitespace",
+              "self_instructions": 14704013,
+              "self_fraction": 0.08050355079802961,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-storage-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 10294521,
+              "self_fraction": 0.05636185810396676,
+              "calls": 224634,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_int_parse",
+              "self_instructions": 7298301,
+              "self_fraction": 0.03995774114813489,
+              "calls": 55007,
+              "objects": [
+                "benchmarks/local/dependency-index-storage-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 6963561,
+              "self_fraction": 0.03812506060071342,
+              "calls": 224631,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_runtime::output_bytes",
+              "self_instructions": 5265225,
+              "self_fraction": 0.028826777305661758,
+              "calls": 83573,
+              "objects": [
+                "benchmarks/local/dependency-index-storage-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "relar_print_int",
+              "self_instructions": 3932667,
+              "self_fraction": 0.021531105665251706,
+              "calls": 67180,
+              "objects": [
+                "benchmarks/local/dependency-index-storage-lto/dependency_planner"
+              ]
+            }
+          ],
+          "allocated_bytes": 51019379,
+          "allocated_blocks": 233897,
+          "peak_live_bytes": 5662496,
+          "peak_live_blocks": 95873,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3
+        },
+        "wide-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.storage.callgrind.trace",
+              "sha256": "5576dbc9d0263d3b1cf39199f912c574ab7443c2a0eef8b6afa1b2c3bfc8f7a5",
+              "log_sha256": "ba0f07fcd1c93fa8043ee24967642c173c79093ba8f549237d91db5efd6e33c6",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "wide-16384.storage.dhat.trace",
+              "sha256": "fba8a67f280f009d3ea1dc733c052cc3a4c83b80a7c095f6c38849e73b03c1e6",
+              "log_sha256": "b590f550a28b2d687f3f4ff27d0242dd2c0892a4dafc656a67026ff671f223d8",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 106504878,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "fn_0",
+              "self_instructions": 36347674,
+              "self_fraction": 0.3412770821633165,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-index-storage-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 9343876,
+              "self_fraction": 0.08773190651417863,
+              "calls": 147526,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 9091483,
+              "self_fraction": 0.08536212773277858,
+              "calls": 65591,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_str_split_whitespace",
+              "self_instructions": 7961769,
+              "self_fraction": 0.07475497037797649,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-storage-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 6769008,
+              "self_fraction": 0.0635558495264414,
+              "calls": 147510,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_runtime::output_bytes",
+              "self_instructions": 5161959,
+              "self_fraction": 0.0484668786719797,
+              "calls": 81934,
+              "objects": [
+                "benchmarks/local/dependency-index-storage-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 4572715,
+              "self_fraction": 0.042934324566805286,
+              "calls": 147507,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_print_int",
+              "self_instructions": 3315242,
+              "self_fraction": 0.03112760713175973,
+              "calls": 65541,
+              "objects": [
+                "benchmarks/local/dependency-index-storage-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 1901788,
+              "self_fraction": 0.017856346448281928,
+              "calls": 98507,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_int_parse",
+              "self_instructions": 1883170,
+              "self_fraction": 0.01768153755361327,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-storage-lto/dependency_planner"
+              ]
+            }
+          ],
+          "allocated_bytes": 9553711,
+          "allocated_blocks": 147584,
+          "peak_live_bytes": 4736960,
+          "peak_live_blocks": 65564,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3
+        }
+      },
+      "completed_at_utc": "2026-10-17T21:39:59.718177+00:00"
+    },
+    {
+      "id": "flags",
+      "comparison": {
+        "path": "benchmarks/local/dependency-index-flags-lto.json",
+        "sha256": "8e2523adbcddac466397c483ad26026fe08bcc10d2b27e403f9a10a900ff1a4f"
+      },
+      "git": {
+        "revision": "c1ed16f4c6b70ea7c7f641e09c64866b1c5b3592",
+        "dirty": true
+      },
+      "artifact_sha256": {
+        "baseline": "251212b84f7df996b241fa21bd10a507e048ff48f86b117d806ab1e99ecdc0e9",
+        "baseline_record": "cd3115d1c268c56dc1e2082b90b9609d91ec76cada5bca2f297447bb08a50930",
+        "rust_bigint": "100c0f67cccac4178a55ac2a7a45dd986ad46d8c8f61f7d3059fa14d0b5a3ba6",
+        "rust_i64": "ce5a885e6cb140ab2d062771f67789fe779de5c54e1bf7501ef5737ed3105006",
+        "rust_record": "ae0ffa4c61ef90675cc63756ea977fcf2e6800f84ad44cc3049a3cd98885a099",
+        "rust_build_script": "5e9f939cf701baefd6440b36bb676afde7549fc1ddcc53bb05d342f1acfd6e2c",
+        "compiler": "0307d9fd2fac9bb2c376fc30bfcd79fe338cc449efd106d121a3809cab9368eb",
+        "runtime": "da05b5d29e239e7ae074cecaaad83d99f53abccf1e48997f6acd2879e502408f",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+        "harness": "f496e1e7659e15a2446427794f6184e173691b2e22c83439966c47b1cc7c0fc5",
+        "dependency_harness": "ddf4c986e24d5ea66dad3d492121ebe464a11e5bb7e0b5f075e3f3bc7989930d",
+        "shared_harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+        "route_validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+        "validator": "493bd16ecfc938c902b98f78adecc5f8dce2204c163fd05c64a1701e4996be2e",
+        "boundary_harness": "e0e83d31483c2983b1228c6403cb6ca43fc305b1300c78294e33d0f74edc1ac4",
+        "lto_linker": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+        "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        "binary": "f4539c93fe6cf4213531956b5185cf0ae9602cb15b712ecdc3baa5bb6ed82ada",
+        "llvm_ir": "4f0bf05cc8d0a7997e12441dd648756929665f35d1ea25e49df15253beb1476c"
+      },
+      "artifact_bytes": {
+        "baseline": {
+          "bytes": 2478088
+        },
+        "binary": {
+          "bytes": 2445360
+        },
+        "llvm_ir": {
+          "bytes": 96533
+        },
+        "rust_bigint": {
+          "bytes": 1514408
+        },
+        "rust_i64": {
+          "bytes": 740592
+        }
+      },
+      "text_section": {
+        "sha256": "a05f00aebcc6497a3a303bdca3d0d3bfd24e8410bbcffde949a2a2fc038a49e9",
+        "bytes": 916208
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-index-flags-lto/build-record.json",
+        "sha256": "e46972962ce58939c5148a90002a6974f9dc0d42e6bc89bf0f29199034464d96"
+      },
+      "tools_build_record": {
+        "path": "benchmarks/local/dependency-index-flags-tools/build-record.json",
+        "sha256": "11c47f34520b57d59261bcaec51f4115f2842803585a7bd1aa46a4cc5199ae2c",
+        "source_sha256": {
+          "Cargo.toml": "ce49064770ad21744c8ac6cea604da7408be1e5ec474e3f90206fa95f2af614f",
+          "Cargo.lock": "62b84d5f29e184143562b4a022bdb96eed14d9880c922cd36e3b38ce2d3ad2b9",
+          "crates/relar-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
+          "crates/relar-runtime/Cargo.toml": "ca46c91b45fcda42d7b6073c1de9178bf9e93ad7791bbd8b4c0e94caa739fb77",
+          "crates/relar-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
+          "crates/relar-compiler/src/classes.rs": "3d02a3968dcc28bf1c040e7bae4f1b2def6911fa9187813abc213b25a400914c",
+          "crates/relar-compiler/src/frontend.rs": "98026ca31bd572ef90a7603114be02d09024ef5b91bff21cb558646dcbd5a5be",
+          "crates/relar-compiler/src/ir.rs": "3371086ec43aeca6038383ba0492cf7b4d8ab6530374c601f53208d4048cf234",
+          "crates/relar-compiler/src/lib.rs": "9fafcca2352a05d26904d0202147356a9198fcd5afa95e215d2f4009d1ea133a",
+          "crates/relar-compiler/src/llvm.rs": "3cb1a5e1112e7216838460daebb3709cac8a18c376974f2fe6cea5bbbc04ac24",
+          "crates/relar-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+          "crates/relar-compiler/src/modules.rs": "7133088ce8840ab6e72237bb55e8d118bfa30ab2962b486d325af6a0186fe7d6",
+          "crates/relar-compiler/src/narrowing.rs": "bd97ee2f328de9b5985473c5d223a0d73f740bf56a8481a74bd1cf10e5f07d30",
+          "crates/relar-compiler/src/ranges.rs": "704a4688c3e958ec39bf9d0b9157a0964997a5d53f906c6f4a2e4ce496b1f244",
+          "crates/relar-compiler/src/tuples.rs": "adf794c6fc74bcf22d7e786b3da49a8393fb83a9b5a9b9e7a0ad411e94a2a78e",
+          "crates/relar-compiler/src/types.rs": "9f7ad86c6cb4388be30fe00a93a730e31c8ba480910d6490e4d723fd02528ff4",
+          "crates/relar-runtime/src/lib.rs": "c27af08319a870fcf7fd5c0fd031e1c9e45d210b6951e7b756d64ac0e10410f7",
+          "crates/relar-runtime/src/objects.rs": "a2d3f40d96555fe60def7b9487e9860586f4d9b6432a3321a28920dc3666fa65"
+        },
+        "source_snapshot_sha256": "7bc2143635ee5969bbc63f284209b2137c4c874b6805441fa866a3da15be719f",
+        "git_head": "c1ed16f4c6b70ea7c7f641e09c64866b1c5b3592",
+        "git_status": " M crates/relar-compiler/src/lib.rs\n M crates/relar-compiler/src/llvm.rs\n M crates/relar-runtime/src/lib.rs\n M crates/relar-runtime/src/objects.rs\n M tests/containers.py\n?? crates/relar-compiler/src/ranges.rs\n?? tests/fixtures/containers/index_proofs.py\n",
+        "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8\n",
+        "runtime_lto_rustflags": "-Clinker-plugin-lto"
+      },
+      "program_build": [
+        "relar",
+        "build",
+        "examples/dependency_planner/__main__.py",
+        "--module-root",
+        "examples",
+        "-o",
+        "<artifact-dir>/dependency_planner",
+        "--runtime",
+        "<runtime>",
+        "--clang",
+        "clang",
+        "--opt-level",
+        "3",
+        "--emit-llvm",
+        "<artifact-dir>/dependency_planner.ll",
+        "--lto-linker",
+        "<lto-linker-dir>/ld.lld",
+        "--target",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "compilation": {
+        "elapsed_ns": 4222589431,
+        "stdout": "",
+        "stderr": "",
+        "returncode": 0
+      },
+      "generated_ir_callsites": {
+        "relar_list_borrow_index": {},
+        "relar_list_copy_index": {}
+      },
+      "options": {
+        "optimization_level": 3,
+        "target": "x86_64-unknown-linux-gnu",
+        "requested_target": "x86_64-unknown-linux-gnu",
+        "lto": "thin",
+        "sizes": [
+          128,
+          2048,
+          16384
+        ],
+        "shapes": [
+          "layered",
+          "wide"
+        ],
+        "samples": 10,
+        "warmups": 2,
+        "timeout_seconds": 120.0,
+        "validation_timeout_seconds": 120
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-index-flags-profile",
+        "summary_sha256": "f30f1dc0fdc8e5b0d966a46ca1bf57907a22f27e6dd184ab2255304d6c6691a2",
+        "provenance_sha256": "a7a8364127327390939aab8a7dce5b9538727627714976dda8cf0319cf7c100a",
+        "manifest_sha256": "eb1a7d175bb12cd0e638f468fefc42ee047af2103ab79bcf2a6a703b7cc35d13",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30",
+        "manifest_entries_verified": 24
+      },
+      "profiler": {
+        "version": "valgrind-3.22.0",
+        "sha256": {
+          "valgrind": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+          "callgrind": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03",
+          "dhat": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc"
+        },
+        "affinity": [
+          0
+        ],
+        "host": {
+          "os": "Linux",
+          "architecture": "x86_64",
+          "kernel": "6.8.0-146-generic"
+        },
+        "io": "Captured input and full stdout use pipes; every stdout is saved and checked byte-for-byte."
+      },
+      "workloads": {
+        "layered-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.flags.callgrind.trace",
+              "sha256": "362eadfeee0025919d31cb8be057494d6a78a0681de6568a65e27d13fdfc5194",
+              "log_sha256": "a9e51132aa34756363c2493fc9523705b818151dce32433c809ef58125cda061",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "layered-16384.flags.dhat.trace",
+              "sha256": "4f23a4c6a5de472f6ecd975886932282c9df8479293e8dfbcc4881012933d1c0",
+              "log_sha256": "38c1c7e66b523d8c1c93f27fae1b8668ae4729699d5a1ba4c8ab4977470a8f07",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 182650504,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "fn_0",
+              "self_instructions": 37961260,
+              "self_fraction": 0.2078355064380222,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-index-flags-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 35350456,
+              "self_fraction": 0.1935415190532406,
+              "calls": 115933,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 16466317,
+              "self_fraction": 0.09015204797901899,
+              "calls": 106934,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 15603106,
+              "self_fraction": 0.0854260221477407,
+              "calls": 233832,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_str_split_whitespace",
+              "self_instructions": 14704013,
+              "self_fraction": 0.08050354462750346,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-flags-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 10294521,
+              "self_fraction": 0.05636185378388006,
+              "calls": 224634,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_int_parse",
+              "self_instructions": 7298301,
+              "self_fraction": 0.039957738085409276,
+              "calls": 55007,
+              "objects": [
+                "benchmarks/local/dependency-index-flags-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 6963561,
+              "self_fraction": 0.03812505767846115,
+              "calls": 224631,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_runtime::output_bytes",
+              "self_instructions": 5265225,
+              "self_fraction": 0.02882677509611471,
+              "calls": 83573,
+              "objects": [
+                "benchmarks/local/dependency-index-flags-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "relar_print_int",
+              "self_instructions": 3932667,
+              "self_fraction": 0.02153110401491145,
+              "calls": 67180,
+              "objects": [
+                "benchmarks/local/dependency-index-flags-lto/dependency_planner"
+              ]
+            }
+          ],
+          "allocated_bytes": 51019379,
+          "allocated_blocks": 233897,
+          "peak_live_bytes": 5662496,
+          "peak_live_blocks": 95873,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3
+        },
+        "wide-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.flags.callgrind.trace",
+              "sha256": "af3d42d7f05ec5b1946ff24e532016aa2fb01d6c9f1cd3dbbbaae7a0c9dfb1b4",
+              "log_sha256": "62c1767e13df16dcd3fe7c13fc18bfda3cfbf0ede259c1063827fa3363037066",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "wide-16384.flags.dhat.trace",
+              "sha256": "7ed4e056dcfe5ce81ba46dba1a1a35b633e21d3ec7b552d93613d33983469180",
+              "log_sha256": "5551c4629112b276a9eff5e2b69987a1867c1575db8b19711a9358059e89e8a7",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 106504892,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "fn_0",
+              "self_instructions": 36347674,
+              "self_fraction": 0.3412770373026621,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-index-flags-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 9343876,
+              "self_fraction": 0.08773189498187557,
+              "calls": 147526,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 9091483,
+              "self_fraction": 0.08536211651198145,
+              "calls": 65591,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_str_split_whitespace",
+              "self_instructions": 7961769,
+              "self_fraction": 0.0747549605514834,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-flags-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 6769008,
+              "self_fraction": 0.0635558411720656,
+              "calls": 147510,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_runtime::output_bytes",
+              "self_instructions": 5161959,
+              "self_fraction": 0.048466872301039465,
+              "calls": 81934,
+              "objects": [
+                "benchmarks/local/dependency-index-flags-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 4572715,
+              "self_fraction": 0.04293431892311576,
+              "calls": 147507,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_print_int",
+              "self_instructions": 3315242,
+              "self_fraction": 0.031127603040055664,
+              "calls": 65541,
+              "objects": [
+                "benchmarks/local/dependency-index-flags-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 1901788,
+              "self_fraction": 0.017856344101076598,
+              "calls": 98507,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_int_parse",
+              "self_instructions": 1883170,
+              "self_fraction": 0.01768153522938646,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-flags-lto/dependency_planner"
+              ]
+            }
+          ],
+          "allocated_bytes": 9553711,
+          "allocated_blocks": 147584,
+          "peak_live_bytes": 4736960,
+          "peak_live_blocks": 65564,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3
+        }
+      },
+      "completed_at_utc": "2026-10-17T21:40:07.037941+00:00"
+    },
+    {
+      "id": "locals",
+      "comparison": {
+        "path": "benchmarks/local/dependency-index-locals-lto.json",
+        "sha256": "4c89a7311f34f7cc366136fd1d780ae4abe7465889770c883b0506273b9ef9df"
+      },
+      "git": {
+        "revision": "c1ed16f4c6b70ea7c7f641e09c64866b1c5b3592",
+        "dirty": true
+      },
+      "artifact_sha256": {
+        "baseline": "251212b84f7df996b241fa21bd10a507e048ff48f86b117d806ab1e99ecdc0e9",
+        "baseline_record": "cd3115d1c268c56dc1e2082b90b9609d91ec76cada5bca2f297447bb08a50930",
+        "rust_bigint": "100c0f67cccac4178a55ac2a7a45dd986ad46d8c8f61f7d3059fa14d0b5a3ba6",
+        "rust_i64": "ce5a885e6cb140ab2d062771f67789fe779de5c54e1bf7501ef5737ed3105006",
+        "rust_record": "ae0ffa4c61ef90675cc63756ea977fcf2e6800f84ad44cc3049a3cd98885a099",
+        "rust_build_script": "5e9f939cf701baefd6440b36bb676afde7549fc1ddcc53bb05d342f1acfd6e2c",
+        "compiler": "3c559d36af4a61b7dbf5e0d7f17a39641c33fc5d2fd4fd4d8354749cb534704f",
+        "runtime": "da05b5d29e239e7ae074cecaaad83d99f53abccf1e48997f6acd2879e502408f",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+        "harness": "f496e1e7659e15a2446427794f6184e173691b2e22c83439966c47b1cc7c0fc5",
+        "dependency_harness": "ddf4c986e24d5ea66dad3d492121ebe464a11e5bb7e0b5f075e3f3bc7989930d",
+        "shared_harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+        "route_validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+        "validator": "493bd16ecfc938c902b98f78adecc5f8dce2204c163fd05c64a1701e4996be2e",
+        "boundary_harness": "e0e83d31483c2983b1228c6403cb6ca43fc305b1300c78294e33d0f74edc1ac4",
+        "lto_linker": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+        "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        "binary": "4ef7a3226e598a64c7056ae07dc682cb2bc4cc201fb920bedf7dd637828e4ee1",
+        "llvm_ir": "cdfcb9bb406af07005f23cfc9bf21ac82e495fadd941f454d857ff4f92796c01"
+      },
+      "artifact_bytes": {
+        "baseline": {
+          "bytes": 2478088
+        },
+        "binary": {
+          "bytes": 2441664
+        },
+        "llvm_ir": {
+          "bytes": 88328
+        },
+        "rust_bigint": {
+          "bytes": 1514408
+        },
+        "rust_i64": {
+          "bytes": 740592
+        }
+      },
+      "text_section": {
+        "sha256": "061ddd1b01c7471c875f4416a6a39a8509bdce19a4aef89104703b7be1c444e8",
+        "bytes": 912944
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-index-locals-lto/build-record.json",
+        "sha256": "1894691e0f8179c02cc9a18f1ef189df97b70e8eb06c5287e589bcc2ee420ce2"
+      },
+      "tools_build_record": {
+        "path": "benchmarks/local/dependency-index-locals-tools/build-record.json",
+        "sha256": "3b927e3dcff8f9f6f6b8e59535775edaa7c786333e3f3953fdeea5691aa671b2",
+        "source_sha256": {
+          "Cargo.toml": "ce49064770ad21744c8ac6cea604da7408be1e5ec474e3f90206fa95f2af614f",
+          "Cargo.lock": "62b84d5f29e184143562b4a022bdb96eed14d9880c922cd36e3b38ce2d3ad2b9",
+          "crates/relar-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
+          "crates/relar-runtime/Cargo.toml": "ca46c91b45fcda42d7b6073c1de9178bf9e93ad7791bbd8b4c0e94caa739fb77",
+          "crates/relar-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
+          "crates/relar-compiler/src/classes.rs": "3d02a3968dcc28bf1c040e7bae4f1b2def6911fa9187813abc213b25a400914c",
+          "crates/relar-compiler/src/frontend.rs": "98026ca31bd572ef90a7603114be02d09024ef5b91bff21cb558646dcbd5a5be",
+          "crates/relar-compiler/src/ir.rs": "3371086ec43aeca6038383ba0492cf7b4d8ab6530374c601f53208d4048cf234",
+          "crates/relar-compiler/src/lib.rs": "9fafcca2352a05d26904d0202147356a9198fcd5afa95e215d2f4009d1ea133a",
+          "crates/relar-compiler/src/llvm.rs": "ba0f619a62b24c063a46a7752eadd8faff8304ee29c6b5a0b5475d869c97158c",
+          "crates/relar-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+          "crates/relar-compiler/src/modules.rs": "7133088ce8840ab6e72237bb55e8d118bfa30ab2962b486d325af6a0186fe7d6",
+          "crates/relar-compiler/src/narrowing.rs": "bd97ee2f328de9b5985473c5d223a0d73f740bf56a8481a74bd1cf10e5f07d30",
+          "crates/relar-compiler/src/ranges.rs": "08e1a9c1275c93ba8aa79c4dc87c264c63ef1258eff3fd8f43c917e54d806011",
+          "crates/relar-compiler/src/tuples.rs": "adf794c6fc74bcf22d7e786b3da49a8393fb83a9b5a9b9e7a0ad411e94a2a78e",
+          "crates/relar-compiler/src/types.rs": "9f7ad86c6cb4388be30fe00a93a730e31c8ba480910d6490e4d723fd02528ff4",
+          "crates/relar-runtime/src/lib.rs": "c27af08319a870fcf7fd5c0fd031e1c9e45d210b6951e7b756d64ac0e10410f7",
+          "crates/relar-runtime/src/objects.rs": "a2d3f40d96555fe60def7b9487e9860586f4d9b6432a3321a28920dc3666fa65"
+        },
+        "source_snapshot_sha256": "02f27515afdba8ed6f7254f33e2b3333f2b50fe1f0a79e5bd79f3265e6c797a6",
+        "git_head": "c1ed16f4c6b70ea7c7f641e09c64866b1c5b3592",
+        "git_status": " M crates/relar-compiler/src/lib.rs\n M crates/relar-compiler/src/llvm.rs\n M crates/relar-runtime/src/lib.rs\n M crates/relar-runtime/src/objects.rs\n M docs/design.md\n M docs/subset.md\n M tests/containers.py\n?? crates/relar-compiler/src/ranges.rs\n?? tests/fixtures/containers/index_proofs.py\n",
+        "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8\n",
+        "runtime_lto_rustflags": "-Clinker-plugin-lto"
+      },
+      "program_build": [
+        "relar",
+        "build",
+        "examples/dependency_planner/__main__.py",
+        "--module-root",
+        "examples",
+        "-o",
+        "<artifact-dir>/dependency_planner",
+        "--runtime",
+        "<runtime>",
+        "--clang",
+        "clang",
+        "--opt-level",
+        "3",
+        "--emit-llvm",
+        "<artifact-dir>/dependency_planner.ll",
+        "--lto-linker",
+        "<lto-linker-dir>/ld.lld",
+        "--target",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "compilation": {
+        "elapsed_ns": 4120680526,
+        "stdout": "",
+        "stderr": "",
+        "returncode": 0
+      },
+      "generated_ir_callsites": {
+        "relar_list_borrow_index": {},
+        "relar_list_copy_index": {}
+      },
+      "options": {
+        "optimization_level": 3,
+        "target": "x86_64-unknown-linux-gnu",
+        "requested_target": "x86_64-unknown-linux-gnu",
+        "lto": "thin",
+        "sizes": [
+          128,
+          2048,
+          16384
+        ],
+        "shapes": [
+          "layered",
+          "wide"
+        ],
+        "samples": 10,
+        "warmups": 2,
+        "timeout_seconds": 120.0,
+        "validation_timeout_seconds": 120
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-index-locals-profile-restored",
+        "summary_sha256": "4b5db2fea7331f9595e9aa82d274510193b380e630bfb7596fb564b91e879bc8",
+        "provenance_sha256": "4805eab622c66cca44296cff2231d4436974726087b83e30b34abcf6f0cb3dbc",
+        "manifest_sha256": "3001eea03c928e682f63a215d8dc048325eef2872a49933a5db4157c7148872a",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30",
+        "manifest_entries_verified": 24
+      },
+      "profiler": {
+        "version": "valgrind-3.22.0",
+        "sha256": {
+          "valgrind": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+          "callgrind": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03",
+          "dhat": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc"
+        },
+        "affinity": [
+          0
+        ],
+        "host": {
+          "os": "Linux",
+          "architecture": "x86_64",
+          "kernel": "6.8.0-146-generic"
+        },
+        "io": "Captured input and full stdout use pipes; every stdout is saved and checked byte-for-byte."
+      },
+      "workloads": {
+        "layered-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.locals.callgrind.trace",
+              "sha256": "4bbe61283785f28f3525477847ef3ce5ff9df55f79837d0b380ef21044873869",
+              "log_sha256": "d899202c93c8d2ae692a81370abe4acefdab1653d95852f2cd3c57089ff953c1",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "layered-16384.locals.dhat.trace",
+              "sha256": "f273d07ce93366a236c0cc6809049e119996e409fcf2f3ad3d9a726545665f29",
+              "log_sha256": "9748c29a2b2be75643614e73ccf7ebe57a460a01fc08d7f3275c5f1c9be52178",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 181108491,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "fn_0",
+              "self_instructions": 36538275,
+              "self_fraction": 0.2017479953493732,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-index-locals-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 35350456,
+              "self_fraction": 0.1951893906509331,
+              "calls": 115933,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 16466317,
+              "self_fraction": 0.0909196300465007,
+              "calls": 106934,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 15603106,
+              "self_fraction": 0.08615336538804247,
+              "calls": 233832,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_str_split_whitespace",
+              "self_instructions": 14704013,
+              "self_fraction": 0.08118897639095232,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-locals-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 10294521,
+              "self_fraction": 0.05684173581900144,
+              "calls": 224634,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_int_parse",
+              "self_instructions": 7298301,
+              "self_fraction": 0.04029795046992026,
+              "calls": 55007,
+              "objects": [
+                "benchmarks/local/dependency-index-locals-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 6963561,
+              "self_fraction": 0.03844966606231621,
+              "calls": 224631,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_runtime::output_bytes",
+              "self_instructions": 5265225,
+              "self_fraction": 0.029072215062517417,
+              "calls": 83573,
+              "objects": [
+                "benchmarks/local/dependency-index-locals-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "relar_print_int",
+              "self_instructions": 3932667,
+              "self_fraction": 0.021714426409747956,
+              "calls": 67180,
+              "objects": [
+                "benchmarks/local/dependency-index-locals-lto/dependency_planner"
+              ]
+            }
+          ],
+          "allocated_bytes": 51019379,
+          "allocated_blocks": 233897,
+          "peak_live_bytes": 5662496,
+          "peak_live_blocks": 95873,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3
+        },
+        "wide-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.locals.callgrind.trace",
+              "sha256": "65b7afac1e70137d08e4d1ca3614ae832ac4953c79d413f9509baa497e4f5125",
+              "log_sha256": "079311cb9014b07fed711d95858c4e8b0af174907108ec66dbb708b87af959fe",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "wide-16384.locals.dhat.trace",
+              "sha256": "22f45c3e93e92126036b58266e7e18057e86ebac57b484029830a6ae711cce4c",
+              "log_sha256": "dc5bc5fca5d7530707092972428b6b3f80fbef5ecabf2564a63ef2f25ca8c30e",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 104396037,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "fn_0",
+              "self_instructions": 34288031,
+              "self_fraction": 0.328441883287198,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-index-locals-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 9343876,
+              "self_fraction": 0.08950412552537794,
+              "calls": 147526,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 9091483,
+              "self_fraction": 0.08708647628070403,
+              "calls": 65591,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_str_split_whitespace",
+              "self_instructions": 7961769,
+              "self_fraction": 0.07626505017618629,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-locals-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 6769008,
+              "self_fraction": 0.06483970267951839,
+              "calls": 147510,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_runtime::output_bytes",
+              "self_instructions": 5161959,
+              "self_fraction": 0.04944592868022375,
+              "calls": 81934,
+              "objects": [
+                "benchmarks/local/dependency-index-locals-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 4572715,
+              "self_fraction": 0.04380161480650841,
+              "calls": 147507,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_print_int",
+              "self_instructions": 3315242,
+              "self_fraction": 0.031756397036412407,
+              "calls": 65541,
+              "objects": [
+                "benchmarks/local/dependency-index-locals-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 1901788,
+              "self_fraction": 0.018217051668350207,
+              "calls": 98507,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_int_parse",
+              "self_instructions": 1883170,
+              "self_fraction": 0.018038711565267557,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-locals-lto/dependency_planner"
+              ]
+            }
+          ],
+          "allocated_bytes": 9553711,
+          "allocated_blocks": 147584,
+          "peak_live_bytes": 4736960,
+          "peak_live_blocks": 65564,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3
+        }
+      },
+      "completed_at_utc": "2026-10-17T21:50:23.541187+00:00"
+    },
+    {
+      "id": "cold",
+      "comparison": {
+        "path": "benchmarks/local/dependency-index-cold-lto.json",
+        "sha256": "74906af3dfa0986f9f26b2fbd33203bf5df9f4c325992ad47c780c6c42a317c8"
+      },
+      "git": {
+        "revision": "c1ed16f4c6b70ea7c7f641e09c64866b1c5b3592",
+        "dirty": true
+      },
+      "artifact_sha256": {
+        "baseline": "251212b84f7df996b241fa21bd10a507e048ff48f86b117d806ab1e99ecdc0e9",
+        "baseline_record": "cd3115d1c268c56dc1e2082b90b9609d91ec76cada5bca2f297447bb08a50930",
+        "rust_bigint": "100c0f67cccac4178a55ac2a7a45dd986ad46d8c8f61f7d3059fa14d0b5a3ba6",
+        "rust_i64": "ce5a885e6cb140ab2d062771f67789fe779de5c54e1bf7501ef5737ed3105006",
+        "rust_record": "ae0ffa4c61ef90675cc63756ea977fcf2e6800f84ad44cc3049a3cd98885a099",
+        "rust_build_script": "5e9f939cf701baefd6440b36bb676afde7549fc1ddcc53bb05d342f1acfd6e2c",
+        "compiler": "3c559d36af4a61b7dbf5e0d7f17a39641c33fc5d2fd4fd4d8354749cb534704f",
+        "runtime": "e535816484e445ef064ae3abf3143555ba8bdb9a5bbc4887f90a5bb7516e962c",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+        "harness": "f496e1e7659e15a2446427794f6184e173691b2e22c83439966c47b1cc7c0fc5",
+        "dependency_harness": "ddf4c986e24d5ea66dad3d492121ebe464a11e5bb7e0b5f075e3f3bc7989930d",
+        "shared_harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+        "route_validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+        "validator": "493bd16ecfc938c902b98f78adecc5f8dce2204c163fd05c64a1701e4996be2e",
+        "boundary_harness": "e0e83d31483c2983b1228c6403cb6ca43fc305b1300c78294e33d0f74edc1ac4",
+        "lto_linker": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+        "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        "binary": "ce28133452aebd09619f51c5e59b11ddea8fe19dd15ec0cf80c41cf14cbb4c64",
+        "llvm_ir": "cdfcb9bb406af07005f23cfc9bf21ac82e495fadd941f454d857ff4f92796c01"
+      },
+      "artifact_bytes": {
+        "baseline": {
+          "bytes": 2478088
+        },
+        "binary": {
+          "bytes": 2436136
+        },
+        "llvm_ir": {
+          "bytes": 88328
+        },
+        "rust_bigint": {
+          "bytes": 1514408
+        },
+        "rust_i64": {
+          "bytes": 740592
+        }
+      },
+      "text_section": {
+        "sha256": "99bf907a4b3aab43164cd7bf85b560b4c41103cf343f5896e161ba5c17633737",
+        "bytes": 907392
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-index-cold-lto/build-record.json",
+        "sha256": "0276fd3ec8a44484d48fc3111868d28b5fc94a4fb24445169007e4e083f4efc1"
+      },
+      "tools_build_record": {
+        "path": "benchmarks/local/dependency-index-cold-tools/build-record.json",
+        "sha256": "ce9fc0c62122231d97ee19c58944c52c8e1214222717aef8df91bae99abdf226",
+        "source_sha256": {
+          "Cargo.toml": "ce49064770ad21744c8ac6cea604da7408be1e5ec474e3f90206fa95f2af614f",
+          "Cargo.lock": "62b84d5f29e184143562b4a022bdb96eed14d9880c922cd36e3b38ce2d3ad2b9",
+          "crates/relar-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
+          "crates/relar-runtime/Cargo.toml": "ca46c91b45fcda42d7b6073c1de9178bf9e93ad7791bbd8b4c0e94caa739fb77",
+          "crates/relar-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
+          "crates/relar-compiler/src/classes.rs": "3d02a3968dcc28bf1c040e7bae4f1b2def6911fa9187813abc213b25a400914c",
+          "crates/relar-compiler/src/frontend.rs": "98026ca31bd572ef90a7603114be02d09024ef5b91bff21cb558646dcbd5a5be",
+          "crates/relar-compiler/src/ir.rs": "3371086ec43aeca6038383ba0492cf7b4d8ab6530374c601f53208d4048cf234",
+          "crates/relar-compiler/src/lib.rs": "9fafcca2352a05d26904d0202147356a9198fcd5afa95e215d2f4009d1ea133a",
+          "crates/relar-compiler/src/llvm.rs": "ba0f619a62b24c063a46a7752eadd8faff8304ee29c6b5a0b5475d869c97158c",
+          "crates/relar-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+          "crates/relar-compiler/src/modules.rs": "7133088ce8840ab6e72237bb55e8d118bfa30ab2962b486d325af6a0186fe7d6",
+          "crates/relar-compiler/src/narrowing.rs": "bd97ee2f328de9b5985473c5d223a0d73f740bf56a8481a74bd1cf10e5f07d30",
+          "crates/relar-compiler/src/ranges.rs": "08e1a9c1275c93ba8aa79c4dc87c264c63ef1258eff3fd8f43c917e54d806011",
+          "crates/relar-compiler/src/tuples.rs": "adf794c6fc74bcf22d7e786b3da49a8393fb83a9b5a9b9e7a0ad411e94a2a78e",
+          "crates/relar-compiler/src/types.rs": "9f7ad86c6cb4388be30fe00a93a730e31c8ba480910d6490e4d723fd02528ff4",
+          "crates/relar-runtime/src/lib.rs": "a7238dcf07b1408101c1118fa4fe6255282de7263d40a349fbf0f282122edac1",
+          "crates/relar-runtime/src/objects.rs": "a2d3f40d96555fe60def7b9487e9860586f4d9b6432a3321a28920dc3666fa65"
+        },
+        "source_snapshot_sha256": "065b7f9b80751c8e16b6196c31436dd92757934b5d10aaa7ae7f4bd144273010",
+        "git_head": "c1ed16f4c6b70ea7c7f641e09c64866b1c5b3592",
+        "git_status": " M crates/relar-compiler/src/lib.rs\n M crates/relar-compiler/src/llvm.rs\n M crates/relar-runtime/src/lib.rs\n M crates/relar-runtime/src/objects.rs\n M docs/design.md\n M docs/subset.md\n M tests/containers.py\n?? crates/relar-compiler/src/ranges.rs\n?? tests/fixtures/containers/index_proofs.py\n",
+        "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8\n",
+        "runtime_lto_rustflags": "-Clinker-plugin-lto"
+      },
+      "program_build": [
+        "relar",
+        "build",
+        "examples/dependency_planner/__main__.py",
+        "--module-root",
+        "examples",
+        "-o",
+        "<artifact-dir>/dependency_planner",
+        "--runtime",
+        "<runtime>",
+        "--clang",
+        "clang",
+        "--opt-level",
+        "3",
+        "--emit-llvm",
+        "<artifact-dir>/dependency_planner.ll",
+        "--lto-linker",
+        "<lto-linker-dir>/ld.lld",
+        "--target",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "compilation": {
+        "elapsed_ns": 3940927473,
+        "stdout": "",
+        "stderr": "",
+        "returncode": 0
+      },
+      "generated_ir_callsites": {
+        "relar_list_borrow_index": {},
+        "relar_list_copy_index": {}
+      },
+      "options": {
+        "optimization_level": 3,
+        "target": "x86_64-unknown-linux-gnu",
+        "requested_target": "x86_64-unknown-linux-gnu",
+        "lto": "thin",
+        "sizes": [
+          128,
+          2048,
+          16384
+        ],
+        "shapes": [
+          "layered",
+          "wide"
+        ],
+        "samples": 10,
+        "warmups": 2,
+        "timeout_seconds": 120.0,
+        "validation_timeout_seconds": 120
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-index-cold-profile",
+        "summary_sha256": "687fbc2d848e9fef4053198b4fea5d585a94697713ed6ec08867471fe9858c45",
+        "provenance_sha256": "5b646b887eb0f79b8f5d1fe90a0ef6e7690458815ed547898176077554605414",
+        "manifest_sha256": "26b2a9bf7e7d05d9b1fa2514e780d6f5990cbad70f3935a10e35692e2c57dafa",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30",
+        "manifest_entries_verified": 24
+      },
+      "profiler": {
+        "version": "valgrind-3.22.0",
+        "sha256": {
+          "valgrind": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+          "callgrind": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03",
+          "dhat": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc"
+        },
+        "affinity": [
+          0
+        ],
+        "host": {
+          "os": "Linux",
+          "architecture": "x86_64",
+          "kernel": "6.8.0-146-generic"
+        },
+        "io": "Captured input and full stdout use pipes; every stdout is saved and checked byte-for-byte."
+      },
+      "workloads": {
+        "layered-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.cold.callgrind.trace",
+              "sha256": "6b946795130cdf4b04349a91c8d9eba4c350761f7b559f817da0667350f0817b",
+              "log_sha256": "80cab63633d1ac76e07b3b88ec67ae9dfb99a170c46431d5af72e69ae0de3e0d",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "layered-16384.cold.dhat.trace",
+              "sha256": "2811ac664b46d04637ba1f8e5eea4283633e8de02da001d2e91be90106becb05",
+              "log_sha256": "8c41bacc00064834eb23175b5145e538c38380b1f8f377d44232120873a04f17",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 180707653,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "fn_0",
+              "self_instructions": 36429295,
+              "self_fraction": 0.20159243062052276,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-index-cold-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 35350456,
+              "self_fraction": 0.19562235142304682,
+              "calls": 115933,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 16466317,
+              "self_fraction": 0.09112130408776876,
+              "calls": 106934,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 15603106,
+              "self_fraction": 0.08634446710455589,
+              "calls": 233832,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_str_split_whitespace",
+              "self_instructions": 14704013,
+              "self_fraction": 0.08136906631176268,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-cold-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 10294521,
+              "self_fraction": 0.05696781973035752,
+              "calls": 224634,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_int_parse",
+              "self_instructions": 7298301,
+              "self_fraction": 0.04038733766300423,
+              "calls": 55007,
+              "objects": [
+                "benchmarks/local/dependency-index-cold-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 6963561,
+              "self_fraction": 0.038534953469845576,
+              "calls": 224631,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_runtime::output_bytes",
+              "self_instructions": 5265225,
+              "self_fraction": 0.029136701808638952,
+              "calls": 83573,
+              "objects": [
+                "benchmarks/local/dependency-index-cold-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "relar_print_int",
+              "self_instructions": 3932667,
+              "self_fraction": 0.02176259242324397,
+              "calls": 67180,
+              "objects": [
+                "benchmarks/local/dependency-index-cold-lto/dependency_planner"
+              ]
+            }
+          ],
+          "allocated_bytes": 51019379,
+          "allocated_blocks": 233897,
+          "peak_live_bytes": 5662496,
+          "peak_live_blocks": 95873,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3
+        },
+        "wide-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.cold.callgrind.trace",
+              "sha256": "bf49f1edf6f30dfcb490aa1fb52c87d598b27915f22b74658832721247bfea96",
+              "log_sha256": "64503df74380ca3b2df1a266dac3e8c23160c0ccc570029a543afacae1cb1f6d",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "wide-16384.cold.dhat.trace",
+              "sha256": "9f74b8cb4b777ab8c80c27ff2bbd061eed837b85aac7ead843f5190cb4d23a1e",
+              "log_sha256": "a99474fc1526be6df73e43e80a1ec89af83f8c9126da79092bbadc80a7e89cbb",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 103372563,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "fn_0",
+              "self_instructions": 33543018,
+              "self_fraction": 0.32448666286817324,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-index-cold-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 9343876,
+              "self_fraction": 0.09039029050677597,
+              "calls": 147526,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 9091483,
+              "self_fraction": 0.08794870453197527,
+              "calls": 65591,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_str_split_whitespace",
+              "self_instructions": 7961769,
+              "self_fraction": 0.07702013734534181,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-cold-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 6769008,
+              "self_fraction": 0.06548166944453143,
+              "calls": 147510,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_runtime::output_bytes",
+              "self_instructions": 5161959,
+              "self_fraction": 0.04993548433156291,
+              "calls": 81934,
+              "objects": [
+                "benchmarks/local/dependency-index-cold-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 4572715,
+              "self_fraction": 0.04423528707515939,
+              "calls": 147507,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_print_int",
+              "self_instructions": 3315242,
+              "self_fraction": 0.03207081167175859,
+              "calls": 65541,
+              "objects": [
+                "benchmarks/local/dependency-index-cold-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 1901788,
+              "self_fraction": 0.018397415569545276,
+              "calls": 98507,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_int_parse",
+              "self_instructions": 1883170,
+              "self_fraction": 0.01821730975171816,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-cold-lto/dependency_planner"
+              ]
+            }
+          ],
+          "allocated_bytes": 9553711,
+          "allocated_blocks": 147584,
+          "peak_live_bytes": 4736960,
+          "peak_live_blocks": 65564,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3
+        }
+      },
+      "completed_at_utc": "2026-10-17T21:50:30.458883+00:00"
+    },
+    {
+      "id": "final",
+      "comparison": {
+        "path": "benchmarks/local/dependency-index-final-lto.json",
+        "sha256": "bfb319a5ef15e714f4f7efafdc311ce212973e72f1f3f80a5e3f9bc3916fe4c4"
+      },
+      "git": {
+        "revision": "c0cb211cabbafb9d666bea4417a9a296a9856821",
+        "dirty": false
+      },
+      "artifact_sha256": {
+        "baseline": "251212b84f7df996b241fa21bd10a507e048ff48f86b117d806ab1e99ecdc0e9",
+        "baseline_record": "cd3115d1c268c56dc1e2082b90b9609d91ec76cada5bca2f297447bb08a50930",
+        "rust_bigint": "100c0f67cccac4178a55ac2a7a45dd986ad46d8c8f61f7d3059fa14d0b5a3ba6",
+        "rust_i64": "ce5a885e6cb140ab2d062771f67789fe779de5c54e1bf7501ef5737ed3105006",
+        "rust_record": "ae0ffa4c61ef90675cc63756ea977fcf2e6800f84ad44cc3049a3cd98885a099",
+        "rust_build_script": "5e9f939cf701baefd6440b36bb676afde7549fc1ddcc53bb05d342f1acfd6e2c",
+        "compiler": "f68cd09dbb90ca7f4f441c2100af693b0235bc5f5af72484f392da5ee4848b55",
+        "runtime": "c3e968cd9bc426d3c380f43e601ed21763282f9e285218d50a18f16204fbb2ff",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+        "harness": "f496e1e7659e15a2446427794f6184e173691b2e22c83439966c47b1cc7c0fc5",
+        "dependency_harness": "ddf4c986e24d5ea66dad3d492121ebe464a11e5bb7e0b5f075e3f3bc7989930d",
+        "shared_harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+        "route_validator": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+        "validator": "493bd16ecfc938c902b98f78adecc5f8dce2204c163fd05c64a1701e4996be2e",
+        "boundary_harness": "e0e83d31483c2983b1228c6403cb6ca43fc305b1300c78294e33d0f74edc1ac4",
+        "lto_linker": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+        "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        "binary": "2afaaa19f6342b0fb6484e0b8d55abfe9c74d398bc864040d11e0215a3525002",
+        "llvm_ir": "939e7014dd2b1bdaa79d7acd41592c4b2889ab715444d730dc1dd03b4ace2507"
+      },
+      "artifact_bytes": {
+        "baseline": {
+          "bytes": 2478088
+        },
+        "binary": {
+          "bytes": 2437264
+        },
+        "llvm_ir": {
+          "bytes": 86708
+        },
+        "rust_bigint": {
+          "bytes": 1514408
+        },
+        "rust_i64": {
+          "bytes": 740592
+        }
+      },
+      "text_section": {
+        "sha256": "1162f252912ff8774466e13b2ebb245498119c16c17826b2e94d64487cf8f714",
+        "bytes": 905808
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-index-final-lto/build-record.json",
+        "sha256": "d4aa3b7aa75f68c92a5c7b041195cd570f8b388bb2cbda98b9b6904855ff7716"
+      },
+      "tools_build_record": {
+        "path": "benchmarks/local/dependency-index-final-tools/build-record.json",
+        "sha256": "5165aa143c27db0f157291ce7ab94e3be3408ce62e322e0e705c595a0c24da31",
+        "source_sha256": {
+          "Cargo.toml": "ce49064770ad21744c8ac6cea604da7408be1e5ec474e3f90206fa95f2af614f",
+          "Cargo.lock": "62b84d5f29e184143562b4a022bdb96eed14d9880c922cd36e3b38ce2d3ad2b9",
+          "crates/relar-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
+          "crates/relar-runtime/Cargo.toml": "ca46c91b45fcda42d7b6073c1de9178bf9e93ad7791bbd8b4c0e94caa739fb77",
+          "crates/relar-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
+          "crates/relar-compiler/src/classes.rs": "3d02a3968dcc28bf1c040e7bae4f1b2def6911fa9187813abc213b25a400914c",
+          "crates/relar-compiler/src/frontend.rs": "98026ca31bd572ef90a7603114be02d09024ef5b91bff21cb558646dcbd5a5be",
+          "crates/relar-compiler/src/ir.rs": "3371086ec43aeca6038383ba0492cf7b4d8ab6530374c601f53208d4048cf234",
+          "crates/relar-compiler/src/lib.rs": "9fafcca2352a05d26904d0202147356a9198fcd5afa95e215d2f4009d1ea133a",
+          "crates/relar-compiler/src/llvm.rs": "b35b69654dbcbddf5ceceae30fb0933b1edf6fc4389ae8ff898eb2a8682d9f63",
+          "crates/relar-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+          "crates/relar-compiler/src/modules.rs": "7133088ce8840ab6e72237bb55e8d118bfa30ab2962b486d325af6a0186fe7d6",
+          "crates/relar-compiler/src/narrowing.rs": "bd97ee2f328de9b5985473c5d223a0d73f740bf56a8481a74bd1cf10e5f07d30",
+          "crates/relar-compiler/src/ranges.rs": "08e1a9c1275c93ba8aa79c4dc87c264c63ef1258eff3fd8f43c917e54d806011",
+          "crates/relar-compiler/src/tuples.rs": "adf794c6fc74bcf22d7e786b3da49a8393fb83a9b5a9b9e7a0ad411e94a2a78e",
+          "crates/relar-compiler/src/types.rs": "9f7ad86c6cb4388be30fe00a93a730e31c8ba480910d6490e4d723fd02528ff4",
+          "crates/relar-runtime/src/lib.rs": "4ba7c19ca6e3a6297e4ac49307444451038edfe8879bc8830357e648740100fc",
+          "crates/relar-runtime/src/objects.rs": "a2d3f40d96555fe60def7b9487e9860586f4d9b6432a3321a28920dc3666fa65"
+        },
+        "source_snapshot_sha256": "51468b494e514885bd9dd94dd3a69fb5f8bdee6fd007c68cc804925d04f1cb6e",
+        "git_head": "c0cb211cabbafb9d666bea4417a9a296a9856821",
+        "git_status": "",
+        "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8\n",
+        "runtime_lto_rustflags": "-Clinker-plugin-lto"
+      },
+      "program_build": [
+        "relar",
+        "build",
+        "examples/dependency_planner/__main__.py",
+        "--module-root",
+        "examples",
+        "-o",
+        "<artifact-dir>/dependency_planner",
+        "--runtime",
+        "<runtime>",
+        "--clang",
+        "clang",
+        "--opt-level",
+        "3",
+        "--emit-llvm",
+        "<artifact-dir>/dependency_planner.ll",
+        "--lto-linker",
+        "<lto-linker-dir>/ld.lld",
+        "--target",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "compilation": {
+        "elapsed_ns": 3950397017,
+        "stdout": "",
+        "stderr": "",
+        "returncode": 0
+      },
+      "generated_ir_callsites": {
+        "relar_list_borrow_index": {
+          "fn_3": 1,
+          "fn_4": 3,
+          "fn_6": 3
+        },
+        "relar_list_copy_index": {
+          "fn_3": 1,
+          "fn_4": 1
+        }
+      },
+      "options": {
+        "optimization_level": 3,
+        "target": "x86_64-unknown-linux-gnu",
+        "requested_target": "x86_64-unknown-linux-gnu",
+        "lto": "thin",
+        "sizes": [
+          128,
+          2048,
+          16384
+        ],
+        "shapes": [
+          "layered",
+          "wide"
+        ],
+        "samples": 30,
+        "warmups": 2,
+        "timeout_seconds": 120.0,
+        "validation_timeout_seconds": 120
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-index-final-profile",
+        "summary_sha256": "396ceb27bcc46b441b069e151c6f91acdf8e3a4d9af580eec9ccd8852dbf5f89",
+        "provenance_sha256": "a7cbdab71f28f38be0697e7584b13c5a87f04ddf479669678f7170c53df973c4",
+        "manifest_sha256": "7ecc8f82fa8f1fab900369dcbec23e206319489341caba841cec0255ecaf2b9b",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30",
+        "manifest_entries_verified": 24
+      },
+      "profiler": {
+        "version": "valgrind-3.22.0",
+        "sha256": {
+          "valgrind": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+          "callgrind": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03",
+          "dhat": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc"
+        },
+        "affinity": [
+          0
+        ],
+        "host": {
+          "os": "Linux",
+          "architecture": "x86_64",
+          "kernel": "6.8.0-146-generic"
+        },
+        "io": "Captured input and full stdout use pipes; every stdout is saved and checked byte-for-byte."
+      },
+      "workloads": {
+        "layered-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.final.callgrind.trace",
+              "sha256": "787377619b33a2f5023b34a804277aaf2a24bbbb433befcc6f6e897cbbd6a90f",
+              "log_sha256": "e7629d7daf927761147ebcd793acf23dd955416267ae6edd742253b588af3f41",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "layered-16384.final.dhat.trace",
+              "sha256": "7cd07cf02f4e2b0730bfbb621912a0bba81ab509a6696694e91e717273674302",
+              "log_sha256": "dc777c4d4c2aa26da5bf05ceb3df4fa61b6d4e9fa61fda876a5b753c9c40be19",
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "stdout_bytes": 531728,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 179989365,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "fn_0",
+              "self_instructions": 35930031,
+              "self_fraction": 0.1996230777301759,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-index-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 35350456,
+              "self_fraction": 0.19640302636769677,
+              "calls": 115933,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 16466317,
+              "self_fraction": 0.09148494412433757,
+              "calls": 106934,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 15603106,
+              "self_fraction": 0.08668904409991113,
+              "calls": 233832,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_str_split_whitespace",
+              "self_instructions": 14704013,
+              "self_fraction": 0.08169378785241006,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 10294521,
+              "self_fraction": 0.05719516261419112,
+              "calls": 224634,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_int_parse",
+              "self_instructions": 7298301,
+              "self_fraction": 0.04054851240794143,
+              "calls": 55007,
+              "objects": [
+                "benchmarks/local/dependency-index-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 6963561,
+              "self_fraction": 0.03868873585947703,
+              "calls": 224631,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_runtime::output_bytes",
+              "self_instructions": 5265225,
+              "self_fraction": 0.02925297836347164,
+              "calls": 83573,
+              "objects": [
+                "benchmarks/local/dependency-index-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "relar_print_int",
+              "self_instructions": 3932667,
+              "self_fraction": 0.021849440937802077,
+              "calls": 67180,
+              "objects": [
+                "benchmarks/local/dependency-index-final-lto/dependency_planner"
+              ]
+            }
+          ],
+          "allocated_bytes": 51019379,
+          "allocated_blocks": 233897,
+          "peak_live_bytes": 5662496,
+          "peak_live_blocks": 95873,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3
+        },
+        "wide-16384": {
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.final.callgrind.trace",
+              "sha256": "22c1f4af51b99efa68439b26b7b12b17efd973edbb3fd09e2cf914a5aff50eae",
+              "log_sha256": "79c84819017b6e4cc80e7b46ac642b14208276c5c59d20516385b9d23819d145",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            },
+            "dhat": {
+              "file": "wide-16384.final.dhat.trace",
+              "sha256": "47d181e0bde77f02a2f4c16f61daa53dd3026ef63f68d72d07011439b15f27eb",
+              "log_sha256": "f10b8414e93a754353feddf3c987c66c2a185fb5d22adf9627fba1656176ce20",
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "stdout_bytes": 395810,
+              "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr_bytes": 0,
+              "returncode": 0,
+              "full_output_rechecked": true
+            }
+          },
+          "instructions": 99436272,
+          "exclusive_sum_verified": true,
+          "major_self_functions": [
+            {
+              "name": "fn_0",
+              "self_instructions": 29754165,
+              "self_fraction": 0.2992284847525257,
+              "calls": 1,
+              "objects": [
+                "benchmarks/local/dependency-index-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x00000000000ab250",
+              "self_instructions": 9343876,
+              "self_fraction": 0.09396848667053809,
+              "calls": 147526,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "0x00000000000ab650",
+              "self_instructions": 9091483,
+              "self_fraction": 0.09143024790792639,
+              "calls": 65591,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_str_split_whitespace",
+              "self_instructions": 7961769,
+              "self_fraction": 0.08006906172025435,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 6769008,
+              "self_fraction": 0.06807383124741442,
+              "calls": 147510,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_runtime::output_bytes",
+              "self_instructions": 5161959,
+              "self_fraction": 0.05191223379734108,
+              "calls": 81934,
+              "objects": [
+                "benchmarks/local/dependency-index-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "free",
+              "self_instructions": 4572715,
+              "self_fraction": 0.045986388146168636,
+              "calls": 147507,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_print_int",
+              "self_instructions": 3315242,
+              "self_fraction": 0.033340368995329994,
+              "calls": 65541,
+              "objects": [
+                "benchmarks/local/dependency-index-final-lto/dependency_planner"
+              ]
+            },
+            {
+              "name": "0x0000000000188d80",
+              "self_instructions": 1901788,
+              "self_fraction": 0.019125696908669304,
+              "calls": 98507,
+              "objects": [
+                "/usr/lib/x86_64-linux-gnu/libc.so.6"
+              ]
+            },
+            {
+              "name": "relar_int_parse",
+              "self_instructions": 1883170,
+              "self_fraction": 0.018938461409735877,
+              "calls": 16385,
+              "objects": [
+                "benchmarks/local/dependency-index-final-lto/dependency_planner"
+              ]
+            }
+          ],
+          "allocated_bytes": 9553711,
+          "allocated_blocks": 147584,
+          "peak_live_bytes": 4736960,
+          "peak_live_blocks": 65564,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3
+        }
+      },
+      "completed_at_utc": "2026-10-17T21:58:53.570705+00:00"
+    }
+  ],
+  "attribution_notes": [
+    "Stages are cumulative development snapshots; dirty revisions are identified by exact frozen source/build hashes, not by the commit ID alone.",
+    "Storage and flags have byte-identical .text sections and equal allocation/peak metrics. Flags has 14 additional whole-process instructions per workload, all attributed to the same external address-named function; this is not an nsw benefit. No generated-code improvement is established by this stage or its timing differences.",
+    "The first locals profile failed because an objcopy inspection rewrote its binary during profiling. It is excluded. Only the completed dependency-index-locals-profile-restored retry is accepted.",
+    "Inspection also changed storage/flags/locals/cold ELF metadata after their measurements. Preserved binaries are accepted only when restored whole-file hashes exactly equal the original comparison and completed profile records.",
+    "Callgrind instruction counts and exclusive function fractions are not wall-time shares. Inlining changes function attribution. DHAT allocation/peak bytes are not process RSS.",
+    "The reused Rust references preserve the same algorithm; checked-i64 has a narrower numeric domain than Relar and Rust BigInt. These two captured workloads fit that domain.",
+    "Raw traces, logs, outputs and source snapshots remain in ignored local evidence directories; this compact record stores hashes and summaries instead of source contents."
+  ]
+}

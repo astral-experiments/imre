@@ -68,4 +68,18 @@ The [recorded comparison and I/O profile](results/2026-10-17-dependency-planner.
 
 The [CPU and allocation follow-up](results/2026-10-17-dependency-performance.md) compares optimized Relar with CPython and algorithm-matched Rust references. At 16,384 tasks, optional ThinLTO makes Relar about 1.5× faster than the buffered baseline and 3.69×/5.26× faster than CPython on layered/wide graphs. It approximately matches arbitrary-precision Rust on the layered graph and remains 46% slower on the wide graph, with LLVM optimization budgets matched. The report includes ordinary-link controls, cumulative allocation profiles, correctness checks, and raw samples.
 
+The [range-proof and container-access follow-up](results/2026-10-17-dependency-index-specialization.md) reduces large wide-graph time by another 20%, narrowing the matched Rust BigInt gap from 46% to 16%. Relar is 4.04×/6.67× faster than CPython on large layered/wide graphs with ThinLTO. The report preserves ordinary-link controls, 30-sample raw comparisons, cumulative CPU/allocation profiles, and validation of bounds, ownership, aliases, and arbitrary-precision fallbacks. The Python package and Rust reference algorithm remain unchanged.
+
 The five-way `dependency_compare.py` comparison and native correctness suites accept optional `--lto-linker /path/to/ld.lld --target x86_64-unknown-linux-gnu` flags. Supply a compatible runtime archive; these harnesses do not rebuild it. The comparison records the requested and effective target, build flags, and linker version and hash. Linker symlink names are preserved because they select LLD's flavor. Omitting these flags retains the default linking behavior.
+
+`dependency_profile.py` profiles preserved executables using the inputs and complete expected outputs from a comparison record. For example, after producing `benchmarks/local/dependency-comparison.json` and its native artifact:
+
+```sh
+python3 benchmarks/dependency_profile.py \
+  --record benchmarks/local/dependency-comparison.json \
+  --binary optimized=benchmarks/local/dependency-comparison/dependency_planner \
+  --sizes 16384 --shapes layered wide \
+  --output benchmarks/local/dependency-profile
+```
+
+This runs Callgrind and DHAT separately, requires a new output directory, and verifies exit status, complete output, and executable hashes. Supply `--build-record optimized=/path/to/build-record.json` to preserve additional build provenance. Instrumented runs are excluded from timing results; the output includes trace/log hashes and instruction/allocation summaries. Valgrind is discovered on `PATH` or in the Relar tool cache, or can be selected with `--valgrind` and `--valgrind-lib`.
