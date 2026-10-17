@@ -27,4 +27,4 @@ target/release/relar build examples/dependency_planner/__main__.py \
 python3 benchmarks/dependency_validate.py --binary /tmp/dependency-planner
 ```
 
-The independent oracle checks 135 inputs, including cycles, forward dependencies, Unicode labels, and arbitrary-precision durations. See the package README for input format and benchmark reproduction.
+The independent oracle checks 135 inputs, including cycles, forward dependencies, Unicode labels, and arbitrary-precision durations. See the package README for input format and benchmark reproduction, and the [recorded baseline comparison](benchmarks/results/2026-10-17-dependency-planner-baseline.md).
