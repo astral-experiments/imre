@@ -95,9 +95,29 @@ impl ClassInfo {
 }
 
 const RESERVED: &[&str] = &[
-    "int", "bool", "str", "list", "tuple", "len", "input", "print", "range", "None", "True",
-    "False", "__name__",
+    "int",
+    "bool",
+    "str",
+    "list",
+    "tuple",
+    "len",
+    "input",
+    "print",
+    "range",
+    "enumerate",
+    "None",
+    "True",
+    "False",
+    "__name__",
 ];
+
+fn pattern_elements(target: &ast::Expr) -> Option<&[ast::Expr]> {
+    match target {
+        ast::Expr::Tuple(tuple) => Some(&tuple.elts),
+        ast::Expr::List(list) => Some(&list.elts),
+        _ => None,
+    }
+}
 
 /// Resolves the project-wide call graph without changing source-level namespaces.
 pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
@@ -567,6 +587,14 @@ impl<'a> Checker<'a> {
         slot
     }
 
+    /// Reads a hidden binding at its storage type, without source-level narrowing.
+    fn local(&self, slot: usize) -> Expr {
+        Expr {
+            ty: self.locals[slot],
+            kind: ExprKind::Local(slot),
+        }
+    }
+
     fn expect(&self, expected: Type, actual: Type, node: &impl Ranged) -> Result<(), String> {
         if expected == actual {
             Ok(())
@@ -781,6 +809,186 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Supplies existing target types to literal fields before any names are bound.
+    fn unpacking_value(&mut self, target: &ast::Expr, value: &ast::Expr) -> Result<Expr, String> {
+        if let Some(targets) = pattern_elements(target)
+            && let ast::Expr::Tuple(tuple) = value
+            && targets.len() == tuple.elts.len()
+        {
+            let values = targets
+                .iter()
+                .zip(&tuple.elts)
+                .map(|(target, value)| self.unpacking_value(target, value))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(Expr {
+                ty: self
+                    .types
+                    .tuple(values.iter().map(|value| value.ty).collect()),
+                kind: ExprKind::Tuple(values),
+            });
+        }
+        if let ast::Expr::Name(name) = target
+            && let Some(&slot) = self.names.get(name.id.as_str())
+        {
+            let value = self.expr_expected(value, self.locals[slot])?;
+            // Wrap at the eventual store, preserving known presence for local
+            // narrowing instead of hiding it inside the temporary tuple.
+            return Ok(match value.kind {
+                ExprKind::Present(value) | ExprKind::Absent(value) => *value,
+                _ => value,
+            });
+        }
+        self.expr(value)
+    }
+
+    /// Captures a fixed tuple before rebinding any of its recursively named targets.
+    fn bind_pattern(&mut self, target: &ast::Expr, value: Expr) -> Result<Vec<Statement>, String> {
+        let Some(targets) = pattern_elements(target) else {
+            return Ok(vec![self.assign(target, value)?]);
+        };
+        let fields = self.types.fields(value.ty).ok_or_else(|| {
+            error(
+                self.source,
+                target,
+                "unpacking requires a fixed tuple value",
+            )
+        })?;
+        if targets.len() != fields.len() {
+            return Err(error(
+                self.source,
+                target,
+                "unpacking target has the wrong number of fields",
+            ));
+        }
+        let captured = self.hidden(value.ty);
+        let mut output = vec![Statement::Assign(captured, value)];
+        for (index, (target, ty)) in targets.iter().zip(fields).enumerate() {
+            let value = Expr {
+                ty,
+                kind: ExprKind::Field(Box::new(self.local(captured)), index),
+            };
+            output.extend(self.bind_pattern(target, value)?);
+        }
+        output.push(Statement::Clear(captured));
+        Ok(output)
+    }
+
+    /// Keeps the original list rooted and acquires each item before user code runs.
+    fn iteration(&mut self, loop_: &ast::StmtFor) -> Result<Vec<Statement>, String> {
+        let (iterable, start) = if let ast::Expr::Call(call) = &*loop_.iter
+            && matches!(&*call.func, ast::Expr::Name(name) if name.id == "enumerate")
+        {
+            if !call.arguments.keywords.is_empty() || !(1..=2).contains(&call.arguments.args.len())
+            {
+                return Err(error(
+                    self.source,
+                    call,
+                    "enumerate requires a list and an optional positional integer start",
+                ));
+            }
+            let iterable = self.expr(&call.arguments.args[0])?;
+            let start = if let Some(start) = call.arguments.args.get(1) {
+                self.expr_expected(start, Type::Int)?
+            } else {
+                Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Int("0".into()),
+                }
+            };
+            (iterable, Some(start))
+        } else {
+            (self.expr(&loop_.iter)?, None)
+        };
+        let element = self.types.element(iterable.ty).ok_or_else(|| {
+            error(
+                self.source,
+                &*loop_.iter,
+                "iteration requires a concrete list or range",
+            )
+        })?;
+        let captured = self.hidden(iterable.ty);
+        let cursor = self.hidden(Type::Int);
+        let mut output = vec![Statement::Assign(captured, iterable)];
+        let counter = start.map(|start| {
+            let slot = self.hidden(Type::Int);
+            output.push(Statement::Assign(slot, start));
+            slot
+        });
+        output.push(Statement::Assign(
+            cursor,
+            Expr {
+                ty: Type::Int,
+                kind: ExprKind::Int("0".into()),
+            },
+        ));
+        let item = Expr {
+            ty: element,
+            kind: ExprKind::Builtin(
+                Builtin::ListGet,
+                vec![self.local(captured), self.local(cursor)],
+            ),
+        };
+        let item = if let Some(counter) = counter {
+            Expr {
+                ty: self.types.tuple(vec![Type::Int, element]),
+                kind: ExprKind::Tuple(vec![self.local(counter), item]),
+            }
+        } else {
+            item
+        };
+
+        self.invalidate_loop_facts(&loop_.body);
+        let mut facts = self.narrowed.clone();
+        let before = self.assigned.clone();
+        let mut body = self.bind_pattern(&loop_.target, item)?;
+        for statement in &body {
+            if let Statement::Assign(slot, _) = statement {
+                facts.remove(slot);
+            }
+        }
+        // Advance before entering the body so continue and target rebinding do
+        // not alter progression. Length is read anew on every loop condition.
+        for slot in std::iter::once(cursor).chain(counter) {
+            body.push(Statement::Assign(
+                slot,
+                Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Binary(
+                        Binary::Add,
+                        Box::new(self.local(slot)),
+                        Box::new(Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Int("1".into()),
+                        }),
+                    ),
+                },
+            ));
+        }
+        self.loop_depth += 1;
+        body.extend(self.block(&loop_.body)?.0);
+        self.loop_depth -= 1;
+        self.assigned = before;
+        self.narrowed = facts;
+        let test = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Compare(
+                vec![
+                    self.local(cursor),
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::Len, vec![self.local(captured)]),
+                    },
+                ],
+                vec![Compare::Less],
+            ),
+        };
+        output.push(Statement::While(test, body));
+        output.push(Statement::Clear(captured));
+        output.push(Statement::Clear(cursor));
+        output.extend(counter.map(Statement::Clear));
+        Ok(output)
+    }
+
     /// Checks dead syntax too, but merges definite assignment only from reachable exits.
     fn block(&mut self, statements: &[ast::Stmt]) -> Result<(Vec<Statement>, bool), String> {
         let mut body = Vec::new();
@@ -796,6 +1004,10 @@ impl<'a> Checker<'a> {
     fn statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
         let result = match statement {
             ast::Stmt::Assign(assign) if assign.targets.len() == 1 => {
+                if pattern_elements(&assign.targets[0]).is_some() {
+                    let value = self.unpacking_value(&assign.targets[0], &assign.value)?;
+                    return Ok((self.bind_pattern(&assign.targets[0], value)?, true));
+                }
                 Some(self.assignment(&assign.targets[0], &assign.value)?)
             }
             ast::Stmt::AnnAssign(assign) => {
@@ -890,12 +1102,13 @@ impl<'a> Checker<'a> {
                 Some(Statement::While(test, body))
             }
             ast::Stmt::For(loop_) if !loop_.is_async && loop_.orelse.is_empty() => {
+                if !matches!(&*loop_.iter, ast::Expr::Call(call)
+                    if matches!(&*call.func, ast::Expr::Name(name) if name.id == "range"))
+                {
+                    return Ok((self.iteration(loop_)?, true));
+                }
                 let ast::Expr::Call(call) = &*loop_.iter else {
-                    return Err(error(
-                        self.source,
-                        statement,
-                        "for loops require range(...)",
-                    ));
+                    unreachable!("range loops have a call expression")
                 };
                 if !matches!(&*call.func, ast::Expr::Name(name) if name.id == "range")
                     || !call.arguments.keywords.is_empty()

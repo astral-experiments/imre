@@ -225,6 +225,72 @@ main()
 # Every rejected program must reach the checker. Cycle cases additionally require
 # the ownership-graph diagnostic, rather than an unsupported-annotation rejection.
 REJECTED = {
+    "iteration_maybe_unbound_target": """
+        def last(values: list[int]) -> int:
+            for item in values:
+                pass
+            return item
+    """,
+    "iteration_maybe_unbound_enumerate_target": """
+        def last(values: list[str]) -> str:
+            for index, item in enumerate(values):
+                pass
+            return item
+    """,
+    "iteration_maybe_unbound_tuple_target": """
+        def last(values: list[tuple[int, str]]) -> int:
+            for number, name in values:
+                pass
+            return number
+    """,
+    "iteration_target_type_mismatch": 'value = "text"\nfor value in [1]:\n    pass\n',
+    "iteration_tuple_target_arity": "for first, second in [(1, 2, 3)]:\n    pass\n",
+    "iteration_range_tuple_target": "for (value,) in range(2):\n    pass\n",
+    "iteration_string_iterable": 'for letter in "text":\n    print(letter)\n',
+    "iteration_tuple_iterable": "for value in (1, 2):\n    print(value)\n",
+    "iteration_optional_iterable": """
+        def show(values: list[int] | None) -> None:
+            for value in values:
+                print(value)
+    """,
+    "iteration_enumerate_wrong_start": 'for index, value in enumerate([1], "bad"):\n    pass\n',
+    "iteration_enumerate_bool_start": "for index, value in enumerate([1], True):\n    pass\n",
+    "iteration_enumerate_arity": "for index, value in enumerate([1], 0, 1):\n    pass\n",
+    "iteration_enumerate_keyword": "for index, value in enumerate([1], start=2):\n    pass\n",
+    "iteration_enumerate_escapes": "iterator = enumerate([1])\n",
+    "iteration_list_unpacking": "first, second = [1, 2]\n",
+    "iteration_starred_unpacking": "first, *rest = (1, 2, 3)\n",
+    "iteration_nested_wrong_arity": 'first, (second, third) = (1, ("two",))\n',
+    "iteration_repeated_name_type_mismatch": 'same, same = (1, "two")\n',
+    "iteration_mutable_unpacking_leaf": "values = [0]\nvalues[0], other = (1, 2)\n",
+    "iteration_rhs_precedes_target_declaration": "first, second = (1, first)\n",
+    "iteration_nested_rhs_precedes_target_declaration": "first, (second, third) = (1, (2, first))\n",
+    "iteration_optional_target_invalidates_fact": """
+        def show(value: int | None, values: list[int | None]) -> None:
+            if value is not None:
+                for value in values:
+                    print(value + 1)
+    """,
+    "iteration_optional_tuple_target_invalidates_fact": """
+        def show(value: int | None, values: list[tuple[int | None, int]]) -> None:
+            if value is not None:
+                for value, index in values:
+                    print(value + 1)
+    """,
+    "iteration_optional_unpacking_backedge": """
+        def show(value: int | None) -> None:
+            if value is not None:
+                for index in [1, 2]:
+                    print(value + 1)
+                    value, index = (None, index)
+    """,
+    "iteration_optional_nested_unpacking_backedge": """
+        def show(value: int | None) -> None:
+            if value is not None:
+                for index in [1, 2]:
+                    print(value + 1)
+                    index, (value, again) = (index, (None, True))
+    """,
     "mixed_elements": 'values = ["text", 1]\n',
     "wrong_string_append": "values: list[str] = []\nvalues.append(1)\n",
     "wrong_string_replace": 'values: list[str] = ["x"]\nvalues[0] = False\n',
@@ -409,6 +475,46 @@ show(Box(Item("x")))
 }
 
 ERRORS = {
+    "iteration_iterable_error_precedes_start": (
+        (
+            "def values() -> list[int]:\n"
+            '    print("iterable")\n    return [1 // 0]\n'
+            "def start() -> int:\n"
+            '    print("start")\n    return 1 // 0\n'
+            "for index, value in enumerate(values(), start()):\n"
+            '    print("body")\n'
+        ),
+        "ZeroDivisionError",
+    ),
+    "iteration_start_error_precedes_body": (
+        (
+            "def values() -> list[int]:\n"
+            '    print("iterable")\n    return [1]\n'
+            "def start() -> int:\n"
+            '    print("start")\n    return 1 // 0\n'
+            "for index, value in enumerate(values(), start()):\n"
+            '    print("body")\n'
+        ),
+        "ZeroDivisionError",
+    ),
+    "iteration_snapshot_before_body_failure": (
+        (
+            "values = [1000000000000000000000000000000]\n"
+            "for value in values:\n"
+            "    values.pop()\n    print(value)\n    print(values[0])\n"
+        ),
+        "IndexError",
+    ),
+    "iteration_unpacking_rhs_effects_before_failure": (
+        (
+            "def first() -> int:\n"
+            '    print("first")\n    return 1\n'
+            "def second() -> int:\n"
+            '    print("second")\n    return 1 // 0\n'
+            "left, right = (first(), second())\n"
+        ),
+        "ZeroDivisionError",
+    ),
     "index_copy_both_bounds": (
         'values: list[int] = []\nprint("before")\nvalues[1] = values[0]\n',
         "IndexError",
