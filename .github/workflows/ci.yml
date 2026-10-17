@@ -30,3 +30,7 @@ jobs:
         run: python3 tests/differential.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Check generated code with AddressSanitizer
         run: python3 tests/differential.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18 --sanitize --opt-levels 1
+      - name: Validate the route planner against an independent oracle
+        run: |
+          target/release/relar build examples/route_planner.py -o /tmp/route-planner --clang clang-18
+          python3 benchmarks/validate.py --binary /tmp/route-planner
