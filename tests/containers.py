@@ -19,6 +19,57 @@ class Item:
 # Projection-only tuple locals may be scalarized. These cases protect snapshot
 # ownership, evaluation order, control-flow rebinding, and boxed escape paths.
 ACCEPTED = {
+    "dict_contextual_empty": """
+def empty() -> dict[str, list[int]]:
+    return {}
+
+def constructed() -> dict[str, list[int]]:
+    return dict()
+
+def use(values: dict[str, int]) -> None:
+    values["number"] = 7
+    print(values["number"])
+
+def main() -> None:
+    use({})
+    use(dict())
+    created: dict[str, int] = dict()
+    print(len(created))
+    print(len(constructed()))
+    rows = empty()
+    rows["row"] = []
+    rows["row"].append(8)
+    print(rows["row"][0])
+    nested: dict[str, dict[int, int]] = {"inner": {}}
+    nested["inner"][1] = 9
+    print(nested["inner"][1])
+    maps: list[dict[str, int]] = [{}]
+    maps[0]["value"] = 10
+    print(maps[0]["value"])
+    pair: tuple[dict[str, int], int] = ({}, 11)
+    pair[0]["value"] = pair[1]
+    print(pair[0]["value"])
+    fallback = nested.get("missing", {})
+    print(len(fallback))
+
+main()
+""",
+    "dict_literal_evaluation": """
+def key(log: list[int], event: int) -> str:
+    log.append(event)
+    return "duplicate"
+
+def value(log: list[int], event: int) -> int:
+    log.append(event)
+    return event
+
+log: list[int] = []
+values = {key(log, 1): value(log, 2), key(log, 3): value(log, 4)}
+print(len(values))
+print(values["duplicate"])
+for event in log:
+    print(event)
+""",
     "tuple_scalar_snapshots": """
 class Box:
     number: int
@@ -225,6 +276,59 @@ main()
 # Every rejected program must reach the checker. Cycle cases additionally require
 # the ownership-graph diagnostic, rather than an unsupported-annotation rejection.
 REJECTED = {
+    "dict_empty_without_context": "values = {}\n",
+    "dict_empty_constructor_without_context": "values = dict()\n",
+    "dict_copy_constructor": 'original = {"one": 1}\nvalues: dict[str, int] = dict(original)\n',
+    "dict_bool_key_annotation": "values: dict[bool, int] = {}\n",
+    "dict_list_key_annotation": "values: dict[list[int], int] = {}\n",
+    "dict_tuple_key_annotation": "values: dict[tuple[int, int], int] = {}\n",
+    "dict_mixed_literal_keys": 'values = {1: 2, "one": 3}\n',
+    "dict_mixed_literal_values": 'values = {1: 2, 3: "four"}\n',
+    "dict_bool_int_literal_values": "values = {1: 2, 3: True}\n",
+    "dict_wrong_key_write": "values: dict[str, int] = {}\nvalues[1] = 2\n",
+    "dict_bool_int_key_write": "values: dict[int, int] = {}\nvalues[True] = 2\n",
+    "dict_bool_int_key_read": "values = {1: 2}\nprint(values[True])\n",
+    "dict_bool_int_membership": "values = {1: 2}\nprint(True in values)\n",
+    "dict_wrong_key_delete": 'values = {1: 2}\ndel values["one"]\n',
+    "dict_wrong_value_write": 'values = {"one": 1}\nvalues["one"] = "two"\n',
+    "dict_wrong_alias_write": 'values = {"one": 1}\nalias = values\nalias["one"] = False\n',
+    "dict_wrong_nested_alias_write": 'values: dict[str, list[int]] = {"row": [1]}\nalias = values["row"]\nalias.append("bad")\n',
+    "dict_wrong_get_default": 'values = {"one": 1}\nprint(values.get("one", "wrong"))\n',
+    "dict_bool_int_get_default": 'values = {"one": 1}\nprint(values.get("one", True))\n',
+    "dict_none_get_wrong_default": 'values: dict[str, None] = {"none": None}\nvalues.get("none", 1)\n',
+    "dict_get_wrong_key": 'values = {"one": 1}\nvalues.get(1)\n',
+    "dict_get_wrong_arity": 'values = {"one": 1}\nvalues.get("one", 2, 3)\n',
+    "dict_get_keyword": 'values = {"one": 1}\nvalues.get("one", default=2)\n',
+    "dict_get_without_narrowing": 'values = {"one": 1}\nprint(values.get("one") + 1)\n',
+    "dict_get_repeated_call_narrowing": 'values = {"one": 1}\nif values.get("one") is not None:\n    print(values.get("one") + 1)\n',
+    "dict_optional_element_without_narrowing": 'values: dict[str, int | None] = {"one": 1}\nprint(values["one"] + 1)\n',
+    "dict_optional_receiver": "def show(values: dict[int, int] | None) -> None:\n    print(values[1])\n",
+    "dict_string_augmented_assignment": 'values = {1: "one"}\nvalues[1] += "two"\n',
+    "dict_items_escapes": 'values = {"one": 1}\nview = values.items()\n',
+    "dict_items_arguments": 'values = {"one": 1}\nfor key, value in values.items(1):\n    pass\n',
+    "dict_keys_view": 'values = {"one": 1}\nfor key in values.keys():\n    pass\n',
+    "dict_values_view": 'values = {"one": 1}\nfor value in values.values():\n    pass\n',
+    "dict_first_class_iterator": 'values = {"one": 1}\niterator = iter(values)\n',
+    "dict_literal_expansion": 'values = {"one": 1}\ncopy = {**values}\n',
+    "dict_wrong_items_target": 'values = {"one": 1}\nfor key, value, extra in values.items():\n    pass\n',
+    "dict_invariant_values": """
+        def use(values: dict[str, int | None]) -> None:
+            values["none"] = None
+        values: dict[str, int] = {"one": 1}
+        use(values)
+    """,
+    "dict_class_cycle": """
+        class Node:
+            edges: dict[str, "Node"]
+            def __init__(self, edges: dict[str, "Node"]) -> None:
+                self.edges = edges
+    """,
+    "dict_optional_class_cycle": """
+        class Node:
+            edges: dict[int, "Node | None"]
+            def __init__(self, edges: dict[int, "Node | None"]) -> None:
+                self.edges = edges
+    """,
     "iteration_maybe_unbound_target": """
         def last(values: list[int]) -> int:
             for item in values:
@@ -475,6 +579,51 @@ show(Box(Item("x")))
 }
 
 ERRORS = {
+    "dict_missing_index": (
+        'values: dict[str, int] = {}\nprint(values["missing"])\n',
+        "KeyError",
+    ),
+    "dict_missing_delete": ("values: dict[int, int] = {}\ndel values[1]\n", "KeyError"),
+    "dict_missing_augmented_before_rhs": (
+        'def rhs() -> int:\n    print("rhs must not run")\n    return 1\nvalues: dict[str, int] = {}\nvalues["missing"] += rhs()\n',
+        "KeyError",
+    ),
+    "dict_get_eager_default_failure": (
+        'def fallback() -> int:\n    print("default")\n    return 1 // 0\nvalues = {"found": 1}\nprint(values.get("found", fallback()))\n',
+        "ZeroDivisionError",
+    ),
+    "dict_get_key_failure_before_default": (
+        'def key() -> int:\n    print("key")\n    return 1 // 0\ndef fallback() -> int:\n    print("default must not run")\n    return 2\nvalues = {1: 1}\nprint(values.get(key(), fallback()))\n',
+        "ZeroDivisionError",
+    ),
+    "dict_index_receiver_failure_before_key": (
+        'def receiver() -> dict[int, int]:\n    print("receiver")\n    return {1: 1 // 0}\ndef key() -> int:\n    print("key must not run")\n    return 1\nprint(receiver()[key()])\n',
+        "ZeroDivisionError",
+    ),
+    "dict_delete_receiver_then_key": (
+        'def receiver() -> dict[int, int]:\n    print("receiver")\n    return {}\ndef key() -> int:\n    print("key")\n    return 1\ndel receiver()[key()]\n',
+        "KeyError",
+    ),
+    "dict_membership_key_before_receiver_failure": (
+        'def key() -> str:\n    print("key")\n    return "missing"\ndef receiver() -> dict[str, int]:\n    print("receiver")\n    return {"bad": 1 // 0}\nprint(key() in receiver())\n',
+        "ZeroDivisionError",
+    ),
+    "dict_assignment_rhs_before_receiver_failure": (
+        'def receiver() -> dict[str, int]:\n    print("receiver must not run")\n    return {}\ndef rhs() -> int:\n    print("rhs")\n    return 1 // 0\nreceiver()["key"] = rhs()\n',
+        "ZeroDivisionError",
+    ),
+    "dict_iteration_insert_size_change": (
+        'values = {"first": 1, "second": 2}\nfor key in values:\n    print(key)\n    values["new"] = 3\n',
+        "RuntimeError",
+    ),
+    "dict_items_delete_size_change": (
+        'values = {"first": [1], "second": [2]}\nfor key, row in values.items():\n    del values[key]\n    print(key)\n    print(row[0])\n',
+        "RuntimeError",
+    ),
+    "dict_enumerate_items_size_change": (
+        "values = {1: True}\nfor index, (key, value) in enumerate(values.items(), 10):\n    print(index)\n    print(key)\n    print(value)\n    values[2] = False\n",
+        "RuntimeError",
+    ),
     "iteration_iterable_error_precedes_start": (
         (
             "def values() -> list[int]:\n"

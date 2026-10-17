@@ -130,6 +130,21 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
                 candidates[*target].eligible = false;
                 candidates[*source].eligible = false;
             }
+            Statement::IterNext {
+                iterator,
+                key,
+                value,
+                ready,
+            } => {
+                // Runtime iteration transfers whole values, including boxed
+                // tuple payloads whose components are not known statically.
+                for slot in [Some(*iterator), Some(*key), *value, Some(*ready)]
+                    .into_iter()
+                    .flatten()
+                {
+                    candidates[slot].eligible = false;
+                }
+            }
             // Clearing the aggregate releases exactly the component owners.
             // It neither observes tuple identity nor lets the aggregate escape.
             Statement::Clear(_) => {}
@@ -294,7 +309,10 @@ fn rewrite_block(
                 }
                 rewrite_block(body, locals, components, producers);
             }
-            Statement::Move(..) | Statement::Break | Statement::Continue => {}
+            Statement::Move(..)
+            | Statement::IterNext { .. }
+            | Statement::Break
+            | Statement::Continue => {}
         }
         output.push(statement);
     }
@@ -340,6 +358,12 @@ fn rewrite_expression(expression: &mut Expr, components: &[Option<Vec<usize>>]) 
 
 fn children(expression: &Expr, mut visit: impl FnMut(&Expr)) {
     match &expression.kind {
+        ExprKind::Dict { entries, .. } => {
+            for (key, value) in entries {
+                visit(key);
+                visit(value);
+            }
+        }
         ExprKind::List(values)
         | ExprKind::Tuple(values)
         | ExprKind::Compare(values, _)
@@ -371,6 +395,12 @@ fn children(expression: &Expr, mut visit: impl FnMut(&Expr)) {
 
 fn children_mut(expression: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
     match &mut expression.kind {
+        ExprKind::Dict { entries, .. } => {
+            for (key, value) in entries {
+                visit(key);
+                visit(value);
+            }
+        }
         ExprKind::List(values)
         | ExprKind::Tuple(values)
         | ExprKind::Compare(values, _)

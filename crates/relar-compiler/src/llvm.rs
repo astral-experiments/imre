@@ -14,6 +14,8 @@ impl Type {
             | Self::ListInt
             | Self::Class(_)
             | Self::List(_)
+            | Self::Dict(_)
+            | Self::Iterator
             | Self::Tuple(_)
             | Self::Optional(_) => "ptr",
             Self::None => "i8",
@@ -27,6 +29,8 @@ impl Type {
             | Self::ListInt
             | Self::Class(_)
             | Self::List(_)
+            | Self::Dict(_)
+            | Self::Iterator
             | Self::Tuple(_)
             | Self::Optional(_) => "null",
             Self::Bool | Self::None => "0",
@@ -171,9 +175,12 @@ impl Emitter<'_, '_> {
             Type::Int => "retain_int",
             Type::Str => "relar_str_retain",
             Type::ListInt => "relar_list_retain",
-            Type::Class(_) | Type::List(_) | Type::Tuple(_) | Type::Optional(_) => {
-                "relar_object_retain"
-            }
+            Type::Class(_)
+            | Type::List(_)
+            | Type::Dict(_)
+            | Type::Iterator
+            | Type::Tuple(_)
+            | Type::Optional(_) => "relar_object_retain",
             Type::Bool | Type::None => return,
         };
         self.void_call(name, &[value]);
@@ -187,9 +194,12 @@ impl Emitter<'_, '_> {
             Type::Int => "release_int",
             Type::Str => "relar_str_release",
             Type::ListInt => "relar_list_release",
-            Type::Class(_) | Type::List(_) | Type::Tuple(_) | Type::Optional(_) => {
-                "relar_object_release"
-            }
+            Type::Class(_)
+            | Type::List(_)
+            | Type::Dict(_)
+            | Type::Iterator
+            | Type::Tuple(_)
+            | Type::Optional(_) => "relar_object_release",
             Type::Bool | Type::None => return,
         };
         self.void_call(name, &[value]);
@@ -319,6 +329,11 @@ impl Emitter<'_, '_> {
         )
         .unwrap();
         self.start("entry");
+        // Runtime out-parameters always write full words, including for bool
+        // and None payloads. Results are loaded only after a successful call;
+        // each call transfers them before another call can reuse this storage.
+        self.line("%mapping_key_word = alloca i64");
+        self.line("%mapping_value_word = alloca i64");
         for (slot, &ty) in function.locals.iter().enumerate() {
             self.line(format!("%local{slot} = alloca {}", ty.llvm()));
             self.line(format!(
@@ -377,6 +392,14 @@ impl Emitter<'_, '_> {
             Statement::Clear(slot) => {
                 let value = self.take_slot(*slot);
                 self.release(&value);
+            }
+            Statement::IterNext {
+                iterator,
+                key,
+                value,
+                ready,
+            } => {
+                self.iter_next(*iterator, *key, *value, *ready);
             }
             Statement::SetItem(list, index, expression) => {
                 if self.copy_item(list, index, expression) {
@@ -620,6 +643,29 @@ impl Emitter<'_, '_> {
                     self.release_operand(&value);
                 }
                 list
+            }
+            ExprKind::Dict {
+                key,
+                value,
+                entries,
+            } => {
+                let dict = Value {
+                    ty: expression.ty,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_dict_new(i32 {}, i32 {})",
+                        representation_kind(*key),
+                        representation_kind(*value)
+                    )),
+                    small_integer: false,
+                };
+                for (key, value) in entries {
+                    let key = self.operand(key);
+                    let value = self.operand(value);
+                    self.set_item(&dict, &key.value, &value.value, false);
+                    self.release_operand(&value);
+                    self.release_operand(&key);
+                }
+                dict
             }
             ExprKind::Tuple(values) => {
                 let object = Value {
@@ -893,7 +939,12 @@ impl Emitter<'_, '_> {
                 left.operand,
                 right.operand
             )),
-            Type::ListInt | Type::List(_) | Type::Tuple(_) | Type::Optional(_) => {
+            Type::ListInt
+            | Type::List(_)
+            | Type::Dict(_)
+            | Type::Iterator
+            | Type::Tuple(_)
+            | Type::Optional(_) => {
                 unreachable!("container comparison is rejected by the frontend")
             }
         };
@@ -1030,6 +1081,7 @@ impl Emitter<'_, '_> {
                     Type::Str => "relar_str_len",
                     Type::ListInt => "relar_list_len",
                     Type::List(_) => "relar_seq_len",
+                    Type::Dict(_) => "relar_dict_len",
                     Type::Tuple(_) => "relar_object_len",
                     _ => unreachable!("len input was checked"),
                 },
@@ -1042,6 +1094,46 @@ impl Emitter<'_, '_> {
                 returns,
                 self.nonnegative_index(&expressions[1]),
             ),
+            Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
+            Builtin::DictGetDefault => {
+                let key = self.word(&args[1].value);
+                let default = self.word(&args[2].value);
+                let word = self.instruction(format!(
+                    "call i64 @relar_dict_get_default(ptr {}, i64 {key}, i64 {default})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            Builtin::DictTryGet(stored) => self.dict_try_get(*stored, &args, returns),
+            Builtin::DictContains => {
+                let key = self.word(&args[0].value);
+                let byte = self.instruction(format!(
+                    "call i8 @relar_dict_contains(ptr {}, i64 {key})",
+                    args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i8 {byte}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::DictDelete => {
+                let key = self.word(&args[1].value);
+                self.line(format!(
+                    "call void @relar_dict_delete(ptr {}, i64 {key})",
+                    args[0].value.operand
+                ));
+                none()
+            }
+            Builtin::DictIter(items) => Value {
+                ty: Type::Iterator,
+                operand: self.instruction(format!(
+                    "call ptr @relar_dict_iter(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u8::from(*items)
+                )),
+                small_integer: false,
+            },
             Builtin::Append => {
                 self.append(&args[0].value, &args[1].value);
                 none()
@@ -1082,6 +1174,8 @@ impl Emitter<'_, '_> {
                     Type::ListInt
                     | Type::Class(_)
                     | Type::List(_)
+                    | Type::Dict(_)
+                    | Type::Iterator
                     | Type::Tuple(_)
                     | Type::Optional(_) => {
                         unreachable!("container printing is rejected")
@@ -1096,6 +1190,106 @@ impl Emitter<'_, '_> {
         result
     }
 
+    /// Uses word-sized scratch storage only on the successful lookup edge. A
+    /// found nonoptional payload is promoted into a new optional box; existing
+    /// optional/None storage stays flattened. Defaults were already evaluated
+    /// eagerly, and the missing edge acquires its own owner before argument
+    /// cleanup can release the supplied fallback.
+    fn dict_try_get(&mut self, stored: Type, args: &[Operand], returns: Type) -> Value {
+        let key = self.word(&args[1].value);
+        let byte = self.instruction(format!(
+            "call i8 @relar_dict_try_get(ptr {}, i64 {key}, ptr %mapping_key_word)",
+            args[0].value.operand
+        ));
+        let found = self.instruction(format!("icmp ne i8 {byte}, 0"));
+        let (present, absent, end) = (self.label(), self.label(), self.label());
+        self.branch(&found, &present, &absent);
+        self.start(&present);
+        let word = self.instruction("load i64, ptr %mapping_key_word");
+        let value = self.unpack_word(word, stored);
+        let value = if matches!(stored, Type::Optional(_) | Type::None) {
+            debug_assert_eq!(stored, returns);
+            value
+        } else {
+            debug_assert!(matches!(returns, Type::Optional(_)));
+            let object = Value {
+                ty: returns,
+                operand: self.instruction("call ptr @relar_object_new(i64 1)"),
+                small_integer: false,
+            };
+            self.set_field(&object, 0, &value);
+            self.release(&value);
+            object
+        };
+        self.jump(&end);
+        self.start(&absent);
+        let default = if let Some(default) = args.get(2) {
+            debug_assert_eq!(default.value.ty, returns);
+            self.retain(&default.value);
+            default.value.operand.clone()
+        } else {
+            returns.initial().to_owned()
+        };
+        self.jump(&end);
+        self.start(&end);
+        Value {
+            ty: returns,
+            operand: self.instruction(format!(
+                "phi {} [ {}, %{present} ], [ {default}, %{absent} ]",
+                returns.llvm(),
+                value.operand
+            )),
+            small_integer: false,
+        }
+    }
+
+    /// The runtime transfers independent owned words only on success. Output
+    /// locals have distinct slots and may be narrower than a word, so scratch
+    /// values are converted before publication. Exhaustion never reads scratch
+    /// or replaces an output owner; nested loops can safely reuse both scratch
+    /// words after this synchronous conversion.
+    fn iter_next(&mut self, iterator: usize, key: usize, value: Option<usize>, ready: usize) {
+        debug_assert_eq!(self.locals[iterator], Type::Iterator);
+        debug_assert_eq!(self.locals[ready], Type::Bool);
+        debug_assert_ne!(iterator, key);
+        debug_assert_ne!(iterator, ready);
+        debug_assert_ne!(key, ready);
+        if let Some(value) = value {
+            debug_assert_ne!(iterator, value);
+            debug_assert_ne!(key, value);
+            debug_assert_ne!(ready, value);
+        }
+        let iterator = self.borrow_slot(iterator);
+        let value_output = if value.is_some() {
+            "%mapping_value_word"
+        } else {
+            "null"
+        };
+        let byte = self.instruction(format!(
+            "call i8 @relar_mapping_iter_next(ptr {}, ptr %mapping_key_word, ptr {value_output})",
+            iterator.operand
+        ));
+        let ready_value = Value {
+            ty: Type::Bool,
+            operand: self.instruction(format!("icmp ne i8 {byte}, 0")),
+            small_integer: false,
+        };
+        self.store(ready, &ready_value);
+        let (success, end) = (self.label(), self.label());
+        self.branch(&ready_value.operand, &success, &end);
+        self.start(&success);
+        let word = self.instruction("load i64, ptr %mapping_key_word");
+        let key_value = self.unpack_word(word, self.locals[key]);
+        self.store(key, &key_value);
+        if let Some(value) = value {
+            let word = self.instruction("load i64, ptr %mapping_value_word");
+            let value_result = self.unpack_word(word, self.locals[value]);
+            self.store(value, &value_result);
+        }
+        self.jump(&end);
+        self.start(&end);
+    }
+
     /// Converts a typed value to the runtime's word representation without
     /// changing ownership. The slot's representation tag controls reclamation.
     fn word(&mut self, value: &Value) -> String {
@@ -1107,6 +1301,8 @@ impl Emitter<'_, '_> {
             | Type::ListInt
             | Type::Class(_)
             | Type::List(_)
+            | Type::Dict(_)
+            | Type::Iterator
             | Type::Tuple(_)
             | Type::Optional(_) => {
                 self.instruction(format!("ptrtoint ptr {} to i64", value.operand))
@@ -1125,6 +1321,8 @@ impl Emitter<'_, '_> {
             | Type::ListInt
             | Type::Class(_)
             | Type::List(_)
+            | Type::Dict(_)
+            | Type::Iterator
             | Type::Tuple(_)
             | Type::Optional(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
@@ -1227,6 +1425,14 @@ impl Emitter<'_, '_> {
     }
 
     fn get_item(&mut self, list: &Value, index: &Value, returns: Type, nonnegative: bool) -> Value {
+        if matches!(list.ty, Type::Dict(_)) {
+            let key = self.word(index);
+            let word = self.instruction(format!(
+                "call i64 @relar_dict_get(ptr {}, i64 {key})",
+                list.operand
+            ));
+            return self.unpack_word(word, returns);
+        }
         let family = if list.ty == Type::ListInt {
             "list"
         } else {
@@ -1242,6 +1448,15 @@ impl Emitter<'_, '_> {
     }
 
     fn set_item(&mut self, list: &Value, index: &Value, value: &Value, nonnegative: bool) {
+        if matches!(list.ty, Type::Dict(_)) {
+            let key = self.word(index);
+            let word = self.word(value);
+            self.line(format!(
+                "call void @relar_dict_set(ptr {}, i64 {key}, i64 {word})",
+                list.operand
+            ));
+            return;
+        }
         let family = if list.ty == Type::ListInt {
             "list"
         } else {
@@ -1302,7 +1517,12 @@ fn representation_kind(ty: Type) -> u32 {
         Type::Int => 2,
         Type::Str => 3,
         Type::ListInt => 4,
-        Type::Class(_) | Type::List(_) | Type::Tuple(_) | Type::Optional(_) => 5,
+        Type::Class(_)
+        | Type::List(_)
+        | Type::Dict(_)
+        | Type::Iterator
+        | Type::Tuple(_)
+        | Type::Optional(_) => 5,
     }
 }
 
@@ -1315,6 +1535,13 @@ fn mark_rebound(statements: &[Statement], rebound: &mut [bool]) {
             Statement::Move(target, source) => {
                 rebound[*target] = true;
                 rebound[*source] = true;
+            }
+            Statement::IterNext {
+                key, value, ready, ..
+            } => {
+                for slot in [Some(*key), *value, Some(*ready)].into_iter().flatten() {
+                    rebound[slot] = true;
+                }
             }
             Statement::If(_, yes, no) => {
                 mark_rebound(yes, rebound);
@@ -1371,6 +1598,16 @@ declare void @relar_seq_append(ptr, i64, i32)
 declare i64 @relar_seq_pop(ptr)
 declare i64 @relar_seq_len(ptr)
 declare ptr @relar_seq_repeat(ptr, i64)
+declare ptr @relar_dict_new(i32, i32)
+declare i64 @relar_dict_len(ptr)
+declare i8 @relar_dict_contains(ptr, i64)
+declare i64 @relar_dict_get(ptr, i64)
+declare i8 @relar_dict_try_get(ptr, i64, ptr)
+declare i64 @relar_dict_get_default(ptr, i64, i64)
+declare void @relar_dict_set(ptr, i64, i64)
+declare void @relar_dict_delete(ptr, i64)
+declare ptr @relar_dict_iter(ptr, i32)
+declare i8 @relar_mapping_iter_next(ptr, ptr, ptr)
 declare ptr @relar_str_concat(ptr, ptr)
 declare ptr @relar_str_split_whitespace(ptr)
 declare void @relar_int_retain(i64)
