@@ -17,4 +17,4 @@ printf '128\n3\n42\n' | /tmp/route-planner
 printf '128\n3\n42\n' | python3 examples/route_planner.py
 ```
 
-See the [benchmark method and reproduction commands](benchmarks/README.md).
+See the [benchmark method and reproduction commands](benchmarks/README.md) and [recorded results](benchmarks/results/2026-10-17-route-planner.md). The first run measured a 2.17× median end-to-end speedup over CPython 3.14.5 for three routes on 256 × 256 grids.
