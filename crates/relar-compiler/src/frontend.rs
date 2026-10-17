@@ -1,17 +1,85 @@
-//! Enforces the closed language contract before any representation is lowered.
+//! Enforces the closed typed subset independently of gradual Python typing.
 
 use std::collections::{HashMap, HashSet};
 
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
+use crate::classes::Classes;
 use crate::ir::{self, Binary, Builtin, Compare, Expr, ExprKind, Statement, Type};
 use crate::modules::{Binding, DefinitionId, ModuleId, SourceGraph};
 
+#[derive(Clone)]
 struct Signature {
     id: usize,
     params: Vec<Type>,
     returns: Type,
+}
+
+struct ClassInfo {
+    declarations: Classes,
+    fields: Vec<Vec<Type>>,
+    methods: Vec<HashMap<String, Signature>>,
+}
+
+impl ClassInfo {
+    /// Resolves all nominal field types before checking constructors and methods.
+    fn new(graph: &SourceGraph) -> Result<Self, String> {
+        let declarations = Classes::collect(graph)?;
+        let fields = declarations
+            .definitions
+            .iter()
+            .map(|class| {
+                class
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        annotation(
+                            &field.annotation,
+                            graph,
+                            class.definition.module,
+                            &declarations,
+                        )
+                        .map_err(|error| {
+                            format!(
+                                "{}:{error}",
+                                graph.modules[class.definition.module].path.display()
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        // Reference counting is sufficient only while no accepted field graph can
+        // close a cycle. This concerns storage types, not method signatures.
+        fn visit(id: usize, fields: &[Vec<Type>], states: &mut [u8]) -> bool {
+            if states[id] != 0 {
+                return states[id] == 2;
+            }
+            states[id] = 1;
+            for field in &fields[id] {
+                if let Type::Class(next) = field
+                    && !visit(*next, fields, states)
+                {
+                    return false;
+                }
+            }
+            states[id] = 2;
+            true
+        }
+        let mut states = vec![0; fields.len()];
+        for (id, class) in declarations.definitions.iter().enumerate() {
+            if !visit(id, &fields, &mut states) {
+                return Err(graph.modules[class.definition.module].error(&class.node,
+                    "cyclic heap types are unsupported; class fields must form an acyclic ownership graph"));
+            }
+        }
+        Ok(Self {
+            methods: vec![HashMap::new(); fields.len()],
+            declarations,
+            fields,
+        })
+    }
 }
 
 const RESERVED: &[&str] = &[
@@ -21,6 +89,7 @@ const RESERVED: &[&str] = &[
 
 /// Resolves the project-wide call graph without changing source-level namespaces.
 pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
+    let mut classes = ClassInfo::new(graph)?;
     let mut signatures = HashMap::new();
     let mut definitions = Vec::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
@@ -35,19 +104,23 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
         for (statement_id, statement) in module.parsed.syntax().body.iter().enumerate() {
             match statement {
                 ast::Stmt::FunctionDef(function) => {
-                    let id = DefinitionId {
-                        module: module_id,
-                        statement: statement_id,
-                    };
-                    let signature = signature(function, &module.source, definitions.len())
-                        .map_err(|error| format!("{}:{error}", module.path.display()))?;
-                    signatures.insert(id, signature);
-                    definitions.push((id, function));
-                }
-                ast::Stmt::ClassDef(_) => {
-                    return Err(
-                        module.error(statement, "classes are unsupported in this prototype")
+                    let signature = signature(
+                        function,
+                        graph,
+                        module_id,
+                        &classes.declarations,
+                        definitions.len(),
+                        None,
+                    )
+                    .map_err(|error| format!("{}:{error}", module.path.display()))?;
+                    signatures.insert(
+                        DefinitionId {
+                            module: module_id,
+                            statement: statement_id,
+                        },
+                        signature.clone(),
                     );
+                    definitions.push((module_id, function, signature));
                 }
                 ast::Stmt::Expr(value) => {
                     if let ast::Expr::StringLiteral(value) = &*value.value {
@@ -59,13 +132,41 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
             }
         }
     }
+    for (class_id, class) in classes.declarations.definitions.iter().enumerate() {
+        let module_id = class.definition.module;
+        let module = &graph.modules[module_id];
+        for statement in &class.node.body {
+            if let ast::Stmt::Expr(value) = statement
+                && let ast::Expr::StringLiteral(value) = &*value.value
+            {
+                check_string(value, &module.source)
+                    .map_err(|error| format!("{}:{error}", module.path.display()))?;
+            }
+        }
+        for method in &class.methods {
+            let signature = signature(
+                method,
+                graph,
+                module_id,
+                &classes.declarations,
+                definitions.len(),
+                Some(Type::Class(class_id)),
+            )
+            .map_err(|error| format!("{}:{error}", module.path.display()))?;
+            if method.name.as_str() == "__init__" && signature.returns != Type::None {
+                return Err(module.error(method, "__init__ must return None"));
+            }
+            classes.methods[class_id].insert(method.name.to_string(), signature.clone());
+            definitions.push((module_id, method, signature));
+        }
+    }
     let mut functions = Vec::new();
     let mut call_graph = Vec::new();
-    for (id, definition) in &definitions {
-        let signature = &signatures[id];
-        let module = &graph.modules[id.module];
+    for (module_id, definition, signature) in &definitions {
+        let module = &graph.modules[*module_id];
         let result = (|| {
-            let mut checker = Checker::new(graph, id.module, &signatures, signature.returns);
+            let mut checker =
+                Checker::new(graph, *module_id, &signatures, &classes, signature.returns);
             let mut params = Vec::new();
             for (parameter, &ty) in definition
                 .parameters
@@ -99,13 +200,9 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
         functions.push(function);
         call_graph.push(calls);
     }
-    // Acyclic direct calls bound native call depth independently of input values.
     fn visit(id: usize, graph: &[HashSet<usize>], states: &mut [u8]) -> bool {
-        if states[id] == 1 {
-            return false;
-        }
-        if states[id] == 2 {
-            return true;
+        if states[id] != 0 {
+            return states[id] == 2;
         }
         states[id] = 1;
         for &callee in &graph[id] {
@@ -117,15 +214,15 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
         true
     }
     let mut states = vec![0; functions.len()];
-    for (id, &(definition, node)) in definitions.iter().enumerate() {
+    for (id, (module, node, _)) in definitions.iter().enumerate() {
         if !visit(id, &call_graph, &mut states) {
-            return Err(graph.modules[definition.module]
-                .error(node, "recursive calls are unsupported in this prototype"));
+            return Err(graph.modules[*module]
+                .error(*node, "recursive calls are unsupported in this prototype"));
         }
     }
     let mut entry = None;
     for (module_id, module) in graph.modules.iter().enumerate() {
-        let mut checker = Checker::new(graph, module_id, &signatures, Type::None);
+        let mut checker = Checker::new(graph, module_id, &signatures, &classes, Type::None);
         checker.module_scope = true;
         let statements = module
             .executable
@@ -152,9 +249,13 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
 
 fn signature(
     function: &ast::StmtFunctionDef,
-    source: &str,
+    graph: &SourceGraph,
+    module: ModuleId,
+    classes: &Classes,
     id: usize,
+    receiver: Option<Type>,
 ) -> Result<Signature, String> {
+    let source = &graph.modules[module].source;
     if function.is_async
         || !function.decorator_list.is_empty()
         || function.type_params.is_some()
@@ -169,7 +270,7 @@ fn signature(
         ));
     }
     let mut params = Vec::new();
-    for parameter in function.parameters.iter_non_variadic_params() {
+    for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
         if parameter.default.is_some() {
             return Err(error(
                 source,
@@ -177,19 +278,39 @@ fn signature(
                 "default parameter values are unsupported",
             ));
         }
-        params.push(annotation(
-            parameter
-                .annotation()
-                .ok_or_else(|| error(source, parameter, "parameter requires a type annotation"))?,
-            source,
-        )?);
+        let ty = if let Some(receiver) = receiver
+            && index == 0
+        {
+            if let Some(declared) = parameter.annotation()
+                && annotation(declared, graph, module, classes)? != receiver
+            {
+                return Err(error(
+                    source,
+                    parameter,
+                    "self annotation must name its exact class",
+                ));
+            }
+            receiver
+        } else {
+            annotation(
+                parameter.annotation().ok_or_else(|| {
+                    error(source, parameter, "parameter requires a type annotation")
+                })?,
+                graph,
+                module,
+                classes,
+            )?
+        };
+        params.push(ty);
     }
     let returns = annotation(
         function
             .returns
             .as_deref()
             .ok_or_else(|| error(source, function, "function requires a return annotation"))?,
-        source,
+        graph,
+        module,
+        classes,
     )?;
     Ok(Signature {
         id,
@@ -206,7 +327,35 @@ fn error(source: &str, node: &impl Ranged, message: &str) -> String {
     format!("{line}:{column}: Relar: {message}")
 }
 
-fn annotation(expression: &ast::Expr, source: &str) -> Result<Type, String> {
+fn annotation(
+    expression: &ast::Expr,
+    graph: &SourceGraph,
+    module: ModuleId,
+    classes: &Classes,
+) -> Result<Type, String> {
+    let source = &graph.modules[module].source;
+    let binding = if let ast::Expr::StringLiteral(value) = expression {
+        check_string(value, source)?;
+        let mut names = value.value.to_str().split('.');
+        let mut binding = names
+            .next()
+            .and_then(|name| graph.modules[module].bindings.get(name))
+            .copied();
+        for name in names {
+            binding = match binding {
+                Some(Binding::Module(module)) => graph.modules[module].bindings.get(name).copied(),
+                _ => None,
+            };
+        }
+        binding
+    } else {
+        graph.resolve(module, expression)
+    };
+    if let Some(Binding::Definition(definition)) = binding
+        && let Some(&id) = classes.ids.get(&definition)
+    {
+        return Ok(Type::Class(id));
+    }
     match expression {
         ast::Expr::Name(name) => match name.id.as_str() {
             "int" => Ok(Type::Int),
@@ -215,7 +364,7 @@ fn annotation(expression: &ast::Expr, source: &str) -> Result<Type, String> {
             _ => Err(error(
                 source,
                 expression,
-                "supported types are int, bool, str, None, and list[int]",
+                "supported annotations are int, bool, str, None, list[int], and fixed classes",
             )),
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
@@ -275,6 +424,7 @@ struct Checker<'a> {
     graph: &'a SourceGraph,
     module: ModuleId,
     functions: &'a HashMap<DefinitionId, Signature>,
+    classes: &'a ClassInfo,
     returns: Type,
     names: HashMap<String, usize>,
     locals: Vec<Type>,
@@ -289,6 +439,7 @@ impl<'a> Checker<'a> {
         graph: &'a SourceGraph,
         module: ModuleId,
         functions: &'a HashMap<DefinitionId, Signature>,
+        classes: &'a ClassInfo,
         returns: Type,
     ) -> Self {
         Self {
@@ -296,6 +447,7 @@ impl<'a> Checker<'a> {
             graph,
             module,
             functions,
+            classes,
             returns,
             names: HashMap::new(),
             locals: Vec::new(),
@@ -337,9 +489,70 @@ impl<'a> Checker<'a> {
             Err(error(
                 self.source,
                 node,
-                &format!("expected {expected}, got {actual}; annotations are enforced contracts"),
+                &format!(
+                    "expected {}, got {}; annotations are enforced contracts",
+                    self.type_name(expected),
+                    self.type_name(actual)
+                ),
             ))
         }
+    }
+
+    fn type_name(&self, ty: Type) -> String {
+        if let Type::Class(id) = ty {
+            let class = &self.classes.declarations.definitions[id];
+            format!(
+                "{}.{}",
+                self.graph.modules[class.definition.module].name, class.name
+            )
+        } else {
+            ty.to_string()
+        }
+    }
+
+    /// Resolves a fixed field without evaluating its receiver more than once.
+    fn field(&mut self, attribute: &ast::ExprAttribute) -> Result<(Expr, usize, Type), String> {
+        let receiver = self.expr(&attribute.value)?;
+        let Type::Class(class) = receiver.ty else {
+            return Err(error(
+                self.source,
+                attribute,
+                "field access requires a fixed class instance",
+            ));
+        };
+        let field = self.classes.declarations.definitions[class]
+            .fields
+            .iter()
+            .position(|field| field.name == attribute.attr.as_str())
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    attribute,
+                    "unknown field; dynamic attributes and first-class methods are unsupported",
+                )
+            })?;
+        Ok((receiver, field, self.classes.fields[class][field]))
+    }
+
+    /// Checks direct-call arguments in source order against the fixed signature.
+    fn arguments(&mut self, call: &ast::ExprCall, params: &[Type]) -> Result<Vec<Expr>, String> {
+        if call.arguments.args.len() != params.len() {
+            return Err(error(
+                self.source,
+                call,
+                "incorrect number of function arguments",
+            ));
+        }
+        call.arguments
+            .args
+            .iter()
+            .zip(params)
+            .map(|(argument, &expected)| {
+                let argument = self.expr(argument)?;
+                self.expect(expected, argument.ty, call)?;
+                Ok(argument)
+            })
+            .collect()
     }
 
     /// Checks dead syntax too, but merges definite assignment only from reachable exits.
@@ -364,7 +577,12 @@ impl<'a> Checker<'a> {
                 let ast::Expr::Name(name) = &*assign.target else {
                     return Err(error(self.source, statement, "only names may be annotated"));
                 };
-                let ty = annotation(&assign.annotation, self.source)?;
+                let ty = annotation(
+                    &assign.annotation,
+                    self.graph,
+                    self.module,
+                    &self.classes.declarations,
+                )?;
                 let slot = self.declare(name.id.as_str(), ty, statement)?;
                 if let Some(value) = &assign.value {
                     let value = self.expr(value)?;
@@ -387,6 +605,15 @@ impl<'a> Checker<'a> {
                         .binary_op(assign.op, Type::Int, Type::Int, statement)?
                         .0;
                     Some(Statement::AugmentItem(list, index, op, value))
+                } else if let ast::Expr::Attribute(target) = &*assign.target {
+                    let (receiver, field, ty) = self.field(target)?;
+                    self.expect(Type::Int, ty, statement)?;
+                    let value = self.expr(&assign.value)?;
+                    self.expect(Type::Int, value.ty, statement)?;
+                    let op = self
+                        .binary_op(assign.op, Type::Int, Type::Int, statement)?
+                        .0;
+                    Some(Statement::AugmentField(receiver, field, op, value))
                 } else if let ast::Expr::Name(_) = &*assign.target {
                     let left = self.expr(&assign.target)?;
                     let right = self.expr(&assign.value)?;
@@ -557,6 +784,11 @@ impl<'a> Checker<'a> {
                 self.expect(Type::Int, index.ty, target)?;
                 Ok(Statement::SetItem(list, index, value))
             }
+            ast::Expr::Attribute(attribute) => {
+                let (receiver, field, ty) = self.field(attribute)?;
+                self.expect(ty, value.ty, target)?;
+                Ok(Statement::SetField(receiver, field, value))
+            }
             _ => Err(error(self.source, target, "unsupported assignment target")),
         }
     }
@@ -719,6 +951,10 @@ impl<'a> Checker<'a> {
                     ExprKind::Builtin(Builtin::ListGet, vec![list, index]),
                 )
             }
+            ast::Expr::Attribute(attribute) => {
+                let (receiver, field, ty) = self.field(attribute)?;
+                (ty, ExprKind::Field(Box::new(receiver), field))
+            }
             ast::Expr::Call(call) => return self.call(call),
             _ => {
                 return Err(error(
@@ -743,26 +979,28 @@ impl<'a> Checker<'a> {
             let Binding::Definition(definition) = binding else {
                 return Err(error(self.source, call, "a module is not callable"));
             };
+            if let Some(&class_id) = self.classes.declarations.ids.get(&definition) {
+                let class = &self.classes.declarations.definitions[class_id];
+                let initializer_name = class.methods[class.initializer].name.as_str();
+                let signature = self.classes.methods[class_id][initializer_name].clone();
+                let fields = class.fields.len();
+                let args = self.arguments(call, &signature.params[1..])?;
+                self.calls.insert(signature.id);
+                return Ok(Expr {
+                    ty: Type::Class(class_id),
+                    kind: ExprKind::Construct {
+                        initializer: signature.id,
+                        fields,
+                        args,
+                    },
+                });
+            }
             let signature = self
                 .functions
                 .get(&definition)
-                .ok_or_else(|| error(self.source, call, "definition is not a callable function"))?;
-            let args = call
-                .arguments
-                .args
-                .iter()
-                .map(|arg| self.expr(arg))
-                .collect::<Result<Vec<_>, _>>()?;
-            if args.len() != signature.params.len() {
-                return Err(error(
-                    self.source,
-                    call,
-                    "incorrect number of function arguments",
-                ));
-            }
-            for (arg, &expected) in args.iter().zip(&signature.params) {
-                self.expect(expected, arg.ty, call)?;
-            }
+                .ok_or_else(|| error(self.source, call, "definition is not a callable function"))?
+                .clone();
+            let args = self.arguments(call, &signature.params)?;
             self.calls.insert(signature.id);
             return Ok(Expr {
                 ty: signature.returns,
@@ -771,6 +1009,26 @@ impl<'a> Checker<'a> {
         }
         if let ast::Expr::Attribute(attribute) = &*call.func {
             let receiver = self.expr(&attribute.value)?;
+            if let Type::Class(class) = receiver.ty {
+                if attribute.attr.as_str().starts_with("__") {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "special methods cannot be called directly",
+                    ));
+                }
+                let signature = self.classes.methods[class]
+                    .get(attribute.attr.as_str())
+                    .ok_or_else(|| error(self.source, call, "unknown instance method"))?
+                    .clone();
+                let mut args = vec![receiver];
+                args.extend(self.arguments(call, &signature.params[1..])?);
+                self.calls.insert(signature.id);
+                return Ok(Expr {
+                    ty: signature.returns,
+                    kind: ExprKind::Call(signature.id, args),
+                });
+            }
             self.expect(Type::ListInt, receiver.ty, call)?;
             let mut args = vec![receiver];
             for arg in &call.arguments.args {
@@ -818,7 +1076,10 @@ impl<'a> Checker<'a> {
             "len" if args.len() == 1 && matches!(args[0].ty, Type::Str | Type::ListInt) => {
                 (Builtin::Len, Type::Int)
             }
-            "print" if args.len() == 1 && args[0].ty != Type::ListInt => {
+            "print"
+                if args.len() == 1
+                    && matches!(args[0].ty, Type::Int | Type::Bool | Type::Str | Type::None) =>
+            {
                 (Builtin::Print, Type::None)
             }
             _ => {
