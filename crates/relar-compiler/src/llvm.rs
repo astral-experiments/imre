@@ -313,6 +313,9 @@ impl Emitter {
         self.block(&function.body);
         if !self.terminated {
             self.cleanup();
+            if entry {
+                self.void_call("relar_flush_stdout", &[]);
+            }
             self.line(format!("ret {returns} 0"));
         }
         self.code.push_str("}\n");
@@ -1008,6 +1011,7 @@ fn none() -> Value {
 }
 
 const DECLARATIONS: &str = r#"
+declare void @relar_flush_stdout()
 declare ptr @relar_object_new(i64)
 declare i64 @relar_object_get(ptr, i64)
 declare void @relar_object_set(ptr, i64, i64, i32)

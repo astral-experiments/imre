@@ -14,6 +14,15 @@ from types import SimpleNamespace
 HERE = Path(__file__).resolve().parent
 shared = SimpleNamespace(**runpy.run_path(str(HERE / "benchmark.py")))
 validator = SimpleNamespace(**runpy.run_path(str(HERE / "dependency_validate.py")))
+PAIR_ORDERS = (("cpython", "relar"), ("relar", "cpython"))
+TRIPLET_ORDERS = (
+    ("cpython", "baseline", "relar"),
+    ("relar", "baseline", "cpython"),
+    ("baseline", "relar", "cpython"),
+    ("cpython", "relar", "baseline"),
+    ("relar", "cpython", "baseline"),
+    ("baseline", "cpython", "relar"),
+)
 
 
 def compact_output(result: dict) -> dict:
@@ -23,6 +32,28 @@ def compact_output(result: dict) -> dict:
         **{key: value for key, value in result.items() if key != "stdout"},
         "stdout_sha256": hashlib.sha256(stdout).hexdigest(),
         "stdout_bytes": len(stdout),
+    }
+
+
+def baseline_provenance(path: Path, binary_hash: str, sources: dict) -> dict:
+    """Require a build record for this exact native binary and unchanged package."""
+    record = json.loads(path.read_text())
+    if record.get("example") != "dependency_planner":
+        raise ValueError(f"{path.name}: not a dependency-planner benchmark record")
+    hashes = record.get("sha256", {})
+    if hashes.get("binary") != binary_hash:
+        raise ValueError(f"{path.name}: baseline executable hash does not match")
+    if record.get("sources") != sources:
+        raise ValueError(f"{path.name}: package source hashes do not match")
+    return {
+        "record_name": path.name,
+        "record_sha256": shared.sha256(path),
+        "git": record.get("git"),
+        "sources": record["sources"],
+        "sha256": hashes,
+        "tools": record.get("tools"),
+        "compilation": record.get("compilation"),
+        "compile_command": record.get("method", {}).get("compile_command"),
     }
 
 
@@ -45,6 +76,9 @@ def benchmark(args: argparse.Namespace) -> dict:
         "shared_harness": HERE / "benchmark.py",
         "validator": HERE / "dependency_validate.py",
     }
+    if args.baseline is not None:
+        inputs["baseline"] = Path(shared.executable(str(args.baseline)))
+        inputs["baseline_record"] = args.baseline_record.resolve(strict=True)
     source_paths = validator.package_sources()
     source_hashes = {
         str(path.relative_to(validator.PACKAGE_ROOT)): shared.sha256(path)
@@ -58,6 +92,13 @@ def benchmark(args: argparse.Namespace) -> dict:
     if args.output.resolve() in (binary, llvm):
         raise ValueError("JSON, executable, and LLVM output must have distinct paths")
     hashes = {name: shared.sha256(path) for name, path in inputs.items()}
+    provenance = (
+        baseline_provenance(
+            inputs["baseline_record"], hashes["baseline"], source_hashes
+        )
+        if args.baseline is not None
+        else None
+    )
     python_info = json.loads(
         shared.run([python, "-I", "-c", shared.PYTHON_INFO], b"", args.timeout)[
             "stdout"
@@ -110,6 +151,11 @@ def benchmark(args: argparse.Namespace) -> dict:
     hashes.update({name: shared.sha256(inputs[name]) for name in ("binary", "llvm_ir")})
     validation = validator.validate(binary, python)
     commands = {"cpython": validator.python_command(python), "relar": [str(binary)]}
+    baseline_validation = None
+    if provenance is not None:
+        baseline_validation = validator.validate(inputs["baseline"], python)
+        commands["baseline"] = [str(inputs["baseline"])]
+    orders = TRIPLET_ORDERS if provenance is not None else PAIR_ORDERS
     workloads = []
     for shape in args.shapes:
         for size in args.sizes:
@@ -125,10 +171,8 @@ def benchmark(args: argparse.Namespace) -> dict:
             phases = {"warmups": [], "samples": []}
             for phase, count in (("warmups", args.warmups), ("samples", args.samples)):
                 for index in range(count):
-                    order = (
-                        ["cpython", "relar"] if index % 2 == 0 else ["relar", "cpython"]
-                    )
-                    pair = {"index": index, "order": order}
+                    order = orders[index % len(orders)]
+                    group = {"index": index, "order": order}
                     for implementation in order:
                         result = shared.run(
                             commands[implementation], stdin, args.timeout
@@ -138,11 +182,34 @@ def benchmark(args: argparse.Namespace) -> dict:
                                 f"output mismatch for {implementation}, {shape}, "
                                 f"{size} tasks, {phase} {index}"
                             )
-                        pair[implementation] = compact_output(result)
-                    phases[phase].append(pair)
+                        group[implementation] = compact_output(result)
+                    phases[phase].append(group)
             cpython = shared.summary(phases["samples"], "cpython")
             relar = shared.summary(phases["samples"], "relar")
             speedup = cpython["median_seconds"] / relar["median_seconds"]
+            summary = {
+                "cpython": cpython,
+                "relar": relar,
+                "speedup_ratio_of_medians": speedup,
+            }
+            baseline_message = ""
+            if provenance is not None:
+                baseline = shared.summary(phases["samples"], "baseline")
+                baseline_speedup = baseline["median_seconds"] / relar["median_seconds"]
+                summary.update(
+                    {
+                        "baseline": baseline,
+                        "baseline_to_relar_ratio_of_medians": baseline_speedup,
+                        "cpython_to_baseline_ratio_of_medians": cpython[
+                            "median_seconds"
+                        ]
+                        / baseline["median_seconds"],
+                    }
+                )
+                baseline_message = (
+                    f", baseline {baseline['median_seconds']:.6f}s, "
+                    f"{baseline_speedup:.2f}x versus baseline"
+                )
             workloads.append(
                 {
                     "shape": shape,
@@ -158,16 +225,12 @@ def benchmark(args: argparse.Namespace) -> dict:
                     ).hexdigest(),
                     "expected_stdout_bytes": len(expected.encode("utf-8")),
                     **phases,
-                    "summary": {
-                        "cpython": cpython,
-                        "relar": relar,
-                        "speedup_ratio_of_medians": speedup,
-                    },
+                    "summary": summary,
                 }
             )
             print(
                 f"{shape}, {size} tasks: CPython {cpython['median_seconds']:.6f}s, "
-                f"Relar {relar['median_seconds']:.6f}s, {speedup:.2f}x",
+                f"Relar {relar['median_seconds']:.6f}s, {speedup:.2f}x{baseline_message}",
                 flush=True,
             )
     if validator.package_sources() != source_paths:
@@ -179,7 +242,7 @@ def benchmark(args: argparse.Namespace) -> dict:
     for name, path in inputs.items():
         if shared.sha256(path) != hashes[name]:
             raise RuntimeError(f"{name} changed during the benchmark")
-    return {
+    result = {
         "schema_version": 2,
         "example": "dependency_planner",
         "completed_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -212,8 +275,12 @@ def benchmark(args: argparse.Namespace) -> dict:
             "timer": "time.perf_counter_ns around subprocess.run; shared with benchmark.py",
             "includes": "fresh process startup, package imports, input parsing, all scheduling and complete report output, and process exit",
             "excludes": "Rust workspace builds, AOT compilation, oracle/differential validation, and warmups",
-            "ordering": "alternating CPython-first and Relar-first pairs, starting with CPython",
-            "fully_balanced_samples": args.samples % 2 == 0,
+            "ordering": (
+                "all six CPython/baseline/Relar orders in a repeating cycle; adjacent orders reverse each other"
+                if provenance is not None
+                else "alternating CPython-first and Relar-first pairs, starting with CPython"
+            ),
+            "fully_balanced_samples": args.samples % len(orders) == 0,
             "cpu": "harness and children inherit the same single-CPU affinity",
             "output_validation": "every warmup and sample must match the complete oracle output, exit zero, and emit no stderr; comparison and UTF-8 output hashing occur after timing",
             "output_storage": "complete expected_stdout appears once per workload; each raw run retains duration, exit status, stderr, stdout SHA256, and stdout byte length",
@@ -252,12 +319,28 @@ def benchmark(args: argparse.Namespace) -> dict:
         "validation": validation,
         "workloads": workloads,
     }
+    if provenance is not None:
+        result["baseline_build_record"] = provenance
+        result["baseline_validation"] = baseline_validation
+        result["artifacts"]["baseline_executable_bytes"] = (
+            inputs["baseline"].stat().st_size
+        )
+        result["method"].update(
+            {
+                "order_cycle": orders,
+                "baseline_command": ["<baseline-executable>"],
+                "baseline_provenance": "required build record matches the baseline executable and every package source hash; baseline executable and record are checked again after measurement",
+            }
+        )
+    return result
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True)
     parser.add_argument("--runtime", required=True, type=Path)
+    parser.add_argument("--baseline", type=Path)
+    parser.add_argument("--baseline-record", type=Path)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--clang", default="clang")
     parser.add_argument(
@@ -281,6 +364,8 @@ def main() -> None:
     parser.add_argument("--cpu", type=int)
     parser.add_argument("--timeout", type=shared.positive_float, default=120.0)
     args = parser.parse_args()
+    if (args.baseline is None) != (args.baseline_record is None):
+        parser.error("--baseline and --baseline-record must be supplied together")
     result = benchmark(args)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     temporary = args.output.with_name(args.output.name + ".tmp")

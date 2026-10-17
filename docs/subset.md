@@ -35,7 +35,7 @@ Imported modules, including every package `__init__.py`, may contain only defini
 
 Imports are resolved statically from `.py` files and packages with `__init__.py`. Wildcards, dynamic or function-local imports, namespace packages, import cycles, external dependencies, and standard-library imports or shadowing are rejected. A package can re-export definitions from its children; reading an unfinished parent's definitions through a circular import is rejected. Symlinks cannot escape the module root or give one source file multiple module identities. The source-string library APIs remain isolated; filesystem imports use the path-based APIs.
 
-The I/O surface is intentionally small. `input()` reads a UTF-8 line and strips its LF or CRLF terminator. `int(str)` accepts signed ASCII decimal digits with optional separators between digits and surrounding whitespace. Other bases and Unicode decimal digits in input strings are outside this prototype's input format. Surrogate escapes in non-raw string literals are rejected: Ruff's analysis AST substitutes replacement characters for them, which is unsuitable for executable semantics. Strings support `+` and local `+=`; `text.split()` groups Python whitespace and omits empty fields, returning `list[str]`. Separators, split limits, other string methods, formatting, and arbitrary codecs are not implemented. CPython's configurable integer conversion digit limit is not reproduced.
+The I/O surface is intentionally small. `input()` reads a UTF-8 line and removes its trailing LF. A preceding CR remains part of the value, matching CPython's piped input on the Linux target. `int(str)` accepts signed ASCII decimal digits with optional separators between digits and surrounding whitespace. Other bases and Unicode decimal digits in input strings are outside this prototype's input format. Surrogate escapes in non-raw string literals are rejected: Ruff's analysis AST substitutes replacement characters for them, which is unsuitable for executable semantics. Strings support `+` and local `+=`; `text.split()` groups Python whitespace and omits empty fields, returning `list[str]`. Separators, split limits, other string methods, formatting, and arbitrary codecs are not implemented. CPython's configurable integer conversion digit limit is not reproduced.
 
 ## Fixed classes
 
@@ -81,6 +81,8 @@ Heap objects are nonmoving reference-counted allocations. Classes, tuples, gener
 
 Runtime errors print an exception category and exit with status 1. There are no catchable exceptions or Python tracebacks yet. Normal return paths release references; fatal process-exit paths rely on process teardown. Allocation failures may terminate the process. `assert` is always enabled, independent of LLVM optimization.
 
+Standard output uses bounded buffering for pipes and files, and flushes each printed line on a terminal. Pending output is also flushed before `input()` waits, before a reported runtime error exits, and before the generated process entry returns normally. If a write or flush returns an error, Relar reports `OSError`; fatal-error flushing is best effort and preserves the original exception category. Generated code explicitly flushes at process exit because its LLVM entry point does not run Rust's standard `main` lifecycle.
+
 ## Build and validate
 
 Install the Rust toolchain specified in `rust-toolchain.toml`, Clang 18, and CPython 3.12 or later. Build the compiler and runtime together:
@@ -94,6 +96,7 @@ python3 tests/differential.py --compiler target/release/relar --runtime target/r
 python3 tests/imports.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/classes.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/containers.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+python3 tests/io.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 ```
 
 `--runtime` selects a static library explicitly; otherwise it is found beside the compiler executable. `--clang` selects the Clang driver and `--opt-level` selects 0 through 3 (default 3). Every input module, executable, runtime, and saved LLVM output must have a distinct file identity; symlinks and hard links cannot bypass the input overwrite check.
@@ -106,4 +109,6 @@ The imports suite compares multi-file programs with CPython at `-O0` and `-O3`, 
 
 The classes suite checks nominal types, imported class aliases, field replacement, temporary receivers, returns, method argument evaluation, and normal-exit ownership at `-O0` and `-O3`. Rejection cases cover incomplete construction, escaping `self`, invalid writes, dynamic class features, recursive calls, and cyclic field types.
 
-The containers suite covers nested lists, tuple positions, optional ownership and local flow narrowing, contextual literals, shallow repetition, string concatenation, and whitespace splitting. It rejects invalid alias writes, unsafe optional accesses, and class cycles hidden inside containers. All four suites also run generated-code AddressSanitizer checks at `-O1` in CI.
+The containers suite covers nested lists, tuple positions, optional ownership and local flow narrowing, contextual literals, shallow repetition, string concatenation, and whitespace splitting. It rejects invalid alias writes, unsafe optional accesses, and class cycles hidden inside containers.
+
+The I/O suite checks complete output, large and Unicode writes, normal and fatal exit flushing, LF and CRLF pipe input, terminal line visibility, and output failures. Interactive checks use protocol handshakes and readiness deadlines rather than performance expectations. All five suites also run generated-code AddressSanitizer checks at `-O1` in CI.
