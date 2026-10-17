@@ -82,9 +82,15 @@ SOURCE_BOUNDARIES = {
 
 ERRORS = {
     "division_zero": ("print(1 // 0)\n", "ZeroDivisionError"),
+    "modulo_zero": ("print(-1 % 0)\n", "ZeroDivisionError"),
+    "dynamic_division_zero": ('zero = int("0")\nprint(1 // zero)\n', "ZeroDivisionError"),
+    "dynamic_modulo_zero": ('zero = int("0")\nprint(-1 % zero)\n', "ZeroDivisionError"),
     "modulo_zero_big": ("print(1000000000000000000000000 % 0)\n", "ZeroDivisionError"),
     "bounds": ("x = [1]\nprint(x[1])\n", "IndexError"),
     "negative_bounds": ("x = [1]\nprint(x[-2])\n", "IndexError"),
+    "empty_negative_bounds": ("x: list[int] = []\nprint(x[-1])\n", "IndexError"),
+    "minimum_machine_index": ("x = [1]\nprint(x[-9223372036854775808])\n", "IndexError"),
+    "negative_big_bounds": ("x = [1]\nprint(x[-1000000000000000000000000])\n", "IndexError"),
     "big_bounds": ("x = [1]\nprint(x[1000000000000000000000000])\n", "IndexError"),
     "empty_pop": ("x: list[int] = []\nprint(x.pop())\n", "IndexError"),
     "bad_integer": ('print(int("12__3"))\n', "ValueError"),
