@@ -1,0 +1,27 @@
+[package]
+name = "relar-compiler"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+ruff_python_ast.workspace = true
+ruff_python_parser.workspace = true
+ruff_text_size.workspace = true
+ruff_db.workspace = true
+ty_python_semantic.workspace = true
+ty_python_core.workspace = true
+ty_module_resolver.workspace = true
+ty_site_packages.workspace = true
+ty_vendored.workspace = true
+salsa.workspace = true
+salsa-macro-rules.workspace = true
+tempfile = "=3.23.0"
+
+[[bin]]
+name = "relar"
+path = "src/main.rs"
+
+[lints]
+workspace = true
