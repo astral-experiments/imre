@@ -1,4 +1,4 @@
-# Route planner benchmark
+# Benchmarks
 
 The example computes shortest routes across weighted grids using Dijkstra's algorithm and its own binary heap. CPython and Relar execute the same `examples/route_planner.py` source, receive the same input, and must produce exactly the same output. The compiler generates LLVM IR and links a native executable against the independent Rust runtime. There is no rewritten native kernel or CPython interpreter inside that executable.
 
@@ -63,3 +63,5 @@ Callgrind reports executed instructions, not CPU cycles or elapsed-time shares. 
 ## Dependency planner
 
 The [dependency-planner package](../examples/dependency_planner/README.md) exercises static imports, typed classes, general lists, tuples, and optional values in a complete scheduling program. Its independent oracle and `dependency_benchmark.py` compare the unchanged package on CPython and Relar, using the same fresh-process timing, single-CPU affinity, and tracing guard. See the package README for input semantics, correctness checks, reproduction commands, and the compact per-sample output records.
+
+The [recorded comparison and I/O profile](results/2026-10-17-dependency-planner.md) include six workloads and a preserved native baseline. At 16,384 tasks, buffered Relar runs the layered graph 2.39× faster than CPython and 10.97× faster than the original native build. The three-way harness rotates all six execution orders and verifies every complete report.

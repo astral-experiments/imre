@@ -27,4 +27,4 @@ target/release/relar build examples/dependency_planner/__main__.py \
 python3 benchmarks/dependency_validate.py --binary /tmp/dependency-planner
 ```
 
-The independent oracle checks 135 inputs, including cycles, forward dependencies, Unicode labels, and arbitrary-precision durations. See the package README for input format and benchmark reproduction, and the [recorded baseline comparison](benchmarks/results/2026-10-17-dependency-planner-baseline.md).
+The independent oracle checks 135 inputs, including cycles, forward dependencies, Unicode labels, and arbitrary-precision durations. At 16,384 tasks, the [profiled comparison](benchmarks/results/2026-10-17-dependency-planner.md) records 2.39× faster execution than CPython for layered graphs and 3.50× for independent tasks, including the complete report. The [initial baseline](benchmarks/results/2026-10-17-dependency-planner-baseline.md) and raw samples are preserved; the package README describes input format and reproduction.
