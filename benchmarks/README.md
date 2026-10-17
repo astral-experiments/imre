@@ -88,6 +88,8 @@ This runs Callgrind and DHAT separately, requires a new output directory, and ve
 
 The [named incremental planner](../examples/incremental_planner/README.md) uses dictionaries, sets, and direct iteration to validate a named graph and schedule the targets affected by changes. The unchanged package runs on CPython and Relar; [Rust references](reference/incremental_planner/README.md) implement the same algorithm with either arbitrary-precision or checked-i64 arithmetic.
 
+The [recorded comparison](results/2026-10-17-incremental-planner.md) includes ordinary and matched ThinLTO controls, all raw samples, frozen build records, and sanitizer validation. Relar runs the four 16,384-target workloads 2.28–4.67× faster than CPython with ThinLTO and takes 1.49–1.57× as long as Rust BigInt. These are whole-process results for the new named planner, including whole-graph validation and complete output.
+
 Build and validate all four implementations before measuring:
 
 ```sh
