@@ -1,0 +1,19 @@
+[package]
+name = "relar-inventory-reference"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+[workspace]
+
+[dependencies]
+num-bigint = "=0.4.8"
+num-traits = "=0.2.19"
+
+[[bin]]
+name = "inventory-reference"
+path = "src/main.rs"
+
+[profile.release]
+debug = "line-tables-only"
