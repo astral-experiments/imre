@@ -112,7 +112,7 @@ python3 benchmarks/batch_benchmark.py \
   --baseline-record benchmarks/results/2026-10-17-incremental-planner-normal.json \
   --rust-bigint benchmarks/local/batch-reference-normal/planner-batch-bigint \
   --rust-build-record benchmarks/local/batch-reference-normal/build-record.json \
-  --python python3.14 --clang clang-18 \
+  --python python3.14 --clang clang-18 --target x86_64-unknown-linux-gnu \
   --artifact-dir benchmarks/local/batch-normal \
   --output benchmarks/local/batch-normal.json
 ```
