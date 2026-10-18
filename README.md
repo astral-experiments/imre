@@ -39,3 +39,5 @@ python3 benchmarks/incremental_validate.py --binary /tmp/incremental-planner
 ```
 
 Its independent checks cover 155 graph cases and 17 parser cases. The [recorded four-engine comparison](benchmarks/results/2026-10-17-incremental-planner.md) measures 2.28–4.67× faster execution than CPython on 16,384-target workloads with matched ThinLTO; Relar takes 1.49–1.57× as long as Rust BigInt. The [Rust references and benchmark guide](benchmarks/reference/incremental_planner/README.md) preserve the same algorithm and distinguish arbitrary-precision arithmetic from checked-i64 limits.
+
+The [batch planner](examples/batch_planner/README.md) exercises catchable builtin exceptions and `finally` cleanup. It captures each request's complete frame, reports malformed payloads, and continues with later requests in the same process. Its graph algorithm and reports come from the unchanged incremental planner. An independent oracle compares CPython, Relar, and Rust BigInt on 194 inputs; the benchmark separately measures regression on the unchanged single-request program and throughput of valid and mixed batches.

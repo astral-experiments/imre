@@ -76,3 +76,8 @@ jobs:
           python3 benchmarks/reference/incremental_planner/build.py --artifact-dir /tmp/relar-incremental-reference --target-dir target/incremental-reference
           # Checked i64 compares only in-range cases and must reject every excluded overflow case.
           python3 benchmarks/incremental_validate.py --python python3 --binary /tmp/incremental-planner --rust-bigint /tmp/relar-incremental-reference/planner-bigint --rust-i64 /tmp/relar-incremental-reference/planner-i64 --output /tmp/relar-incremental-reference/validation.json
+      - name: Validate framed batches and recovery against CPython and Rust
+        run: |
+          target/release/relar build examples/batch_planner/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/batch-planner
+          python3 benchmarks/reference/incremental_planner/build.py --batch --artifact-dir /tmp/relar-batch-reference --target-dir target/incremental-reference
+          python3 benchmarks/batch_validate.py --python python3 --binary /tmp/batch-planner --rust-bigint /tmp/relar-batch-reference/planner-batch-bigint --output /tmp/relar-batch-reference/validation.json

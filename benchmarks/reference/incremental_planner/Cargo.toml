@@ -11,6 +11,7 @@ publish = false
 default = ["bigint"]
 bigint = ["dep:num-bigint", "dep:num-traits"]
 checked-i64 = []
+batch = []
 
 [dependencies]
 num-bigint = { version = "=0.4.8", optional = true }
@@ -19,6 +20,11 @@ num-traits = { version = "=0.2.19", optional = true }
 [[bin]]
 name = "planner-reference"
 path = "src/main.rs"
+
+[[bin]]
+name = "planner-batch"
+path = "src/batch_main.rs"
+required-features = ["batch"]
 
 [profile.release]
 debug = "line-tables-only"
