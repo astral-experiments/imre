@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use ruff_python_ast as ast;
-use ruff_python_ast::visitor::{Visitor, walk_expr};
+use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr};
 
 /// Returns facts guaranteed when `test` has the requested truth value.
 /// A true fact means non-None. Only local names are eligible: attribute and
@@ -71,4 +71,32 @@ impl<'a> Visitor<'a> for Assignments {
         }
         walk_expr(self, expression);
     }
+
+    fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
+        let ast::ExceptHandler::ExceptHandler(handler_) = handler;
+        if let Some(name) = &handler_.name {
+            self.0.insert(name.to_string());
+        }
+        walk_except_handler(self, handler);
+    }
+}
+
+/// Handler targets are deleted on exit, even when the name previously existed.
+/// An outer handler cannot assume such a local survived the protected body.
+pub(crate) fn deleted_names(body: &[ast::Stmt]) -> HashSet<String> {
+    struct Deletions(HashSet<String>);
+    impl<'a> Visitor<'a> for Deletions {
+        fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
+            let ast::ExceptHandler::ExceptHandler(handler_) = handler;
+            if let Some(name) = &handler_.name {
+                self.0.insert(name.to_string());
+            }
+            walk_except_handler(self, handler);
+        }
+    }
+    let mut visitor = Deletions(HashSet::new());
+    for statement in body {
+        visitor.visit_stmt(statement);
+    }
+    visitor.0
 }

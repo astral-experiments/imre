@@ -11,6 +11,7 @@ use std::hash::{Hash, Hasher};
 use std::mem::ManuallyDrop;
 use std::rc::{Rc, Weak};
 
+use super::exceptions::{Error, Kind, string_repr};
 use super::{Int, Object, Slot, Storage, StorageCell, Str, acquire_rc, fail, object};
 
 #[derive(Clone, Copy)]
@@ -264,7 +265,20 @@ impl MappingIterator {
                 }
                 Ok(None)
             })
-        }?;
+        };
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                // CPython keeps size failures sticky even if a handler restores
+                // the size. Keys-changed failures instead exhaust the iterator.
+                if matches!(error, IterationError::DictionaryKeys) {
+                    self.exhausted = true;
+                } else {
+                    self.expected_len = usize::MAX;
+                }
+                return Err(error);
+            }
+        };
         if let Some((position, key, value)) = result {
             self.position = position;
             self.remaining = self.remaining.saturating_sub(1);
@@ -378,15 +392,35 @@ unsafe fn lookup(value: *const Object, key: usize) -> Option<Slot> {
     }
 }
 
+/// Formats the actual missing scalar key after dictionary storage access ends.
+unsafe fn missing_key(value: *const Object, key: usize) -> Error {
+    // SAFETY: the caller roots the dictionary; only immutable kind metadata escapes.
+    let kind = unsafe {
+        object(value)
+            .0
+            .with(|storage| storage.dictionary().key_kind)
+    };
+    // SAFETY: the caller roots a key of the dictionary's exact declared kind.
+    let key = unsafe { Key::borrow(key, kind) };
+    let message = match &*key {
+        Key::Int(value) => Str::from(value.big().to_string()),
+        Key::Str(value) => string_repr(value),
+    };
+    Error::new(Kind::KeyError, message)
+}
+
 /// # Safety
 /// The dictionary and exact-kind key must be rooted. The returned word owns its
-/// declared value type; a missing key terminates with KeyError.
+/// declared value type. A missing key sets KeyError; check pending before using
+/// or acquiring the returned word, which is uninterpreted zero on failure.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_get(value: *const Object, key: usize) -> usize {
     // SAFETY: the caller satisfies lookup's handle contract.
-    unsafe { lookup(value, key) }
-        .unwrap_or_else(|| fail("KeyError", "dictionary key not found"))
-        .into_word()
+    if let Some(owned) = unsafe { lookup(value, key) } {
+        return owned.into_word();
+    }
+    // SAFETY: both borrowed handles remain rooted after lookup returns.
+    unsafe { missing_key(value, key) }.returning(0)
 }
 
 /// Writes one owned value only when the key exists; missing leaves `out` untouched.
@@ -465,8 +499,8 @@ pub unsafe extern "C" fn relar_dict_set(value: *const Object, key: usize, word: 
 }
 
 /// # Safety
-/// The dictionary and exact-kind key must be rooted. Missing keys terminate
-/// with KeyError; removed key/value owners are dropped after storage access.
+/// The dictionary and exact-kind key must be rooted. Missing keys set KeyError;
+/// removed key/value owners are dropped after storage access.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_delete(value: *const Object, key: usize) {
     // SAFETY: lookup/removal cannot reenter; removed owners escape the access.
@@ -476,8 +510,11 @@ pub unsafe extern "C" fn relar_dict_delete(value: *const Object, key: usize) {
             let key = Key::borrow(key, mapping.key_kind);
             mapping.remove(&key)
         })
+    };
+    if old.is_none() {
+        // SAFETY: the unchanged dictionary and missing input key remain rooted.
+        unsafe { missing_key(value, key) }.raise();
     }
-    .unwrap_or_else(|| fail("KeyError", "dictionary key not found"));
     drop(old);
 }
 
@@ -619,8 +656,11 @@ pub unsafe extern "C" fn relar_mapping_iter_next(
         object(value)
             .0
             .with_mut(|storage| storage.mapping_iterator_mut().next())
-    }
-    .unwrap_or_else(|error| fail("RuntimeError", error.message()));
+    };
+    let next = match next {
+        Ok(next) => next,
+        Err(error) => return Error::new(Kind::RuntimeError, error.message()).returning(0),
+    };
     let Some((key, item)) = next else {
         return 0;
     };

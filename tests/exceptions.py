@@ -1,0 +1,603 @@
+"""Compare exception propagation and cleanup with CPython, including sanitizer runs."""
+
+import argparse
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from textwrap import dedent
+
+ACCEPTED = {
+    "handlers_and_messages": """
+def fail(value: int) -> int:
+    if value == 0:
+        raise ValueError("invalid request")
+    if value == 1:
+        raise IndexError("missing row")
+    return 9
+
+for value in range(3):
+    try:
+        print(fail(value))
+    except (ValueError, TypeError) as problem:
+        print(problem)
+    except LookupError as problem:
+        print(str(problem))
+    else:
+        print("success")
+    finally:
+        print("done")
+
+print(str(Exception()))
+print(str(KeyError()))
+print(str(KeyError("")))
+print(str(KeyError("quote's")))
+print(str(KeyError("single'" + '"' + "double")))
+print(str(KeyError("line\\nzero\\0é\\u200b\\ue000")))
+try:
+    raise ArithmeticError
+except BaseException:
+    print("base")
+try:
+    raise RuntimeError
+except:
+    print("bare")
+""",
+    "runtime_failures": """
+for turn in range(3):
+    try:
+        print(int("bad"))
+    except ValueError:
+        print("conversion")
+    try:
+        print(12 // turn)
+    except ArithmeticError:
+        print("division")
+    try:
+        print(12 % turn)
+    except ZeroDivisionError:
+        print("modulo")
+    values: list[int] = []
+    words: list[str] = []
+    try:
+        print(values.pop())
+    except IndexError:
+        print("int pop")
+    try:
+        print(words.pop())
+    except LookupError:
+        print("str pop")
+    try:
+        values[0] = 10
+    except IndexError:
+        print("int store")
+    try:
+        words[0] = "word"
+    except IndexError:
+        print("str store")
+    try:
+        print(values[10000000000000000000000000000000000])
+    except IndexError:
+        print("huge index")
+    try:
+        print(words[-1])
+    except IndexError:
+        print("negative index")
+    try:
+        for value in range(0, 3, 0):
+            print(value)
+    except ValueError:
+        print("range")
+    try:
+        assert False
+    except AssertionError as problem:
+        print(str(problem))
+    try:
+        print(input())
+    except EOFError:
+        print("eof")
+""",
+    "dictionary_errors": """
+values: dict[str, int] = {"present": 10}
+numbers: dict[int, str] = {1: "one"}
+try:
+    print(values["missing"])
+except KeyError as problem:
+    print(str(problem))
+try:
+    del numbers[123456789012345678901234567890]
+except LookupError as problem:
+    print(problem)
+try:
+    values["missing"] += 1
+except KeyError:
+    print("still absent")
+print(len(values))
+for turn in range(4):
+    try:
+        for name in values:
+            values["added"] = turn
+            del values["present"]
+            values["another"] = 8
+    except RuntimeError:
+        print("changed")
+    values = {"present": 10}
+    print(len(values))
+""",
+    "active_exception": """
+def again() -> None:
+    raise
+
+def after_handler_return() -> int:
+    try:
+        raise ValueError("handled")
+    except ValueError:
+        return 1
+    finally:
+        raise
+
+try:
+    again()
+except RuntimeError as problem:
+    print(problem)
+try:
+    raise ValueError("outer")
+except ValueError as outer:
+    try:
+        raise TypeError("inner")
+    except TypeError:
+        try:
+            again()
+        except TypeError as inner:
+            print(inner)
+    try:
+        again()
+    except ValueError as restored:
+        print(restored)
+try:
+    again()
+except RuntimeError:
+    print("inactive")
+try:
+    try:
+        raise IndexError("finally active")
+    finally:
+        again()
+except IndexError as problem:
+    print(problem)
+try:
+    after_handler_return()
+except RuntimeError as problem:
+    print(problem)
+""",
+    "handler_and_else_errors": """
+try:
+    try:
+        raise ValueError("first")
+    except ValueError:
+        raise IndexError("second")
+    except IndexError:
+        print("wrong sibling")
+    finally:
+        print("handler cleanup")
+except LookupError as problem:
+    print(problem)
+
+try:
+    try:
+        print("body")
+    except ValueError:
+        print("wrong else handler")
+    else:
+        raise ValueError("from else")
+    finally:
+        print("else cleanup")
+except ValueError as problem:
+    print(problem)
+""",
+    "finally_return": """
+def preserved() -> list[int]:
+    values = [1]
+    try:
+        return values
+    finally:
+        values.append(2)
+        values = [99]
+
+def overridden() -> list[int]:
+    try:
+        return [123456789012345678901234567890]
+    finally:
+        return [20]
+
+def suppressed() -> str:
+    try:
+        raise ValueError("discarded")
+    finally:
+        return "recovered"
+
+def replaced() -> list[int]:
+    try:
+        return [123456789012345678901234567890]
+    finally:
+        raise ValueError("replacement")
+
+for item in preserved():
+    print(item)
+print(overridden()[0])
+print(suppressed())
+try:
+    replaced()
+except ValueError as problem:
+    print(problem)
+""",
+    "finally_loops": """
+def loops() -> list[int]:
+    events: list[int] = []
+    for outer in range(3):
+        try:
+            for inner in range(2):
+                return [999999999999999999999999999]
+        finally:
+            events.append(outer)
+            if outer == 0:
+                continue
+            break
+    return events
+
+for value in loops():
+    print(value)
+for number in range(4):
+    try:
+        if number == 1:
+            continue
+        if number == 3:
+            break
+        print(number)
+    finally:
+        print("cleanup")
+try:
+    for number in range(2):
+        try:
+            raise ValueError("suppressed by break")
+        finally:
+            break
+except ValueError:
+    print("wrong exception")
+print("after break")
+""",
+    "partial_construction": """
+def fail_int() -> int:
+    raise ValueError("stop")
+
+def fail_str() -> str:
+    raise ValueError("stop")
+
+def consume(values: list[int], number: int) -> None:
+    print("wrong call")
+
+def pair(first: list[int], second: int) -> tuple[list[int], int]:
+    return (first, second)
+
+class Partial:
+    values: list[int]
+    number: int
+    def __init__(self) -> None:
+        self.values = [999999999999999999999999999999]
+        self.number = fail_int()
+
+for iteration in range(100):
+    try:
+        consume([99999999999999999999999999999], fail_int())
+    except ValueError:
+        pass
+    try:
+        captured = pair([99999999999999999999999999999], fail_int())
+        print(captured[1])
+    except ValueError:
+        pass
+    try:
+        instance = Partial()
+    except ValueError:
+        pass
+    try:
+        values = [99999999999999999999999999999, fail_int()]
+    except ValueError:
+        pass
+    try:
+        words = {"first": "owned" + " string", "second": fail_str()}
+    except ValueError:
+        pass
+    try:
+        names = {"owned" + " string", fail_str()}
+    except ValueError:
+        pass
+    try:
+        print(("owned" + " string") + fail_str())
+    except ValueError:
+        pass
+    try:
+        print(999999999999999999999999999999 < fail_int() < 1)
+    except ValueError:
+        pass
+print("recovered 100 times")
+""",
+    "atomic_updates_and_assertion": """
+def failure() -> int:
+    raise ValueError("failure")
+
+def message(log: list[int]) -> str:
+    log.append(1)
+    return "failed condition"
+
+left = 1000000000000000000000000000000
+right = 2
+try:
+    left, right = (3, failure())
+except ValueError:
+    print(left)
+    print(right)
+values = [1000000000000000000000000000000]
+try:
+    values[0] += failure()
+except ValueError:
+    print(values[0])
+log: list[int] = []
+assert True, message(log)
+print(len(log))
+try:
+    assert False, message(log)
+except AssertionError as problem:
+    print(problem)
+print(len(log))
+""",
+    "exception_storage": """
+def saved(value: Exception) -> Exception:
+    return value
+
+class Box:
+    error: Exception
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+values: list[Exception] = [ValueError("stored")]
+errors: dict[str, Exception] = {"error": values[0]}
+box = Box(saved(errors["error"]))
+optional: Exception | None = box.error
+assert optional is not None
+try:
+    raise optional
+except ValueError as caught:
+    print(caught)
+    retained: Exception = caught
+try:
+    raise retained
+except Exception as repeated:
+    print(repeated)
+""",
+    "exception_range_facts": """
+def compute(value: int) -> None:
+    index = value
+    divisor = value
+    try:
+        assert index >= 0
+        assert index < 2
+        divisor = 1
+        index = 10000000000000000000000000000000
+        raise ValueError("failed after assignment")
+    except Exception:
+        try:
+            print([10, 20][index])
+        except IndexError:
+            print("bounds")
+        try:
+            print(10 // divisor)
+        except ZeroDivisionError:
+            print("zero")
+    finally:
+        print(index)
+
+compute(0)
+compute(-1)
+""",
+}
+
+REJECTED = {
+    "handler_uninitialized": """
+try:
+    value = int(input())
+except ValueError:
+    print(value)
+""",
+    "handler_target_deleted": """
+try:
+    raise ValueError("error")
+except ValueError as problem:
+    print(problem)
+print(problem)
+""",
+    "handler_target_previous_deleted": """
+problem: Exception = ValueError("old")
+try:
+    raise ValueError("new")
+except ValueError as problem:
+    pass
+print(problem)
+""",
+    "handler_target_deleted_in_loop": """
+problem: Exception = ValueError("old")
+for turn in range(2):
+    try:
+        raise ValueError("new")
+    except ValueError as problem:
+        pass
+print(problem)
+""",
+    "handler_target_deleted_on_backedge": """
+problem: Exception = ValueError("old")
+for turn in range(2):
+    print(problem)
+    try:
+        raise ValueError("new")
+    except ValueError as problem:
+        pass
+""",
+    "nested_handler_target_deleted": """
+problem: Exception = ValueError("old")
+try:
+    try:
+        raise ValueError("inner")
+    except ValueError as problem:
+        pass
+    raise IndexError()
+except IndexError:
+    print(problem)
+""",
+    "finally_uninitialized": """
+try:
+    value = int(input())
+finally:
+    print(value)
+""",
+    "handler_optional_fact": """
+value: int | None = 1
+try:
+    value = None
+    raise ValueError()
+except ValueError:
+    print(value + 1)
+""",
+    "finally_optional_fact": """
+value: int | None = 1
+try:
+    value = None
+finally:
+    print(value + 1)
+""",
+    "integer_message": "raise ValueError(1)",
+    "multiple_messages": 'raise ValueError("a", "b")',
+    "subclass_annotation": 'value: ValueError = ValueError("error")',
+    "explicit_cause": 'raise ValueError("error") from None',
+    "exception_group": "try:\n    raise ValueError()\nexcept* ValueError:\n    pass\n",
+    "dynamic_handler": "kind = ValueError\ntry:\n    pass\nexcept kind:\n    pass\n",
+    "custom_exception": "class Custom(Exception):\n    pass\n",
+}
+
+ERRORS = {
+    "unhandled_cleanup": (
+        'try:\n    values = [999999999999999999999999999999]\n    raise ValueError("terminal")\nfinally:\n    print("cleaned")\n',
+        "ValueError",
+    ),
+    "unhandled_finally_replacement": (
+        'try:\n    raise ValueError("first")\nfinally:\n    raise IndexError("replacement")\n',
+        "IndexError",
+    ),
+    "unhandled_reraise": (
+        'try:\n    raise ValueError("again")\nexcept ValueError:\n    raise\n',
+        "ValueError",
+    ),
+}
+
+
+def run(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        input="",
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=60,
+        env={**os.environ, "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1"},
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--compiler", required=True, type=Path)
+    parser.add_argument("--runtime", required=True, type=Path)
+    parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--clang", default="clang")
+    parser.add_argument("--lto-linker", type=Path)
+    parser.add_argument("--target")
+    parser.add_argument("--opt-levels", nargs="+", default=["0", "3"])
+    parser.add_argument("--sanitize", action="store_true")
+    args = parser.parse_args()
+    compiler = str(args.compiler.resolve())
+    flags = ["--runtime", str(args.runtime.resolve()), "--clang", args.clang]
+    if args.target:
+        flags += ["--target", args.target]
+    if args.lto_linker:
+        flags += ["--lto-linker", str(args.lto_linker.resolve())]
+    if args.sanitize:
+        flags += ["--sanitize"]
+    passed = 0
+    with tempfile.TemporaryDirectory(prefix="relar-exceptions-") as directory:
+        temporary = Path(directory)
+        for name, source in REJECTED.items():
+            path = temporary / f"{name}.py"
+            path.write_text(dedent(source), encoding="utf-8")
+            result = run([compiler, "check", str(path)])
+            assert result.returncode > 0 and result.stderr, (name, result)
+            passed += 1
+        cases = [(name, source, None) for name, source in ACCEPTED.items()]
+        cases += [
+            (name, source, category) for name, (source, category) in ERRORS.items()
+        ]
+        for name, source, category in cases:
+            path = temporary / f"{name}.py"
+            path.write_text(dedent(source), encoding="utf-8")
+            reference = run(
+                [args.python, "-I", "-W", "ignore::SyntaxWarning", str(path)]
+            )
+            if category:
+                assert reference.returncode > 0 and category in reference.stderr, (
+                    name,
+                    reference,
+                )
+            else:
+                assert reference.returncode == 0 and not reference.stderr, (
+                    name,
+                    reference,
+                )
+            for level in args.opt_levels:
+                binary = temporary / f"{name}-O{level}"
+                built = run(
+                    [
+                        compiler,
+                        "build",
+                        str(path),
+                        "-o",
+                        str(binary),
+                        "--opt-level",
+                        level,
+                        *flags,
+                    ]
+                )
+                assert built.returncode == 0, (name, level, built.stderr)
+                actual = run([str(binary)])
+                assert actual.stdout == reference.stdout, (
+                    name,
+                    level,
+                    actual,
+                    reference,
+                )
+                if category:
+                    assert actual.returncode == 1 and actual.stderr.startswith(
+                        category + ":"
+                    ), (name, level, actual)
+                else:
+                    assert actual.returncode == 0 and not actual.stderr, (
+                        name,
+                        level,
+                        actual,
+                    )
+                assert "Sanitizer" not in actual.stderr, (name, level, actual.stderr)
+                passed += 1
+    print(
+        f"Passed {passed} exception checks ({len(REJECTED)} rejected programs; optimization levels {args.opt_levels}; ASan={args.sanitize})"
+    )
+
+
+if __name__ == "__main__":
+    main()

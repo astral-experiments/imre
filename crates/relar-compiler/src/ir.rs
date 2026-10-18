@@ -15,6 +15,8 @@ pub(crate) enum Type {
     Optional(usize),
     /// An internal mapping cursor, never available in user annotations.
     Iterator,
+    /// A sealed builtin exception with an immutable category and string message.
+    Exception,
     None,
 }
 
@@ -38,6 +40,7 @@ impl std::fmt::Display for Type {
             Self::ListInt => "list[int]",
             Self::None => "None",
             Self::Iterator => "iterator",
+            Self::Exception => "Exception",
             Self::Class(_)
             | Self::List(_)
             | Self::Dict(_)
@@ -100,6 +103,11 @@ pub(crate) enum ExprKind {
         fields: usize,
         args: Vec<Expr>,
     },
+    Exception {
+        kind: u32,
+        /// None distinguishes a zero-argument exception from an empty string.
+        message: Option<Box<Expr>>,
+    },
     Field(Box<Expr>, usize),
     Builtin(Builtin, Vec<Expr>),
 }
@@ -151,14 +159,29 @@ pub(crate) enum Builtin {
     SetAdd,
     SetDiscard,
     SetIter,
+    ExceptionMessage,
 }
 
+#[derive(Clone)]
+pub(crate) struct ExceptHandler {
+    /// Empty for a bare handler; otherwise fixed builtin exception categories.
+    pub kinds: Vec<u32>,
+    pub name: Option<usize>,
+    pub body: Vec<Statement>,
+}
+
+#[derive(Clone)]
 pub(crate) enum Statement {
     Assign(usize, Expr),
     /// Transfers an owned local to another local, resetting its source.
     Move(usize, usize),
     /// Releases an owned temporary and restores its cleanup-safe initial value.
     Clear(usize),
+    /// Compiler-owned roots are released on normal and abrupt scope exits.
+    Scope {
+        body: Vec<Statement>,
+        clear: Vec<usize>,
+    },
     SetItem(Expr, Expr, Expr),
     AugmentItem(Expr, Expr, Binary, Expr),
     SetField(Expr, usize, Expr),
@@ -186,4 +209,13 @@ pub(crate) enum Statement {
     Break,
     Continue,
     Assert(Expr),
+    /// Handlers protect only `body`; `finalbody` runs for every exit reason.
+    Try {
+        body: Vec<Statement>,
+        handlers: Vec<ExceptHandler>,
+        orelse: Vec<Statement>,
+        finalbody: Vec<Statement>,
+    },
+    /// None re-raises the dynamically active exception, including across calls.
+    Raise(Option<Expr>),
 }

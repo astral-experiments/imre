@@ -14,13 +14,16 @@
 //! code. Storage access uses the parent module's single-thread, nonreentrant
 //! contract. Mutable access ends before a displaced owner is dropped.
 
+pub(crate) mod exceptions;
 mod mappings;
 
 use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
-use super::{Int, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, index};
+use super::{
+    Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish, index,
+};
 
 /// An opaque allocation whose storage shape is checked by each runtime entry.
 pub struct Object(StorageCell<Storage>);
@@ -39,6 +42,7 @@ enum Storage {
     Dictionary(Box<mappings::Mapping>),
     Set(Box<mappings::Mapping>),
     MappingIterator(mappings::MappingIterator),
+    Exception(exceptions::Exception),
 }
 
 /// Owns one value independently of the container from which it was acquired.
@@ -198,16 +202,16 @@ pub unsafe extern "C" fn relar_object_get(value: *const Object, field: usize) ->
     // its value independently of the field storage.
     let owned = unsafe {
         object(value).0.with(|storage| {
-            storage
+            Ok(storage
                 .fields()
                 .get(field)
-                .unwrap_or_else(|| fail("IndexError", "object field index out of range"))
+                .ok_or_else(|| Error::new(Kind::IndexError, "object field index out of range"))?
                 .as_ref()
-                .unwrap_or_else(|| fail("AttributeError", "object field is uninitialized"))
-                .clone()
+                .ok_or_else(|| Error::new(Kind::AttributeError, "object field is uninitialized"))?
+                .clone())
         })
     };
-    owned.into_word()
+    finish(owned.map(Slot::into_word), 0)
 }
 
 /// # Safety
@@ -221,18 +225,19 @@ pub unsafe extern "C" fn relar_object_set(
     kind: u32,
 ) {
     // SAFETY: the compiler checks the replacement and its representation kind.
-    let new = unsafe { Slot::acquire(word, kind) };
+    let mut new = Some(unsafe { Slot::acquire(word, kind) });
     // SAFETY: replacement cannot reenter; the old owner is dropped afterward.
     let old = unsafe {
         object(value).0.with_mut(|storage| {
-            storage
+            Ok(storage
                 .fields_mut()
                 .get_mut(field)
-                .unwrap_or_else(|| fail("IndexError", "object field index out of range"))
-                .replace(new)
+                .ok_or_else(|| Error::new(Kind::IndexError, "object field index out of range"))?
+                .replace(new.take().unwrap()))
         })
     };
-    drop(old);
+    drop(new);
+    finish(old.map(drop), ());
 }
 
 /// # Safety
@@ -258,15 +263,18 @@ pub extern "C" fn relar_seq_new() -> *const Object {
 pub unsafe extern "C" fn relar_seq_get(value: *const Object, at: usize) -> usize {
     // SAFETY: the caller roots the index; conversion cannot call user code.
     let at = unsafe { Int::borrow(at) };
-    let at = decode_index(&at);
+    let at = match decode_index(&at) {
+        Ok(at) => at,
+        Err(error) => return error.returning(0),
+    };
     // SAFETY: cloning cannot reenter, and the result owns its value independently.
     let owned = unsafe {
         object(value).0.with(|storage| {
             let values = storage.sequence();
-            values[index(at, values.len())].clone()
+            Ok(values[index(at, values.len())?].clone())
         })
     };
-    owned.into_word()
+    finish(owned.map(Slot::into_word), 0)
 }
 
 /// Reads an element using a compiler-proven nonnegative, decoded index.
@@ -280,15 +288,11 @@ pub unsafe extern "C" fn relar_seq_get(value: *const Object, at: usize) -> usize
 pub unsafe extern "C" fn relar_seq_get_index(value: *const Object, at: usize) -> usize {
     // SAFETY: cloning cannot reenter; only an independently owned value escapes.
     let owned = unsafe {
-        object(value).0.with(|storage| {
-            storage
-                .sequence()
-                .get(at)
-                .unwrap_or_else(|| fail("IndexError", "list index out of range"))
-                .clone()
-        })
+        object(value)
+            .0
+            .with(|storage| storage.sequence().get(at).cloned().ok_or_else(Error::index))
     };
-    owned.into_word()
+    finish(owned.map(Slot::into_word), 0)
 }
 
 /// # Safety
@@ -297,19 +301,23 @@ pub unsafe extern "C" fn relar_seq_get_index(value: *const Object, at: usize) ->
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_seq_set(value: *const Object, at: usize, word: usize, kind: u32) {
     // SAFETY: the compiler checks the incoming element and representation kind.
-    let new = unsafe { Slot::acquire(word, kind) };
+    let mut new = Some(unsafe { Slot::acquire(word, kind) });
     // SAFETY: the caller roots the index; conversion cannot call user code.
     let at = unsafe { Int::borrow(at) };
-    let at = decode_index(&at);
+    let at = match decode_index(&at) {
+        Ok(at) => at,
+        Err(error) => return error.raise(),
+    };
     // SAFETY: replacement cannot reenter, and the old owner is returned for dropping.
     let old = unsafe {
         object(value).0.with_mut(|storage| {
             let values = storage.sequence_mut();
-            let at = index(at, values.len());
-            std::mem::replace(&mut values[at], new)
+            let at = index(at, values.len())?;
+            Ok(std::mem::replace(&mut values[at], new.take().unwrap()))
         })
     };
-    drop(old);
+    drop(new);
+    finish(old.map(drop), ());
 }
 
 /// Replaces an element using a compiler-proven nonnegative, decoded index.
@@ -327,18 +335,19 @@ pub unsafe extern "C" fn relar_seq_set_index(
     kind: u32,
 ) {
     // SAFETY: the compiler checks the replacement and its representation kind.
-    let new = unsafe { Slot::acquire(word, kind) };
+    let mut new = Some(unsafe { Slot::acquire(word, kind) });
     // SAFETY: replacement cannot reenter, and the old owner is returned for dropping.
     let old = unsafe {
         object(value).0.with_mut(|storage| {
             let slot = storage
                 .sequence_mut()
                 .get_mut(at)
-                .unwrap_or_else(|| fail("IndexError", "list index out of range"));
-            std::mem::replace(slot, new)
+                .ok_or_else(Error::index)?;
+            Ok(std::mem::replace(slot, new.take().unwrap()))
         })
     };
-    drop(old);
+    drop(new);
+    finish(old.map(drop), ());
 }
 
 /// # Safety
@@ -372,10 +381,10 @@ pub unsafe extern "C" fn relar_seq_pop(value: *const Object) -> usize {
             storage
                 .sequence_mut()
                 .pop()
-                .unwrap_or_else(|| fail("IndexError", "pop from empty list"))
+                .ok_or_else(|| Error::new(Kind::IndexError, "pop from empty list"))
         })
     };
-    owned.into_word()
+    finish(owned.map(Slot::into_word), 0)
 }
 
 /// # Safety
@@ -400,12 +409,11 @@ pub unsafe extern "C" fn relar_seq_repeat(value: *const Object, count: usize) ->
     let count = count
         .as_small()
         .map(|value| value as isize)
-        .unwrap_or_else(|| {
-            count
-                .big()
-                .to_isize()
-                .unwrap_or_else(|| fail("OverflowError", "list repeat count is too large"))
-        });
+        .or_else(|| count.big().to_isize());
+    let Some(count) = count else {
+        return Error::new(Kind::OverflowError, "list repeat count is too large")
+            .returning(std::ptr::null());
+    };
     if count <= 0 {
         return relar_seq_new();
     }
@@ -418,7 +426,8 @@ pub unsafe extern "C" fn relar_seq_repeat(value: *const Object, count: usize) ->
             let length = values
                 .len()
                 .checked_mul(count)
-                .unwrap_or_else(|| fail("MemoryError", "list is too large"));
+                .filter(|&length| length <= isize::MAX as usize / size_of::<Slot>())
+                .ok_or_else(|| Error::new(Kind::MemoryError, "list is too large"))?;
             let mut result = Vec::new();
             result
                 .try_reserve_exact(length)
@@ -428,10 +437,15 @@ pub unsafe extern "C" fn relar_seq_repeat(value: *const Object, count: usize) ->
                     result.extend(values.iter().cloned());
                 }
             }
-            result
+            Ok(result)
         })
     };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(result)))))
+    finish(
+        result.map(|values| {
+            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(values)))))
+        }),
+        std::ptr::null(),
+    )
 }
 
 /// # Safety

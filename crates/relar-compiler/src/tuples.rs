@@ -169,6 +169,25 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
                 inspect_expression(condition, candidates);
                 inspect(body, candidates, producers);
             }
+            Statement::Scope { body, .. } => inspect(body, candidates, producers),
+            Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } => {
+                for body in [body, orelse, finalbody] {
+                    inspect(body, candidates, producers);
+                }
+                for handler in handlers {
+                    inspect(&handler.body, candidates, producers);
+                }
+            }
+            Statement::Raise(value) => {
+                if let Some(value) = value {
+                    inspect_expression(value, candidates);
+                }
+            }
             Statement::For {
                 target, args, body, ..
             } => {
@@ -215,6 +234,7 @@ fn expand_assignment(
     producers: &[Option<Producer>],
     output: &mut Vec<Statement>,
 ) {
+    let mut staged_output = Vec::new();
     let mut arguments = Vec::new();
     let elements = match value.kind {
         ExprKind::Tuple(elements) => elements,
@@ -226,7 +246,7 @@ fn expand_assignment(
                 let slot = new_local(locals, arg.ty);
                 bindings.insert(parameter, slot);
                 arguments.push(slot);
-                output.push(Statement::Assign(slot, arg));
+                staged_output.push(Statement::Assign(slot, arg));
             }
             let mut elements = producer.elements.clone();
             for element in &mut elements {
@@ -241,12 +261,17 @@ fn expand_assignment(
     for element in elements {
         let slot = new_local(locals, element.ty);
         staged.push(slot);
-        output.push(Statement::Assign(slot, element));
+        staged_output.push(Statement::Assign(slot, element));
     }
-    output.extend(arguments.into_iter().map(Statement::Clear));
-    for (&target, source) in targets.iter().zip(staged) {
-        output.push(Statement::Move(target, source));
+    staged_output.extend(arguments.iter().copied().map(Statement::Clear));
+    for (&target, &source) in targets.iter().zip(&staged) {
+        staged_output.push(Statement::Move(target, source));
     }
+    arguments.extend(staged);
+    output.push(Statement::Scope {
+        body: staged_output,
+        clear: arguments,
+    });
 }
 
 fn substitute_parameters(expression: &mut Expr, bindings: &HashMap<usize, usize>) {
@@ -303,6 +328,31 @@ fn rewrite_block(
                 rewrite_expression(condition, components);
                 rewrite_block(body, locals, components, producers);
             }
+            Statement::Scope { body, clear } => {
+                rewrite_block(body, locals, components, producers);
+                *clear = clear
+                    .iter()
+                    .flat_map(|&slot| components[slot].clone().unwrap_or_else(|| vec![slot]))
+                    .collect();
+            }
+            Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } => {
+                for body in [body, orelse, finalbody] {
+                    rewrite_block(body, locals, components, producers);
+                }
+                for handler in handlers {
+                    rewrite_block(&mut handler.body, locals, components, producers);
+                }
+            }
+            Statement::Raise(value) => {
+                if let Some(value) = value {
+                    rewrite_expression(value, components);
+                }
+            }
             Statement::For { args, body, .. } => {
                 for arg in args {
                     rewrite_expression(arg, components);
@@ -358,6 +408,11 @@ fn rewrite_expression(expression: &mut Expr, components: &[Option<Vec<usize>>]) 
 
 fn children(expression: &Expr, mut visit: impl FnMut(&Expr)) {
     match &expression.kind {
+        ExprKind::Exception { message, .. } => {
+            if let Some(message) = message {
+                visit(message);
+            }
+        }
         ExprKind::Dict { entries, .. } => {
             for (key, value) in entries {
                 visit(key);
@@ -396,6 +451,11 @@ fn children(expression: &Expr, mut visit: impl FnMut(&Expr)) {
 
 fn children_mut(expression: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
     match &mut expression.kind {
+        ExprKind::Exception { message, .. } => {
+            if let Some(message) = message {
+                visit(message);
+            }
+        }
         ExprKind::Dict { entries, .. } => {
             for (key, value) in entries {
                 visit(key);
@@ -459,17 +519,21 @@ print(total([10, 20]))
         let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
         assert!(!after.contains("call ptr @relar_object_new("));
         let function = &module.functions[0];
-        let cleared = function
-            .body
-            .iter()
-            .filter_map(|statement| {
-                if let Statement::Clear(slot) = statement {
-                    Some(function.locals[*slot])
-                } else {
-                    None
+        fn collect_cleared(body: &[Statement], locals: &[Type], cleared: &mut Vec<Type>) {
+            for statement in body {
+                match statement {
+                    Statement::Clear(slot) => cleared.push(locals[*slot]),
+                    Statement::Scope { body, clear } => {
+                        cleared.extend(clear.iter().map(|&slot| locals[slot]));
+                        collect_cleared(body, locals, cleared);
+                    }
+                    Statement::While(_, body) => collect_cleared(body, locals, cleared),
+                    _ => {}
                 }
-            })
-            .collect::<Vec<_>>();
+            }
+        }
+        let mut cleared = Vec::new();
+        collect_cleared(&function.body, &function.locals, &mut cleared);
         assert!(cleared.contains(&Type::Int));
         assert!(cleared.contains(&Type::Str));
         assert!(cleared.contains(&Type::ListInt));

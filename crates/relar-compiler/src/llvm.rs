@@ -2,7 +2,9 @@
 
 use std::fmt::Write;
 
-use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Function, Module, Statement, Type};
+use crate::ir::{
+    Binary, Builtin, Compare, ExceptHandler, Expr, ExprKind, Function, Module, Statement, Type,
+};
 use crate::ranges::RangeFacts;
 
 impl Type {
@@ -17,6 +19,7 @@ impl Type {
             | Self::Dict(_)
             | Self::Set(_)
             | Self::Iterator
+            | Self::Exception
             | Self::Tuple(_)
             | Self::Optional(_) => "ptr",
             Self::None => "i8",
@@ -33,6 +36,7 @@ impl Type {
             | Self::Dict(_)
             | Self::Set(_)
             | Self::Iterator
+            | Self::Exception
             | Self::Tuple(_)
             | Self::Optional(_) => "null",
             Self::Bool | Self::None => "0",
@@ -40,6 +44,7 @@ impl Type {
     }
 }
 
+#[derive(Clone)]
 struct Value {
     ty: Type,
     operand: String,
@@ -58,6 +63,37 @@ struct Operand {
     ownership: Ownership,
 }
 
+#[derive(Clone)]
+struct LoopTarget {
+    end: String,
+    next: String,
+    cleanup_depth: usize,
+}
+
+/// Lexical cleanup obligations are separate from expression-owned SSA values.
+/// A handler can retain user locals while releasing temporary scopes exited by
+/// an error; finally bodies may replace the completion currently being routed.
+#[derive(Clone)]
+enum Cleanup {
+    Handler(String),
+    Finally {
+        body: Vec<Statement>,
+        loops: Vec<LoopTarget>,
+    },
+    Slots(Vec<usize>),
+    Active {
+        previous: Value,
+        name: Option<usize>,
+    },
+    Completion(Value),
+}
+
+enum Completion {
+    Return(Value),
+    Jump { label: String, depth: usize },
+    Error,
+}
+
 pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> String {
     let mut emitter = Emitter {
         code: String::new(),
@@ -70,6 +106,10 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         locals: Vec::new(),
         borrowed_params: Vec::new(),
         small_locals: Vec::new(),
+        temporaries: Vec::new(),
+        cleanups: Vec::new(),
+        return_exit: String::new(),
+        error_exit: String::new(),
         sanitize,
         ranges,
     };
@@ -105,10 +145,14 @@ struct Emitter<'a, 'module> {
     next_label: usize,
     current: String,
     terminated: bool,
-    loops: Vec<(String, String)>,
+    loops: Vec<LoopTarget>,
     locals: Vec<Type>,
     borrowed_params: Vec<bool>,
     small_locals: Vec<bool>,
+    temporaries: Vec<Value>,
+    cleanups: Vec<Cleanup>,
+    return_exit: String,
+    error_exit: String,
     sanitize: bool,
     ranges: &'a RangeFacts<'module>,
 }
@@ -123,6 +167,19 @@ impl Emitter<'_, '_> {
         self.next_value += 1;
         self.line(format!("{result} = {}", instruction.as_ref()));
         result
+    }
+
+    /// Checks the pending error before exposing a fallible call's result to
+    /// word conversion, ownership registration or subsequent source effects.
+    fn checked_instruction(&mut self, instruction: impl AsRef<str>) -> String {
+        let result = self.instruction(instruction);
+        self.check_error();
+        result
+    }
+
+    fn checked_line(&mut self, line: impl AsRef<str>) {
+        self.line(line);
+        self.check_error();
     }
 
     fn label(&mut self) -> String {
@@ -153,11 +210,18 @@ impl Emitter<'_, '_> {
             .map(|value| format!("{} {}", value.ty.llvm(), value.operand))
             .collect::<Vec<_>>()
             .join(", ");
-        Value {
+        let instruction = format!("call {} @{name}({args})", returns.llvm());
+        let operand = if fallible(name) {
+            self.checked_instruction(instruction)
+        } else {
+            self.instruction(instruction)
+        };
+        let value = Value {
             ty: returns,
-            operand: self.instruction(format!("call {} @{name}({args})", returns.llvm())),
+            operand,
             small_integer: false,
-        }
+        };
+        self.owned(value)
     }
 
     fn void_call(&mut self, name: &str, args: &[&Value]) {
@@ -166,7 +230,12 @@ impl Emitter<'_, '_> {
             .map(|value| format!("{} {}", value.ty.llvm(), value.operand))
             .collect::<Vec<_>>()
             .join(", ");
-        self.line(format!("call void @{name}({args})"));
+        let instruction = format!("call void @{name}({args})");
+        if fallible(name) {
+            self.checked_line(instruction);
+        } else {
+            self.line(instruction);
+        }
     }
 
     fn retain(&mut self, value: &Value) {
@@ -182,6 +251,7 @@ impl Emitter<'_, '_> {
             | Type::Dict(_)
             | Type::Set(_)
             | Type::Iterator
+            | Type::Exception
             | Type::Tuple(_)
             | Type::Optional(_) => "relar_object_retain",
             Type::Bool | Type::None => return,
@@ -190,6 +260,7 @@ impl Emitter<'_, '_> {
     }
 
     fn release(&mut self, value: &Value) {
+        self.forget(value);
         if value.small_integer {
             return;
         }
@@ -202,11 +273,50 @@ impl Emitter<'_, '_> {
             | Type::Dict(_)
             | Type::Set(_)
             | Type::Iterator
+            | Type::Exception
             | Type::Tuple(_)
             | Type::Optional(_) => "relar_object_release",
             Type::Bool | Type::None => return,
         };
         self.void_call(name, &[value]);
+    }
+
+    /// Registers one owner only after a call's error check. Fallible universal
+    /// word getters may return zero on failure, which is not a valid owned Int.
+    fn owned(&mut self, value: Value) -> Value {
+        if !matches!(value.ty, Type::Bool | Type::None)
+            && !value.small_integer
+            && !self
+                .temporaries
+                .iter()
+                .any(|temporary| temporary.operand == value.operand)
+        {
+            self.temporaries.push(value.clone());
+        }
+        value
+    }
+
+    fn forget(&mut self, value: &Value) {
+        self.temporaries
+            .retain(|temporary| temporary.operand != value.operand);
+    }
+
+    /// An exceptional edge consumes only owners already produced before the
+    /// failed call. The success edge retains the same SSA owners and resumes
+    /// before the caller can inspect a result or a runtime out-parameter.
+    fn check_error(&mut self) {
+        let pending = self.instruction("call i8 @relar_error_pending()");
+        let pending = self.instruction(format!("icmp ne i8 {pending}, 0"));
+        let (error, success) = (self.label(), self.label());
+        self.branch(&pending, &error, &success);
+        let temporaries = self.temporaries.clone();
+        self.start(&error);
+        for value in temporaries.iter().rev() {
+            self.release(value);
+        }
+        self.route(Completion::Error);
+        self.start(&success);
+        self.temporaries = temporaries;
     }
 
     /// Borrows only direct local values. No expression in the closed IR can
@@ -241,7 +351,7 @@ impl Emitter<'_, '_> {
         if matches!(operand.ownership, Ownership::Borrowed) {
             self.retain(&operand.value);
         }
-        operand.value
+        self.owned(operand.value)
     }
 
     /// Acquires an owned value for assignment or return, which may outlive or
@@ -250,7 +360,7 @@ impl Emitter<'_, '_> {
         let mut value = self.borrow_slot(slot);
         value.small_integer |= small_integer;
         self.retain(&value);
-        value
+        self.owned(value)
     }
 
     fn borrow_slot(&mut self, slot: usize) -> Value {
@@ -272,7 +382,7 @@ impl Emitter<'_, '_> {
             value.ty.llvm(),
             value.ty.initial()
         ));
-        value
+        self.owned(value)
     }
 
     /// Publishes the new owned value before releasing the replaced reference.
@@ -284,6 +394,7 @@ impl Emitter<'_, '_> {
             value.ty.llvm(),
             value.operand
         ));
+        self.forget(value);
         self.release(&old);
     }
 
@@ -292,9 +403,192 @@ impl Emitter<'_, '_> {
             if self.borrowed_params[slot] {
                 continue;
             }
-            let value = self.borrow_slot(slot);
+            let value = self.take_slot(slot);
             self.release(&value);
         }
+    }
+
+    fn clear_slots(&mut self, slots: &[usize]) {
+        for &slot in slots {
+            let value = self.take_slot(slot);
+            self.release(&value);
+        }
+    }
+
+    /// Restores the dynamically active exception independently of the pending
+    /// error being propagated. Handler names are deleted even when rebound.
+    fn restore_active(&mut self, previous: &Value, name: Option<usize>) {
+        if let Some(name) = name {
+            self.clear_slots(&[name]);
+        }
+        let current = self.call("relar_exception_swap_active", Type::Exception, &[previous]);
+        self.release(&current);
+        self.release(previous);
+    }
+
+    /// Emits one completion while preserving the lexical stack for other CFG
+    /// edges. A finally runs with its own lexical loop targets, which can differ
+    /// from the loops surrounding the instruction that initiated unwinding.
+    fn route(&mut self, completion: Completion) {
+        let cleanups = self.cleanups.clone();
+        let loops = self.loops.clone();
+        self.unwind(completion);
+        self.cleanups = cleanups;
+        self.loops = loops;
+    }
+
+    fn unwind(&mut self, completion: Completion) {
+        let stop = match &completion {
+            Completion::Jump { depth, .. } => *depth,
+            Completion::Return(_) | Completion::Error => 0,
+        };
+        while self.cleanups.len() > stop {
+            match self.cleanups.pop().unwrap() {
+                Cleanup::Handler(label) => {
+                    if matches!(completion, Completion::Error) {
+                        self.jump(&label);
+                        return;
+                    }
+                }
+                Cleanup::Slots(slots) => self.clear_slots(&slots),
+                Cleanup::Active { previous, name } => self.restore_active(&previous, name),
+                Cleanup::Completion(value) => self.release(&value),
+                Cleanup::Finally { body, loops } => {
+                    let depth = self.cleanups.len();
+                    let error = if matches!(completion, Completion::Error) {
+                        let error = self.call("relar_error_take", Type::Exception, &[]);
+                        let previous =
+                            self.call("relar_exception_swap_active", Type::Exception, &[&error]);
+                        self.forget(&error);
+                        self.forget(&previous);
+                        self.cleanups.push(Cleanup::Completion(error.clone()));
+                        self.cleanups.push(Cleanup::Active {
+                            previous: previous.clone(),
+                            name: None,
+                        });
+                        Some((error, previous))
+                    } else {
+                        if let Completion::Return(value) = &completion {
+                            self.cleanups.push(Cleanup::Completion(value.clone()));
+                        }
+                        None
+                    };
+                    self.loops = loops;
+                    self.block(&body);
+                    self.cleanups.truncate(depth);
+                    if self.terminated {
+                        return;
+                    }
+                    if let Some((error, previous)) = error {
+                        self.restore_active(&previous, None);
+                        self.void_call("relar_error_set", &[&error]);
+                        self.release(&error);
+                    }
+                }
+            }
+        }
+        match completion {
+            Completion::Return(value) => {
+                self.line(format!(
+                    "store {} {}, ptr %function_return",
+                    value.ty.llvm(),
+                    value.operand
+                ));
+                self.jump(&self.return_exit.clone());
+            }
+            Completion::Jump { label, .. } => self.jump(&label),
+            Completion::Error => self.jump(&self.error_exit.clone()),
+        }
+    }
+
+    /// Only errors from the try body enter these handlers. Handler and else
+    /// failures first execute finally, then continue to an enclosing handler.
+    fn try_statement(
+        &mut self,
+        body: &[Statement],
+        handlers: &[ExceptHandler],
+        orelse: &[Statement],
+        finalbody: &[Statement],
+    ) {
+        let depth = self.cleanups.len();
+        let end = self.label();
+        if !finalbody.is_empty() {
+            self.cleanups.push(Cleanup::Finally {
+                body: finalbody.to_vec(),
+                loops: self.loops.clone(),
+            });
+        }
+        let dispatch = self.label();
+        if !handlers.is_empty() {
+            self.cleanups.push(Cleanup::Handler(dispatch.clone()));
+        }
+        self.block(body);
+        if !handlers.is_empty() {
+            self.cleanups.pop();
+        }
+        if !self.terminated {
+            self.block(orelse);
+            if !self.terminated {
+                self.route(Completion::Jump {
+                    label: end.clone(),
+                    depth,
+                });
+            }
+        }
+        if !handlers.is_empty() {
+            self.start(&dispatch);
+            let exception = self.call("relar_error_take", Type::Exception, &[]);
+            let pending_temporary = self.temporaries.clone();
+            for handler in handlers {
+                let matched = if handler.kinds.is_empty() {
+                    "true".to_owned()
+                } else {
+                    let mut matched = "false".to_owned();
+                    for kind in &handler.kinds {
+                        let byte = self.instruction(format!(
+                            "call i8 @relar_exception_matches(ptr {}, i32 {kind})",
+                            exception.operand
+                        ));
+                        let test = self.instruction(format!("icmp ne i8 {byte}, 0"));
+                        matched = self.instruction(format!("or i1 {matched}, {test}"));
+                    }
+                    matched
+                };
+                let (caught, next) = (self.label(), self.label());
+                self.branch(&matched, &caught, &next);
+                self.start(&caught);
+                let previous = self.call(
+                    "relar_exception_swap_active",
+                    Type::Exception,
+                    &[&exception],
+                );
+                self.forget(&previous);
+                if let Some(name) = handler.name {
+                    self.store(name, &exception);
+                } else {
+                    self.release(&exception);
+                }
+                self.cleanups.push(Cleanup::Active {
+                    previous,
+                    name: handler.name,
+                });
+                self.block(&handler.body);
+                if !self.terminated {
+                    self.route(Completion::Jump {
+                        label: end.clone(),
+                        depth,
+                    });
+                }
+                self.cleanups.pop();
+                self.start(&next);
+                self.temporaries = pending_temporary.clone();
+            }
+            self.void_call("relar_error_set", &[&exception]);
+            self.release(&exception);
+            self.route(Completion::Error);
+        }
+        self.cleanups.truncate(depth);
+        self.start(&end);
     }
 
     /// The caller roots arguments throughout a call. Parameters whose bindings
@@ -309,6 +603,10 @@ impl Emitter<'_, '_> {
             self.borrowed_params[slot] = !rebound[slot];
         }
         self.loops.clear();
+        self.temporaries.clear();
+        self.cleanups.clear();
+        self.return_exit = self.label();
+        self.error_exit = self.label();
         let params = function
             .params
             .iter()
@@ -333,6 +631,15 @@ impl Emitter<'_, '_> {
         )
         .unwrap();
         self.start("entry");
+        self.line(format!(
+            "%function_return = alloca {}",
+            function.returns.llvm()
+        ));
+        self.line(format!(
+            "store {} {}, ptr %function_return",
+            function.returns.llvm(),
+            function.returns.initial()
+        ));
         // Runtime out-parameters always write full words, including for bool
         // and None payloads. Results are loaded only after a successful call;
         // each call transfers them before another call can reuse this storage.
@@ -364,11 +671,27 @@ impl Emitter<'_, '_> {
         }
         self.block(&function.body);
         if !self.terminated {
-            self.cleanup();
-            if entry {
-                self.void_call("relar_flush_stdout", &[]);
-            }
-            self.line(format!("ret {returns} 0"));
+            self.jump(&self.return_exit.clone());
+        }
+        self.start(&self.return_exit.clone());
+        self.cleanup();
+        if entry {
+            self.void_call("relar_flush_stdout", &[]);
+            self.line("ret i32 0");
+        } else {
+            let value = self.instruction(format!(
+                "load {}, ptr %function_return",
+                function.returns.llvm()
+            ));
+            self.line(format!("ret {returns} {value}"));
+        }
+        self.start(&self.error_exit.clone());
+        self.cleanup();
+        if entry {
+            let status = self.instruction("call i32 @relar_error_unhandled()");
+            self.line(format!("ret i32 {status}"));
+        } else {
+            self.line(format!("ret {returns} {}", function.returns.initial()));
         }
         self.code.push_str("}\n");
     }
@@ -379,6 +702,10 @@ impl Emitter<'_, '_> {
                 break;
             }
             self.statement(statement);
+            debug_assert!(
+                self.temporaries.is_empty(),
+                "statement left expression-owned temporaries live"
+            );
         }
     }
 
@@ -396,6 +723,33 @@ impl Emitter<'_, '_> {
             Statement::Clear(slot) => {
                 let value = self.take_slot(*slot);
                 self.release(&value);
+            }
+            Statement::Scope { body, clear } => {
+                self.cleanups.push(Cleanup::Slots(clear.clone()));
+                self.block(body);
+                self.cleanups.pop();
+                if !self.terminated {
+                    self.clear_slots(clear);
+                }
+            }
+            Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } => self.try_statement(body, handlers, orelse, finalbody),
+            Statement::Raise(exception) => {
+                if let Some(exception) = exception {
+                    let exception = self.operand(exception);
+                    self.void_call("relar_exception_raise", &[&exception.value]);
+                    self.release_operand(&exception);
+                } else {
+                    self.void_call("relar_exception_reraise", &[]);
+                }
+                // Both runtime helpers always set an error; their success edge
+                // is unreachable, but uses the same immediate-check protocol.
+                self.line("unreachable");
+                self.terminated = true;
             }
             Statement::IterNext {
                 iterator,
@@ -458,9 +812,8 @@ impl Emitter<'_, '_> {
             }
             Statement::Return(expression) => {
                 let value = self.expr(expression);
-                self.cleanup();
-                self.line(format!("ret {} {}", value.ty.llvm(), value.operand));
-                self.terminated = true;
+                self.forget(&value);
+                self.route(Completion::Return(value));
             }
             Statement::If(test, yes, no) => {
                 let test = self.expr(test);
@@ -491,7 +844,11 @@ impl Emitter<'_, '_> {
                 let test = self.expr(test);
                 self.branch(&test.operand, &body_label, &end);
                 self.start(&body_label);
-                self.loops.push((end.clone(), condition.clone()));
+                self.loops.push(LoopTarget {
+                    end: end.clone(),
+                    next: condition.clone(),
+                    cleanup_depth: self.cleanups.len(),
+                });
                 self.block(body);
                 self.loops.pop();
                 if !self.terminated {
@@ -530,7 +887,7 @@ impl Emitter<'_, '_> {
                 );
                 self.branch(&zero.operand, &fail, &condition);
                 self.start(&fail);
-                self.line("call void @relar_range_step_zero()");
+                self.checked_line("call void @relar_range_step_zero()");
                 self.line("unreachable");
                 self.start(&condition);
                 let mut current = self.borrow_slot(*cursor);
@@ -550,7 +907,11 @@ impl Emitter<'_, '_> {
                 self.start(&body_label);
                 let current = self.load(*cursor, small_cursor);
                 self.store(*target, &current);
-                self.loops.push((end.clone(), increment.clone()));
+                self.loops.push(LoopTarget {
+                    end: end.clone(),
+                    next: increment.clone(),
+                    cleanup_depth: self.cleanups.len(),
+                });
                 self.block(body);
                 self.loops.pop();
                 if !self.terminated {
@@ -570,14 +931,23 @@ impl Emitter<'_, '_> {
                 self.jump(&condition);
                 self.start(&end);
             }
-            Statement::Break => self.jump(&self.loops.last().unwrap().0.clone()),
-            Statement::Continue => self.jump(&self.loops.last().unwrap().1.clone()),
+            Statement::Break | Statement::Continue => {
+                let target = self.loops.last().unwrap();
+                self.route(Completion::Jump {
+                    label: if matches!(statement, Statement::Break) {
+                        target.end.clone()
+                    } else {
+                        target.next.clone()
+                    },
+                    depth: target.cleanup_depth,
+                });
+            }
             Statement::Assert(test) => {
                 let test = self.expr(test);
                 let (success, fail) = (self.label(), self.label());
                 self.branch(&test.operand, &success, &fail);
                 self.start(&fail);
-                self.line("call void @relar_assert_fail()");
+                self.checked_line("call void @relar_assert_fail()");
                 self.line("unreachable");
                 self.start(&success);
             }
@@ -607,7 +977,7 @@ impl Emitter<'_, '_> {
     fn expr(&mut self, expression: &Expr) -> Value {
         let mut value = self.expression(expression);
         value.small_integer |= self.ranges.integer(expression).is_some();
-        value
+        self.owned(value)
     }
 
     fn expression(&mut self, expression: &Expr) -> Value {
@@ -662,6 +1032,7 @@ impl Emitter<'_, '_> {
                     )),
                     small_integer: false,
                 };
+                let dict = self.owned(dict);
                 for (key, value) in entries {
                     let key = self.operand(key);
                     let value = self.operand(value);
@@ -680,6 +1051,7 @@ impl Emitter<'_, '_> {
                     )),
                     small_integer: false,
                 };
+                let set = self.owned(set);
                 for value in values {
                     let value = self.operand(value);
                     self.set_member(&set, &value.value, true);
@@ -694,6 +1066,7 @@ impl Emitter<'_, '_> {
                         .instruction(format!("call ptr @relar_object_new(i64 {})", values.len())),
                     small_integer: false,
                 };
+                let object = self.owned(object);
                 for (field, value) in values.iter().enumerate() {
                     let value = self.operand(value);
                     self.set_field(&object, field, &value.value);
@@ -708,6 +1081,7 @@ impl Emitter<'_, '_> {
                     operand: self.instruction("call ptr @relar_object_new(i64 1)"),
                     small_integer: false,
                 };
+                let object = self.owned(object);
                 self.set_field(&object, 0, &value.value);
                 self.release_operand(&value);
                 object
@@ -786,6 +1160,7 @@ impl Emitter<'_, '_> {
                     operand: self.instruction(format!("call ptr @relar_object_new(i64 {fields})")),
                     small_integer: false,
                 };
+                let object = self.owned(object);
                 let mut inputs = vec![&object];
                 inputs.extend(args.iter().map(|arg| &arg.value));
                 self.call(&format!("fn_{initializer}"), Type::None, &inputs);
@@ -793,6 +1168,23 @@ impl Emitter<'_, '_> {
                     self.release_operand(arg);
                 }
                 object
+            }
+            ExprKind::Exception { kind, message } => {
+                let message = message.as_ref().map(|message| self.operand(message));
+                let pointer = message
+                    .as_ref()
+                    .map_or("null", |message| message.value.operand.as_str());
+                let value = Value {
+                    ty: Type::Exception,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_exception_new(i32 {kind}, ptr {pointer})"
+                    )),
+                    small_integer: false,
+                };
+                if let Some(message) = &message {
+                    self.release_operand(message);
+                }
+                value
             }
             ExprKind::Field(receiver, field) => {
                 let receiver = self.operand(receiver);
@@ -953,12 +1345,14 @@ impl Emitter<'_, '_> {
                 };
                 self.instruction(format!("icmp {predicate} i8 {equal}, 0"))
             }
-            Type::Bool | Type::None | Type::Class(_) => self.instruction(format!(
-                "icmp {predicate} {} {}, {}",
-                left.ty.llvm(),
-                left.operand,
-                right.operand
-            )),
+            Type::Bool | Type::None | Type::Class(_) | Type::Exception => {
+                self.instruction(format!(
+                    "icmp {predicate} {} {}, {}",
+                    left.ty.llvm(),
+                    left.operand,
+                    right.operand
+                ))
+            }
             Type::ListInt
             | Type::List(_)
             | Type::Dict(_)
@@ -1003,11 +1397,13 @@ impl Emitter<'_, '_> {
             } else {
                 let (next, fail) = (self.label(), self.label());
                 self.branch(&test.operand, &next, &fail);
+                let temporaries = self.temporaries.clone();
                 self.start(&fail);
                 self.release_operand(&right);
                 incoming.push(format!("[ false, %{} ]", self.current));
                 self.jump(&end);
                 self.start(&next);
+                self.temporaries = temporaries;
             }
             left = right;
         }
@@ -1035,14 +1431,16 @@ impl Emitter<'_, '_> {
             let list = self.operand(receiver);
             let index = self.operand(index);
             let at = self.index_word(&index.value, true);
-            let word = self.instruction(format!(
+            let word = self.checked_instruction(format!(
                 "call i64 @relar_list_borrow_index(ptr {}, i64 {at})",
                 list.value.operand
             ));
             self.release_operand(&index);
             self.release_operand(&list);
+            let value = self.unpack_word(word, Type::Int);
+            self.forget(&value);
             return Operand {
-                value: self.unpack_word(word, Type::Int),
+                value,
                 ownership: Ownership::Borrowed,
             };
         }
@@ -1082,6 +1480,9 @@ impl Emitter<'_, '_> {
             .collect::<Vec<_>>();
         let result = match builtin {
             Builtin::Input => self.call("relar_input", Type::Str, &[]),
+            Builtin::ExceptionMessage => {
+                self.call("relar_exception_message", Type::Str, &[&args[0].value])
+            }
             Builtin::Int => match args[0].value.ty {
                 Type::Int => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Bool => {
@@ -1146,7 +1547,7 @@ impl Emitter<'_, '_> {
             }
             Builtin::DictDelete => {
                 let key = self.word(&args[1].value);
-                self.line(format!(
+                self.checked_line(format!(
                     "call void @relar_dict_delete(ptr {}, i64 {key})",
                     args[0].value.operand
                 ));
@@ -1178,7 +1579,7 @@ impl Emitter<'_, '_> {
                 if args[0].value.ty == Type::ListInt {
                     self.call("relar_list_pop", Type::Int, &[&args[0].value])
                 } else {
-                    let word = self.instruction(format!(
+                    let word = self.checked_instruction(format!(
                         "call i64 @relar_seq_pop(ptr {})",
                         args[0].value.operand
                     ));
@@ -1204,7 +1605,7 @@ impl Emitter<'_, '_> {
                     Type::Bool => {
                         let byte =
                             self.instruction(format!("zext i1 {} to i8", args[0].value.operand));
-                        self.line(format!("call void @relar_print_bool(i8 {byte})"));
+                        self.checked_line(format!("call void @relar_print_bool(i8 {byte})"));
                     }
                     Type::None => self.void_call("relar_print_none", &[]),
                     Type::ListInt
@@ -1213,6 +1614,7 @@ impl Emitter<'_, '_> {
                     | Type::Dict(_)
                     | Type::Set(_)
                     | Type::Iterator
+                    | Type::Exception
                     | Type::Tuple(_)
                     | Type::Optional(_) => {
                         unreachable!("container printing is rejected")
@@ -1254,10 +1656,13 @@ impl Emitter<'_, '_> {
                 operand: self.instruction("call ptr @relar_object_new(i64 1)"),
                 small_integer: false,
             };
+            let object = self.owned(object);
             self.set_field(&object, 0, &value);
             self.release(&value);
             object
         };
+        self.forget(&value);
+        let present_end = self.current.clone();
         self.jump(&end);
         self.start(&absent);
         let default = if let Some(default) = args.get(2) {
@@ -1272,7 +1677,7 @@ impl Emitter<'_, '_> {
         Value {
             ty: returns,
             operand: self.instruction(format!(
-                "phi {} [ {}, %{present} ], [ {default}, %{absent} ]",
+                "phi {} [ {}, %{present_end} ], [ {default}, %{absent} ]",
                 returns.llvm(),
                 value.operand
             )),
@@ -1302,7 +1707,7 @@ impl Emitter<'_, '_> {
         } else {
             "null"
         };
-        let byte = self.instruction(format!(
+        let byte = self.checked_instruction(format!(
             "call i8 @relar_mapping_iter_next(ptr {}, ptr %mapping_key_word, ptr {value_output})",
             iterator.operand
         ));
@@ -1341,6 +1746,7 @@ impl Emitter<'_, '_> {
             | Type::Dict(_)
             | Type::Set(_)
             | Type::Iterator
+            | Type::Exception
             | Type::Tuple(_)
             | Type::Optional(_) => {
                 self.instruction(format!("ptrtoint ptr {} to i64", value.operand))
@@ -1362,18 +1768,20 @@ impl Emitter<'_, '_> {
             | Type::Dict(_)
             | Type::Set(_)
             | Type::Iterator
+            | Type::Exception
             | Type::Tuple(_)
             | Type::Optional(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
-        Value {
+        let value = Value {
             ty,
             operand,
             small_integer: false,
-        }
+        };
+        self.owned(value)
     }
 
     fn get_field(&mut self, receiver: &Value, field: usize, ty: Type) -> Value {
-        let word = self.instruction(format!(
+        let word = self.checked_instruction(format!(
             "call i64 @relar_object_get(ptr {}, i64 {field})",
             receiver.operand
         ));
@@ -1383,7 +1791,7 @@ impl Emitter<'_, '_> {
     /// The runtime acquires the replacement before releasing the old field.
     fn set_field(&mut self, receiver: &Value, field: usize, value: &Value) {
         let word = self.word(value);
-        self.line(format!(
+        self.checked_line(format!(
             "call void @relar_object_set(ptr {}, i64 {field}, i64 {word}, i32 {})",
             receiver.operand,
             representation_kind(value.ty)
@@ -1456,7 +1864,7 @@ impl Emitter<'_, '_> {
         let destination = self.operand(index);
         let from = self.index_word(&source.value, true);
         let to = self.index_word(&destination.value, true);
-        self.line(format!(
+        self.checked_line(format!(
             "call void @relar_list_copy_index(ptr {}, i64 {to}, i64 {from})",
             list.value.operand
         ));
@@ -1480,7 +1888,7 @@ impl Emitter<'_, '_> {
     fn get_item(&mut self, list: &Value, index: &Value, returns: Type, nonnegative: bool) -> Value {
         if matches!(list.ty, Type::Dict(_)) {
             let key = self.word(index);
-            let word = self.instruction(format!(
+            let word = self.checked_instruction(format!(
                 "call i64 @relar_dict_get(ptr {}, i64 {key})",
                 list.operand
             ));
@@ -1493,7 +1901,7 @@ impl Emitter<'_, '_> {
         };
         let suffix = if nonnegative { "_index" } else { "" };
         let index = self.index_word(index, nonnegative);
-        let word = self.instruction(format!(
+        let word = self.checked_instruction(format!(
             "call i64 @relar_{family}_get{suffix}(ptr {}, i64 {index})",
             list.operand
         ));
@@ -1523,7 +1931,7 @@ impl Emitter<'_, '_> {
         } else {
             format!(", i32 {}", representation_kind(value.ty))
         };
-        self.line(format!(
+        self.checked_line(format!(
             "call void @relar_{family}_set{suffix}(ptr {}, i64 {index}, i64 {word}{kind})",
             list.operand
         ));
@@ -1575,6 +1983,7 @@ fn representation_kind(ty: Type) -> u32 {
         | Type::Dict(_)
         | Type::Set(_)
         | Type::Iterator
+        | Type::Exception
         | Type::Tuple(_)
         | Type::Optional(_) => 5,
     }
@@ -1601,6 +2010,28 @@ fn mark_rebound(statements: &[Statement], rebound: &mut [bool]) {
                 mark_rebound(yes, rebound);
                 mark_rebound(no, rebound);
             }
+            Statement::Scope { body, clear } => {
+                mark_rebound(body, rebound);
+                for &slot in clear {
+                    rebound[slot] = true;
+                }
+            }
+            Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } => {
+                mark_rebound(body, rebound);
+                for handler in handlers {
+                    if let Some(name) = handler.name {
+                        rebound[name] = true;
+                    }
+                    mark_rebound(&handler.body, rebound);
+                }
+                mark_rebound(orelse, rebound);
+                mark_rebound(finalbody, rebound);
+            }
             Statement::While(_, body) => mark_rebound(body, rebound),
             Statement::For { target, body, .. } => {
                 rebound[*target] = true;
@@ -1612,6 +2043,7 @@ fn mark_rebound(statements: &[Statement], rebound: &mut [bool]) {
             | Statement::AugmentField(..)
             | Statement::Expr(_)
             | Statement::Return(_)
+            | Statement::Raise(_)
             | Statement::Break
             | Statement::Continue
             | Statement::Assert(_) => {}
@@ -1635,7 +2067,60 @@ fn none() -> Value {
     }
 }
 
+/// This list follows the runtime's pending-error contract. Proven integer
+/// arithmetic, ownership operations, lookup-with-default, lengths and hashing
+/// remain infallible; allocation failure and invalid ABI use are fatal.
+fn fallible(name: &str) -> bool {
+    name.starts_with("fn_")
+        || matches!(
+            name,
+            "int_floordiv"
+                | "int_mod"
+                | "relar_flush_stdout"
+                | "relar_print_int"
+                | "relar_print_str"
+                | "relar_print_bool"
+                | "relar_print_none"
+                | "relar_input"
+                | "relar_int_parse"
+                | "relar_assert_fail"
+                | "relar_range_step_zero"
+                | "relar_list_get"
+                | "relar_list_set"
+                | "relar_list_get_index"
+                | "relar_list_set_index"
+                | "relar_list_borrow_index"
+                | "relar_list_copy_index"
+                | "relar_list_pop"
+                | "relar_list_repeat"
+                | "relar_object_get"
+                | "relar_object_set"
+                | "relar_seq_get"
+                | "relar_seq_set"
+                | "relar_seq_get_index"
+                | "relar_seq_set_index"
+                | "relar_seq_pop"
+                | "relar_seq_repeat"
+                | "relar_dict_get"
+                | "relar_dict_delete"
+                | "relar_mapping_iter_next"
+                | "relar_exception_raise"
+                | "relar_exception_reraise"
+        )
+}
+
 const DECLARATIONS: &str = r#"
+declare i8 @relar_error_pending()
+declare ptr @relar_error_take()
+declare void @relar_error_set(ptr)
+declare i32 @relar_error_unhandled()
+declare ptr @relar_exception_new(i32, ptr)
+declare i8 @relar_exception_matches(ptr, i32)
+declare ptr @relar_exception_message(ptr)
+declare ptr @relar_exception_current()
+declare ptr @relar_exception_swap_active(ptr)
+declare void @relar_exception_raise(ptr)
+declare void @relar_exception_reraise()
 declare void @relar_flush_stdout()
 declare ptr @relar_object_new(i64)
 declare i64 @relar_object_get(ptr, i64)
@@ -1699,8 +2184,8 @@ declare void @relar_list_append(ptr, i64)
 declare i64 @relar_list_pop(ptr)
 declare i64 @relar_list_len(ptr)
 declare ptr @relar_list_repeat(ptr, i64)
-declare void @relar_assert_fail() noreturn
-declare void @relar_range_step_zero() noreturn
+declare void @relar_assert_fail()
+declare void @relar_range_step_zero()
 declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)

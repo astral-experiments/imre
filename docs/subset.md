@@ -9,9 +9,9 @@ This is a deliberately restricted Python dialect for closed first-party programs
 | Modules | Closed first-party UTF-8 source graph; definitions and imports precede executable entry statements; optional module/function docstrings |
 | Imports | Absolute, `from`, and package-relative imports; aliases and package re-exports; fixed module and definition bindings; no import cycles |
 | Functions | Required parameter and return annotations; positional calls; direct, fixed bindings; no recursive call cycles |
-| Types | `int`, `bool`, `str`, `None`, fixed nominal classes, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, and `T \| None`; locals have one inferred or declared storage type |
+| Types | `int`, `bool`, `str`, `None`, the sealed builtin `Exception` family, fixed nominal classes, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, and `T \| None`; locals have one inferred or declared storage type |
 | Classes | Declared fields, an explicit initializer, typed instance methods, alias-visible field mutation, and integer field augmented assignment |
-| Statements | Single-target and fixed-tuple unpacking assignment, annotated assignment, integer augmented assignment, local string `+=`, dictionary entry deletion, `if`/`elif`/`else`, `while`, `for` over ranges or concrete containers, `break`, `continue`, `return`, `pass`, `assert condition` |
+| Statements | Single-target and fixed-tuple unpacking assignment, annotated assignment, integer augmented assignment, local string `+=`, dictionary entry deletion, `if`/`elif`/`else`, `while`, `for` over ranges or concrete containers, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, and `try`/`except`/`else`/`finally` |
 | Conditions | Explicit `bool`; `and`, `or`, `not`; short-circuit evaluation; `is None`/`is not None` with local flow narrowing |
 | Integers | Arbitrary precision; `+`, `-`, `*`, `//`, `%`; unary `+`/`-`; all six value comparisons, including chains |
 | Lists | One exact element type, including nested containers and classes; literals, shallow repetition, checked negative indexing, indexed assignment, iteration, `append(value)`, `pop()`, `len(...)`; alias-visible mutation |
@@ -19,7 +19,7 @@ This is a deliberately restricted Python dialect for closed first-party programs
 | Sets | Exact `int` or `str` elements; literals, contextual `set()`, `add`, `discard`, `in`/`not in`, `len`, and iteration with unspecified order |
 | Tuples | Fixed length and a type per position; literals, bounded literal indexing, unpacking into names, and `len(...)`; immutable slots |
 | Strings | Immutable UTF-8 text, literals, concatenation, equality/inequality, Unicode scalar length, no-argument whitespace `split()`, input and output |
-| Builtins | `print(value)` for one scalar; `input()` without a prompt; `int(int_or_bool_or_string)`; `len(string_or_container)`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments and `enumerate(container[, start])` inside a `for` loop |
+| Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `int(int_or_bool_or_string)`; `str(exception)`; `len(string_or_container)`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments and `enumerate(container[, start])` inside a `for` loop |
 
 Booleans have a separate exact type: use `int(flag)` to store one in an integer list. An empty list defaults to `list[int]` unless a typed storage, call, or return boundary supplies its element type. No annotation permits `Any`, a general union, an untyped object, or a foreign container to enter native storage. ty checks ordinary Python typing first; Relar additionally enforces exact types, definite assignment, fixed bindings, and every container write. Suppression comments cannot waive Relar's contract.
 
@@ -99,7 +99,21 @@ A proved nonnegative small index may use a decoded native-index ABI, but each re
 
 Heap objects are nonmoving reference-counted allocations. Classes, tuples, generic lists, dictionaries, sets, and present optional boxes own their stored values. An absent optional is a null handle; a present optional is a one-field box, including when its payload is an integer or another heap object. Writes acquire the replacement before releasing the displaced value, and reads acquire ownership before the receiver can be released, apart from the rooted comparison borrow above. Storage access uses scoped `UnsafeCell` closures on one execution thread: mutable access is exclusive, operations cannot reenter through aliases, and no storage reference or buffer address may escape. Independently owned values and explicitly constrained borrowed integer handles may escape; displaced owners are dropped after access ends. Dictionaries use a randomized hash index and insertion-ordered entries; sets share the storage without an ordering guarantee. Internal iterators root their container and prevent entry compaction until released, but keep no storage reference across a loop body. The acyclic heap type graph prevents reference cycles through classes and containers. There are no finalizers or user callbacks under storage access. Threaded or reentrant extension boundaries would need to preserve these rules. This is not yet a general garbage collector, extension ABI, sandbox, or proof of memory safety; those claims would require additional design and evidence.
 
-Runtime errors print an exception category and exit with status 1. There are no catchable exceptions or Python tracebacks yet. Normal return paths release references; fatal process-exit paths rely on process teardown. Allocation failures may terminate the process. `assert` is always enabled, independent of LLVM optimization.
+Language errors propagate through explicit checked call results and can be caught. Each fallible runtime call returns a cleanup-safe sentinel and records an owned pending exception; generated code checks that state before inspecting the result. Partial expression values, constructor fields, unpacking temporaries, and loop iterator roots are released when their scopes exit. Function propagation also releases owned locals. No Rust panic or native stack unwinding implements language exceptions. Uncaught errors print an exception category and message and return process status 1 after cleanup. Actual allocation failures and invalid internal ABI operations may still terminate the process.
+
+Exceptions contain only an immutable category and message. They have no traceback, frame, cause, or context references, so they introduce no cycles into the reference-counted heap. Full traceback objects, exception chaining, `raise ... from ...`, custom exception subclasses, exception groups, `except*`, and context managers remain unsupported.
+
+## Exceptions and cleanup
+
+The constructible builtin categories are `Exception`, `ArithmeticError`, `ZeroDivisionError`, `OverflowError`, `LookupError`, `IndexError`, `KeyError`, `ValueError`, `AssertionError`, `RuntimeError`, `EOFError`, `OSError`, `TypeError`, `AttributeError`, `MemoryError`, and `SystemError`. A constructor takes zero arguments or one string message. `raise Category` constructs the zero-argument form; `raise value` requires an exception instance. The annotation `Exception` admits this sealed family and can be used in parameters, returns, fields, containers, and optional values. Specific subclass annotations are currently rejected rather than erasing their narrower contracts. `BaseException` is supported as a handler category, but not as a constructor or storage annotation.
+
+Handlers select the first matching fixed builtin category or nonempty tuple of categories, using the builtin hierarchy. A bare handler catches any supported exception. `except Category as name` binds an owned exception and deletes that name on every handler exit, even if it previously existed or was rebound inside the handler. Save it under another name to retain it. Bare `raise` uses the dynamically active exception, including from a called function or a `finally` block unwinding an exception; without an active exception it raises `RuntimeError`.
+
+`else` runs only after normal fallthrough from the protected body; its errors are handled outside that try statement. `finally` runs on normal fallthrough, error propagation, `return`, `break`, and `continue`. A new transfer from finally overrides the pending transfer and releases its owned return value or exception. Loop transfers inside finally use the block's lexical loop. Nested handlers restore the previously active exception.
+
+Handlers cannot assume a fallible assignment completed. Definite assignment starts from the protected body's incoming state, excluding names that a nested handler could delete. Optional facts for potentially reassigned names are discarded. Finally is checked against a similarly conservative entry covering all exit reasons; initialize values before try when finally needs them. Integer interval facts in handlers and finally start unknown, and facts after try are conservative. These restrictions can reject safe programs requiring more precise exceptional-flow analysis.
+
+`str(exception)` and `print(exception)` expose the message, including Python's special quoting for a one-string `KeyError`. Missing dictionary keys report the actual integer key or quoted string key. KeyError quoting follows Ruff's repr rules and pinned ICU Unicode data; newly assigned characters can print literally where a CPython build with older Unicode data emits an escape (for example U+1FAEA versus CPython 3.14). Other runtime-generated diagnostic messages are not a CPython text-compatibility promise; category matching and explicitly constructed messages are stable within this quoting rule. `assert` is always enabled independently of optimization, evaluates its optional string message only when false, and raises an empty-message `AssertionError` when no message is provided.
 
 Standard output uses bounded buffering for pipes and files, and flushes each printed line on a terminal. Pending output is also flushed before `input()` waits, before a reported runtime error exits, and before the generated process entry returns normally. If a write or flush returns an error, Relar reports `OSError`; fatal-error flushing is best effort and preserves the original exception category. Generated code explicitly flushes at process exit because its LLVM entry point does not run Rust's standard `main` lifecycle.
 
@@ -118,6 +132,7 @@ python3 tests/differential.py --compiler target/release/relar --runtime target/r
 python3 tests/imports.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/classes.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/containers.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+python3 tests/exceptions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/io.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 ```
 
@@ -135,7 +150,7 @@ target/release/relar build examples/dependency_planner/__main__.py \
   -o /tmp/dependency-planner-lto
 ```
 
-All five native test harnesses accept the same `--lto-linker` and `--target` options.
+All six native test harnesses accept the same `--lto-linker` and `--target` options.
 
 `--sanitize` marks generated functions for AddressSanitizer and links its runtime. This instruments generated code; it does not retroactively instrument a prebuilt Rust static library. Instrumenting Rust runtime code requires a separate sanitizer build of that library. The test suites accept `--sanitize --opt-levels 1` to exercise this configuration, including leak checks on normal exits.
 
@@ -147,4 +162,6 @@ The classes suite checks nominal types, imported class aliases, field replacemen
 
 The containers suite covers nested lists, tuple positions and unpacking, list iteration and `enumerate`, optional ownership and local flow narrowing, contextual literals, shallow repetition, string concatenation, and whitespace splitting. Iteration cases exercise alias mutation, source and target rebinding, temporary roots, control flow, and arbitrary-precision counters. It rejects invalid alias writes, unsafe optional accesses, and class cycles hidden inside containers.
 
-The I/O suite checks complete output, large and Unicode writes, normal and fatal exit flushing, LF and CRLF pipe input, terminal line visibility, and output failures. Interactive checks use protocol handshakes and readiness deadlines rather than performance expectations. All five suites also run generated-code AddressSanitizer checks at `-O1` in CI.
+The exceptions suite compares nested propagation, handler ordering, builtin hierarchy, stored exception values, dynamically scoped re-raising, lazy assertion messages, and all finally exit reasons. Repeated failures during argument evaluation and partial container/class construction exercise ownership cleanup. Rejection cases protect definite assignment, optional facts, and the sealed exception contract.
+
+The I/O suite checks complete output, large and Unicode writes, normal and fatal exit flushing, LF and CRLF pipe input, terminal line visibility, and output failures. Interactive checks use protocol handshakes and readiness deadlines rather than performance expectations. All six suites also run generated-code AddressSanitizer checks at `-O1` in CI.

@@ -113,6 +113,36 @@ const RESERVED: &[&str] = &[
     "__name__",
 ];
 
+/// These numbers are the sealed exception categories in the runtime ABI.
+fn exception_kind(name: &str) -> Option<u32> {
+    [
+        "BaseException",
+        "Exception",
+        "ArithmeticError",
+        "ZeroDivisionError",
+        "OverflowError",
+        "LookupError",
+        "IndexError",
+        "KeyError",
+        "ValueError",
+        "AssertionError",
+        "RuntimeError",
+        "EOFError",
+        "OSError",
+        "TypeError",
+        "AttributeError",
+        "MemoryError",
+        "SystemError",
+    ]
+    .iter()
+    .position(|candidate| *candidate == name)
+    .map(|kind| kind as u32)
+}
+
+fn reserved(name: &str) -> bool {
+    RESERVED.contains(&name) || exception_kind(name).is_some()
+}
+
 fn pattern_elements(target: &ast::Expr) -> Option<&[ast::Expr]> {
     match target {
         ast::Expr::Tuple(tuple) => Some(&tuple.elts),
@@ -129,7 +159,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     let mut definitions = Vec::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
         for name in module.bindings.keys() {
-            if RESERVED.contains(&name.as_str()) {
+            if reserved(name) {
                 return Err(module.error(
                     module.parsed.syntax(),
                     "a static binding uses a reserved builtin name",
@@ -435,6 +465,7 @@ fn annotation_at(
             "int" => Ok(Type::Int),
             "bool" => Ok(Type::Bool),
             "str" => Ok(Type::Str),
+            "Exception" => Ok(Type::Exception),
             _ => Err(error(
                 source,
                 expression,
@@ -603,7 +634,7 @@ impl<'a> Checker<'a> {
 
     /// Reuses a slot only at its original type and prevents rebinding fixed call targets.
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
-        if RESERVED.contains(&name) || self.graph.modules[self.module].bindings.contains_key(name) {
+        if reserved(name) || self.graph.modules[self.module].bindings.contains_key(name) {
             return Err(error(
                 self.source,
                 node,
@@ -832,6 +863,11 @@ impl<'a> Checker<'a> {
                 self.narrowed.remove(slot);
             }
         }
+        for name in narrowing::deleted_names(body) {
+            if let Some(slot) = self.names.get(&name) {
+                self.assigned.remove(slot);
+            }
+        }
     }
 
     fn assigned_value(&mut self, slot: usize, value: &Expr) {
@@ -1034,8 +1070,10 @@ impl<'a> Checker<'a> {
             };
             output.extend(self.bind_pattern(target, value)?);
         }
-        output.push(Statement::Clear(captured));
-        Ok(output)
+        Ok(vec![Statement::Scope {
+            body: output,
+            clear: vec![captured],
+        }])
     }
 
     /// Recognizes items views only at a loop boundary; no view value escapes.
@@ -1217,12 +1255,24 @@ impl<'a> Checker<'a> {
         let mut facts = self.narrowed.clone();
         let before = self.assigned.clone();
         let bindings = self.bind_pattern(&loop_.target, item)?;
-        for statement in &bindings {
-            if let Statement::Assign(slot, _) = statement {
-                facts.remove(slot);
+        fn remove_target_facts(
+            target: &ast::Expr,
+            names: &HashMap<String, usize>,
+            facts: &mut HashMap<usize, Type>,
+        ) {
+            if let ast::Expr::Name(name) = target {
+                if let Some(slot) = names.get(name.id.as_str()) {
+                    facts.remove(slot);
+                }
+            } else if let Some(elements) = pattern_elements(target) {
+                for element in elements {
+                    remove_target_facts(element, names, facts);
+                }
             }
         }
+        remove_target_facts(&loop_.target, &self.names, &mut facts);
         body.extend(bindings);
+        cleanup.extend(&owned_items);
         body.extend(owned_items.into_iter().map(Statement::Clear));
         // Advance before entering the body so continue and target rebinding do
         // not alter progression. Length is read anew on every loop condition.
@@ -1248,9 +1298,11 @@ impl<'a> Checker<'a> {
         self.assigned = before;
         self.narrowed = facts;
         output.push(Statement::While(test, body));
-        output.extend(cleanup.into_iter().map(Statement::Clear));
-        output.extend(counter.map(Statement::Clear));
-        Ok(output)
+        cleanup.extend(counter);
+        Ok(vec![Statement::Scope {
+            body: output,
+            clear: cleanup,
+        }])
     }
 
     /// Checks dead syntax too, but merges definite assignment only from reachable exits.
@@ -1435,13 +1487,19 @@ impl<'a> Checker<'a> {
                 self.loop_depth -= 1;
                 self.assigned = before;
                 self.narrowed = facts;
-                Some(Statement::For {
-                    target,
-                    cursor: self.hidden(Type::Int),
-                    stop: self.hidden(Type::Int),
-                    step: self.hidden(Type::Int),
-                    args,
-                    body,
+                let cursor = self.hidden(Type::Int);
+                let stop = self.hidden(Type::Int);
+                let step = self.hidden(Type::Int);
+                Some(Statement::Scope {
+                    body: vec![Statement::For {
+                        target,
+                        cursor,
+                        stop,
+                        step,
+                        args,
+                        body,
+                    }],
+                    clear: vec![cursor, stop, step],
                 })
             }
             ast::Stmt::Return(return_) if !self.module_scope => {
@@ -1466,10 +1524,52 @@ impl<'a> Checker<'a> {
                     false,
                 ));
             }
-            ast::Stmt::Assert(assert) if assert.msg.is_none() => {
+            ast::Stmt::Assert(assert) => {
                 let test = self.condition(&assert.test)?;
+                let result = if let Some(message) = &assert.msg {
+                    let message = self.expr_expected(message, Type::Str)?;
+                    Statement::If(
+                        test,
+                        Vec::new(),
+                        vec![Statement::Raise(Some(Expr {
+                            ty: Type::Exception,
+                            kind: ExprKind::Exception {
+                                kind: 9,
+                                message: Some(Box::new(message)),
+                            },
+                        }))],
+                    )
+                } else {
+                    Statement::Assert(test)
+                };
                 self.apply_facts(&assert.test, true);
-                Some(Statement::Assert(test))
+                Some(result)
+            }
+            ast::Stmt::Try(try_) if !try_.is_star => {
+                return self.try_statement(try_);
+            }
+            ast::Stmt::Raise(raise) if raise.cause.is_none() => {
+                let value = raise
+                    .exc
+                    .as_deref()
+                    .map(|value| {
+                        if let ast::Expr::Name(name) = value
+                            && let Some(kind) =
+                                exception_kind(name.id.as_str()).filter(|kind| *kind != 0)
+                        {
+                            Ok(Expr {
+                                ty: Type::Exception,
+                                kind: ExprKind::Exception {
+                                    kind,
+                                    message: None,
+                                },
+                            })
+                        } else {
+                            self.expr_expected(value, Type::Exception)
+                        }
+                    })
+                    .transpose()?;
+                return Ok((vec![Statement::Raise(value)], false));
             }
             ast::Stmt::Pass(_) => None,
             _ => {
@@ -1481,6 +1581,152 @@ impl<'a> Checker<'a> {
             }
         };
         Ok((result.into_iter().collect(), true))
+    }
+
+    /// A handler may run after any failing operation, before its assignment has
+    /// committed. Only incoming definite assignments survive; writes invalidate
+    /// incoming optional facts. Finally uses the same conservative entry for all
+    /// normal, exceptional, return, and loop exits.
+    fn try_statement(&mut self, try_: &ast::StmtTry) -> Result<(Vec<Statement>, bool), String> {
+        let before = self.assigned.clone();
+        let before_facts = self.narrowed.clone();
+        let (body, body_falls) = self.block(&try_.body)?;
+        let (orelse, else_falls) = self.block(&try_.orelse)?;
+        let mut exits = Vec::new();
+        if body_falls && else_falls {
+            exits.push((self.assigned.clone(), self.narrowed.clone()));
+        }
+
+        let mut handler_assigned = before.clone();
+        for name in narrowing::deleted_names(&try_.body) {
+            if let Some(slot) = self.names.get(&name) {
+                handler_assigned.remove(slot);
+            }
+        }
+        let mut handler_facts = before_facts.clone();
+        for name in narrowing::assigned_names(&try_.body) {
+            if let Some(slot) = self.names.get(&name) {
+                handler_facts.remove(slot);
+            }
+        }
+        let mut handlers = Vec::new();
+        for (index, handler) in try_.handlers.iter().enumerate() {
+            let ast::ExceptHandler::ExceptHandler(handler) = handler;
+            let kinds = if let Some(target) = &handler.type_ {
+                let expressions = if let ast::Expr::Tuple(tuple) = &**target {
+                    tuple.elts.as_slice()
+                } else {
+                    std::slice::from_ref(&**target)
+                };
+                if expressions.is_empty() {
+                    return Err(error(
+                        self.source,
+                        target.as_ref(),
+                        "an exception handler requires at least one builtin category",
+                    ));
+                }
+                expressions
+                    .iter()
+                    .map(|target| {
+                        if let ast::Expr::Name(name) = target
+                            && let Some(kind) = exception_kind(name.id.as_str())
+                        {
+                            return Ok(kind);
+                        }
+                        Err(error(
+                            self.source,
+                            target,
+                            "exception handlers require fixed builtin categories",
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            } else {
+                if index + 1 != try_.handlers.len() {
+                    return Err(error(self.source, handler, "a bare handler must be last"));
+                }
+                Vec::new()
+            };
+            self.assigned = handler_assigned.clone();
+            self.narrowed = handler_facts.clone();
+            let name = handler
+                .name
+                .as_ref()
+                .map(|name| {
+                    let slot = self.declare(name.as_str(), Type::Exception, handler)?;
+                    self.assigned.insert(slot);
+                    self.narrowed.remove(&slot);
+                    Ok::<_, String>(slot)
+                })
+                .transpose()?;
+            let (handler_body, falls) = self.block(&handler.body)?;
+            if let Some(name) = name {
+                self.assigned.remove(&name);
+                self.narrowed.remove(&name);
+            }
+            if falls {
+                exits.push((self.assigned.clone(), self.narrowed.clone()));
+            }
+            handlers.push(ir::ExceptHandler {
+                kinds,
+                name,
+                body: handler_body,
+            });
+        }
+
+        let mut normal_assigned = exits.first().map(|exit| exit.0.clone()).unwrap_or_default();
+        let mut normal_facts = exits.first().map(|exit| exit.1.clone()).unwrap_or_default();
+        for (assigned, facts) in &exits[1.min(exits.len())..] {
+            normal_assigned.retain(|slot| assigned.contains(slot));
+            normal_facts.retain(|slot, ty| facts.get(slot) == Some(ty));
+        }
+
+        self.assigned = before;
+        self.narrowed = before_facts;
+        let mut protected = try_.body.to_vec();
+        protected.extend(try_.orelse.iter().cloned());
+        for handler in &try_.handlers {
+            let ast::ExceptHandler::ExceptHandler(handler) = handler;
+            protected.extend(handler.body.iter().cloned());
+            if let Some(name) = &handler.name
+                && let Some(slot) = self.names.get(name.as_str())
+            {
+                self.assigned.remove(slot);
+                self.narrowed.remove(slot);
+            }
+        }
+        for name in narrowing::deleted_names(&protected) {
+            if let Some(slot) = self.names.get(&name) {
+                self.assigned.remove(slot);
+            }
+        }
+        for name in narrowing::assigned_names(&protected) {
+            if let Some(slot) = self.names.get(&name) {
+                self.narrowed.remove(slot);
+            }
+        }
+        let (finalbody, final_falls) = self.block(&try_.finalbody)?;
+        if try_.finalbody.is_empty() {
+            self.assigned = normal_assigned;
+            self.narrowed = normal_facts;
+        } else {
+            for name in narrowing::deleted_names(&try_.finalbody) {
+                if let Some(slot) = self.names.get(&name) {
+                    normal_assigned.remove(slot);
+                }
+            }
+            self.assigned.extend(normal_assigned);
+            // Facts from the successful body cannot describe an interrupted one.
+            // Preserve only facts established while checking the shared finally.
+        }
+        Ok((
+            vec![Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            }],
+            !exits.is_empty() && final_falls,
+        ))
     }
 
     fn if_chain(
@@ -2033,8 +2279,39 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if let Some(kind) = exception_kind(name.id.as_str()).filter(|kind| *kind != 0) {
+            if args.len() > 1 || args.first().is_some_and(|arg| arg.ty != Type::Str) {
+                return Err(error(
+                    self.source,
+                    call,
+                    "builtin exceptions accept zero arguments or one string message",
+                ));
+            }
+            return Ok(Expr {
+                ty: Type::Exception,
+                kind: ExprKind::Exception {
+                    kind,
+                    message: args.into_iter().next().map(Box::new),
+                },
+            });
+        }
+        if name.id == "print" && args.len() == 1 && args[0].ty == Type::Exception {
+            return Ok(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(
+                    Builtin::Print,
+                    vec![Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(Builtin::ExceptionMessage, args),
+                    }],
+                ),
+            });
+        }
         let (builtin, ty) = match name.id.as_str() {
             "input" if args.is_empty() => (Builtin::Input, Type::Str),
+            "str" if args.len() == 1 && args[0].ty == Type::Exception => {
+                (Builtin::ExceptionMessage, Type::Str)
+            }
             "int"
                 if args.len() == 1 && matches!(args[0].ty, Type::Int | Type::Bool | Type::Str) =>
             {
