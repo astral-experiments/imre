@@ -9,10 +9,20 @@ use std::process::ExitCode;
 #[path = "batch.rs"]
 mod batch;
 
+#[cfg(feature = "manifest")]
+#[path = "manifest.rs"]
+mod manifest;
+
 /// Run the framed-request entrypoint while sharing the original graph algorithm.
 #[cfg(feature = "batch")]
 pub fn batch_main() -> ExitCode {
     batch::main()
+}
+
+/// Run file-backed requests with the same parser and graph algorithm.
+#[cfg(feature = "manifest")]
+pub fn manifest_main() -> ExitCode {
+    manifest::main()
 }
 
 #[cfg(all(feature = "bigint", feature = "checked-i64"))]
