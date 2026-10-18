@@ -225,6 +225,28 @@ impl<'a> Visitor<'a> for SelfUse<'a> {
         if self.0.is_some() {
             return;
         }
+        // A comprehension target named self is distinct from the incomplete
+        // receiver. Its leftmost iterable still belongs to the enclosing scope.
+        let clauses = match expression {
+            ast::Expr::ListComp(value) => Some(value.generators.as_slice()),
+            ast::Expr::SetComp(value) => Some(value.generators.as_slice()),
+            ast::Expr::DictComp(value) => Some(value.generators.as_ref()),
+            _ => None,
+        };
+        fn binds_self(target: &ast::Expr) -> bool {
+            match target {
+                ast::Expr::Name(name) => name.id == "self",
+                ast::Expr::Tuple(value) => value.elts.iter().any(binds_self),
+                ast::Expr::List(value) => value.elts.iter().any(binds_self),
+                _ => false,
+            }
+        }
+        if let Some(clauses) = clauses
+            && clauses.iter().any(|clause| binds_self(&clause.target))
+        {
+            self.visit_expr(&clauses[0].iter);
+            return;
+        }
         if matches!(expression, ast::Expr::Name(name) if name.id == "self") {
             self.0 = Some(expression);
         } else {

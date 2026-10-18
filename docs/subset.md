@@ -17,16 +17,17 @@ This is a deliberately restricted Python dialect for closed first-party programs
 | Lists | One exact element type, including nested containers and classes; literals, shallow repetition, checked negative indexing, indexed assignment, iteration, `append(value)`, `pop()`, `len(...)`; alias-visible mutation |
 | Dictionaries | Exact `int` or `str` keys and one concrete value type; literals, contextual `dict()`, lookup/write/delete, integer augmented writes, `in`/`not in`, `get`, `len`, and insertion-ordered key/items iteration |
 | Sets | Exact `int` or `str` elements; literals, contextual `set()`, `add`, `discard`, `in`/`not in`, `len`, and iteration with unspecified order |
+| Comprehensions | Eager list, dictionary, and set comprehensions; nested `for` clauses and explicit boolean filters over the existing iteration sources; isolated target bindings |
 | Tuples | Fixed length and a type per position; literals, bounded literal indexing, unpacking into names, and `len(...)`; immutable slots |
 | Strings | Immutable UTF-8 text, literals, concatenation, equality/inequality, Unicode scalar length, no-argument whitespace `split()` and `splitlines()`, input and output |
 | Files and arguments | Explicit UTF-8 `open` in read/write mode; `read`, `write`, `flush`, `close`, `closed`; `with` cleanup; one shared mutable `sys.argv` list |
-| Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `int(int_or_bool_or_string)`; `str()` or `str(int_or_bool_or_string_or_None_or_exception)`; `len(string_or_container)`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments and `enumerate(container[, start])` inside a `for` loop |
+| Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `int(int_or_bool_or_string)`; `str()` or `str(int_or_bool_or_string_or_None_or_exception)`; `len(string_or_container)`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments and `enumerate(container[, start])` at a loop or comprehension boundary |
 
 Booleans have a separate exact type: use `int(flag)` to store one in an integer list. An empty list defaults to `list[int]` unless a typed storage, call, or return boundary supplies its element type. No annotation permits `Any`, a general union, an untyped object, or a foreign container to enter native storage. ty checks ordinary Python typing first; Relar additionally enforces exact types, definite assignment, fixed bindings, and every container write. Suppression comments cannot waive Relar's contract.
 
 Indentation must use spaces; tabs and form feeds remain valid inside string data. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
 
-Mutable global values, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generators, async, comprehensions, slicing, starred or variable-length unpacking, general keyword/default arguments, loop `else`, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. The required `encoding` keyword on `open` is a bounded exception. Conditions cannot rely on implicit truthiness. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods or constructors; a future recursion feature needs an explicit stack policy.
+Mutable global values, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generators, async, assignment expressions, slicing, starred or variable-length unpacking, general keyword/default arguments, loop `else`, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. The required `encoding` keyword on `open` is a bounded exception. Conditions cannot rely on implicit truthiness. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
 
 ## First-party module graphs
 
@@ -72,7 +73,7 @@ class Counter:
 
 Class bodies contain field annotations without defaults, instance methods, and optional docstrings. Every method's first positional parameter is named `self`; its exact class type is inferred, or an explicit annotation must name that class. Other parameters and every return value require annotations. Method calls use the receiver's exact class and a fixed implementation. Passing or returning an instance preserves its identity, and aliases observe field replacement. `==` and `!=` between instances of the same class compare object identity.
 
-Every class requires `__init__(...) -> None`, including classes with no fields. Its body contains only straight-line `self.field = expression` assignments, docstrings, and `pass`. Every declared field must be assigned exactly once. Assignment values may use constructor arguments and checked expressions, but cannot read or pass `self`; a partially initialized object never escapes construction. Local assignments, conditionals, loops, explicit returns, and direct later calls to `__init__` are rejected.
+Every class requires `__init__(...) -> None`, including classes with no fields. Its body contains only straight-line `self.field = expression` assignments, docstrings, and `pass`. Every declared field must be assigned exactly once. Assignment values may use constructor arguments and checked expressions, but cannot read or pass the receiver; a partially initialized object never escapes construction. Local assignments, conditionals, loops, explicit returns, and direct later calls to `__init__` are rejected.
 
 Inheritance, metaclasses, class variables, field defaults, properties, static/class methods, dynamically added fields, and special methods other than `__init__` are unsupported. Field and method names beginning with `__` are reserved, except the initializer. Class-field ownership types must form an acyclic graph, following list elements, dictionary values, tuple positions, and optional payloads. For example, fields `children: list["Node"]`, `named: dict[str, "Node"]`, and `parent: "Node | None"` inside class `Node` are rejected even when unused or initialized empty. Methods may accept or return their own class because those signatures do not create stored references.
 
@@ -99,6 +100,28 @@ Literal elements receive types from an annotated variable, an existing storage l
 `T | None` permits a value of exactly `T` or `None`. Storage, call, and return boundaries explicitly wrap a present value; a bare return or falling off an optional-returning function produces `None`. No other union is supported. Use `value is None` or `value is not None` before accessing an unknown optional payload. Direct checks of local names narrow the relevant branches, short-circuit operands, assertions, and guarded loop bodies; early exits preserve facts on the remaining path. Rebinding updates those facts, and possible stores in a loop invalidate facts that later iterations could contradict.
 
 Narrowing applies to local bindings, not mutable fields or indexed elements. Copy a field or element into a local before checking it; the local owns its value even if an alias later replaces the original slot. Compare an optional payload only after narrowing it. Neither an optional nor a container supplies implicit truthiness.
+
+## Eager comprehensions
+
+List, dictionary, and set comprehensions support nested `for` clauses and zero or more explicit boolean filters per clause. Sources are the existing concrete lists, dictionary keys or `.items()`, sets, `range`, and loop-head `enumerate` forms. Targets use the same name-only fixed-tuple unpacking as ordinary loops.
+
+```python
+def positives(rows: list[list[int]]) -> list[int]:
+    return [value for row in rows for value in row if value > 0]
+
+
+names: list[str] = ["alpha", "beta", "alpha"]
+unique = {name for name in names}
+last_position = {name: index for index, name in enumerate(names)}
+```
+
+The leftmost iterable uses the enclosing scope and is evaluated once. All clause targets belong to the comprehension's separate scope, including names first assigned by later clauses; they cannot fall back to an outer binding before assignment. Targets may shadow an enclosing local of another type and never replace that outer binding. Nested comprehensions have their own scope. Static module/definition bindings and reserved builtins retain their existing shadowing restrictions.
+
+Clauses nest from left to right. Each inner iterable is evaluated when its enclosing iteration reaches it; filters short-circuit in source order, and the element expression runs only after all filters pass. Dictionary keys are evaluated and owned before their values. Duplicate dictionary keys retain their first insertion position and last value. Set traversal remains unspecified.
+
+Results have exact element/key/value types, inferred from the checked body or supplied by a typed storage, argument, or return boundary. Context also reaches nested literals and comprehensions. Filters can narrow optional local targets before constructing an element. These rules do not convert an existing container to a different element type or permit implicit truthiness.
+
+Capturing an outer local preserves its value and shared object identity; field and indexed reads still occur where written inside the body. Mutations through aliases retain the existing list/dictionary/set iteration behavior. A failure propagates through normal handlers and finally blocks, releasing the partial result and temporary owners without rolling back earlier user-visible mutations. Eager comprehensions do not expose an iterator, closure, callback, or partially built result. Generators, async clauses, assignment expressions, and new iteration protocols remain unsupported.
 
 ## Ownership and errors
 
@@ -138,8 +161,6 @@ Standard output uses bounded buffering for pipes and files, and flushes each pri
 
 Before creating file writers or initializing standard output, the runtime ignores `SIGPIPE` once so disconnected pipes produce catchable I/O errors. The sealed runtime has no user signal handlers or signal API.
 
-Signal handling remains native. Relar does not install CPython's signal handlers, so a closed output pipe can terminate the process with `SIGPIPE` before an I/O error is returned. This behavior predates output buffering.
-
 ## Build and validate
 
 Install the Rust toolchain specified in `rust-toolchain.toml`, Clang 18, and CPython 3.12 or later. Build the compiler and runtime together:
@@ -153,6 +174,7 @@ python3 tests/differential.py --compiler target/release/relar --runtime target/r
 python3 tests/imports.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/classes.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/containers.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+python3 tests/comprehensions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/exceptions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/files.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/io.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
@@ -172,7 +194,7 @@ target/release/relar build examples/dependency_planner/__main__.py \
   -o /tmp/dependency-planner-lto
 ```
 
-All seven native test harnesses accept the same `--lto-linker` and `--target` options.
+All eight native test harnesses accept the same `--lto-linker` and `--target` options.
 
 `--sanitize` marks generated functions for AddressSanitizer and links its runtime. This instruments generated code; it does not retroactively instrument a prebuilt Rust static library. Instrumenting Rust runtime code requires a separate sanitizer build of that library. The test suites accept `--sanitize --opt-levels 1` to exercise this configuration, including leak checks on normal exits.
 
@@ -184,8 +206,10 @@ The classes suite checks nominal types, imported class aliases, field replacemen
 
 The containers suite covers nested lists, tuple positions and unpacking, list iteration and `enumerate`, optional ownership and local flow narrowing, contextual literals, shallow repetition, string concatenation, and whitespace splitting. Iteration cases exercise alias mutation, source and target rebinding, temporary roots, control flow, and arbitrary-precision counters. It rejects invalid alias writes, unsafe optional accesses, and class cycles hidden inside containers.
 
+The comprehensions suite checks isolated and nested scopes, contextual result types, ordered filters and dictionary key/value evaluation, optional narrowing, alias-visible mutation, arbitrary-precision ranges, and cleanup after partial construction. It compares complete filesystem effects and rejects unsupported targets, escaped names, implicit truthiness, dynamic operations, and recursion hidden inside helpers.
+
 The exceptions suite compares nested propagation, handler ordering, builtin hierarchy, stored exception values, dynamically scoped re-raising, lazy assertion messages, and all finally exit reasons. Repeated failures during argument evaluation and partial container/class construction exercise ownership cleanup. Rejection cases protect definite assignment, optional facts, and the sealed exception contract.
 
 The I/O suite checks complete output, large and Unicode writes, normal and fatal exit flushing, LF and CRLF pipe input, terminal line visibility, and output failures. Interactive checks use protocol handshakes and readiness deadlines rather than performance expectations.
 
-The files suite compares complete filesystem effects, strict decoding, newline handling, write counts, alias-visible closure, all `with` exit reasons, failed cleanup, argument aliases, and descriptor recovery under a reduced open-file limit. Rejection cases protect the sealed import, file, context-manager, and argument surfaces. All seven suites also run generated-code AddressSanitizer checks at `-O1` in CI.
+The files suite compares complete filesystem effects, strict decoding, newline handling, write counts, alias-visible closure, all `with` exit reasons, failed cleanup, argument aliases, and descriptor recovery under a reduced open-file limit. Rejection cases protect the sealed import, file, context-manager, and argument surfaces. All eight suites also run generated-code and runtime AddressSanitizer checks at `-O1` in CI.
