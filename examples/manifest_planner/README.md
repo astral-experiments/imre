@@ -51,6 +51,8 @@ The report is truncated when opened. If it is the manifest, paths have already b
 
 ## Correctness and comparison
 
+The [recorded comparison](../../benchmarks/results/2026-10-18-manifest-planner.md) includes ordinary and matched ThinLTO results, unchanged-program controls, complete raw samples, and sanitizer evidence. Large ThinLTO file workloads run 1.86–3.27× faster than CPython and take 1.72–1.79× Rust BigInt's time; these are warm-cache whole-program measurements.
+
 The independent [filesystem oracle](../../benchmarks/manifest_validate.py) does not import the compiled packages. It models sequential opens and hard-link ownership, uses an independent bounded parser and graph oracle, and checks all file bytes and directory entries as well as stdout, stderr, and status. Its 196 cases cover the prior graph/parser corpus, line boundaries, Unicode, malformed UTF-8, missing/directory/NUL paths, path components, repeated recovery, output aliases, and terminal failures. A separately recorded Linux `/dev/full` check requires report-write failure to terminate with `OSError`, empty stdout, and unchanged input files; it is explicitly skipped when that device is unavailable.
 
 ```sh
