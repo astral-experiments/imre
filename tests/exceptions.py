@@ -401,6 +401,193 @@ def compute(value: int) -> None:
 compute(0)
 compute(-1)
 """,
+    "infallible_field_boundaries": """
+class Record:
+    number: int
+    optional: int | None
+    flag: bool
+    nothing: None
+    def __init__(self, number: int, optional: int | None) -> None:
+        self.number = number
+        self.optional = optional
+        self.flag = False
+        self.nothing = None
+
+def identity(record: Record) -> Record:
+    return record
+
+def read(record: Record) -> int:
+    return identity(record).number
+
+def replace(record: Record, number: int) -> int:
+    record.number = number
+    return read(record)
+
+def fail_int() -> int:
+    raise ValueError("integer child")
+
+def fail_record() -> Record:
+    raise ValueError("receiver child")
+
+def receiver_failure() -> int:
+    return identity(fail_record()).number
+
+def argument_failure(record: Record) -> int:
+    return replace(record, fail_int())
+
+class Partial:
+    values: list[int]
+    number: int
+    def __init__(self) -> None:
+        self.values = [999999999999999999999999999999]
+        self.number = fail_int()
+
+def initializer_failure() -> Partial:
+    return Partial()
+
+def constructor_argument_failure() -> Record:
+    return Record(fail_int(), None)
+
+def field_assignment_failure(record: Record) -> None:
+    record.number = fail_int()
+
+def default_failure() -> int:
+    values = {"present": 1}
+    return values.get("present", fail_int())
+
+def finally_failure(record: Record) -> int:
+    try:
+        return read(record)
+    finally:
+        fail_int()
+
+def else_failure() -> int:
+    try:
+        value = 1
+    except ValueError:
+        return 0
+    else:
+        return value + fail_int()
+
+record = Record(1000000000000000000000000000000, None)
+print(read(record))
+print(record.optional is None)
+print(record.flag)
+print(record.nothing)
+print(replace(record, 7))
+record.optional = 1000000000000000000000000000001
+saved = record.optional
+if saved is not None:
+    print(saved)
+for turn in range(3):
+    try:
+        print(receiver_failure())
+    except ValueError as error:
+        print(error)
+    try:
+        print(argument_failure(record))
+    except ValueError:
+        print(read(record))
+    try:
+        initializer_failure()
+    except ValueError:
+        print("partial released")
+    try:
+        constructor_argument_failure()
+    except ValueError:
+        print("constructor skipped")
+    try:
+        field_assignment_failure(record)
+    except ValueError:
+        print(read(record))
+    try:
+        print(default_failure())
+    except ValueError:
+        print("eager default")
+    try:
+        print(finally_failure(record))
+    except ValueError:
+        print("finally replaced return")
+    try:
+        print(else_failure())
+    except ValueError:
+        print("else propagated")
+""",
+    "integer_list_error_results": """
+def read(values: list[int], index: int) -> int:
+    return values[index]
+
+def write(values: list[int], index: int, value: int) -> None:
+    values[index] = value
+
+def consume(first: list[int], second: int) -> None:
+    print("wrong call")
+
+values = [0, 1000000000000000000000000000000]
+print(read(values, 0))
+print(values[0] == values[0])
+write(values, -1, 1000000000000000000000000000001)
+values[0] = values[1]
+values[1] = 0
+values[0] = values[0]
+print(read(values, 0))
+print(values.pop())
+print(values.pop())
+for turn in range(3):
+    try:
+        print(values.pop())
+    except IndexError:
+        print("empty pop")
+    values.append(1000000000000000000000000000002)
+    try:
+        print(values[0] < values[9])
+    except IndexError:
+        print("borrow failure")
+    try:
+        consume([1000000000000000000000000000003], read(values, -2))
+    except IndexError:
+        print("argument cleanup")
+    try:
+        print(read(values, 1000000000000000000000000000000))
+    except IndexError:
+        print("huge index")
+    try:
+        values[0] = values[9]
+    except IndexError:
+        print("copy source")
+    try:
+        values[9] = values[0]
+    except IndexError:
+        print("copy target")
+    try:
+        values[9] = 1000000000000000000000000000004
+    except IndexError:
+        print("decoded store")
+    try:
+        write(values, -2, 1000000000000000000000000000005)
+    except IndexError:
+        print("signed store")
+    print(values[0])
+    print(values.pop())
+
+flags: list[bool] = [False]
+nones: list[None] = [None]
+optionals: list[int | None] = [None]
+mapping: dict[str, None] = {"present": None}
+print(flags[0])
+print(nones[0])
+print(optionals[0] is None)
+print(optionals.pop() is None)
+print(mapping["present"])
+try:
+    print(flags[1])
+except IndexError:
+    print("generic false remains checked")
+try:
+    print(mapping["missing"])
+except KeyError:
+    print("generic none remains checked")
+""",
 }
 
 REJECTED = {
@@ -528,7 +715,7 @@ def main() -> None:
     if args.target:
         flags += ["--target", args.target]
     if args.lto_linker:
-        flags += ["--lto-linker", str(args.lto_linker.resolve())]
+        flags += ["--lto-linker", str(args.lto_linker.absolute())]
     if args.sanitize:
         flags += ["--sanitize"]
     passed = 0

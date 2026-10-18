@@ -2,8 +2,9 @@
 //!
 //! Integer handles are either signed 63-bit values tagged with a low one bit, or
 //! live `Rc<BigInt>` pointers to values outside that range. This canonical form
-//! lets compiler range proofs imply representation; extension adapters must
-//! normalize incoming integers before exposing them to generated code.
+//! is always nonzero and lets compiler range proofs imply representation;
+//! extension adapters must normalize incoming integers before exposing them to
+//! generated code.
 //! String and list handles are live `Rc` pointers of
 //! their respective types. ABI arguments borrow these handles; results transfer
 //! one owned reference unless an entry point explicitly documents a borrowed
@@ -16,10 +17,14 @@
 //! mutations. Future callback or threaded extension boundaries must uphold these
 //! invariants before entering this ABI.
 //!
-//! Recoverable language errors set an owned thread-local pending exception.
-//! Generated code checks it immediately, before acquiring a returned word or
-//! reading out parameters. Integer failures return tagged zero, pointer failures
-//! return null, and generic slot-word failures return an uninterpreted zero.
+//! Recoverable calls enter with pending state clear. Language errors install an
+//! owned thread-local exception; generated code checks the entry point's error
+//! result immediately, before acquiring a returned word or reading out parameters.
+//! Int-list reads/pop return raw zero on failure, and Int-list replacements return
+//! status zero on failure or one on success. Other integer failures return tagged
+//! zero, pointer failures return null, and generic slot-word failures return an
+//! uninterpreted zero. Successful calls do not clear a preexisting exception.
+//! These private ABI contracts require a matching compiler and runtime archive.
 //! Cleanup/error-state entry points remain valid while pending. Invalid ABI
 //! inputs and allocator exhaustion remain fatal; neither uses Rust unwinding.
 
@@ -554,6 +559,8 @@ fn big_index(value: &BigInt) -> Option<isize> {
     value.to_isize()
 }
 
+/// Returns an owned nonzero integer word, or raw zero with a pending error.
+///
 /// # Safety
 /// The arguments must be live list and integer handles, respectively.
 #[unsafe(no_mangle)]
@@ -562,7 +569,7 @@ pub unsafe extern "C" fn relar_list_get(list: *const List, at: usize) -> usize {
     let at = unsafe { Int::borrow(at) };
     let at = match decode_index(&at) {
         Ok(at) => at,
-        Err(error) => return error.returning(1),
+        Err(error) => return error.returning(0),
     };
     // SAFETY: this rooted list is accessed only for the nonreentrant clone.
     let owned = unsafe {
@@ -570,10 +577,11 @@ pub unsafe extern "C" fn relar_list_get(list: *const List, at: usize) -> usize {
             .0
             .with(|list| Ok(list[index(at, list.len())?].clone()))
     };
-    finish(owned.map(Int::into_raw), 1)
+    finish(owned.map(Int::into_raw), 0)
 }
 
 /// Reads an element using a compiler-proven nonnegative, decoded index.
+/// Returns an owned nonzero integer word, or raw zero with a pending error.
 ///
 /// # Safety
 /// `list` must be a rooted list handle. `at` is the exact mathematical index,
@@ -588,10 +596,11 @@ pub unsafe extern "C" fn relar_list_get_index(list: *const List, at: usize) -> u
             .0
             .with(|list| list.get(at).cloned().ok_or_else(Error::index))
     };
-    finish(owned.map(Int::into_raw), 1)
+    finish(owned.map(Int::into_raw), 0)
 }
 
 /// Borrows an integer word without retaining it or exposing list storage.
+/// Returns a nonzero borrowed word, or raw zero with a pending error.
 ///
 /// # Safety
 /// `list` must remain rooted, and its selected element must not be replaced or
@@ -608,18 +617,20 @@ pub unsafe extern "C" fn relar_list_borrow_index(list: *const List, at: usize) -
             .0
             .with(|list| list.get(at).map(|value| value.0).ok_or_else(Error::index))
     };
-    finish(result, 1)
+    finish(result, 0)
 }
 
+/// Returns one after replacement, or zero with a pending error and no mutation.
+///
 /// # Safety
 /// The arguments must be live list and integer handles.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_list_set(list: *const List, at: usize, value: usize) {
+pub unsafe extern "C" fn relar_list_set(list: *const List, at: usize, value: usize) -> u8 {
     // SAFETY: the caller roots both integers; conversion and acquisition cannot reenter.
     let (at, value) = unsafe { (Int::borrow(at), Int::borrow(value)) };
     let at = match decode_index(&at) {
         Ok(at) => at,
-        Err(error) => return error.raise(),
+        Err(error) => return error.returning(0),
     };
     // SAFETY: no storage reference escapes this exclusive, nonreentrant access.
     let old = unsafe {
@@ -628,10 +639,17 @@ pub unsafe extern "C" fn relar_list_set(list: *const List, at: usize, value: usi
             Ok(std::mem::replace(&mut list[at], (*value).clone()))
         })
     };
-    finish(old.map(drop), ());
+    finish(
+        old.map(|old| {
+            drop(old);
+            1
+        }),
+        0,
+    )
 }
 
 /// Replaces an element using a compiler-proven nonnegative, decoded index.
+/// Returns one after replacement, or zero with a pending error and no mutation.
 ///
 /// # Safety
 /// `list` and `value` must be rooted list and integer handles. `at` must be the
@@ -639,7 +657,7 @@ pub unsafe extern "C" fn relar_list_set(list: *const List, at: usize, value: usi
 /// checked at this call, including after any intervening mutation through an
 /// alias. The replacement is acquired before the displaced owner is released.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_list_set_index(list: *const List, at: usize, value: usize) {
+pub unsafe extern "C" fn relar_list_set_index(list: *const List, at: usize, value: usize) -> u8 {
     // SAFETY: the caller roots both handles for the operation.
     let value = unsafe { Int::borrow(value) };
     // SAFETY: replacement cannot reenter and returns the displaced owner.
@@ -649,10 +667,17 @@ pub unsafe extern "C" fn relar_list_set_index(list: *const List, at: usize, valu
             Ok(std::mem::replace(slot, (*value).clone()))
         })
     };
-    finish(old.map(drop), ());
+    finish(
+        old.map(|old| {
+            drop(old);
+            1
+        }),
+        0,
+    )
 }
 
 /// Copies an element within one list, acquiring the source before replacement.
+/// Returns one after replacement, or zero with a pending error and no mutation.
 ///
 /// # Safety
 /// `list` must be rooted. Both indices must be exact nonnegative native indices,
@@ -664,7 +689,7 @@ pub unsafe extern "C" fn relar_list_copy_index(
     list: *const List,
     destination: usize,
     source: usize,
-) {
+) -> u8 {
     let mut copied = None;
     // SAFETY: the caller roots the list; cloning cannot reenter, and only the
     // displaced owner escapes this exclusive access. Self-copy acquires first.
@@ -678,7 +703,13 @@ pub unsafe extern "C" fn relar_list_copy_index(
     // A failed destination check also releases the acquired source only here,
     // after exclusive storage access has ended.
     drop(copied);
-    finish(old.map(drop), ());
+    finish(
+        old.map(|old| {
+            drop(old);
+            1
+        }),
+        0,
+    )
 }
 
 /// # Safety
@@ -697,8 +728,10 @@ pub unsafe extern "C" fn relar_list_append(list: *const List, value: usize) {
     }
 }
 
+/// Returns an owned nonzero integer word, or raw zero with a pending error.
+///
 /// # Safety
-/// The argument must be a live list handle. Returns one owned integer reference.
+/// The argument must be a live list handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_list_pop(list: *const List) -> usize {
     // SAFETY: the caller roots the list, and removal returns an independent owner.
@@ -708,7 +741,7 @@ pub unsafe extern "C" fn relar_list_pop(list: *const List) -> usize {
                 .ok_or_else(|| Error::new(Kind::IndexError, "pop from empty list"))
         })
     };
-    finish(owned.map(Int::into_raw), 1)
+    finish(owned.map(Int::into_raw), 0)
 }
 
 /// # Safety
@@ -780,6 +813,19 @@ pub extern "C" fn relar_range_step_zero() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use objects::exceptions::{relar_error_pending, relar_error_take, relar_exception_matches};
+
+    fn clear_index_error() {
+        assert_eq!(relar_error_pending(), 1);
+        let error = relar_error_take();
+        assert!(!error.is_null());
+        // SAFETY: take transfers one owned exception; inspect and release it once.
+        unsafe {
+            assert_eq!(relar_exception_matches(error, Kind::IndexError as u32), 1);
+            objects::relar_object_release(error);
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
 
     #[test]
     fn decimal_input_preserves_signs_separators_and_tag_boundaries() {
@@ -844,7 +890,7 @@ mod tests {
         unsafe {
             relar_list_append(list, big.0);
             let saved = Int(relar_list_get(list, zero.0));
-            relar_list_set(list, zero.0, zero.0);
+            assert_eq!(relar_list_set(list, zero.0, zero.0), 1);
             relar_list_release(list);
             drop(big);
             assert_eq!(saved.big().as_ref(), &BigInt::from(1_u64 << 63));
@@ -862,9 +908,16 @@ mod tests {
         unsafe {
             relar_list_append(list, word);
             drop(big);
-            relar_list_set_index(list, 0, word);
+            assert_eq!(relar_list_set_index(list, 1, word), 0);
+            clear_index_error();
+            assert_eq!(weak.strong_count(), 1);
+            let huge = Int::new(BigInt::from(1_u128 << 100));
+            assert_eq!(relar_list_set(list, huge.0, word), 0);
+            clear_index_error();
+            assert_eq!(weak.strong_count(), 1);
+            assert_eq!(relar_list_set_index(list, 0, word), 1);
             let saved = Int(relar_list_get_index(list, 0));
-            relar_list_set_index(list, 0, Int::small(7).unwrap().0);
+            assert_eq!(relar_list_set_index(list, 0, Int::small(7).unwrap().0), 1);
             assert_eq!(Int(relar_list_len(list)).as_small(), Some(1));
             relar_list_release(list);
             assert_eq!(saved.big().as_ref(), &BigInt::from(1_u128 << 100));
@@ -889,17 +942,25 @@ mod tests {
             relar_list_append(list, Rc::as_ptr(&displaced) as usize);
             drop(source);
             drop(displaced);
+            assert_eq!(relar_list_copy_index(list, 2, 0), 0);
+            clear_index_error();
+            assert_eq!(source_weak.strong_count(), 1);
+            assert_eq!(displaced_weak.strong_count(), 1);
+            assert_eq!(relar_list_copy_index(list, 1, 2), 0);
+            clear_index_error();
+            assert_eq!(source_weak.strong_count(), 1);
+            assert_eq!(displaced_weak.strong_count(), 1);
             {
                 let borrowed = Int::borrow(relar_list_borrow_index(list, 0));
                 assert_eq!(borrowed.big().as_ref(), &BigInt::from(1_u128 << 100));
                 assert_eq!(source_weak.strong_count(), 1);
             }
-            relar_list_copy_index(list, 0, 0);
+            assert_eq!(relar_list_copy_index(list, 0, 0), 1);
             assert_eq!(source_weak.strong_count(), 1);
-            relar_list_copy_index(list, 1, 0);
+            assert_eq!(relar_list_copy_index(list, 1, 0), 1);
             assert_eq!(source_weak.strong_count(), 2);
             assert!(displaced_weak.upgrade().is_none());
-            relar_list_set_index(list, 0, Int::small(7).unwrap().0);
+            assert_eq!(relar_list_set_index(list, 0, Int::small(7).unwrap().0), 1);
             assert_eq!(source_weak.strong_count(), 1);
             {
                 let borrowed = Int::borrow(relar_list_borrow_index(list, 1));
@@ -913,5 +974,41 @@ mod tests {
             drop(saved);
         }
         assert!(source_weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn list_error_words_distinguish_numeric_zero_and_allow_recovery() {
+        let list = relar_list_new();
+        let zero = Int::small(0).unwrap();
+        let last = Int::small(-1).unwrap();
+        let before_start = Int::small(-2).unwrap();
+        let huge = Int::new(BigInt::from(1_u8) << 100_u32);
+        // SAFETY: list and index inputs stay rooted. Successful zero results
+        // are immediate integers; error words are inspected without adoption,
+        // and each pending exception is cleared before the next fallible call.
+        unsafe {
+            relar_list_append(list, zero.0);
+            assert_eq!(relar_list_get(list, last.0), 1);
+            assert_eq!(relar_list_get_index(list, 0), 1);
+            assert_eq!(relar_list_borrow_index(list, 0), 1);
+            assert_eq!(relar_error_pending(), 0);
+            assert_eq!(relar_list_get(list, before_start.0), 0);
+            clear_index_error();
+            assert_eq!(relar_list_get(list, huge.0), 0);
+            clear_index_error();
+            assert_eq!(relar_list_get_index(list, 1), 0);
+            clear_index_error();
+            assert_eq!(relar_list_borrow_index(list, 1), 0);
+            clear_index_error();
+            assert_eq!(relar_list_set(list, last.0, zero.0), 1);
+            assert_eq!(relar_list_pop(list), 1);
+            assert_eq!(relar_error_pending(), 0);
+            assert_eq!(relar_list_pop(list), 0);
+            clear_index_error();
+            relar_list_append(list, zero.0);
+            assert_eq!(relar_list_pop(list), 1);
+            assert_eq!(relar_error_pending(), 0);
+            relar_list_release(list);
+        }
     }
 }
