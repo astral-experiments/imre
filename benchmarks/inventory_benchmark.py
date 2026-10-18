@@ -356,6 +356,13 @@ def benchmark(args) -> dict:
             if name in inputs and baseline["sha256"].get(name) != hashes[name]:
                 raise ValueError("baseline and current tool differ: " + name)
     inventory_baseline = None
+    inventory_baseline_source = None
+    inventory_baseline_paths = []
+    inventory_baseline_root = (
+        args.inventory_baseline_source_root.resolve(strict=True)
+        if args.inventory_baseline_source_root
+        else None
+    )
     inventory_workloads = None
     if args.inventory_baseline:
         inventory_baseline = json.loads(inputs["inventory_baseline_record"].read_text())
@@ -368,15 +375,47 @@ def benchmark(args) -> dict:
             inventory_baseline.get("example") != "inventory_reconciliation"
             or inventory_baseline.get("sha256", {}).get("inventory_binary")
             != hashes["inventory_baseline"]
-            or {
-                name: digest
-                for name, digest in inventory_baseline.get("sources", {}).items()
-                if name.startswith("inventory_reconciliation/")
-            }
-            != inventory_sources
         ):
+            raise ValueError("inventory baseline must identify the exact saved binary")
+        recorded_sources = {
+            name: digest
+            for name, digest in inventory_baseline.get("sources", {}).items()
+            if name.startswith("inventory_reconciliation/")
+        }
+        if inventory_baseline_root:
+            inventory_baseline_paths = sorted(
+                (inventory_baseline_root / "inventory_reconciliation").rglob("*.py")
+            )
+            snapshot_sources = {
+                str(path.relative_to(inventory_baseline_root)): shared.sha256(path)
+                for path in inventory_baseline_paths
+            }
+            if not recorded_sources or snapshot_sources != recorded_sources:
+                raise ValueError(
+                    "inventory baseline source snapshot must match the complete recorded package"
+                )
+            inventory_baseline_source = {
+                "snapshot_root": str(inventory_baseline_root),
+                "recorded_sources": recorded_sources,
+                "current_sources": inventory_sources,
+                "changed_sources": {
+                    name: {
+                        "baseline_sha256": recorded_sources.get(name),
+                        "current_sha256": inventory_sources.get(name),
+                    }
+                    for name in sorted(
+                        recorded_sources.keys() | inventory_sources.keys()
+                    )
+                    if recorded_sources.get(name) != inventory_sources.get(name)
+                },
+            }
+            for path in inventory_baseline_paths:
+                name = str(path.relative_to(inventory_baseline_root))
+                key = "inventory_baseline_source:" + name
+                inputs[key], hashes[key] = path, snapshot_sources[name]
+        elif recorded_sources != inventory_sources:
             raise ValueError(
-                "inventory baseline must identify unchanged source and exact saved binary"
+                "inventory baseline must identify unchanged source unless a verified source snapshot is supplied"
             )
         if (
             inventory_baseline["options"].get("lto") != ("thin" if thin else None)
@@ -532,6 +571,9 @@ def benchmark(args) -> dict:
         current_paths != source_paths
         or helpers.rust_sources(source_root) != rust_sources
         or helpers.rust_sources(REFERENCE) != rust_sources
+        or inventory_baseline_root
+        and sorted((inventory_baseline_root / "inventory_reconciliation").rglob("*.py"))
+        != inventory_baseline_paths
     ):
         raise RuntimeError("source set changed during comparison")
     for path in source_paths:
@@ -587,6 +629,7 @@ def benchmark(args) -> dict:
         }
         if inventory_baseline
         else None,
+        "inventory_baseline_source": inventory_baseline_source,
         "tools": tools,
         "execution": execution,
         "compilation": compilations,
@@ -617,7 +660,7 @@ def benchmark(args) -> dict:
                 for name, group in commands.items()
             },
             "ordering": "each complete engine permutation cycle repeats evenly; positions and directed within-round adjacent pairs balanced; warmups and cross-round predecessors not balanced; no discarded samples",
-            "filesystem": "fresh isolated cwd per engine/run; complete input bytes captured once per workload; warm page cache, buffered output with explicit flush/close, no fsync or atomic replacement",
+            "filesystem": "fresh isolated cwd per engine/run; complete input bytes captured once per workload; inputs created before timing and OS caches not deliberately flushed; buffered output with explicit flush/close, no fsync or atomic replacement",
             "output": "complete stdout/stderr/status and full directory bytes compared for every gate/warmup/sample; expected changed-file bytes once per workload, per-run complete file hashes/lengths",
             "hash_seeds": "default per-process hash seeding; report order never depends on set traversal",
             "compile_commands": compile_commands,
@@ -643,6 +686,11 @@ def main() -> None:
     parser.add_argument("--baseline-record", type=Path)
     parser.add_argument("--inventory-baseline", type=Path)
     parser.add_argument("--inventory-baseline-record", type=Path)
+    parser.add_argument(
+        "--inventory-baseline-source-root",
+        type=Path,
+        help="explicitly compare changed application source against a verified old inventory_reconciliation package snapshot",
+    )
     parser.add_argument("--rust-source-root", type=Path, default=REFERENCE)
     parser.add_argument("--python", default="python3.14")
     parser.add_argument("--clang", default="clang")
@@ -670,6 +718,8 @@ def main() -> None:
         parser.error(
             "--inventory-baseline and --inventory-baseline-record must be supplied together"
         )
+    if args.inventory_baseline_source_root and not args.inventory_baseline:
+        parser.error("--inventory-baseline-source-root requires an inventory baseline")
     engines = 4 if args.inventory_baseline else 3
     if args.samples is None:
         args.samples = 48 if args.inventory_baseline else 30
