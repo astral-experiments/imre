@@ -19,7 +19,7 @@ This is a deliberately restricted Python dialect for closed first-party programs
 | Sets | Exact `int` or `str` elements; literals, contextual `set()`, `add`, `discard`, `in`/`not in`, `len`, and iteration with unspecified order |
 | Comprehensions | Eager list, dictionary, and set comprehensions; nested `for` clauses and explicit boolean filters over the existing iteration sources; isolated target bindings |
 | Tuples | Fixed length and a type per position; literals, bounded literal indexing, unpacking into names, and `len(...)`; immutable slots |
-| Strings | Immutable UTF-8 text, literals, concatenation, equality/inequality, Unicode scalar length, no-argument whitespace `split()` and `splitlines()`, input and output |
+| Strings | Immutable UTF-8 text, literals, scalar f-strings, concatenation, equality/inequality, Unicode scalar length, no-argument whitespace `split()` and `splitlines()`, input and output |
 | Files and arguments | Explicit UTF-8 `open` in read/write mode; `read`, `write`, `flush`, `close`, `closed`; `with` cleanup; one shared mutable `sys.argv` list |
 | Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `int(int_or_bool_or_string)`; `str()` or `str(int_or_bool_or_string_or_None_or_exception)`; `len(string_or_container)`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments and `enumerate(container[, start])` at a loop or comprehension boundary |
 
@@ -40,6 +40,19 @@ Imported modules, including every package `__init__.py`, may contain only defini
 Imports are resolved statically from `.py` files and packages with `__init__.py`. Wildcards, dynamic or function-local imports, namespace packages, import cycles, external dependencies, and general standard-library imports or shadowing are rejected. The compiler recognizes sealed bindings for `typing.TextIO`, `sys.argv`, and `io.UnsupportedOperation`; these do not execute standard-library Python code. Their import aliases and first-party re-exports preserve identity. A package can re-export definitions from its children; reading an unfinished parent's definitions through a circular import is rejected. Symlinks cannot escape the module root or give one source file multiple module identities. The source-string library APIs accept sealed bindings but remain isolated from filesystem imports, which use the path-based APIs.
 
 The I/O surface is intentionally small. `input()` reads a UTF-8 line and removes its trailing LF. A preceding CR remains part of the value, matching CPython's piped input on the Linux target. `int(str)` accepts signed ASCII decimal digits with optional separators between digits and surrounding whitespace. Other bases and Unicode decimal digits in input strings are outside this prototype's input format. Surrogate escapes in non-raw string literals are rejected: Ruff's analysis AST substitutes replacement characters for them, which is unsuitable for executable semantics. Strings support `+` and local `+=`; `text.split()` groups Python whitespace and omits empty fields, returning `list[str]`. `text.splitlines()` recognizes LF, CR, CRLF, vertical tab, form feed, U+001C through U+001E, U+0085, U+2028, and U+2029. It returns no elements for empty input and no extra element for a final line break; U+001F remains ordinary text. Separators, split limits, retained line endings, other string methods, general formatting, and arbitrary codecs are not implemented. CPython's configurable integer conversion digit limit is not reproduced.
+
+## Scalar f-strings
+
+F-strings interpolate exact `int`, `bool`, `str`, `None`, and sealed builtin exception values. Ordinary, raw, triple-quoted, and adjacent literals are supported, including escaped braces, Unicode, and escaped NULs. Each field expression and its conversion complete before the next field evaluates. Nested f-strings may appear inside field expressions. Optional values require the same local narrowing as other scalar operations.
+
+```python
+def describe(name: str, quantity: int) -> str:
+    return f"{name}: {quantity} units"
+```
+
+The default conversion and `!s` use the existing sealed scalar string conversion, selected directly by the compiler. The existing restriction against rebinding builtin names still applies. An absent or explicitly empty format specification, as in `f"{quantity:}"`, is supported. Nonempty or dynamic format specifications, `!r`, `!a`, and debug `=` fields are rejected, including `f"{quantity=!s}"`. General `__format__`, `__str__`, and `__repr__` protocols remain unsupported.
+
+Raw prefixes apply only to their own literal text. Expressions inside a raw f-string still follow their ordinary string rules, and adjacent parts keep their individual prefixes. Surrogate escapes in non-raw literal text or field expressions are rejected consistently with ordinary strings; tabs and form feeds inside literal text remain data.
 
 ## UTF-8 files and process arguments
 
@@ -175,6 +188,7 @@ python3 tests/imports.py --compiler target/release/relar --runtime target/releas
 python3 tests/classes.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/containers.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/comprehensions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+python3 tests/fstrings.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/exceptions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/files.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/io.py --compiler target/release/relar --runtime target/release/librelar_runtime.a

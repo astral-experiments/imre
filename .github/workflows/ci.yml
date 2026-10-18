@@ -36,6 +36,8 @@ jobs:
         run: python3 tests/containers.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compare eager comprehensions with CPython
         run: python3 tests/comprehensions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
+      - name: Compare scalar f-strings with CPython
+        run: python3 tests/fstrings.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compare exception propagation and cleanup with CPython
         run: python3 tests/exceptions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compare output and interactive I/O with CPython
@@ -51,7 +53,7 @@ jobs:
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"
           relar_lld_dir="$(rustc --print sysroot)/lib/rustlib/$relar_target/bin"
           python3 tests/lto.py --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --rust-lld "$relar_lld_dir/rust-lld" --python python3
-          for suite in differential imports classes containers comprehensions exceptions io files; do
+          for suite in differential imports classes containers comprehensions fstrings exceptions io files; do
             python3 "tests/$suite.py" --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --lto-linker "$relar_lld_dir/gcc-ld/ld.lld" --opt-levels 3
           done
       - name: Build the runtime with AddressSanitizer
@@ -64,10 +66,10 @@ jobs:
       - name: Check generated code and runtime with AddressSanitizer
         run: |
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"
-          for suite in differential imports classes containers comprehensions exceptions io files; do
+          for suite in differential imports classes containers comprehensions fstrings exceptions io files; do
             python3 "tests/$suite.py" --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 1
           done
-          for suite in containers files; do
+          for suite in containers fstrings files; do
             python3 "tests/$suite.py" --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 0
           done
       - name: Validate the route planner against an independent oracle
