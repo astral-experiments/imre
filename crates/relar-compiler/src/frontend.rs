@@ -332,6 +332,8 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
         }
     }
     Ok(ir::Module {
+        types,
+        class_fields: classes.fields,
         functions,
         entry: entry.expect("source graph has an entry module"),
     })
@@ -752,7 +754,7 @@ impl<'a> Checker<'a> {
             .collect()
     }
 
-    /// Optional values are explicit boxes; all other storage remains invariant.
+    /// Optional conversions are explicit in the IR; other storage is invariant.
     fn coerce(&self, value: Expr, expected: Type, node: &impl Ranged) -> Result<Expr, String> {
         if value.ty == expected {
             return Ok(value);
@@ -2268,14 +2270,12 @@ impl<'a> Checker<'a> {
                 let class = &self.classes.declarations.definitions[class_id];
                 let initializer_name = class.methods[class.initializer].name.as_str();
                 let signature = self.classes.methods[class_id][initializer_name].clone();
-                let fields = class.fields.len();
                 let args = self.arguments(call, &signature.params[1..])?;
                 self.calls.insert(signature.id);
                 return Ok(Expr {
                     ty: Type::Class(class_id),
                     kind: ExprKind::Construct {
                         initializer: signature.id,
-                        fields,
                         args,
                     },
                 });

@@ -57,6 +57,11 @@ impl std::fmt::Display for Type {
 }
 
 pub(crate) struct Module {
+    /// Exact storage shapes survive checking so lowering need not erase them to
+    /// generic tagged slots. Class identities index `class_fields`; container
+    /// identities refer to this compilation's interned type universe.
+    pub types: crate::types::Types,
+    pub class_fields: Vec<Vec<Type>>,
     pub functions: Vec<Function>,
     pub entry: Function,
 }
@@ -179,7 +184,6 @@ pub(crate) enum ExprKind {
     Call(usize, Vec<Expr>),
     Construct {
         initializer: usize,
-        fields: usize,
         args: Vec<Expr>,
     },
     Exception {

@@ -215,6 +215,8 @@ mod tests {
     #[test]
     fn transitive_calls_converge_and_uncertain_cycles_stay_fallible() {
         let module = Module {
+            types: Default::default(),
+            class_fields: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(call(1, Vec::new()))]),
                 function(vec![Statement::Return(call(2, Vec::new()))]),
@@ -238,13 +240,11 @@ mod tests {
         };
         let construct = |initializer, args| Expr {
             ty: Type::Class(0),
-            kind: ExprKind::Construct {
-                initializer,
-                fields: 1,
-                args,
-            },
+            kind: ExprKind::Construct { initializer, args },
         };
         let module = Module {
+            types: Default::default(),
+            class_fields: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(integer())]),
                 function(vec![Statement::Raise(None)]),
@@ -356,8 +356,7 @@ def indirect(value: str) -> int:
     return parse(value)
 "#;
         let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
-        assert!(llvm.contains("call i64 @relar_object_get("));
-        assert!(llvm.contains("call void @relar_object_set("));
+        assert!(llvm.contains("getelementptr inbounds %class_0"));
         // Parsing, its fallible caller, and the process-entry flush stay checked.
         assert_eq!(llvm.matches("call i8 @relar_error_pending()").count(), 3);
     }

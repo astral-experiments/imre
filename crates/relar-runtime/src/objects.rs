@@ -1,339 +1,183 @@
-//! Owned slots for records, tuples, optional boxes, lists, and mappings.
+//! Typed container handles with one representation descriptor per homogeneous buffer.
 //!
-//! The compiler supplies each slot's representation kind: 0 = None (word 0),
-//! 1 = bool (word 0 or 1), 2 = tagged Int, 3 = Str pointer, 4 = ListInt
-//! pointer, and 5 = Object pointer. Only kind 5 permits a null pointer, denoting
-//! an absent optional value. All non-null pointers must be live handles of the
-//! specified kind. The compiler enforces nominal types, homogeneous sequence
-//! elements, tuple immutability, and acyclic heap type graphs.
-//!
-//! Arguments borrow their handles. Reads and pops return one owned reference;
-//! writes acquire a reference before replacing an existing owner. Fixed objects
-//! and sequences share an opaque allocation type, but their operations check the
-//! storage shape. No buffer pointer escapes, and no runtime operation calls user
-//! code. Storage access uses the parent module's single-thread, nonreentrant
-//! contract. Mutable access ends before a displaced owner is dropped.
+//! Records have separate compact native allocations. Object handles cover sequences,
+//! mappings, iterators, exceptions, and resources. All calls follow the parent's
+//! single-threaded, nonreentrant ownership contract. No growable buffer escapes;
+//! displaced owners are dropped only after mutable storage access ends.
 
 mod args;
 pub(crate) mod exceptions;
 mod files;
 mod mappings;
-
-use std::rc::Rc;
-
-use num_traits::ToPrimitive;
+pub(crate) mod records;
+mod words;
 
 use super::{
     Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish, index,
 };
+use num_traits::ToPrimitive;
+use std::rc::Rc;
+use words::{OwnedWord, Words};
 
-/// An opaque allocation whose storage shape is checked by each runtime entry.
+/// An opaque allocation for runtime-managed containers and resource state.
 pub struct Object(StorageCell<Storage>);
 
-const INLINE_FIELD_CAPACITY: usize = 4;
-
-/// Small records keep their slots in the object allocation. Unused inline
-/// capacity stays absent; larger records and sequences retain their buffers.
 enum Storage {
-    InlineFields {
-        length: usize,
-        fields: [Option<Slot>; INLINE_FIELD_CAPACITY],
-    },
-    Fields(Vec<Option<Slot>>),
-    Sequence(Vec<Slot>),
+    Sequence(Words),
     Dictionary(Box<mappings::Mapping>),
-    Set(Box<mappings::Mapping>),
+    Set(Box<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     Exception(exceptions::Exception),
     TextIO(Box<files::TextFile>),
 }
 
-// Resource state stays boxed so it cannot enlarge the existing inline-field layout.
-const _: () =
-    assert!(size_of::<Storage>() == size_of::<(usize, [Option<Slot>; INLINE_FIELD_CAPACITY])>());
-
-/// Owns one value independently of the container from which it was acquired.
-#[derive(Clone)]
-enum Slot {
-    None,
-    Bool(bool),
-    Int(Int),
-    Str(Rc<Str>),
-    ListInt(Rc<List>),
-    Object(Option<Rc<Object>>),
-}
-
-// The compiler shares one length bound for generic lists and fixed-field tuples.
-const _: () = assert!(size_of::<Slot>() >= 8 && size_of::<Option<Slot>>() >= 8);
-
-impl Slot {
-    /// Acquires a borrowed ABI value whose representation was checked by the compiler.
-    unsafe fn acquire(word: usize, kind: u32) -> Self {
-        match kind {
-            0 if word == 0 => Self::None,
-            1 if word <= 1 => Self::Bool(word == 1),
-            2 if word != 0 => {
-                // SAFETY: the caller provides a rooted integer handle for kind 2.
-                Self::Int(unsafe { (*Int::borrow(word)).clone() })
-            }
-            3 => {
-                // SAFETY: the caller provides a rooted Str handle for kind 3.
-                Self::Str(unsafe { acquire_rc(word) })
-            }
-            4 => {
-                // SAFETY: the caller provides a rooted ListInt handle for kind 4.
-                Self::ListInt(unsafe { acquire_rc(word) })
-            }
-            5 if word == 0 => Self::Object(None),
-            5 => {
-                // SAFETY: the caller provides a rooted Object handle for kind 5.
-                Self::Object(Some(unsafe { acquire_rc(word) }))
-            }
-            _ => fail("SystemError", "invalid runtime slot representation"),
-        }
-    }
-
-    /// Transfers this slot's reference into the compiler's statically typed word.
-    fn into_word(self) -> usize {
-        match self {
-            Self::None | Self::Object(None) => 0,
-            Self::Bool(value) => usize::from(value),
-            Self::Int(value) => value.into_raw(),
-            Self::Str(value) => Rc::into_raw(value) as usize,
-            Self::ListInt(value) => Rc::into_raw(value) as usize,
-            Self::Object(Some(value)) => Rc::into_raw(value) as usize,
-        }
-    }
-}
-
-/// Acquires a reference without consuming the caller's live `Rc<T>` handle.
+/// Acquires a reference without consuming the caller's live Rc handle.
 unsafe fn acquire_rc<T>(word: usize) -> Rc<T> {
     if word == 0 {
         fail("TypeError", "unexpected null runtime handle");
     }
     let pointer = word as *const T;
-    // SAFETY: the caller supplies a live Rc<T>; the increment creates our reference.
-    unsafe { Rc::increment_strong_count(pointer) };
-    // SAFETY: this consumes only the reference acquired immediately above.
-    unsafe { Rc::from_raw(pointer) }
+    // SAFETY: the caller supplies a rooted allocation of the exact type.
+    unsafe {
+        Rc::increment_strong_count(pointer);
+        Rc::from_raw(pointer)
+    }
 }
 
-/// Borrows a rooted handle and diagnoses absent optionals before dereferencing.
+/// Borrows a rooted object for one nonreentrant operation.
 unsafe fn object<'a>(pointer: *const Object) -> &'a Object {
     if pointer.is_null() {
         fail("TypeError", "cannot access an absent optional value");
     }
-    // SAFETY: the caller roots the non-null Object handle for the operation.
+    // SAFETY: the caller roots this allocation for the operation.
     unsafe { &*pointer }
 }
 
 impl Storage {
-    fn fields(&self) -> &[Option<Slot>] {
-        match self {
-            Self::InlineFields { length, fields } => &fields[..*length],
-            Self::Fields(fields) => fields,
-            _ => fail("SystemError", "expected a fixed-field object"),
-        }
-    }
-
-    fn fields_mut(&mut self) -> &mut [Option<Slot>] {
-        match self {
-            Self::InlineFields { length, fields } => &mut fields[..*length],
-            Self::Fields(fields) => fields,
-            _ => fail("SystemError", "expected a fixed-field object"),
-        }
-    }
-
-    fn sequence(&self) -> &[Slot] {
+    fn sequence(&self) -> &Words {
         match self {
             Self::Sequence(values) => values,
             _ => fail("SystemError", "expected a sequence object"),
         }
     }
-
-    fn sequence_mut(&mut self) -> &mut Vec<Slot> {
+    fn sequence_mut(&mut self) -> &mut Words {
         match self {
             Self::Sequence(values) => values,
             _ => fail("SystemError", "expected a sequence object"),
         }
     }
-}
-
-/// Allocates fixed fields without inventing values for uninitialized slots.
-#[unsafe(no_mangle)]
-pub extern "C" fn relar_object_new(field_count: usize) -> *const Object {
-    let storage = if field_count <= INLINE_FIELD_CAPACITY {
-        Storage::InlineFields {
-            length: field_count,
-            fields: std::array::from_fn(|_| None),
-        }
-    } else {
-        let mut fields = Vec::new();
-        fields
-            .try_reserve_exact(field_count)
-            .unwrap_or_else(|_| fail("MemoryError", "object allocation failed"));
-        fields.resize_with(field_count, || None);
-        Storage::Fields(fields)
-    };
-    Rc::into_raw(Rc::new(Object(StorageCell::new(storage))))
 }
 
 /// # Safety
-/// `value` must be a live Object handle or a null optional value.
+/// `value` is a live Object handle or an absent nullable value.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_object_retain(value: *const Object) {
     if !value.is_null() {
-        // SAFETY: the caller owns a live Rc<Object> reference.
+        // SAFETY: the caller roots this allocation.
         unsafe { Rc::increment_strong_count(value) };
     }
 }
 
 /// # Safety
-/// Consumes one Object reference, or accepts a null optional value.
+/// Transfers one Object reference, or accepts null during nullable/partial cleanup.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_object_release(value: *const Object) {
     if !value.is_null() {
-        // SAFETY: the caller transfers one live Rc<Object> reference.
+        // SAFETY: the caller transfers one live strong reference.
         unsafe { Rc::decrement_strong_count(value) };
     }
 }
 
-/// Returns one owned field value; its representation remains compiler-checked.
-///
-/// # Safety
-/// `value` must be a rooted fixed object, and the caller must interpret the
-/// returned word using the field's declared representation kind.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_object_get(value: *const Object, field: usize) -> usize {
-    // SAFETY: the object is rooted, cloning cannot reenter, and the result owns
-    // its value independently of the field storage.
-    let owned = unsafe {
-        object(value).0.with(|storage| {
-            Ok(storage
-                .fields()
-                .get(field)
-                .ok_or_else(|| Error::new(Kind::IndexError, "object field index out of range"))?
-                .as_ref()
-                .ok_or_else(|| Error::new(Kind::AttributeError, "object field is uninitialized"))?
-                .clone())
-        })
-    };
-    finish(owned.map(Slot::into_word), 0)
-}
-
-/// # Safety
-/// `value` must be a rooted fixed object. `word` must be a borrowed value of
-/// `kind`, matching the field's declared type; the write must preserve acyclicity.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_object_set(
-    value: *const Object,
-    field: usize,
-    word: usize,
-    kind: u32,
-) {
-    // SAFETY: the compiler checks the replacement and its representation kind.
-    let mut new = Some(unsafe { Slot::acquire(word, kind) });
-    // SAFETY: replacement cannot reenter; the old owner is dropped afterward.
-    let old = unsafe {
-        object(value).0.with_mut(|storage| {
-            Ok(storage
-                .fields_mut()
-                .get_mut(field)
-                .ok_or_else(|| Error::new(Kind::IndexError, "object field index out of range"))?
-                .replace(new.take().unwrap()))
-        })
-    };
-    drop(new);
-    finish(old.map(drop), ());
-}
-
-/// # Safety
-/// `value` must be a rooted fixed-field object.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_object_len(value: *const Object) -> usize {
-    // SAFETY: only the length escapes this nonreentrant access to the rooted object.
-    let length = unsafe { object(value).0.with(|storage| storage.fields().len()) };
-    Int::from_usize(length).into_raw()
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn relar_seq_new() -> *const Object {
+pub extern "C" fn relar_seq_new(kind: u32) -> *const Object {
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(
-        Vec::new(),
+        Words::new(kind),
     )))))
 }
 
 /// # Safety
-/// The arguments must be rooted sequence and integer handles. The caller must
-/// interpret the returned owned word using the sequence's declared element type.
+/// Root a sequence and exact canonical Int index. The result owns one value of
+/// the sequence's declared kind; pending must be checked before interpreting zero.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_seq_get(value: *const Object, at: usize) -> usize {
-    // SAFETY: the caller roots the index; conversion cannot call user code.
+    // SAFETY: the index remains rooted for conversion.
     let at = unsafe { Int::borrow(at) };
     let at = match decode_index(&at) {
         Ok(at) => at,
         Err(error) => return error.returning(0),
     };
-    // SAFETY: cloning cannot reenter, and the result owns its value independently.
+    // SAFETY: acquisition cannot reenter and only an owned word escapes.
     let owned = unsafe {
         object(value).0.with(|storage| {
             let values = storage.sequence();
-            Ok(values[index(at, values.len())?].clone())
+            Ok(values
+                .kind
+                .acquire(values.values[index(at, values.values.len())?]))
         })
     };
-    finish(owned.map(Slot::into_word), 0)
+    finish(owned.map(OwnedWord::into_word), 0)
 }
 
-/// Reads an element using a compiler-proven nonnegative, decoded index.
-///
 /// # Safety
-/// `value` must be a rooted sequence handle. `at` must be the exact nonnegative
-/// index represented as a native unsigned integer, not a tagged handle or a
-/// truncated large integer. Bounds remain checked. The result owns one value
-/// whose representation the caller must interpret using the sequence's type.
+/// `at` is the exact compiler-proven nonnegative native index, not a tagged word.
+/// The rooted sequence keeps current bounds checking and returns an owned value.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_seq_get_index(value: *const Object, at: usize) -> usize {
-    // SAFETY: cloning cannot reenter; only an independently owned value escapes.
+    // SAFETY: only an independently acquired value leaves the storage access.
     let owned = unsafe {
-        object(value)
-            .0
-            .with(|storage| storage.sequence().get(at).cloned().ok_or_else(Error::index))
+        object(value).0.with(|storage| {
+            let values = storage.sequence();
+            let word = *values.values.get(at).ok_or_else(Error::index)?;
+            Ok(values.kind.acquire(word))
+        })
     };
-    finish(owned.map(Slot::into_word), 0)
+    finish(owned.map(OwnedWord::into_word), 0)
+}
+
+/// Acquires the replacement before any existing container owner can be displaced.
+unsafe fn replacement(value: *const Object, word: usize, kind: u32) -> OwnedWord {
+    // SAFETY: only copied descriptor metadata escapes this rooted storage read.
+    let actual = unsafe {
+        object(value).0.with(|storage| {
+            let values = storage.sequence();
+            values.check_kind(kind);
+            values.kind
+        })
+    };
+    // SAFETY: the compiler supplies a borrowed word of the exact element type.
+    unsafe { actual.acquire(word) }
 }
 
 /// # Safety
-/// The arguments must be rooted sequence and integer handles. `word` must have
-/// representation `kind`, match the element type, and preserve heap acyclicity.
+/// All handles are rooted; the replacement has the sequence's declared kind and
+/// preserves heap acyclicity. Failed indexing leaves the sequence unchanged.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_seq_set(value: *const Object, at: usize, word: usize, kind: u32) {
-    // SAFETY: the compiler checks the incoming element and representation kind.
-    let mut new = Some(unsafe { Slot::acquire(word, kind) });
-    // SAFETY: the caller roots the index; conversion cannot call user code.
+    // SAFETY: the caller supplies the checked replacement and index representations.
+    let mut new = Some(unsafe { replacement(value, word, kind) });
+    // SAFETY: the caller roots the exact canonical integer index.
     let at = unsafe { Int::borrow(at) };
     let at = match decode_index(&at) {
         Ok(at) => at,
         Err(error) => return error.raise(),
     };
-    // SAFETY: replacement cannot reenter, and the old owner is returned for dropping.
+    // SAFETY: ownership leaves mutable storage before any displaced value drops.
     let old = unsafe {
         object(value).0.with_mut(|storage| {
             let values = storage.sequence_mut();
-            let at = index(at, values.len())?;
-            Ok(std::mem::replace(&mut values[at], new.take().unwrap()))
+            let at = index(at, values.values.len())?;
+            Ok(OwnedWord::from_owned(
+                std::mem::replace(&mut values.values[at], new.take().unwrap().into_word()),
+                values.kind,
+            ))
         })
     };
     drop(new);
     finish(old.map(drop), ());
 }
 
-/// Replaces an element using a compiler-proven nonnegative, decoded index.
-///
 /// # Safety
-/// `value` must be a rooted sequence, and `at` must satisfy
-/// `relar_seq_get_index`'s native-index contract. `word` must be a rooted borrowed
-/// value of `kind`, matching the element type and preserving heap acyclicity.
-/// Bounds are checked at the call; writes through aliases remain visible.
+/// As for set, but `at` is an exact nonnegative native index. Bounds are checked.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_seq_set_index(
     value: *const Object,
@@ -341,16 +185,17 @@ pub unsafe extern "C" fn relar_seq_set_index(
     word: usize,
     kind: u32,
 ) {
-    // SAFETY: the compiler checks the replacement and its representation kind.
-    let mut new = Some(unsafe { Slot::acquire(word, kind) });
-    // SAFETY: replacement cannot reenter, and the old owner is returned for dropping.
+    // SAFETY: the checked replacement is acquired before replacing its last owner.
+    let mut new = Some(unsafe { replacement(value, word, kind) });
+    // SAFETY: no reference escapes; the displaced owner is dropped afterward.
     let old = unsafe {
         object(value).0.with_mut(|storage| {
-            let slot = storage
-                .sequence_mut()
-                .get_mut(at)
-                .ok_or_else(Error::index)?;
-            Ok(std::mem::replace(slot, new.take().unwrap()))
+            let values = storage.sequence_mut();
+            let slot = values.values.get_mut(at).ok_or_else(Error::index)?;
+            Ok(OwnedWord::from_owned(
+                std::mem::replace(slot, new.take().unwrap().into_word()),
+                values.kind,
+            ))
         })
     };
     drop(new);
@@ -358,60 +203,63 @@ pub unsafe extern "C" fn relar_seq_set_index(
 }
 
 /// # Safety
-/// `value` must be a rooted sequence. `word` must have representation `kind`,
-/// match the sequence's element type, and preserve heap acyclicity.
+/// The rooted word matches this sequence's element kind and preserves acyclicity.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_seq_append(value: *const Object, word: usize, kind: u32) {
-    // SAFETY: the compiler checks the incoming element and representation kind.
-    let new = unsafe { Slot::acquire(word, kind) };
-    // SAFETY: allocation cannot reenter, and no storage reference escapes.
+    // SAFETY: acquiring first also handles values rooted only by this container.
+    let new = unsafe { replacement(value, word, kind) };
+    // SAFETY: no callback or escaped buffer can overlap this mutation.
     unsafe {
         object(value).0.with_mut(|storage| {
-            let values = storage.sequence_mut();
+            let values = &mut storage.sequence_mut().values;
             values
                 .try_reserve(1)
                 .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
-            values.push(new);
-        });
-    }
-}
-
-/// # Safety
-/// `value` must be a rooted sequence; the returned owned word has its declared
-/// element representation and must be released or transferred by the caller.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_seq_pop(value: *const Object) -> usize {
-    // SAFETY: the caller roots the sequence; removal cannot reenter and returns
-    // the element's ownership after mutable storage access has ended.
-    let owned = unsafe {
-        object(value).0.with_mut(|storage| {
-            storage
-                .sequence_mut()
-                .pop()
-                .ok_or_else(|| Error::new(Kind::IndexError, "pop from empty list"))
+            values.push(new.into_word());
         })
     };
-    finish(owned.map(Slot::into_word), 0)
 }
 
 /// # Safety
-/// `value` must be a rooted sequence object.
+/// The sequence is rooted. Success transfers its removed owner's exact word;
+/// check pending before interpreting zero, which may also be a valid element.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_seq_pop(value: *const Object) -> usize {
+    // SAFETY: only a transferred owner escapes mutable storage.
+    let owned = unsafe {
+        object(value).0.with_mut(|storage| {
+            let values = storage.sequence_mut();
+            let word = values
+                .values
+                .pop()
+                .ok_or_else(|| Error::new(Kind::IndexError, "pop from empty list"))?;
+            Ok(OwnedWord::from_owned(word, values.kind))
+        })
+    };
+    finish(owned.map(OwnedWord::into_word), 0)
+}
+
+/// # Safety
+/// `value` is a rooted concrete sequence.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_seq_len(value: *const Object) -> usize {
-    // SAFETY: only the length escapes this nonreentrant read of the rooted sequence.
-    let length = unsafe { object(value).0.with(|storage| storage.sequence().len()) };
+    // SAFETY: only the copied length leaves storage.
+    let length = unsafe {
+        object(value)
+            .0
+            .with(|storage| storage.sequence().values.len())
+    };
     debug_assert!(length <= MAX_LIST_LEN);
-    // Vec<Slot>'s allocation limit guarantees that this is a small integer.
     (length << 1) | 1
 }
 
-/// Repeats references to the same elements, preserving Python's shallow aliasing.
+/// Repetition preserves the element representation and shares referenced objects.
 ///
 /// # Safety
-/// The arguments must be rooted sequence and integer handles.
+/// Both sequence and canonical integer count remain rooted throughout the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_seq_repeat(value: *const Object, count: usize) -> *const Object {
-    // SAFETY: the caller roots the integer count for this operation.
+    // SAFETY: the caller roots the integer count.
     let count = unsafe { Int::borrow(count) };
     let count = count
         .as_small()
@@ -421,27 +269,27 @@ pub unsafe extern "C" fn relar_seq_repeat(value: *const Object, count: usize) ->
         return Error::new(Kind::OverflowError, "list repeat count is too large")
             .returning(std::ptr::null());
     };
-    if count <= 0 {
-        return relar_seq_new();
-    }
-    let count = count as usize;
-    // SAFETY: cloning cannot reenter. Only a new vector of acquired owners
-    // escapes; no references into the source storage are retained.
+    // SAFETY: only independent owned words escape; acquisition cannot reenter.
     let result = unsafe {
         object(value).0.with(|storage| {
             let values = storage.sequence();
+            let count = usize::try_from(count).unwrap_or(0);
             let length = values
+                .values
                 .len()
                 .checked_mul(count)
-                .filter(|&length| length <= isize::MAX as usize / size_of::<Slot>())
+                .filter(|&length| length <= MAX_LIST_LEN)
                 .ok_or_else(|| Error::new(Kind::MemoryError, "list is too large"))?;
-            let mut result = Vec::new();
+            let mut result = Words::new(values.kind.raw());
             result
+                .values
                 .try_reserve_exact(length)
                 .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
-            if !values.is_empty() {
+            if !values.values.is_empty() {
                 for _ in 0..count {
-                    result.extend(values.iter().cloned());
+                    for &word in &values.values {
+                        result.values.push(values.kind.acquire(word).into_word());
+                    }
                 }
             }
             Ok(result)
@@ -486,15 +334,18 @@ fn python_whitespace(value: char) -> bool {
 pub unsafe extern "C" fn relar_str_split_whitespace(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { &*value };
-    let mut result = Vec::new();
+    let mut result = Words::new(3);
     for part in value
         .split(python_whitespace)
         .filter(|part| !part.is_empty())
     {
         result
+            .values
             .try_reserve(1)
             .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
-        result.push(Slot::Str(Rc::new(Str::new(part))));
+        result
+            .values
+            .push(Rc::into_raw(Rc::new(Str::new(part))) as usize);
     }
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(result)))))
 }
@@ -508,7 +359,7 @@ pub unsafe extern "C" fn relar_str_split_whitespace(value: *const Str) -> *const
 pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { &*value };
-    let mut result = Vec::new();
+    let mut result = Words::new(3);
     let mut start = 0;
     let mut chars = value.char_indices().peekable();
     while let Some((at, character)) = chars.next() {
@@ -525,9 +376,12 @@ pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Objec
                 | '\u{2029}'
         ) {
             result
+                .values
                 .try_reserve(1)
                 .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
-            result.push(Slot::Str(Rc::new(Str::new(&value[start..at]))));
+            result
+                .values
+                .push(Rc::into_raw(Rc::new(Str::new(&value[start..at]))) as usize);
             start = at + character.len_utf8();
             if character == '\r' && chars.peek().is_some_and(|(_, next)| *next == '\n') {
                 chars.next();
@@ -537,9 +391,12 @@ pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Objec
     }
     if start < value.len() {
         result
+            .values
             .try_reserve(1)
             .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
-        result.push(Slot::Str(Rc::new(Str::new(&value[start..]))));
+        result
+            .values
+            .push(Rc::into_raw(Rc::new(Str::new(&value[start..]))) as usize);
     }
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(result)))))
 }
@@ -547,8 +404,103 @@ pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Objec
 #[cfg(test)]
 mod tests {
     use super::*;
-    use num_bigint::BigInt;
 
+    #[test]
+    fn sequence_words_preserve_niches_and_owned_snapshots() {
+        let text = Rc::new(Str::from("optional payload"));
+        let weak = Rc::downgrade(&text);
+        let word = Rc::as_ptr(&text) as usize;
+        // SAFETY: exact sequence kinds describe every scalar or pointer word;
+        // nullable strings use null directly without any wrapper allocation.
+        unsafe {
+            let optional = relar_seq_new(259);
+            relar_seq_append(optional, 0, 259);
+            relar_seq_append(optional, word, 259);
+            drop(text);
+            relar_seq_set_index(optional, 1, word, 259);
+            let saved = Rc::from_raw(relar_seq_get_index(optional, 1) as *const Str);
+            relar_seq_set_index(optional, 1, 0, 259);
+            assert_eq!(relar_seq_pop(optional), 0);
+            assert_eq!(relar_seq_get_index(optional, 0), 0);
+            relar_object_release(optional);
+            assert_eq!(saved.as_str(), "optional payload");
+            drop(saved);
+
+            for (kind, values) in [
+                (257, vec![0, 1, 2]),
+                (258, vec![0, 1, Int::small(-1).unwrap().0]),
+            ] {
+                let sequence = relar_seq_new(kind);
+                for &value in &values {
+                    relar_seq_append(sequence, value, kind);
+                }
+                let empty = relar_seq_repeat(sequence, Int::small(-1).unwrap().0);
+                assert_eq!(Int(relar_seq_len(empty)).as_small(), Some(0));
+                assert_eq!(object(empty).0.with(|s| s.sequence().kind.raw()), kind);
+                relar_object_release(empty);
+                for (index, &value) in values.iter().enumerate() {
+                    assert_eq!(relar_seq_get_index(sequence, index), value);
+                }
+                relar_object_release(sequence);
+            }
+        }
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn repeated_record_sequences_share_mutations_and_transfer_pop_owners() {
+        use records::{RecordDescriptor, relar_record_new, relar_record_release};
+        let kinds = [2, 3];
+        let descriptor = RecordDescriptor {
+            length: 2,
+            kinds: kinds.as_ptr(),
+        };
+        let text = Rc::new(Str::from("nested record root"));
+        let weak = Rc::downgrade(&text);
+        // SAFETY: metadata outlives all records and each copied record reference
+        // is independently rooted until released; field writes transfer ownership.
+        unsafe {
+            let child = relar_record_new(&descriptor);
+            child.write(Int::small(4).unwrap().into_raw());
+            child.add(1).cast::<*const Str>().write(Rc::into_raw(text));
+            let original = relar_seq_new(6);
+            relar_seq_append(original, child as usize, 6);
+            relar_record_release(child);
+            let repeated = relar_seq_repeat(original, Int::small(2).unwrap().0);
+            let popped = relar_seq_pop(original) as *mut usize;
+            relar_object_release(original);
+            popped.write(Int::small(9).unwrap().into_raw());
+            let alias = relar_seq_get(repeated, Int::small(-1).unwrap().0) as *const usize;
+            assert_eq!(Int(alias.read()).as_small(), Some(9));
+            relar_object_release(repeated);
+            relar_record_release(popped);
+            assert!(weak.upgrade().is_some());
+            relar_record_release(alias);
+        }
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn optional_bigint_sequence_replacement_releases_only_displaced_owners() {
+        use num_bigint::BigInt;
+        let integer = Rc::new(BigInt::from(1_u128 << 120));
+        let weak = Rc::downgrade(&integer);
+        let word = Rc::as_ptr(&integer) as usize;
+        // SAFETY: nullable Int word0 and canonical nonzero words are distinct;
+        // every returned BigInt owner is adopted exactly once.
+        unsafe {
+            let values = relar_seq_new(258);
+            relar_seq_append(values, word, 258);
+            drop(integer);
+            relar_seq_set_index(values, 0, word, 258);
+            let saved = Int(relar_seq_get_index(values, 0));
+            relar_seq_set_index(values, 0, 0, 258);
+            relar_object_release(values);
+            assert_eq!(saved.big().as_ref(), &BigInt::from(1_u128 << 120));
+            drop(saved);
+        }
+        assert!(weak.upgrade().is_none());
+    }
     #[test]
     fn splitlines_distinguishes_every_python_boundary_and_retains_interior_empty_lines() {
         for (source, expected) in [
@@ -569,205 +521,14 @@ mod tests {
                 result.0.with(|storage| {
                     storage
                         .sequence()
+                        .values
                         .iter()
-                        .map(|slot| match slot {
-                            Slot::Str(text) => text.to_string(),
-                            _ => unreachable!(),
-                        })
+                        .map(|&word| (&*(word as *const Str)).to_string())
                         .collect::<Vec<_>>()
                 })
             };
             assert_eq!(actual, expected);
         }
-    }
-
-    #[test]
-    fn small_fixed_fields_keep_owned_snapshots_across_the_inline_boundary() {
-        for field_count in [0, 1, 4, 5] {
-            // SAFETY: the constructor transfers its one owned reference into the Rc.
-            let record = unsafe { Rc::from_raw(relar_object_new(field_count)) };
-            // SAFETY: these nonreentrant inspections return only copied facts.
-            unsafe {
-                assert_eq!(record.0.with(|storage| storage.fields().len()), field_count);
-                assert!(
-                    record
-                        .0
-                        .with(|storage| storage.fields().iter().all(Option::is_none))
-                );
-            }
-            let text = Rc::new(Str::from("original field"));
-            let weak = Rc::downgrade(&text);
-            if field_count == 0 {
-                drop((record, text));
-            } else {
-                let word = Rc::as_ptr(&text) as usize;
-                // SAFETY: each accessed field is a string slot and all handles
-                // stay rooted. Interior fields may remain uninitialized.
-                unsafe {
-                    relar_object_set(Rc::as_ptr(&record), 0, word, 3);
-                    relar_object_set(Rc::as_ptr(&record), field_count - 1, word, 3);
-                    drop(text);
-                    // Self-assignment must acquire before releasing the old owner.
-                    relar_object_set(Rc::as_ptr(&record), field_count - 1, word, 3);
-                    let saved = Rc::from_raw(
-                        relar_object_get(Rc::as_ptr(&record), field_count - 1) as *const Str,
-                    );
-                    let replacement = Rc::new(Str::from("replacement field"));
-                    let replacement_weak = Rc::downgrade(&replacement);
-                    relar_object_set(
-                        Rc::as_ptr(&record),
-                        field_count - 1,
-                        Rc::as_ptr(&replacement) as usize,
-                        3,
-                    );
-                    drop((record, replacement));
-                    assert!(replacement_weak.upgrade().is_none());
-                    assert_eq!(saved.as_str(), "original field");
-                    drop(saved);
-                }
-            }
-            assert!(weak.upgrade().is_none());
-        }
-    }
-
-    #[test]
-    fn fixed_fields_preserve_every_heap_representation_after_the_owner_is_released() {
-        let integer = Rc::new(BigInt::from(1_u128 << 100));
-        let integer_weak = Rc::downgrade(&integer);
-        let text = Rc::new(Str::from("owned field"));
-        let text_weak = Rc::downgrade(&text);
-        // SAFETY: new returns one owned reference, transferred into each Rc.
-        let (list, nested) = unsafe {
-            (
-                Rc::from_raw(super::super::relar_list_new()),
-                Rc::from_raw(relar_object_new(0)),
-            )
-        };
-        let list_weak = Rc::downgrade(&list);
-        let nested_weak = Rc::downgrade(&nested);
-        let record = relar_object_new(7);
-        // SAFETY: all handles are rooted, field representations agree, and this graph is acyclic.
-        unsafe {
-            relar_object_set(record, 0, 0, 0);
-            relar_object_set(record, 1, 1, 1);
-            relar_object_set(record, 2, Rc::as_ptr(&integer) as usize, 2);
-            relar_object_set(record, 3, Rc::as_ptr(&text) as usize, 3);
-            relar_object_set(record, 4, Rc::as_ptr(&list) as usize, 4);
-            relar_object_set(record, 5, Rc::as_ptr(&nested) as usize, 5);
-            relar_object_set(record, 6, 0, 5);
-            assert_eq!(relar_object_get(record, 0), 0);
-            assert_eq!(relar_object_get(record, 1), 1);
-            assert_eq!(relar_object_get(record, 6), 0);
-            assert_eq!(Int(relar_object_len(record)).as_small(), Some(7));
-            drop((integer, text, list, nested));
-
-            let saved_integer = Int(relar_object_get(record, 2));
-            let saved_text = Rc::from_raw(relar_object_get(record, 3) as *const Str);
-            let saved_list = Rc::from_raw(relar_object_get(record, 4) as *const List);
-            let saved_nested = Rc::from_raw(relar_object_get(record, 5) as *const Object);
-            relar_object_set(record, 2, 1, 2);
-            relar_object_release(record);
-            assert_eq!(saved_integer.big().as_ref(), &BigInt::from(1_u128 << 100));
-            assert_eq!(saved_text.as_str(), "owned field");
-            assert!(saved_list.0.with(Vec::is_empty));
-            assert!(saved_nested.0.with(|storage| storage.fields().is_empty()));
-            drop((saved_integer, saved_text, saved_list, saved_nested));
-        }
-        assert!(integer_weak.upgrade().is_none());
-        assert!(text_weak.upgrade().is_none());
-        assert!(list_weak.upgrade().is_none());
-        assert!(nested_weak.upgrade().is_none());
-    }
-
-    #[test]
-    fn repeated_sequences_share_elements_and_pop_transfers_ownership() {
-        // SAFETY: the constructor returns an owned reference transferred into the Rc.
-        let child = unsafe { Rc::from_raw(relar_object_new(1)) };
-        let child_weak = Rc::downgrade(&child);
-        let original = relar_seq_new();
-        let zero = Int::small(0).unwrap();
-        let two = Int::small(2).unwrap();
-        let last = Int::small(-1).unwrap();
-        // SAFETY: every handle is rooted, and sequences contain only acyclic record references.
-        unsafe {
-            relar_object_set(Rc::as_ptr(&child), 0, Int::small(4).unwrap().0, 2);
-            relar_seq_append(original, Rc::as_ptr(&child) as usize, 5);
-            let repeated = relar_seq_repeat(original, two.0);
-            let popped = Rc::from_raw(relar_seq_pop(original) as *const Object);
-            relar_object_release(original);
-            drop(child);
-            relar_object_set(Rc::as_ptr(&popped), 0, Int::small(9).unwrap().0, 2);
-            let alias = Rc::from_raw(relar_seq_get(repeated, last.0) as *const Object);
-            assert_eq!(
-                Int(relar_object_get(Rc::as_ptr(&alias), 0)).as_small(),
-                Some(9)
-            );
-            assert_eq!(Int(relar_seq_len(repeated)).as_small(), Some(2));
-            let replacement = relar_object_new(1);
-            relar_object_set(replacement, 0, Int::small(7).unwrap().0, 2);
-            relar_seq_set(repeated, zero.0, replacement as usize, 5);
-            relar_object_release(replacement);
-            relar_object_release(repeated);
-            assert_eq!(
-                Int(relar_object_get(Rc::as_ptr(&popped), 0)).as_small(),
-                Some(9)
-            );
-            drop((popped, alias));
-        }
-        assert!(child_weak.upgrade().is_none());
-    }
-
-    #[test]
-    fn decoded_sequence_indices_preserve_owned_snapshots_and_self_assignment() {
-        let text = Rc::new(Str::from("saved sequence element"));
-        let weak = Rc::downgrade(&text);
-        let word = Rc::as_ptr(&text) as usize;
-        let sequence = relar_seq_new();
-        // SAFETY: the sequence roots its string throughout self-assignment, and
-        // the returned owned string remains rooted after sequence replacement.
-        unsafe {
-            relar_seq_append(sequence, word, 3);
-            drop(text);
-            relar_seq_set_index(sequence, 0, word, 3);
-            let saved = Rc::from_raw(relar_seq_get_index(sequence, 0) as *const Str);
-            let replacement = Rc::new(Str::from("replacement"));
-            relar_seq_set_index(sequence, 0, Rc::as_ptr(&replacement) as usize, 3);
-            drop(replacement);
-            assert_eq!(Int(relar_seq_len(sequence)).as_small(), Some(1));
-            relar_object_release(sequence);
-            assert_eq!(saved.as_str(), "saved sequence element");
-            assert!(weak.upgrade().is_some());
-            drop(saved);
-        }
-        assert!(weak.upgrade().is_none());
-    }
-
-    #[test]
-    fn optional_boxes_keep_present_values_alive_and_allow_absent_slots() {
-        let text = Rc::new(Str::from("optional payload"));
-        let weak = Rc::downgrade(&text);
-        let present = relar_object_new(1);
-        let optionals = relar_seq_new();
-        let zero = Int::small(0).unwrap();
-        // SAFETY: optionals are null or owned one-field Objects; their payloads are strings.
-        unsafe {
-            relar_object_set(present, 0, Rc::as_ptr(&text) as usize, 3);
-            relar_seq_append(optionals, 0, 5);
-            relar_seq_append(optionals, present as usize, 5);
-            relar_object_release(present);
-            drop(text);
-            let absent = relar_seq_get(optionals, zero.0) as *const Object;
-            assert!(absent.is_null());
-            relar_object_retain(absent);
-            relar_object_release(absent);
-            let saved = relar_seq_pop(optionals) as *const Object;
-            relar_object_release(optionals);
-            let payload = Rc::from_raw(relar_object_get(saved, 0) as *const Str);
-            relar_object_release(saved);
-            assert_eq!(payload.as_str(), "optional payload");
-            drop(payload);
-        }
-        assert!(weak.upgrade().is_none());
     }
 
     #[test]

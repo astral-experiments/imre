@@ -410,8 +410,7 @@ mod tests {
         relar_mapping_iter_next,
     };
     use crate::objects::{
-        relar_object_get, relar_object_new, relar_object_set, relar_seq_append,
-        relar_seq_get_index, relar_seq_new, relar_seq_pop, relar_seq_set_index,
+        relar_seq_append, relar_seq_get_index, relar_seq_new, relar_seq_pop, relar_seq_set_index,
     };
     use crate::{
         Int, relar_int_binary, relar_int_parse, relar_list_append, relar_list_copy_index,
@@ -615,26 +614,20 @@ mod tests {
     }
 
     #[test]
-    fn failed_object_and_sequence_updates_release_staged_values_after_access() {
+    fn failed_sequence_updates_release_staged_values_after_access() {
         let text = Rc::new(Str::new("staged"));
         let weak = Rc::downgrade(&text);
         // SAFETY: constructors transfer owners; all string/exception slots use
         // their declared representation and every getter's owner is adopted.
         unsafe {
-            let record = Rc::from_raw(relar_object_new(1));
-            assert_eq!(relar_object_get(Rc::as_ptr(&record), 0), 0);
-            drop(take_error(Kind::AttributeError));
-            relar_object_set(Rc::as_ptr(&record), 3, Rc::as_ptr(&text) as usize, 3);
-            drop(take_error(Kind::IndexError));
-            assert_eq!(Rc::strong_count(&text), 1);
-            relar_object_set(Rc::as_ptr(&record), 0, Rc::as_ptr(&text) as usize, 3);
-            let saved = Rc::from_raw(relar_object_get(Rc::as_ptr(&record), 0) as *const Str);
-            let sequence = Rc::from_raw(relar_seq_new());
+            let sequence = Rc::from_raw(relar_seq_new(3));
             relar_seq_set_index(Rc::as_ptr(&sequence), 0, Rc::as_ptr(&text) as usize, 3);
             drop(take_error(Kind::IndexError));
-            assert_eq!(Rc::strong_count(&text), 3);
+            assert_eq!(Rc::strong_count(&text), 1);
             assert_eq!(relar_seq_pop(Rc::as_ptr(&sequence)), 0);
             drop(take_error(Kind::IndexError));
+            drop(sequence);
+            let sequence = Rc::from_raw(relar_seq_new(5));
             let exception = Rc::from_raw(relar_exception_new(
                 Kind::Exception as u32,
                 Rc::as_ptr(&text),
@@ -645,7 +638,7 @@ mod tests {
             let exception =
                 Rc::from_raw(relar_seq_get_index(Rc::as_ptr(&sequence), 0) as *const Object);
             relar_exception_raise(Rc::as_ptr(&exception));
-            drop((sequence, exception, record, saved, text));
+            drop((sequence, exception, text));
             let pending = take_error(Kind::Exception);
             assert_eq!(message(&pending).as_str(), "staged");
             drop(pending);
