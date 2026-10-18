@@ -12,6 +12,80 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "concat_write_order": r"""
+from typing import TextIO
+
+def close_in_argument(stream: TextIO) -> str:
+    print("closing argument")
+    stream.close()
+    return "closed"
+
+def fail() -> str:
+    print("failing argument")
+    raise ValueError("argument failure")
+
+def remove_owner(streams: list[TextIO]) -> str:
+    streams.pop()
+    return "only receiver remains"
+
+def write_and_return(stream: TextIO) -> int:
+    try:
+        stream.write("return" + ":body\n")
+        return 7
+    finally:
+        stream.write("return" + ":finally\n")
+
+with open("output.txt", "w", encoding="utf-8") as stream:
+    stream.write("prefix" + "λ\0🙂" + "\n")
+    print(stream.write("λ" + "🙂\0"))
+    print(stream.write("" + ""))
+    print(write_and_return(stream))
+    try:
+        stream.write("must not write" + close_in_argument(stream) + "tail")
+    except ValueError:
+        print("closed after arguments")
+
+try:
+    with open("late.txt", "w", encoding="utf-8") as stream:
+        stream.write("must not write" + fail() + "tail")
+except ValueError:
+    print("no partial expression write")
+
+reader = open("input.txt", "r", encoding="utf-8")
+try:
+    reader.write("" + "")
+except OSError:
+    print("empty concat still checks write mode")
+reader.close()
+try:
+    reader.write("" + "")
+except ValueError:
+    print("empty concat still checks closed state")
+try:
+    reader.write(fail() + "must not evaluate the closed file")
+except ValueError as error:
+    print(str(error))
+
+streams: list[TextIO] = [open("rooted.txt", "w", encoding="utf-8")]
+streams[0].write(
+    "root:"
+    + str(1000000000000000000000000000000000000000000000000000000000009)
+    + remove_owner(streams)
+    + ":end"
+)
+print(len(streams))
+
+text = "large write"
+for index in range(12):
+    text = text + text
+with open("large.txt", "w", encoding="utf-8") as stream:
+    stream.write(text + "\0λ" + text)
+try:
+    with open("/dev/full", "w", encoding="utf-8") as stream:
+        stream.write("prefix" + text + "suffix")
+except OSError:
+    print("discarded write failed")
+""",
     "text_roundtrip": r"""
 with open("input.txt", "r", encoding="utf-8") as source:
     print(source.closed)

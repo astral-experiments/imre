@@ -67,6 +67,9 @@ jobs:
           for suite in differential imports classes containers comprehensions exceptions io files; do
             python3 "tests/$suite.py" --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 1
           done
+          for suite in containers files; do
+            python3 "tests/$suite.py" --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 0
+          done
       - name: Validate the route planner against an independent oracle
         run: |
           target/release/relar build examples/route_planner.py -o /tmp/route-planner --clang clang-18

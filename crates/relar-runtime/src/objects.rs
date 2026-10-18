@@ -320,6 +320,147 @@ pub unsafe extern "C" fn relar_str_concat(a: *const Str, b: *const Str) -> *cons
     Rc::into_raw(Rc::new(result))
 }
 
+/// One borrowed concatenation fragment. `usize::MAX` identifies a rooted Str
+/// handle; other lengths identify immutable, valid UTF-8 bytes, including
+/// compiler literals and caller-owned formatting scratch.
+#[repr(C)]
+pub struct StringPart {
+    data: *const u8,
+    length: usize,
+}
+
+const _: () = assert!(size_of::<StringPart>() == 16);
+
+impl StringPart {
+    /// # Safety
+    /// This fragment's handle or byte span remains readable and immutable for
+    /// the borrow. Nonempty spans contain valid UTF-8; empty spans may be null.
+    unsafe fn as_str(&self) -> &str {
+        if self.length == usize::MAX {
+            // SAFETY: the sentinel selects a rooted, correctly aligned Str handle.
+            unsafe { &*self.data.cast::<Str>() }.as_str()
+        } else if self.length == 0 {
+            ""
+        } else {
+            // SAFETY: the caller supplies this immutable, valid UTF-8 span.
+            unsafe {
+                std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.data, self.length))
+            }
+        }
+    }
+}
+
+/// Formats one integer at its expression position without allocating for small
+/// values. Null means the fragment borrows `buffer`; otherwise the result owns
+/// the fallback string referenced by `part`. Neither outcome consumes `value`.
+///
+/// # Safety
+/// `value` is a rooted canonical integer for this call. `buffer` points to 20
+/// writable bytes, and `part` to one aligned writable descriptor; they do not
+/// overlap each other or any borrowed input. Keep the written span immutable,
+/// or the returned string rooted, until the fragment's concatenation finishes.
+/// The returned nullable owner must be released once. Allocation failure is fatal.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_int_str_part(
+    value: usize,
+    buffer: *mut u8,
+    part: *mut StringPart,
+) -> *const Str {
+    // SAFETY: the caller roots this integer throughout formatting.
+    let borrowed = unsafe { Int::borrow(value) };
+    if let Some(value) = borrowed.as_small() {
+        let mut formatted = itoa::Buffer::new();
+        let formatted = formatted.format(value);
+        // SAFETY: every i64 decimal spelling fits 20 bytes. The caller's scratch
+        // and descriptor are writable and disjoint from this local formatter.
+        unsafe {
+            std::ptr::copy_nonoverlapping(formatted.as_ptr(), buffer, formatted.len());
+            part.write(StringPart {
+                data: buffer,
+                length: formatted.len(),
+            });
+        }
+        std::ptr::null()
+    } else {
+        // SAFETY: the input is still rooted; this conversion returns an independent
+        // string owner and performs arbitrary-precision formatting exactly once.
+        let result = unsafe { super::relar_int_str(value) };
+        // SAFETY: the caller provides a writable descriptor, and the returned
+        // owner keeps its immutable Str allocation alive for concatenation.
+        unsafe {
+            part.write(StringPart {
+                data: result.cast(),
+                length: usize::MAX,
+            });
+        }
+        result
+    }
+}
+
+/// Joins already evaluated fragments into one owned string without intermediate
+/// strings or a temporary fragment vector. Capacity is checked before copying.
+///
+/// # Safety
+/// `parts` is an aligned, readable array of `count` initialized descriptors,
+/// or null when `count` is zero. Each handle remains rooted and each byte span
+/// remains immutable and valid UTF-8 for this call. The array and spans obey Rust
+/// slice size limits. This private ABI borrows every input; allocation exhaustion
+/// is fatal.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_concat_parts(
+    parts: *const StringPart,
+    count: usize,
+) -> *const Str {
+    // SAFETY: this entry point has the builder's same fragment-lifetime contract.
+    Rc::into_raw(Rc::new(unsafe { concat_parts(parts, count) }))
+}
+
+/// Builds a complete concatenation before publishing it or accessing a writer.
+///
+/// # Safety
+/// The descriptors, handles, and spans obey `relar_str_concat_parts`'s contract.
+unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Str {
+    let parts = if count == 0 {
+        &[]
+    } else {
+        // SAFETY: the compiler supplies a readable descriptor array of this length.
+        unsafe { std::slice::from_raw_parts(parts, count) }
+    };
+    let length = parts.iter().fold(0_usize, |length, part| {
+        // SAFETY: every fragment remains immutable and rooted throughout this call.
+        let text = unsafe { part.as_str() };
+        length
+            .checked_add(text.len())
+            .unwrap_or_else(|| fail("MemoryError", "string is too large"))
+    });
+    let mut result = Str::try_with_capacity(length)
+        .unwrap_or_else(|_| fail("MemoryError", "string allocation failed"));
+    {
+        // SAFETY: the fresh result has capacity for the checked total. We fill
+        // its spare bytes without reading or moving it, then publish length once.
+        // At the inline capacity, the final byte also holds the tag: sequential
+        // prefixes overwrite it only with the final byte of complete valid UTF-8.
+        let output = unsafe { result.spare_capacity_mut() }
+            .as_mut_ptr()
+            .cast::<u8>();
+        let mut offset = 0;
+        for part in parts {
+            // SAFETY: no immutable input has changed since the capacity pass.
+            let text = unsafe { part.as_str() };
+            // SAFETY: the checked total bounds every prefix, and the fresh result
+            // cannot overlap any borrowed input. No uninitialized byte is read.
+            unsafe {
+                std::ptr::copy_nonoverlapping(text.as_ptr(), output.add(offset), text.len());
+            }
+            offset += text.len();
+        }
+    }
+    // SAFETY: exactly `length` bytes were initialized within capacity; joining
+    // complete UTF-8 fragments preserves UTF-8, including the full-inline case.
+    unsafe { result.set_len(length) };
+    result
+}
+
 /// Python also treats the four ASCII information separators as whitespace.
 fn python_whitespace(value: char) -> bool {
     value.is_whitespace() || matches!(value, '\u{001c}'..='\u{001f}')
@@ -404,6 +545,188 @@ pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Objec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concatenation_initializes_inline_tag_and_heap_boundaries() {
+        for (length, ending) in [
+            (0, ""),
+            (23, "é"),
+            (24, "z"),
+            (24, "\0"),
+            (24, "🦀"),
+            (25, "é"),
+            (25, "🦀"),
+        ] {
+            let padding = "a".repeat(length - ending.len());
+            let split = padding.len() / 2;
+            let owned = Rc::new(Str::new(&padding[split..]));
+            let parts = [
+                StringPart {
+                    data: padding.as_ptr(),
+                    length: split,
+                },
+                StringPart {
+                    data: std::ptr::null(),
+                    length: 0,
+                },
+                StringPart {
+                    data: Rc::as_ptr(&owned).cast(),
+                    length: usize::MAX,
+                },
+                StringPart {
+                    data: ending.as_ptr(),
+                    length: ending.len(),
+                },
+                StringPart {
+                    data: std::ptr::null(),
+                    length: 0,
+                },
+            ];
+            // SAFETY: the ASCII padding, complete UTF-8 ending, and owned handle
+            // remain immutable; null descriptors have zero length.
+            let mut result = unsafe { concat_parts(parts.as_ptr(), parts.len()) };
+            drop(owned);
+            let expected = format!("{padding}{ending}");
+            assert_eq!(result.len(), length);
+            assert_eq!(result.as_str(), expected);
+            assert_eq!(result.is_heap_allocated(), length > 24);
+            result.push_str("!");
+            assert_eq!(result.as_str(), format!("{expected}!"));
+        }
+    }
+
+    #[test]
+    fn integer_parts_outlive_inputs_and_preserve_fallback_ownership() {
+        use num_bigint::BigInt;
+        use std::mem::MaybeUninit;
+
+        for number in [
+            BigInt::from(crate::MIN_SMALL),
+            BigInt::from(crate::MAX_SMALL),
+            BigInt::from(0),
+            BigInt::from(-1),
+            BigInt::from(-1001),
+            BigInt::from(17),
+            BigInt::from(crate::MIN_SMALL) - 1,
+            BigInt::from(crate::MAX_SMALL) + 1,
+            BigInt::from(1) << 400,
+            -(BigInt::from(1) << 400_u32),
+        ] {
+            let expected = number.to_string();
+            let integer = Int::new(number);
+            let small = integer.as_small().is_some();
+            let weak_integer = if small {
+                None
+            } else {
+                // SAFETY: the integer owns this exact BigInt allocation. The
+                // temporary acquired reference is released before formatting.
+                let owner = unsafe { acquire_rc::<BigInt>(integer.0) };
+                Some(Rc::downgrade(&owner))
+            };
+            let mut buffer = [0xcc_u8; 22];
+            let scratch = buffer[1..21].as_mut_ptr();
+            let mut part = MaybeUninit::<StringPart>::uninit();
+            // SAFETY: the integer is rooted, and these disjoint caller allocations
+            // provide 20 writable bytes and one aligned descriptor.
+            let owner = unsafe { relar_int_str_part(integer.0, scratch, part.as_mut_ptr()) };
+            // SAFETY: both successful helper paths initialize the descriptor.
+            let part = unsafe { part.assume_init() };
+            assert_eq!(owner.is_null(), small);
+            assert_eq!((buffer[0], buffer[21]), (0xcc, 0xcc));
+            let owner = if small {
+                assert_eq!(part.data, scratch.cast_const());
+                assert_eq!(part.length, expected.len());
+                assert_eq!(
+                    std::str::from_utf8(&buffer[1..1 + part.length]).unwrap(),
+                    expected
+                );
+                assert!(buffer[1 + part.length..21].iter().all(|byte| *byte == 0xcc));
+                None
+            } else {
+                assert_eq!(part.data, owner.cast());
+                assert_eq!(part.length, usize::MAX);
+                assert!(buffer.iter().all(|byte| *byte == 0xcc));
+                assert_eq!(weak_integer.as_ref().unwrap().strong_count(), 1);
+                // SAFETY: the helper transfers exactly one non-null Str owner.
+                Some(unsafe { Rc::from_raw(owner) })
+            };
+            let weak_string = owner.as_ref().map(Rc::downgrade);
+            drop(integer);
+            if let Some(weak) = weak_integer {
+                assert!(weak.upgrade().is_none());
+            }
+            let prefix = "é\0[";
+            let suffix = "]🦀";
+            let parts = [
+                StringPart {
+                    data: prefix.as_ptr(),
+                    length: prefix.len(),
+                },
+                part,
+                StringPart {
+                    data: suffix.as_ptr(),
+                    length: suffix.len(),
+                },
+            ];
+            // SAFETY: caller scratch, literals, and the optional fallback owner
+            // remain immutable and live; the original integer is already gone.
+            let result =
+                unsafe { Rc::from_raw(relar_str_concat_parts(parts.as_ptr(), parts.len())) };
+            drop(owner);
+            if let Some(weak) = weak_string {
+                assert!(weak.upgrade().is_none());
+            }
+            assert_eq!(result.as_str(), format!("{prefix}{expected}{suffix}"));
+        }
+    }
+
+    #[test]
+    fn concatenation_parts_borrow_aliases_and_preserve_utf8_and_nuls() {
+        let source = Rc::new(Str::new("α\0🦀"));
+        let alias = source.clone();
+        let weak = Rc::downgrade(&source);
+        let prefix = "literalé\0:";
+        let suffix = ":a suffix exceeding inline string capacity";
+        let parts = [
+            StringPart {
+                data: prefix.as_ptr(),
+                length: prefix.len(),
+            },
+            StringPart {
+                data: Rc::as_ptr(&source).cast(),
+                length: usize::MAX,
+            },
+            StringPart {
+                data: std::ptr::null(),
+                length: 0,
+            },
+            StringPart {
+                data: Rc::as_ptr(&alias).cast(),
+                length: usize::MAX,
+            },
+            StringPart {
+                data: suffix.as_ptr(),
+                length: suffix.len(),
+            },
+        ];
+        // SAFETY: both aliases and all literal spans outlive the descriptor array's
+        // use; the call returns one independently owned concatenated string.
+        let result = unsafe { Rc::from_raw(relar_str_concat_parts(parts.as_ptr(), parts.len())) };
+        assert_eq!(Rc::strong_count(&source), 2);
+        assert_eq!(source.as_str(), "α\0🦀");
+        drop((source, alias));
+        assert!(weak.upgrade().is_none());
+        assert_eq!(
+            result.as_str(),
+            "literalé\0:α\0🦀α\0🦀:a suffix exceeding inline string capacity"
+        );
+        // SAFETY: zero count permits a null array, and empty literal spans permit
+        // null data; each returned reference is adopted and released once.
+        unsafe {
+            assert!(Rc::from_raw(relar_str_concat_parts(std::ptr::null(), 0)).is_empty());
+            assert!(Rc::from_raw(relar_str_concat_parts(&parts[2], 1)).is_empty());
+        }
+    }
 
     #[test]
     fn sequence_words_preserve_niches_and_owned_snapshots() {

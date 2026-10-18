@@ -100,6 +100,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
     let mut emitter = Emitter {
         module,
         code: String::new(),
+        entry_allocas: String::new(),
         strings: Vec::new(),
         next_value: 0,
         next_label: 0,
@@ -148,6 +149,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
 struct Emitter<'a, 'module> {
     module: &'a Module,
     code: String,
+    entry_allocas: String,
     strings: Vec<Vec<u8>>,
     next_value: usize,
     next_label: usize,
@@ -176,6 +178,15 @@ impl Emitter<'_, '_> {
         let result = format!("%v{}", self.next_value);
         self.next_value += 1;
         self.line(format!("{result} = {}", instruction.as_ref()));
+        result
+    }
+
+    /// Gives each emitted operation independent scratch with function lifetime,
+    /// including operations inside loops and duplicated finally cleanup paths.
+    fn entry_alloca(&mut self, ty: impl AsRef<str>) -> String {
+        let result = format!("%scratch{}", self.next_value);
+        self.next_value += 1;
+        writeln!(self.entry_allocas, "  {result} = alloca {}", ty.as_ref()).unwrap();
         result
     }
 
@@ -658,6 +669,7 @@ impl Emitter<'_, '_> {
     /// The caller roots arguments throughout a call. Parameters whose bindings
     /// never change can share that root; rebound parameters need their own.
     fn function(&mut self, function: &Function, symbol: &str, entry: bool) {
+        self.entry_allocas.clear();
         self.locals = function.locals.clone();
         self.small_locals = self.ranges.small_locals(function);
         let mut rebound = vec![false; self.locals.len()];
@@ -700,6 +712,7 @@ impl Emitter<'_, '_> {
         )
         .unwrap();
         self.start("entry");
+        let allocas_at = self.code.len();
         self.line(format!(
             "%function_return = alloca {}",
             function.returns.llvm()
@@ -716,11 +729,15 @@ impl Emitter<'_, '_> {
         self.line("%mapping_value_word = alloca i64");
         for (slot, &ty) in function.locals.iter().enumerate() {
             self.line(format!("%local{slot} = alloca {}", ty.llvm()));
-            self.line(format!(
-                "store {} {}, ptr %local{slot}",
-                ty.llvm(),
-                ty.initial()
-            ));
+            // Parameters initialize exactly once below. ASan can relocate their
+            // argument stores into its prologue, ahead of a default initializer.
+            if !function.params.contains(&slot) {
+                self.line(format!(
+                    "store {} {}, ptr %local{slot}",
+                    ty.llvm(),
+                    ty.initial()
+                ));
+            }
         }
         for (i, &slot) in function.params.iter().enumerate() {
             let value = Value {
@@ -731,7 +748,8 @@ impl Emitter<'_, '_> {
             if !self.borrowed_params[slot] {
                 self.retain(&value);
             }
-            // Initial publication replaces only null or an immediate value.
+            // Retains are infallible; every parameter is initialized before
+            // body evaluation or any recoverable-error cleanup can begin.
             self.line(format!(
                 "store {} {}, ptr %local{slot}",
                 value.ty.llvm(),
@@ -772,6 +790,7 @@ impl Emitter<'_, '_> {
             self.line(format!("ret {returns} {}", function.returns.initial()));
         }
         self.code.push_str("}\n");
+        self.code.insert_str(allocas_at, &self.entry_allocas);
     }
 
     fn block(&mut self, statements: &[Statement]) {
@@ -885,8 +904,12 @@ impl Emitter<'_, '_> {
                 self.release_operand(&receiver);
             }
             Statement::Expr(expression) => {
-                let value = self.expr(expression);
-                self.release(&value);
+                if let ExprKind::Builtin(Builtin::TextWrite, args) = &expression.kind {
+                    self.write_discard(args);
+                } else {
+                    let value = self.expr(expression);
+                    self.release(&value);
+                }
             }
             Statement::Return(expression) => {
                 let value = self.expr(expression);
@@ -1179,6 +1202,7 @@ impl Emitter<'_, '_> {
                 };
                 self.decode_word(word, expression.ty)
             }
+            ExprKind::Binary(Binary::Concat, ..) => self.concat(expression),
             ExprKind::Binary(op, left, right) => {
                 let direct = self.small_binary_proof(expression, left, right, *op);
                 let left_value = self.operand(left);
@@ -1263,6 +1287,126 @@ impl Emitter<'_, '_> {
             }
             ExprKind::Builtin(builtin, args) => self.builtin(builtin, args, expression.ty),
         }
+    }
+
+    /// Fuses only exact immutable string concatenation. Leaves are evaluated in
+    /// source order and computed values stay owned across later mutation/errors;
+    /// literal spans need no runtime string owner. Exact str(Int) conversions
+    /// still run at their source position, using stack bytes or an owned BigInt
+    /// string. Allocation failure is fatal, so removed allocations cannot raise
+    /// a caught error.
+    /// Unique entry-block scratch avoids loop stack growth and nested overwrite.
+    fn concat(&mut self, expression: &Expr) -> Value {
+        let expressions = concat_leaves(expression);
+        if let [left, right] = expressions.as_slice()
+            && !matches!(left.kind, ExprKind::Str(_))
+            && !matches!(right.kind, ExprKind::Str(_))
+            && integer_string_argument(left).is_none()
+            && integer_string_argument(right).is_none()
+        {
+            let left = self.operand(left);
+            let right = self.operand(right);
+            let result = self.call("relar_str_concat", Type::Str, &[&left.value, &right.value]);
+            self.release_operand(&left);
+            self.release_operand(&right);
+            return result;
+        }
+
+        let (scratch, count, owners) = self.concat_parts(expressions);
+        let value = Value {
+            ty: Type::Str,
+            operand: self.instruction(format!(
+                "call ptr @relar_str_concat_parts(ptr {scratch}, i64 {count})"
+            )),
+            small_integer: false,
+        };
+        let value = self.owned(value);
+        for owner in &owners {
+            self.release_operand(owner);
+        }
+        value
+    }
+
+    /// Evaluates and roots ordered leaves before their consumer runs. Returned
+    /// owners must survive the consumer's error check; all borrowed byte spans
+    /// reside in immutable literals or unique entry-block formatting scratch.
+    fn concat_parts(&mut self, expressions: Vec<&Expr>) -> (String, usize, Vec<Operand>) {
+        let count = expressions.len();
+        let scratch = self.entry_alloca(format!("[{count} x {{ ptr, i64 }}]"));
+        let mut owners = Vec::new();
+        for (index, expression) in expressions.into_iter().enumerate() {
+            let part = self.instruction(format!(
+                "getelementptr inbounds {{ ptr, i64 }}, ptr {scratch}, i64 {index}"
+            ));
+            if let Some(integer) = integer_string_argument(expression) {
+                let integer = self.operand(integer);
+                let buffer = self.entry_alloca("[20 x i8]");
+                let value = Value {
+                    ty: Type::Str,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_int_str_part(i64 {}, ptr {buffer}, ptr {part})",
+                        integer.value.operand
+                    )),
+                    small_integer: false,
+                };
+                // Null denotes inline bytes, not failure; release is null-safe.
+                let value = self.owned(value);
+                owners.push(Operand {
+                    value,
+                    ownership: Ownership::Owned,
+                });
+                self.release_operand(&integer);
+                continue;
+            }
+            let (data, length) = if let ExprKind::Str(value) = &expression.kind {
+                let id = self.strings.len();
+                self.strings.push(value.as_bytes().to_vec());
+                (format!("@str_{id}"), value.len().to_string())
+            } else {
+                let operand = self.operand(expression);
+                let data = operand.value.operand.clone();
+                owners.push(operand);
+                (data, "-1".to_owned())
+            };
+            let data_slot = self.instruction(format!(
+                "getelementptr inbounds {{ ptr, i64 }}, ptr {part}, i64 0, i32 0"
+            ));
+            self.line(format!("store ptr {data}, ptr {data_slot}"));
+            let length_slot = self.instruction(format!(
+                "getelementptr inbounds {{ ptr, i64 }}, ptr {part}, i64 0, i32 1"
+            ));
+            self.line(format!("store i64 {length}, ptr {length_slot}"));
+        }
+        (scratch, count, owners)
+    }
+
+    /// A discarded write result needs no Unicode character count. The runtime
+    /// still performs the same state checks and one write, with pending clear
+    /// on entry. Exact concat parts are fully assembled before file-state checks;
+    /// receiver and fragment roots survive until the status has been checked.
+    fn write_discard(&mut self, args: &[Expr]) {
+        let receiver = self.operand(&args[0]);
+        let (status, owners) = if matches!(args[1].kind, ExprKind::Binary(Binary::Concat, ..)) {
+            let (scratch, count, owners) = self.concat_parts(concat_leaves(&args[1]));
+            let status = self.instruction(format!(
+                "call i8 @relar_text_write_parts(ptr {}, ptr {scratch}, i64 {count})",
+                receiver.value.operand
+            ));
+            (status, owners)
+        } else {
+            let text = self.operand(&args[1]);
+            let status = self.instruction(format!(
+                "call i8 @relar_text_write_discard(ptr {}, ptr {})",
+                receiver.value.operand, text.value.operand
+            ));
+            (status, vec![text])
+        };
+        let failed = self.instruction(format!("icmp eq i8 {status}, 0"));
+        self.check_failed(&failed);
+        for owner in &owners {
+            self.release_operand(owner);
+        }
+        self.release_operand(&receiver);
     }
 
     fn binary(&mut self, op: Binary, left: &Value, right: &Value) -> Value {
@@ -2166,6 +2310,36 @@ fn read_only_integer(expression: &Expr) -> bool {
     }
 }
 
+/// Flattens only exact string additions, preserving both source nesting shapes'
+/// leaf order without evaluating through calls or other expression boundaries.
+fn concat_leaves(expression: &Expr) -> Vec<&Expr> {
+    fn visit<'a>(expression: &'a Expr, output: &mut Vec<&'a Expr>) {
+        if let ExprKind::Binary(Binary::Concat, left, right) = &expression.kind {
+            visit(left, output);
+            visit(right, output);
+        } else {
+            debug_assert_eq!(expression.ty, Type::Str);
+            output.push(expression);
+        }
+    }
+
+    let mut result = Vec::new();
+    visit(expression, &mut result);
+    result
+}
+
+/// Only the sealed integer conversion can use the eager scratch formatter.
+fn integer_string_argument(expression: &Expr) -> Option<&Expr> {
+    if let ExprKind::Builtin(Builtin::Str, args) = &expression.kind
+        && let [value] = args.as_slice()
+        && value.ty == Type::Int
+    {
+        Some(value)
+    } else {
+        None
+    }
+}
+
 /// Must match the descriptor kinds in the runtime. Nullable words preserve the
 /// payload's ownership operation, with bit 8 allowing the absent zero value.
 fn representation_kind(ty: Type, types: &Types) -> u32 {
@@ -2408,6 +2582,8 @@ declare void @relar_set_discard(ptr, i64)
 declare ptr @relar_set_iter(ptr)
 declare i8 @relar_mapping_iter_next(ptr, ptr, ptr)
 declare ptr @relar_str_concat(ptr, ptr)
+declare ptr @relar_str_concat_parts(ptr, i64)
+declare ptr @relar_int_str_part(i64, ptr, ptr)
 declare ptr @relar_str_split_whitespace(ptr)
 declare ptr @relar_str_splitlines(ptr)
 declare ptr @relar_int_str(i64)
@@ -2417,6 +2593,8 @@ declare ptr @relar_text_open(ptr, i32)
 declare i8 @relar_text_enter(ptr)
 declare ptr @relar_text_read(ptr)
 declare i64 @relar_text_write(ptr, ptr)
+declare i8 @relar_text_write_discard(ptr, ptr)
+declare i8 @relar_text_write_parts(ptr, ptr, i64)
 declare i8 @relar_text_flush(ptr)
 declare i8 @relar_text_close(ptr)
 declare i8 @relar_text_closed(ptr)
