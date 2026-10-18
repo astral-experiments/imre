@@ -154,7 +154,14 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::ListGet
         | Builtin::Pop
         | Builtin::DictGet
-        | Builtin::DictDelete => true,
+        | Builtin::DictDelete
+        | Builtin::SysArgv
+        | Builtin::TextOpen(_)
+        | Builtin::TextEnter
+        | Builtin::TextRead
+        | Builtin::TextWrite
+        | Builtin::TextFlush
+        | Builtin::TextClose => true,
         Builtin::Int => args
             .first()
             .is_none_or(|arg| !matches!(arg.ty, Type::Int | Type::Bool)),
@@ -162,6 +169,9 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::Append
         | Builtin::IsNone
         | Builtin::Split
+        | Builtin::SplitLines
+        | Builtin::Str
+        | Builtin::TextClosed
         | Builtin::DictGetDefault
         | Builtin::DictTryGet(_)
         | Builtin::DictContains

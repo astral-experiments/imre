@@ -10,7 +10,8 @@
 //! one owned reference unless an entry point explicitly documents a borrowed
 //! result. Release functions consume one reference. Generated code
 //! must never forge, confuse, or reuse released handles. There are no callbacks
-//! or finalizers in this runtime, so a container access cannot reenter user code.
+//! or user-defined finalizers, so a container access cannot reenter user code.
+//! Final resource release may close a file, but never installs a language error.
 //! Handles belong to one execution thread. An operation must finish before
 //! another operation accesses the same mutable storage; no storage reference or
 //! buffer address may escape. Aliased handles are allowed and observe sequential
@@ -20,7 +21,7 @@
 //! Recoverable calls enter with pending state clear. Language errors install an
 //! owned thread-local exception; generated code checks the entry point's error
 //! result immediately, before acquiring a returned word or reading out parameters.
-//! Int-list reads/pop return raw zero on failure, and Int-list replacements return
+//! Int-list reads/pop and text writes return raw zero on failure; Int-list replacements return
 //! status zero on failure or one on success. Other integer failures return tagged
 //! zero, pointer failures return null, and generic slot-word failures return an
 //! uninterpreted zero. Successful calls do not clear a preexisting exception.
@@ -39,7 +40,7 @@ use std::cell::UnsafeCell;
 use std::io::{self, BufWriter, IsTerminal, Write};
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, Once};
 
 const MIN_SMALL: i64 = -(1_i64 << 62);
 const MAX_SMALL: i64 = (1_i64 << 62) - 1;
@@ -163,6 +164,26 @@ pub struct List(StorageCell<Vec<Int>>);
 /// representation directly.
 pub type Str = compact_str::CompactString;
 
+/// LLVM's C main bypasses Rust's SIGPIPE setup. Ignore it once before publishing
+/// buffered writers, so a disconnected pipe reports an ordinary I/O error. The
+/// closed runtime has no signal API or callbacks that could change this policy.
+fn initialize_io() {
+    static INITIALIZED: Once = Once::new();
+    INITIALIZED.call_once(|| {
+        // SAFETY: SIG_IGN is a valid process-wide disposition, not a Rust callback.
+        if unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) } == libc::SIG_ERR {
+            // This fixed startup operation cannot be induced by source code.
+            // Avoid fail(), which would recursively initialize OUTPUT here.
+            let error = io::Error::last_os_error();
+            let _ = writeln!(
+                io::stderr().lock(),
+                "OSError: could not initialize I/O signals: {error}"
+            );
+            std::process::exit(1);
+        }
+    });
+}
+
 /// Standard output uses bounded block buffering for pipes and files, while
 /// terminals flush each printed line. LLVM supplies the process entry point, so
 /// input, fatal errors, and normal entry-point return explicitly flush it.
@@ -172,6 +193,7 @@ struct Output {
 }
 
 static OUTPUT: LazyLock<Mutex<Output>> = LazyLock::new(|| {
+    initialize_io();
     let stdout = io::stdout();
     let line_buffered = stdout.is_terminal();
     Mutex::new(Output {
@@ -386,6 +408,34 @@ pub extern "C" fn relar_print_bool(value: u8) {
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_print_none() {
     output_bytes(b"None");
+}
+
+/// Formats an integer without changing its ownership or arbitrary precision.
+///
+/// # Safety
+/// `value` must be a rooted canonical integer handle. Returns an owned string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_int_str(value: usize) -> *const Str {
+    // SAFETY: the caller keeps the integer alive through formatting.
+    let value = unsafe { Int::borrow(value) };
+    let text = if let Some(value) = value.as_small() {
+        Str::new(itoa::Buffer::new().format(value))
+    } else {
+        Str::from(value.big().to_string())
+    };
+    Rc::into_raw(Rc::new(text))
+}
+
+/// Returns an owned Python spelling for a compiler-validated boolean.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_bool_str(value: u8) -> *const Str {
+    Rc::into_raw(Rc::new(Str::new(if value == 0 { "False" } else { "True" })))
+}
+
+/// Returns an owned string containing Python's None spelling.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_none_str() -> *const Str {
+    Rc::into_raw(Rc::new(Str::new("None")))
 }
 
 /// # Safety
@@ -814,6 +864,30 @@ pub extern "C" fn relar_range_step_zero() {
 mod tests {
     use super::*;
     use objects::exceptions::{relar_error_pending, relar_error_take, relar_exception_matches};
+
+    #[test]
+    fn scalar_strings_preserve_integer_boundaries_and_python_spellings() {
+        for value in [
+            BigInt::from(MIN_SMALL),
+            BigInt::from(MAX_SMALL),
+            BigInt::from(0),
+            BigInt::from(1_u128 << 100),
+            -BigInt::from(1_u128 << 100),
+        ] {
+            let expected = value.to_string();
+            let value = Int::new(value);
+            // SAFETY: the integer stays rooted and the returned string transfers ownership.
+            let formatted = unsafe { Rc::from_raw(relar_int_str(value.0)) };
+            drop(value);
+            assert_eq!(formatted.as_str(), expected);
+        }
+        // SAFETY: each conversion returns one fresh owned string handle.
+        unsafe {
+            assert_eq!(Rc::from_raw(relar_bool_str(0)).as_str(), "False");
+            assert_eq!(Rc::from_raw(relar_bool_str(1)).as_str(), "True");
+            assert_eq!(Rc::from_raw(relar_none_str()).as_str(), "None");
+        }
+    }
 
     fn clear_index_error() {
         assert_eq!(relar_error_pending(), 1);

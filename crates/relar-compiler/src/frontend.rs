@@ -7,7 +7,7 @@ use ruff_text_size::Ranged;
 
 use crate::classes::Classes;
 use crate::ir::{self, Binary, Builtin, Compare, Expr, ExprKind, Statement, Type};
-use crate::modules::{Binding, DefinitionId, ModuleId, SourceGraph};
+use crate::modules::{Binding, DefinitionId, Intrinsic, ModuleId, SourceGraph};
 use crate::narrowing;
 use crate::types::Types;
 
@@ -107,6 +107,7 @@ const RESERVED: &[&str] = &[
     "print",
     "range",
     "enumerate",
+    "open",
     "None",
     "True",
     "False",
@@ -133,9 +134,17 @@ fn exception_kind(name: &str) -> Option<u32> {
         "AttributeError",
         "MemoryError",
         "SystemError",
+        "UnicodeError",
+        "UnicodeDecodeError",
+        // UnsupportedOperation belongs to io, not the builtin namespace.
+        "",
+        "FileNotFoundError",
+        "PermissionError",
+        "IsADirectoryError",
+        "NotADirectoryError",
     ]
     .iter()
-    .position(|candidate| *candidate == name)
+    .position(|candidate| !candidate.is_empty() && *candidate == name)
     .map(|kind| kind as u32)
 }
 
@@ -453,10 +462,14 @@ fn annotation_at(
             },
         );
     }
-    if let Some(Binding::Definition(definition)) = graph.resolve(module, expression)
-        && let Some(&id) = classes.ids.get(&definition)
-    {
-        return Ok(Type::Class(id));
+    match graph.resolve(module, expression) {
+        Some(Binding::Definition(definition)) => {
+            if let Some(&id) = classes.ids.get(&definition) {
+                return Ok(Type::Class(id));
+            }
+        }
+        Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
+        _ => {}
     }
     let nested =
         |expression: &ast::Expr| annotation_at(expression, graph, module, classes, types, source);
@@ -693,6 +706,14 @@ impl<'a> Checker<'a> {
     /// Resolves a fixed field without evaluating its receiver more than once.
     fn field(&mut self, attribute: &ast::ExprAttribute) -> Result<(Expr, usize, Type), String> {
         let receiver = self.expr(&attribute.value)?;
+        self.field_value(attribute, receiver)
+    }
+
+    fn field_value(
+        &self,
+        attribute: &ast::ExprAttribute,
+        receiver: Expr,
+    ) -> Result<(Expr, usize, Type), String> {
         let Type::Class(class) = receiver.ty else {
             return Err(error(
                 self.source,
@@ -1548,15 +1569,22 @@ impl<'a> Checker<'a> {
             ast::Stmt::Try(try_) if !try_.is_star => {
                 return self.try_statement(try_);
             }
+            ast::Stmt::With(with_) if !with_.is_async => {
+                return self.with_items(&with_.items, &with_.body);
+            }
             ast::Stmt::Raise(raise) if raise.cause.is_none() => {
                 let value = raise
                     .exc
                     .as_deref()
                     .map(|value| {
-                        if let ast::Expr::Name(name) = value
-                            && let Some(kind) =
-                                exception_kind(name.id.as_str()).filter(|kind| *kind != 0)
-                        {
+                        if let Some(kind) = self.exception_category(value) {
+                            if matches!(kind, 0 | 18) {
+                                return Err(error(
+                                    self.source,
+                                    value,
+                                    "this exception category is catch-only",
+                                ));
+                            }
                             Ok(Expr {
                                 ty: Type::Exception,
                                 kind: ExprKind::Exception {
@@ -1581,6 +1609,69 @@ impl<'a> Checker<'a> {
             }
         };
         Ok((result.into_iter().collect(), true))
+    }
+
+    /// Only sealed file managers are accepted. Enter precedes installation of
+    /// its own finally, while already-entered outer managers protect later
+    /// expressions. Cleanup uses an independent root if the user rebinds `as`.
+    fn with_items(
+        &mut self,
+        items: &[ast::WithItem],
+        body: &[ast::Stmt],
+    ) -> Result<(Vec<Statement>, bool), String> {
+        let Some((item, remaining)) = items.split_first() else {
+            return self.block(body);
+        };
+        let manager = self.expr_expected(&item.context_expr, Type::TextIO)?;
+        let captured = self.hidden(Type::TextIO);
+        let mut protected = Vec::new();
+        if let Some(target) = &item.optional_vars {
+            if !matches!(&**target, ast::Expr::Name(_)) {
+                return Err(error(
+                    self.source,
+                    target.as_ref(),
+                    "with targets must be local names",
+                ));
+            }
+            protected.push(self.assign(target, self.local(captured))?);
+        }
+        let (nested, falls) = self.with_items(remaining, body)?;
+        protected.extend(nested);
+        Ok((
+            vec![Statement::Scope {
+                body: vec![
+                    Statement::Assign(captured, manager),
+                    Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::TextEnter, vec![self.local(captured)]),
+                    }),
+                    Statement::Try {
+                        body: protected,
+                        handlers: Vec::new(),
+                        orelse: Vec::new(),
+                        finalbody: vec![Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(Builtin::TextClose, vec![self.local(captured)]),
+                        })],
+                    },
+                ],
+                clear: vec![captured],
+            }],
+            falls,
+        ))
+    }
+
+    /// Imported exception aliases resolve by identity; a spelling alone cannot
+    /// turn an arbitrary first-party definition into a builtin category.
+    fn exception_category(&self, expression: &ast::Expr) -> Option<u32> {
+        match self.graph.resolve(self.module, expression) {
+            Some(Binding::Intrinsic(Intrinsic::UnsupportedOperation)) => Some(19),
+            Some(_) => None,
+            None => match expression {
+                ast::Expr::Name(name) => exception_kind(name.id.as_str()),
+                _ => None,
+            },
+        }
     }
 
     /// A handler may run after any failing operation, before its assignment has
@@ -1628,9 +1719,7 @@ impl<'a> Checker<'a> {
                 expressions
                     .iter()
                     .map(|target| {
-                        if let ast::Expr::Name(name) = target
-                            && let Some(kind) = exception_kind(name.id.as_str())
-                        {
+                        if let Some(kind) = self.exception_category(target) {
                             return Ok(kind);
                         }
                         Err(error(
@@ -1822,6 +1911,15 @@ impl<'a> Checker<'a> {
     }
 
     fn expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if matches!(
+            self.graph.resolve(self.module, expression),
+            Some(Binding::Intrinsic(Intrinsic::Argv))
+        ) {
+            return Ok(Expr {
+                ty: self.types.list(Type::Str),
+                kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
+            });
+        }
         let (ty, kind) = match expression {
             ast::Expr::NumberLiteral(value) => match &value.value {
                 ast::Number::Int(value) => (Type::Int, ExprKind::Int(value.to_string())),
@@ -2103,7 +2201,14 @@ impl<'a> Checker<'a> {
                 )
             }
             ast::Expr::Attribute(attribute) => {
-                let (receiver, field, ty) = self.field(attribute)?;
+                let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::TextIO && attribute.attr.as_str() == "closed" {
+                    return Ok(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(Builtin::TextClosed, vec![receiver]),
+                    });
+                }
+                let (receiver, field, ty) = self.field_value(attribute, receiver)?;
                 (ty, ExprKind::Field(Box::new(receiver), field))
             }
             ast::Expr::Call(call) => return self.call(call),
@@ -2119,12 +2224,41 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "open") {
+            return self.open(call);
+        }
         if !call.arguments.keywords.is_empty() {
             return Err(error(
                 self.source,
                 call,
                 "keyword arguments are unsupported",
             ));
+        }
+        if let Some(kind) = self.exception_category(&call.func) {
+            if matches!(kind, 0 | 18) {
+                return Err(error(
+                    self.source,
+                    call,
+                    "this exception category is catch-only",
+                ));
+            }
+            if call.arguments.args.len() > 1 {
+                return Err(error(
+                    self.source,
+                    call,
+                    "builtin exceptions accept zero arguments or one string message",
+                ));
+            }
+            let message = call
+                .arguments
+                .args
+                .first()
+                .map(|message| self.expr_expected(message, Type::Str).map(Box::new))
+                .transpose()?;
+            return Ok(Expr {
+                ty: Type::Exception,
+                kind: ExprKind::Exception { kind, message },
+            });
         }
         if let Some(binding) = self.graph.resolve(self.module, &call.func) {
             let Binding::Definition(definition) = binding else {
@@ -2160,6 +2294,29 @@ impl<'a> Checker<'a> {
         }
         if let ast::Expr::Attribute(attribute) = &*call.func {
             let receiver = self.expr(&attribute.value)?;
+            if receiver.ty == Type::TextIO {
+                let (builtin, ty) = match (attribute.attr.as_str(), call.arguments.args.len()) {
+                    ("read", 0) => (Builtin::TextRead, Type::Str),
+                    ("write", 1) => (Builtin::TextWrite, Type::Int),
+                    ("flush", 0) => (Builtin::TextFlush, Type::None),
+                    ("close", 0) => (Builtin::TextClose, Type::None),
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "supported text-file methods are read(), write(str), flush(), and close()",
+                        ));
+                    }
+                };
+                let mut args = vec![receiver];
+                if let Some(value) = call.arguments.args.first() {
+                    args.push(self.expr_expected(value, Type::Str)?);
+                }
+                return Ok(Expr {
+                    ty,
+                    kind: ExprKind::Builtin(builtin, args),
+                });
+            }
             if let Type::Class(class) = receiver.ty {
                 if attribute.attr.as_str().starts_with("__") {
                     return Err(error(
@@ -2181,12 +2338,19 @@ impl<'a> Checker<'a> {
                 });
             }
             if receiver.ty == Type::Str
-                && attribute.attr.as_str() == "split"
+                && matches!(attribute.attr.as_str(), "split" | "splitlines")
                 && call.arguments.args.is_empty()
             {
                 return Ok(Expr {
                     ty: self.types.list(Type::Str),
-                    kind: ExprKind::Builtin(Builtin::Split, vec![receiver]),
+                    kind: ExprKind::Builtin(
+                        if attribute.attr.as_str() == "split" {
+                            Builtin::Split
+                        } else {
+                            Builtin::SplitLines
+                        },
+                        vec![receiver],
+                    ),
                 });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
@@ -2279,22 +2443,6 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
-        if let Some(kind) = exception_kind(name.id.as_str()).filter(|kind| *kind != 0) {
-            if args.len() > 1 || args.first().is_some_and(|arg| arg.ty != Type::Str) {
-                return Err(error(
-                    self.source,
-                    call,
-                    "builtin exceptions accept zero arguments or one string message",
-                ));
-            }
-            return Ok(Expr {
-                ty: Type::Exception,
-                kind: ExprKind::Exception {
-                    kind,
-                    message: args.into_iter().next().map(Box::new),
-                },
-            });
-        }
         if name.id == "print" && args.len() == 1 && args[0].ty == Type::Exception {
             return Ok(Expr {
                 ty: Type::None,
@@ -2309,8 +2457,20 @@ impl<'a> Checker<'a> {
         }
         let (builtin, ty) = match name.id.as_str() {
             "input" if args.is_empty() => (Builtin::Input, Type::Str),
-            "str" if args.len() == 1 && args[0].ty == Type::Exception => {
-                (Builtin::ExceptionMessage, Type::Str)
+            "str" if args.is_empty() => {
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Str(String::new()),
+                });
+            }
+            "str"
+                if args.len() == 1
+                    && matches!(
+                        args[0].ty,
+                        Type::Int | Type::Bool | Type::Str | Type::None | Type::Exception
+                    ) =>
+            {
+                (Builtin::Str, Type::Str)
             }
             "int"
                 if args.len() == 1 && matches!(args[0].ty, Type::Int | Type::Bool | Type::Str) =>
@@ -2348,6 +2508,70 @@ impl<'a> Checker<'a> {
         Ok(Expr {
             ty,
             kind: ExprKind::Builtin(builtin, args),
+        })
+    }
+
+    /// Explicit UTF-8 and literal mode keep this builtin's semantics sealed;
+    /// only the path is dynamic, and it is evaluated once in source order.
+    fn open(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let [path, ast::Expr::StringLiteral(mode)] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "open requires a path and literal mode 'r' or 'w'",
+            ));
+        };
+        check_string(mode, self.source)?;
+        let mode = match mode.value.to_str() {
+            "r" => 0,
+            "w" => 1,
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "open supports only literal 'r' or 'w' mode",
+                ));
+            }
+        };
+        let [encoding] = call.arguments.keywords.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "open requires only encoding='utf-8' as a keyword",
+            ));
+        };
+        if encoding
+            .arg
+            .as_ref()
+            .is_none_or(|name| name.as_str() != "encoding")
+        {
+            return Err(error(
+                self.source,
+                encoding,
+                "open requires encoding='utf-8'",
+            ));
+        }
+        let ast::Expr::StringLiteral(value) = &encoding.value else {
+            return Err(error(
+                self.source,
+                encoding,
+                "encoding must be the literal 'utf-8'",
+            ));
+        };
+        check_string(value, self.source)?;
+        if value.value.to_str() != "utf-8" {
+            return Err(error(
+                self.source,
+                encoding,
+                "encoding must be the literal 'utf-8'",
+            ));
+        }
+        Ok(Expr {
+            ty: Type::TextIO,
+            kind: ExprKind::Builtin(
+                Builtin::TextOpen(mode),
+                vec![self.expr_expected(path, Type::Str)?],
+            ),
         })
     }
 }
