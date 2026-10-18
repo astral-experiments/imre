@@ -1,0 +1,1851 @@
+{
+  "audit_script": {
+    "bytes": 21736,
+    "path": "benchmarks/local/scalar-fstrings-validation-audit.py",
+    "sha256": "8c19155f25fdedaffcabc22c9c8c0e5bcc0b7e7fb8b279c9b6e9674436e3e4c3"
+  },
+  "builds": {
+    "dev1": {
+      "artifacts": {
+        "librelar_runtime.a": {
+          "bytes": 37313342,
+          "path": "benchmarks/local/scalar-fstrings-tools-dev1/librelar_runtime.a",
+          "sha256": "0f84565ba01308c42c0cd22171d257c22d551e1c26df5cdc52be5f9bd07d62a9"
+        },
+        "librelar_runtime_asan.a": {
+          "bytes": 38193714,
+          "path": "benchmarks/local/scalar-fstrings-tools-dev1/librelar_runtime_asan.a",
+          "sha256": "833ddf686977a24b0ac8a3db82882bc1491cdb775b2d56f06148498dd3e0daac"
+        },
+        "librelar_runtime_lto.a": {
+          "bytes": 24708184,
+          "path": "benchmarks/local/scalar-fstrings-tools-dev1/librelar_runtime_lto.a",
+          "sha256": "6626eb59d0f2151041ec7f032374dc1cc86a2e7a689aae87a4150882540c7c6a"
+        },
+        "relar": {
+          "bytes": 138173664,
+          "path": "benchmarks/local/scalar-fstrings-tools-dev1/relar",
+          "sha256": "3c87047f0ff80ba7bd572fb4e327fd9b947c6323f71743ff9ae713c4dc8cae50"
+        }
+      },
+      "compiled_source_count": 26,
+      "embedded_build_script_sha256": "8ea5aefe5e90036fda94f2a02605820f671715aa5b6641eae22cb8f60791ed8c",
+      "embedded_cargo_wrapper_sha256": "74f3f3596cf89fdecf9458d74fc47cfcf09533b8c10f3b569470f74ddbc80fd8",
+      "record": {
+        "bytes": 681523,
+        "path": "benchmarks/local/scalar-fstrings-tools-dev1/build-record.json",
+        "sha256": "a7c6a2730901f0e86d1a084691e2fdce5feb1a24edb0abbf7e7543ed8df103fa"
+      },
+      "recorded_head": "6cac354f4157389068e51daadd44d995c41363af"
+    },
+    "final": {
+      "artifacts": {
+        "librelar_runtime.a": {
+          "bytes": 37313342,
+          "path": "benchmarks/local/scalar-fstrings-tools-final/librelar_runtime.a",
+          "sha256": "0f84565ba01308c42c0cd22171d257c22d551e1c26df5cdc52be5f9bd07d62a9"
+        },
+        "librelar_runtime_asan.a": {
+          "bytes": 38193714,
+          "path": "benchmarks/local/scalar-fstrings-tools-final/librelar_runtime_asan.a",
+          "sha256": "833ddf686977a24b0ac8a3db82882bc1491cdb775b2d56f06148498dd3e0daac"
+        },
+        "librelar_runtime_lto.a": {
+          "bytes": 24708184,
+          "path": "benchmarks/local/scalar-fstrings-tools-final/librelar_runtime_lto.a",
+          "sha256": "6626eb59d0f2151041ec7f032374dc1cc86a2e7a689aae87a4150882540c7c6a"
+        },
+        "relar": {
+          "bytes": 138173664,
+          "path": "benchmarks/local/scalar-fstrings-tools-final/relar",
+          "sha256": "3c87047f0ff80ba7bd572fb4e327fd9b947c6323f71743ff9ae713c4dc8cae50"
+        }
+      },
+      "compiled_source_count": 26,
+      "embedded_build_script_sha256": "8ea5aefe5e90036fda94f2a02605820f671715aa5b6641eae22cb8f60791ed8c",
+      "embedded_cargo_wrapper_sha256": "74f3f3596cf89fdecf9458d74fc47cfcf09533b8c10f3b569470f74ddbc80fd8",
+      "record": {
+        "bytes": 681167,
+        "path": "benchmarks/local/scalar-fstrings-tools-final/build-record.json",
+        "sha256": "eb946a0a4504886180786f61ff8a49baa3ca1b511ef3f809443cb074b82edb7a"
+      },
+      "recorded_head": "e9c2a879ff258892ffe8d2c6862b5fa7688eea57"
+    }
+  },
+  "cargo_validation": {
+    "commands": {
+      "clippy": {
+        "command": [
+          "sh",
+          "/tmp/relar-cargo.sh",
+          "clippy",
+          "--workspace",
+          "--all-targets",
+          "--locked",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "log": {
+          "bytes": 242,
+          "path": "benchmarks/local/scalar-fstrings-cargo-validation/clippy.log",
+          "sha256": "2da22083e54eeea3b931d863784a3eb0acb6c1c7c688fe1b3176864c0f937bec"
+        },
+        "returncode": 0
+      },
+      "fmt": {
+        "command": [
+          "sh",
+          "/tmp/relar-cargo.sh",
+          "fmt",
+          "--all",
+          "--check"
+        ],
+        "log": {
+          "bytes": 0,
+          "path": "benchmarks/local/scalar-fstrings-cargo-validation/fmt.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "returncode": 0
+      },
+      "unit": {
+        "command": [
+          "sh",
+          "/tmp/relar-cargo.sh",
+          "test",
+          "--workspace",
+          "--locked"
+        ],
+        "log": {
+          "bytes": 7102,
+          "path": "benchmarks/local/scalar-fstrings-cargo-validation/unit.log",
+          "sha256": "076d0fa1baa85b049af7e92162ba61d3e95712f865407e660018b315e9d1d392"
+        },
+        "returncode": 0
+      }
+    },
+    "compiler_unit_tests": 25,
+    "provenance_limit": "The Cargo runner retained exact command, exit status, and log hashes, but no per-command source snapshot. Development and final build records independently contain identical compiled-source snapshots matching the measured commit.",
+    "record": {
+      "bytes": 1269,
+      "path": "benchmarks/local/scalar-fstrings-cargo-validation/record.json",
+      "sha256": "cb325193b19b5b7894161b92cc840a8675e8b414e2613dc5a6829a912f143814"
+    },
+    "runner": {
+      "bytes": 1129,
+      "path": "benchmarks/local/scalar-fstrings-cargo-checks.py",
+      "sha256": "9a68fa3f4e382a543f29763d355001890f0b4a6dfcd4744852b265f05eba9d1e"
+    },
+    "runtime_unit_tests": 40,
+    "unit_tests": 65
+  },
+  "clean_source_checkout_verified": true,
+  "compiled_sources_match_measured_commit": true,
+  "external_tool_provenance_note": "Suite receipts retained Python/Clang version strings, not executable hashes. These hashes describe the current files and do not retroactively establish a pre-run hash receipt.",
+  "external_tools_current_hash_observations": [
+    {
+      "bytes": 32359056,
+      "path": "/home/dev-user/.local/bin/python3.14",
+      "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+    },
+    {
+      "bytes": 140592,
+      "path": "/usr/bin/clang-18",
+      "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+    }
+  ],
+  "final_and_development_artifacts_byte_identical": true,
+  "inventory_sanitizer_oracle": {
+    "cases": 176,
+    "complete_output_status_filesystem_verified": true,
+    "device_checks": 1,
+    "engines": [
+      "cpython",
+      "relar",
+      "rust_bigint"
+    ],
+    "oracle": {
+      "bytes": 1036877,
+      "path": "benchmarks/local/scalar-fstrings-inventory-asan/validation.json",
+      "sha256": "0e922427c83627cc46fdea5495e620889a5ae7e027bf54b61388c30917c8971b"
+    },
+    "record": {
+      "bytes": 5529,
+      "path": "benchmarks/local/scalar-fstrings-inventory-asan/record.json",
+      "sha256": "ee2f5338a5b20e4c734382e1c1eafa193366f37de01b59f1241768169db57b81"
+    },
+    "runner": {
+      "bytes": 2510,
+      "path": "benchmarks/local/scalar-fstrings-inventory-asan.py",
+      "sha256": "5a164d84389f4aa98d65dee1d59c03cd75dd41c52ad71605e991e0fbbfdc77c2"
+    },
+    "rust_reference_current_file": {
+      "bytes": 1562488,
+      "path": "benchmarks/local/inventory-reference-final-normal/inventory-bigint",
+      "sha256": "dae07835587c65d3b1d82558e5eebb9f2cc11fc549f7ab5876570132c932f2f5"
+    },
+    "sanitizer_diagnostics_absent": true,
+    "sanitizer_scope": "Generated Relar code and runtime dependencies; the prebuilt Rust standard library was not instrumented.",
+    "successful_cases": 127,
+    "terminal_error_cases": 49
+  },
+  "measured_source_commit": "e9c2a879ff258892ffe8d2c6862b5fa7688eea57",
+  "retained_local_evidence_paths": [
+    "benchmarks/local/scalar-fstrings-cargo-checks.py",
+    "benchmarks/local/scalar-fstrings-cargo-validation/clippy.log",
+    "benchmarks/local/scalar-fstrings-cargo-validation/fmt.log",
+    "benchmarks/local/scalar-fstrings-cargo-validation/record.json",
+    "benchmarks/local/scalar-fstrings-cargo-validation/unit.log",
+    "benchmarks/local/scalar-fstrings-inventory-asan.py",
+    "benchmarks/local/scalar-fstrings-inventory-asan/build.log",
+    "benchmarks/local/scalar-fstrings-inventory-asan/inventory_reconciliation.ll",
+    "benchmarks/local/scalar-fstrings-inventory-asan/record.json",
+    "benchmarks/local/scalar-fstrings-inventory-asan/validate.log",
+    "benchmarks/local/scalar-fstrings-inventory-asan/validation.json",
+    "benchmarks/local/scalar-fstrings-tools-dev1/asan.log",
+    "benchmarks/local/scalar-fstrings-tools-dev1/build-record.json",
+    "benchmarks/local/scalar-fstrings-tools-dev1/ordinary.log",
+    "benchmarks/local/scalar-fstrings-tools-dev1/thinlto.log",
+    "benchmarks/local/scalar-fstrings-tools-final/asan.log",
+    "benchmarks/local/scalar-fstrings-tools-final/build-record.json",
+    "benchmarks/local/scalar-fstrings-tools-final/ordinary.log",
+    "benchmarks/local/scalar-fstrings-tools-final/thinlto.log",
+    "benchmarks/local/scalar-fstrings-validate.py",
+    "benchmarks/local/scalar-fstrings-validation-audit.py",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/classes.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/classes.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/comprehensions.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/comprehensions.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/containers.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/containers.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/differential.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/differential.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/exceptions.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/exceptions.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/files.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/files.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/fstrings.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/fstrings.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/imports.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/imports.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/io.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/io.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/results.json",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/classes.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/classes.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/comprehensions.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/comprehensions.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/containers.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/containers.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/differential.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/differential.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/exceptions.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/exceptions.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/files.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/files.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/fstrings.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/fstrings.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/imports.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/imports.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/io.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/io.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/results.json",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/classes.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/classes.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/comprehensions.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/comprehensions.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/containers.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/containers.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/differential.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/differential.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/exceptions.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/exceptions.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/files.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/files.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/fstrings.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/fstrings.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/imports.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/imports.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/io.stderr",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/io.stdout",
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/results.json",
+    "benchmarks/local/scalar-fstrings-validation-fstrings/asan/fstrings.stderr",
+    "benchmarks/local/scalar-fstrings-validation-fstrings/asan/fstrings.stdout",
+    "benchmarks/local/scalar-fstrings-validation-fstrings/asan/results.json",
+    "benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/fstrings.stderr",
+    "benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/fstrings.stdout",
+    "benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/results.json"
+  ],
+  "schema": "relar-scalar-fstrings-validation-audit-v1",
+  "suite_count_note": "Counts include compile-time rejection checks, and are not counts of native process executions. No separate ThinLTO CLI suite is included.",
+  "suite_modes": {
+    "asan": {
+      "optimization_levels": [
+        "0",
+        "1"
+      ],
+      "reported_checks": 760,
+      "suites": {
+        "classes": {
+          "reported_checks": 58,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18916,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/results.json",
+            "sha256": "2e8952164e9ff7b267b974058a15ced5becf4ba9c01fa899abf1a8f3027cdd54"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/classes.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 82,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/classes.stdout",
+            "sha256": "e47b9565fcc16d950719c1022a989bc193f1bf95ccab7e1b6fcbf39b1e0209f4"
+          }
+        },
+        "comprehensions": {
+          "reported_checks": 65,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18916,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/results.json",
+            "sha256": "2e8952164e9ff7b267b974058a15ced5becf4ba9c01fa899abf1a8f3027cdd54"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/comprehensions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 90,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/comprehensions.stdout",
+            "sha256": "4894fa869b3377f0e30b68e96bb24fa8a02458a07eef6ed0b99fcccb8cfb1dce"
+          }
+        },
+        "containers": {
+          "reported_checks": 282,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18916,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/results.json",
+            "sha256": "2e8952164e9ff7b267b974058a15ced5becf4ba9c01fa899abf1a8f3027cdd54"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/containers.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 95,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/containers.stdout",
+            "sha256": "520daea6d11faaa8597400848bc9712b09aefc3a8754389695a87b6cb7074490"
+          }
+        },
+        "differential": {
+          "reported_checks": 112,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18916,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/results.json",
+            "sha256": "2e8952164e9ff7b267b974058a15ced5becf4ba9c01fa899abf1a8f3027cdd54"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/differential.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 103,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/differential.stdout",
+            "sha256": "c4763d7e4a31f958d29de7c58ee3f6d5e7936ec8f731706dea5fea6c4fc6b26d"
+          }
+        },
+        "exceptions": {
+          "reported_checks": 48,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18916,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/results.json",
+            "sha256": "2e8952164e9ff7b267b974058a15ced5becf4ba9c01fa899abf1a8f3027cdd54"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/exceptions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 93,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/exceptions.stdout",
+            "sha256": "e8a9330b9803894544e8e925fcf9047317917337fd7631e6f4114094cd3a0944"
+          }
+        },
+        "files": {
+          "reported_checks": 74,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18916,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/results.json",
+            "sha256": "2e8952164e9ff7b267b974058a15ced5becf4ba9c01fa899abf1a8f3027cdd54"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/files.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 75,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/files.stdout",
+            "sha256": "b5a5843eee34f5ac820c8ef3a14789cf687fab67bf5d163e63f879b3f36a1bda"
+          }
+        },
+        "fstrings": {
+          "reported_checks": 50,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 9535,
+            "path": "benchmarks/local/scalar-fstrings-validation-fstrings/asan/results.json",
+            "sha256": "96921aed6a31aef8ec9fc67abe4b85cc4b8a45e27c72829310f241d54cb2d43f"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-fstrings/asan/fstrings.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 85,
+            "path": "benchmarks/local/scalar-fstrings-validation-fstrings/asan/fstrings.stdout",
+            "sha256": "1e322a7f7ecdde04b465763a3fbda392e722dcac525afa1041cefe21282784f8"
+          }
+        },
+        "imports": {
+          "reported_checks": 51,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18916,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/results.json",
+            "sha256": "2e8952164e9ff7b267b974058a15ced5becf4ba9c01fa899abf1a8f3027cdd54"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/imports.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 24,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/imports.stdout",
+            "sha256": "29d9fdaf4f4e6d33d6e79f22dbf01c96bae4db4e8b3d1e2fae090b4b6890d835"
+          }
+        },
+        "io": {
+          "reported_checks": 20,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18916,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/results.json",
+            "sha256": "2e8952164e9ff7b267b974058a15ced5becf4ba9c01fa899abf1a8f3027cdd54"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/io.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 65,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/io.stdout",
+            "sha256": "c7db1ba9ef054c6ebc2489f9b66c30e8c4ff823b6e39dce924f6fdf75ec44444"
+          }
+        }
+      }
+    },
+    "ordinary": {
+      "optimization_levels": [
+        "0",
+        "3"
+      ],
+      "reported_checks": 760,
+      "suites": {
+        "classes": {
+          "reported_checks": 58,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18743,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/results.json",
+            "sha256": "9ef784e44f3fc67cc35152901cff16198942874dd30e46492fec4bc974ee9843"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/classes.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 83,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/classes.stdout",
+            "sha256": "17b5e0bb55bf9b355d570c75aeb14d06b943d145fd3c750ef0318eb2452fd116"
+          }
+        },
+        "comprehensions": {
+          "reported_checks": 65,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18743,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/results.json",
+            "sha256": "9ef784e44f3fc67cc35152901cff16198942874dd30e46492fec4bc974ee9843"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/comprehensions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 91,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/comprehensions.stdout",
+            "sha256": "032c0899953819f366ee418fb6fe57c25b4855e7b31a4b8ea7e012f59833fc4b"
+          }
+        },
+        "containers": {
+          "reported_checks": 282,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18743,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/results.json",
+            "sha256": "9ef784e44f3fc67cc35152901cff16198942874dd30e46492fec4bc974ee9843"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/containers.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 96,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/containers.stdout",
+            "sha256": "c004e23b9859c05e252ffeceaadad3a26610e7056bb75f00429df4c2e222b00b"
+          }
+        },
+        "differential": {
+          "reported_checks": 112,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18743,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/results.json",
+            "sha256": "9ef784e44f3fc67cc35152901cff16198942874dd30e46492fec4bc974ee9843"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/differential.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 104,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/differential.stdout",
+            "sha256": "bd6213d537870f3ce12fc4012cb254b21ddf4ecd47aea1515c035139a7d6c75e"
+          }
+        },
+        "exceptions": {
+          "reported_checks": 48,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18743,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/results.json",
+            "sha256": "9ef784e44f3fc67cc35152901cff16198942874dd30e46492fec4bc974ee9843"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/exceptions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 94,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/exceptions.stdout",
+            "sha256": "2acc8d882974554d58247a8f2b8a536de2882591a83438ca391f35802fa7cf15"
+          }
+        },
+        "files": {
+          "reported_checks": 74,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18743,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/results.json",
+            "sha256": "9ef784e44f3fc67cc35152901cff16198942874dd30e46492fec4bc974ee9843"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/files.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 76,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/files.stdout",
+            "sha256": "150a6cd78bf0167d4285eb9f1d0e22bcff040c2064ac466c5ade34975c304a35"
+          }
+        },
+        "fstrings": {
+          "reported_checks": 50,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 9516,
+            "path": "benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/results.json",
+            "sha256": "74211df166c943f344ed3d7e11e87e0f9c7aca0b5277c24705730fef57bd83f0"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/fstrings.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 86,
+            "path": "benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/fstrings.stdout",
+            "sha256": "4f06dbdb68207a5293f0c8af4558a08f00dc1ca63d978e25b938a9bead6fd60d"
+          }
+        },
+        "imports": {
+          "reported_checks": 51,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18743,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/results.json",
+            "sha256": "9ef784e44f3fc67cc35152901cff16198942874dd30e46492fec4bc974ee9843"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/imports.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 24,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/imports.stdout",
+            "sha256": "29d9fdaf4f4e6d33d6e79f22dbf01c96bae4db4e8b3d1e2fae090b4b6890d835"
+          }
+        },
+        "io": {
+          "reported_checks": 20,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 18743,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/results.json",
+            "sha256": "9ef784e44f3fc67cc35152901cff16198942874dd30e46492fec4bc974ee9843"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/io.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 66,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/io.stdout",
+            "sha256": "ff6b20527ed1fc9c431c42fafb7f1f6b7f32182e53ec07ab1cf5d5241f1c23e3"
+          }
+        }
+      }
+    },
+    "thinlto": {
+      "optimization_levels": [
+        "3"
+      ],
+      "reported_checks": 573,
+      "suites": {
+        "classes": {
+          "reported_checks": 56,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 20059,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/results.json",
+            "sha256": "0c00b7c59a5893a3e1dfed9cbb0caac9b664d366fb7d965d27c7529d3488c886"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/classes.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 78,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/classes.stdout",
+            "sha256": "724d8cc23455331074e5b350ef4a08ea8a4ace147e236f59b60bd8b511eae8f3"
+          }
+        },
+        "comprehensions": {
+          "reported_checks": 52,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 20059,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/results.json",
+            "sha256": "0c00b7c59a5893a3e1dfed9cbb0caac9b664d366fb7d965d27c7529d3488c886"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/comprehensions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 86,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/comprehensions.stdout",
+            "sha256": "6ec2c9414b0c8d28da95a5b3431f7075ce585fd94c0d47f93d106b88234142ad"
+          }
+        },
+        "containers": {
+          "reported_checks": 212,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 20059,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/results.json",
+            "sha256": "0c00b7c59a5893a3e1dfed9cbb0caac9b664d366fb7d965d27c7529d3488c886"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/containers.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 91,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/containers.stdout",
+            "sha256": "e8e55df202e6fc0c7fcaa0c5ad4fa2d95dd0cb18ab6c637ecc5d3e11e5a8a14e"
+          }
+        },
+        "differential": {
+          "reported_checks": 72,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 20059,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/results.json",
+            "sha256": "0c00b7c59a5893a3e1dfed9cbb0caac9b664d366fb7d965d27c7529d3488c886"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/differential.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 98,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/differential.stdout",
+            "sha256": "b190ebd6e7203c28c17ec7faa0c0f5d8c6decd1e773be99ae0c98e060f7b79ad"
+          }
+        },
+        "exceptions": {
+          "reported_checks": 32,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 20059,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/results.json",
+            "sha256": "0c00b7c59a5893a3e1dfed9cbb0caac9b664d366fb7d965d27c7529d3488c886"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/exceptions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 89,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/exceptions.stdout",
+            "sha256": "4be6f9ad9a05c34549de276fa89593d1ea332cc66be7ccb7b0216027cb0ea3f3"
+          }
+        },
+        "files": {
+          "reported_checks": 52,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 20059,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/results.json",
+            "sha256": "0c00b7c59a5893a3e1dfed9cbb0caac9b664d366fb7d965d27c7529d3488c886"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/files.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 71,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/files.stdout",
+            "sha256": "3dd64d3fc327432c225d6548a6ec9041a05e068128093bc969f1978319f64cc1"
+          }
+        },
+        "fstrings": {
+          "reported_checks": 40,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 20059,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/results.json",
+            "sha256": "0c00b7c59a5893a3e1dfed9cbb0caac9b664d366fb7d965d27c7529d3488c886"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/fstrings.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 81,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/fstrings.stdout",
+            "sha256": "184c59375e0e29053e2857f5a4564a6b70174a286c91fc28388dce2e2a070ef1"
+          }
+        },
+        "imports": {
+          "reported_checks": 47,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 20059,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/results.json",
+            "sha256": "0c00b7c59a5893a3e1dfed9cbb0caac9b664d366fb7d965d27c7529d3488c886"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/imports.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 24,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/imports.stdout",
+            "sha256": "f83498e79d485a45cf5d880badfac061b59ec07ac7f8ea00dd9723e7ac0d2cd0"
+          }
+        },
+        "io": {
+          "reported_checks": 10,
+          "returncode": 0,
+          "source_record": {
+            "bytes": 20059,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/results.json",
+            "sha256": "0c00b7c59a5893a3e1dfed9cbb0caac9b664d366fb7d965d27c7529d3488c886"
+          },
+          "stderr": {
+            "bytes": 0,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/io.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "bytes": 61,
+            "path": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/io.stdout",
+            "sha256": "8db850d1783de29fdc0dc48daec150b64f1b10efdcfa1ee0ed8e7bd2dc5e0fc7"
+          }
+        }
+      }
+    }
+  },
+  "superseded_failed_entries": [
+    {
+      "mode": "ordinary",
+      "reason": "The accepted scalars fixture rebound builtin str, which the pre-existing language contract rejects. The fixture was corrected and builtin rebinding moved to an explicit rejection; compiler behavior was unchanged.",
+      "replacement_record": {
+        "bytes": 9516,
+        "path": "benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/results.json",
+        "sha256": "74211df166c943f344ed3d7e11e87e0f9c7aca0b5277c24705730fef57bd83f0"
+      },
+      "returncode": 1,
+      "source_record": {
+        "bytes": 18743,
+        "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/results.json",
+        "sha256": "9ef784e44f3fc67cc35152901cff16198942874dd30e46492fec4bc974ee9843"
+      },
+      "stderr": {
+        "bytes": 490,
+        "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/fstrings.stderr",
+        "sha256": "a28cf06782f5233c33203b15e12639f68b20b32b134506605574113509b4959b"
+      },
+      "stdout": {
+        "bytes": 0,
+        "path": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/fstrings.stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "suite": "fstrings"
+    },
+    {
+      "mode": "asan",
+      "reason": "The accepted scalars fixture rebound builtin str, which the pre-existing language contract rejects. The fixture was corrected and builtin rebinding moved to an explicit rejection; compiler behavior was unchanged.",
+      "replacement_record": {
+        "bytes": 9535,
+        "path": "benchmarks/local/scalar-fstrings-validation-fstrings/asan/results.json",
+        "sha256": "96921aed6a31aef8ec9fc67abe4b85cc4b8a45e27c72829310f241d54cb2d43f"
+      },
+      "returncode": 1,
+      "source_record": {
+        "bytes": 18916,
+        "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/results.json",
+        "sha256": "2e8952164e9ff7b267b974058a15ced5becf4ba9c01fa899abf1a8f3027cdd54"
+      },
+      "stderr": {
+        "bytes": 490,
+        "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/fstrings.stderr",
+        "sha256": "eb124d8fd5f2cbd72e22c1d609980ea9c1cd0175ace94cf7181c8b4076cfc87b"
+      },
+      "stdout": {
+        "bytes": 0,
+        "path": "benchmarks/local/scalar-fstrings-validation-dev1/asan/fstrings.stdout",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "suite": "fstrings"
+    }
+  ],
+  "test_source_reconciliation": {
+    "changed_paths": {
+      "tests/fixtures/fstrings/scalars.py": {
+        "corrected_sha256": "a3c5ce51ac92665fad1be349c869058dca60432b6626a519b4a80dda6ab13e1f",
+        "initial_sha256": "b5f8a94372a1e3c04e8e4b792bbc6b515e542e80d04cd113eefe040451e63dfb"
+      },
+      "tests/fstrings.py": {
+        "corrected_sha256": "9c5299ed862d58cdd1686a5214de6335b493b7bff569e11a5cd3715c9b8006cd",
+        "initial_sha256": "5f1b70978849fc542012d3a5ac48cbf28ed4c15213089716ab3dbbedaf54981f"
+      }
+    },
+    "current_captured_test_sources": 61,
+    "current_sources_match_measured_commit": true,
+    "initial_changed_file_contents_retained": false,
+    "initial_changed_file_evidence": "The initial runner recorded source hashes and failure logs, not copies of the two uncommitted test files.",
+    "selected_existing_suites_depend_only_on_unchanged_paths": true,
+    "unchanged_captured_test_sources": 59
+  },
+  "total_reported_suite_checks": 2093,
+  "verified_committed_sources": [
+    "Cargo.lock",
+    "Cargo.toml",
+    "benchmarks/batch_benchmark.py",
+    "benchmarks/batch_validate.py",
+    "benchmarks/benchmark.py",
+    "benchmarks/compare.py",
+    "benchmarks/dependency_benchmark.py",
+    "benchmarks/dependency_compare.py",
+    "benchmarks/dependency_profile.py",
+    "benchmarks/dependency_validate.py",
+    "benchmarks/exception_benchmark.py",
+    "benchmarks/incremental_benchmark.py",
+    "benchmarks/incremental_validate.py",
+    "benchmarks/inventory_benchmark.py",
+    "benchmarks/inventory_profile.py",
+    "benchmarks/inventory_validate.py",
+    "benchmarks/layout_benchmark.py",
+    "benchmarks/layout_profile.py",
+    "benchmarks/manifest_benchmark.py",
+    "benchmarks/manifest_validate.py",
+    "benchmarks/validate.py",
+    "crates/relar-compiler/Cargo.toml",
+    "crates/relar-compiler/src/analysis.rs",
+    "crates/relar-compiler/src/classes.rs",
+    "crates/relar-compiler/src/effects.rs",
+    "crates/relar-compiler/src/frontend.rs",
+    "crates/relar-compiler/src/frontend/comprehensions.rs",
+    "crates/relar-compiler/src/ir.rs",
+    "crates/relar-compiler/src/lib.rs",
+    "crates/relar-compiler/src/llvm.rs",
+    "crates/relar-compiler/src/main.rs",
+    "crates/relar-compiler/src/modules.rs",
+    "crates/relar-compiler/src/narrowing.rs",
+    "crates/relar-compiler/src/ranges.rs",
+    "crates/relar-compiler/src/tuples.rs",
+    "crates/relar-compiler/src/types.rs",
+    "crates/relar-runtime/Cargo.toml",
+    "crates/relar-runtime/src/lib.rs",
+    "crates/relar-runtime/src/objects.rs",
+    "crates/relar-runtime/src/objects/args.rs",
+    "crates/relar-runtime/src/objects/exceptions.rs",
+    "crates/relar-runtime/src/objects/files.rs",
+    "crates/relar-runtime/src/objects/mappings.rs",
+    "crates/relar-runtime/src/objects/records.rs",
+    "crates/relar-runtime/src/objects/words.rs",
+    "examples/inventory_reconciliation/__init__.py",
+    "examples/inventory_reconciliation/__main__.py",
+    "examples/inventory_reconciliation/load.py",
+    "examples/inventory_reconciliation/model.py",
+    "examples/inventory_reconciliation/reconcile.py",
+    "examples/inventory_reconciliation/render.py",
+    "tests/classes.py",
+    "tests/comprehensions.py",
+    "tests/containers.py",
+    "tests/differential.py",
+    "tests/exceptions.py",
+    "tests/files.py",
+    "tests/fixtures/classes/imported/facade.py",
+    "tests/fixtures/classes/imported/main.py",
+    "tests/fixtures/classes/imported/models/__init__.py",
+    "tests/fixtures/classes/imported/models/records.py",
+    "tests/fixtures/classes/ownership.py",
+    "tests/fixtures/comprehensions/cleanup.py",
+    "tests/fixtures/comprehensions/containers.py",
+    "tests/fixtures/comprehensions/effects.py",
+    "tests/fixtures/comprehensions/imported/facade.py",
+    "tests/fixtures/comprehensions/imported/helpers.py",
+    "tests/fixtures/comprehensions/imported/main.py",
+    "tests/fixtures/comprehensions/iteration.py",
+    "tests/fixtures/comprehensions/ownership.py",
+    "tests/fixtures/comprehensions/scoping.py",
+    "tests/fixtures/containers/contextual.py",
+    "tests/fixtures/containers/dictionaries.py",
+    "tests/fixtures/containers/index_proofs.py",
+    "tests/fixtures/containers/iteration.py",
+    "tests/fixtures/containers/lists.py",
+    "tests/fixtures/containers/objects.py",
+    "tests/fixtures/containers/optional.py",
+    "tests/fixtures/containers/optional_effects.py",
+    "tests/fixtures/containers/optional_flow.py",
+    "tests/fixtures/containers/representation_cleanup.py",
+    "tests/fixtures/containers/representation_niches.py",
+    "tests/fixtures/containers/sets.py",
+    "tests/fixtures/containers/string_concat.py",
+    "tests/fixtures/containers/strings.py",
+    "tests/fixtures/containers/tuples.py",
+    "tests/fixtures/fstrings/effects.py",
+    "tests/fixtures/fstrings/files.py",
+    "tests/fixtures/fstrings/imported/helpers.py",
+    "tests/fixtures/fstrings/imported/main.py",
+    "tests/fixtures/fstrings/literals.py",
+    "tests/fixtures/fstrings/ownership.py",
+    "tests/fixtures/fstrings/scalars.py",
+    "tests/fixtures/imports/arithmetic.py",
+    "tests/fixtures/imports/entry.py",
+    "tests/fixtures/imports/package/__init__.py",
+    "tests/fixtures/imports/package/__main__.py",
+    "tests/fixtures/imports/package/nested/__init__.py",
+    "tests/fixtures/imports/package/nested/labels.py",
+    "tests/fixtures/imports/package/operations.py",
+    "tests/fixtures/imports/package/program.py",
+    "tests/fstrings.py",
+    "tests/imports.py",
+    "tests/io.py",
+    "tests/lto.py",
+    "tests/programs/borrowed_operands.py",
+    "tests/programs/constant_division.py",
+    "tests/programs/control_flow.py",
+    "tests/programs/decimal_input.py",
+    "tests/programs/integer_matrix.py",
+    "tests/programs/ownership.py",
+    "tests/programs/short_strings.py"
+  ],
+  "verified_file_hashes": {
+    "/home/dev-user/.local/bin/python3.14": {
+      "bytes": 32359056,
+      "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+    },
+    "/tmp/relar-cargo.sh": {
+      "bytes": 326,
+      "sha256": "74f3f3596cf89fdecf9458d74fc47cfcf09533b8c10f3b569470f74ddbc80fd8"
+    },
+    "/usr/bin/clang-18": {
+      "bytes": 140592,
+      "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+    },
+    "Cargo.lock": {
+      "bytes": 53726,
+      "sha256": "94ea6e3c2351ad1dff6764dac5c52ff51993b1f7a3a79164e209a4e7c1b80471"
+    },
+    "Cargo.toml": {
+      "bytes": 818,
+      "sha256": "ce49064770ad21744c8ac6cea604da7408be1e5ec474e3f90206fa95f2af614f"
+    },
+    "benchmarks/batch_benchmark.py": {
+      "bytes": 23596,
+      "sha256": "8d7b1d17a73baae1a691cc9efad15f29063b4f2a9d090354d5f81a173b67ba19"
+    },
+    "benchmarks/batch_validate.py": {
+      "bytes": 10937,
+      "sha256": "d9ceda6746224421ac5c6c8ca555b8d5beed4d8aec93487674269bb5b765f941"
+    },
+    "benchmarks/benchmark.py": {
+      "bytes": 12777,
+      "sha256": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145"
+    },
+    "benchmarks/compare.py": {
+      "bytes": 10330,
+      "sha256": "d878c49d30863b2b47bc3e453003611752b7fda34b9250754a4b580887599724"
+    },
+    "benchmarks/dependency_benchmark.py": {
+      "bytes": 15928,
+      "sha256": "ddf4c986e24d5ea66dad3d492121ebe464a11e5bb7e0b5f075e3f3bc7989930d"
+    },
+    "benchmarks/dependency_compare.py": {
+      "bytes": 19925,
+      "sha256": "f496e1e7659e15a2446427794f6184e173691b2e22c83439966c47b1cc7c0fc5"
+    },
+    "benchmarks/dependency_profile.py": {
+      "bytes": 19807,
+      "sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30"
+    },
+    "benchmarks/dependency_validate.py": {
+      "bytes": 13429,
+      "sha256": "493bd16ecfc938c902b98f78adecc5f8dce2204c163fd05c64a1701e4996be2e"
+    },
+    "benchmarks/exception_benchmark.py": {
+      "bytes": 22792,
+      "sha256": "7eb93f08f84fa1ca98d94bb2c6c2fde341726fa69e185cf6d45434602d7aeb85"
+    },
+    "benchmarks/incremental_benchmark.py": {
+      "bytes": 19310,
+      "sha256": "362a99c6a015840d2f36428a61d31e2ba81ebb221b761ca54669b584ad577d9a"
+    },
+    "benchmarks/incremental_validate.py": {
+      "bytes": 21198,
+      "sha256": "f384d2807c07006572a5dec0146abd026511ed59f2ae1d0a674dd9c60e95782b"
+    },
+    "benchmarks/inventory_benchmark.py": {
+      "bytes": 30611,
+      "sha256": "2aeb2c8440f3c8ca4a560c4dee2ff840dd186e13e2bf96a1aecd2d5e8799290c"
+    },
+    "benchmarks/inventory_profile.py": {
+      "bytes": 20529,
+      "sha256": "f07dc7a9d6a4033828d6b59a96273a1affe87a45b0b23911c1c0bcffed3e9a39"
+    },
+    "benchmarks/inventory_validate.py": {
+      "bytes": 20206,
+      "sha256": "ec709364c6726a5f6d042a741e408416a06c3bf37f5882185fcb0173618da40f"
+    },
+    "benchmarks/layout_benchmark.py": {
+      "bytes": 29984,
+      "sha256": "c01bf35a42b805ba8627e01585ccab432cd00bbd1122060d87bf7257bc3abc25"
+    },
+    "benchmarks/layout_profile.py": {
+      "bytes": 15769,
+      "sha256": "a46a2483b4375e87a7a058b237ba3a2ee186ac711208b04a6207af5c86912ea1"
+    },
+    "benchmarks/local/batch-linker/ld.lld": {
+      "bytes": 11593976,
+      "sha256": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b"
+    },
+    "benchmarks/local/inventory-reference-final-normal/inventory-bigint": {
+      "bytes": 1562488,
+      "sha256": "dae07835587c65d3b1d82558e5eebb9f2cc11fc549f7ab5876570132c932f2f5"
+    },
+    "benchmarks/local/scalar-fstrings-cargo-checks.py": {
+      "bytes": 1129,
+      "sha256": "9a68fa3f4e382a543f29763d355001890f0b4a6dfcd4744852b265f05eba9d1e"
+    },
+    "benchmarks/local/scalar-fstrings-cargo-validation/clippy.log": {
+      "bytes": 242,
+      "sha256": "2da22083e54eeea3b931d863784a3eb0acb6c1c7c688fe1b3176864c0f937bec"
+    },
+    "benchmarks/local/scalar-fstrings-cargo-validation/fmt.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-cargo-validation/record.json": {
+      "bytes": 1269,
+      "sha256": "cb325193b19b5b7894161b92cc840a8675e8b414e2613dc5a6829a912f143814"
+    },
+    "benchmarks/local/scalar-fstrings-cargo-validation/unit.log": {
+      "bytes": 7102,
+      "sha256": "076d0fa1baa85b049af7e92162ba61d3e95712f865407e660018b315e9d1d392"
+    },
+    "benchmarks/local/scalar-fstrings-inventory-asan.py": {
+      "bytes": 2510,
+      "sha256": "5a164d84389f4aa98d65dee1d59c03cd75dd41c52ad71605e991e0fbbfdc77c2"
+    },
+    "benchmarks/local/scalar-fstrings-inventory-asan/build.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-inventory-asan/inventory_reconciliation": {
+      "bytes": 5868848,
+      "sha256": "59502db2cbfbfd4e26d7da22d9b437bed799799ef5a431baaaa5afcf0981a30f"
+    },
+    "benchmarks/local/scalar-fstrings-inventory-asan/inventory_reconciliation.ll": {
+      "bytes": 196048,
+      "sha256": "2bfa844602c671a196fbde1627070c5b04d9fcc83ef0a95031f73e709bcf0444"
+    },
+    "benchmarks/local/scalar-fstrings-inventory-asan/record.json": {
+      "bytes": 5529,
+      "sha256": "ee2f5338a5b20e4c734382e1c1eafa193366f37de01b59f1241768169db57b81"
+    },
+    "benchmarks/local/scalar-fstrings-inventory-asan/validate.log": {
+      "bytes": 130,
+      "sha256": "71f81465f9fbcbb5d3b0403ea94357247a4826cdfdf7887743da9542434af1d3"
+    },
+    "benchmarks/local/scalar-fstrings-inventory-asan/validation.json": {
+      "bytes": 1036877,
+      "sha256": "0e922427c83627cc46fdea5495e620889a5ae7e027bf54b61388c30917c8971b"
+    },
+    "benchmarks/local/scalar-fstrings-tools-dev1/asan.log": {
+      "bytes": 74,
+      "sha256": "4366ebd115916e8c5b9cd0320c369cbb3c35ea18f2bb6429f26eb34b468e2fd6"
+    },
+    "benchmarks/local/scalar-fstrings-tools-dev1/build-record.json": {
+      "bytes": 681523,
+      "sha256": "a7c6a2730901f0e86d1a084691e2fdce5feb1a24edb0abbf7e7543ed8df103fa"
+    },
+    "benchmarks/local/scalar-fstrings-tools-dev1/librelar_runtime.a": {
+      "bytes": 37313342,
+      "sha256": "0f84565ba01308c42c0cd22171d257c22d551e1c26df5cdc52be5f9bd07d62a9"
+    },
+    "benchmarks/local/scalar-fstrings-tools-dev1/librelar_runtime_asan.a": {
+      "bytes": 38193714,
+      "sha256": "833ddf686977a24b0ac8a3db82882bc1491cdb775b2d56f06148498dd3e0daac"
+    },
+    "benchmarks/local/scalar-fstrings-tools-dev1/librelar_runtime_lto.a": {
+      "bytes": 24708184,
+      "sha256": "6626eb59d0f2151041ec7f032374dc1cc86a2e7a689aae87a4150882540c7c6a"
+    },
+    "benchmarks/local/scalar-fstrings-tools-dev1/relar": {
+      "bytes": 138173664,
+      "sha256": "3c87047f0ff80ba7bd572fb4e327fd9b947c6323f71743ff9ae713c4dc8cae50"
+    },
+    "benchmarks/local/scalar-fstrings-tools-dev1/ordinary.log": {
+      "bytes": 244,
+      "sha256": "873ff9bfea23acbaf3fed93432da4d999955644352d106ecd64ff558f1eebbb9"
+    },
+    "benchmarks/local/scalar-fstrings-tools-dev1/thinlto.log": {
+      "bytes": 158,
+      "sha256": "119fcf894a125c83f9e7de93f2fe141b693d23b1dfb47f4b47f652186a218577"
+    },
+    "benchmarks/local/scalar-fstrings-tools-final/asan.log": {
+      "bytes": 74,
+      "sha256": "0acb0a2bff112598410ca24f63b4158caab27357f014792e2fc332a5208bbbe4"
+    },
+    "benchmarks/local/scalar-fstrings-tools-final/build-record.json": {
+      "bytes": 681167,
+      "sha256": "eb946a0a4504886180786f61ff8a49baa3ca1b511ef3f809443cb074b82edb7a"
+    },
+    "benchmarks/local/scalar-fstrings-tools-final/librelar_runtime.a": {
+      "bytes": 37313342,
+      "sha256": "0f84565ba01308c42c0cd22171d257c22d551e1c26df5cdc52be5f9bd07d62a9"
+    },
+    "benchmarks/local/scalar-fstrings-tools-final/librelar_runtime_asan.a": {
+      "bytes": 38193714,
+      "sha256": "833ddf686977a24b0ac8a3db82882bc1491cdb775b2d56f06148498dd3e0daac"
+    },
+    "benchmarks/local/scalar-fstrings-tools-final/librelar_runtime_lto.a": {
+      "bytes": 24708184,
+      "sha256": "6626eb59d0f2151041ec7f032374dc1cc86a2e7a689aae87a4150882540c7c6a"
+    },
+    "benchmarks/local/scalar-fstrings-tools-final/relar": {
+      "bytes": 138173664,
+      "sha256": "3c87047f0ff80ba7bd572fb4e327fd9b947c6323f71743ff9ae713c4dc8cae50"
+    },
+    "benchmarks/local/scalar-fstrings-tools-final/ordinary.log": {
+      "bytes": 74,
+      "sha256": "570a18d3e6bb6000ece8b454eed6998fa60fead452dfb1f765690aec75f3da4b"
+    },
+    "benchmarks/local/scalar-fstrings-tools-final/thinlto.log": {
+      "bytes": 74,
+      "sha256": "3ca8fcda053f027e1874549d3c67b8d5af55ddd0cbbf24d0750cbb54ae966e20"
+    },
+    "benchmarks/local/scalar-fstrings-validate.py": {
+      "bytes": 4951,
+      "sha256": "e0c8689883595d6392fa97ea7b25a332d229dd239faf9bab2cfee1d9dd3f9cc7"
+    },
+    "benchmarks/local/scalar-fstrings-validation-audit.py": {
+      "bytes": 21736,
+      "sha256": "8c19155f25fdedaffcabc22c9c8c0e5bcc0b7e7fb8b279c9b6e9674436e3e4c3"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/classes.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/classes.stdout": {
+      "bytes": 82,
+      "sha256": "e47b9565fcc16d950719c1022a989bc193f1bf95ccab7e1b6fcbf39b1e0209f4"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/comprehensions.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/comprehensions.stdout": {
+      "bytes": 90,
+      "sha256": "4894fa869b3377f0e30b68e96bb24fa8a02458a07eef6ed0b99fcccb8cfb1dce"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/containers.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/containers.stdout": {
+      "bytes": 95,
+      "sha256": "520daea6d11faaa8597400848bc9712b09aefc3a8754389695a87b6cb7074490"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/differential.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/differential.stdout": {
+      "bytes": 103,
+      "sha256": "c4763d7e4a31f958d29de7c58ee3f6d5e7936ec8f731706dea5fea6c4fc6b26d"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/exceptions.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/exceptions.stdout": {
+      "bytes": 93,
+      "sha256": "e8a9330b9803894544e8e925fcf9047317917337fd7631e6f4114094cd3a0944"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/files.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/files.stdout": {
+      "bytes": 75,
+      "sha256": "b5a5843eee34f5ac820c8ef3a14789cf687fab67bf5d163e63f879b3f36a1bda"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/fstrings.stderr": {
+      "bytes": 490,
+      "sha256": "eb124d8fd5f2cbd72e22c1d609980ea9c1cd0175ace94cf7181c8b4076cfc87b"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/fstrings.stdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/imports.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/imports.stdout": {
+      "bytes": 24,
+      "sha256": "29d9fdaf4f4e6d33d6e79f22dbf01c96bae4db4e8b3d1e2fae090b4b6890d835"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/io.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/io.stdout": {
+      "bytes": 65,
+      "sha256": "c7db1ba9ef054c6ebc2489f9b66c30e8c4ff823b6e39dce924f6fdf75ec44444"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/asan/results.json": {
+      "bytes": 18916,
+      "sha256": "2e8952164e9ff7b267b974058a15ced5becf4ba9c01fa899abf1a8f3027cdd54"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/classes.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/classes.stdout": {
+      "bytes": 83,
+      "sha256": "17b5e0bb55bf9b355d570c75aeb14d06b943d145fd3c750ef0318eb2452fd116"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/comprehensions.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/comprehensions.stdout": {
+      "bytes": 91,
+      "sha256": "032c0899953819f366ee418fb6fe57c25b4855e7b31a4b8ea7e012f59833fc4b"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/containers.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/containers.stdout": {
+      "bytes": 96,
+      "sha256": "c004e23b9859c05e252ffeceaadad3a26610e7056bb75f00429df4c2e222b00b"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/differential.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/differential.stdout": {
+      "bytes": 104,
+      "sha256": "bd6213d537870f3ce12fc4012cb254b21ddf4ecd47aea1515c035139a7d6c75e"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/exceptions.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/exceptions.stdout": {
+      "bytes": 94,
+      "sha256": "2acc8d882974554d58247a8f2b8a536de2882591a83438ca391f35802fa7cf15"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/files.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/files.stdout": {
+      "bytes": 76,
+      "sha256": "150a6cd78bf0167d4285eb9f1d0e22bcff040c2064ac466c5ade34975c304a35"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/fstrings.stderr": {
+      "bytes": 490,
+      "sha256": "a28cf06782f5233c33203b15e12639f68b20b32b134506605574113509b4959b"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/fstrings.stdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/imports.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/imports.stdout": {
+      "bytes": 24,
+      "sha256": "29d9fdaf4f4e6d33d6e79f22dbf01c96bae4db4e8b3d1e2fae090b4b6890d835"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/io.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/io.stdout": {
+      "bytes": 66,
+      "sha256": "ff6b20527ed1fc9c431c42fafb7f1f6b7f32182e53ec07ab1cf5d5241f1c23e3"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/results.json": {
+      "bytes": 18743,
+      "sha256": "9ef784e44f3fc67cc35152901cff16198942874dd30e46492fec4bc974ee9843"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/classes.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/classes.stdout": {
+      "bytes": 78,
+      "sha256": "724d8cc23455331074e5b350ef4a08ea8a4ace147e236f59b60bd8b511eae8f3"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/comprehensions.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/comprehensions.stdout": {
+      "bytes": 86,
+      "sha256": "6ec2c9414b0c8d28da95a5b3431f7075ce585fd94c0d47f93d106b88234142ad"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/containers.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/containers.stdout": {
+      "bytes": 91,
+      "sha256": "e8e55df202e6fc0c7fcaa0c5ad4fa2d95dd0cb18ab6c637ecc5d3e11e5a8a14e"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/differential.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/differential.stdout": {
+      "bytes": 98,
+      "sha256": "b190ebd6e7203c28c17ec7faa0c0f5d8c6decd1e773be99ae0c98e060f7b79ad"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/exceptions.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/exceptions.stdout": {
+      "bytes": 89,
+      "sha256": "4be6f9ad9a05c34549de276fa89593d1ea332cc66be7ccb7b0216027cb0ea3f3"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/files.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/files.stdout": {
+      "bytes": 71,
+      "sha256": "3dd64d3fc327432c225d6548a6ec9041a05e068128093bc969f1978319f64cc1"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/fstrings.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/fstrings.stdout": {
+      "bytes": 81,
+      "sha256": "184c59375e0e29053e2857f5a4564a6b70174a286c91fc28388dce2e2a070ef1"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/imports.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/imports.stdout": {
+      "bytes": 24,
+      "sha256": "f83498e79d485a45cf5d880badfac061b59ec07ac7f8ea00dd9723e7ac0d2cd0"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/io.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/io.stdout": {
+      "bytes": 61,
+      "sha256": "8db850d1783de29fdc0dc48daec150b64f1b10efdcfa1ee0ed8e7bd2dc5e0fc7"
+    },
+    "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/results.json": {
+      "bytes": 20059,
+      "sha256": "0c00b7c59a5893a3e1dfed9cbb0caac9b664d366fb7d965d27c7529d3488c886"
+    },
+    "benchmarks/local/scalar-fstrings-validation-fstrings/asan/fstrings.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-fstrings/asan/fstrings.stdout": {
+      "bytes": 85,
+      "sha256": "1e322a7f7ecdde04b465763a3fbda392e722dcac525afa1041cefe21282784f8"
+    },
+    "benchmarks/local/scalar-fstrings-validation-fstrings/asan/results.json": {
+      "bytes": 9535,
+      "sha256": "96921aed6a31aef8ec9fc67abe4b85cc4b8a45e27c72829310f241d54cb2d43f"
+    },
+    "benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/fstrings.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/fstrings.stdout": {
+      "bytes": 86,
+      "sha256": "4f06dbdb68207a5293f0c8af4558a08f00dc1ca63d978e25b938a9bead6fd60d"
+    },
+    "benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/results.json": {
+      "bytes": 9516,
+      "sha256": "74211df166c943f344ed3d7e11e87e0f9c7aca0b5277c24705730fef57bd83f0"
+    },
+    "benchmarks/manifest_benchmark.py": {
+      "bytes": 24725,
+      "sha256": "4833c5d3ad0f0ed542cb8e12e0f5b787b143e300979747f3e278d5fad08eb773"
+    },
+    "benchmarks/manifest_validate.py": {
+      "bytes": 19931,
+      "sha256": "2ba1a0e0062583add10cc7e5fd347b67ad82769a74dfc761266cc604685d738d"
+    },
+    "benchmarks/validate.py": {
+      "bytes": 3251,
+      "sha256": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49"
+    },
+    "crates/relar-compiler/Cargo.toml": {
+      "bytes": 592,
+      "sha256": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247"
+    },
+    "crates/relar-compiler/src/analysis.rs": {
+      "bytes": 7037,
+      "sha256": "142aa0f25cf75d1c7d9462c94c50967e8f6dfa2903a2ad913b6f33bfe5c405d1"
+    },
+    "crates/relar-compiler/src/classes.rs": {
+      "bytes": 9633,
+      "sha256": "8a57bbf41463e5384d86fc7d70be62fb8c26ef95b89bbcf7b575ea13be373785"
+    },
+    "crates/relar-compiler/src/effects.rs": {
+      "bytes": 13155,
+      "sha256": "58d6d4604c2ec19402a696c6b168c63c924493424feab30f013874f10108f62f"
+    },
+    "crates/relar-compiler/src/frontend.rs": {
+      "bytes": 108029,
+      "sha256": "6dc8f4c870ff1326fe7ed8dd6fa16c91881868e00e3832b7d71a9d1301e76e24"
+    },
+    "crates/relar-compiler/src/frontend/comprehensions.rs": {
+      "bytes": 17966,
+      "sha256": "d90161413c8957a941deeafa82210aca3ff73d51058760a9362124d4ab20bc02"
+    },
+    "crates/relar-compiler/src/ir.rs": {
+      "bytes": 9790,
+      "sha256": "a716274199e8cace1a95867148e752e62568cfd59f64aa1bd2c5c344eae3114c"
+    },
+    "crates/relar-compiler/src/lib.rs": {
+      "bytes": 5107,
+      "sha256": "aff038d03eadb6f07481b29100e984e3f6de97c089404a574daf3c0f5653861d"
+    },
+    "crates/relar-compiler/src/llvm.rs": {
+      "bytes": 107445,
+      "sha256": "363ec32948210e7e1662705f2dbbb33ac7e47356c2245ac6d12d96446a039665"
+    },
+    "crates/relar-compiler/src/main.rs": {
+      "bytes": 7777,
+      "sha256": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c"
+    },
+    "crates/relar-compiler/src/modules.rs": {
+      "bytes": 22044,
+      "sha256": "3c597d7ddfe35c2cd12a2189ce7c69cf81c7983e89193c47f00395019210de0a"
+    },
+    "crates/relar-compiler/src/narrowing.rs": {
+      "bytes": 4455,
+      "sha256": "f37bbacad8279aa18aff36edbee90477187d8927ca12b0563b0bfedde791832d"
+    },
+    "crates/relar-compiler/src/ranges.rs": {
+      "bytes": 58451,
+      "sha256": "29c217f8ef942187f5e945385279ac2548ab645a13145345c2023befa6303060"
+    },
+    "crates/relar-compiler/src/tuples.rs": {
+      "bytes": 19761,
+      "sha256": "022bc95c1702a09f6f124754031d13c07ff94b4f721f72f6363bad2ff29211fa"
+    },
+    "crates/relar-compiler/src/types.rs": {
+      "bytes": 5866,
+      "sha256": "6ec28df90874d39206cfd36f025964e6e4fd1026bbfff9eba868e7a944d2cbbe"
+    },
+    "crates/relar-runtime/Cargo.toml": {
+      "bytes": 374,
+      "sha256": "504747307550bbb6a62804730b159c158cba5b35e22a533269db00f51f423ba8"
+    },
+    "crates/relar-runtime/src/lib.rs": {
+      "bytes": 41980,
+      "sha256": "4ca207eb054a7a9023b08957058ebe4dae933410ea5cd1ede62550c18dab2988"
+    },
+    "crates/relar-runtime/src/objects.rs": {
+      "bytes": 34886,
+      "sha256": "345c52b38ea32647cbeb220d853d3f0848906ae275b98a371fb05c021e61ee59"
+    },
+    "crates/relar-runtime/src/objects/args.rs": {
+      "bytes": 6684,
+      "sha256": "0f7c2543368bc69da08613471c17dc7ac0981967e7840e3c30ef85dc6a044099"
+    },
+    "crates/relar-runtime/src/objects/exceptions.rs": {
+      "bytes": 27362,
+      "sha256": "003d465b3a28ac4cb991d2fa2a9b589add6a35ef714587ad6c705e0667b836af"
+    },
+    "crates/relar-runtime/src/objects/files.rs": {
+      "bytes": 23049,
+      "sha256": "17abf6f1aec89723d6508e00756c53108e5c5ec912979eca0be884c4eb78aebd"
+    },
+    "crates/relar-runtime/src/objects/mappings.rs": {
+      "bytes": 42817,
+      "sha256": "eca128f038aff16c93af24203b7d66fe652d27430b5cac02a25630758a590ec9"
+    },
+    "crates/relar-runtime/src/objects/records.rs": {
+      "bytes": 10110,
+      "sha256": "9e8061a02eca605d6587da87dedb0ca7b2b868d98bef9abb5159bd4b7ceff75d"
+    },
+    "crates/relar-runtime/src/objects/words.rs": {
+      "bytes": 6001,
+      "sha256": "251b21899a15b0d40c6de1f8452034d139bf7093aa112c5603c8896427f53ca8"
+    },
+    "examples/inventory_reconciliation/__init__.py": {
+      "bytes": 75,
+      "sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1"
+    },
+    "examples/inventory_reconciliation/__main__.py": {
+      "bytes": 753,
+      "sha256": "853f4a7ae796ab29edbb9ff098d300969905bfe988ede2c90210e988191369a2"
+    },
+    "examples/inventory_reconciliation/load.py": {
+      "bytes": 2528,
+      "sha256": "074239fd9df26acc79424aed65e004df89d8b27c2d59fd7e2401ab74abeaad4d"
+    },
+    "examples/inventory_reconciliation/model.py": {
+      "bytes": 1524,
+      "sha256": "c3214a814d98213ff00bcb1dac25f18ac2c5bcafba96e07a8457aa161e3cbcbc"
+    },
+    "examples/inventory_reconciliation/reconcile.py": {
+      "bytes": 1561,
+      "sha256": "6c5aa3a17b5650e7bdad2434fbf80c3a9c08ca691de31d2cf87fdd1d7829125c"
+    },
+    "examples/inventory_reconciliation/render.py": {
+      "bytes": 2243,
+      "sha256": "fd5c152f800eb9736411869e9a5e2fc6b2f0e6a5c759f75bae1e7d5a771b2e72"
+    },
+    "tests/classes.py": {
+      "bytes": 10294,
+      "sha256": "c4b409a3b5d7fb08d22c737b20aa96ab4e6cd76026a86d227ad9d497ced8a49c"
+    },
+    "tests/comprehensions.py": {
+      "bytes": 13576,
+      "sha256": "9937f7cd9b6f96b6f2da2601523f45fc4696d74f5fd6782a31ccaaf4ea82760b"
+    },
+    "tests/containers.py": {
+      "bytes": 39197,
+      "sha256": "16dfcdf29ecb8a6eaba9fee44c10a94ef38c836957067bead6bf0d81aefc4ff6"
+    },
+    "tests/differential.py": {
+      "bytes": 9209,
+      "sha256": "6f28393b1b78d967065d080d4aec45836213b2609cd205299d358a4803695ffc"
+    },
+    "tests/exceptions.py": {
+      "bytes": 19947,
+      "sha256": "29de31304fa700d21bbafe7d9a63a08642e4c3371e2af3efcc1044e4746deec3"
+    },
+    "tests/files.py": {
+      "bytes": 24823,
+      "sha256": "a920cc543636110913668e3383fe678e02c86a281edd90a0cda50288753f60ba"
+    },
+    "tests/fixtures/classes/imported/facade.py": {
+      "bytes": 103,
+      "sha256": "1fc491f43b749999d1afd898230328773a6f0e24113589a3b4f4c36cd8f271df"
+    },
+    "tests/fixtures/classes/imported/main.py": {
+      "bytes": 752,
+      "sha256": "2ee9d22808a2bbff00171e34dceeee35da2b5b7211ddafd056fab7e3a1d19470"
+    },
+    "tests/fixtures/classes/imported/models/__init__.py": {
+      "bytes": 76,
+      "sha256": "cc9368b60161036bb8d4904bd2fccb1ab462fc7490daec4bd15713714d4c4af1"
+    },
+    "tests/fixtures/classes/imported/models/records.py": {
+      "bytes": 261,
+      "sha256": "873d83fdac64010579e753dd2b22acd098ff9824e2ee21f1f9e89255f5e608df"
+    },
+    "tests/fixtures/classes/ownership.py": {
+      "bytes": 4637,
+      "sha256": "01a0a4e9b35c26ae99fa00564d947aea82c612e615792afd272785c35520a7bb"
+    },
+    "tests/fixtures/comprehensions/cleanup.py": {
+      "bytes": 3731,
+      "sha256": "7948e8cb76c4bdc54f5dc58cdf71b9f68fdc5bb3009049afe954c587c5a7c26a"
+    },
+    "tests/fixtures/comprehensions/containers.py": {
+      "bytes": 4527,
+      "sha256": "eb41b01bf52539ca63d12b3a6dff04e9f7144f9a56b9400bc4ddcdc993f89450"
+    },
+    "tests/fixtures/comprehensions/effects.py": {
+      "bytes": 2965,
+      "sha256": "84ed6a6904d312f45499542271151c9b8e9cdb4fae1f4e420a7db269353ddcc6"
+    },
+    "tests/fixtures/comprehensions/imported/facade.py": {
+      "bytes": 151,
+      "sha256": "512361b0c69ee74b13171106d7e253c77c71bb4adb5ce97cbba9e6a052f39e5a"
+    },
+    "tests/fixtures/comprehensions/imported/helpers.py": {
+      "bytes": 715,
+      "sha256": "67eee6918df81fcf1ab2fb65673aefe6c7e1b932e03a52fa8996e60463256286"
+    },
+    "tests/fixtures/comprehensions/imported/main.py": {
+      "bytes": 574,
+      "sha256": "f9294a683edf9df46a04777afee80d3ed08db7ade78b397e71eba5dc39f236ae"
+    },
+    "tests/fixtures/comprehensions/iteration.py": {
+      "bytes": 2352,
+      "sha256": "3894961fc768597f11506a0c5d07d9c1e7b3c9a294c7eb4a2ccb8d0c9c5738fb"
+    },
+    "tests/fixtures/comprehensions/ownership.py": {
+      "bytes": 3867,
+      "sha256": "d921fbef3b7c9acd5ec8a61def79d838a4ed17cd3a8bc97de94e18d2241a7cea"
+    },
+    "tests/fixtures/comprehensions/scoping.py": {
+      "bytes": 1685,
+      "sha256": "137401b5756b0b711db61ad0ed3c500ae6d7981611b0b36bfc86a737765459c3"
+    },
+    "tests/fixtures/containers/contextual.py": {
+      "bytes": 1039,
+      "sha256": "2cb63da3dfb77ebe72f0cc758a51af9fc3dcaeba5f275ffc186d3d5ab46bc083"
+    },
+    "tests/fixtures/containers/dictionaries.py": {
+      "bytes": 11591,
+      "sha256": "f8603f41a2bac9a8209557538b06314d62b2d5888c6b06af13ee86510ea97f3b"
+    },
+    "tests/fixtures/containers/index_proofs.py": {
+      "bytes": 9217,
+      "sha256": "c5246e43c65bb66781fa16ce4ea9daa39474569ec03af470d5a35fde11062e6a"
+    },
+    "tests/fixtures/containers/iteration.py": {
+      "bytes": 6119,
+      "sha256": "1a32951ce1db29274156067b099169b1bea9633a3462e29cde409a4a0adc6afc"
+    },
+    "tests/fixtures/containers/lists.py": {
+      "bytes": 1087,
+      "sha256": "958067d313b7ca0015b49532a32efc1369b24738c012becf6465b52d07d8f961"
+    },
+    "tests/fixtures/containers/objects.py": {
+      "bytes": 1107,
+      "sha256": "86c25e805beccb666b331c10351f674a9d7dc7493a1311e388bd3df65adf4e89"
+    },
+    "tests/fixtures/containers/optional.py": {
+      "bytes": 1956,
+      "sha256": "f091b226523e2def53faea8692ea6cedfbf1527fd57245a7f9b71d55eaa4b18e"
+    },
+    "tests/fixtures/containers/optional_effects.py": {
+      "bytes": 1917,
+      "sha256": "c48d7757e1b20d1fa042aa221b7c4162b62ce50bb941078cd8651728ec0b4f77"
+    },
+    "tests/fixtures/containers/optional_flow.py": {
+      "bytes": 3637,
+      "sha256": "b214eaf2cd9016f6d881491b44fcbe5fa5a8bf90ee286fa9a241adbf413c03d5"
+    },
+    "tests/fixtures/containers/representation_cleanup.py": {
+      "bytes": 3795,
+      "sha256": "1bba523c14e49a219581fcfac3ec3cf0c56e35a30a27f1250529f9781f276f1a"
+    },
+    "tests/fixtures/containers/representation_niches.py": {
+      "bytes": 4954,
+      "sha256": "8cddfe6474b1ec03502aaca243224761a7577a63df7defc6d4e5e3e161a2efb1"
+    },
+    "tests/fixtures/containers/sets.py": {
+      "bytes": 7505,
+      "sha256": "dca2b038827e77a9cea25b1034aca14adc4eb1e9f4c6844b7c74a7ea3a92aedd"
+    },
+    "tests/fixtures/containers/string_concat.py": {
+      "bytes": 4341,
+      "sha256": "e23c2e5a0ab749f429983a1b551a8c0d4fdabcb39b6c83ff56f5a24182753fe7"
+    },
+    "tests/fixtures/containers/strings.py": {
+      "bytes": 884,
+      "sha256": "d1d2aeb83b6906ccfba1242a23c3be7756915bd2cc86cfcb8ac28703a4b78c51"
+    },
+    "tests/fixtures/containers/tuples.py": {
+      "bytes": 1057,
+      "sha256": "be3b2819fc7e8aefd2e14621e67dace0b7a8afc030721fcde6b1fecfe52a592d"
+    },
+    "tests/fixtures/fstrings/effects.py": {
+      "bytes": 1171,
+      "sha256": "9d248f7a8c9fe5d216ec930a6aec9c2e4729c39845a331ebcb3680869aeb0a50"
+    },
+    "tests/fixtures/fstrings/files.py": {
+      "bytes": 1701,
+      "sha256": "72d78e1a305911991c96569f54b5caa2f368d038e72ebb5069949e0d16f47be9"
+    },
+    "tests/fixtures/fstrings/imported/helpers.py": {
+      "bytes": 60,
+      "sha256": "d50a043e559f443e2cf69f40aa6b4e294e102a07d6332d185f27c24f390c8207"
+    },
+    "tests/fixtures/fstrings/imported/main.py": {
+      "bytes": 138,
+      "sha256": "00be4e17afb1b701cafb33dc2b6bc912ecaab03de41defad5d30157ace530402"
+    },
+    "tests/fixtures/fstrings/literals.py": {
+      "bytes": 973,
+      "sha256": "779c4a9b3f7c94946058a565028326c93244b274690d29a0e4218a990dc2ec4d"
+    },
+    "tests/fixtures/fstrings/ownership.py": {
+      "bytes": 2033,
+      "sha256": "ea0573a530731dbbfed6079829b7dde432120b13d1a217554fb7cbca3fbd494c"
+    },
+    "tests/fixtures/fstrings/scalars.py": {
+      "bytes": 1180,
+      "sha256": "a3c5ce51ac92665fad1be349c869058dca60432b6626a519b4a80dda6ab13e1f"
+    },
+    "tests/fixtures/imports/arithmetic.py": {
+      "bytes": 214,
+      "sha256": "61e3f1d26734cf56315c4fccf666e0570cd3b25182e105e4596faaaf5ce93c80"
+    },
+    "tests/fixtures/imports/entry.py": {
+      "bytes": 774,
+      "sha256": "1d573fb62ea858a814cfde55c439dcfa9c66838bac553db5b47b8cb18dd4d5ee"
+    },
+    "tests/fixtures/imports/package/__init__.py": {
+      "bytes": 191,
+      "sha256": "82efee395ef7da7d89ecf588a2459bb975ec94b3d2ac48b358c9e3b735597e25"
+    },
+    "tests/fixtures/imports/package/__main__.py": {
+      "bytes": 66,
+      "sha256": "4f217f1612640f31fe685e70a73f662438dc42eafd8a81e782f8539fce46e6d5"
+    },
+    "tests/fixtures/imports/package/nested/__init__.py": {
+      "bytes": 26,
+      "sha256": "3976178a3891d14d6abd358ff4d68f3a721adabbd76d10f34e5a8bb1de07ed04"
+    },
+    "tests/fixtures/imports/package/nested/labels.py": {
+      "bytes": 135,
+      "sha256": "802c90cda3d7cd7c61080a5e8c065a71597a29f0646981e156e126b074e4b514"
+    },
+    "tests/fixtures/imports/package/operations.py": {
+      "bytes": 338,
+      "sha256": "eacb80ef165efbe1225bced68a8e5387ce45af270a5152622a949469b0d4e029"
+    },
+    "tests/fixtures/imports/package/program.py": {
+      "bytes": 222,
+      "sha256": "b0b1f15f2bfea46039555f8ccb5fd73f32b1f94705b004b083ecc466e4aac0c6"
+    },
+    "tests/fstrings.py": {
+      "bytes": 9244,
+      "sha256": "9c5299ed862d58cdd1686a5214de6335b493b7bff569e11a5cd3715c9b8006cd"
+    },
+    "tests/imports.py": {
+      "bytes": 10494,
+      "sha256": "b3f38a06a5cd40b8f7f1b233739240aad7262868425c49c23a8fbffec67b127a"
+    },
+    "tests/io.py": {
+      "bytes": 10980,
+      "sha256": "631d08df643102928d7851a20080baa6bc3eefb75a2f634e00f061ff9defc6bb"
+    },
+    "tests/lto.py": {
+      "bytes": 4780,
+      "sha256": "b49156b14c746a6fc34a512eb7263ad25f23d5aecb87ce352b084bb0ff0d5a3f"
+    },
+    "tests/programs/borrowed_operands.py": {
+      "bytes": 4222,
+      "sha256": "b11f660bf7be77819c6ce8837b78cda087cfd6f00ab74715ccfea88022cb8b1c"
+    },
+    "tests/programs/constant_division.py": {
+      "bytes": 1233,
+      "sha256": "9625893a535b7fbe7421acecce65cee6e9ea06f050b9e59473199d6b1fb38f19"
+    },
+    "tests/programs/control_flow.py": {
+      "bytes": 1194,
+      "sha256": "0ab7519f7a2013b611e9c946f95edc48ea254c41514ef331eef10c02178d6b31"
+    },
+    "tests/programs/decimal_input.py": {
+      "bytes": 513,
+      "sha256": "540380824cecc0c073942118144c17d2185c2c9cb92d0d6ee7eb171a55bf8264"
+    },
+    "tests/programs/integer_matrix.py": {
+      "bytes": 388,
+      "sha256": "36d33ac4564ce1a810cfcda04caf67d4775e9e01fdf56cca4eafc08efa8caf3c"
+    },
+    "tests/programs/ownership.py": {
+      "bytes": 1991,
+      "sha256": "b581438ef1fdb00edc399f550112c5c153c152f15d4d5cbfd7c33357b9d84d29"
+    },
+    "tests/programs/short_strings.py": {
+      "bytes": 1747,
+      "sha256": "c35fc3f77c55f5d5cc70fa3b46312c290180207c5224d0aaee2bf7476688eed0"
+    }
+  }
+}

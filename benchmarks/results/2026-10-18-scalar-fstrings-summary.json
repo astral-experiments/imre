@@ -1,0 +1,420 @@
+{
+  "audit_sha256": "7c5866ea0bdd717e34ecf1c9d5ceaae156acc9d9eae1638111bc63c42c0f7540",
+  "source_commit": "e9c2a879ff258892ffe8d2c6862b5fa7688eea57",
+  "counts": {
+    "assertions": 27962,
+    "distinct_files_hashed": 102,
+    "measured": 2304,
+    "warmups": 96,
+    "gates": 48,
+    "oracle_cases": 1408,
+    "device_cases": 8
+  },
+  "rows": [
+    {
+      "mode": "normal",
+      "workload": "empty",
+      "median_ms": {
+        "cpython": 26.5263185,
+        "relar": 2.15857,
+        "rust_bigint": 2.214409,
+        "baseline": 2.157813
+      },
+      "iqr_ms": {
+        "cpython": [
+          26.34886275,
+          26.65109275
+        ],
+        "relar": [
+          2.08297075,
+          2.24438225
+        ],
+        "rust_bigint": [
+          2.13414475,
+          2.310009
+        ],
+        "baseline": [
+          2.087092,
+          2.28395625
+        ]
+      },
+      "new_vs_baseline_percent": 0.03508181663562926,
+      "cpython_speedup": 12.288838675604683,
+      "relar_over_rust": 0.9747837910702133,
+      "rust_gap_percent": -2.521620892978671,
+      "baseline_current_iqr_overlap": true
+    },
+    {
+      "mode": "normal",
+      "workload": "boundary-128",
+      "median_ms": {
+        "cpython": 27.5344495,
+        "relar": 2.767549,
+        "rust_bigint": 2.589467,
+        "baseline": 2.7598135
+      },
+      "iqr_ms": {
+        "cpython": [
+          27.3740125,
+          27.6641105
+        ],
+        "relar": [
+          2.71887025,
+          2.8426275
+        ],
+        "rust_bigint": [
+          2.53035925,
+          2.69452775
+        ],
+        "baseline": [
+          2.69302175,
+          2.82896025
+        ]
+      },
+      "new_vs_baseline_percent": 0.2802906790621895,
+      "cpython_speedup": 9.949037758681056,
+      "relar_over_rust": 1.0687716815854382,
+      "rust_gap_percent": 6.877168158543823,
+      "baseline_current_iqr_overlap": true
+    },
+    {
+      "mode": "normal",
+      "workload": "dense-2048",
+      "median_ms": {
+        "cpython": 32.773708,
+        "relar": 6.3992975,
+        "rust_bigint": 6.002639,
+        "baseline": 6.484366
+      },
+      "iqr_ms": {
+        "cpython": [
+          32.24221175,
+          33.726477
+        ],
+        "relar": [
+          6.30886325,
+          6.6729795
+        ],
+        "rust_bigint": [
+          5.86049025,
+          6.2478095
+        ],
+        "baseline": [
+          6.32857475,
+          6.900483
+        ]
+      },
+      "new_vs_baseline_percent": -1.3119015798923161,
+      "cpython_speedup": 5.121454034603017,
+      "relar_over_rust": 1.0660806855118223,
+      "rust_gap_percent": 6.6080685511822335,
+      "baseline_current_iqr_overlap": true
+    },
+    {
+      "mode": "normal",
+      "workload": "sparse-2048",
+      "median_ms": {
+        "cpython": 36.2906765,
+        "relar": 9.269422,
+        "rust_bigint": 8.51129,
+        "baseline": 9.2686595
+      },
+      "iqr_ms": {
+        "cpython": [
+          36.0349505,
+          36.80446675
+        ],
+        "relar": [
+          9.1544775,
+          9.389909
+        ],
+        "rust_bigint": [
+          8.3863945,
+          8.6442045
+        ],
+        "baseline": [
+          9.15681225,
+          9.418945
+        ]
+      },
+      "new_vs_baseline_percent": 0.008226648092968247,
+      "cpython_speedup": 3.9150959466512583,
+      "relar_over_rust": 1.0890736891822508,
+      "rust_gap_percent": 8.907368918225078,
+      "baseline_current_iqr_overlap": true
+    },
+    {
+      "mode": "normal",
+      "workload": "dense-16384",
+      "median_ms": {
+        "cpython": 70.19227,
+        "relar": 27.241035,
+        "rust_bigint": 23.454939,
+        "baseline": 27.2972785
+      },
+      "iqr_ms": {
+        "cpython": [
+          68.5861835,
+          71.04257025
+        ],
+        "relar": [
+          26.868247,
+          27.7957795
+        ],
+        "rust_bigint": [
+          23.0431885,
+          23.90833075
+        ],
+        "baseline": [
+          26.88704,
+          27.84543475
+        ]
+      },
+      "new_vs_baseline_percent": -0.20604068643692575,
+      "cpython_speedup": 2.5767108334907247,
+      "relar_over_rust": 1.161419989197158,
+      "rust_gap_percent": 16.141998919715796,
+      "baseline_current_iqr_overlap": true
+    },
+    {
+      "mode": "normal",
+      "workload": "sparse-16384",
+      "median_ms": {
+        "cpython": 101.9221135,
+        "relar": 51.7779675,
+        "rust_bigint": 42.8095955,
+        "baseline": 51.322234
+      },
+      "iqr_ms": {
+        "cpython": [
+          100.23999925,
+          103.59136625
+        ],
+        "relar": [
+          51.10552575,
+          52.4443745
+        ],
+        "rust_bigint": [
+          42.3706795,
+          43.6465455
+        ],
+        "baseline": [
+          50.7466995,
+          52.1283175
+        ]
+      },
+      "new_vs_baseline_percent": 0.8879845331752234,
+      "cpython_speedup": 1.9684456231311127,
+      "relar_over_rust": 1.2094944344895762,
+      "rust_gap_percent": 20.949443448957616,
+      "baseline_current_iqr_overlap": true
+    },
+    {
+      "mode": "lto",
+      "workload": "empty",
+      "median_ms": {
+        "cpython": 27.113682,
+        "relar": 2.2878555,
+        "rust_bigint": 2.4038115,
+        "baseline": 2.2592315
+      },
+      "iqr_ms": {
+        "cpython": [
+          26.9402485,
+          27.29594875
+        ],
+        "relar": [
+          2.18177775,
+          2.5005365
+        ],
+        "rust_bigint": [
+          2.251172,
+          2.5558295
+        ],
+        "baseline": [
+          2.137663,
+          2.3473125
+        ]
+      },
+      "new_vs_baseline_percent": 1.2669795016579721,
+      "cpython_speedup": 11.851133954919792,
+      "relar_over_rust": 0.9517616085953495,
+      "rust_gap_percent": -4.823839140465047,
+      "baseline_current_iqr_overlap": true
+    },
+    {
+      "mode": "lto",
+      "workload": "boundary-128",
+      "median_ms": {
+        "cpython": 27.9775355,
+        "relar": 2.8115705,
+        "rust_bigint": 2.67131,
+        "baseline": 2.774287
+      },
+      "iqr_ms": {
+        "cpython": [
+          27.77066875,
+          28.32736525
+        ],
+        "relar": [
+          2.716915,
+          2.9143325
+        ],
+        "rust_bigint": [
+          2.56715875,
+          2.79686125
+        ],
+        "baseline": [
+          2.6901095,
+          2.85614125
+        ]
+      },
+      "new_vs_baseline_percent": 1.3438948457747957,
+      "cpython_speedup": 9.950856825393494,
+      "relar_over_rust": 1.0525062609730806,
+      "rust_gap_percent": 5.250626097308064,
+      "baseline_current_iqr_overlap": true
+    },
+    {
+      "mode": "lto",
+      "workload": "dense-2048",
+      "median_ms": {
+        "cpython": 33.1989495,
+        "relar": 5.843511,
+        "rust_bigint": 5.749227,
+        "baseline": 5.792422
+      },
+      "iqr_ms": {
+        "cpython": [
+          32.79873475,
+          33.73398
+        ],
+        "relar": [
+          5.7388165,
+          5.94652375
+        ],
+        "rust_bigint": [
+          5.61485125,
+          5.872365
+        ],
+        "baseline": [
+          5.68474625,
+          5.9903705
+        ]
+      },
+      "new_vs_baseline_percent": 0.8819972025518874,
+      "cpython_speedup": 5.681336015282593,
+      "relar_over_rust": 1.0163994220440418,
+      "rust_gap_percent": 1.6399422044041767,
+      "baseline_current_iqr_overlap": true
+    },
+    {
+      "mode": "lto",
+      "workload": "sparse-2048",
+      "median_ms": {
+        "cpython": 36.460439,
+        "relar": 8.0524655,
+        "rust_bigint": 7.8085115,
+        "baseline": 8.05197
+      },
+      "iqr_ms": {
+        "cpython": [
+          35.9749785,
+          37.25581875
+        ],
+        "relar": [
+          7.91607425,
+          8.40763425
+        ],
+        "rust_bigint": [
+          7.6752845,
+          8.01590325
+        ],
+        "baseline": [
+          7.919534,
+          8.27251725
+        ]
+      },
+      "new_vs_baseline_percent": 0.0061537735485783784,
+      "cpython_speedup": 4.527860318060351,
+      "relar_over_rust": 1.0312420619474019,
+      "rust_gap_percent": 3.1242061947401867,
+      "baseline_current_iqr_overlap": true
+    },
+    {
+      "mode": "lto",
+      "workload": "dense-16384",
+      "median_ms": {
+        "cpython": 69.9022195,
+        "relar": 21.6220405,
+        "rust_bigint": 20.5310235,
+        "baseline": 21.5717465
+      },
+      "iqr_ms": {
+        "cpython": [
+          69.37203725,
+          70.8354325
+        ],
+        "relar": [
+          21.27549225,
+          21.95624525
+        ],
+        "rust_bigint": [
+          20.3015665,
+          20.80454125
+        ],
+        "baseline": [
+          21.28300625,
+          21.915707
+        ]
+      },
+      "new_vs_baseline_percent": 0.23314755715304614,
+      "cpython_speedup": 3.2329150202081993,
+      "relar_over_rust": 1.0531399226151585,
+      "rust_gap_percent": 5.313992261515854,
+      "baseline_current_iqr_overlap": true
+    },
+    {
+      "mode": "lto",
+      "workload": "sparse-16384",
+      "median_ms": {
+        "cpython": 101.6385755,
+        "relar": 42.63947,
+        "rust_bigint": 38.046231,
+        "baseline": 42.465085
+      },
+      "iqr_ms": {
+        "cpython": [
+          100.3711625,
+          104.31314125
+        ],
+        "relar": [
+          41.48943975,
+          43.21221725
+        ],
+        "rust_bigint": [
+          37.67304825,
+          38.88444725
+        ],
+        "baseline": [
+          41.69557925,
+          42.8405525
+        ]
+      },
+      "new_vs_baseline_percent": 0.410655012229455,
+      "cpython_speedup": 2.3836735189250713,
+      "relar_over_rust": 1.120727832409996,
+      "rust_gap_percent": 12.072783240999607,
+      "baseline_current_iqr_overlap": true
+    }
+  ],
+  "ir_identity": {
+    "normal": true,
+    "lto": true
+  },
+  "median_changes_range_percent": [
+    -1.3119015798923161,
+    1.3438948457747957
+  ],
+  "all_baseline_current_iqrs_overlap": true
+}
