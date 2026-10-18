@@ -1,5 +1,8 @@
 # Concrete-layout comparisons
 
+The [recorded comparison and profiles](results/2026-10-18-concrete-layouts.md)
+publish the final measurements, raw samples, build provenance, and validation.
+
 `layout_benchmark.py` compares three unchanged applications independently:
 
 | Group | Captured workloads | Engines |
