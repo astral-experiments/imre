@@ -777,7 +777,51 @@ ERRORS = {
         'try:\n    raise ValueError("again")\nexcept ValueError:\n    raise\n',
         "ValueError",
     ),
+    "unhandled_explicit_chain": (
+        """
+try:
+    try:
+        raise KeyError("inner")
+    except KeyError as inner:
+        raise ValueError("middle") from inner
+except ValueError as middle:
+    raise RuntimeError("outer") from middle
+""",
+        "RuntimeError",
+    ),
+    "unhandled_suppressed_context": (
+        """
+try:
+    raise KeyError("hidden predecessor")
+except KeyError:
+    raise ValueError("visible") from None
+""",
+        "ValueError",
+    ),
 }
+
+CAUSE_SEPARATOR = "The above exception was the direct cause of the following exception:"
+EXPLICIT_REPORTS = {
+    "unhandled_explicit_chain": [
+        "KeyError: 'inner'",
+        CAUSE_SEPARATOR,
+        "ValueError: middle",
+        CAUSE_SEPARATOR,
+        "RuntimeError: outer",
+    ],
+    "unhandled_suppressed_context": ["ValueError: visible"],
+}
+
+
+def exception_report(stderr: str) -> list[str]:
+    """Keep exception messages and chaining separators without Python stack frames."""
+    return [
+        line
+        for line in stderr.splitlines()
+        if line
+        and not line[0].isspace()
+        and line != "Traceback (most recent call last):"
+    ]
 
 
 def run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -835,6 +879,13 @@ def main() -> None:
                     name,
                     reference,
                 )
+                if name in EXPLICIT_REPORTS:
+                    assert (
+                        exception_report(reference.stderr) == EXPLICIT_REPORTS[name]
+                    ), (
+                        name,
+                        reference.stderr,
+                    )
             else:
                 assert reference.returncode == 0 and not reference.stderr, (
                     name,
@@ -863,9 +914,14 @@ def main() -> None:
                     reference,
                 )
                 if category:
-                    assert actual.returncode == 1 and actual.stderr.startswith(
-                        category + ":"
-                    ), (name, level, actual)
+                    if name in EXPLICIT_REPORTS:
+                        assert actual.returncode == 1 and exception_report(
+                            actual.stderr
+                        ) == exception_report(reference.stderr), (name, level, actual)
+                    else:
+                        assert actual.returncode == 1 and actual.stderr.startswith(
+                            category + ":"
+                        ), (name, level, actual)
                 else:
                     assert actual.returncode == 0 and not actual.stderr, (
                         name,
