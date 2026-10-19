@@ -1,0 +1,830 @@
+{
+  "revision": "7c1e378625d6760b30e68025fe2299b29287cedc",
+  "unit_tests": {
+    "compiler": 58,
+    "runtime": 85,
+    "total": 143
+  },
+  "language_checks": {
+    "ordinary": 1429,
+    "thinlto": 1073,
+    "asan": 1429
+  },
+  "language_checks_total": 3931,
+  "matrix_jobs": 81,
+  "base45_variants": 5,
+  "base45_per_variant": {
+    "upstream_native_calls": 323,
+    "differential_cases": 289,
+    "compile_rejections": 2
+  },
+  "application_jobs": {
+    "application-route": {
+      "job": "application-route",
+      "started_at": "2026-10-19T20:21:37.497479+00:00",
+      "commands": [
+        {
+          "command": [
+            "/tmp/relar-decoder-frozen/relar",
+            "build",
+            "/home/dev-user/code/oss/relar/examples/route_planner.py",
+            "--module-root",
+            "/home/dev-user/code/oss/relar/examples",
+            "--runtime",
+            "/tmp/relar-decoder-frozen/normal_runtime.a",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-level",
+            "3",
+            "--emit-llvm",
+            "/tmp/relar-decoder-final-validation-v3/applications/route/route.ll",
+            "-o",
+            "/tmp/relar-decoder-final-validation-v3/applications/route/route"
+          ],
+          "shell_display": "/tmp/relar-decoder-frozen/relar build /home/dev-user/code/oss/relar/examples/route_planner.py --module-root /home/dev-user/code/oss/relar/examples --runtime /tmp/relar-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/relar-decoder-final-validation-v3/applications/route/route.ll -o /tmp/relar-decoder-final-validation-v3/applications/route/route",
+          "cwd": "/home/dev-user/code/oss/relar",
+          "started_at": "2026-10-19T20:21:37.499468+00:00",
+          "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
+          "environment_overrides": {
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "GIT_OPTIONAL_LOCKS": "0"
+          },
+          "finished_at": "2026-10-19T20:21:38.032340+00:00",
+          "seconds": 0.532875455042813,
+          "returncode": 0,
+          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/route/compile.stdout",
+          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/route/compile.stderr",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "command": [
+            "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "-I",
+            "-B",
+            "/home/dev-user/code/oss/relar/benchmarks/validate.py",
+            "--python",
+            "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "--binary",
+            "/tmp/relar-decoder-final-validation-v3/applications/route/route"
+          ],
+          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/relar/benchmarks/validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/relar-decoder-final-validation-v3/applications/route/route",
+          "cwd": "/home/dev-user/code/oss/relar",
+          "started_at": "2026-10-19T20:21:38.036951+00:00",
+          "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
+          "environment_overrides": {
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "GIT_OPTIONAL_LOCKS": "0"
+          },
+          "finished_at": "2026-10-19T20:21:38.605983+00:00",
+          "seconds": 0.5690394840203226,
+          "returncode": 0,
+          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/route/validate.stdout",
+          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/route/validate.stderr",
+          "stdout_sha256": "4ab2018f22ceee917cd1217d60ce0ddaa90aa25c66e20a6198489f22c2a4245e",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "validation": "/tmp/relar-decoder-final-validation-v3/applications/route/validation.json",
+      "counts": {
+        "input_cases": 22,
+        "routes": 64,
+        "oracle": "Bellman-Ford repeated relaxation"
+      },
+      "binary_sha256": "2bd671ff3e0a6ff138b638142996e8a80b0065d6db51e411a64e3502c9ca2e4d",
+      "llvm_sha256": "4b95450c170c7857e67bac9cca229113012db63712dc32a2bd02b79ea8e7cfa3",
+      "status": "passed",
+      "finished_at": "2026-10-19T20:21:38.611261+00:00"
+    },
+    "application-dependency": {
+      "job": "application-dependency",
+      "started_at": "2026-10-19T20:21:38.611725+00:00",
+      "commands": [
+        {
+          "command": [
+            "/tmp/relar-decoder-frozen/relar",
+            "build",
+            "/home/dev-user/code/oss/relar/examples/dependency_planner/__main__.py",
+            "--module-root",
+            "/home/dev-user/code/oss/relar/examples",
+            "--runtime",
+            "/tmp/relar-decoder-frozen/normal_runtime.a",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-level",
+            "3",
+            "--emit-llvm",
+            "/tmp/relar-decoder-final-validation-v3/applications/dependency/dependency.ll",
+            "-o",
+            "/tmp/relar-decoder-final-validation-v3/applications/dependency/dependency"
+          ],
+          "shell_display": "/tmp/relar-decoder-frozen/relar build /home/dev-user/code/oss/relar/examples/dependency_planner/__main__.py --module-root /home/dev-user/code/oss/relar/examples --runtime /tmp/relar-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/relar-decoder-final-validation-v3/applications/dependency/dependency.ll -o /tmp/relar-decoder-final-validation-v3/applications/dependency/dependency",
+          "cwd": "/home/dev-user/code/oss/relar",
+          "started_at": "2026-10-19T20:21:38.613714+00:00",
+          "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
+          "environment_overrides": {
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "GIT_OPTIONAL_LOCKS": "0"
+          },
+          "finished_at": "2026-10-19T20:21:39.232447+00:00",
+          "seconds": 0.6187355340225622,
+          "returncode": 0,
+          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/dependency/compile.stdout",
+          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/dependency/compile.stderr",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "command": [
+            "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "-I",
+            "-B",
+            "/home/dev-user/code/oss/relar/benchmarks/dependency_validate.py",
+            "--python",
+            "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "--binary",
+            "/tmp/relar-decoder-final-validation-v3/applications/dependency/dependency"
+          ],
+          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/relar/benchmarks/dependency_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/relar-decoder-final-validation-v3/applications/dependency/dependency",
+          "cwd": "/home/dev-user/code/oss/relar",
+          "started_at": "2026-10-19T20:21:39.236894+00:00",
+          "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
+          "environment_overrides": {
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "GIT_OPTIONAL_LOCKS": "0"
+          },
+          "finished_at": "2026-10-19T20:21:42.561194+00:00",
+          "seconds": 3.324305917019956,
+          "returncode": 0,
+          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/dependency/validate.stdout",
+          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/dependency/validate.stderr",
+          "stdout_sha256": "fbdf5337c10f5ce0588ac81f2385621cfca938145ad38ab440cb5e96c3878b00",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "command": [
+            "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "-I",
+            "-B",
+            "/home/dev-user/code/oss/relar/benchmarks/reference/dependency_planner/check_boundaries.py",
+            "--python",
+            "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "--relar",
+            "/tmp/relar-decoder-final-validation-v3/applications/dependency/dependency",
+            "--rust-bigint",
+            "/home/dev-user/code/oss/relar/benchmarks/local/dependency-reference-tuned-lto/planner-bigint",
+            "--rust-i64",
+            "/home/dev-user/code/oss/relar/benchmarks/local/dependency-reference-tuned-lto/planner-i64",
+            "--output",
+            "/tmp/relar-decoder-final-validation-v3/applications/dependency/boundaries.json"
+          ],
+          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/relar/benchmarks/reference/dependency_planner/check_boundaries.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --relar /tmp/relar-decoder-final-validation-v3/applications/dependency/dependency --rust-bigint /home/dev-user/code/oss/relar/benchmarks/local/dependency-reference-tuned-lto/planner-bigint --rust-i64 /home/dev-user/code/oss/relar/benchmarks/local/dependency-reference-tuned-lto/planner-i64 --output /tmp/relar-decoder-final-validation-v3/applications/dependency/boundaries.json",
+          "cwd": "/home/dev-user/code/oss/relar",
+          "started_at": "2026-10-19T20:21:42.562278+00:00",
+          "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
+          "environment_overrides": {
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "GIT_OPTIONAL_LOCKS": "0"
+          },
+          "finished_at": "2026-10-19T20:21:47.184157+00:00",
+          "seconds": 4.6218877919600345,
+          "returncode": 0,
+          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/dependency/boundaries.stdout",
+          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/dependency/boundaries.stderr",
+          "stdout_sha256": "c58f483b01e76aa29f147d87e88855da7098c8abf08a7340d89bb32e5ce8ebbe",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "validation": "/tmp/relar-decoder-final-validation-v3/applications/dependency/validation.json",
+      "counts": {
+        "inputs": 135,
+        "valid_plans": 95,
+        "cycles": 22,
+        "missing_dependencies": 16,
+        "negative_durations": 2,
+        "input_tasks": 1318,
+        "native_checked": true,
+        "oracle": "graphlib cycle detection, exhaustive ready-set ordering, and independent dependency maximums"
+      },
+      "boundaries": {
+        "path": "/tmp/relar-decoder-final-validation-v3/applications/dependency/boundaries.json",
+        "cases": 10,
+        "i64_overflow_rejections": 4
+      },
+      "binary_sha256": "fa134fb5caab7efd3f4a40e33d8d83d9baa37fe958e562a45adc15738f02a939",
+      "llvm_sha256": "a1bb3a80c4ed8cced43ca965a70806d033d487ee46a0c3d31722198bd69d9357",
+      "status": "passed",
+      "finished_at": "2026-10-19T20:21:47.190460+00:00"
+    },
+    "application-incremental": {
+      "job": "application-incremental",
+      "started_at": "2026-10-19T20:21:47.190927+00:00",
+      "commands": [
+        {
+          "command": [
+            "/tmp/relar-decoder-frozen/relar",
+            "build",
+            "/home/dev-user/code/oss/relar/examples/incremental_planner/__main__.py",
+            "--module-root",
+            "/home/dev-user/code/oss/relar/examples",
+            "--runtime",
+            "/tmp/relar-decoder-frozen/normal_runtime.a",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-level",
+            "3",
+            "--emit-llvm",
+            "/tmp/relar-decoder-final-validation-v3/applications/incremental/incremental.ll",
+            "-o",
+            "/tmp/relar-decoder-final-validation-v3/applications/incremental/incremental"
+          ],
+          "shell_display": "/tmp/relar-decoder-frozen/relar build /home/dev-user/code/oss/relar/examples/incremental_planner/__main__.py --module-root /home/dev-user/code/oss/relar/examples --runtime /tmp/relar-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/relar-decoder-final-validation-v3/applications/incremental/incremental.ll -o /tmp/relar-decoder-final-validation-v3/applications/incremental/incremental",
+          "cwd": "/home/dev-user/code/oss/relar",
+          "started_at": "2026-10-19T20:21:47.191281+00:00",
+          "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
+          "environment_overrides": {
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "GIT_OPTIONAL_LOCKS": "0"
+          },
+          "finished_at": "2026-10-19T20:21:47.944337+00:00",
+          "seconds": 0.753061430004891,
+          "returncode": 0,
+          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/incremental/compile.stdout",
+          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/incremental/compile.stderr",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "command": [
+            "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "-I",
+            "-B",
+            "/home/dev-user/code/oss/relar/benchmarks/incremental_validate.py",
+            "--python",
+            "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "--binary",
+            "/tmp/relar-decoder-final-validation-v3/applications/incremental/incremental",
+            "--rust-bigint",
+            "/home/dev-user/code/oss/relar/benchmarks/local/incremental-reference-normal-final/planner-bigint",
+            "--output",
+            "/tmp/relar-decoder-final-validation-v3/applications/incremental/validation.json",
+            "--rust-i64",
+            "/home/dev-user/code/oss/relar/benchmarks/local/incremental-reference-normal-final/planner-i64"
+          ],
+          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/relar/benchmarks/incremental_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/relar-decoder-final-validation-v3/applications/incremental/incremental --rust-bigint /home/dev-user/code/oss/relar/benchmarks/local/incremental-reference-normal-final/planner-bigint --output /tmp/relar-decoder-final-validation-v3/applications/incremental/validation.json --rust-i64 /home/dev-user/code/oss/relar/benchmarks/local/incremental-reference-normal-final/planner-i64",
+          "cwd": "/home/dev-user/code/oss/relar",
+          "started_at": "2026-10-19T20:21:47.950209+00:00",
+          "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
+          "environment_overrides": {
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "GIT_OPTIONAL_LOCKS": "0"
+          },
+          "finished_at": "2026-10-19T20:21:53.748043+00:00",
+          "seconds": 5.797838086960837,
+          "returncode": 0,
+          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/incremental/validate.stdout",
+          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/incremental/validate.stderr",
+          "stdout_sha256": "b1943f145f7742c171578be11b26bd5db4f663dc3e2e47350b50feb663239da7",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "validation": "/tmp/relar-decoder-final-validation-v3/applications/incremental/validation.json",
+      "counts": {
+        "oracle_cases": 155,
+        "input_targets": 1712,
+        "passed_by_engine": {
+          "cpython": 155,
+          "relar": 155,
+          "rust_bigint": 155,
+          "rust_i64": 138
+        },
+        "i64_excluded_cases": [
+          {
+            "case": "negative-duration",
+            "reason": "target 0 duration -1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000123 is outside signed 64-bit range"
+          },
+          {
+            "case": "huge-chain",
+            "reason": "target 0 duration 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000123 is outside signed 64-bit range"
+          },
+          {
+            "case": "huge-unaffected",
+            "reason": "target 0 duration 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000123 is outside signed 64-bit range"
+          },
+          {
+            "case": "max-plus-one",
+            "reason": "target 0 duration 9223372036854775808 is outside signed 64-bit range"
+          },
+          {
+            "case": "min-minus-one",
+            "reason": "target 0 duration -9223372036854775809 is outside signed 64-bit range"
+          },
+          {
+            "case": "finish-overflow",
+            "reason": "target 1 rebuild finish 9223372036854775808 exceeds signed 64-bit range"
+          },
+          {
+            "case": "random-dag-0",
+            "reason": "target 0 duration 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000141 is outside signed 64-bit range"
+          },
+          {
+            "case": "random-cycle-0",
+            "reason": "target 0 duration 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000141 is outside signed 64-bit range"
+          },
+          {
+            "case": "random-unknown-0",
+            "reason": "target 0 duration 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000141 is outside signed 64-bit range"
+          },
+          {
+            "case": "random-unknown-change-0",
+            "reason": "target 0 duration 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000141 is outside signed 64-bit range"
+          },
+          {
+            "case": "random-dag-13",
+            "reason": "target 0 duration 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000131 is outside signed 64-bit range"
+          },
+          {
+            "case": "random-dag-26",
+            "reason": "target 0 duration 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000128 is outside signed 64-bit range"
+          },
+          {
+            "case": "random-dag-39",
+            "reason": "target 0 duration 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000133 is outside signed 64-bit range"
+          },
+          {
+            "case": "random-dag-52",
+            "reason": "target 0 duration 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000134 is outside signed 64-bit range"
+          },
+          {
+            "case": "random-dag-65",
+            "reason": "target 0 duration 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000145 is outside signed 64-bit range"
+          },
+          {
+            "case": "random-cycle-65",
+            "reason": "target 0 duration 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000145 is outside signed 64-bit range"
+          },
+          {
+            "case": "random-dag-78",
+            "reason": "target 0 duration 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000137 is outside signed 64-bit range"
+          }
+        ],
+        "i64_overflow_rejections_checked": 17,
+        "i64_policy": "Out-of-range parsed durations and affected finishes are excluded from semantic equivalence and checked for explicit overflow rejection; graph validation precedes rebuild arithmetic.",
+        "oracle": "graphlib topology, fixed-point affected-set closure, heapq min-ID ready selection, independent predecessor maximums; compiled package never imported",
+        "parser_cases": 17,
+        "parser_passed_by_engine": {
+          "cpython": 17,
+          "relar": 17,
+          "rust_bigint": 17,
+          "rust_i64": 17
+        },
+        "parser_policy": "Fourteen malformed inputs require exit 1, empty stdout, and the same final error category; three valid framing variants require the full independent oracle output and no stderr. These cases are separate from graph-oracle counts and are in range for checked i64."
+      },
+      "binary_sha256": "dbb5453e1f13f814c17af44600b7492027def93aadd71f589456b24e307468f2",
+      "llvm_sha256": "51acc0c4e641726eade833aea376acd347a7a11a10382ebf771c5441fe7df518",
+      "status": "passed",
+      "finished_at": "2026-10-19T20:21:53.757989+00:00"
+    },
+    "application-batch": {
+      "job": "application-batch",
+      "started_at": "2026-10-19T20:21:51.319462+00:00",
+      "commands": [
+        {
+          "command": [
+            "/tmp/relar-decoder-frozen/relar",
+            "build",
+            "/home/dev-user/code/oss/relar/examples/batch_planner/__main__.py",
+            "--module-root",
+            "/home/dev-user/code/oss/relar/examples",
+            "--runtime",
+            "/tmp/relar-decoder-frozen/normal_runtime.a",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-level",
+            "3",
+            "--emit-llvm",
+            "/tmp/relar-decoder-final-validation-v3/applications/batch/batch.ll",
+            "-o",
+            "/tmp/relar-decoder-final-validation-v3/applications/batch/batch"
+          ],
+          "shell_display": "/tmp/relar-decoder-frozen/relar build /home/dev-user/code/oss/relar/examples/batch_planner/__main__.py --module-root /home/dev-user/code/oss/relar/examples --runtime /tmp/relar-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/relar-decoder-final-validation-v3/applications/batch/batch.ll -o /tmp/relar-decoder-final-validation-v3/applications/batch/batch",
+          "cwd": "/home/dev-user/code/oss/relar",
+          "started_at": "2026-10-19T20:21:51.319904+00:00",
+          "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
+          "environment_overrides": {
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "GIT_OPTIONAL_LOCKS": "0"
+          },
+          "finished_at": "2026-10-19T20:21:52.243528+00:00",
+          "seconds": 0.9236291800043546,
+          "returncode": 0,
+          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/batch/compile.stdout",
+          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/batch/compile.stderr",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "command": [
+            "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "-I",
+            "-B",
+            "/home/dev-user/code/oss/relar/benchmarks/batch_validate.py",
+            "--python",
+            "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "--binary",
+            "/tmp/relar-decoder-final-validation-v3/applications/batch/batch",
+            "--rust-bigint",
+            "/home/dev-user/code/oss/relar/benchmarks/local/batch-reference-normal-final/planner-batch-bigint",
+            "--output",
+            "/tmp/relar-decoder-final-validation-v3/applications/batch/validation.json"
+          ],
+          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/relar/benchmarks/batch_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/relar-decoder-final-validation-v3/applications/batch/batch --rust-bigint /home/dev-user/code/oss/relar/benchmarks/local/batch-reference-normal-final/planner-batch-bigint --output /tmp/relar-decoder-final-validation-v3/applications/batch/validation.json",
+          "cwd": "/home/dev-user/code/oss/relar",
+          "started_at": "2026-10-19T20:21:52.248471+00:00",
+          "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
+          "environment_overrides": {
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "GIT_OPTIONAL_LOCKS": "0"
+          },
+          "finished_at": "2026-10-19T20:21:58.547596+00:00",
+          "seconds": 6.299129430030007,
+          "returncode": 0,
+          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/batch/validate.stdout",
+          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/batch/validate.stderr",
+          "stdout_sha256": "ab1b57aca64f8e2228c6ee1ccf5fb6ff21d30b68b61e7f4dafa1a40ce5a3ea94",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "validation": "/tmp/relar-decoder-final-validation-v3/applications/batch/validation.json",
+      "counts": {
+        "cases": 194,
+        "passed_by_engine": {
+          "cpython": 194,
+          "relar": 194,
+          "rust_bigint": 194
+        },
+        "requests": 393,
+        "completed_requests": 342,
+        "invalid_requests": 51,
+        "fatal_framing_cases": 9,
+        "oracle": "Independent iterator-based framing and payload grammar; existing independent graphlib/fixed-point/heapq graph oracle; compiled packages never imported"
+      },
+      "binary_sha256": "6dd7b4af8454020bb03300d96ea3f212880fca6de715422afef37c98b57b85fb",
+      "llvm_sha256": "d188b6b592f643dcbcebc0cdf80c7ae25961c24cf9a2ab1ce0d4851e4abdbe34",
+      "status": "passed",
+      "finished_at": "2026-10-19T20:21:58.559376+00:00"
+    },
+    "application-manifest": {
+      "job": "application-manifest",
+      "started_at": "2026-10-19T20:21:53.758641+00:00",
+      "commands": [
+        {
+          "command": [
+            "/tmp/relar-decoder-frozen/relar",
+            "build",
+            "/home/dev-user/code/oss/relar/examples/manifest_planner/__main__.py",
+            "--module-root",
+            "/home/dev-user/code/oss/relar/examples",
+            "--runtime",
+            "/tmp/relar-decoder-frozen/normal_runtime.a",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-level",
+            "3",
+            "--emit-llvm",
+            "/tmp/relar-decoder-final-validation-v3/applications/manifest/manifest.ll",
+            "-o",
+            "/tmp/relar-decoder-final-validation-v3/applications/manifest/manifest"
+          ],
+          "shell_display": "/tmp/relar-decoder-frozen/relar build /home/dev-user/code/oss/relar/examples/manifest_planner/__main__.py --module-root /home/dev-user/code/oss/relar/examples --runtime /tmp/relar-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/relar-decoder-final-validation-v3/applications/manifest/manifest.ll -o /tmp/relar-decoder-final-validation-v3/applications/manifest/manifest",
+          "cwd": "/home/dev-user/code/oss/relar",
+          "started_at": "2026-10-19T20:21:53.760879+00:00",
+          "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
+          "environment_overrides": {
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "GIT_OPTIONAL_LOCKS": "0"
+          },
+          "finished_at": "2026-10-19T20:21:54.997786+00:00",
+          "seconds": 1.2369945230311714,
+          "returncode": 0,
+          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/manifest/compile.stdout",
+          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/manifest/compile.stderr",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "command": [
+            "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "-I",
+            "-B",
+            "/home/dev-user/code/oss/relar/benchmarks/manifest_validate.py",
+            "--python",
+            "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "--binary",
+            "/tmp/relar-decoder-final-validation-v3/applications/manifest/manifest",
+            "--rust-bigint",
+            "/home/dev-user/code/oss/relar/benchmarks/local/manifest-reference-normal-final/planner-manifest-bigint",
+            "--output",
+            "/tmp/relar-decoder-final-validation-v3/applications/manifest/validation.json"
+          ],
+          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/relar/benchmarks/manifest_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/relar-decoder-final-validation-v3/applications/manifest/manifest --rust-bigint /home/dev-user/code/oss/relar/benchmarks/local/manifest-reference-normal-final/planner-manifest-bigint --output /tmp/relar-decoder-final-validation-v3/applications/manifest/validation.json",
+          "cwd": "/home/dev-user/code/oss/relar",
+          "started_at": "2026-10-19T20:21:55.006940+00:00",
+          "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
+          "environment_overrides": {
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "GIT_OPTIONAL_LOCKS": "0"
+          },
+          "finished_at": "2026-10-19T20:22:03.740031+00:00",
+          "seconds": 8.73335864400724,
+          "returncode": 0,
+          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/manifest/validate.stdout",
+          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/manifest/validate.stderr",
+          "stdout_sha256": "3ab479b0bf09454bc05717093759cc52b063cf3eb016eff494be31398a007b01",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "validation": "/tmp/relar-decoder-final-validation-v3/applications/manifest/validation.json",
+      "counts": {
+        "cases": 196,
+        "passed_by_engine": {
+          "cpython": 196,
+          "relar": 196,
+          "rust_bigint": 196
+        },
+        "completed_requests": 199,
+        "invalid_requests": 92,
+        "terminal_cases": 9,
+        "oracle": "Independent in-memory inode/open model, full directory snapshots, bounded iterator parser, and graphlib/fixed-point/heapq scheduling oracle; compiled packages never imported",
+        "linux_device_checks": {
+          "cases": 1,
+          "passed_by_engine": {
+            "cpython": 1,
+            "relar": 1,
+            "rust_bigint": 1
+          },
+          "checks": [
+            {
+              "label": "report-device-write-is-terminal",
+              "arguments": [
+                "manifest.txt",
+                "/dev/full"
+              ],
+              "files": {
+                "good.txt": {
+                  "base64": "MQpyZWFkeSA3CjEKcmVhZHkK",
+                  "sha256": "1fa11bc9ccb21f80f2a4938db2185744a213bbee828707efba29dd04e592828a",
+                  "bytes": 18
+                },
+                "manifest.txt": {
+                  "base64": "Z29vZC50eHQK",
+                  "sha256": "1f5a24c93af00bb35e8783d1308bf6f8cbb708dc65c6e69b512d8e948c820fb3",
+                  "bytes": 9
+                }
+              },
+              "directories": [],
+              "hardlinks": {},
+              "expected": {
+                "returncode": 1,
+                "error_category": "OSError",
+                "usage_message": null,
+                "stdout": "",
+                "directories": [],
+                "files": {
+                  "good.txt": {
+                    "base64": "MQpyZWFkeSA3CjEKcmVhZHkK",
+                    "sha256": "1fa11bc9ccb21f80f2a4938db2185744a213bbee828707efba29dd04e592828a",
+                    "bytes": 18
+                  },
+                  "manifest.txt": {
+                    "base64": "Z29vZC50eHQK",
+                    "sha256": "1f5a24c93af00bb35e8783d1308bf6f8cbb708dc65c6e69b512d8e948c820fb3",
+                    "bytes": 9
+                  }
+                }
+              },
+              "results": {
+                "cpython": {
+                  "returncode": 1,
+                  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "stdout_bytes": 0,
+                  "stderr": "Traceback (most recent call last):\n  File \"/home/dev-user/code/oss/relar/examples/manifest_planner/__main__.py\", line 61, in main\n    if process(path, request_id, report):\n       ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/dev-user/code/oss/relar/examples/manifest_planner/__main__.py\", line 17, in process\n    report.flush()\n    ~~~~~~~~~~~~^^\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import runpy, sys; sys.path.insert(0, sys.argv[1]); sys.argv = ['manifest_planner', *sys.argv[2:]]; runpy.run_module('manifest_planner', run_name='__main__', alter_sys=True)\n                                                                                                        ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen runpy>\", line 231, in run_module\n  File \"<frozen runpy>\", line 98, in _run_module_code\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"/home/dev-user/code/oss/relar/examples/manifest_planner/__main__.py\", line 77, in <module>\n    main()\n    ~~~~^^\n  File \"/home/dev-user/code/oss/relar/examples/manifest_planner/__main__.py\", line 59, in main\n    with open(sys.argv[2], \"w\", encoding=\"utf-8\") as report:\n         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nOSError: [Errno 28] No space left on device\n",
+                  "files": {
+                    "good.txt": {
+                      "sha256": "1fa11bc9ccb21f80f2a4938db2185744a213bbee828707efba29dd04e592828a",
+                      "bytes": 18
+                    },
+                    "manifest.txt": {
+                      "sha256": "1f5a24c93af00bb35e8783d1308bf6f8cbb708dc65c6e69b512d8e948c820fb3",
+                      "bytes": 9
+                    }
+                  },
+                  "directories": []
+                },
+                "relar": {
+                  "returncode": 1,
+                  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "stdout_bytes": 0,
+                  "stderr": "OSError: No space left on device (os error 28)\n",
+                  "files": {
+                    "good.txt": {
+                      "sha256": "1fa11bc9ccb21f80f2a4938db2185744a213bbee828707efba29dd04e592828a",
+                      "bytes": 18
+                    },
+                    "manifest.txt": {
+                      "sha256": "1f5a24c93af00bb35e8783d1308bf6f8cbb708dc65c6e69b512d8e948c820fb3",
+                      "bytes": 9
+                    }
+                  },
+                  "directories": []
+                },
+                "rust_bigint": {
+                  "returncode": 1,
+                  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "stdout_bytes": 0,
+                  "stderr": "OSError: could not write standard output\n",
+                  "files": {
+                    "good.txt": {
+                      "sha256": "1fa11bc9ccb21f80f2a4938db2185744a213bbee828707efba29dd04e592828a",
+                      "bytes": 18
+                    },
+                    "manifest.txt": {
+                      "sha256": "1f5a24c93af00bb35e8783d1308bf6f8cbb708dc65c6e69b512d8e948c820fb3",
+                      "bytes": 9
+                    }
+                  },
+                  "directories": []
+                }
+              }
+            }
+          ]
+        }
+      },
+      "binary_sha256": "d60ec9d93c3cbe8e426acdefb10c7beaa2666ed7b46fd7b1540e88cebf05b6c2",
+      "llvm_sha256": "3d6d6f5d457fc6c2dfd34eadbf67901b9e84c10758879ca2e24ff29cda5af967",
+      "status": "passed",
+      "finished_at": "2026-10-19T20:22:03.766528+00:00"
+    },
+    "application-inventory": {
+      "job": "application-inventory",
+      "started_at": "2026-10-19T20:21:58.231723+00:00",
+      "commands": [
+        {
+          "command": [
+            "/tmp/relar-decoder-frozen/relar",
+            "build",
+            "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py",
+            "--module-root",
+            "/home/dev-user/code/oss/relar/examples",
+            "--runtime",
+            "/tmp/relar-decoder-frozen/normal_runtime.a",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-level",
+            "3",
+            "--emit-llvm",
+            "/tmp/relar-decoder-final-validation-v3/applications/inventory/inventory.ll",
+            "-o",
+            "/tmp/relar-decoder-final-validation-v3/applications/inventory/inventory"
+          ],
+          "shell_display": "/tmp/relar-decoder-frozen/relar build /home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py --module-root /home/dev-user/code/oss/relar/examples --runtime /tmp/relar-decoder-frozen/normal_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --emit-llvm /tmp/relar-decoder-final-validation-v3/applications/inventory/inventory.ll -o /tmp/relar-decoder-final-validation-v3/applications/inventory/inventory",
+          "cwd": "/home/dev-user/code/oss/relar",
+          "started_at": "2026-10-19T20:21:58.232270+00:00",
+          "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
+          "environment_overrides": {
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "GIT_OPTIONAL_LOCKS": "0"
+          },
+          "finished_at": "2026-10-19T20:21:58.961631+00:00",
+          "seconds": 0.7293632090440951,
+          "returncode": 0,
+          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/inventory/compile.stdout",
+          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/inventory/compile.stderr",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "command": [
+            "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "-I",
+            "-B",
+            "/home/dev-user/code/oss/relar/benchmarks/inventory_validate.py",
+            "--python",
+            "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "--binary",
+            "/tmp/relar-decoder-final-validation-v3/applications/inventory/inventory",
+            "--rust-bigint",
+            "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint",
+            "--output",
+            "/tmp/relar-decoder-final-validation-v3/applications/inventory/validation.json"
+          ],
+          "shell_display": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 -I -B /home/dev-user/code/oss/relar/benchmarks/inventory_validate.py --python /home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14 --binary /tmp/relar-decoder-final-validation-v3/applications/inventory/inventory --rust-bigint /home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint --output /tmp/relar-decoder-final-validation-v3/applications/inventory/validation.json",
+          "cwd": "/home/dev-user/code/oss/relar",
+          "started_at": "2026-10-19T20:21:58.966740+00:00",
+          "input_manifest_sha256": "26721cf32caf39ccbf3a915e637fa92b840ce1913f6e45546758c9dd5c1b3391",
+          "environment_overrides": {
+            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "GIT_OPTIONAL_LOCKS": "0"
+          },
+          "finished_at": "2026-10-19T20:22:10.242489+00:00",
+          "seconds": 11.275786496989895,
+          "returncode": 0,
+          "stdout": "/tmp/relar-decoder-final-validation-v3/applications/inventory/validate.stdout",
+          "stderr": "/tmp/relar-decoder-final-validation-v3/applications/inventory/validate.stderr",
+          "stdout_sha256": "80e8f75e19a3561bc3244a00f4febf6a7a3177fb9ef85320e64e87e43030213a",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "validation": "/tmp/relar-decoder-final-validation-v3/applications/inventory/validation.json",
+      "counts": {
+        "cases": 204,
+        "successful": 139,
+        "terminal_errors": 65,
+        "engines": [
+          "cpython",
+          "relar",
+          "rust_bigint"
+        ],
+        "device_check": {
+          "case": "terminal-report-device-error",
+          "engines": {
+            "cpython": {
+              "returncode": 1,
+              "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout_bytes": 0,
+              "stderr": "Traceback (most recent call last):\n  File \"/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py\", line 21, in main\n    output.flush()\n    ~~~~~~~~~~~~^^\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py\", line 19, in main\n    with open(report_path, \"w\", encoding=\"utf-8\") as output:\n         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nOSError: [Errno 28] No space left on device\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import runpy, sys; sys.path.insert(0, sys.argv[1]); sys.argv = ['inventory_reconciliation', *sys.argv[2:]]; runpy.run_module('inventory_reconciliation', run_name='__main__', alter_sys=True)\n                                                                                                                ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen runpy>\", line 231, in run_module\n  File \"<frozen runpy>\", line 98, in _run_module_code\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py\", line 28, in <module>\n    main()\n    ~~~~^^\n  File \"/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py\", line 23, in main\n    raise OSError(\"report: cannot write\")\nOSError: report: cannot write\n",
+              "files": {
+                "orders.txt": {
+                  "sha256": "b4f9376165d501dd6231c58f4d0ecc24bb981b1c15c6a4f2c69fb8ad324e58c0",
+                  "bytes": 8
+                },
+                "stock.txt": {
+                  "sha256": "ae396913bb6ec1166b0ff7a07a6dc9a4fc9f0ab6fa3e89ee8344dc32ea4c46b2",
+                  "bytes": 6
+                }
+              },
+              "directories": []
+            },
+            "relar": {
+              "returncode": 1,
+              "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout_bytes": 0,
+              "stderr": "OSError: report: cannot write\n",
+              "files": {
+                "orders.txt": {
+                  "sha256": "b4f9376165d501dd6231c58f4d0ecc24bb981b1c15c6a4f2c69fb8ad324e58c0",
+                  "bytes": 8
+                },
+                "stock.txt": {
+                  "sha256": "ae396913bb6ec1166b0ff7a07a6dc9a4fc9f0ab6fa3e89ee8344dc32ea4c46b2",
+                  "bytes": 6
+                }
+              },
+              "directories": []
+            },
+            "rust_bigint": {
+              "returncode": 1,
+              "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout_bytes": 0,
+              "stderr": "OSError: report: cannot write\n",
+              "files": {
+                "orders.txt": {
+                  "sha256": "b4f9376165d501dd6231c58f4d0ecc24bb981b1c15c6a4f2c69fb8ad324e58c0",
+                  "bytes": 8
+                },
+                "stock.txt": {
+                  "sha256": "ae396913bb6ec1166b0ff7a07a6dc9a4fc9f0ab6fa3e89ee8344dc32ea4c46b2",
+                  "bytes": 6
+                }
+              },
+              "directories": []
+            }
+          }
+        }
+      },
+      "binary_sha256": "a9d132da0fba791742d750853a5e6158667013b8c504df1271628688923e2dc3",
+      "llvm_sha256": "96ef9c29be6d26b863a1a7be2c2512385a1d729bcf7c81e8a3078cec5c534a93",
+      "status": "passed",
+      "finished_at": "2026-10-19T20:22:10.283507+00:00"
+    }
+  },
+  "application_configuration": "ordinary O3",
+  "caveats": [
+    "Language counts include compile-time rejections and combine optimization levels; they are not all distinct programs.",
+    "Sanitizers cover generated native code and the custom runtime; the prebuilt Rust standard library is not instrumented.",
+    "The Rust reference has four recorded Unicode repr-message boundaries; Relar is checked against exact CPython messages."
+  ]
+}
