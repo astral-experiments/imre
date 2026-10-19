@@ -6,15 +6,17 @@ from .render import show
 
 
 def main() -> None:
-    arguments = sys.argv[1:]
-    if len(arguments) != 3:
+    _, *arguments = sys.argv
+    try:
+        stock_path, orders_path, report_path = arguments
+    except ValueError:
         raise ValueError("usage: inventory_reconciliation STOCK ORDERS REPORT")
-    stocks = read_stock(load(arguments[0]))
-    batches = read_orders(load(arguments[1], label="orders"))
+    stocks = read_stock(load(stock_path))
+    batches = read_orders(load(orders_path, label="orders"))
     report = reconcile(stocks, batches=batches)
     # Both inputs are closed before any output truncation, including aliases.
     try:
-        with open(arguments[2], "w", encoding="utf-8") as output:
+        with open(report_path, "w", encoding="utf-8") as output:
             show(report, output=output)
             output.flush()
     except OSError:
