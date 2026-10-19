@@ -1,0 +1,65 @@
+{
+  "status": "passed",
+  "source_commit": "3cc767b401f988ece94e1eb4bb98c43cd06c02b2",
+  "archive_members": 721,
+  "companions": 11,
+  "totals_recomputed": {
+    "measured_process_runs": 4608,
+    "warmup_process_runs": 192,
+    "inventory_gate_runs": 96,
+    "oracle_process_results": 3264,
+    "device_process_results": 16
+  },
+  "inventory_asan_outcomes_recomputed": {
+    "inventory": 204,
+    "inventory_device": 1
+  },
+  "native_semantic_checks_joined": 2417,
+  "rust_unit_tests_joined": 92,
+  "recomputed": {
+    "application-normal": {
+      "workloads": 6,
+      "measured": 1152,
+      "warmups": 48,
+      "gates": 24,
+      "oracle_outcomes": {
+        "inventory": 816,
+        "inventory_device": 4
+      }
+    },
+    "common-source-normal": {
+      "workloads": 6,
+      "measured": 1152,
+      "warmups": 48,
+      "gates": 24,
+      "oracle_outcomes": {
+        "inventory": 816,
+        "inventory_device": 4
+      }
+    },
+    "application-lto": {
+      "workloads": 6,
+      "measured": 1152,
+      "warmups": 48,
+      "gates": 24,
+      "oracle_outcomes": {
+        "inventory": 816,
+        "inventory_device": 4
+      }
+    },
+    "common-source-lto": {
+      "workloads": 6,
+      "measured": 1152,
+      "warmups": 48,
+      "gates": 24,
+      "oracle_outcomes": {
+        "inventory": 816,
+        "inventory_device": 4
+      }
+    }
+  },
+  "archive_sha256": "f6c7cd9cec576c140e6dbf2822b0d159057e958e2204abba8edb929c042d6dac",
+  "manifest_sha256": "64f1c9a9368265874316da54996449dc3b85d0dd6ef9a64c5752b137a561ef9a",
+  "script_sha256": "17311cab5a5a3c078fbb85ebdb0df8844c3202890767b767338efaf24822d820",
+  "note": "Only retained text/source records were read. Native artifacts, caches and historical raw benchmark archives remain external; their recorded provenance is joined without re-executing native work or recovering external bytes from hashes."
+}
