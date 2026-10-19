@@ -11,7 +11,7 @@ use std::rc::{Rc, Weak};
 
 use super::exceptions::{Error, Kind, string_repr};
 use super::words::{OwnedWord, WordKind};
-use super::{Bytes, Int, Object, Storage, StorageCell, Str, acquire_rc, fail, object};
+use super::{Bytes, Int, List, Object, Storage, StorageCell, Str, acquire_rc, fail, object};
 
 #[derive(Clone)]
 struct IntKey(Int);
@@ -280,9 +280,35 @@ impl<V: Copy> Tables<V> {
     }
 }
 
+/// Borrowed canonical integer words; zero denotes a missing ASCII key. Keeping
+/// the heap-value count lets gathers prove that copying words acquires no owners.
+struct AsciiIntCache {
+    values: [usize; 128],
+    heap_values: usize,
+}
+
+impl AsciiIntCache {
+    fn new() -> Self {
+        Self {
+            values: [0; 128],
+            heap_values: 0,
+        }
+    }
+
+    /// Maintains the small-value proof across insertion, replacement, and deletion.
+    fn set(&mut self, character: u8, word: usize) {
+        let old = std::mem::replace(&mut self.values[usize::from(character)], word);
+        self.heap_values -= usize::from(old != 0 && old & 1 == 0);
+        self.heap_values += usize::from(word != 0 && word & 1 == 0);
+    }
+}
+
 pub(super) struct Mapping {
     tables: Tables<usize>,
     value_kind: WordKind,
+    /// Present only after a string-to-integer gather. Words borrow current table
+    /// values; ASCII mutation updates the corresponding slot before old owners drop.
+    ascii_int: Option<Box<AsciiIntCache>>,
 }
 pub(super) struct Set {
     tables: Tables<()>,
@@ -293,6 +319,24 @@ impl Mapping {
         Self {
             tables: Tables::new(key_kind),
             value_kind: WordKind::new(value_kind),
+            ascii_int: None,
+        }
+    }
+
+    /// Updates only an already-built cache. Other dictionary representations
+    /// neither allocate a cache nor reinterpret their keys as strings.
+    ///
+    /// # Safety
+    /// `key` is a rooted key of this mapping's exact kind. When the cache exists,
+    /// `word` is a rooted canonical integer word, or zero after deletion.
+    unsafe fn update_ascii_int(&mut self, key: usize, word: usize) {
+        if let Some(cache) = &mut self.ascii_int {
+            // SAFETY: only exact dict[str, int] gather creates this cache.
+            let key = unsafe { &*(key as *const Str) };
+            if let [character] = key.as_bytes() {
+                // A one-byte valid UTF-8 string is necessarily ASCII.
+                cache.set(*character, word);
+            }
         }
     }
 }
@@ -512,6 +556,134 @@ pub unsafe extern "C" fn relar_dict_get(value: *const Object, key: usize) -> usi
     // SAFETY: input roots remain live after storage access ends.
     unsafe { missing_key(value, key) }.returning(0)
 }
+
+/// Gathers a dictionary's integer values in Unicode code-point order without
+/// allocating a string owner for every key. A lazily built ASCII cache borrows
+/// current dictionary values and is maintained by every mapping mutation.
+///
+/// # Safety
+/// `text` is a rooted string and `value` is a rooted exact `dict[str, int]`.
+/// The compiler proves the comprehension contains only these lookups, with no
+/// callbacks or intervening mutations. Success transfers one list owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_dict_gather_str_int(
+    text: *const Str,
+    value: *const Object,
+) -> *const List {
+    // SAFETY: the exact dictionary and immutable string remain rooted.
+    unsafe { gather_str_int(&*text, value) }
+}
+
+/// Gathers directly from compiler-validated UTF-8 bytes without copying a string.
+///
+/// # Safety
+/// `text` is rooted immutable bytes that already passed `relar_bytes_validate_utf8`
+/// at the source decode expression. `value` is a rooted exact `dict[str, int]`,
+/// with the same mutation-free comprehension proof as `relar_dict_gather_str_int`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_dict_gather_bytes_int(
+    text: *const Bytes,
+    value: *const Object,
+) -> *const List {
+    // SAFETY: the compiler validates these exact immutable bytes before entry.
+    let text = unsafe { std::str::from_utf8_unchecked(&*text) };
+    // SAFETY: all borrowed contents and the exact dictionary remain rooted.
+    unsafe { gather_str_int(text, value) }
+}
+
+/// Shares lookup, cache maintenance, and ownership between text and decoded bytes.
+///
+/// # Safety
+/// `value` is a rooted exact `dict[str, int]`; no callbacks or mapping mutation
+/// can occur during the gather. The borrowed text remains immutable throughout.
+unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
+    // SAFETY: exact immutable keys, integer acquisition, and buffer allocation
+    // cannot reenter. Only the internal lookup cache changes, and no borrowed
+    // key/value or table address escapes this access.
+    let result = unsafe {
+        object(value).0.with_mut(|storage| {
+            let mapping = storage.dictionary_mut();
+            let Tables::Str(table) = &mapping.tables else {
+                fail(
+                    "SystemError",
+                    "string gather requires string dictionary keys",
+                );
+            };
+            if mapping.value_kind != WordKind::new(2) {
+                fail(
+                    "SystemError",
+                    "string gather requires integer dictionary values",
+                );
+            }
+            if mapping.ascii_int.is_none() {
+                let mut ascii = Box::new(AsciiIntCache::new());
+                for entry in table.entries.iter().flatten() {
+                    if let [character] = entry.key.as_bytes() {
+                        ascii.set(*character, entry.value);
+                    }
+                }
+                mapping.ascii_int = Some(ascii);
+            }
+            let ascii = mapping.ascii_int.as_ref().unwrap();
+            let ascii_small = ascii.heap_values == 0 && text.is_ascii();
+            let length = if ascii_small {
+                text.len()
+            } else {
+                text.chars().count()
+            };
+            let mut values = crate::take_list_buffer(length);
+            values
+                .try_reserve_exact(length)
+                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+            if ascii_small {
+                for (slot, &character) in values.spare_capacity_mut()[..length]
+                    .iter_mut()
+                    .zip(text.as_bytes())
+                {
+                    // SAFETY: ascii_small proved this immutable text is ASCII,
+                    // so every byte indexes within the 128-entry lookup cache.
+                    let word = *ascii.values.get_unchecked(usize::from(character));
+                    if word == 0 {
+                        let mut key = Str::new("");
+                        key.push(char::from(character));
+                        return Err(Error::new(Kind::KeyError, string_repr(&key)));
+                    }
+                    slot.write(Int(word));
+                }
+                // SAFETY: the equal-length zip initialized every slot. The
+                // cache proves all words are small integers, so an earlier
+                // missing key leaves no heap owners in unpublished slots.
+                values.set_len(length);
+                return Ok(values);
+            }
+            for character in text.chars() {
+                let word = if character.is_ascii() {
+                    ascii.values[character as usize]
+                } else {
+                    let mut key = Str::new("");
+                    key.push(character);
+                    table.index.get(&key).map_or(0, |&position| {
+                        table.entries[position].as_ref().unwrap().value
+                    })
+                };
+                // Canonical Int words are nonzero, including the integer zero.
+                if word == 0 {
+                    let mut key = Str::new("");
+                    key.push(character);
+                    return Err(Error::new(Kind::KeyError, string_repr(&key)));
+                }
+                // SAFETY: this exact integer remains rooted by the dictionary;
+                // the copied owner belongs to the fresh result or its cleanup.
+                values.push((*Int::borrow(word)).clone());
+            }
+            Ok(values)
+        })
+    };
+    match result {
+        Ok(values) => Rc::into_raw(Rc::new(List(StorageCell::new(values)))),
+        Err(error) => error.returning(std::ptr::null()),
+    }
+}
 /// # Safety
 /// Root the exact inputs; `out` is an aligned writable word outside runtime
 /// storage. Missing leaves it untouched; success transfers one independently owned value.
@@ -564,7 +736,11 @@ pub unsafe extern "C" fn relar_dict_set(value: *const Object, key: usize, word: 
     // SAFETY: insertion cannot reenter; displaced owners leave storage together.
     let old = unsafe {
         object(value).0.with_mut(|s| {
-            s.dictionary_mut()
+            let mapping = s.dictionary_mut();
+            // Both incoming owners remain rooted while the cache and table are
+            // updated together; insertion cannot reenter a dictionary lookup.
+            mapping.update_ascii_int(key.word, new.word);
+            mapping
                 .tables
                 .insert(key, new.into_word())
                 .map(|(key, word)| (key, OwnedWord::from_owned(word, value_kind)))
@@ -581,6 +757,7 @@ pub unsafe extern "C" fn relar_dict_delete(value: *const Object, key: usize) {
     let old = unsafe {
         object(value).0.with_mut(|s| {
             let mapping = s.dictionary_mut();
+            mapping.update_ascii_int(key, 0);
             mapping
                 .tables
                 .remove(key)
@@ -727,6 +904,9 @@ pub unsafe extern "C" fn relar_mapping_iter_next(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::objects::exceptions::{
+        relar_error_pending, relar_error_take, relar_exception_matches, relar_exception_message,
+    };
     use crate::objects::{
         relar_object_release, relar_seq_append, relar_seq_get_index, relar_seq_new,
     };
@@ -734,6 +914,214 @@ mod tests {
 
     fn integer(value: i64) -> usize {
         Int::small(value).unwrap().into_raw()
+    }
+
+    #[test]
+    fn validated_bytes_gather_matches_text_for_ascii_and_unicode() {
+        // SAFETY: each byte buffer is validated while rooted and immutable; the
+        // exact dictionary and result owners remain live throughout each use.
+        unsafe {
+            let dictionary = Rc::from_raw(relar_dict_new(3, 2));
+            let pointer = Rc::as_ptr(&dictionary);
+            for (index, key) in ["a", "é", "😺"].into_iter().enumerate() {
+                let key = Rc::new(Str::new(key));
+                relar_dict_set(pointer, Rc::as_ptr(&key) as usize, integer(index as i64));
+            }
+            for source in ["", "aaa", "aaé😺"] {
+                let text = Str::new(source);
+                let bytes = Rc::new(source.as_bytes().to_vec());
+                let validated = Rc::from_raw(super::super::bytes::relar_bytes_validate_utf8(
+                    Rc::as_ptr(&bytes),
+                ));
+                let from_text = Rc::from_raw(relar_dict_gather_str_int(&text, pointer));
+                let from_bytes =
+                    Rc::from_raw(relar_dict_gather_bytes_int(Rc::as_ptr(&validated), pointer));
+                let words = |list: &List| {
+                    list.0
+                        .with(|values| values.iter().map(|value| value.0).collect::<Vec<_>>())
+                };
+                assert_eq!(words(&from_bytes), words(&from_text));
+                assert_eq!(Rc::strong_count(&bytes), 2);
+            }
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn character_gather_observes_mutations_and_exact_unicode_keys() {
+        // SAFETY: constructors transfer their owners to Rc, and all exact string
+        // and dictionary inputs remain rooted through each gather/mutation.
+        unsafe {
+            let dictionary = Rc::from_raw(relar_dict_new(3, 2));
+            let pointer = Rc::as_ptr(&dictionary);
+            let keys = ["a", "é", "\u{301}", "😺", "\0", "\u{7f}", "\u{80}"]
+                .map(|key| Rc::new(Str::new(key)));
+            for (index, key) in keys.iter().enumerate() {
+                relar_dict_set(pointer, Rc::as_ptr(key) as usize, integer(index as i64));
+            }
+            let text = Str::new("aaé\u{301}😺\0a\u{7f}\u{80}");
+            let gathered = Rc::from_raw(relar_dict_gather_str_int(&text, pointer));
+            let values = gathered.0.with(|values| {
+                values
+                    .iter()
+                    .map(|value| value.as_small().unwrap())
+                    .collect::<Vec<_>>()
+            });
+            assert_eq!(values, [0, 0, 1, 2, 3, 4, 0, 5, 6]);
+            let ascii_edges =
+                Rc::from_raw(relar_dict_gather_str_int(&Str::new("\0\u{7f}"), pointer));
+            ascii_edges.0.with(|values| {
+                assert_eq!(values[0].as_small(), Some(4));
+                assert_eq!(values[1].as_small(), Some(5));
+            });
+            let alias = dictionary.clone();
+            relar_dict_set(
+                Rc::as_ptr(&alias),
+                Rc::as_ptr(&keys[0]) as usize,
+                integer(-7),
+            );
+            let changed = Rc::from_raw(relar_dict_gather_str_int(&Str::new("aaa"), pointer));
+            changed.0.with(|values| {
+                assert!(values.iter().all(|value| value.as_small() == Some(-7)));
+            });
+            relar_dict_delete(pointer, Rc::as_ptr(&keys[0]) as usize);
+            assert!(relar_dict_gather_str_int(&Str::new("a"), pointer).is_null());
+            let error = Rc::from_raw(relar_error_take());
+            assert_eq!(
+                relar_exception_matches(Rc::as_ptr(&error), Kind::KeyError as u32),
+                1
+            );
+            let message = Rc::from_raw(relar_exception_message(Rc::as_ptr(&error)));
+            assert_eq!(message.as_str(), "'a'");
+            relar_dict_set(pointer, Rc::as_ptr(&keys[0]) as usize, integer(29));
+            let restored = Rc::from_raw(relar_dict_gather_str_int(&Str::new("a"), pointer));
+            restored
+                .0
+                .with(|values| assert_eq!(values[0].as_small(), Some(29)));
+            let empty = Rc::from_raw(relar_dict_gather_str_int(&Str::new(""), pointer));
+            empty.0.with(|values| assert!(values.is_empty()));
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn character_gather_owns_big_integers_and_releases_partial_results() {
+        let integer = Rc::new(BigInt::from(1_u128 << 120));
+        let weak = Rc::downgrade(&integer);
+        // SAFETY: dictionary/text handles are exact and rooted. A successful
+        // gather transfers one list owner; each failed gather transfers none.
+        unsafe {
+            let dictionary = Rc::from_raw(relar_dict_new(3, 2));
+            let key = Rc::new(Str::new("a"));
+            relar_dict_set(
+                Rc::as_ptr(&dictionary),
+                Rc::as_ptr(&key) as usize,
+                Rc::as_ptr(&integer) as usize,
+            );
+            drop(integer);
+            assert_eq!(weak.strong_count(), 1);
+            for (text, expected) in [
+                ("aa😺z", "'😺'"),
+                ("aa\0z", "'\\x00'"),
+                ("aa\u{301}z", "'́'"),
+            ] {
+                let result = relar_dict_gather_str_int(&Str::new(text), Rc::as_ptr(&dictionary));
+                assert!(result.is_null());
+                assert_eq!(weak.strong_count(), 1);
+                assert_eq!(relar_error_pending(), 1);
+                let error = Rc::from_raw(relar_error_take());
+                assert_eq!(
+                    relar_exception_matches(Rc::as_ptr(&error), Kind::KeyError as u32),
+                    1
+                );
+                let message = Rc::from_raw(relar_exception_message(Rc::as_ptr(&error)));
+                assert_eq!(message.as_str(), expected);
+            }
+            let gathered = Rc::from_raw(relar_dict_gather_str_int(
+                &Str::new("aaa"),
+                Rc::as_ptr(&dictionary),
+            ));
+            assert_eq!(weak.strong_count(), 4);
+            relar_dict_set(
+                Rc::as_ptr(&dictionary),
+                Rc::as_ptr(&key) as usize,
+                Int::from_usize(7).into_raw(),
+            );
+            assert_eq!(weak.strong_count(), 3);
+            let replaced = Rc::from_raw(relar_dict_gather_str_int(
+                &Str::new("aaa"),
+                Rc::as_ptr(&dictionary),
+            ));
+            replaced.0.with(|values| {
+                assert!(values.iter().all(|value| value.as_small() == Some(7)));
+            });
+            drop(dictionary);
+            assert_eq!(weak.strong_count(), 3);
+            gathered.0.with(|values| {
+                assert_eq!(values.len(), 3);
+                assert!(
+                    values
+                        .iter()
+                        .all(|value| value.big().as_ref() == &BigInt::from(1_u128 << 120))
+                );
+            });
+            drop(gathered);
+        }
+        assert!(weak.upgrade().is_none());
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn character_gather_tracks_heap_value_transitions_in_its_ascii_cache() {
+        let large = Rc::new(BigInt::from(1_u128 << 120));
+        let heap_word = Rc::as_ptr(&large) as usize;
+        // SAFETY: every key/value remains rooted, and successful results and
+        // pending failures each transfer exactly one owner to Rc.
+        unsafe {
+            let dictionary = Rc::from_raw(relar_dict_new(3, 2));
+            let pointer = Rc::as_ptr(&dictionary);
+            let keys = ["a", "b", "é"].map(|key| Rc::new(Str::new(key)));
+            let count = || {
+                dictionary
+                    .0
+                    .with(|storage| storage.dictionary().ascii_int.as_ref().unwrap().heap_values)
+            };
+            assert!(relar_dict_gather_str_int(&Str::new("a"), pointer).is_null());
+            drop(Rc::from_raw(relar_error_take()));
+            assert_eq!(count(), 0);
+            for (key, word, expected) in [
+                (0, heap_word, 1),
+                (0, heap_word, 1),
+                (1, heap_word, 2),
+                (0, integer(0), 1),
+                (2, heap_word, 1),
+            ] {
+                relar_dict_set(pointer, Rc::as_ptr(&keys[key]) as usize, word);
+                assert_eq!(count(), expected);
+                let before = Rc::strong_count(&large);
+                let gathered =
+                    Rc::from_raw(relar_dict_gather_str_int(Rc::as_ptr(&keys[key]), pointer));
+                assert_eq!(
+                    Rc::strong_count(&large),
+                    before + usize::from(word == heap_word)
+                );
+                gathered.0.with(|values| assert_eq!(values[0].0, word));
+                drop(gathered);
+                assert_eq!(Rc::strong_count(&large), before);
+            }
+            relar_dict_delete(pointer, Rc::as_ptr(&keys[1]) as usize);
+            assert_eq!(count(), 0);
+            relar_dict_set(pointer, Rc::as_ptr(&keys[1]) as usize, heap_word);
+            assert_eq!(count(), 1);
+            relar_dict_delete(pointer, Rc::as_ptr(&keys[1]) as usize);
+            assert_eq!(count(), 0);
+            assert!(relar_dict_gather_str_int(&Str::new("aa\0z"), pointer).is_null());
+            let error = Rc::from_raw(relar_error_take());
+            let message = Rc::from_raw(relar_exception_message(Rc::as_ptr(&error)));
+            assert_eq!(message.as_str(), "'\\x00'");
+        }
+        assert_eq!(Rc::strong_count(&large), 1);
+        assert_eq!(relar_error_pending(), 0);
     }
 
     unsafe fn collect_keys(iterator: *const Object) -> Vec<i64> {

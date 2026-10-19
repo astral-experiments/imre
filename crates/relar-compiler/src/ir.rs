@@ -239,6 +239,15 @@ pub(crate) enum Builtin {
     Str,
     Len,
     ListGet,
+    /// Internal loop guard over [list, start, stop, step]. Scanning is limited
+    /// to four elements per planned iteration; true proves every value fits i32.
+    ListAllI32,
+    /// Best-effort bounded capacity hint for one empty loop output list.
+    ListReserveRange,
+    /// The guarded loop proves all elements fit i32 and cannot be replaced.
+    ListGetI32,
+    /// Internal identity guard between a read source and a mutated list.
+    ListDistinct,
     StringGet,
     StringIter,
     Bytes,
@@ -246,6 +255,9 @@ pub(crate) enum Builtin {
     BytesIter,
     Encode,
     Decode,
+    /// Validates complete UTF-8 at the decode evaluation point and returns a
+    /// retained bytes identity for an internal allocation-free character gather.
+    BytesValidateUtf8,
     /// Receiver followed by three nullable integer words for start, stop, step.
     Slice,
     Append,
@@ -272,6 +284,11 @@ pub(crate) enum Builtin {
     TextClose,
     TextClosed,
     DictGet,
+    /// Maps each Unicode scalar through an exact string-to-integer dictionary.
+    /// The text is evaluated first; the mapping remains mutable between calls.
+    DictGatherStrInt,
+    /// Reads immutable bytes already proved valid by BytesValidateUtf8.
+    DictGatherBytesInt,
     DictGetDefault,
     /// The stored value type determines optional promotion on successful lookup.
     /// A third argument, when present, already has the flattened result type.

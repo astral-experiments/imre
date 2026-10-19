@@ -37,7 +37,7 @@ use objects::exceptions::{Error, Kind, Result, finish};
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
 use std::borrow::Cow;
-use std::cell::UnsafeCell;
+use std::cell::{RefCell, UnsafeCell};
 use std::io::{self, BufWriter, IsTerminal, Write};
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
@@ -163,6 +163,80 @@ impl<T> StorageCell<T> {
 
 /// An opaque, nonmoving list allocation. Its resizable buffer stays inside Rust.
 pub struct List(StorageCell<Vec<Int>>);
+
+const MAX_REUSED_LIST_CAPACITY: usize = 32_768;
+
+thread_local! {
+    // Only empty buffers enter these newest-first slots: no integer owners or
+    // list identities survive here. Retention is bounded to 512 KiB per thread.
+    static LIST_BUFFERS: RefCell<[Vec<Int>; 2]> = const {
+        RefCell::new([Vec::new(), Vec::new()])
+    };
+}
+
+/// Reuses the smallest suitable empty buffer for a known result size. Limiting
+/// excess capacity avoids attaching large allocations to small, long-lived lists.
+/// Cache misses leave allocation and its existing error handling to the caller.
+fn take_list_buffer(requested: usize) -> Vec<Int> {
+    if requested == 0 || requested > MAX_REUSED_LIST_CAPACITY {
+        return Vec::new();
+    }
+    LIST_BUFFERS
+        .try_with(|buffers| {
+            let Ok(mut buffers) = buffers.try_borrow_mut() else {
+                return Vec::new();
+            };
+            let candidate = buffers
+                .iter()
+                .enumerate()
+                .filter(|(_, buffer)| (requested..=requested * 2).contains(&buffer.capacity()))
+                .min_by_key(|(_, buffer)| buffer.capacity())
+                .map(|(index, _)| index);
+            let Some(index) = candidate else {
+                return Vec::new();
+            };
+            let buffer = std::mem::take(&mut buffers[index]);
+            if index == 0 {
+                buffers.swap(0, 1);
+            }
+            buffer
+        })
+        .unwrap_or_default()
+}
+
+/// Retains only empty, bounded buffers. Evicted storage is freed after the TLS
+/// borrow ends; reentry or TLS destruction simply frees the incoming buffer.
+fn recycle_list_buffer(values: &mut Vec<Int>) {
+    if !values.is_empty() || !(1..=MAX_REUSED_LIST_CAPACITY).contains(&values.capacity()) {
+        return;
+    }
+    let buffer = std::mem::take(values);
+    let evicted = LIST_BUFFERS.try_with(|buffers| {
+        let Ok(mut buffers) = buffers.try_borrow_mut() else {
+            return buffer;
+        };
+        let previous = std::mem::replace(&mut buffers[0], buffer);
+        std::mem::replace(&mut buffers[1], previous)
+    });
+    drop(evicted);
+}
+
+impl Drop for List {
+    /// A vectorizable tag reduction skips element cleanup when every integer is
+    /// immediate. Any BigInt leaves the ordinary Vec drop path responsible for
+    /// releasing all owners, including repeated references to the same integer.
+    fn drop(&mut self) {
+        let values = self.0.0.get_mut();
+        let common_tags = values.iter().fold(1_usize, |tags, value| tags & value.0);
+        if common_tags & 1 != 0 {
+            // SAFETY: a low one bit proves each Int owns no allocation, so its
+            // destructor has no effect. Exclusive List destruction owns the Vec;
+            // clearing its length permits bounded buffer reuse without owners.
+            unsafe { values.set_len(0) };
+            recycle_list_buffer(values);
+        }
+    }
+}
 
 /// Immutable UTF-8 storage behind an opaque `Rc` handle. Short strings fit inside
 /// that allocation; longer strings own a separate buffer. LLVM never reads this
@@ -858,6 +932,33 @@ pub unsafe extern "C" fn relar_list_append(list: *const List, value: usize) {
     }
 }
 
+/// Appends two already-evaluated integers with one capacity check. The compiler
+/// selects this only when the first append cannot affect the second operand.
+///
+/// # Safety
+/// Root the exact list and both canonical integer handles throughout the call.
+/// Each stored element acquires its own owner, including repeated BigInts.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_append_pair(list: *const List, first: usize, second: usize) {
+    // SAFETY: these borrowed words remain rooted even when resizing moves the
+    // list's buffer. Acquisition and allocation cannot call user code.
+    unsafe {
+        let first = Int::borrow(first);
+        let second = Int::borrow(second);
+        (&*list).0.with_mut(|list| {
+            list.try_reserve(2)
+                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+            let length = list.len();
+            // Successful reservation proves that both slots fit. Cloning exact
+            // Int owners cannot unwind; publish only after both are initialized.
+            let output = list.as_mut_ptr().add(length);
+            output.write((*first).clone());
+            output.add(1).write((*second).clone());
+            list.set_len(length + 2);
+        });
+    }
+}
+
 /// Returns an owned nonzero integer word, or raw zero with a pending error.
 ///
 /// # Safety
@@ -883,6 +984,115 @@ pub unsafe extern "C" fn relar_list_len(list: *const List) -> usize {
     debug_assert!(length <= MAX_LIST_LEN);
     // Vec<Int>'s allocation limit guarantees that this is a small integer.
     (length << 1) | 1
+}
+
+/// Counts a nonempty range only when its captured components are tagged small.
+///
+/// # Safety
+/// All arguments must be rooted canonical integer handles.
+unsafe fn small_range_trips(start: usize, stop: usize, step: usize) -> Option<usize> {
+    // SAFETY: the components remain rooted during these nonreentrant reads.
+    let (start, stop, step) = unsafe {
+        (
+            Int::borrow(start).as_small()?,
+            Int::borrow(stop).as_small()?,
+            Int::borrow(step).as_small()?,
+        )
+    };
+    // Differences of tagged-small values and a negated small step fit i64.
+    if step > 0 && stop > start {
+        Some(((stop - start - 1) / step + 1) as usize)
+    } else if step < 0 && start > stop {
+        Some(((start - stop - 1) / -step + 1) as usize)
+    } else {
+        None
+    }
+}
+
+/// Gives one empty output list a best-effort capacity hint, capped at 256 KiB.
+/// A break, error, or untaken branch may consume fewer slots than estimated.
+/// Allocation failure is ignored; the ordinary append retains its error behavior.
+///
+/// # Safety
+/// `list` is a rooted list or null; the range arguments are rooted canonical
+/// integers. `per_iteration` is a decoded native count, not a tagged integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_reserve_range(
+    list: *const List,
+    start: usize,
+    stop: usize,
+    step: usize,
+    per_iteration: usize,
+) {
+    if list.is_null() {
+        return;
+    }
+    // SAFETY: all range components remain rooted throughout the estimate.
+    let Some(trips) = (unsafe { small_range_trips(start, stop, step) }) else {
+        return;
+    };
+    let capacity = trips
+        .saturating_mul(per_iteration)
+        .min(MAX_REUSED_LIST_CAPACITY);
+    // SAFETY: this nonreentrant reservation changes capacity only; no buffer
+    // address or storage borrow escapes, and existing elements are untouched.
+    let displaced = unsafe {
+        (&*list).0.with_mut(|values| {
+            if !values.is_empty() || values.capacity() >= capacity {
+                return Vec::new();
+            }
+            let buffer = take_list_buffer(capacity);
+            if buffer.capacity() >= capacity {
+                std::mem::replace(values, buffer)
+            } else {
+                let _ = values.try_reserve_exact(capacity);
+                buffer
+            }
+        })
+    };
+    drop(displaced);
+}
+
+/// Guards native arithmetic in a loop that cannot replace this list's elements.
+/// The caller keeps the list rooted and excludes mutation until the guarded
+/// reads finish; arbitrary-precision values select the original checked loop.
+/// Scanning is worthwhile only when the list has at most four elements per
+/// planned iteration. Empty, zero-step, and arbitrary-precision ranges decline
+/// specialization without reporting an error or scanning any list elements.
+///
+/// # Safety
+/// `list` must be a rooted list handle or a null uninitialized local, accessed
+/// on its owning thread. Null selects the original loop without dereferencing it.
+/// The remaining arguments are rooted canonical integer range components.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_all_i32(
+    list: *const List,
+    start: usize,
+    stop: usize,
+    step: usize,
+) -> u8 {
+    if list.is_null() {
+        return 0;
+    }
+    // SAFETY: all range components remain rooted throughout the estimate.
+    let Some(trips) = (unsafe { small_range_trips(start, stop, step) }) else {
+        return 0;
+    };
+    // SAFETY: this read cannot reenter or retain a storage reference.
+    let valid = unsafe {
+        (&*list).0.with(|values| {
+            if values.len().div_ceil(4) > trips {
+                return false;
+            }
+            // Biasing moves the tagged i32 interval into the low 33 bits.
+            // Its one extra lower endpoint has an even tag and is rejected by
+            // the second term. An integer OR reduction exposes SIMD lowering.
+            values.iter().fold(0_usize, |invalid, value| {
+                invalid | (value.0.wrapping_add(1_usize << 32) >> 33) | (!value.0 & 1)
+            }) == 0
+        })
+    };
+    u8::from(valid)
 }
 
 /// # Safety
@@ -944,6 +1154,168 @@ pub extern "C" fn relar_range_step_zero() {
 mod tests {
     use super::*;
     use objects::exceptions::{relar_error_pending, relar_error_take, relar_exception_matches};
+
+    #[test]
+    fn paired_append_preserves_order_and_independent_bigint_owners() {
+        let big = Rc::new(BigInt::from(1_u128 << 100));
+        let weak = Rc::downgrade(&big);
+        let big_word = Rc::as_ptr(&big) as usize;
+        let negative = Int::small(-7).unwrap().0;
+        let values = vec![Int::small(9).unwrap()];
+        let list = Rc::new(List(StorageCell::new(values)));
+        // SAFETY: both inputs and the exact list remain rooted. The second call
+        // borrows its repeated input from the list itself across buffer growth.
+        unsafe {
+            relar_list_append_pair(Rc::as_ptr(&list), big_word, negative);
+            assert_eq!(Rc::strong_count(&big), 2);
+            let borrowed = list.0.with(|values| values[1].0);
+            relar_list_append_pair(Rc::as_ptr(&list), borrowed, borrowed);
+            assert_eq!(Rc::strong_count(&big), 4);
+            list.0.with(|values| {
+                assert_eq!(values.len(), 5);
+                assert_eq!(values[0].as_small(), Some(9));
+                assert_eq!(values[1].0, big_word);
+                assert_eq!(values[2].as_small(), Some(-7));
+                assert_eq!(values[3].0, big_word);
+                assert_eq!(values[4].0, big_word);
+            });
+        }
+        drop(big);
+        assert_eq!(weak.strong_count(), 3);
+        drop(list);
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn list_buffer_reuse_preserves_live_lists_and_uses_a_tight_fit() {
+        let mut values = Vec::with_capacity(64);
+        values.extend((0..64).map(|value| Int::small(value).unwrap()));
+        let allocation = values.as_ptr();
+        let list = Rc::new(List(StorageCell::new(values)));
+        let alias = list.clone();
+        drop(list);
+        assert_eq!(take_list_buffer(48).capacity(), 0);
+        drop(alias);
+        let mut reused = take_list_buffer(48);
+        assert_eq!(reused.as_ptr(), allocation);
+        assert_eq!(reused.capacity(), 64);
+        assert!(reused.is_empty());
+        reused.push(Int::small(-7).unwrap());
+        assert_eq!(reused[0].as_small(), Some(-7));
+    }
+
+    #[test]
+    fn list_buffer_pool_is_bounded_and_declines_reentrant_access() {
+        fn cache(capacity: usize) {
+            let mut values = Vec::with_capacity(capacity);
+            recycle_list_buffer(&mut values);
+        }
+        fn capacities() -> [usize; 2] {
+            LIST_BUFFERS.with(|buffers| buffers.borrow().each_ref().map(Vec::capacity))
+        }
+        cache(16);
+        cache(8);
+        let mut smallest = take_list_buffer(8);
+        assert_eq!(smallest.capacity(), 8);
+        recycle_list_buffer(&mut smallest);
+        assert_eq!(take_list_buffer(9).capacity(), 16);
+        assert_eq!(take_list_buffer(3).capacity(), 0);
+        assert_eq!(take_list_buffer(0).capacity(), 0);
+        assert_eq!(take_list_buffer(MAX_REUSED_LIST_CAPACITY + 1).capacity(), 0);
+        cache(32);
+        cache(64);
+        assert_eq!(capacities(), [64, 32]);
+        cache(0);
+        cache(MAX_REUSED_LIST_CAPACITY + 1);
+        assert_eq!(capacities(), [64, 32]);
+        cache(MAX_REUSED_LIST_CAPACITY);
+        cache(MAX_REUSED_LIST_CAPACITY);
+        assert_eq!(capacities(), [MAX_REUSED_LIST_CAPACITY; 2]);
+        LIST_BUFFERS.with(|buffers| {
+            let borrowed = buffers.borrow_mut();
+            assert_eq!(take_list_buffer(MAX_REUSED_LIST_CAPACITY).capacity(), 0);
+            let mut values = Vec::with_capacity(8);
+            recycle_list_buffer(&mut values);
+            assert_eq!(values.capacity(), 0);
+            assert_eq!(
+                borrowed.each_ref().map(Vec::capacity),
+                [MAX_REUSED_LIST_CAPACITY; 2]
+            );
+        });
+    }
+
+    #[test]
+    fn list_buffer_pool_releases_bigints_and_survives_thread_teardown() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let bigint = Rc::new(BigInt::from(1_u128 << 100));
+        let weak = Rc::downgrade(&bigint);
+        let mut values = Vec::with_capacity(8);
+        values.push(Int(Rc::into_raw(bigint) as usize));
+        recycle_list_buffer(&mut values);
+        assert_eq!(values.len(), 1);
+        assert_eq!(weak.strong_count(), 1);
+        drop(List(StorageCell::new(values)));
+        assert!(weak.upgrade().is_none());
+        LIST_BUFFERS.with(|buffers| {
+            assert!(buffers.borrow().iter().all(|buffer| buffer.capacity() == 0));
+        });
+
+        struct Teardown(Arc<AtomicBool>);
+        impl Drop for Teardown {
+            fn drop(&mut self) {
+                let mut values = take_list_buffer(8);
+                values.try_reserve_exact(8).unwrap();
+                values.push(Int::small(1).unwrap());
+                drop(List(StorageCell::new(values)));
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+        thread_local! {
+            static TEARDOWN: RefCell<Option<Teardown>> = const { RefCell::new(None) };
+        }
+        let completed = Arc::new(AtomicBool::new(false));
+        let observed = completed.clone();
+        std::thread::spawn(move || {
+            // Initialize the probe first so reverse TLS teardown exercises list
+            // cleanup after the buffer cache has already been destroyed.
+            TEARDOWN.with(|probe| *probe.borrow_mut() = Some(Teardown(observed)));
+            let mut values = Vec::with_capacity(8);
+            values.push(Int::small(2).unwrap());
+            drop(List(StorageCell::new(values)));
+        })
+        .join()
+        .unwrap();
+        assert!(completed.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn list_drop_preserves_bigint_owners_at_vector_boundaries() {
+        for position in [0, 1, 7, 8, 15, 16, 32] {
+            let bigint = Rc::new(BigInt::from(1_u128 << 100));
+            let weak = Rc::downgrade(&bigint);
+            let mut values = (0..33)
+                .map(|value| Int::small(value - 16).unwrap())
+                .collect::<Vec<_>>();
+            values[position] = Int(Rc::into_raw(bigint) as usize);
+            let list = Rc::new(List(StorageCell::new(values)));
+            let alias = Rc::clone(&list);
+            drop(list);
+            assert_eq!(weak.strong_count(), 1);
+            drop(alias);
+            assert!(weak.upgrade().is_none());
+        }
+        for length in [0, 1, 7, 8, 15, 16, 33] {
+            let values = [MIN_SMALL, 0, MAX_SMALL]
+                .into_iter()
+                .cycle()
+                .take(length)
+                .map(|value| Int::small(value).unwrap())
+                .collect();
+            drop(List(StorageCell::new(values)));
+        }
+    }
 
     #[test]
     fn scalar_strings_preserve_integer_boundaries_and_python_spellings() {
@@ -1081,6 +1453,95 @@ mod tests {
         drop(copy);
         assert_eq!(Rc::strong_count(&owner), 1);
         assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn list_i32_guard_checks_every_value_and_current_mutations() {
+        let list = relar_list_new();
+        // SAFETY: all values remain rooted during insertion, and the sole list
+        // owner is released after the final check. Guards acquire no owners.
+        unsafe {
+            assert_eq!(relar_list_all_i32(std::ptr::null(), 1, 2049, 3), 0);
+            assert_eq!(relar_list_all_i32(list, 1, 2049, 3), 1);
+            for value in [i32::MIN as i64, -1, 0, i32::MAX as i64] {
+                let value = Int::small(value).unwrap();
+                relar_list_append(list, value.0);
+            }
+            assert_eq!(relar_list_all_i32(list, 1, 2049, 3), 1);
+            for value in [
+                BigInt::from(i32::MIN) - 1,
+                BigInt::from(i32::MAX) + 1,
+                BigInt::from(1) << 100_u32,
+                -(BigInt::from(1) << 100_u32),
+            ] {
+                let value = Int::new(value);
+                relar_list_append(list, value.0);
+                assert_eq!(relar_list_all_i32(list, 1, 2049, 3), 0);
+                drop(Int(relar_list_pop(list)));
+                assert_eq!(relar_list_all_i32(list, 1, 2049, 3), 1);
+            }
+            relar_list_release(list);
+        }
+    }
+
+    #[test]
+    fn list_i32_guard_bounds_scanning_without_raising_range_errors() {
+        let list = relar_list_new();
+        let zero = Int::small(0).unwrap();
+        let one = Int::small(1).unwrap();
+        let nine = Int::small(9).unwrap();
+        let negative = Int::small(-1).unwrap();
+        let huge = Int::new(BigInt::from(1) << 140_u32);
+        // SAFETY: the exact list and integer arguments stay rooted. The guard
+        // returns only a predicate and must never consume owners or raise.
+        unsafe {
+            for _ in 0..33 {
+                relar_list_append(list, zero.0);
+            }
+            assert_eq!(relar_list_all_i32(list, zero.0, one.0, one.0), 0);
+            assert_eq!(relar_list_all_i32(list, zero.0, nine.0, one.0), 1);
+            assert_eq!(relar_list_all_i32(list, nine.0, zero.0, negative.0), 1);
+            assert_eq!(relar_list_all_i32(list, zero.0, zero.0, one.0), 0);
+            assert_eq!(relar_list_all_i32(list, zero.0, nine.0, zero.0), 0);
+            assert_eq!(relar_list_all_i32(list, zero.0, huge.0, one.0), 0);
+            assert_eq!(relar_error_pending(), 0);
+            relar_list_release(list);
+        }
+    }
+
+    #[test]
+    fn range_capacity_hint_is_bounded_and_preserves_existing_values() {
+        let list = relar_list_new();
+        let zero = Int::small(0).unwrap();
+        let one = Int::small(1).unwrap();
+        let three = Int::small(3).unwrap();
+        let negative = Int::small(-1).unwrap();
+        let maximum = Int::small(MAX_SMALL).unwrap();
+        let huge = Int::new(BigInt::from(1) << 140_u32);
+        // SAFETY: exact handles stay rooted, capacity reads cannot reenter,
+        // and the final release destroys the sole list owner.
+        unsafe {
+            relar_list_reserve_range(std::ptr::null(), zero.0, three.0, one.0, 2);
+            relar_list_reserve_range(list, zero.0, three.0, zero.0, 2);
+            relar_list_reserve_range(list, zero.0, huge.0, one.0, 2);
+            assert_eq!((&*list).0.with(Vec::capacity), 0);
+            relar_list_reserve_range(list, three.0, zero.0, negative.0, 2);
+            assert_eq!((&*list).0.with(Vec::capacity), 6);
+            assert_eq!(relar_list_len(list), zero.0);
+            relar_list_append(list, huge.0);
+            relar_list_reserve_range(list, zero.0, maximum.0, one.0, usize::MAX);
+            assert_eq!((&*list).0.with(Vec::capacity), 6);
+            assert_eq!(
+                Int::borrow(relar_list_borrow_index(list, 0)).big(),
+                huge.big()
+            );
+            drop(Int(relar_list_pop(list)));
+            relar_list_reserve_range(list, zero.0, maximum.0, one.0, usize::MAX);
+            assert_eq!((&*list).0.with(Vec::capacity), 32_768);
+            assert_eq!(relar_list_len(list), zero.0);
+            assert_eq!(relar_error_pending(), 0);
+            relar_list_release(list);
+        }
     }
 
     #[test]
