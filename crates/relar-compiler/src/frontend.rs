@@ -101,6 +101,7 @@ impl ClassInfo {
 
 const RESERVED: &[&str] = &[
     "int",
+    "float",
     "bool",
     "str",
     "list",
@@ -513,6 +514,7 @@ fn annotation_at(
     match expression {
         ast::Expr::Name(name) => match name.id.as_str() {
             "int" => Ok(Type::Int),
+            "float" => Ok(Type::Float),
             "bool" => Ok(Type::Bool),
             "str" => Ok(Type::Str),
             "Exception" => Ok(Type::Exception),
@@ -1590,28 +1592,53 @@ impl<'a> Checker<'a> {
             ast::Stmt::AugAssign(assign) => {
                 if let ast::Expr::Subscript(target) = &*assign.target {
                     let list = self.expr(&target.value)?;
-                    let key = if let Some((key, value)) = self.types.mapping(list.ty) {
-                        self.expect(Type::Int, value, target)?;
-                        key
+                    let (key, element) = if let Some(mapping) = self.types.mapping(list.ty) {
+                        mapping
                     } else {
-                        self.expect(Type::ListInt, list.ty, target)?;
-                        Type::Int
+                        let element = self.types.element(list.ty).ok_or_else(|| {
+                            error(
+                                self.source,
+                                target,
+                                "augmented item assignment requires a typed list or dictionary",
+                            )
+                        })?;
+                        (Type::Int, element)
                     };
+                    if !matches!(element, Type::Int | Type::Float) {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "augmented items require int or float storage",
+                        ));
+                    }
                     let index = self.expr_expected(&target.slice, key)?;
                     let value = self.expr(&assign.value)?;
-                    self.expect(Type::Int, value.ty, statement)?;
-                    let op = self
-                        .binary_op(assign.op, Type::Int, Type::Int, statement)?
-                        .0;
+                    let (op, result) = self.binary_op(assign.op, element, value.ty, statement)?;
+                    self.expect(element, result, statement)?;
                     Some(Statement::AugmentItem(list, index, op, value))
                 } else if let ast::Expr::Attribute(target) = &*assign.target {
                     let (receiver, field, ty) = self.field(target)?;
-                    self.expect(Type::Int, ty, statement)?;
+                    if !matches!(ty, Type::Int | Type::Float) {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "augmented fields require int or float storage",
+                        ));
+                    }
                     let value = self.expr(&assign.value)?;
-                    self.expect(Type::Int, value.ty, statement)?;
-                    let op = self
-                        .binary_op(assign.op, Type::Int, Type::Int, statement)?
-                        .0;
+                    let (op, result) = self.binary_op(assign.op, ty, value.ty, statement)?;
+                    self.expect(ty, result, statement)?;
+                    // AugmentField keeps its old value implicit. Expose the
+                    // checked integer conversion in the RHS so effect analysis
+                    // preserves OverflowError through callers.
+                    let value = if ty == Type::Float && value.ty == Type::Int {
+                        Expr {
+                            ty: Type::Float,
+                            kind: ExprKind::Builtin(Builtin::Float, vec![value]),
+                        }
+                    } else {
+                        value
+                    };
                     Some(Statement::AugmentField(receiver, field, op, value))
                 } else if let ast::Expr::Name(_) = &*assign.target {
                     let left = self.expr(&assign.target)?;
@@ -2066,17 +2093,28 @@ impl<'a> Checker<'a> {
         if op == ast::Operator::Add && left == Type::Str && right == Type::Str {
             return Ok((Binary::Concat, Type::Str));
         }
-        self.expect(Type::Int, left, node)?;
-        self.expect(Type::Int, right, node)?;
+        if !matches!(left, Type::Int | Type::Float) || !matches!(right, Type::Int | Type::Float) {
+            return Err(error(
+                self.source,
+                node,
+                "arithmetic requires int or float operands",
+            ));
+        }
+        let result = if left == Type::Float || right == Type::Float || op == ast::Operator::Div {
+            Type::Float
+        } else {
+            Type::Int
+        };
         let op = match op {
             ast::Operator::Add => Binary::Add,
             ast::Operator::Sub => Binary::Subtract,
             ast::Operator::Mult => Binary::Multiply,
+            ast::Operator::Div => Binary::Divide,
             ast::Operator::FloorDiv => Binary::FloorDivide,
             ast::Operator::Mod => Binary::Modulo,
-            _ => return Err(error(self.source, node, "unsupported integer operator")),
+            _ => return Err(error(self.source, node, "unsupported numeric operator")),
         };
-        Ok((op, Type::Int))
+        Ok((op, result))
     }
 
     fn expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
@@ -2092,11 +2130,12 @@ impl<'a> Checker<'a> {
         let (ty, kind) = match expression {
             ast::Expr::NumberLiteral(value) => match &value.value {
                 ast::Number::Int(value) => (Type::Int, ExprKind::Int(value.to_string())),
+                ast::Number::Float(value) => (Type::Float, ExprKind::Float(*value)),
                 _ => {
                     return Err(error(
                         self.source,
                         expression,
-                        "only integer numeric literals are supported",
+                        "complex numeric literals are unsupported",
                     ));
                 }
             },
@@ -2193,11 +2232,17 @@ impl<'a> Checker<'a> {
                         (Type::Bool, ExprKind::Not(Box::new(value)))
                     }
                     ast::UnaryOp::USub | ast::UnaryOp::UAdd => {
-                        self.expect(Type::Int, value.ty, expression)?;
+                        if !matches!(value.ty, Type::Int | Type::Float) {
+                            return Err(error(
+                                self.source,
+                                expression,
+                                "unary signs require int or float",
+                            ));
+                        }
                         if unary.op == ast::UnaryOp::UAdd {
                             return Ok(value);
                         }
-                        (Type::Int, ExprKind::Negate(Box::new(value)))
+                        (value.ty, ExprKind::Negate(Box::new(value)))
                     }
                     _ => return Err(error(self.source, expression, "unsupported unary operator")),
                 }
@@ -2278,17 +2323,21 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|value| self.expr(value))
                     .collect::<Result<Vec<_>, _>>()?;
-                let ty = values[0].ty;
                 let mut ops = Vec::new();
-                for (&op, value) in compare.ops.iter().zip(&values[1..]) {
-                    self.expect(ty, value.ty, expression)?;
+                for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
+                    let (ty, right) = (pair[0].ty, pair[1].ty);
+                    let numeric = matches!(ty, Type::Int | Type::Float)
+                        && matches!(right, Type::Int | Type::Float);
+                    if !numeric {
+                        self.expect(ty, right, expression)?;
+                    }
                     let op = match op {
                         ast::CmpOp::Eq => Compare::Equal,
                         ast::CmpOp::NotEq => Compare::NotEqual,
-                        ast::CmpOp::Lt if ty == Type::Int => Compare::Less,
-                        ast::CmpOp::LtE if ty == Type::Int => Compare::LessEqual,
-                        ast::CmpOp::Gt if ty == Type::Int => Compare::Greater,
-                        ast::CmpOp::GtE if ty == Type::Int => Compare::GreaterEqual,
+                        ast::CmpOp::Lt if numeric => Compare::Less,
+                        ast::CmpOp::LtE if numeric => Compare::LessEqual,
+                        ast::CmpOp::Gt if numeric => Compare::Greater,
+                        ast::CmpOp::GtE if numeric => Compare::GreaterEqual,
                         _ => {
                             return Err(error(
                                 self.source,
@@ -2477,6 +2526,7 @@ impl<'a> Checker<'a> {
                                 if !matches!(
                                     expression.ty,
                                     Type::Int
+                                        | Type::Float
                                         | Type::Bool
                                         | Type::Str
                                         | Type::None
@@ -2485,7 +2535,7 @@ impl<'a> Checker<'a> {
                                     return Err(error(
                                         self.source,
                                         field,
-                                        "f-string fields require exactly int, bool, str, None, or Exception",
+                                        "f-string fields require exactly int, float, bool, str, None, or Exception",
                                     ));
                                 }
                                 if expression.ty == Type::Str {
@@ -2769,15 +2819,33 @@ impl<'a> Checker<'a> {
                 if args.len() == 1
                     && matches!(
                         args[0].ty,
-                        Type::Int | Type::Bool | Type::Str | Type::None | Type::Exception
+                        Type::Int
+                            | Type::Float
+                            | Type::Bool
+                            | Type::Str
+                            | Type::None
+                            | Type::Exception
                     ) =>
             {
                 (Builtin::Str, Type::Str)
             }
             "int"
-                if args.len() == 1 && matches!(args[0].ty, Type::Int | Type::Bool | Type::Str) =>
+                if args.len() == 1
+                    && matches!(args[0].ty, Type::Int | Type::Float | Type::Bool | Type::Str) =>
             {
                 (Builtin::Int, Type::Int)
+            }
+            "float" if args.is_empty() => {
+                return Ok(Expr {
+                    ty: Type::Float,
+                    kind: ExprKind::Float(0.0),
+                });
+            }
+            "float"
+                if args.len() == 1
+                    && matches!(args[0].ty, Type::Int | Type::Float | Type::Bool | Type::Str) =>
+            {
+                (Builtin::Float, Type::Float)
             }
             "len"
                 if args.len() == 1
@@ -2795,7 +2863,10 @@ impl<'a> Checker<'a> {
             }
             "print"
                 if args.len() == 1
-                    && matches!(args[0].ty, Type::Int | Type::Bool | Type::Str | Type::None) =>
+                    && matches!(
+                        args[0].ty,
+                        Type::Int | Type::Float | Type::Bool | Type::Str | Type::None
+                    ) =>
             {
                 (Builtin::Print, Type::None)
             }

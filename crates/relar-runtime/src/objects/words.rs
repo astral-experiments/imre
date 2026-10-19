@@ -3,6 +3,7 @@
 //! Stored containers carry one kind per homogeneous buffer, or one static kind
 //! per record field. Only temporary owners carry their own kind. Bit 256 marks
 //! a nullable value; optional booleans use 0=None, 1=False, and 2=True.
+//! Bare float words hold all binary64 bits; nullable floats instead own an Rc<f64>.
 
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
@@ -16,7 +17,7 @@ pub(super) struct WordKind(u32);
 
 impl WordKind {
     pub(super) fn new(kind: u32) -> Self {
-        if kind & !NULLABLE > 6 {
+        if kind & !NULLABLE > 7 {
             fail("SystemError", "invalid concrete word representation");
         }
         Self(kind)
@@ -42,6 +43,9 @@ impl WordKind {
         if matches!(self.0, 3..=6) {
             // SAFETY: this exact descriptor denotes a pointer-typed field.
             unsafe { field.cast::<*const ()>().read() as usize }
+        } else if self.0 == 7 {
+            // SAFETY: nonnullable float fields use LLVM double storage.
+            unsafe { field.cast::<f64>().read().to_bits() as usize }
         } else {
             // SAFETY: scalar, Int, and nullable fields use machine-word storage.
             unsafe { field.read() }
@@ -56,6 +60,7 @@ impl WordKind {
             0 => word == 0,
             1 => word <= if nullable { 2 } else { 1 },
             2..=6 => word != 0 || nullable,
+            7 => true,
             _ => unreachable!(),
         };
         if !valid {
@@ -73,8 +78,8 @@ impl WordKind {
     }
 
     /// # Safety
-    /// `word` is zero or a rooted handle of this kind. Zero is also the safe
-    /// uninitialized state of reference-bearing record fields.
+    /// `word` uses this exact scalar representation or is a rooted handle of
+    /// this kind. Zero is also the safe uninitialized state of owning fields.
     pub(super) unsafe fn retain(self, word: usize) {
         if word == 0 {
             return;
@@ -92,6 +97,8 @@ impl WordKind {
                 4 => Rc::increment_strong_count(word as *const List),
                 5 => Rc::increment_strong_count(word as *const Object),
                 6 => records::relar_record_retain(word as *const usize),
+                7 if self.0 & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
+                7 => {}
                 _ => unreachable!(),
             }
         }
@@ -113,6 +120,8 @@ impl WordKind {
                 4 => Rc::decrement_strong_count(word as *const List),
                 5 => Rc::decrement_strong_count(word as *const Object),
                 6 => records::relar_record_release(word as *const usize),
+                7 if self.0 & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
+                7 => {}
                 _ => unreachable!(),
             }
         }
@@ -172,5 +181,37 @@ impl Drop for Words {
             // SAFETY: each buffer word owns its declared value independently.
             unsafe { self.kind.release(word) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn float_words_distinguish_unboxed_bits_from_optional_owners() {
+        let bare = WordKind::new(7);
+        let nullable = WordKind::new(NULLABLE | 7);
+        for bits in [0, 1_u64 << 63, 0x7ff8_0000_0000_0042, u64::MAX] {
+            let value = f64::from_bits(bits);
+            // SAFETY: bare descriptors accept all f64 bits and read double fields.
+            unsafe {
+                let owner = bare.acquire(bits as usize);
+                assert_eq!(owner.word, bits as usize);
+                assert_eq!(
+                    bare.read_record_field(std::ptr::from_ref(&value).cast()),
+                    bits as usize
+                );
+            }
+            let boxed = Rc::new(value);
+            let word = Rc::as_ptr(&boxed) as usize;
+            // SAFETY: boxed roots this exact optional-float allocation.
+            let owner = unsafe { nullable.acquire(word) };
+            assert_eq!(Rc::strong_count(&boxed), 2);
+            drop(owner);
+            assert_eq!(Rc::strong_count(&boxed), 1);
+        }
+        // SAFETY: zero denotes absence for the nullable descriptor.
+        drop(unsafe { nullable.acquire(0) });
     }
 }

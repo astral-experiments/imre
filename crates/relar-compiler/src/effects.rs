@@ -98,6 +98,7 @@ fn block(body: &[Statement], functions: &[bool]) -> bool {
 fn expression(value: &Expr, functions: &[bool]) -> bool {
     match &value.kind {
         ExprKind::Int(_)
+        | ExprKind::Float(_)
         | ExprKind::Bool(_)
         | ExprKind::Str(_)
         | ExprKind::None
@@ -117,7 +118,13 @@ fn expression(value: &Expr, functions: &[bool]) -> bool {
         | ExprKind::Negate(value)
         | ExprKind::Field(value, _) => expression(value, functions),
         ExprKind::Binary(op, left, right) => {
-            binary(*op) || expression(left, functions) || expression(right, functions)
+            binary(*op)
+                || matches!(
+                    (left.ty, right.ty),
+                    (Type::Int, Type::Float) | (Type::Float, Type::Int)
+                )
+                || expression(left, functions)
+                || expression(right, functions)
         }
         ExprKind::Conditional(test, yes, no) => {
             expression(test, functions) || expression(yes, functions) || expression(no, functions)
@@ -143,7 +150,7 @@ fn expression(value: &Expr, functions: &[bool]) -> bool {
 
 fn binary(op: Binary) -> bool {
     match op {
-        Binary::FloorDivide | Binary::Modulo | Binary::Repeat => true,
+        Binary::Divide | Binary::FloorDivide | Binary::Modulo | Binary::Repeat => true,
         Binary::Add | Binary::Subtract | Binary::Multiply | Binary::Concat => false,
     }
 }
@@ -170,6 +177,9 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         Builtin::Int => args
             .first()
             .is_none_or(|arg| !matches!(arg.ty, Type::Int | Type::Bool)),
+        Builtin::Float => args
+            .first()
+            .is_none_or(|arg| !matches!(arg.ty, Type::Float | Type::Bool)),
         Builtin::Len
         | Builtin::Append
         | Builtin::IsNone

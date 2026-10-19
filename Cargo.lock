@@ -736,11 +736,13 @@ name = "relar-runtime"
 version = "0.1.0"
 dependencies = [
  "compact_str",
+ "icu_properties",
  "itoa",
  "libc",
  "num-bigint",
  "num-traits",
  "ruff_python_literal",
+ "ryu",
 ]
 
 [[package]]

@@ -29,6 +29,7 @@
 //! Cleanup/error-state entry points remain valid while pending. Invalid ABI
 //! inputs and allocator exhaustion remain fatal; neither uses Rust unwinding.
 
+mod floats;
 mod objects;
 
 use objects::exceptions::{Error, Kind, Result, finish};
