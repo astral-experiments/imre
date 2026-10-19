@@ -2934,7 +2934,10 @@ impl<'a> Checker<'a> {
             }
             "float"
                 if args.len() == 1
-                    && matches!(args[0].ty, Type::Int | Type::Float | Type::Bool | Type::Str) =>
+                    && matches!(
+                        args[0].ty,
+                        Type::Int | Type::Float | Type::Bool | Type::Str | Type::Bytes
+                    ) =>
             {
                 (Builtin::Float, Type::Float)
             }

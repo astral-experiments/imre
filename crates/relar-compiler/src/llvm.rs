@@ -2006,6 +2006,7 @@ impl Emitter<'_, '_> {
                 Type::Float => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Int => self.call("relar_int_float", Type::Float, &[&args[0].value]),
                 Type::Str => self.call("relar_float_parse", Type::Float, &[&args[0].value]),
+                Type::Bytes => self.call("relar_bytes_float", Type::Float, &[&args[0].value]),
                 Type::Bool => Value {
                     ty: Type::Float,
                     operand: self
@@ -2831,6 +2832,7 @@ fn fallible(name: &str) -> bool {
                 | "relar_int_float"
                 | "relar_float_int"
                 | "relar_float_parse"
+                | "relar_bytes_float"
                 | "relar_int_true_divide"
                 | "relar_assert_fail"
                 | "relar_range_step_zero"
@@ -2870,6 +2872,7 @@ declare void @relar_print_float(double)
 declare double @relar_int_float(i64)
 declare i64 @relar_float_int(double)
 declare double @relar_float_parse(ptr)
+declare double @relar_bytes_float(ptr)
 declare double @relar_float_divide(double, double, i32)
 declare i32 @relar_int_float_compare(i64, double)
 declare double @relar_int_true_divide(i64, i64)
