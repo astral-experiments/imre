@@ -52,6 +52,8 @@ jobs:
         run: python3 tests/assignments.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compare truthiness and boolean operand values with CPython
         run: python3 tests/truthiness.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
+      - name: Compare loop exhaustion and else cleanup with CPython
+        run: python3 tests/loop_else.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compare exception propagation and cleanup with CPython
         run: python3 tests/exceptions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compare output and interactive I/O with CPython
@@ -67,7 +69,7 @@ jobs:
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"
           relar_lld_dir="$(rustc --print sysroot)/lib/rustlib/$relar_target/bin"
           python3 tests/lto.py --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --rust-lld "$relar_lld_dir/rust-lld" --python python3
-          for suite in differential imports classes containers comprehensions fstrings calls expressions floats bytes matching assignments truthiness exceptions io files; do
+          for suite in differential imports classes containers comprehensions fstrings calls expressions floats bytes matching assignments truthiness loop_else exceptions io files; do
             python3 "tests/$suite.py" --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --lto-linker "$relar_lld_dir/gcc-ld/ld.lld" --opt-levels 3
           done
       - name: Build the runtime with AddressSanitizer
@@ -80,10 +82,10 @@ jobs:
       - name: Check generated code and runtime with AddressSanitizer
         run: |
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"
-          for suite in differential imports classes containers comprehensions fstrings calls expressions floats bytes matching assignments truthiness exceptions io files; do
+          for suite in differential imports classes containers comprehensions fstrings calls expressions floats bytes matching assignments truthiness loop_else exceptions io files; do
             python3 "tests/$suite.py" --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 1
           done
-          for suite in containers fstrings calls expressions floats bytes matching assignments truthiness files; do
+          for suite in containers fstrings calls expressions floats bytes matching assignments truthiness loop_else files; do
             python3 "tests/$suite.py" --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 0
           done
       - name: Validate the route planner against an independent oracle
