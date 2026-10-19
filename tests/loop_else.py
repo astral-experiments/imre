@@ -27,6 +27,14 @@ REJECTED = {
 }
 
 ERRORS = {
+    "range_zero_step_skips_else": (
+        'for value in range(0, 0, 0):\n    print(value)\nelse:\n    print("must not execute")\n',
+        "ValueError",
+    ),
+    "dictionary_changed_after_last_item": (
+        'mapping = {"only": 1}\nfor key in mapping:\n    print(key)\n    mapping["added"] = 2\nelse:\n    print("must not execute")\n',
+        "RuntimeError",
+    ),
     "iterator_failure_skips_else": (
         'def source() -> list[int]:\n    print("source")\n    raise ValueError("iterator")\nfor value in source():\n    print(value)\nelse:\n    print("must not execute")\n',
         "ValueError",
