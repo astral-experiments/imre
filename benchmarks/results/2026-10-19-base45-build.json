@@ -1,0 +1,72 @@
+{
+  "revision": "54d7255f3184aacd4b54b9246a4bc6c7d2235f93",
+  "artifacts": {
+    "compiler": {
+      "path": "/tmp/relar-base45-frozen/relar",
+      "sha256": "7a7128dea48e78d9b91b906a751a1fd6de0f8dd4cefdee2f5c3f7222c0af0ef5"
+    },
+    "normal_runtime": {
+      "path": "/tmp/relar-base45-frozen/normal_runtime.a",
+      "sha256": "0733e1659cef8846e5e8ecd7bb8916be213722bf85c6b1b68799a326baabaea8"
+    },
+    "thinlto_runtime": {
+      "path": "/tmp/relar-base45-frozen/thinlto_runtime.a",
+      "sha256": "e077e8f859ff51b3fe04704abeb9f611c67b6476c728fb96e96e5fabf87739b8"
+    },
+    "asan_runtime": {
+      "path": "/tmp/relar-base45-frozen/asan_runtime.a",
+      "sha256": "ca42e418f29ace02f7285a3699f93a84da5b81b5cfb119975cc4eeae5ea403b8"
+    }
+  },
+  "source_sha256": {
+    "Cargo.toml": "7a9d1c188ccc5a930c600ad503438d9ef4f590cdaf5f2a6488cb65e741f79c29",
+    "Cargo.lock": "1e4053a4eb89af2554a43b30dac6e6f81d56097907d65bf48953a69e318e55ae",
+    "rust-toolchain.toml": "7553618f800829444096beea3dce84c3d07585efda504c19adb6787369bbd9e8",
+    "crates/relar-compiler/src/analysis.rs": "9d7e36d7f1f1ca55a0815128316b979f647aa1fef4c58ee10baa474ceaa0885c",
+    "crates/relar-compiler/src/classes.rs": "61a7b33711262a841e59a47f417227e77b4ffef7e6369f6beec72bb2666a92ea",
+    "crates/relar-compiler/src/effects.rs": "6a80479b3bbad4088a7cfa9ed4e97caba4e5d983814a4c8dcc61374c1962f5b6",
+    "crates/relar-compiler/src/frontend/assignments.rs": "a57afd5e332eac11967df5ba970f9531e34c68f9c750544a53998491c932a920",
+    "crates/relar-compiler/src/frontend/calls.rs": "96846d29ac6d0ccba178427a9defc548f4b5ab3461a0e24c0db546212b9db720",
+    "crates/relar-compiler/src/frontend/comprehensions.rs": "f0fcadec3c564d96d841d48ae8f61b583852d1e1ba5b169763cc835a0d20ebec",
+    "crates/relar-compiler/src/frontend/expansions.rs": "e3d22ab30d8dd477b89a51e4efe582c0d48d92829abada21531ba27f2452a94c",
+    "crates/relar-compiler/src/frontend/matching.rs": "a773a2ea540e6f02c12e872aa22b605d34e06be7f8c37ac054e8bb3d1e3c926e",
+    "crates/relar-compiler/src/frontend/module_values.rs": "a7d6ef3f5ed4f446a59231290e809f8ce505f1f3bce816bb5ac4520bf9153668",
+    "crates/relar-compiler/src/frontend/truthiness.rs": "62faeca4d3f3497265711fb5cd8eacc6eb551a70845a17ff5735d25738a0ae11",
+    "crates/relar-compiler/src/frontend/unions.rs": "3b649582a176b5e8b3e11087f4e7673c03e52849dd72ef8eaa4eb4ccff4575d5",
+    "crates/relar-compiler/src/frontend/unpacking.rs": "d3a3e73ea6812f62300be034808aecc96610b24cce5cf8e4a2ade884d21840b8",
+    "crates/relar-compiler/src/frontend.rs": "4733fe5094e7435c08116656087996dfbe041c1b6471bec6548a08264e653e3c",
+    "crates/relar-compiler/src/ir.rs": "33df74bdbed3c5f541ff514de153da65ebf677487ee919be6532a3d677d091c8",
+    "crates/relar-compiler/src/lib.rs": "69e431a89155096d2b142bd5b6402b8d2c2730e685ac60879ce7fdbb689cc84a",
+    "crates/relar-compiler/src/llvm/truthiness.rs": "bcc234584c40f685177d74dc21e6d7edb19170df8676c2f99e3ea30db765e18a",
+    "crates/relar-compiler/src/llvm/unions.rs": "4ec16463e9c0ad5734e7cf28313d7b7b70fa882bafe117bf2c065e822752f852",
+    "crates/relar-compiler/src/llvm.rs": "ac3b30db59ba35fb3b0f59ff85e4ccc1df923ad208ef016c5b8d9c1c2dc5441b",
+    "crates/relar-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+    "crates/relar-compiler/src/modules.rs": "cc69a54c52fca924b4f52920b61f9778918f486665bebcd06bf46733e47a66ac",
+    "crates/relar-compiler/src/narrowing.rs": "4e62079facab3e53ab356299d1d20325ca62ec9509eac5e193a2d70f22a4d2a7",
+    "crates/relar-compiler/src/ranges.rs": "7cfc1d6dc7f73ca8d467f617ff83583a2b09c7eb0c33cc0735b810210482636a",
+    "crates/relar-compiler/src/tuples.rs": "5f0f1ae40c22c38cb841fa7a0d29d2172765fa8806cb9c8ae575f0415031ed89",
+    "crates/relar-compiler/src/types.rs": "f83a88a2a6bd0fde9ebf5c92bfb0cc009c373236b209df146031b2a795073b51",
+    "crates/relar-runtime/src/floats.rs": "99882a45e8d7d3e4f3d88221303d09f32c3c811f25f1b3e709646b0a59ace76e",
+    "crates/relar-runtime/src/lib.rs": "07153056c50e3623cb381689a2f582c52b0ab31fb212b9106090c2b28615c68a",
+    "crates/relar-runtime/src/objects/args.rs": "0f7c2543368bc69da08613471c17dc7ac0981967e7840e3c30ef85dc6a044099",
+    "crates/relar-runtime/src/objects/bytes.rs": "20693862a727e214a66983bc1a023d5368e53d74963c917c1b1add0d519aa4bc",
+    "crates/relar-runtime/src/objects/exceptions.rs": "321a12eb3acaf16df308675fb0a0403a22afa8b86158a134277a0b98d0910503",
+    "crates/relar-runtime/src/objects/files.rs": "aeef4b559a3b712569e2de219832228c20e416814bc7e502604e22253170341d",
+    "crates/relar-runtime/src/objects/mappings.rs": "abb515dc980648a857f2acf3505198b8b195d4ef7ab55024d9b4764960bf1c00",
+    "crates/relar-runtime/src/objects/records.rs": "9e8061a02eca605d6587da87dedb0ca7b2b868d98bef9abb5159bd4b7ceff75d",
+    "crates/relar-runtime/src/objects/sequences.rs": "35db7ebce64ae2fc9cc0a2efb40e5cb9ceb43adc9ff5327df000b3b5d90ba079",
+    "crates/relar-runtime/src/objects/unions.rs": "ba98620a4482fe54aaa500ae2e49802a105896241ab77a2899e339611cf414da",
+    "crates/relar-runtime/src/objects/words.rs": "b1efd10f8d46dcf2ef17bfafc4fb52760617c8f7bd22581a0cd7743e8bbc68ff",
+    "crates/relar-runtime/src/objects.rs": "01594586f40d560d209ca0d14e7ae945315359a569ee6463c3e823caa4f83620",
+    "crates/relar-compiler/Cargo.toml": "e6936e9d0c4e64f21889cfe158385a0c49067bb19672bc3d2df8dc1c7c1f173e",
+    "crates/relar-runtime/Cargo.toml": "147e0977af4370fc833c67726f1be51f72fe0b413efcaa7f8f35fdb6c82ac919"
+  },
+  "rustc": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8\n",
+  "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin\n",
+  "profiles": {
+    "compiler_and_normal_runtime": "relar-integrated inherits release",
+    "thinlto_runtime": "relar-truthiness-lto inherits release; RUSTFLAGS=-Clinker-plugin-lto",
+    "asan_runtime": "relar-truthiness-asan inherits release; explicit host target; RUSTFLAGS=-Zsanitizer=address -Cforce-frame-pointers=yes"
+  },
+  "cargo": "cargo +ohm -Zohm-defaults=no; --workspace/--package relar-runtime --locked; stable per-worktree target and shared Ohm build cache"
+}

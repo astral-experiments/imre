@@ -41,6 +41,8 @@ The suite also accepts `--sanitize`, `--target`, `--lto-linker`, and `--opt-leve
 
 ## Benchmark
 
+The [measured comparison](../../benchmarks/results/2026-10-19-base45.md) includes ordinary and ThinLTO builds, raw samples, upstream validation, and allocation profiles. ThinLTO decoding is 1.80–2.11× faster than CPython in this run; encoding 16 KiB inputs takes 1.50× as long because the native path repeatedly copies growing output strings.
+
 Commit measured sources before running:
 
 ```sh
