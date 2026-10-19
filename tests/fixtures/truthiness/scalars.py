@@ -5,6 +5,10 @@ class Box:
         self.value = value
 
 
+def conditional(value: int | None) -> int:
+    return 1 if value else 2
+
+
 print(bool())  # noqa: UP018 - exercise the zero-argument constructor.
 print(bool(None))
 print(not None)
@@ -39,12 +43,6 @@ print(not Box(0))
 print(bool(Box(0)))
 print(1 if "present" else 2)
 print(1 if "" else 2)
-
-
-def conditional(value: int | None) -> int:
-    return 1 if value else 2
-
-
 print(conditional(None))
 print(conditional(0))
 print(conditional(3))
