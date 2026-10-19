@@ -266,6 +266,10 @@ pub(crate) enum Builtin {
     SetDiscard,
     SetIter,
     ExceptionMessage,
+    /// Attaches an explicit cause to a fresh, unescaped builtin exception.
+    ExceptionWithCause,
+    ExceptionCause,
+    ExceptionSuppressContext,
 }
 
 #[derive(Clone)]

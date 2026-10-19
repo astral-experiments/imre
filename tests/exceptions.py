@@ -9,6 +9,96 @@ from pathlib import Path
 from textwrap import dedent
 
 ACCEPTED = {
+    "explicit_causes": """
+def show(error: Exception) -> None:
+    print(str(error))
+    print(error.__suppress_context__)
+    cause = error.__cause__
+    if cause is None:
+        print("no cause")
+    else:
+        print(str(cause))
+        print(cause.__suppress_context__)
+
+def optional_cause(cause: Exception | None) -> None:
+    raise RuntimeError("optional") from cause
+
+try:
+    try:
+        raise KeyError("missing")
+    except KeyError as original:
+        raise ValueError("invalid input") from original
+except ValueError as wrapped:
+    show(wrapped)
+
+try:
+    raise ValueError from KeyError
+except ValueError as wrapped:
+    show(wrapped)
+
+try:
+    raise ValueError("suppressed") from None
+except ValueError as wrapped:
+    show(wrapped)
+
+show(ValueError("plain"))
+
+for index in range(2):
+    cause: Exception | None = None
+    if index:
+        cause = ValueError("present")
+    try:
+        optional_cause(cause)
+    except RuntimeError as wrapped:
+        show(wrapped)
+""",
+    "cause_evaluation": """
+def message() -> str:
+    print("exception expression")
+    return "outer"
+
+def cause(fail: bool) -> Exception:
+    print("cause expression")
+    if fail:
+        raise IndexError("cause failed")
+    return ValueError("inner")
+
+for fail in [False, True]:
+    try:
+        raise RuntimeError(message()) from cause(fail)
+    except Exception as problem:
+        print(str(problem))
+        print(problem.__suppress_context__)
+        original = problem.__cause__
+        if original is not None:
+            print(str(original))
+""",
+    "long_cause_cleanup": """
+def make_chain() -> None:
+    tail: Exception | None = None
+    for index in range(20000):
+        try:
+            raise ValueError("chain") from tail
+        except ValueError as current:
+            tail = current
+    count = 0
+    while tail is not None:
+        count += 1
+        tail = tail.__cause__
+    print(count)
+
+def drop_chain() -> None:
+    tail: Exception | None = None
+    for index in range(20000):
+        try:
+            raise ValueError("chain") from tail
+        except ValueError as current:
+            tail = current
+
+make_chain()
+drop_chain()
+print("released")
+""",
     "handlers_and_messages": """
 def fail(value: int) -> int:
     if value == 0:
@@ -665,7 +755,10 @@ finally:
     "integer_message": "raise ValueError(1)",
     "multiple_messages": 'raise ValueError("a", "b")',
     "subclass_annotation": 'value: ValueError = ValueError("error")',
-    "explicit_cause": 'raise ValueError("error") from None',
+    "existing_exception_cause": 'error = ValueError("error")\nraise error from None',
+    "nonexception_cause": 'raise ValueError("error") from "wrong"',
+    "writable_exception_cause": 'error = ValueError("error")\nerror.__cause__ = None',
+    "writable_exception_suppression": 'error = ValueError("error")\nerror.__suppress_context__ = True',
     "exception_group": "try:\n    raise ValueError()\nexcept* ValueError:\n    pass\n",
     "dynamic_handler": "kind = ValueError\ntry:\n    pass\nexcept kind:\n    pass\n",
     "custom_exception": "class Custom(Exception):\n    pass\n",

@@ -1786,31 +1786,33 @@ impl<'a> Checker<'a> {
             ast::Stmt::With(with_) if !with_.is_async => {
                 return self.with_items(&with_.items, &with_.body);
             }
-            ast::Stmt::Raise(raise) if raise.cause.is_none() => {
-                let value = raise
+            ast::Stmt::Raise(raise) => {
+                let mut value = raise
                     .exc
                     .as_deref()
-                    .map(|value| {
-                        if let Some(kind) = self.exception_category(value) {
-                            if matches!(kind, 0 | 18) {
-                                return Err(error(
-                                    self.source,
-                                    value,
-                                    "this exception category is catch-only",
-                                ));
-                            }
-                            Ok(Expr {
-                                ty: Type::Exception,
-                                kind: ExprKind::Exception {
-                                    kind,
-                                    message: None,
-                                },
-                            })
-                        } else {
-                            self.expr_expected(value, Type::Exception)
-                        }
-                    })
+                    .map(|value| self.raised_exception(value))
                     .transpose()?;
+                if let Some(cause) = &raise.cause {
+                    let raised = value.take().expect("raise from has an exception");
+                    if !matches!(raised.kind, ExprKind::Exception { .. }) {
+                        return Err(error(
+                            self.source,
+                            raise,
+                            "explicit causes require a freshly constructed builtin exception",
+                        ));
+                    }
+                    let expected = self.types.optional(Type::Exception);
+                    let cause = if self.exception_category(cause).is_some() {
+                        let cause = self.raised_exception(cause)?;
+                        self.coerce(cause, expected, raise)?
+                    } else {
+                        self.expr_expected(cause, expected)?
+                    };
+                    value = Some(Expr {
+                        ty: Type::Exception,
+                        kind: ExprKind::Builtin(Builtin::ExceptionWithCause, vec![raised, cause]),
+                    });
+                }
                 return Ok((vec![Statement::Raise(value)], false));
             }
             ast::Stmt::Pass(_) => None,
@@ -1884,6 +1886,28 @@ impl<'a> Checker<'a> {
 
     /// Imported exception aliases resolve by identity; a spelling alone cannot
     /// turn an arbitrary first-party definition into a builtin category.
+    /// Class-form raises construct a new instance, just like an explicit call.
+    fn raised_exception(&mut self, value: &ast::Expr) -> Result<Expr, String> {
+        if let Some(kind) = self.exception_category(value) {
+            if matches!(kind, 0 | 18) {
+                return Err(error(
+                    self.source,
+                    value,
+                    "this exception category is catch-only",
+                ));
+            }
+            Ok(Expr {
+                ty: Type::Exception,
+                kind: ExprKind::Exception {
+                    kind,
+                    message: None,
+                },
+            })
+        } else {
+            self.expr_expected(value, Type::Exception)
+        }
+    }
+
     fn exception_category(&self, expression: &ast::Expr) -> Option<u32> {
         match self.graph.resolve(self.module, expression) {
             Some(Binding::Intrinsic(Intrinsic::UnsupportedOperation)) => Some(19),
@@ -2521,6 +2545,26 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Attribute(attribute) => {
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::Exception {
+                    let (ty, builtin) = match attribute.attr.as_str() {
+                        "__cause__" => (
+                            self.types.optional(Type::Exception),
+                            Builtin::ExceptionCause,
+                        ),
+                        "__suppress_context__" => (Type::Bool, Builtin::ExceptionSuppressContext),
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                attribute,
+                                "unsupported exception attribute",
+                            ));
+                        }
+                    };
+                    return Ok(Expr {
+                        ty,
+                        kind: ExprKind::Builtin(builtin, vec![receiver]),
+                    });
+                }
                 if matches!(receiver.ty, Type::TextIO | Type::BinaryIO)
                     && attribute.attr.as_str() == "closed"
                 {

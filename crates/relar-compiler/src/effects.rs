@@ -223,7 +223,10 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::StringIter
         | Builtin::BytesIter
         | Builtin::Encode
-        | Builtin::ExceptionMessage => false,
+        | Builtin::ExceptionMessage
+        | Builtin::ExceptionWithCause
+        | Builtin::ExceptionCause
+        | Builtin::ExceptionSuppressContext => false,
     }
 }
 

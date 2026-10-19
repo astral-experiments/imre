@@ -137,6 +137,10 @@ impl<T> StorageCell<T> {
         Self(UnsafeCell::new(value))
     }
 
+    fn into_inner(self) -> T {
+        self.0.into_inner()
+    }
+
     /// # Safety
     /// No mutable reference to this storage may be live. The closure must not
     /// reenter an operation on this cell, and no storage reference or buffer

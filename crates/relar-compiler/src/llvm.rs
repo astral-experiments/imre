@@ -2036,6 +2036,40 @@ impl Emitter<'_, '_> {
             Builtin::ExceptionMessage => {
                 self.call("relar_exception_message", Type::Str, &[&args[0].value])
             }
+            Builtin::ExceptionWithCause => {
+                let cause =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
+                Value {
+                    ty: Type::Exception,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_exception_with_cause(ptr {}, ptr {cause})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::ExceptionCause => {
+                let cause = self.instruction(format!(
+                    "call ptr @relar_exception_cause(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!("ptrtoint ptr {cause} to i64")),
+                    small_integer: false,
+                }
+            }
+            Builtin::ExceptionSuppressContext => {
+                let flag = self.instruction(format!(
+                    "call i8 @relar_exception_suppress_context(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i8 {flag}, 0")),
+                    small_integer: false,
+                }
+            }
             Builtin::Str => match args[0].value.ty {
                 Type::Str => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Int => self.call("relar_int_str", Type::Str, &[&args[0].value]),
@@ -2982,6 +3016,9 @@ declare i32 @relar_error_unhandled()
 declare ptr @relar_exception_new(i32, ptr)
 declare i8 @relar_exception_matches(ptr, i32)
 declare ptr @relar_exception_message(ptr)
+declare ptr @relar_exception_with_cause(ptr, ptr)
+declare ptr @relar_exception_cause(ptr)
+declare i8 @relar_exception_suppress_context(ptr)
 declare ptr @relar_exception_current()
 declare ptr @relar_exception_swap_active(ptr)
 declare void @relar_exception_raise(ptr)
