@@ -160,7 +160,7 @@ fn check_initializer(
     let mut initialized = HashSet::new();
     for statement in &initializer.body {
         let assignment = match statement {
-            ast::Stmt::Assign(assignment) if assignment.targets.len() == 1 => assignment,
+            ast::Stmt::Assign(assignment) => assignment,
             ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_)) => {
                 continue;
             }
@@ -172,25 +172,30 @@ fn check_initializer(
                 ));
             }
         };
-        let target = &assignment.targets[0];
-        let ast::Expr::Attribute(attribute) = target else {
-            return Err(module.error(target, "__init__ must assign a declared self.field"));
-        };
-        if !matches!(&*attribute.value, ast::Expr::Name(name) if name.id == "self") {
-            return Err(module.error(target, "__init__ must assign a declared self.field"));
+        let mut targets = Vec::new();
+        for target in &assignment.targets {
+            initializer_targets(target, &mut targets);
         }
-        let name = attribute.attr.as_str();
-        if !declared.contains(name) {
-            return Err(module.error(
-                target,
-                &format!("field {name:?} is not declared in the class"),
-            ));
-        }
-        if !initialized.insert(name) {
-            return Err(module.error(
-                target,
-                &format!("field {name:?} is initialized more than once"),
-            ));
+        for target in targets {
+            let ast::Expr::Attribute(attribute) = target else {
+                return Err(module.error(target, "__init__ must assign a declared self.field"));
+            };
+            if !matches!(&*attribute.value, ast::Expr::Name(name) if name.id == "self") {
+                return Err(module.error(target, "__init__ must assign a declared self.field"));
+            }
+            let name = attribute.attr.as_str();
+            if !declared.contains(name) {
+                return Err(module.error(
+                    target,
+                    &format!("field {name:?} is not declared in the class"),
+                ));
+            }
+            if !initialized.insert(name) {
+                return Err(module.error(
+                    target,
+                    &format!("field {name:?} is initialized more than once"),
+                ));
+            }
         }
         let mut self_use = SelfUse(None);
         self_use.visit_expr(&assignment.value);
@@ -218,6 +223,25 @@ fn check_initializer(
     Ok(())
 }
 
+/// Chained and nested assignments must still initialize only declared fields.
+/// A starred target receives one list, so it has the same field requirement.
+fn initializer_targets<'a>(target: &'a ast::Expr, targets: &mut Vec<&'a ast::Expr>) {
+    match target {
+        ast::Expr::Tuple(tuple) => {
+            for target in &tuple.elts {
+                initializer_targets(target, targets);
+            }
+        }
+        ast::Expr::List(list) => {
+            for target in &list.elts {
+                initializer_targets(target, targets);
+            }
+        }
+        ast::Expr::Starred(starred) => initializer_targets(&starred.value, targets),
+        _ => targets.push(target),
+    }
+}
+
 struct SelfUse<'a>(Option<&'a ast::Expr>);
 
 impl<'a> Visitor<'a> for SelfUse<'a> {
@@ -238,6 +262,7 @@ impl<'a> Visitor<'a> for SelfUse<'a> {
                 ast::Expr::Name(name) => name.id == "self",
                 ast::Expr::Tuple(value) => value.elts.iter().any(binds_self),
                 ast::Expr::List(value) => value.elts.iter().any(binds_self),
+                ast::Expr::Starred(value) => binds_self(&value.value),
                 _ => false,
             }
         }

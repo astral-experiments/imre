@@ -11,25 +11,25 @@ This is a deliberately restricted Python dialect for closed first-party programs
 | Functions | Required parameter and return annotations; positional and keyword calls; positional-only and keyword-only parameters; scalar literal defaults; direct, fixed bindings; no recursive call cycles |
 | Types | `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed `typing.TextIO` and `typing.BinaryIO`, the sealed builtin `Exception` family, fixed nominal classes, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, and `T \| None`; locals have one inferred or declared storage type |
 | Classes | Declared fields, an explicit initializer, typed instance methods, alias-visible field mutation, and numeric field augmented assignment |
-| Statements | Single-target and fixed-tuple unpacking assignment, annotated assignment, numeric augmented assignment, local string/bytes `+=` and bytes `*=`, dictionary entry deletion, `if`/`elif`/`else`, structural `match`/`case`, `while`, `for` over ranges, strings, bytes, or concrete containers, loop `else`, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin-file `with` |
+| Statements | Single-target and chained assignment; nested and starred unpacking of fixed tuples, lists, strings, and bytes, annotated assignment, numeric augmented assignment, local string/bytes `+=` and bytes `*=`, dictionary entry deletion, `if`/`elif`/`else`, structural `match`/`case`, `while`, `for` over ranges, strings, bytes, or concrete containers, loop `else`, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin-file `with` |
 | Conditions | Truth tests for every supported concrete type; operand-returning `and`/`or`, boolean `not`, and short-circuit evaluation; conditional expressions `yes if condition else no`; assignment expressions `(name := value)`; local optional narrowing |
 | Integers | Arbitrary precision; `+`, `-`, `*`, `//`, `%`; `/` returns a correctly rounded float; unary `+`/`-`; all six value comparisons, including chains |
 | Floats | Binary64 literals and exact storage; `+`, `-`, `*`, `/`, `//`, `%`; unary signs; all six comparisons; mixed integer arithmetic and exact mixed comparisons; explicit numeric/string conversions |
-| Lists | One exact element type, including nested containers and classes; literals, shallow repetition and slicing, checked negative indexing, indexed assignment, iteration, `append(value)`, `pop()`, `len(...)`; alias-visible mutation |
-| Dictionaries | Exact `int`, `str`, or `bytes` keys and one concrete value type; literals, contextual `dict()`, lookup/write/delete, numeric augmented writes, `in`/`not in`, `get`, `len`, and insertion-ordered key/items iteration |
-| Sets | Exact `int`, `str`, or `bytes` elements; literals, contextual `set()`, `add`, `discard`, `in`/`not in`, `len`, and iteration with unspecified order |
+| Lists | One exact element type, including nested containers and classes; literals and starred displays, shallow repetition and slicing, checked negative indexing, indexed assignment, iteration, `append(value)`, `pop()`, `len(...)`; alias-visible mutation |
+| Dictionaries | Exact `int`, `str`, or `bytes` keys and one concrete value type; literals and `**` displays, contextual `dict()`, lookup/write/delete, numeric augmented writes, `in`/`not in`, `get`, `len`, and insertion-ordered key/items iteration |
+| Sets | Exact `int`, `str`, or `bytes` elements; literals and `*` displays, contextual `set()`, `add`, `discard`, `in`/`not in`, `len`, and iteration with unspecified order |
 | Comprehensions | Eager list, dictionary, and set comprehensions; nested `for` clauses and truth-tested filters over the existing iteration sources; isolated target bindings |
-| Tuples | Fixed length and a type per position; literals, bounded literal indexing, unpacking into names, and `len(...)`; immutable slots |
+| Tuples | Fixed length and a type per position; literals, bounded literal indexing, nested/starred unpacking into names, fields, and subscripts, and `len(...)`; immutable slots |
 | Strings | Immutable UTF-8 text, literals, scalar f-strings, concatenation, equality/inequality, Unicode scalar length, indexing, slicing and iteration, no-argument whitespace `split()` and `splitlines()`, input and output |
 | Bytes | Immutable bytes; literals, construction from an integer count or `list[int]`, concatenation/repetition, all value comparisons, indexing/slicing/iteration, `len`, Python byte repr, strict UTF-8 encode/decode |
 | Files and arguments | Explicit UTF-8 text read/write and binary read/write/append/exclusive-create modes; `read`, `write`, `flush`, `close`, `closed`; `with` cleanup; one shared mutable `sys.argv` list |
-| Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `bool()` or `bool(value)`; `int(int_or_float_or_bool_or_string)`; `float()` or `float(int_or_float_or_bool_or_string_or_bytes)`; `str()` or `str(int_or_float_or_bool_or_string_or_bytes_or_None_or_exception)`; `len(string_or_bytes_or_container)`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments and `enumerate(string_or_bytes_or_container[, start])` at a loop or comprehension boundary |
+| Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `bool()` or `bool(value)`; `int(int_or_float_or_bool_or_string)`; `float()` or `float(int_or_float_or_bool_or_string_or_bytes)`; `str()` or `str(int_or_float_or_bool_or_string_or_bytes_or_None_or_exception)`; `len(string_or_bytes_or_container)`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments and `enumerate(string_or_bytes_or_container[, start])` at a loop, comprehension, or container-expansion boundary |
 
 Booleans have a separate exact type: use `int(flag)` to store one in an integer list. An empty list defaults to `list[int]` unless a typed storage, call, or return boundary supplies its element type. No annotation permits `Any`, a general union, an untyped object, or a foreign container to enter native storage. ty checks ordinary Python typing first; Relar additionally enforces exact types, definite assignment, fixed bindings, and every container write. Suppression comments cannot waive Relar's contract.
 
 Indentation must use spaces; tabs and form feeds remain valid inside string data. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
 
-Mutable global values, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generators, async, slice assignment/deletion, starred or variable-length unpacking, variadic parameters, defaults other than scalar literals, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+Mutable global values, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generators, async, slice assignment/deletion, tuple display expansion, call argument expansion, variadic parameters, defaults other than scalar literals, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
 
 ## Truthiness and boolean values
 
@@ -49,6 +49,35 @@ def first_or_zero(values: list[int] | None) -> int:
 ```
 
 A true optional local is narrowed to its payload. A false optional number or container may still be present, so falsity does not prove `None`; use an explicit None check when that distinction matters. Truth testing never changes storage requirements: assigning an integer or container to a `bool` annotation still fails.
+
+## Assignment and container expansion
+
+Chained assignment evaluates its RHS once and assigns the same value to targets from left to right. Each target keeps its exact storage type; a declared target can supply context for an empty literal. Shared mutable values retain their aliases:
+
+```python
+left: list[int] = []
+left = right = [1]
+right.append(2)  # left also contains 1 and 2
+```
+
+Unpacking accepts fixed tuples, concrete lists, strings, and bytes. Targets may be nested tuple/list patterns containing names, declared fields, or list/dictionary subscripts. One starred target per level collects a fresh shallow list. String elements are Unicode scalar strings; byte elements are integers. The same patterns work in container loop and comprehension targets; range targets still require a name.
+
+```python
+sku, quantity = ["widget", "12"]
+first, *middle, last = [1, 2, 3, 4]
+```
+
+Each level captures all of its values before assigning that level's targets, so a target's mutation cannot change values already extracted. Nested levels are unpacked when their target is reached. A later failure preserves earlier successful stores. A list, string, or bytes length mismatch raises `ValueError`; fixed-tuple arity mismatches remain compile-time errors. A starred tuple remainder must fit one concrete element type, including `T | None`; an empty remainder uses the destination's list annotation when available and otherwise defaults to `list[int]`. Constructors can use chained or nested/starred field assignments while still initializing each declared field exactly once and never reading or exposing an incomplete `self`.
+
+List and set displays accept `*source`, including repeated expansions mixed with ordinary elements. Sources are concrete lists, dictionary keys, sets, strings, bytes, compatible fixed tuples, and the existing `range`, `enumerate`, and dictionary `items()` iteration forms. Dictionary displays accept `**source` from concrete dictionaries. Each expansion completes before the following entry evaluates. Duplicate dictionary keys replace values without changing the key's original insertion position.
+
+```python
+values = [0, *[1, 2], 3]
+keys = {*{"one": 1, "two": 2}}
+merged = {**{"one": 1}, "one": 2, "three": 3}
+```
+
+Destination annotations can type empty source literals and promote copied values into optional storage. Existing source containers keep their own exact layout and aliases. Tuple result displays, argument expansion in calls, variadic parameters, and user-defined iteration protocols remain outside this milestone.
 
 ## Assignment expressions
 
@@ -241,7 +270,7 @@ Inheritance, metaclasses, class variables, field defaults, properties, static/cl
 
 Tuple types name each position, for example `tuple[str, int, list[Counter]]`; `tuple[()]` is empty. A tuple's slots cannot be reassigned, but a referenced list or instance can still be mutated. Indexes must be in-range integer literals, optionally negative. Variable indexes, computed indexes, variadic tuple annotations, tuple concatenation, and tuple repetition are rejected. List and tuple value comparisons are unsupported.
 
-Fixed tuples can be unpacked into names in assignments and loop targets, including nested tuple or list target syntax: `name, (count, values) = record`. Every source value is evaluated before any target is rebound, so swaps and repeated target names retain Python's assignment order. Targets cannot contain stars, attributes, or subscripts, and a list value cannot be unpacked because its length is not part of its type.
+Fixed tuples, lists, strings, and bytes support the nested and starred assignment patterns described in [assignment and container expansion](#assignment-and-container-expansion). Concrete list lengths are checked at runtime; fixed-tuple shapes are checked during compilation.
 
 `for value in values` evaluates a concrete list once and retains that original list even if the source name or field is later replaced. It reads the current length and acquires the next element at each step. Appending, removing, or replacing elements through an alias therefore has Python's index-based list-iteration behavior. The current item remains owned if the body removes it from the list. `enumerate(values, start)` captures the list before evaluating its optional integer start and yields fixed `(int, T)` tuples; its counter supports arbitrary precision and is independent of visible target rebinding. Both forms support `break`, `continue`, nested loops, and early returns. A target first introduced by a loop remains potentially uninitialized afterward because the loop may be empty. Iterator values, tuple iteration, and user-defined iteration protocols are not supported.
 
@@ -299,7 +328,7 @@ Dictionaries use a randomized hash index and insertion-ordered entries. Integer,
 
 Language errors propagate through explicit checked call results and can be caught. Each fallible runtime call records an owned pending exception and reports failure through either its result or a pending-state query; generated code checks before decoding or acquiring a result. Integer-list reads reserve raw zero for failure, while writes return a success byte. Other calls retain the pending-state check. Proven fixed-field operations and functions whose complete bodies cannot raise omit redundant queries; their argument and receiver evaluations retain their own checks. Partial expression values, constructor fields, unpacking temporaries, and loop iterator roots are released when their scopes exit. Function propagation also releases owned locals. No Rust panic or native stack unwinding implements language exceptions. Uncaught errors print an exception category and message and return process status 1 after cleanup. Actual allocation failures and invalid internal ABI operations may still terminate the process. The compiler and runtime archive must be rebuilt together when this private ABI changes.
 
-Exceptions contain only an immutable category and message. They have no traceback, frame, cause, or context references, so they introduce no cycles into the reference-counted heap. Full traceback objects, exception chaining, `raise ... from ...`, custom exception subclasses, exception groups, `except*`, and user-defined context managers remain unsupported.
+Exceptions contain only an immutable category and message. They have no traceback, frame, cause, or context references, so they introduce no cycles into the reference-counted heap. Exited function frames release their owners during propagation; implicit file closure can therefore happen before CPython releases locals retained by a traceback. Full traceback objects, exception chaining, `raise ... from ...`, custom exception subclasses, exception groups, `except*`, and user-defined context managers remain unsupported.
 
 ## Exceptions and cleanup
 
@@ -331,6 +360,7 @@ python3 tests/imports.py --compiler target/release/relar --runtime target/releas
 python3 tests/classes.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/containers.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/comprehensions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+python3 tests/unpacking.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/fstrings.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/calls.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/expressions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
@@ -370,6 +400,8 @@ The comprehensions suite checks isolated and nested scopes, contextual result ty
 The f-string suite compares literal decoding, raw and adjacent parts, scalar conversions, nested fields, optional narrowing, and comprehension captures. Side-effecting fields, later failures, mutable owners, and file writes check evaluation order and cleanup. Rejection cases cover unsupported formatting/conversions, debug fields, types, surrogate escapes, and builtin rebinding.
 
 The truthiness suite compares concrete scalar/container truth, optional narrowing, operand identity, short-circuit writes and errors, and temporary ownership at `-O0` and `-O3`. It also checks exact result-type restrictions and unsafe optional/assignment facts, and runs with ThinLTO and AddressSanitizer in CI.
+
+The unpacking suite compares chained assignment, nested/starred sequence patterns, field and subscript targets, constructor initialization, eager display expansion, alias mutation, partial failure, and resource cleanup. It also checks exact layouts, contextual empty values, optional facts, and comprehension target scope; the same cases run with ThinLTO and ASan/LSan.
 
 The calls suite compares positional/keyword binding, keyword-only parameters, scalar defaults, imported aliases, contextual container types, and optional values. Reordered arguments, temporary receivers, aliased owners, and later exceptions check evaluation order and cleanup. Rejection cases protect exact types, parameter kinds, required/duplicate names, literal defaults, and the positional builtin surface.
 

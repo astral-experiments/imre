@@ -70,6 +70,13 @@ impl RangeFacts<'_> {
         }
         let mut moves = Vec::new();
         inspect_writes(self, &function.body, &mut small, &mut moves);
+        // The statement walk does not enter expression operands. Every scoped
+        // operand can contain its own owners, including nested range cursors.
+        crate::ir::walk_expressions(&function.body, &mut |expression| {
+            if let ExprKind::Scope { body, .. } = &expression.kind {
+                inspect_writes(self, body, &mut small, &mut moves);
+            }
+        });
         loop {
             let mut changed = false;
             for &(source, target) in &moves {
@@ -425,9 +432,9 @@ struct Analyzer {
 
 impl Analyzer {
     fn function(&mut self, function: &Function) {
-        // The interval transfer functions assume expressions do not change
-        // slots. Keep the generic integer path until expression writes are
-        // modeled with path-sensitive state transitions.
+        // Named bindings can change source locals during comparison operands.
+        // Compiler-owned scopes use explicit state transfers, but user binding
+        // expressions retain the conservative generic integer path.
         if function
             .expression_rebound()
             .into_iter()
@@ -454,7 +461,7 @@ impl Analyzer {
     fn statement(&mut self, statement: &Statement, mut state: State, record: bool) -> Flow {
         match statement {
             Statement::Assign(slot, value) => {
-                state.0[*slot] = self.expression(value, &state, record)
+                state.0[*slot] = self.expression(value, &mut state, record)
             }
             Statement::Move(target, source) => {
                 state.0[*target] = state.0[*source];
@@ -528,45 +535,45 @@ impl Analyzer {
                 state.0[*ready] = Interval::bounded(0, 1);
             }
             Statement::SetItem(list, index, value) => {
-                self.expression(value, &state, record);
-                self.expression(list, &state, record);
-                self.expression(index, &state, record);
+                self.expression(value, &mut state, record);
+                self.expression(list, &mut state, record);
+                self.expression(index, &mut state, record);
             }
             Statement::AugmentItem(list, index, _, value) => {
-                self.expression(list, &state, record);
-                self.expression(index, &state, record);
-                self.expression(value, &state, record);
+                self.expression(list, &mut state, record);
+                self.expression(index, &mut state, record);
+                self.expression(value, &mut state, record);
             }
             Statement::SetField(receiver, _, value) => {
-                self.expression(value, &state, record);
-                self.expression(receiver, &state, record);
+                self.expression(value, &mut state, record);
+                self.expression(receiver, &mut state, record);
             }
             Statement::AugmentField(receiver, _, _, value) => {
-                self.expression(receiver, &state, record);
-                self.expression(value, &state, record);
+                self.expression(receiver, &mut state, record);
+                self.expression(value, &mut state, record);
             }
             Statement::Expr(value) => {
-                self.expression(value, &state, record);
+                self.expression(value, &mut state, record);
             }
             Statement::Return(value) => {
-                self.expression(value, &state, record);
+                self.expression(value, &mut state, record);
                 return Flow::default();
             }
             Statement::Raise(value) => {
                 if let Some(value) = value {
-                    self.expression(value, &state, record);
+                    self.expression(value, &mut state, record);
                 }
                 return Flow::default();
             }
             Statement::Assert(test) => {
-                self.expression(test, &state, record);
+                self.expression(test, &mut state, record);
                 return Flow {
                     next: self.assume(test, true, state),
                     ..Flow::default()
                 };
             }
             Statement::If(test, yes, no) => {
-                self.expression(test, &state, record);
+                self.expression(test, &mut state, record);
                 let yes = self
                     .assume(test, true, state.clone())
                     .map(|state| self.block(yes, state, record))
@@ -589,7 +596,7 @@ impl Analyzer {
             } => {
                 let args = args
                     .iter()
-                    .map(|arg| self.expression(arg, &state, record))
+                    .map(|arg| self.expression(arg, &mut state, record))
                     .collect::<Vec<_>>();
                 if record {
                     let interval = cursor_values(&args).unwrap_or(Interval::UNKNOWN);
@@ -635,8 +642,10 @@ impl Analyzer {
     ) -> Flow {
         let mut header = entry.clone();
         for iteration in 0..64 {
+            let mut tested = header.clone();
+            self.expression(test, &mut tested, false);
             let body_flow = self
-                .assume(test, true, header.clone())
+                .assume(test, true, tested)
                 .map(|state| self.block(body, state, false))
                 .unwrap_or_default();
             let back = merge(body_flow.next, body_flow.continues);
@@ -651,7 +660,7 @@ impl Analyzer {
                 widened
             };
         }
-        self.expression(test, &header, record);
+        self.expression(test, &mut header, record);
         let body_flow = self
             .assume(test, true, header.clone())
             .map(|state| self.block(body, state, record))
@@ -717,10 +726,26 @@ impl Analyzer {
     /// Evaluates children in Python order. Short-circuit successors receive only
     /// facts established by earlier tests; earlier operands keep their original
     /// ranges even when the successful comparison later narrows their locals.
-    fn expression(&mut self, expression: &Expr, state: &State, record: bool) -> Interval {
+    fn expression(&mut self, expression: &Expr, state: &mut State, record: bool) -> Interval {
         let result = match &expression.kind {
-            ExprKind::Bind(..) | ExprKind::Scope { .. } => {
+            ExprKind::Bind(..) => {
                 unreachable!("expression writes bypass interval analysis")
+            }
+            ExprKind::Scope { body, value, clear } => {
+                let flow = self.block(body, state.clone(), record);
+                if let Some(next) = flow.next {
+                    *state = next;
+                    let value = self.expression(value, state, record);
+                    for &slot in clear {
+                        state.0[slot] = Interval::UNKNOWN;
+                    }
+                    value
+                } else {
+                    // No normal successor can read the result. Keeping an
+                    // unknown state also makes any enclosing dead path safe.
+                    *state = State::unknown(state.0.len());
+                    Interval::UNKNOWN
+                }
             }
             ExprKind::Int(value) => value
                 .parse::<i128>()
@@ -736,19 +761,37 @@ impl Analyzer {
             ExprKind::Negate(value) => self.expression(value, state, record).negate(),
             ExprKind::Boolean(and, values) => {
                 let mut current = Some(state.clone());
-                for value in values {
-                    let Some(state) = current else { break };
-                    self.expression(value, &state, record);
-                    current = self.assume(value, *and, state);
+                let mut exits = None;
+                for (index, value) in values.iter().enumerate() {
+                    let Some(mut next) = current.take() else {
+                        break;
+                    };
+                    self.expression(value, &mut next, record);
+                    if index + 1 == values.len() {
+                        exits = merge(exits, Some(next));
+                    } else {
+                        exits = merge(exits, self.assume(value, !and, next.clone()));
+                        current = self.assume(value, *and, next);
+                    }
                 }
+                *state = merge(exits, current).unwrap_or_else(|| State::unknown(state.0.len()));
                 Interval::bounded(0, 1)
             }
             ExprKind::BooleanValue(and, left, right) => {
                 let left_range = self.expression(left, state, record);
+                let stopped = self.assume(left, !and, state.clone());
                 let right_state = self.assume(left, *and, state.clone());
-                if let Some(right_state) = right_state {
-                    left_range.join(self.expression(right, &right_state, record))
+                if let Some(mut right_state) = right_state {
+                    let right_range = self.expression(right, &mut right_state, record);
+                    let result = if stopped.is_some() {
+                        left_range.join(right_range)
+                    } else {
+                        right_range
+                    };
+                    *state = merge(stopped, Some(right_state)).unwrap();
+                    result
                 } else {
+                    *state = stopped.unwrap_or_else(|| State::unknown(state.0.len()));
                     left_range
                 }
             }
@@ -756,22 +799,45 @@ impl Analyzer {
                 self.expression(test, state, record);
                 let yes_state = self.assume(test, true, state.clone());
                 let no_state = self.assume(test, false, state.clone());
-                let yes = yes_state.map(|state| self.expression(yes, &state, record));
-                let no = no_state.map(|state| self.expression(no, &state, record));
-                match (yes, no) {
-                    (Some(yes), Some(no)) => yes.join(no),
-                    (Some(value), None) | (None, Some(value)) => value,
+                let yes = yes_state.map(|mut state| {
+                    let value = self.expression(yes, &mut state, record);
+                    (value, state)
+                });
+                let no = no_state.map(|mut state| {
+                    let value = self.expression(no, &mut state, record);
+                    (value, state)
+                });
+                let result = match (&yes, &no) {
+                    (Some((yes, _)), Some((no, _))) => yes.join(*no),
+                    (Some((value, _)), None) | (None, Some((value, _))) => *value,
                     (None, None) => Interval::UNKNOWN,
-                }
+                };
+                *state = merge(yes.map(|(_, state)| state), no.map(|(_, state)| state))
+                    .unwrap_or_else(|| State::unknown(state.0.len()));
+                result
             }
             ExprKind::Compare(values, ops) => {
                 self.expression(&values[0], state, record);
                 let mut current = Some(state.clone());
+                let mut exits = None;
                 for (index, &op) in ops.iter().enumerate() {
-                    let Some(state) = current else { break };
-                    self.expression(&values[index + 1], &state, record);
-                    current = self.comparison(&values[index], &values[index + 1], op, true, state);
+                    let Some(mut next) = current.take() else {
+                        break;
+                    };
+                    self.expression(&values[index + 1], &mut next, record);
+                    exits = merge(
+                        exits,
+                        self.comparison(
+                            &values[index],
+                            &values[index + 1],
+                            op,
+                            false,
+                            next.clone(),
+                        ),
+                    );
+                    current = self.comparison(&values[index], &values[index + 1], op, true, next);
                 }
+                *state = merge(exits, current).unwrap_or_else(|| State::unknown(state.0.len()));
                 Interval::bounded(0, 1)
             }
             ExprKind::Builtin(builtin, args) => {
@@ -845,6 +911,11 @@ impl Analyzer {
     }
 
     fn assume(&mut self, test: &Expr, truth: bool, state: State) -> Option<State> {
+        // Refinement rereads affine locals from the post-test state. A scoped
+        // operand may already have replaced or cleared an earlier local read.
+        if contains_scope(test) {
+            return Some(state);
+        }
         match &test.kind {
             ExprKind::Bool(value) => (*value == truth).then_some(state),
             ExprKind::Not(value) => self.assume(value, !truth, state),
@@ -914,7 +985,11 @@ impl Analyzer {
         truth: bool,
         state: State,
     ) -> Option<State> {
-        if left.ty != Type::Int || right.ty != Type::Int {
+        if left.ty != Type::Int
+            || right.ty != Type::Int
+            || contains_scope(left)
+            || contains_scope(right)
+        {
             return Some(state);
         }
         let op = if truth {
@@ -934,8 +1009,8 @@ impl Analyzer {
             Compare::GreaterEqual => (right, left, Compare::LessEqual),
             _ => (left, right, op),
         };
-        let a = self.expression(left, &state, false);
-        let b = self.expression(right, &state, false);
+        let a = self.expression(left, &mut state.clone(), false);
+        let b = self.expression(right, &mut state.clone(), false);
         match op {
             Compare::Less | Compare::LessEqual => {
                 let strict = i128::from(matches!(op, Compare::Less));
@@ -969,6 +1044,46 @@ impl Analyzer {
             }
             Compare::Greater | Compare::GreaterEqual => unreachable!(),
         }
+    }
+}
+
+/// Guard refinement must not replay a value after one of its scoped operands
+/// has changed local storage. Ordinary guards keep their existing affine proofs.
+fn contains_scope(expression: &Expr) -> bool {
+    match &expression.kind {
+        ExprKind::Scope { .. } | ExprKind::Bind(..) => true,
+        ExprKind::List(values)
+        | ExprKind::Set { values, .. }
+        | ExprKind::Tuple(values)
+        | ExprKind::Compare(values, _)
+        | ExprKind::Boolean(_, values)
+        | ExprKind::Builtin(_, values) => values.iter().any(contains_scope),
+        ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+            args.values.iter().any(contains_scope)
+        }
+        ExprKind::Dict { entries, .. } => entries
+            .iter()
+            .any(|(key, value)| contains_scope(key) || contains_scope(value)),
+        ExprKind::Present(value)
+        | ExprKind::Absent(value)
+        | ExprKind::Unwrap(value)
+        | ExprKind::Not(value)
+        | ExprKind::Negate(value)
+        | ExprKind::Field(value, _) => contains_scope(value),
+        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
+            contains_scope(left) || contains_scope(right)
+        }
+        ExprKind::Conditional(test, yes, no) => {
+            contains_scope(test) || contains_scope(yes) || contains_scope(no)
+        }
+        ExprKind::Exception { message, .. } => message.as_deref().is_some_and(contains_scope),
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Str(_)
+        | ExprKind::Bytes(_)
+        | ExprKind::None
+        | ExprKind::Local(_) => false,
     }
 }
 
@@ -1297,6 +1412,258 @@ mod tests {
                 .unwrap();
             assert_eq!(facts.integer(access), Some(IntRange { min: 0, max: 3 }));
         }
+    }
+
+    #[test]
+    fn scoped_expansion_preserves_index_range_proofs() {
+        let module = module(
+            "def copied_value(values: list[int], index: int) -> int:\n    copied = [*values, *range(3)]\n    if 0 <= index < len(copied):\n        return copied[index]\n    return -1\n",
+        );
+        let facts = analyze(&module);
+        let accesses = expressions(&module.functions[0])
+            .into_iter()
+            .filter_map(|value| match &value.kind {
+                ExprKind::Builtin(Builtin::ListGet, args) => Some(&args[1]),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(accesses.len(), 2);
+        for index in accesses {
+            assert_eq!(
+                facts.integer(index),
+                Some(IntRange {
+                    min: 0,
+                    max: MAX_LIST_LEN as i64 - 1,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn scoped_integer_owners_include_moves_and_cleanup() {
+        for (value, small) in [
+            (ExprKind::Int("7".into()), true),
+            (
+                ExprKind::Int("1000000000000000000000000000000".into()),
+                false,
+            ),
+            (ExprKind::Local(0), false),
+        ] {
+            let mut module = module("def owners(unknown: int) -> None:\n    pass\n");
+            let function = &mut module.functions[0];
+            function.locals = vec![Type::Int; 4];
+            function.body = vec![
+                Statement::Assign(
+                    3,
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Scope {
+                            body: vec![
+                                Statement::Assign(
+                                    1,
+                                    Expr {
+                                        ty: Type::Int,
+                                        kind: value,
+                                    },
+                                ),
+                                Statement::Move(2, 1),
+                            ],
+                            value: Box::new(Expr {
+                                ty: Type::Int,
+                                kind: ExprKind::Local(2),
+                            }),
+                            clear: vec![1, 2],
+                        },
+                    },
+                ),
+                Statement::Expr(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Local(2),
+                }),
+            ];
+            let facts = analyze(&module);
+            let function = &module.functions[0];
+            let Statement::Assign(_, result) = &function.body[0] else {
+                unreachable!()
+            };
+            assert_eq!(
+                facts.integer(result),
+                small.then_some(IntRange { min: 7, max: 7 })
+            );
+            let Statement::Expr(cleared) = &function.body[1] else {
+                unreachable!()
+            };
+            assert_eq!(facts.integer(cleared), None);
+            assert_eq!(facts.small_locals(function), [false, small, small, small]);
+        }
+    }
+
+    #[test]
+    fn scoped_branch_writes_join_every_normal_successor() {
+        for kind in 0..3 {
+            let mut module = module("def branch(flag: bool) -> int:\n    return 0\n");
+            let function = &mut module.functions[0];
+            function.locals.push(Type::Int);
+            let flag = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Local(0),
+            };
+            let write = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Assign(
+                        1,
+                        Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Int("1000000000000000000000000000000".into()),
+                        },
+                    )],
+                    value: Box::new(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Bool(true),
+                    }),
+                    clear: Vec::new(),
+                },
+            };
+            let expression = match kind {
+                0 => ExprKind::Conditional(
+                    Box::new(flag),
+                    Box::new(write),
+                    Box::new(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Bool(false),
+                    }),
+                ),
+                1 => ExprKind::Boolean(true, vec![flag, write]),
+                _ => ExprKind::BooleanValue(false, Box::new(flag), Box::new(write)),
+            };
+            function.body = vec![
+                Statement::Assign(
+                    1,
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Int("0".into()),
+                    },
+                ),
+                Statement::Expr(Expr {
+                    ty: Type::Bool,
+                    kind: expression,
+                }),
+                Statement::Return(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Local(1),
+                }),
+            ];
+            let facts = analyze(&module);
+            let function = &module.functions[0];
+            let Statement::Return(value) = &function.body[2] else {
+                unreachable!()
+            };
+            assert_eq!(facts.integer(value), None);
+            assert!(!facts.small_locals(function)[1]);
+        }
+    }
+
+    #[test]
+    fn scoped_comparison_keeps_the_earlier_operand_snapshot() {
+        let mut module = module("def compared() -> int:\n    return 0\n");
+        let function = &mut module.functions[0];
+        function.locals = vec![Type::Int; 2];
+        let integer = |value: &str| Expr {
+            ty: Type::Int,
+            kind: ExprKind::Int(value.into()),
+        };
+        let huge = integer("1000000000000000000000000000000");
+        let test = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Compare(
+                vec![
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Local(0),
+                    },
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Scope {
+                            body: vec![Statement::Assign(0, huge.clone())],
+                            value: Box::new(integer("2")),
+                            clear: Vec::new(),
+                        },
+                    },
+                ],
+                vec![Compare::Less],
+            ),
+        };
+        function.body = vec![
+            Statement::Assign(0, integer("1")),
+            Statement::Assign(1, integer("0")),
+            // The actual comparison is 1 < 2. Rereading slot 0 after the RHS
+            // would incorrectly discard this branch and prove the result zero.
+            Statement::If(test, vec![Statement::Assign(1, huge)], Vec::new()),
+            Statement::Return(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Local(1),
+            }),
+        ];
+        let facts = analyze(&module);
+        let function = &module.functions[0];
+        let Statement::Return(value) = &function.body[3] else {
+            unreachable!()
+        };
+        assert_eq!(facts.integer(value), None);
+    }
+
+    #[test]
+    fn scoped_while_tests_participate_in_the_fixed_point() {
+        let mut module = module("def growing(again: bool) -> int:\n    return 0\n");
+        let function = &mut module.functions[0];
+        function.locals.push(Type::Int);
+        let integer = |value: &str| Expr {
+            ty: Type::Int,
+            kind: ExprKind::Int(value.into()),
+        };
+        function.body = vec![
+            Statement::Assign(1, integer("1")),
+            Statement::While(
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Scope {
+                        body: vec![Statement::Assign(
+                            1,
+                            Expr {
+                                ty: Type::Int,
+                                kind: ExprKind::Binary(
+                                    Binary::Multiply,
+                                    Box::new(Expr {
+                                        ty: Type::Int,
+                                        kind: ExprKind::Local(1),
+                                    }),
+                                    Box::new(integer("2")),
+                                ),
+                            },
+                        )],
+                        value: Box::new(Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Local(0),
+                        }),
+                        clear: Vec::new(),
+                    },
+                },
+                Vec::new(),
+                Vec::new(),
+            ),
+            Statement::Return(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Local(1),
+            }),
+        ];
+        let facts = analyze(&module);
+        let function = &module.functions[0];
+        let Statement::Return(value) = &function.body[2] else {
+            unreachable!()
+        };
+        assert_eq!(facts.integer(value), None);
+        assert!(!facts.small_locals(function)[1]);
     }
 
     #[test]

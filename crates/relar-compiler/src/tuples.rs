@@ -136,7 +136,7 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
                 } else {
                     candidates[*slot].eligible = false;
                 }
-                inspect_expression(value, candidates);
+                inspect_expression(value, candidates, producers);
             }
             Statement::Move(target, source) => {
                 candidates[*target].eligible = false;
@@ -162,23 +162,23 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
             Statement::Clear(_) => {}
             Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
                 for value in [a, b, c] {
-                    inspect_expression(value, candidates);
+                    inspect_expression(value, candidates, producers);
                 }
             }
             Statement::SetField(a, _, b) | Statement::AugmentField(a, _, _, b) => {
-                inspect_expression(a, candidates);
-                inspect_expression(b, candidates);
+                inspect_expression(a, candidates, producers);
+                inspect_expression(b, candidates, producers);
             }
             Statement::Expr(value) | Statement::Return(value) | Statement::Assert(value) => {
-                inspect_expression(value, candidates);
+                inspect_expression(value, candidates, producers);
             }
             Statement::If(condition, yes, no) => {
-                inspect_expression(condition, candidates);
+                inspect_expression(condition, candidates, producers);
                 inspect(yes, candidates, producers);
                 inspect(no, candidates, producers);
             }
             Statement::While(condition, body, orelse) => {
-                inspect_expression(condition, candidates);
+                inspect_expression(condition, candidates, producers);
                 inspect(body, candidates, producers);
                 inspect(orelse, candidates, producers);
             }
@@ -198,7 +198,7 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
             }
             Statement::Raise(value) => {
                 if let Some(value) = value {
-                    inspect_expression(value, candidates);
+                    inspect_expression(value, candidates, producers);
                 }
             }
             Statement::For {
@@ -210,7 +210,7 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
             } => {
                 candidates[*target].eligible = false;
                 for arg in args {
-                    inspect_expression(arg, candidates);
+                    inspect_expression(arg, candidates, producers);
                 }
                 inspect(body, candidates, producers);
                 inspect(orelse, candidates, producers);
@@ -220,8 +220,16 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
     }
 }
 
-fn inspect_expression(expression: &Expr, candidates: &mut [Candidate]) {
+fn inspect_expression(
+    expression: &Expr,
+    candidates: &mut [Candidate],
+    producers: &[Option<Producer>],
+) {
     match &expression.kind {
+        ExprKind::Scope { body, value, .. } => {
+            inspect(body, candidates, producers);
+            inspect_expression(value, candidates, producers);
+        }
         ExprKind::Local(slot) => candidates[*slot].eligible = false,
         ExprKind::Field(receiver, _) if matches!(receiver.kind, ExprKind::Local(_)) => {}
         ExprKind::Builtin(Builtin::Len, args)
@@ -232,7 +240,9 @@ fn inspect_expression(expression: &Expr, candidates: &mut [Candidate]) {
                     ..
                 }]
             ) => {}
-        _ => children(expression, |child| inspect_expression(child, candidates)),
+        _ => children(expression, |child| {
+            inspect_expression(child, candidates, producers)
+        }),
     }
 }
 
@@ -314,7 +324,7 @@ fn rewrite_block(
     for mut statement in std::mem::take(statements) {
         match &mut statement {
             Statement::Assign(slot, value) => {
-                rewrite_expression(value, components);
+                rewrite_expression(value, locals, components, producers);
                 if let Some(targets) = &components[*slot] {
                     let Statement::Assign(_, value) = statement else {
                         unreachable!()
@@ -331,32 +341,29 @@ fn rewrite_block(
             }
             Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
                 for value in [a, b, c] {
-                    rewrite_expression(value, components);
+                    rewrite_expression(value, locals, components, producers);
                 }
             }
             Statement::SetField(a, _, b) | Statement::AugmentField(a, _, _, b) => {
-                rewrite_expression(a, components);
-                rewrite_expression(b, components);
+                rewrite_expression(a, locals, components, producers);
+                rewrite_expression(b, locals, components, producers);
             }
             Statement::Expr(value) | Statement::Return(value) | Statement::Assert(value) => {
-                rewrite_expression(value, components);
+                rewrite_expression(value, locals, components, producers);
             }
             Statement::If(condition, yes, no) => {
-                rewrite_expression(condition, components);
+                rewrite_expression(condition, locals, components, producers);
                 rewrite_block(yes, locals, components, producers);
                 rewrite_block(no, locals, components, producers);
             }
             Statement::While(condition, body, orelse) => {
-                rewrite_expression(condition, components);
+                rewrite_expression(condition, locals, components, producers);
                 rewrite_block(body, locals, components, producers);
                 rewrite_block(orelse, locals, components, producers);
             }
             Statement::Scope { body, clear } => {
                 rewrite_block(body, locals, components, producers);
-                *clear = clear
-                    .iter()
-                    .flat_map(|&slot| components[slot].clone().unwrap_or_else(|| vec![slot]))
-                    .collect();
+                rewrite_cleanup(clear, components);
             }
             Statement::Try {
                 body,
@@ -373,14 +380,14 @@ fn rewrite_block(
             }
             Statement::Raise(value) => {
                 if let Some(value) = value {
-                    rewrite_expression(value, components);
+                    rewrite_expression(value, locals, components, producers);
                 }
             }
             Statement::For {
                 args, body, orelse, ..
             } => {
                 for arg in args {
-                    rewrite_expression(arg, components);
+                    rewrite_expression(arg, locals, components, producers);
                 }
                 rewrite_block(body, locals, components, producers);
                 rewrite_block(orelse, locals, components, producers);
@@ -396,7 +403,20 @@ fn rewrite_block(
     *statements = output;
 }
 
-fn rewrite_expression(expression: &mut Expr, components: &[Option<Vec<usize>>]) {
+/// Scoped expressions own the same local roots as statement scopes, including
+/// scalarized tuple components that must be cleared on each exit.
+fn rewrite_expression(
+    expression: &mut Expr,
+    locals: &mut Vec<Type>,
+    components: &[Option<Vec<usize>>],
+    producers: &[Option<Producer>],
+) {
+    if let ExprKind::Scope { body, value, clear } = &mut expression.kind {
+        rewrite_block(body, locals, components, producers);
+        rewrite_expression(value, locals, components, producers);
+        rewrite_cleanup(clear, components);
+        return;
+    }
     let replacement = match &expression.kind {
         ExprKind::Field(receiver, field) => {
             if let ExprKind::Local(slot) = receiver.kind {
@@ -429,8 +449,17 @@ fn rewrite_expression(expression: &mut Expr, components: &[Option<Vec<usize>>]) 
     if let Some(kind) = replacement {
         expression.kind = kind;
     } else {
-        children_mut(expression, |child| rewrite_expression(child, components));
+        children_mut(expression, |child| {
+            rewrite_expression(child, locals, components, producers)
+        });
     }
+}
+
+fn rewrite_cleanup(clear: &mut Vec<usize>, components: &[Option<Vec<usize>>]) {
+    *clear = clear
+        .iter()
+        .flat_map(|&slot| components[slot].clone().unwrap_or_else(|| vec![slot]))
+        .collect();
 }
 
 fn children(expression: &Expr, mut visit: impl FnMut(&Expr)) {
@@ -461,7 +490,9 @@ fn children(expression: &Expr, mut visit: impl FnMut(&Expr)) {
                 visit(value);
             }
         }
-        ExprKind::Scope { .. } => unreachable!("expression writes bypass tuple scalarization"),
+        ExprKind::Scope { .. } => {
+            unreachable!("scoped statements require the full inspection or rewrite pass")
+        }
         ExprKind::Bind(_, value)
         | ExprKind::Present(value)
         | ExprKind::Absent(value)
@@ -516,7 +547,9 @@ fn children_mut(expression: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
                 visit(value);
             }
         }
-        ExprKind::Scope { .. } => unreachable!("expression writes bypass tuple scalarization"),
+        ExprKind::Scope { .. } => {
+            unreachable!("scoped statements require the full inspection or rewrite pass")
+        }
         ExprKind::Bind(_, value)
         | ExprKind::Present(value)
         | ExprKind::Absent(value)
@@ -670,5 +703,72 @@ print(total([10, 20]))
         assert!(cleared.contains(&Type::Int));
         assert!(cleared.contains(&Type::Str));
         assert!(cleared.contains(&Type::ListInt));
+    }
+
+    #[test]
+    fn expression_scope_scalarizes_tuple_and_keeps_failure_cleanup() {
+        let graph = crate::modules::SourceGraph::single(
+            r#"
+def scoped(fail: bool) -> str:
+    pair = ("owned text", [1])
+    if fail:
+        raise ValueError("before projection")
+    return pair[0]
+"#,
+        )
+        .unwrap();
+        let mut module = crate::frontend::lower(&graph).unwrap();
+        let function = &mut module.functions[0];
+        let tuple = function
+            .locals
+            .iter()
+            .position(|ty| matches!(ty, Type::Tuple(_)))
+            .unwrap();
+        let Some(Statement::Return(value)) = function.body.pop() else {
+            panic!("fixture returns a tuple projection");
+        };
+        // Put the producer and a possible exception inside an expression scope.
+        // Its result keeps one component alive after the aggregate is released.
+        let body = std::mem::take(&mut function.body);
+        function.body.push(Statement::Return(Expr {
+            ty: value.ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(value),
+                clear: vec![tuple],
+            },
+        }));
+        let before = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        assert_eq!(before.matches("call ptr @relar_record_new(").count(), 1);
+
+        scalarize(&mut module);
+
+        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        assert!(!after.contains("call ptr @relar_record_new("));
+        let function = &module.functions[0];
+        let [
+            Statement::Return(Expr {
+                kind: ExprKind::Scope { body, value, clear },
+                ..
+            }),
+        ] = function.body.as_slice()
+        else {
+            panic!("scalarization preserves the enclosing cleanup scope");
+        };
+        assert_eq!(
+            clear
+                .iter()
+                .map(|&slot| function.locals[slot])
+                .collect::<Vec<_>>(),
+            vec![Type::Str, Type::ListInt]
+        );
+        let ExprKind::Local(result) = value.kind else {
+            panic!("the projection should read its owned scalar component");
+        };
+        assert!(clear.contains(&result));
+        assert!(body.iter().any(|statement| matches!(
+            statement,
+            Statement::If(_, yes, _) if yes.iter().any(|statement| matches!(statement, Statement::Raise(_)))
+        )));
     }
 }
