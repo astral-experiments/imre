@@ -8,7 +8,7 @@ This is a deliberately restricted Python dialect for closed first-party programs
 | --- | --- |
 | Modules | Closed first-party UTF-8 source graph; definitions and imports precede executable entry statements; optional module/function docstrings |
 | Imports | Absolute, `from`, and package-relative imports; aliases and package re-exports; fixed module and definition bindings; no import cycles |
-| Functions | Required parameter and return annotations; positional calls; direct, fixed bindings; no recursive call cycles |
+| Functions | Required parameter and return annotations; positional and keyword calls; positional-only and keyword-only parameters; scalar literal defaults; direct, fixed bindings; no recursive call cycles |
 | Types | `int`, `bool`, `str`, `None`, sealed `typing.TextIO`, the sealed builtin `Exception` family, fixed nominal classes, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, and `T \| None`; locals have one inferred or declared storage type |
 | Classes | Declared fields, an explicit initializer, typed instance methods, alias-visible field mutation, and integer field augmented assignment |
 | Statements | Single-target and fixed-tuple unpacking assignment, annotated assignment, integer augmented assignment, local string `+=`, dictionary entry deletion, `if`/`elif`/`else`, `while`, `for` over ranges or concrete containers, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin-file `with` |
@@ -27,7 +27,7 @@ Booleans have a separate exact type: use `int(flag)` to store one in an integer 
 
 Indentation must use spaces; tabs and form feeds remain valid inside string data. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
 
-Mutable global values, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generators, async, assignment expressions, slicing, starred or variable-length unpacking, general keyword/default arguments, loop `else`, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. The required `encoding` keyword on `open` is a bounded exception. Conditions cannot rely on implicit truthiness. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+Mutable global values, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generators, async, assignment expressions, slicing, starred or variable-length unpacking, variadic parameters, defaults other than scalar literals, loop `else`, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. Conditions cannot rely on implicit truthiness. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
 
 ## First-party module graphs
 
@@ -40,6 +40,24 @@ Imported modules, including every package `__init__.py`, may contain only defini
 Imports are resolved statically from `.py` files and packages with `__init__.py`. Wildcards, dynamic or function-local imports, namespace packages, import cycles, external dependencies, and general standard-library imports or shadowing are rejected. The compiler recognizes sealed bindings for `typing.TextIO`, `sys.argv`, and `io.UnsupportedOperation`; these do not execute standard-library Python code. Their import aliases and first-party re-exports preserve identity. A package can re-export definitions from its children; reading an unfinished parent's definitions through a circular import is rejected. Symlinks cannot escape the module root or give one source file multiple module identities. The source-string library APIs accept sealed bindings but remain isolated from filesystem imports, which use the path-based APIs.
 
 The I/O surface is intentionally small. `input()` reads a UTF-8 line and removes its trailing LF. A preceding CR remains part of the value, matching CPython's piped input on the Linux target. `int(str)` accepts signed ASCII decimal digits with optional separators between digits and surrounding whitespace. Other bases and Unicode decimal digits in input strings are outside this prototype's input format. Surrogate escapes in non-raw string literals are rejected: Ruff's analysis AST substitutes replacement characters for them, which is unsuitable for executable semantics. Strings support `+` and local `+=`; `text.split()` groups Python whitespace and omits empty fields, returning `list[str]`. `text.splitlines()` recognizes LF, CR, CRLF, vertical tab, form feed, U+001C through U+001E, U+0085, U+2028, and U+2029. It returns no elements for empty input and no extra element for a final line break; U+001F remains ordinary text. Separators, split limits, retained line endings, other string methods, general formatting, and arbitrary codecs are not implemented. CPython's configurable integer conversion digit limit is not reproduced.
+
+## Function arguments and defaults
+
+First-party functions, instance methods, and constructors accept positional and named arguments. Parameters before `/` are positional-only; parameters after a bare `*` are keyword-only. Other parameters accept either form. Imported aliases and re-exports retain the defining signature. Every call is bound during compilation, including checks for missing, duplicate, unexpected, or incorrectly typed arguments.
+
+```python
+def adjust(value: int, /, offset: int = 0, *, label: str = "stock") -> str:
+    return f"{label}: {value + offset}"
+
+print(adjust(8))
+print(adjust(8, label="orders", offset=2))
+```
+
+Defaults must be `int`, `bool`, `str`, or `None` literals. An integer may have one unary `+` or `-`, including arbitrary-precision hexadecimal, octal, and binary literals. Ordinary string-literal rules also apply to defaults. Each default must fit its parameter's exact type: `True` is not an `int` default, and `None` requires `None` or an optional annotation. Mutable containers, tuples, names, calls, arithmetic expressions, and f-strings cannot be defaults, even in an unused function. Literal defaults do not require mutable module state or a general function-object representation.
+
+The receiver of an instance call evaluates first. Supplied arguments then evaluate once in source order, independently of parameter order; a failure prevents later arguments and the callee from running. The compiler applies each parameter's exact type context to its argument, including empty containers and optional values, and retains evaluated values across later mutations and failures. Named arguments lower to ordinary positional native calls.
+
+Variadic parameters and `*`/`**` argument expansion remain unsupported. Builtins keep their existing argument conventions; the explicit `encoding="utf-8"` on `open` is their only accepted keyword. First-party keyword support does not add keywords to `print`, container methods, or file methods.
 
 ## Scalar f-strings
 
@@ -189,6 +207,7 @@ python3 tests/classes.py --compiler target/release/relar --runtime target/releas
 python3 tests/containers.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/comprehensions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/fstrings.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+python3 tests/calls.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/exceptions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/files.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/io.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
@@ -208,7 +227,7 @@ target/release/relar build examples/dependency_planner/__main__.py \
   -o /tmp/dependency-planner-lto
 ```
 
-All nine native test harnesses accept the same `--lto-linker` and `--target` options.
+All ten native test harnesses accept the same `--lto-linker` and `--target` options.
 
 `--sanitize` marks generated functions for AddressSanitizer and links its runtime. This instruments generated code; it does not retroactively instrument a prebuilt Rust static library. Instrumenting Rust runtime code requires a separate sanitizer build of that library. The test suites accept `--sanitize --opt-levels 1` to exercise this configuration, including leak checks on normal exits.
 
@@ -224,8 +243,10 @@ The comprehensions suite checks isolated and nested scopes, contextual result ty
 
 The f-string suite compares literal decoding, raw and adjacent parts, scalar conversions, nested fields, optional narrowing, and comprehension captures. Side-effecting fields, later failures, mutable owners, and file writes check evaluation order and cleanup. Rejection cases cover unsupported formatting/conversions, debug fields, types, surrogate escapes, and builtin rebinding.
 
+The calls suite compares positional/keyword binding, keyword-only parameters, scalar defaults, imported aliases, contextual container types, and optional values. Reordered arguments, temporary receivers, aliased owners, and later exceptions check evaluation order and cleanup. Rejection cases protect exact types, parameter kinds, required/duplicate names, literal defaults, and the positional builtin surface.
+
 The exceptions suite compares nested propagation, handler ordering, builtin hierarchy, stored exception values, dynamically scoped re-raising, lazy assertion messages, and all finally exit reasons. Repeated failures during argument evaluation and partial container/class construction exercise ownership cleanup. Rejection cases protect definite assignment, optional facts, and the sealed exception contract.
 
 The I/O suite checks complete output, large and Unicode writes, normal and fatal exit flushing, LF and CRLF pipe input, terminal line visibility, and output failures. Interactive checks use protocol handshakes and readiness deadlines rather than performance expectations.
 
-The files suite compares complete filesystem effects, strict decoding, newline handling, write counts, alias-visible closure, all `with` exit reasons, failed cleanup, argument aliases, and descriptor recovery under a reduced open-file limit. Rejection cases protect the sealed import, file, context-manager, and argument surfaces. All nine suites also run generated-code and runtime AddressSanitizer checks at `-O1` in CI.
+The files suite compares complete filesystem effects, strict decoding, newline handling, write counts, alias-visible closure, all `with` exit reasons, failed cleanup, argument aliases, and descriptor recovery under a reduced open-file limit. Rejection cases protect the sealed import, file, context-manager, and argument surfaces. All ten suites also run generated-code and runtime AddressSanitizer checks at `-O1` in CI.

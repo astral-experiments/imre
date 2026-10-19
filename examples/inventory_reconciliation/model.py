@@ -2,7 +2,7 @@ class Stock:
     sku: str
     quantity: int
 
-    def __init__(self, sku: str, quantity: int) -> None:
+    def __init__(self, sku: str, *, quantity: int) -> None:
         self.sku = sku
         self.quantity = quantity
 
@@ -13,7 +13,7 @@ class Request:
     sku: str
     quantity: int
 
-    def __init__(self, batch: int, row: int, sku: str, quantity: int) -> None:
+    def __init__(self, *, batch: int, row: int, sku: str, quantity: int) -> None:
         self.batch = batch
         self.row = row
         self.sku = sku
@@ -32,7 +32,7 @@ class Fulfillment:
     filled: int
     shortage: int
 
-    def __init__(self, request: Request, filled: int, shortage: int) -> None:
+    def __init__(self, request: Request, *, filled: int, shortage: int) -> None:
         self.request = request
         self.filled = filled
         self.shortage = shortage
@@ -49,6 +49,7 @@ class Report:
 
     def __init__(
         self,
+        *,
         stock_rows: int,
         batches: int,
         request_rows: int,

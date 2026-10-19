@@ -11,13 +11,15 @@ use crate::modules::{Binding, DefinitionId, Intrinsic, ModuleId, SourceGraph};
 use crate::narrowing;
 use crate::types::Types;
 
+mod calls;
 mod comprehensions;
+use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
 
 #[derive(Clone)]
 struct Signature {
     id: usize,
-    params: Vec<Type>,
+    params: Vec<Parameter>,
     returns: Type,
 }
 
@@ -256,12 +258,12 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                 signature.returns,
             );
             let mut params = Vec::new();
-            for (parameter, &ty) in definition
+            for (parameter, signature) in definition
                 .parameters
                 .iter_non_variadic_params()
                 .zip(&signature.params)
             {
-                let slot = checker.declare(parameter.name().as_str(), ty, parameter)?;
+                let slot = checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
                 checker.assigned.insert(slot);
                 params.push(slot);
             }
@@ -378,23 +380,15 @@ fn signature(
         || function.type_params.is_some()
         || function.parameters.vararg.is_some()
         || function.parameters.kwarg.is_some()
-        || !function.parameters.kwonlyargs.is_empty()
     {
         return Err(error(
             source,
             function,
-            "async, decorators, type parameters, and variadic or keyword-only parameters are unsupported",
+            "async, decorators, type parameters, and variadic parameters are unsupported",
         ));
     }
     let mut params = Vec::new();
     for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
-        if parameter.default.is_some() {
-            return Err(error(
-                source,
-                parameter,
-                "default parameter values are unsupported",
-            ));
-        }
         let ty = if let Some(receiver) = receiver
             && index == 0
         {
@@ -419,7 +413,24 @@ fn signature(
                 types,
             )?
         };
-        params.push(ty);
+        let kind = if index < function.parameters.posonlyargs.len() {
+            ParameterKind::PositionalOnly
+        } else if index < function.parameters.posonlyargs.len() + function.parameters.args.len() {
+            ParameterKind::PositionalOrKeyword
+        } else {
+            ParameterKind::KeywordOnly
+        };
+        let default = parameter
+            .default
+            .as_deref()
+            .map(|value| calls::scalar_default(value, ty, types, source))
+            .transpose()?;
+        params.push(Parameter {
+            name: parameter.name().to_string(),
+            ty,
+            kind,
+            default,
+        });
     }
     let returns = annotation(
         function
@@ -785,23 +796,6 @@ impl<'a> Checker<'a> {
                 )
             })?;
         Ok((receiver, field, self.classes.fields[class][field]))
-    }
-
-    /// Checks direct-call arguments in source order against the fixed signature.
-    fn arguments(&mut self, call: &ast::ExprCall, params: &[Type]) -> Result<Vec<Expr>, String> {
-        if call.arguments.args.len() != params.len() {
-            return Err(error(
-                self.source,
-                call,
-                "incorrect number of function arguments",
-            ));
-        }
-        call.arguments
-            .args
-            .iter()
-            .zip(params)
-            .map(|(argument, &expected)| self.expr_expected(argument, expected))
-            .collect()
     }
 
     /// Optional conversions are explicit in the IR; other storage is invariant.
@@ -2419,17 +2413,28 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "open") {
-            return self.open(call);
-        }
-        if !call.arguments.keywords.is_empty() {
+        if call
+            .arguments
+            .args
+            .iter()
+            .any(|argument| matches!(argument, ast::Expr::Starred(_)))
+            || call
+                .arguments
+                .keywords
+                .iter()
+                .any(|keyword| keyword.arg.is_none())
+        {
             return Err(error(
                 self.source,
                 call,
-                "keyword arguments are unsupported",
+                "argument unpacking is unsupported",
             ));
         }
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "open") {
+            return self.open(call);
+        }
         if let Some(kind) = self.exception_category(&call.func) {
+            self.reject_builtin_keywords(call)?;
             if matches!(kind, 0 | 18) {
                 return Err(error(
                     self.source,
@@ -2463,7 +2468,7 @@ impl<'a> Checker<'a> {
                 let class = &self.classes.declarations.definitions[class_id];
                 let initializer_name = class.methods[class.initializer].name.as_str();
                 let signature = self.classes.methods[class_id][initializer_name].clone();
-                let args = self.arguments(call, &signature.params[1..])?;
+                let args = self.arguments(call, &signature.params[1..], None)?;
                 self.calls.insert(signature.id);
                 return Ok(Expr {
                     ty: Type::Class(class_id),
@@ -2478,7 +2483,7 @@ impl<'a> Checker<'a> {
                 .get(&definition)
                 .ok_or_else(|| error(self.source, call, "definition is not a callable function"))?
                 .clone();
-            let args = self.arguments(call, &signature.params)?;
+            let args = self.arguments(call, &signature.params, None)?;
             self.calls.insert(signature.id);
             return Ok(Expr {
                 ty: signature.returns,
@@ -2487,6 +2492,26 @@ impl<'a> Checker<'a> {
         }
         if let ast::Expr::Attribute(attribute) = &*call.func {
             let receiver = self.expr(&attribute.value)?;
+            if let Type::Class(class) = receiver.ty {
+                if attribute.attr.as_str().starts_with("__") {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "special methods cannot be called directly",
+                    ));
+                }
+                let signature = self.classes.methods[class]
+                    .get(attribute.attr.as_str())
+                    .ok_or_else(|| error(self.source, call, "unknown instance method"))?
+                    .clone();
+                let args = self.arguments(call, &signature.params[1..], Some(receiver))?;
+                self.calls.insert(signature.id);
+                return Ok(Expr {
+                    ty: signature.returns,
+                    kind: ExprKind::Call(signature.id, args),
+                });
+            }
+            self.reject_builtin_keywords(call)?;
             if receiver.ty == Type::TextIO {
                 let (builtin, ty) = match (attribute.attr.as_str(), call.arguments.args.len()) {
                     ("read", 0) => (Builtin::TextRead, Type::Str),
@@ -2508,26 +2533,6 @@ impl<'a> Checker<'a> {
                 return Ok(Expr {
                     ty,
                     kind: ExprKind::Builtin(builtin, args),
-                });
-            }
-            if let Type::Class(class) = receiver.ty {
-                if attribute.attr.as_str().starts_with("__") {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "special methods cannot be called directly",
-                    ));
-                }
-                let signature = self.classes.methods[class]
-                    .get(attribute.attr.as_str())
-                    .ok_or_else(|| error(self.source, call, "unknown instance method"))?
-                    .clone();
-                let mut args = vec![receiver];
-                args.extend(self.arguments(call, &signature.params[1..])?);
-                self.calls.insert(signature.id);
-                return Ok(Expr {
-                    ty: signature.returns,
-                    kind: ExprKind::Call(signature.id, args),
                 });
             }
             if receiver.ty == Type::Str
@@ -2630,6 +2635,7 @@ impl<'a> Checker<'a> {
                 "only statically bound direct calls are supported",
             ));
         };
+        self.reject_builtin_keywords(call)?;
         let args = call
             .arguments
             .args

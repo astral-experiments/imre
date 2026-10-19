@@ -240,14 +240,18 @@ fn expand_assignment(
         ExprKind::Tuple(elements) => elements,
         ExprKind::Call(id, args) => {
             let producer = producers[id].as_ref().expect("checked tuple producer");
-            debug_assert_eq!(producer.params.len(), args.len());
-            let mut bindings = HashMap::new();
-            for (&parameter, arg) in producer.params.iter().zip(args) {
+            debug_assert_eq!(producer.params.len(), args.order.len());
+            for arg in args.values {
                 let slot = new_local(locals, arg.ty);
-                bindings.insert(parameter, slot);
                 arguments.push(slot);
                 staged_output.push(Statement::Assign(slot, arg));
             }
+            let bindings = producer
+                .params
+                .iter()
+                .zip(args.order)
+                .map(|(&parameter, index)| (parameter, arguments[index]))
+                .collect();
             let mut elements = producer.elements.clone();
             for element in &mut elements {
                 substitute_parameters(element, &bindings);
@@ -424,10 +428,13 @@ fn children(expression: &Expr, mut visit: impl FnMut(&Expr)) {
         | ExprKind::Tuple(values)
         | ExprKind::Compare(values, _)
         | ExprKind::Boolean(_, values)
-        | ExprKind::Call(_, values)
-        | ExprKind::Builtin(_, values)
-        | ExprKind::Construct { args: values, .. } => {
+        | ExprKind::Builtin(_, values) => {
             for value in values {
+                visit(value);
+            }
+        }
+        ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+            for value in &args.values {
                 visit(value);
             }
         }
@@ -467,10 +474,13 @@ fn children_mut(expression: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
         | ExprKind::Tuple(values)
         | ExprKind::Compare(values, _)
         | ExprKind::Boolean(_, values)
-        | ExprKind::Call(_, values)
-        | ExprKind::Builtin(_, values)
-        | ExprKind::Construct { args: values, .. } => {
+        | ExprKind::Builtin(_, values) => {
             for value in values {
+                visit(value);
+            }
+        }
+        ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+            for value in &mut args.values {
                 visit(value);
             }
         }
@@ -495,6 +505,85 @@ fn children_mut(expression: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reordered_producer_arguments_keep_evaluation_order_and_parameter_types() {
+        let mut locals = vec![Type::Int, Type::Str];
+        let producer = Producer {
+            params: vec![5, 2],
+            elements: vec![
+                Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Local(5),
+                },
+                Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Local(2),
+                },
+            ],
+        };
+        let value = Expr {
+            ty: Type::Tuple(0),
+            kind: ExprKind::Call(
+                0,
+                crate::ir::CallArgs {
+                    values: vec![
+                        Expr {
+                            ty: Type::Str,
+                            kind: ExprKind::Str("first expression".into()),
+                        },
+                        Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Int("7".into()),
+                        },
+                    ],
+                    order: vec![1, 0],
+                },
+            ),
+        };
+        let mut output = Vec::new();
+        expand_assignment(value, &[0, 1], &mut locals, &[Some(producer)], &mut output);
+        let [Statement::Scope { body, clear }] = output.as_slice() else {
+            panic!("argument and component owners require one cleanup scope");
+        };
+        let [
+            Statement::Assign(
+                second,
+                Expr {
+                    kind: ExprKind::Str(_),
+                    ..
+                },
+            ),
+            Statement::Assign(
+                first,
+                Expr {
+                    kind: ExprKind::Int(_),
+                    ..
+                },
+            ),
+            Statement::Assign(
+                _,
+                Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Local(bound_first),
+                },
+            ),
+            Statement::Assign(
+                _,
+                Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Local(bound_second),
+                },
+            ),
+            ..,
+        ] = body.as_slice()
+        else {
+            panic!("arguments must stage in source order before parameter substitution");
+        };
+        assert_eq!(first, bound_first);
+        assert_eq!(second, bound_second);
+        assert!(clear.contains(first) && clear.contains(second));
+    }
 
     #[test]
     fn cleared_unpacking_roots_do_not_materialize_tuples() {

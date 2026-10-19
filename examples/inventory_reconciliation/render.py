@@ -7,7 +7,7 @@ def line(output: TextIO, value: str) -> None:
     output.write(f"{value}\n")
 
 
-def show(report: Report, output: TextIO) -> None:
+def show(report: Report, *, output: TextIO) -> None:
     shortages: list[Fulfillment] = [
         result for result in report.results if result.shortage > 0
     ]

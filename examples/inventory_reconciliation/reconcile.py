@@ -1,7 +1,7 @@
 from .model import Fulfillment, Inventory, Report, Request, Stock
 
 
-def fulfill(request: Request, inventory: Inventory) -> Fulfillment:
+def fulfill(request: Request, *, inventory: Inventory) -> Fulfillment:
     filled = 0
     if request.sku in inventory.remaining:
         available = inventory.remaining[request.sku]
@@ -9,12 +9,12 @@ def fulfill(request: Request, inventory: Inventory) -> Fulfillment:
         if available < filled:  # noqa: PLR1730 -- min is outside the native subset.
             filled = available
         inventory.remaining[request.sku] = available - filled
-    return Fulfillment(request, filled, request.quantity - filled)
+    return Fulfillment(request, filled=filled, shortage=request.quantity - filled)
 
 
-def reconcile(stocks: list[Stock], batches: list[list[Request]]) -> Report:
+def reconcile(stocks: list[Stock], *, batches: list[list[Request]]) -> Report:
     remaining: dict[str, int] = {stock.sku: stock.quantity for stock in stocks}
-    inventory = Inventory(remaining)
+    inventory = Inventory(remaining=remaining)
     positive: list[Request] = [
         request for batch in batches for request in batch if request.quantity > 0
     ]
@@ -24,16 +24,18 @@ def reconcile(stocks: list[Stock], batches: list[list[Request]]) -> Report:
     for request in positive:
         requested[request.sku] += request.quantity
     # Eagerness and source order matter: every call mutates the same inventory.
-    results: list[Fulfillment] = [fulfill(request, inventory) for request in positive]
+    results: list[Fulfillment] = [
+        fulfill(request, inventory=inventory) for request in positive
+    ]
     request_rows = 0
     for batch in batches:
         request_rows += len(batch)
     return Report(
-        len(stocks),
-        len(batches),
-        request_rows,
-        results,
-        requested,
-        requested_skus,
-        remaining,
+        stock_rows=len(stocks),
+        batches=len(batches),
+        request_rows=request_rows,
+        results=results,
+        requested=requested,
+        requested_skus=requested_skus,
+        remaining=remaining,
     )

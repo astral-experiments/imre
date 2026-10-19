@@ -299,7 +299,7 @@ impl Checker<'_> {
         self.calls.insert(id);
         Ok(Expr {
             ty,
-            kind: ExprKind::Call(id, args),
+            kind: ExprKind::Call(id, ir::CallArgs::positional(args)),
         })
     }
 

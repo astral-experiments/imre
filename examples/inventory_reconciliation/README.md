@@ -49,11 +49,13 @@ Validation order is argument count, stock open/decode/close and parse, then orde
 
 Malformed input is terminal and leaves an existing report untouched. Report open/write/flush/close failure is terminal `OSError: report: cannot write`; invalid report paths use `ValueError: report: invalid path`. These are status-one failures; CPython traceback text is excluded from comparison, but the final normalized category/message is checked exactly. Output is truncated on open, buffered, explicitly flushed, and closed. It is not atomic or fsynced: partial writes remain visible after failure. A report that aliases either input, including a hard link, is safe to parse because both input contents have already been captured; the aliased file is then overwritten as normal.
 
-## Comprehensions and validation
+## Language features and validation
 
 Nested eager list comprehensions read batches with effectful inner bounds, flatten/filter positive requests, and fulfill requests through shared mutable inventory. Dict comprehensions implement last-wins stock and ordered requested totals. Set comprehensions track requested SKUs. Filtered comprehensions derive shortages and untouched `(SKU, quantity)` tuples. These are whole-program uses of the new syntax, not replacement benchmark kernels.
 
 The renderer uses scalar f-strings for report fields and the newline passed to `write`. Fields retain their existing left-to-right evaluation and conversion order, and the report format is unchanged. Adjacent f-strings keep longer rows readable without adding intermediate strings. Relar lowers these fields through the same typed conversions and ordered string construction used by explicit concatenation.
+
+Named arguments make batch/row coordinates, record fields, shared inventory, and the output stream explicit. These parameters are keyword-only where positional calls would be unclear. File loading and the reader constructor default their diagnostic label to the scalar string `"stock"`; stock parsing omits that argument, while orders pass `label="orders"`. Supplied expressions retain their original evaluation order, and the default has the same value as the previous explicit argument. The input contract, algorithm, and report bytes are unchanged.
 
 The independent [oracle](../../benchmarks/inventory_validate.py) never imports this package. It computes each fulfillment from initial stock minus cumulative earlier demand, checks conservation, and models file contents/hard-link aliases. It compares the entire filesystem, report bytes, stdout, stderr category/message, and status for every implementation. The corpus includes deterministic random inventories, empty/duplicate/ignored/unknown requests, Unicode/NUL SKUs, line boundaries, malformed counts/rows, huge quantities/counts, input/output aliases, and terminal errors. A separate Linux `/dev/full` check verifies the application's output-error boundary.
 

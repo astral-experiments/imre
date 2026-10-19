@@ -710,12 +710,14 @@ impl Analyzer {
                     _ => Interval::UNKNOWN,
                 }
             }
-            ExprKind::List(values)
-            | ExprKind::Set { values, .. }
-            | ExprKind::Tuple(values)
-            | ExprKind::Call(_, values)
-            | ExprKind::Construct { args: values, .. } => {
+            ExprKind::List(values) | ExprKind::Set { values, .. } | ExprKind::Tuple(values) => {
                 for value in values {
+                    self.expression(value, state, record);
+                }
+                Interval::UNKNOWN
+            }
+            ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+                for value in &args.values {
                     self.expression(value, state, record);
                 }
                 Interval::UNKNOWN
@@ -1055,10 +1057,13 @@ mod tests {
                 | ExprKind::Tuple(values)
                 | ExprKind::Compare(values, _)
                 | ExprKind::Boolean(_, values)
-                | ExprKind::Call(_, values)
-                | ExprKind::Builtin(_, values)
-                | ExprKind::Construct { args: values, .. } => {
+                | ExprKind::Builtin(_, values) => {
                     for value in values {
+                        expression(value, output);
+                    }
+                }
+                ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+                    for value in &args.values {
                         expression(value, output);
                     }
                 }
