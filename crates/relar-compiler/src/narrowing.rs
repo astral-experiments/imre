@@ -16,13 +16,21 @@ pub(crate) fn facts(test: &ast::Expr, truth: bool) -> HashMap<String, bool> {
                 ast::CmpOp::IsNot => truth,
                 _ => return HashMap::new(),
             };
-            match compare.operands.as_ref() {
-                [ast::Expr::Name(name), ast::Expr::NoneLiteral(_)]
-                | [ast::Expr::NoneLiteral(_), ast::Expr::Name(name)] => {
-                    HashMap::from([(name.id.to_string(), present)])
-                }
-                _ => HashMap::new(),
-            }
+            let value = match compare.operands.as_ref() {
+                [value, ast::Expr::NoneLiteral(_)] | [ast::Expr::NoneLiteral(_), value] => value,
+                _ => return HashMap::new(),
+            };
+            let name = match value {
+                ast::Expr::Name(name) => Some(name),
+                ast::Expr::Named(named) => match &*named.target {
+                    ast::Expr::Name(name) => Some(name),
+                    _ => None,
+                },
+                _ => None,
+            };
+            name.map_or_else(HashMap::new, |name| {
+                HashMap::from([(name.id.to_string(), present)])
+            })
         }
         ast::Expr::UnaryOp(unary) if unary.op == ast::UnaryOp::Not => facts(&unary.operand, !truth),
         ast::Expr::BoolOp(boolean)
@@ -32,6 +40,12 @@ pub(crate) fn facts(test: &ast::Expr, truth: bool) -> HashMap<String, bool> {
             let mut result = HashMap::new();
             let mut conflicting = HashSet::new();
             for value in &boolean.values {
+                // A later operand can replace the value observed by an earlier
+                // test, even when that operand contributes no None fact itself.
+                for name in expression_assignments(value) {
+                    result.remove(&name);
+                    conflicting.remove(&name);
+                }
                 for (name, present) in facts(value, truth) {
                     if let Some(previous) = result.insert(name.clone(), present)
                         && previous != present
@@ -46,6 +60,87 @@ pub(crate) fn facts(test: &ast::Expr, truth: bool) -> HashMap<String, bool> {
             result
         }
         _ => HashMap::new(),
+    }
+}
+
+/// Finds writes in an expression, including writes escaping eager displays.
+pub(crate) fn expression_assignments(expression: &ast::Expr) -> HashSet<String> {
+    struct Writes(HashSet<String>);
+    impl<'a> Visitor<'a> for Writes {
+        fn visit_expr(&mut self, expression: &'a ast::Expr) {
+            if let ast::Expr::Named(value) = expression
+                && let ast::Expr::Name(name) = &*value.target
+            {
+                self.0.insert(name.id.to_string());
+            }
+            walk_expr(self, expression);
+        }
+    }
+    let mut writes = Writes(HashSet::new());
+    writes.visit_expr(expression);
+    writes.0
+}
+
+/// Names written on every normally completed path, optionally restricted to a
+/// boolean result. Later short-circuit operands and empty displays do not run
+/// on every path; a true `and` or false `or` proves all of its operands ran.
+pub(crate) fn guaranteed_assignments(
+    expression: &ast::Expr,
+    truth: Option<bool>,
+) -> HashSet<String> {
+    match expression {
+        ast::Expr::Named(value) => {
+            let mut names = guaranteed_assignments(&value.value, truth);
+            if let ast::Expr::Name(name) = &*value.target {
+                names.insert(name.id.to_string());
+            }
+            names
+        }
+        ast::Expr::UnaryOp(value) if value.op == ast::UnaryOp::Not => {
+            guaranteed_assignments(&value.operand, truth.map(|truth| !truth))
+        }
+        ast::Expr::BoolOp(value) => {
+            if truth == Some(value.op == ast::BoolOp::And) {
+                value
+                    .values
+                    .iter()
+                    .flat_map(|value| guaranteed_assignments(value, truth))
+                    .collect()
+            } else {
+                guaranteed_assignments(&value.values[0], None)
+            }
+        }
+        ast::Expr::Compare(value) => value
+            .operands
+            .iter()
+            .take(if truth == Some(true) {
+                value.operands.len()
+            } else {
+                2
+            })
+            .flat_map(|value| guaranteed_assignments(value, None))
+            .collect(),
+        ast::Expr::If(value) => {
+            let mut names = guaranteed_assignments(&value.test, None);
+            let yes = guaranteed_assignments(&value.body, truth);
+            let no = guaranteed_assignments(&value.orelse, truth);
+            names.extend(yes.intersection(&no).cloned());
+            names
+        }
+        ast::Expr::ListComp(value) => guaranteed_assignments(&value.generators[0].iter, None),
+        ast::Expr::SetComp(value) => guaranteed_assignments(&value.generators[0].iter, None),
+        ast::Expr::DictComp(value) => guaranteed_assignments(&value.generators[0].iter, None),
+        _ => {
+            struct Children(HashSet<String>);
+            impl<'a> Visitor<'a> for Children {
+                fn visit_expr(&mut self, expression: &'a ast::Expr) {
+                    self.0.extend(guaranteed_assignments(expression, None));
+                }
+            }
+            let mut children = Children(HashSet::new());
+            walk_expr(&mut children, expression);
+            children.0
+        }
     }
 }
 
@@ -77,8 +172,8 @@ impl<'a> Visitor<'a> for Assignments {
     }
 
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
-        // Eager displays own their target bindings. Only the leftmost iterable
-        // executes in this scope; walrus expressions remain unsupported.
+        // Eager displays own iteration targets, but assignment expressions
+        // write in the enclosing non-comprehension scope.
         let clauses = match expression {
             ast::Expr::ListComp(value) => Some(value.generators.as_slice()),
             ast::Expr::SetComp(value) => Some(value.generators.as_slice()),
@@ -86,6 +181,7 @@ impl<'a> Visitor<'a> for Assignments {
             _ => None,
         };
         if let Some(clauses) = clauses {
+            self.0.extend(expression_assignments(expression));
             self.visit_expr(&clauses[0].iter);
             return;
         }

@@ -112,7 +112,11 @@ fn expression(value: &Expr, functions: &[bool]) -> bool {
         ExprKind::Dict { entries, .. } => entries
             .iter()
             .any(|(key, value)| expression(key, functions) || expression(value, functions)),
-        ExprKind::Present(value)
+        ExprKind::Scope { body, value, .. } => {
+            block(body, functions) || expression(value, functions)
+        }
+        ExprKind::Bind(_, value)
+        | ExprKind::Present(value)
         | ExprKind::Absent(value)
         | ExprKind::Unwrap(value)
         | ExprKind::Not(value)

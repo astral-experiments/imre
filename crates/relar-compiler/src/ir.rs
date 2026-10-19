@@ -77,81 +77,13 @@ impl Module {
     /// Process argument state is required only by an actual argv expression.
     /// Merely importing sys emits no startup allocation or runtime query.
     pub(crate) fn uses_sys_argv(&self) -> bool {
-        fn expression(value: &Expr) -> bool {
-            match &value.kind {
-                ExprKind::Builtin(Builtin::SysArgv, _) => true,
-                ExprKind::List(values)
-                | ExprKind::Tuple(values)
-                | ExprKind::Set { values, .. }
-                | ExprKind::Compare(values, _)
-                | ExprKind::Boolean(_, values)
-                | ExprKind::Builtin(_, values) => values.iter().any(expression),
-                ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
-                    args.values.iter().any(expression)
-                }
-                ExprKind::Dict { entries, .. } => entries
-                    .iter()
-                    .any(|(key, value)| expression(key) || expression(value)),
-                ExprKind::Present(value)
-                | ExprKind::Absent(value)
-                | ExprKind::Unwrap(value)
-                | ExprKind::Not(value)
-                | ExprKind::Negate(value)
-                | ExprKind::Field(value, _) => expression(value),
-                ExprKind::Binary(_, left, right) => expression(left) || expression(right),
-                ExprKind::Conditional(test, yes, no) => {
-                    expression(test) || expression(yes) || expression(no)
-                }
-                ExprKind::Exception { message, .. } => {
-                    message.as_ref().is_some_and(|message| expression(message))
-                }
-                ExprKind::Int(_)
-                | ExprKind::Float(_)
-                | ExprKind::Bool(_)
-                | ExprKind::Str(_)
-                | ExprKind::Bytes(_)
-                | ExprKind::None
-                | ExprKind::Local(_) => false,
-            }
+        let mut used = false;
+        for function in self.functions.iter().chain([&self.entry]) {
+            walk_expressions(&function.body, &mut |value| {
+                used |= matches!(value.kind, ExprKind::Builtin(Builtin::SysArgv, _));
+            });
         }
-        fn block(body: &[Statement]) -> bool {
-            body.iter().any(|statement| match statement {
-                Statement::Assign(_, value)
-                | Statement::Expr(value)
-                | Statement::Return(value)
-                | Statement::Assert(value) => expression(value),
-                Statement::SetItem(receiver, index, value)
-                | Statement::AugmentItem(receiver, index, _, value) => {
-                    expression(receiver) || expression(index) || expression(value)
-                }
-                Statement::SetField(receiver, _, value)
-                | Statement::AugmentField(receiver, _, _, value) => {
-                    expression(receiver) || expression(value)
-                }
-                Statement::Scope { body, .. } => block(body),
-                Statement::If(test, yes, no) => expression(test) || block(yes) || block(no),
-                Statement::While(test, body) => expression(test) || block(body),
-                Statement::For { args, body, .. } => args.iter().any(expression) || block(body),
-                Statement::Try {
-                    body,
-                    handlers,
-                    orelse,
-                    finalbody,
-                } => {
-                    block(body)
-                        || handlers.iter().any(|handler| block(&handler.body))
-                        || block(orelse)
-                        || block(finalbody)
-                }
-                Statement::Raise(value) => value.as_ref().is_some_and(expression),
-                Statement::Move(..)
-                | Statement::Clear(_)
-                | Statement::IterNext { .. }
-                | Statement::Break
-                | Statement::Continue => false,
-            })
-        }
-        block(&self.entry.body) || self.functions.iter().any(|function| block(&function.body))
+        used
     }
 }
 
@@ -160,6 +92,21 @@ pub(crate) struct Function {
     pub returns: Type,
     pub locals: Vec<Type>,
     pub body: Vec<Statement>,
+}
+
+impl Function {
+    /// These slots can change while an earlier operand is still being used.
+    /// Comprehension targets stay private; only explicit binding expressions
+    /// write into the enclosing source scope.
+    pub(crate) fn expression_rebound(&self) -> Vec<bool> {
+        let mut rebound = vec![false; self.locals.len()];
+        walk_expressions(&self.body, &mut |value| {
+            if let ExprKind::Bind(slot, _) = value.kind {
+                rebound[slot] = true;
+            }
+        });
+        rebound
+    }
 }
 
 #[derive(Clone)]
@@ -197,6 +144,16 @@ pub(crate) enum ExprKind {
     Bytes(Vec<u8>),
     None,
     Local(usize),
+    /// Stores the value, promoting its storage type if needed, and yields the
+    /// original value with an independent owned reference.
+    Bind(usize, Box<Expr>),
+    /// An eager comprehension with writes to its enclosing source scope.
+    /// Private slots are cleared on success and on every escaping error.
+    Scope {
+        body: Vec<Statement>,
+        value: Box<Expr>,
+        clear: Vec<usize>,
+    },
     List(Vec<Expr>),
     Dict {
         key: Type,
@@ -363,4 +320,123 @@ pub(crate) enum Statement {
     },
     /// None re-raises the dynamically active exception, including across calls.
     Raise(Option<Expr>),
+}
+
+/// Visits expression trees, including statements embedded in eager expressions.
+/// Analyses must include every checked branch, even when it never executes.
+pub(crate) fn walk_expressions(body: &[Statement], visit: &mut impl FnMut(&Expr)) {
+    fn expression(value: &Expr, visit: &mut impl FnMut(&Expr)) {
+        visit(value);
+        match &value.kind {
+            ExprKind::List(values)
+            | ExprKind::Tuple(values)
+            | ExprKind::Set { values, .. }
+            | ExprKind::Compare(values, _)
+            | ExprKind::Boolean(_, values)
+            | ExprKind::Builtin(_, values) => {
+                for value in values {
+                    expression(value, visit);
+                }
+            }
+            ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+                for value in &args.values {
+                    expression(value, visit);
+                }
+            }
+            ExprKind::Dict { entries, .. } => {
+                for (key, value) in entries {
+                    expression(key, visit);
+                    expression(value, visit);
+                }
+            }
+            ExprKind::Bind(_, value)
+            | ExprKind::Present(value)
+            | ExprKind::Absent(value)
+            | ExprKind::Unwrap(value)
+            | ExprKind::Not(value)
+            | ExprKind::Negate(value)
+            | ExprKind::Field(value, _) => expression(value, visit),
+            ExprKind::Scope { body, value, .. } => {
+                walk_expressions(body, visit);
+                expression(value, visit);
+            }
+            ExprKind::Binary(_, left, right) => {
+                expression(left, visit);
+                expression(right, visit);
+            }
+            ExprKind::Conditional(test, yes, no) => {
+                expression(test, visit);
+                expression(yes, visit);
+                expression(no, visit);
+            }
+            ExprKind::Exception { message, .. } => {
+                if let Some(message) = message {
+                    expression(message, visit);
+                }
+            }
+            ExprKind::Int(_)
+            | ExprKind::Bool(_)
+            | ExprKind::Str(_)
+            | ExprKind::None
+            | ExprKind::Local(_) => {}
+        }
+    }
+    for statement in body {
+        match statement {
+            Statement::Assign(_, value)
+            | Statement::Expr(value)
+            | Statement::Return(value)
+            | Statement::Assert(value) => expression(value, visit),
+            Statement::SetItem(receiver, index, value)
+            | Statement::AugmentItem(receiver, index, _, value) => {
+                expression(receiver, visit);
+                expression(index, visit);
+                expression(value, visit);
+            }
+            Statement::SetField(receiver, _, value)
+            | Statement::AugmentField(receiver, _, _, value) => {
+                expression(receiver, visit);
+                expression(value, visit);
+            }
+            Statement::Scope { body, .. } => walk_expressions(body, visit),
+            Statement::If(test, yes, no) => {
+                expression(test, visit);
+                walk_expressions(yes, visit);
+                walk_expressions(no, visit);
+            }
+            Statement::While(test, body) => {
+                expression(test, visit);
+                walk_expressions(body, visit);
+            }
+            Statement::For { args, body, .. } => {
+                for arg in args {
+                    expression(arg, visit);
+                }
+                walk_expressions(body, visit);
+            }
+            Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } => {
+                walk_expressions(body, visit);
+                for handler in handlers {
+                    walk_expressions(&handler.body, visit);
+                }
+                walk_expressions(orelse, visit);
+                walk_expressions(finalbody, visit);
+            }
+            Statement::Raise(value) => {
+                if let Some(value) = value {
+                    expression(value, visit);
+                }
+            }
+            Statement::Move(..)
+            | Statement::Clear(_)
+            | Statement::IterNext { .. }
+            | Statement::Break
+            | Statement::Continue => {}
+        }
+    }
 }

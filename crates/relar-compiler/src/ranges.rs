@@ -53,6 +53,13 @@ impl RangeFacts<'_> {
     /// eligibility. Move edges propagate unknown ownership through temporary
     /// chains, while Clear and a Move's source reset only introduce zero.
     pub(crate) fn small_locals(&self, function: &Function) -> Vec<bool> {
+        if function
+            .expression_rebound()
+            .into_iter()
+            .any(|written| written)
+        {
+            return vec![false; function.locals.len()];
+        }
         let mut small = function
             .locals
             .iter()
@@ -410,6 +417,16 @@ struct Analyzer {
 
 impl Analyzer {
     fn function(&mut self, function: &Function) {
+        // The interval transfer functions assume expressions do not change
+        // slots. Keep the generic integer path until expression writes are
+        // modeled with path-sensitive state transitions.
+        if function
+            .expression_rebound()
+            .into_iter()
+            .any(|written| written)
+        {
+            return;
+        }
         self.block(&function.body, State::unknown(function.locals.len()), true);
     }
 
@@ -656,6 +673,9 @@ impl Analyzer {
     /// ranges even when the successful comparison later narrows their locals.
     fn expression(&mut self, expression: &Expr, state: &State, record: bool) -> Interval {
         let result = match &expression.kind {
+            ExprKind::Bind(..) | ExprKind::Scope { .. } => {
+                unreachable!("expression writes bypass interval analysis")
+            }
             ExprKind::Int(value) => value
                 .parse::<i128>()
                 .map(Interval::exact)
@@ -1088,7 +1108,12 @@ mod tests {
                         expression(value, output);
                     }
                 }
-                ExprKind::Present(value)
+                ExprKind::Scope { body, value, .. } => {
+                    block(body, output);
+                    expression(value, output);
+                }
+                ExprKind::Bind(_, value)
+                | ExprKind::Present(value)
                 | ExprKind::Absent(value)
                 | ExprKind::Unwrap(value)
                 | ExprKind::Not(value)
