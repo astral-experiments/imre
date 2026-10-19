@@ -127,8 +127,56 @@ pub unsafe extern "C" fn relar_bytes_compare(left: *const Bytes, right: *const B
 /// Root the bytes value and exact integer index; pending error state is clear.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_bytes_get(value: *const Bytes, at: usize) -> usize {
-    // SAFETY: both exact inputs remain rooted until the result has been copied.
-    let (value, at) = unsafe { (&*value, Int::borrow(at)) };
+    // SAFETY: the immutable bytes allocation remains rooted throughout the read.
+    let value = unsafe { &*value };
+    // The sign check matters even with bounds checking: an unsigned shift of a
+    // negative tagged index could fit an exceptionally large bytes allocation.
+    if at & 1 != 0
+        && (at as isize) >= 0
+        && let Some(&byte) = value.get(at >> 1)
+    {
+        return (usize::from(byte) << 1) | 1;
+    }
+    // SAFETY: the caller roots the exact canonical integer and bytes value.
+    unsafe { bytes_get_slow(value, at) }
+}
+
+/// # Safety
+/// `value` roots immutable bytes and `at` is an exact nonnegative native index,
+/// not a tagged integer. Enter with no pending error. The result is a canonical
+/// tagged byte, or zero with the same IndexError as ordinary bytes indexing.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_bytes_get_index(value: *const Bytes, at: usize) -> usize {
+    // SAFETY: the immutable bytes allocation remains rooted throughout the read.
+    if let Some(&byte) = unsafe { &*value }.get(at) {
+        (usize::from(byte) << 1) | 1
+    } else {
+        bytes_index_error(at)
+    }
+}
+
+/// Preserves index-sized conversion errors without expanding the checked load.
+#[cold]
+#[inline(never)]
+fn bytes_index_error(at: usize) -> usize {
+    let message = if at > isize::MAX as usize {
+        "cannot fit 'int' into an index-sized integer"
+    } else {
+        "index out of range"
+    };
+    Error::new(Kind::IndexError, message).returning(0)
+}
+
+/// Keeps negative/BigInt normalization and exception construction outside the
+/// small checked-load wrapper imported into native caller loops.
+///
+/// # Safety
+/// `at` is a rooted canonical integer handle and pending error state is clear.
+#[cold]
+#[inline(never)]
+unsafe fn bytes_get_slow(value: &Bytes, at: usize) -> usize {
+    // SAFETY: the exact integer remains rooted until the result has been copied.
+    let at = unsafe { Int::borrow(at) };
     let result = (|| {
         let at = native_size(&at).map_err(|_| {
             Error::new(
@@ -331,4 +379,89 @@ pub unsafe extern "C" fn relar_bytes_iter(value: *const Bytes) -> *const Object 
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::BytesIterator(
         BytesIterator { owner, position: 0 },
     )))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objects::exceptions::{
+        relar_error_pending, relar_error_take, relar_exception_matches, relar_exception_message,
+    };
+    use crate::{BigInt, MAX_SMALL, MIN_SMALL};
+
+    /// Consumes one indexing failure and checks the exact public diagnostic.
+    fn assert_index_error(expected: &str) {
+        let error = relar_error_take();
+        assert!(!error.is_null());
+        // SAFETY: taking the pending exception transfers one live owner, and
+        // message extraction returns another independently owned string.
+        unsafe {
+            let error = Rc::from_raw(error);
+            assert_eq!(
+                relar_exception_matches(Rc::as_ptr(&error), Kind::IndexError as u32),
+                1
+            );
+            let message = Rc::from_raw(relar_exception_message(Rc::as_ptr(&error)));
+            assert_eq!(message.as_str(), expected);
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn indexed_bytes_preserve_tagged_zero_signed_bounds_and_bigint_errors() {
+        let bytes: Bytes = (0..=u8::MAX).collect();
+        assert_eq!(relar_error_pending(), 0);
+        // SAFETY: bytes and each canonical integer index remain rooted, and
+        // every error below is consumed before entering another indexed read.
+        unsafe {
+            for byte in 0..=u8::MAX {
+                let positive = Int::from_usize(usize::from(byte));
+                let negative = Int::small(i64::from(byte) - 256).unwrap();
+                let expected = (usize::from(byte) << 1) | 1;
+                assert_eq!(relar_bytes_get(&bytes, positive.0), expected);
+                assert_eq!(relar_bytes_get(&bytes, negative.0), expected);
+                assert_eq!(relar_bytes_get_index(&bytes, usize::from(byte)), expected);
+                assert_eq!(relar_error_pending(), 0);
+            }
+            let huge = BigInt::from(1_u8) << 100_u32;
+            let errors = [
+                (Int::from_usize(256), "index out of range"),
+                (Int::small(-257).unwrap(), "index out of range"),
+                (Int::small(MIN_SMALL).unwrap(), "index out of range"),
+                (Int::small(MAX_SMALL).unwrap(), "index out of range"),
+                (Int::new(BigInt::from(MAX_SMALL) + 1), "index out of range"),
+                (Int::new(BigInt::from(isize::MIN)), "index out of range"),
+                (
+                    Int::new(huge.clone()),
+                    "cannot fit 'int' into an index-sized integer",
+                ),
+                (
+                    Int::new(-huge),
+                    "cannot fit 'int' into an index-sized integer",
+                ),
+            ];
+            for (index, expected) in errors {
+                assert_eq!(relar_bytes_get(&bytes, index.0), 0);
+                assert_index_error(expected);
+                assert_eq!(relar_bytes_get(&bytes, 1), 1);
+            }
+            for (index, expected) in [
+                (bytes.len(), "index out of range"),
+                (isize::MAX as usize, "index out of range"),
+                (
+                    isize::MAX as usize + 1,
+                    "cannot fit 'int' into an index-sized integer",
+                ),
+                (usize::MAX, "cannot fit 'int' into an index-sized integer"),
+            ] {
+                assert_eq!(relar_bytes_get_index(&bytes, index), 0);
+                assert_index_error(expected);
+                assert_eq!(relar_bytes_get_index(&bytes, 0), 1);
+            }
+            assert_eq!(relar_bytes_get(&Bytes::new(), 1), 0);
+            assert_index_error("index out of range");
+            assert_eq!(relar_bytes_get_index(&Bytes::new(), 0), 0);
+            assert_index_error("index out of range");
+        }
+    }
 }

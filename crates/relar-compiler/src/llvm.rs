@@ -115,6 +115,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         code: String::new(),
         entry_allocas: String::new(),
         strings: Vec::new(),
+        literal_globals: literal_globals(module),
         next_value: 0,
         next_label: 0,
         current: "entry".to_owned(),
@@ -174,6 +175,7 @@ struct Emitter<'a, 'module> {
     code: String,
     entry_allocas: String,
     strings: Vec<Vec<u8>>,
+    literal_globals: Vec<Option<String>>,
     next_value: usize,
     next_label: usize,
     current: String,
@@ -869,6 +871,9 @@ impl Emitter<'_, '_> {
     fn statement(&mut self, statement: &Statement) {
         match statement {
             Statement::Assign(slot, expression) => {
+                if self.concat_assign(*slot, expression) {
+                    return;
+                }
                 let value = self.expr(expression);
                 self.store(*slot, &value);
             }
@@ -978,6 +983,19 @@ impl Emitter<'_, '_> {
                 self.release(&old);
                 self.release_operand(&receiver);
             }
+            // Discarded scalar literals have no effects. In particular, a
+            // function docstring must not allocate on every call. Literal
+            // allocation exhaustion is already fatal rather than catchable.
+            Statement::Expr(expression)
+                if matches!(
+                    expression.kind,
+                    ExprKind::Int(_)
+                        | ExprKind::Float(_)
+                        | ExprKind::Bool(_)
+                        | ExprKind::Str(_)
+                        | ExprKind::Bytes(_)
+                        | ExprKind::None
+                ) => {}
             Statement::Expr(expression) => {
                 if let ExprKind::Builtin(Builtin::TextWrite, args) = &expression.kind {
                     self.write_discard(args);
@@ -1466,6 +1484,63 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Transfers an overwritten string only after every suffix has evaluated.
+    /// The local remains rooted on all RHS error paths. Expression-rebound
+    /// locals use the ordinary path, since their first value may differ from
+    /// the slot's value after a later `:=`. Runtime uniqueness checks preserve
+    /// aliases, including suffixes that borrow the overwritten string itself.
+    fn concat_assign(&mut self, slot: usize, expression: &Expr) -> bool {
+        if self.locals[slot] != Type::Str
+            || self.expression_rebound[slot]
+            || !matches!(expression.kind, ExprKind::Binary(Binary::Concat, ..))
+        {
+            return false;
+        }
+        let expressions = concat_leaves(expression);
+        if !matches!(expressions[0].kind, ExprKind::Local(source) if source == slot) {
+            return false;
+        }
+        let disjoint = expressions[1..].iter().all(|expression| {
+            matches!(
+                expression.kind,
+                ExprKind::Str(_) | ExprKind::Builtin(Builtin::StringGet, _)
+            )
+        });
+        let (scratch, count, owners) = self.concat_parts(expressions[1..].to_vec());
+        let left = self.take_slot(slot);
+        self.forget(&left);
+        let instruction = if count == 1 && disjoint {
+            // Literals live in static storage; indexed characters were copied
+            // into unique scratch (or point to an immutable ASCII literal).
+            // Neither can overlap the runtime allocation being consumed.
+            let data = self.instruction(format!("load ptr, ptr {scratch}"));
+            let length_slot = self.instruction(format!(
+                "getelementptr inbounds {{ ptr, i64 }}, ptr {scratch}, i64 0, i32 1"
+            ));
+            let length = self.instruction(format!("load i64, ptr {length_slot}"));
+            format!(
+                "call ptr @relar_str_append_utf8_owned(ptr {}, ptr {data}, i64 {length})",
+                left.operand
+            )
+        } else {
+            format!(
+                "call ptr @relar_str_concat_parts_owned(ptr {}, ptr {scratch}, i64 {count})",
+                left.operand
+            )
+        };
+        let value = Value {
+            ty: Type::Str,
+            operand: self.instruction(instruction),
+            small_integer: false,
+        };
+        let value = self.owned(value);
+        for owner in &owners {
+            self.release_operand(owner);
+        }
+        self.store(slot, &value);
+        true
+    }
+
     /// Fuses only exact immutable string concatenation. Leaves are evaluated in
     /// source order and computed values stay owned across later mutation/errors;
     /// literal spans need no runtime string owner. Exact str(Int) conversions
@@ -1478,6 +1553,8 @@ impl Emitter<'_, '_> {
         if let [left, right] = expressions.as_slice()
             && !matches!(left.kind, ExprKind::Str(_))
             && !matches!(right.kind, ExprKind::Str(_))
+            && !matches!(left.kind, ExprKind::Builtin(Builtin::StringGet, _))
+            && !matches!(right.kind, ExprKind::Builtin(Builtin::StringGet, _))
             && integer_string_argument(left).is_none()
             && integer_string_argument(right).is_none()
         {
@@ -1508,13 +1585,53 @@ impl Emitter<'_, '_> {
     /// owners must survive the consumer's error check; all borrowed byte spans
     /// reside in immutable literals or unique entry-block formatting scratch.
     fn concat_parts(&mut self, expressions: Vec<&Expr>) -> (String, usize, Vec<Operand>) {
-        let count = expressions.len();
+        // Adjacent proved ASCII lookups can share one byte span. Capture each
+        // character at its original evaluation point before evaluating the next.
+        let groups = expressions
+            .chunk_by(|left, right| {
+                self.ascii_index_literal(left).is_some()
+                    && self.ascii_index_literal(right).is_some()
+            })
+            .collect::<Vec<_>>();
+        let count = groups.len();
         let scratch = self.entry_alloca(format!("[{count} x {{ ptr, i64 }}]"));
         let mut owners = Vec::new();
-        for (index, expression) in expressions.into_iter().enumerate() {
+        for (index, group) in groups.into_iter().enumerate() {
             let part = self.instruction(format!(
                 "getelementptr inbounds {{ ptr, i64 }}, ptr {scratch}, i64 {index}"
             ));
+            if group.len() > 1 {
+                let buffer = self.entry_alloca(format!("[{} x i8]", group.len()));
+                for (offset, expression) in group.iter().enumerate() {
+                    let data = self.literal_index_data(expression).unwrap();
+                    let byte = self.instruction(format!("load i8, ptr {data}"));
+                    let destination = self.instruction(format!(
+                        "getelementptr inbounds i8, ptr {buffer}, i64 {offset}"
+                    ));
+                    self.line(format!("store i8 {byte}, ptr {destination}"));
+                }
+                self.store_string_part(&part, &buffer, &group.len().to_string());
+                continue;
+            }
+            let expression = group[0];
+            if let ExprKind::Builtin(Builtin::StringGet, args) = &expression.kind {
+                if let Some(data) = self.literal_index_data(expression) {
+                    self.store_string_part(&part, &data, "1");
+                    continue;
+                }
+                let source = self.operand(&args[0]);
+                let at = self.operand(&args[1]);
+                let buffer = self.entry_alloca("[4 x i8]");
+                let status = self.instruction(format!(
+                    "call i8 @relar_str_get_part(ptr {}, i64 {}, ptr {buffer}, ptr {part})",
+                    source.value.operand, at.value.operand
+                ));
+                let failed = self.instruction(format!("icmp eq i8 {status}, 0"));
+                self.check_failed(&failed);
+                self.release_operand(&source);
+                self.release_operand(&at);
+                continue;
+            }
             if let Some(integer) = integer_string_argument(expression) {
                 let integer = self.operand(integer);
                 let buffer = self.entry_alloca("[20 x i8]");
@@ -1545,16 +1662,58 @@ impl Emitter<'_, '_> {
                 owners.push(operand);
                 (data, "-1".to_owned())
             };
-            let data_slot = self.instruction(format!(
-                "getelementptr inbounds {{ ptr, i64 }}, ptr {part}, i64 0, i32 0"
-            ));
-            self.line(format!("store ptr {data}, ptr {data_slot}"));
-            let length_slot = self.instruction(format!(
-                "getelementptr inbounds {{ ptr, i64 }}, ptr {part}, i64 0, i32 1"
-            ));
-            self.line(format!("store i64 {length}, ptr {length_slot}"));
+            self.store_string_part(&part, &data, &length);
         }
         (scratch, count, owners)
+    }
+
+    /// A bounded index into an immutable ASCII literal names one UTF-8 byte.
+    /// Fixed module bindings qualify only when initialized by that literal;
+    /// checking has already rejected reads before initialization and rebinding.
+    /// Unknown or invalid indices retain the ordinary checked Unicode path.
+    fn ascii_index_literal<'a>(&'a self, expression: &'a Expr) -> Option<&'a str> {
+        let ExprKind::Builtin(Builtin::StringGet, args) = &expression.kind else {
+            return None;
+        };
+        let range = self.ranges.integer(&args[1])?;
+        let text = match &args[0].kind {
+            ExprKind::Str(text) => Some(text.as_str()),
+            ExprKind::Builtin(Builtin::GlobalGet(slot), _) => {
+                self.literal_globals[*slot].as_deref()
+            }
+            _ => None,
+        };
+        text.filter(|text| text.is_ascii() && range.min >= 0 && (range.max as usize) < text.len())
+    }
+
+    /// Evaluates the index and returns a static one-byte UTF-8 span only when
+    /// literal identity and bounds were proved. Index effects retain their order.
+    fn literal_index_data(&mut self, expression: &Expr) -> Option<String> {
+        let bytes = self.ascii_index_literal(expression)?.as_bytes().to_vec();
+        let ExprKind::Builtin(Builtin::StringGet, args) = &expression.kind else {
+            unreachable!();
+        };
+        let index = self.operand(&args[1]);
+        let index_value = self.instruction(format!("ashr i64 {}, 1", index.value.operand));
+        let id = self.strings.len();
+        self.strings.push(bytes);
+        let data = self.instruction(format!(
+            "getelementptr inbounds i8, ptr @str_{id}, i64 {index_value}"
+        ));
+        self.release_operand(&index);
+        Some(data)
+    }
+
+    /// Writes the shared raw-span/owned-handle descriptor consumed by builders.
+    fn store_string_part(&mut self, part: &str, data: &str, length: &str) {
+        let data_slot = self.instruction(format!(
+            "getelementptr inbounds {{ ptr, i64 }}, ptr {part}, i64 0, i32 0"
+        ));
+        self.line(format!("store ptr {data}, ptr {data_slot}"));
+        let length_slot = self.instruction(format!(
+            "getelementptr inbounds {{ ptr, i64 }}, ptr {part}, i64 0, i32 1"
+        ));
+        self.line(format!("store i64 {length}, ptr {length_slot}"));
     }
 
     /// A discarded write result needs no Unicode character count. The runtime
@@ -2255,11 +2414,30 @@ impl Emitter<'_, '_> {
                 Type::Str,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::BytesGet => self.call(
-                "relar_bytes_get",
-                Type::Int,
-                &[&args[0].value, &args[1].value],
-            ),
+            Builtin::BytesGet => {
+                // Successful bytes are canonical tagged integers in 1..=511;
+                // zero uniquely signals failure, so no pending-state poll is needed.
+                let nonnegative = self.nonnegative_index(&expressions[1]);
+                let index = self.index_word(&args[1].value, nonnegative);
+                let function = if nonnegative {
+                    "relar_bytes_get_index"
+                } else {
+                    "relar_bytes_get"
+                };
+                let operand = self.instruction(format!(
+                    "call i64 @{function}(ptr {}, i64 {index})",
+                    args[0].value.operand
+                ));
+                let failed = self.instruction(format!("icmp eq i64 {operand}, 0"));
+                self.check_failed(&failed);
+                let bounded = self.instruction(format!("icmp ule i64 {operand}, 511"));
+                self.line(format!("call void @llvm.assume(i1 {bounded})"));
+                Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: true,
+                }
+            }
             Builtin::BytesIter => self.call("relar_bytes_iter", Type::Iterator, &[&args[0].value]),
             Builtin::StringIter => self.call("relar_str_iter", Type::Iterator, &[&args[0].value]),
             Builtin::Slice => self.call(
@@ -2737,6 +2915,11 @@ impl Emitter<'_, '_> {
     fn index_word(&mut self, index: &Value, nonnegative: bool) -> String {
         if nonnegative {
             debug_assert!(index.small_integer);
+            // The range proof fixes the tag and sign bits too. Publish them so
+            // LLVM can eliminate loop-carried integer ownership checks.
+            let tag = self.instruction(format!("and i64 {}, {}", index.operand, i64::MIN | 1));
+            let canonical = self.instruction(format!("icmp eq i64 {tag}, 1"));
+            self.line(format!("call void @llvm.assume(i1 {canonical})"));
             self.instruction(format!("lshr i64 {}, 1", index.operand))
         } else {
             index.operand.clone()
@@ -2852,6 +3035,24 @@ fn concat_leaves(expression: &Expr) -> Vec<&Expr> {
     let mut result = Vec::new();
     visit(expression, &mut result);
     result
+}
+
+/// The checked IR publishes each module binding once and forbids later rebinding.
+/// Retaining only direct literal initializers avoids evaluating any user code or
+/// assuming a mutable container's contents are constant.
+fn literal_globals(module: &Module) -> Vec<Option<String>> {
+    let mut strings = vec![None; module.globals.len()];
+    for function in module.functions.iter().chain([&module.entry]) {
+        crate::ir::walk_expressions(&function.body, &mut |expression| {
+            if let ExprKind::Builtin(Builtin::GlobalSet(slot), args) = &expression.kind
+                && let [value] = args.as_slice()
+                && let ExprKind::Str(value) = &value.kind
+            {
+                strings[*slot] = Some(value.clone());
+            }
+        });
+    }
+    strings
 }
 
 /// Only the sealed integer conversion can use the eager scratch formatter.
@@ -3054,6 +3255,7 @@ fn fallible(name: &str) -> bool {
                 | "relar_bytes_count"
                 | "relar_bytes_list"
                 | "relar_bytes_get"
+                | "relar_bytes_get_index"
                 | "relar_bytes_slice"
                 | "relar_bytes_concat"
                 | "relar_bytes_repeat"
@@ -3127,6 +3329,7 @@ declare void @relar_print_bytes(ptr)
 declare i64 @relar_bytes_len(ptr)
 declare i32 @relar_bytes_compare(ptr, ptr)
 declare i64 @relar_bytes_get(ptr, i64)
+declare i64 @relar_bytes_get_index(ptr, i64)
 declare ptr @relar_bytes_slice(ptr, i64, i64, i64)
 declare ptr @relar_bytes_count(i64)
 declare ptr @relar_bytes_list(ptr)
@@ -3189,6 +3392,9 @@ declare ptr @relar_set_iter(ptr)
 declare i8 @relar_mapping_iter_next(ptr, ptr, ptr)
 declare ptr @relar_str_concat(ptr, ptr)
 declare ptr @relar_str_concat_parts(ptr, i64)
+declare ptr @relar_str_concat_parts_owned(ptr, ptr, i64)
+declare ptr @relar_str_append_utf8_owned(ptr, ptr, i64)
+declare i8 @relar_str_get_part(ptr, i64, ptr, ptr)
 declare ptr @relar_int_str_part(i64, ptr, ptr)
 declare ptr @relar_str_split_whitespace(ptr)
 declare ptr @relar_str_splitlines(ptr)
@@ -3246,6 +3452,7 @@ declare ptr @relar_list_slice(ptr, i64, i64, i64)
 declare ptr @relar_seq_slice(ptr, i64, i64, i64)
 declare void @relar_assert_fail()
 declare void @relar_range_step_zero()
+declare void @llvm.assume(i1)
 declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
