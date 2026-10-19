@@ -16,6 +16,7 @@ REJECTED = {
     "different_container_results": 'value = [1] or ["text"]\n',
     "different_optional_results": "def bad(left: int | None, right: str | None) -> int | None:\n    return left or right\n",
     "wrong_contextual_empty": "values: list[str] = [] or [1]\n",
+    "existing_walrus_slot_stays_exact": 'existing: list[int] = []\nvalues: list[str] = (existing := []) or ["wrong"]\n',
     "bool_annotation_is_exact": "value: bool = 1\n",
     "bool_parameter_is_exact": "def accept(value: bool) -> bool:\n    return value\nprint(accept(1))\n",
     "bool_result_is_exact": "value: bool = 0 or 1\n",
