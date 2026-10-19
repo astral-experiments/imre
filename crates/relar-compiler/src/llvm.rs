@@ -73,9 +73,12 @@ struct Operand {
     ownership: Ownership,
 }
 
+/// Finally routing chooses the eventual transfer before it reaches either
+/// the break exit or the distinct normal-exhaustion/else entry.
 #[derive(Clone)]
 struct LoopTarget {
     end: String,
+    exhausted: String,
     next: String,
     cleanup_depth: usize,
 }
@@ -978,15 +981,21 @@ impl Emitter<'_, '_> {
                     self.terminated = true;
                 }
             }
-            Statement::While(test, body) => {
+            Statement::While(test, body, orelse) => {
                 let (condition, body_label, end) = (self.label(), self.label(), self.label());
+                let exhausted = if orelse.is_empty() {
+                    end.clone()
+                } else {
+                    self.label()
+                };
                 self.jump(&condition);
                 self.start(&condition);
                 let test = self.expr(test);
-                self.branch(&test.operand, &body_label, &end);
+                self.branch(&test.operand, &body_label, &exhausted);
                 self.start(&body_label);
                 self.loops.push(LoopTarget {
                     end: end.clone(),
+                    exhausted: exhausted.clone(),
                     next: condition.clone(),
                     cleanup_depth: self.cleanups.len(),
                 });
@@ -994,6 +1003,13 @@ impl Emitter<'_, '_> {
                 self.loops.pop();
                 if !self.terminated {
                     self.jump(&condition);
+                }
+                if !orelse.is_empty() {
+                    self.start(&exhausted);
+                    self.block(orelse);
+                    if !self.terminated {
+                        self.jump(&end);
+                    }
                 }
                 self.start(&end);
             }
@@ -1004,6 +1020,7 @@ impl Emitter<'_, '_> {
                 step,
                 args,
                 body,
+                orelse,
             } => {
                 // This proof includes the final increment and the hidden cursor,
                 // independently of reassignment of the visible loop target.
@@ -1026,6 +1043,11 @@ impl Emitter<'_, '_> {
                     self.label(),
                     self.label(),
                 );
+                let exhausted = if orelse.is_empty() {
+                    end.clone()
+                } else {
+                    self.label()
+                };
                 self.branch(&zero.operand, &fail, &condition);
                 self.start(&fail);
                 self.checked_line("call void @relar_range_step_zero()");
@@ -1044,12 +1066,13 @@ impl Emitter<'_, '_> {
                     "select i1 {}, i1 {}, i1 {}",
                     positive.operand, below.operand, above.operand
                 ));
-                self.branch(&test, &body_label, &end);
+                self.branch(&test, &body_label, &exhausted);
                 self.start(&body_label);
                 let current = self.load(*cursor, small_cursor);
                 self.store(*target, &current);
                 self.loops.push(LoopTarget {
                     end: end.clone(),
+                    exhausted: exhausted.clone(),
                     next: increment.clone(),
                     cleanup_depth: self.cleanups.len(),
                 });
@@ -1070,15 +1093,22 @@ impl Emitter<'_, '_> {
                 };
                 self.store(*cursor, &next);
                 self.jump(&condition);
+                if !orelse.is_empty() {
+                    self.start(&exhausted);
+                    self.block(orelse);
+                    if !self.terminated {
+                        self.jump(&end);
+                    }
+                }
                 self.start(&end);
             }
-            Statement::Break | Statement::Continue => {
+            Statement::Break | Statement::Continue | Statement::Exhaust => {
                 let target = self.loops.last().unwrap();
                 self.route(Completion::Jump {
-                    label: if matches!(statement, Statement::Break) {
-                        target.end.clone()
-                    } else {
-                        target.next.clone()
+                    label: match statement {
+                        Statement::Break => target.end.clone(),
+                        Statement::Exhaust => target.exhausted.clone(),
+                        _ => target.next.clone(),
                     },
                     depth: target.cleanup_depth,
                 });
@@ -2798,10 +2828,19 @@ fn mark_rebound(statements: &[Statement], rebound: &mut [bool]) {
                 mark_rebound(orelse, rebound);
                 mark_rebound(finalbody, rebound);
             }
-            Statement::While(_, body) => mark_rebound(body, rebound),
-            Statement::For { target, body, .. } => {
+            Statement::While(_, body, orelse) => {
+                mark_rebound(body, rebound);
+                mark_rebound(orelse, rebound);
+            }
+            Statement::For {
+                target,
+                body,
+                orelse,
+                ..
+            } => {
                 rebound[*target] = true;
                 mark_rebound(body, rebound);
+                mark_rebound(orelse, rebound);
             }
             Statement::SetItem(..)
             | Statement::AugmentItem(..)
@@ -2812,6 +2851,7 @@ fn mark_rebound(statements: &[Statement], rebound: &mut [bool]) {
             | Statement::Raise(_)
             | Statement::Break
             | Statement::Continue
+            | Statement::Exhaust
             | Statement::Assert(_) => {}
         }
     }

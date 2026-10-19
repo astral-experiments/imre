@@ -16,6 +16,7 @@ mod calls;
 mod comprehensions;
 mod matching;
 mod truthiness;
+use assignments::LocalState;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
 
@@ -685,7 +686,8 @@ struct Checker<'a> {
     locals: Vec<Type>,
     assigned: HashSet<usize>,
     calls: HashSet<usize>,
-    loop_depth: usize,
+    loop_breaks: Vec<Vec<LocalState>>,
+    reachable: bool,
     module_scope: bool,
 }
 
@@ -716,7 +718,8 @@ impl<'a> Checker<'a> {
             locals: Vec::new(),
             assigned: HashSet::new(),
             calls: HashSet::new(),
-            loop_depth: 0,
+            loop_breaks: Vec::new(),
+            reachable: true,
             module_scope: false,
         }
     }
@@ -1342,10 +1345,10 @@ impl<'a> Checker<'a> {
     }
 
     /// Keeps the original container rooted and owns each item before user code runs.
-    fn iteration(&mut self, loop_: &ast::StmtFor) -> Result<Vec<Statement>, String> {
+    fn iteration(&mut self, loop_: &ast::StmtFor) -> Result<(Vec<Statement>, bool), String> {
         let input = self.iteration_input(&loop_.iter)?;
         self.invalidate_loop_facts(&loop_.body);
-        self.lower_iteration(&loop_.target, input, |checker| {
+        self.lower_iteration(&loop_.target, input, &loop_.orelse, |checker| {
             Ok(checker.block(&loop_.body)?.0)
         })
     }
@@ -1356,8 +1359,9 @@ impl<'a> Checker<'a> {
         &mut self,
         target: &ast::Expr,
         input: Iteration,
+        orelse: &[ast::Stmt],
         lower_body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
-    ) -> Result<Vec<Statement>, String> {
+    ) -> Result<(Vec<Statement>, bool), String> {
         if let Iteration::Range(args) = input {
             let ast::Expr::Name(name) = target else {
                 return Err(error(self.source, target, "range target must be a name"));
@@ -1367,25 +1371,39 @@ impl<'a> Checker<'a> {
             let facts = self.narrowed.clone();
             let before = self.assigned.clone();
             self.assigned.insert(target);
-            self.loop_depth += 1;
+            self.loop_breaks.push(Vec::new());
             let body = lower_body(self)?;
-            self.loop_depth -= 1;
+            let breaks = self.loop_breaks.pop().unwrap();
             self.assigned = before;
             self.narrowed = facts;
+            let (mut orelse, falls) = self.loop_else(orelse, breaks)?;
             let cursor = self.hidden(Type::Int);
             let stop = self.hidden(Type::Int);
             let step = self.hidden(Type::Int);
-            return Ok(vec![Statement::Scope {
-                body: vec![Statement::For {
-                    target,
-                    cursor,
-                    stop,
-                    step,
-                    args,
-                    body,
+            let clear = vec![cursor, stop, step];
+            if !orelse.is_empty() {
+                orelse = clear
+                    .iter()
+                    .copied()
+                    .map(Statement::Clear)
+                    .chain(orelse)
+                    .collect();
+            }
+            return Ok((
+                vec![Statement::Scope {
+                    body: vec![Statement::For {
+                        target,
+                        cursor,
+                        stop,
+                        step,
+                        args,
+                        body,
+                        orelse,
+                    }],
+                    clear,
                 }],
-                clear: vec![cursor, stop, step],
-            }]);
+                falls,
+            ));
         }
         let Iteration::Container {
             iterable,
@@ -1505,7 +1523,7 @@ impl<'a> Checker<'a> {
                     ty: Type::Bool,
                     kind: ExprKind::Not(Box::new(self.local(ready))),
                 },
-                vec![Statement::Break],
+                vec![Statement::Exhaust],
                 Vec::new(),
             ));
             owned_items.push(key);
@@ -1575,28 +1593,65 @@ impl<'a> Checker<'a> {
                 },
             ));
         }
-        self.loop_depth += 1;
+        self.loop_breaks.push(Vec::new());
         body.extend(lower_body(self)?);
-        self.loop_depth -= 1;
+        let breaks = self.loop_breaks.pop().unwrap();
         self.assigned = before;
         self.narrowed = facts;
-        output.push(Statement::While(test, body));
+        let (mut orelse, falls) = self.loop_else(orelse, breaks)?;
         cleanup.extend(counter);
-        Ok(vec![Statement::Scope {
-            body: output,
-            clear: cleanup,
-        }])
+        if !orelse.is_empty() {
+            // CPython drops the exhausted iterator before entering else. A
+            // temporary container may own buffered files whose drop flushes
+            // writes that the else suite can observe. Scope cleanup remains
+            // idempotent after these private roots have been cleared.
+            orelse = cleanup
+                .iter()
+                .copied()
+                .map(Statement::Clear)
+                .chain(orelse)
+                .collect();
+        }
+        output.push(Statement::While(test, body, orelse));
+        Ok((
+            vec![Statement::Scope {
+                body: output,
+                clear: cleanup,
+            }],
+            falls,
+        ))
+    }
+
+    /// The else suite is outside this loop, so its transfers target an outer loop.
+    /// Only normal completion enters else; break states join after it.
+    fn loop_else(
+        &mut self,
+        orelse: &[ast::Stmt],
+        mut breaks: Vec<LocalState>,
+    ) -> Result<(Vec<Statement>, bool), String> {
+        let (orelse, falls) = self.block(orelse)?;
+        if falls {
+            breaks.push(self.local_state());
+        }
+        let falls = !breaks.is_empty();
+        if falls {
+            self.join_states(breaks);
+        }
+        Ok((orelse, falls))
     }
 
     /// Checks dead syntax too, but merges definite assignment only from reachable exits.
     fn block(&mut self, statements: &[ast::Stmt]) -> Result<(Vec<Statement>, bool), String> {
         let mut body = Vec::new();
         let mut falls_through = true;
+        let reachable = self.reachable;
         for statement in statements {
+            self.reachable = reachable && falls_through;
             let (lowered, continues) = self.statement(statement)?;
             body.extend(lowered);
             falls_through &= continues;
         }
+        self.reachable = reachable;
         Ok((body, falls_through))
     }
 
@@ -1738,13 +1793,6 @@ impl<'a> Checker<'a> {
             }
             ast::Stmt::Match(branch) => return self.match_statement(branch),
             ast::Stmt::While(loop_) => {
-                if !loop_.orelse.is_empty() {
-                    return Err(error(
-                        self.source,
-                        statement,
-                        "loop else clauses are unsupported",
-                    ));
-                }
                 self.invalidate_loop_facts(&loop_.body);
                 for name in narrowing::expression_assignments(&loop_.test) {
                     if let Some(slot) = self.names.get(&name) {
@@ -1755,15 +1803,17 @@ impl<'a> Checker<'a> {
                 let test = self.condition(&loop_.test)?;
                 let before = self.assigned.clone();
                 self.apply_facts(&loop_.test, true);
-                self.loop_depth += 1;
+                self.loop_breaks.push(Vec::new());
                 let (body, _) = self.block(&loop_.body)?;
-                self.loop_depth -= 1;
+                let breaks = self.loop_breaks.pop().unwrap();
                 self.assigned = before;
                 self.narrowed = facts;
-                Some(Statement::While(test, body))
+                self.apply_facts(&loop_.test, false);
+                let (orelse, falls) = self.loop_else(&loop_.orelse, breaks)?;
+                return Ok((vec![Statement::While(test, body, orelse)], falls));
             }
-            ast::Stmt::For(loop_) if !loop_.is_async && loop_.orelse.is_empty() => {
-                return Ok((self.iteration(loop_)?, true));
+            ast::Stmt::For(loop_) if !loop_.is_async => {
+                return self.iteration(loop_);
             }
             ast::Stmt::Return(return_) if !self.module_scope => {
                 let value = if let Some(value) = &return_.value {
@@ -1777,7 +1827,11 @@ impl<'a> Checker<'a> {
                 let value = self.coerce(value, self.returns, statement)?;
                 return Ok((vec![Statement::Return(value)], false));
             }
-            ast::Stmt::Break(_) | ast::Stmt::Continue(_) if self.loop_depth > 0 => {
+            ast::Stmt::Break(_) | ast::Stmt::Continue(_) if !self.loop_breaks.is_empty() => {
+                if self.reachable && matches!(statement, ast::Stmt::Break(_)) {
+                    let state = self.local_state();
+                    self.loop_breaks.last_mut().unwrap().push(state);
+                }
                 return Ok((
                     vec![if matches!(statement, ast::Stmt::Break(_)) {
                         Statement::Break
@@ -1932,8 +1986,12 @@ impl<'a> Checker<'a> {
     fn try_statement(&mut self, try_: &ast::StmtTry) -> Result<(Vec<Statement>, bool), String> {
         let before = self.assigned.clone();
         let before_facts = self.narrowed.clone();
+        let break_counts = self.loop_breaks.iter().map(Vec::len).collect::<Vec<_>>();
         let (body, body_falls) = self.block(&try_.body)?;
+        let reachable = self.reachable;
+        self.reachable &= body_falls;
         let (orelse, else_falls) = self.block(&try_.orelse)?;
+        self.reachable = reachable;
         let mut exits = Vec::new();
         if body_falls && else_falls {
             exits.push((self.assigned.clone(), self.narrowed.clone()));
@@ -1998,10 +2056,18 @@ impl<'a> Checker<'a> {
                     Ok::<_, String>(slot)
                 })
                 .transpose()?;
+            let handler_breaks = self.loop_breaks.iter().map(Vec::len).collect::<Vec<_>>();
             let (handler_body, falls) = self.block(&handler.body)?;
             if let Some(name) = name {
                 self.assigned.remove(&name);
                 self.narrowed.remove(&name);
+                // The exception target is deleted even when a handler breaks.
+                for (states, start) in self.loop_breaks.iter_mut().zip(handler_breaks) {
+                    for state in &mut states[start..] {
+                        state.assigned.remove(&name);
+                        state.narrowed.remove(&name);
+                    }
+                }
             }
             if falls {
                 exits.push((self.assigned.clone(), self.narrowed.clone()));
@@ -2044,7 +2110,42 @@ impl<'a> Checker<'a> {
                 self.narrowed.remove(slot);
             }
         }
+        // Pending breaks must pass through finally. Its own transfers replace
+        // them; successful completion adds its assignments and invalidates any
+        // optional facts it may have changed, rather than recording an early
+        // "broken" flag before the final completion is known.
+        let pending_breaks = if try_.finalbody.is_empty() {
+            Vec::new()
+        } else {
+            self.loop_breaks
+                .iter_mut()
+                .zip(break_counts)
+                .map(|(states, start)| states.split_off(start))
+                .collect::<Vec<_>>()
+        };
         let (finalbody, final_falls) = self.block(&try_.finalbody)?;
+        if final_falls && !pending_breaks.is_empty() {
+            let final_state = self.local_state();
+            let written = narrowing::assigned_names(&try_.finalbody)
+                .into_iter()
+                .filter_map(|name| self.names.get(&name).copied())
+                .collect::<HashSet<_>>();
+            let deleted = narrowing::deleted_names(&try_.finalbody)
+                .into_iter()
+                .filter_map(|name| self.names.get(&name).copied())
+                .collect::<HashSet<_>>();
+            for (states, pending) in self.loop_breaks.iter_mut().zip(pending_breaks) {
+                for mut state in pending {
+                    state.assigned.retain(|slot| !deleted.contains(slot));
+                    state
+                        .narrowed
+                        .retain(|slot, _| !written.contains(slot) && !deleted.contains(slot));
+                    state.assigned.extend(&final_state.assigned);
+                    state.narrowed.extend(&final_state.narrowed);
+                    states.push(state);
+                }
+            }
+        }
         if try_.finalbody.is_empty() {
             self.assigned = normal_assigned;
             self.narrowed = normal_facts;

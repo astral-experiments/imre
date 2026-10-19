@@ -791,6 +791,7 @@ impl Checker<'_> {
                     Statement::Clear(key),
                     Statement::Clear(item),
                 ],
+                Vec::new(),
             ),
         ];
         pattern.body.extend(keys.into_iter().map(|key| {

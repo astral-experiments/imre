@@ -149,4 +149,76 @@ def first(stream: Stream) -> str:
         assert!(!llvm.contains("call void @relar_args_init"));
         assert!(!llvm.contains("call void @relar_args_clear"));
     }
+
+    #[test]
+    fn loop_else_joins_break_assignments_after_finally() {
+        let source = r#"
+def search(values: list[int]) -> int:
+    for value in values:
+        if value > 0:
+            found = value
+            break
+    else:
+        found = -1
+    return found
+
+def final_assignment(values: list[int]) -> int:
+    for value in values:
+        try:
+            break
+        finally:
+            found = value
+    else:
+        found = -1
+    return found
+
+def overridden_break(values: list[int]) -> int:
+    for value in values:
+        try:
+            break
+        finally:
+            continue
+    else:
+        found = -1
+    return found
+
+def present_after_exhaustion(value: int | None) -> int:
+    while value is None:
+        value = 1
+    else:
+        return value + 1
+"#;
+        compile(source, &CompileOptions::default()).unwrap();
+    }
+
+    #[test]
+    fn loop_breaks_do_not_preserve_replaced_or_deleted_locals() {
+        let replaced = r#"
+def invalid(values: list[int]) -> int:
+    result: int | None = 1
+    for value in values:
+        result = value
+        try:
+            break
+        finally:
+            result = None
+    else:
+        result = 1
+    return result + 1
+"#;
+        assert!(compile(replaced, &CompileOptions::default()).is_err());
+        let deleted = r#"
+def invalid(values: list[int]) -> str:
+    caught = ValueError("old")
+    for value in values:
+        try:
+            raise ValueError("new")
+        except ValueError as caught:
+            break
+    else:
+        caught = ValueError("empty")
+    return str(caught)
+"#;
+        assert!(compile(deleted, &CompileOptions::default()).is_err());
+    }
 }

@@ -294,7 +294,8 @@ pub(crate) enum Statement {
     AugmentField(Expr, usize, Binary, Expr),
     Expr(Expr),
     If(Expr, Vec<Statement>, Vec<Statement>),
-    While(Expr, Vec<Statement>),
+    /// The final suite runs only on condition failure or iterator exhaustion.
+    While(Expr, Vec<Statement>, Vec<Statement>),
     For {
         target: usize,
         cursor: usize,
@@ -302,6 +303,7 @@ pub(crate) enum Statement {
         step: usize,
         args: Vec<Expr>,
         body: Vec<Statement>,
+        orelse: Vec<Statement>,
     },
     /// Transfers iterator results into owned output locals only on success.
     /// `ready` is always written; exhausted cursors preserve both output locals.
@@ -314,6 +316,8 @@ pub(crate) enum Statement {
     Return(Expr),
     Break,
     Continue,
+    /// A compiler-owned iterator reached its end; unlike break, this runs else.
+    Exhaust,
     Assert(Expr),
     /// Handlers protect only `body`; `finalbody` runs for every exit reason.
     Try {
@@ -410,15 +414,19 @@ pub(crate) fn walk_expressions(body: &[Statement], visit: &mut impl FnMut(&Expr)
                 walk_expressions(yes, visit);
                 walk_expressions(no, visit);
             }
-            Statement::While(test, body) => {
+            Statement::While(test, body, orelse) => {
                 expression(test, visit);
                 walk_expressions(body, visit);
+                walk_expressions(orelse, visit);
             }
-            Statement::For { args, body, .. } => {
+            Statement::For {
+                args, body, orelse, ..
+            } => {
                 for arg in args {
                     expression(arg, visit);
                 }
                 walk_expressions(body, visit);
+                walk_expressions(orelse, visit);
             }
             Statement::Try {
                 body,
@@ -442,7 +450,8 @@ pub(crate) fn walk_expressions(body: &[Statement], visit: &mut impl FnMut(&Expr)
             | Statement::Clear(_)
             | Statement::IterNext { .. }
             | Statement::Break
-            | Statement::Continue => {}
+            | Statement::Continue
+            | Statement::Exhaust => {}
         }
     }
 }

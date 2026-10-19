@@ -5,8 +5,8 @@ use super::*;
 
 #[derive(Clone)]
 pub(super) struct LocalState {
-    assigned: HashSet<usize>,
-    narrowed: HashMap<usize, Type>,
+    pub(super) assigned: HashSet<usize>,
+    pub(super) narrowed: HashMap<usize, Type>,
 }
 
 /// Removes a storage-only optional promotion while preserving RHS evaluation.
