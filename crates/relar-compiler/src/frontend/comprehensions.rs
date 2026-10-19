@@ -89,6 +89,23 @@ impl<'a> Display<'a> {
             }
         }
     }
+
+    /// Only this clause's suffix repeats on its backedge. An earlier filter can
+    /// safely narrow a name when the remaining filters and yielded value do not
+    /// replace it.
+    fn repeated_writes(self, index: usize) -> HashSet<String> {
+        let (first, second) = match self.value {
+            Yield::List(value) | Yield::Set(value) => (value, None),
+            Yield::Dict(key, value) => (key, Some(value)),
+        };
+        self.clauses[index..]
+            .iter()
+            .flat_map(|clause| &clause.ifs)
+            .chain([first])
+            .chain(second)
+            .flat_map(narrowing::expression_assignments)
+            .collect()
+    }
 }
 
 fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
@@ -333,11 +350,6 @@ impl Checker<'_> {
         let targets = self.comprehension_targets.clone();
         let first_private = self.locals.len();
         let writes = narrowing::expression_assignments(expression);
-        for name in &writes {
-            if let Some(slot) = self.names.get(name) {
-                self.narrowed.remove(slot);
-            }
-        }
         let mut private_targets = HashSet::new();
         for clause in display.clauses {
             target_names(&clause.target, &mut private_targets);
@@ -414,6 +426,11 @@ impl Checker<'_> {
             Some(input) => input,
             None => self.iteration_input(&clause.iter)?,
         };
+        for name in display.repeated_writes(index) {
+            if let Some(slot) = self.names.get(&name) {
+                self.narrowed.remove(slot);
+            }
+        }
         self.lower_iteration(&clause.target, input, |checker| {
             let mut conditions = Vec::new();
             for condition in &clause.ifs {

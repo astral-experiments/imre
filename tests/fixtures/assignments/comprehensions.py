@@ -55,4 +55,38 @@ def collect() -> None:
     print(ignored[1])
 
 
+def nested_generator_flow() -> None:
+    saved: str | None = "initial"
+    values = [
+        (saved := None)
+        for outer in range(1)
+        if saved is not None
+        for inner in range(2)
+        if saved is not None
+    ]
+    print(len(values))
+    print(saved is None)
+    saved = "filter"
+    filtered = [
+        inner
+        for outer in range(1)
+        if saved is not None
+        for inner in range(2)
+        if saved is not None
+        if (saved := None) is None
+    ]
+    print(len(filtered))
+    written = -1
+    lengths = [
+        len(saved) + (written := inner)
+        for outer in range(2)
+        if (saved := "stable") is not None
+        for inner in range(3)
+    ]
+    print(len(lengths))
+    print(lengths[5])
+    print(written)
+
+
 collect()
+nested_generator_flow()

@@ -26,6 +26,7 @@ REJECTED = {
     "optional_loop_stale": 'value: str | None = "ok"\nwhile len(value) > 0 and (value := None) is None:\n    pass\n',
     "comprehension_optional_stale": 'value: str | None = "ok"\nvalues = [(value := None) for index in range(2)]\nprint(value + "bad")\n',
     "comprehension_backedge_stale": 'value: str | None = "ok"\nvalues = [(value := None) for index in range(2) if len(value) > 0]\n',
+    "comprehension_nested_backedge_stale": 'value: str | None = "ok"\nvalues = [(value := None) for outer in range(1) if value is not None for inner in range(2) if len(value) > 0]\n',
     "empty_comprehension_binding": "values = [(saved := item) for item in range(0)]\nprint(saved)\n",
     "comprehension_private_target": "saved = 0\nvalues = [(saved := target) for target in range(3)]\nprint(target)\n",
     "rebind_comprehension_target": "values = [(item := 1) for item in range(3)]\n",
