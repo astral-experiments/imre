@@ -69,6 +69,8 @@ pub(crate) struct Module {
     /// identities refer to this compilation's interned type universe.
     pub types: crate::types::Types,
     pub class_fields: Vec<Vec<Type>>,
+    /// Fixed module bindings own their exact storage until process cleanup.
+    pub globals: Vec<Type>,
     pub functions: Vec<Function>,
     pub entry: Function,
 }
@@ -221,6 +223,10 @@ pub(crate) enum Compare {
 
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    /// Reads an initialized module binding with an independent owned reference.
+    GlobalGet(usize),
+    /// Publishes one fixed module binding after its initializer succeeds.
+    GlobalSet(usize),
     Print,
     Input,
     Int,

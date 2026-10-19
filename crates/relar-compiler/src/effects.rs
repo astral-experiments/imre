@@ -215,7 +215,9 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         Builtin::Float => args
             .first()
             .is_none_or(|arg| !matches!(arg.ty, Type::Float | Type::Bool)),
-        Builtin::Bool
+        Builtin::GlobalGet(_)
+        | Builtin::GlobalSet(_)
+        | Builtin::Bool
         | Builtin::Len
         | Builtin::Append
         | Builtin::IsNone
@@ -275,6 +277,7 @@ mod tests {
         let module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
+            globals: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(call(1, Vec::new()))]),
                 function(vec![Statement::Return(call(2, Vec::new()))]),
@@ -306,6 +309,7 @@ mod tests {
         let module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
+            globals: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(integer())]),
                 function(vec![Statement::Raise(None)]),

@@ -21,13 +21,9 @@ REJECTED = {
     "dynamic": ({"main.py": '__import__("helper")\n', "helper.py": HELPER}, "unsupported"),
     "nested": ({"main.py": "def f() -> None:\n    import math\nf()\n"}, "unsupported"),
     "conditional": ({"main.py": "if False:\n    import math\n"}, "unsupported"),
-    "library_effect": ({"main.py": IMPORT, "helper.py": "print(7)\n" + HELPER}, "helper.py:1:"),
-    "library_state": ({"main.py": IMPORT, "helper.py": "values = [1]\n" + HELPER}, "library modules"),
-    "package_effect": ({"main.py": "import package\n", "package/__init__.py": "print(1)\n"}, "library modules"),
     "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
     "unused_unsupported": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return eval("1")\n'}, "unsupported"),
     "inactive_guard": ({"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    eval("1")\n'}, "unsupported"),
-    "active_library_else": ({"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    print(1)\nelse:\n    print(2)\n'}, "library modules"),
     "wrong_imported_argument": ({"main.py": 'from helper import f\nprint(f("wrong"))\n', "helper.py": HELPER}, "int"),
     "missing_annotation": ({"main.py": IMPORT, "helper.py": "def f(value):\n    return value\n"}, "annotation"),
     "cycle": ({"main.py": "import first\n", "first.py": "import second\n", "second.py": "import first\n"}, "cyclic import"),
@@ -50,6 +46,13 @@ REJECTED = {
     "imported_surrogate": ({"main.py": IMPORT, "helper.py": '"\\ud800"\n' + HELPER}, "surrogate"),
     "imported_encoding": ({"main.py": IMPORT, "helper.py": "# coding: latin1\n" + HELPER}, "encoding"),
     "imported_tabs": ({"main.py": IMPORT, "helper.py": "def f(value: int) -> int:\n\treturn value\n"}, "indentation"),
+}
+
+ACCEPTED = {
+    "library_effect": {"main.py": IMPORT, "helper.py": "print(7)\n" + HELPER},
+    "library_state": {"main.py": "from helper import f, values\nprint(f(values[0]))\n", "helper.py": "values = [1]\n" + HELPER},
+    "package_effect": {"main.py": "import package\n", "package/__init__.py": "print(1)\n"},
+    "active_library_else": {"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    print(1)\nelse:\n    print(2)\n'},
 }
 
 
@@ -110,6 +113,24 @@ def main() -> None:
                 result = run([str(executable)], temporary)
                 require_success(result)
                 assert result.stdout == baseline.stdout, (entry, level, result.stdout, baseline.stdout)
+                checks += 1
+
+        for name, files in ACCEPTED.items():
+            case = temporary / name
+            write_files(case, files)
+            baseline = run([args.python, "-E", "-m", "main"], case)
+            require_success(baseline)
+            for level in args.opt_levels:
+                executable = temporary / f"accepted-{name}-{level}"
+                command = [compiler, "build", str(case / "main.py"), "-o", str(executable),
+                           "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                           *build_flags]
+                if args.sanitize:
+                    command.append("--sanitize")
+                require_success(run(command, temporary))
+                result = run([str(executable)], temporary)
+                require_success(result)
+                assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)
                 checks += 1
 
         for name, (files, expected) in REJECTED.items():

@@ -228,7 +228,7 @@ impl Checker<'_> {
             self.classes,
             self.types,
             self.helpers,
-            Type::None,
+            self.globals,
         );
         helper.comprehension_targets = targets;
         let mut params = Vec::new();

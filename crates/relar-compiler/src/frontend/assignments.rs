@@ -100,8 +100,9 @@ impl Checker<'_> {
             self.classes,
             self.types,
             &helpers,
-            self.returns,
+            self.globals,
         );
+        probe.returns = self.returns;
         probe.names = self.names.clone();
         probe.locals = self.locals.clone();
         probe.assigned = self.assigned.clone();

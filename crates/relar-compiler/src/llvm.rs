@@ -141,6 +141,15 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
     output.push_str(DECLARATIONS);
     output.push_str(&record_layouts(module));
     output.push_str(&integer_helpers());
+    for (slot, ty) in module.globals.iter().enumerate() {
+        writeln!(
+            output,
+            "@module_value_{slot} = internal global {} {}",
+            ty.llvm(),
+            ty.initial()
+        )
+        .unwrap();
+    }
     for (id, bytes) in emitter.strings.iter().enumerate() {
         write!(
             output,
@@ -506,6 +515,24 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Releases initialized module owners and harmless defaults on either exit.
+    fn cleanup_globals(&mut self) {
+        for slot in (0..self.module.globals.len()).rev() {
+            let ty = self.module.globals[slot];
+            let value = Value {
+                ty,
+                operand: self.instruction(format!("load {}, ptr @module_value_{slot}", ty.llvm())),
+                small_integer: false,
+            };
+            self.line(format!(
+                "store {} {}, ptr @module_value_{slot}",
+                ty.llvm(),
+                ty.initial()
+            ));
+            self.release(&value);
+        }
+    }
+
     fn clear_slots(&mut self, slots: &[usize]) {
         for &slot in slots {
             let value = self.take_slot(slot);
@@ -790,6 +817,7 @@ impl Emitter<'_, '_> {
         self.start(&self.return_exit.clone());
         self.cleanup();
         if entry {
+            self.cleanup_globals();
             if self.uses_sys_argv {
                 self.line("call void @relar_args_clear()");
             }
@@ -805,6 +833,7 @@ impl Emitter<'_, '_> {
         self.start(&self.error_exit.clone());
         self.cleanup();
         if entry {
+            self.cleanup_globals();
             if self.uses_sys_argv {
                 self.line("call void @relar_args_clear()");
             }
@@ -2009,6 +2038,26 @@ impl Emitter<'_, '_> {
             .map(|arg| self.operand(arg))
             .collect::<Vec<_>>();
         let result = match builtin {
+            Builtin::GlobalGet(slot) => {
+                let value = Value {
+                    ty: returns,
+                    operand: self
+                        .instruction(format!("load {}, ptr @module_value_{slot}", returns.llvm())),
+                    small_integer: false,
+                };
+                self.retain(&value);
+                value
+            }
+            Builtin::GlobalSet(slot) => {
+                let value = &args[0].value;
+                self.retain(value);
+                self.line(format!(
+                    "store {} {}, ptr @module_value_{slot}",
+                    value.ty.llvm(),
+                    value.operand
+                ));
+                none()
+            }
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("relar_input", Type::Str, &[]),
             Builtin::SysArgv => self.call("relar_sys_argv", returns, &[]),

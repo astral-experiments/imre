@@ -16,11 +16,13 @@ mod calls;
 mod comprehensions;
 mod expansions;
 mod matching;
+mod module_values;
 mod truthiness;
 mod unpacking;
 use assignments::LocalState;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
+use module_values::{Initialization, ModuleValues};
 
 #[derive(Clone)]
 struct Signature {
@@ -181,6 +183,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     let mut classes = ClassInfo::new(graph, &types)?;
     let mut signatures = HashMap::new();
     let mut definitions = Vec::new();
+    let mut callable_definitions = Vec::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
         for name in module.bindings.keys() {
             if reserved(name) {
@@ -211,6 +214,10 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                         signature.clone(),
                     );
                     definitions.push((module_id, function, signature));
+                    callable_definitions.push(DefinitionId {
+                        module: module_id,
+                        statement: statement_id,
+                    });
                 }
                 ast::Stmt::Expr(value) => {
                     if let ast::Expr::StringLiteral(value) = &*value.value {
@@ -249,9 +256,32 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
             }
             classes.methods[class_id].insert(method.name.to_string(), signature.clone());
             definitions.push((module_id, method, signature));
+            callable_definitions.push(class.definition);
         }
     }
-    let helpers = Helpers::new(definitions.len());
+    let initializer_start = definitions.len();
+    let helpers = Helpers::new(definitions.len() + graph.modules.len() - 1);
+    let globals = ModuleValues::default();
+    let mut initializations = Vec::new();
+    let mut available = HashSet::new();
+    for &module_id in &graph.initialization {
+        if module_id == graph.entry {
+            continue;
+        }
+        let checker = Checker::new(
+            graph,
+            module_id,
+            &signatures,
+            &classes,
+            &types,
+            &helpers,
+            &globals,
+        );
+        initializations.push(
+            Initialization::lower(checker, &mut available)
+                .map_err(|error| format!("{}:{error}", graph.modules[module_id].path.display()))?,
+        );
+    }
     let mut functions = Vec::new();
     let mut call_graph = Vec::new();
     let mut recursion_errors = Vec::new();
@@ -265,8 +295,9 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                 &classes,
                 &types,
                 &helpers,
-                signature.returns,
+                &globals,
             );
+            checker.returns = signature.returns;
             let mut params = Vec::new();
             for (parameter, signature) in definition
                 .parameters
@@ -327,6 +358,9 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     }
     let mut entry = None;
     for (module_id, module) in graph.modules.iter().enumerate() {
+        if module_id != graph.entry {
+            continue;
+        }
         let mut checker = Checker::new(
             graph,
             module_id,
@@ -334,7 +368,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
             &classes,
             &types,
             &helpers,
-            Type::None,
+            &globals,
         );
         checker.module_scope = true;
         let statements = module
@@ -342,17 +376,41 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
             .iter()
             .map(|&index| module.parsed.syntax().body[index].clone())
             .collect::<Vec<_>>();
-        let (body, _) = checker
+        let (mut body, _) = checker
             .block(&statements)
             .map_err(|error| format!("{}:{error}", module.path.display()))?;
         if module_id == graph.entry {
+            let mut startup = (0..initializations.len())
+                .map(|index| {
+                    Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Call(
+                            initializer_start + index,
+                            ir::CallArgs::positional(Vec::new()),
+                        ),
+                    })
+                })
+                .collect::<Vec<_>>();
+            startup.append(&mut body);
             entry = Some(ir::Function {
                 params: Vec::new(),
                 returns: Type::None,
                 locals: checker.locals,
-                body,
+                body: startup,
             });
         }
+    }
+    for initialization in &initializations {
+        functions.push(ir::Function {
+            params: Vec::new(),
+            returns: Type::None,
+            locals: initialization.function.locals.clone(),
+            body: initialization.function.body.clone(),
+        });
+        call_graph.push(initialization.calls.clone());
+        let module = &graph.modules[initialization.module];
+        recursion_errors
+            .push(module.error(module.parsed.syntax(), "recursive module initialization"));
     }
     // Entry code and inactive module guards can create helpers too. Validate the
     // complete graph only after every source expression has been lowered.
@@ -367,9 +425,13 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
             return Err(diagnostic);
         }
     }
+    for initialization in &initializations {
+        initialization.validate(graph, &functions, &callable_definitions)?;
+    }
     Ok(ir::Module {
         types,
         class_fields: classes.fields,
+        globals: globals.into_types(),
         functions,
         entry: entry.expect("source graph has an entry module"),
     })
@@ -680,6 +742,7 @@ struct Checker<'a> {
     classes: &'a ClassInfo,
     types: &'a Types,
     helpers: &'a Helpers,
+    globals: &'a ModuleValues,
     comprehension_targets: HashSet<String>,
     comprehension_depth: usize,
     comprehension_exports: HashMap<String, usize>,
@@ -702,7 +765,7 @@ impl<'a> Checker<'a> {
         classes: &'a ClassInfo,
         types: &'a Types,
         helpers: &'a Helpers,
-        returns: Type,
+        globals: &'a ModuleValues,
     ) -> Self {
         Self {
             source: &graph.modules[module].source,
@@ -712,11 +775,12 @@ impl<'a> Checker<'a> {
             classes,
             types,
             helpers,
+            globals,
             comprehension_targets: HashSet::new(),
             comprehension_depth: 0,
             comprehension_exports: HashMap::new(),
             narrowed: HashMap::new(),
-            returns,
+            returns: Type::None,
             names: HashMap::new(),
             locals: Vec::new(),
             assigned: HashSet::new(),
@@ -2222,6 +2286,19 @@ impl<'a> Checker<'a> {
     }
 
     fn expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(Binding::Value(definition)) = self.graph.resolve(self.module, expression) {
+            let (slot, ty) = self.globals.get(definition).ok_or_else(|| {
+                error(
+                    self.source,
+                    expression,
+                    "module value is not initialized on this path",
+                )
+            })?;
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::GlobalGet(slot), Vec::new()),
+            });
+        }
         if matches!(
             self.graph.resolve(self.module, expression),
             Some(Binding::Intrinsic(Intrinsic::Argv))
