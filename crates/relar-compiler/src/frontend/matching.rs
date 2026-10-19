@@ -1009,6 +1009,8 @@ fn literal_key(value: &Expr) -> Option<String> {
 
 /// A guard can rebind the visible subject while later cases still inspect the
 /// original hidden owner. Never transfer its optional facts onto that new value.
+/// Comprehension iteration targets belong to a private scope; only assignment
+/// expressions can write the enclosing function's locals from an expression.
 fn expression_rebinds(expression: &ast::Expr, name: &str) -> bool {
     struct Stores<'a> {
         name: &'a str,
@@ -1016,8 +1018,8 @@ fn expression_rebinds(expression: &ast::Expr, name: &str) -> bool {
     }
     impl<'a> Visitor<'a> for Stores<'_> {
         fn visit_expr(&mut self, expression: &'a ast::Expr) {
-            if let ast::Expr::Name(name) = expression
-                && name.ctx == ast::ExprContext::Store
+            if let ast::Expr::Named(named) = expression
+                && let ast::Expr::Name(name) = &*named.target
                 && name.id.as_str() == self.name
             {
                 self.found = true;
