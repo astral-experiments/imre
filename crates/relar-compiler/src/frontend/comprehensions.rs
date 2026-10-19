@@ -277,17 +277,7 @@ impl Checker<'_> {
                     "captured local may be uninitialized on this path",
                 ));
             }
-            let value = match self.narrowed.get(&source_slot).copied() {
-                Some(Type::None) => Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                },
-                Some(ty) => Expr {
-                    ty,
-                    kind: ExprKind::Unwrap(Box::new(self.local(source_slot))),
-                },
-                None => self.local(source_slot),
-            };
+            let value = self.read_local(source_slot);
             let slot = helper.declare(&name, value.ty, expression)?;
             helper.assigned.insert(slot);
             params.push(slot);

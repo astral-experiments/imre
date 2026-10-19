@@ -218,6 +218,9 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         Builtin::GlobalGet(_)
         | Builtin::GlobalSet(_)
         | Builtin::Bool
+        | Builtin::UnionInject
+        | Builtin::UnionProject
+        | Builtin::IsInstance(_)
         | Builtin::Len
         | Builtin::Append
         | Builtin::IsNone

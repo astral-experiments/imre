@@ -71,14 +71,24 @@ pub(super) fn scalar_default(
             ));
         }
     };
-    let value = Expr { ty, kind };
-    if ty == expected {
+    let mut value = Expr { ty, kind };
+    let concrete = types.payload(expected).unwrap_or(expected);
+    if types
+        .members(concrete)
+        .is_some_and(|members| members.contains(&ty))
+    {
+        value = Expr {
+            ty: concrete,
+            kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
+        };
+    }
+    if value.ty == expected {
         return Ok(value);
     }
     if let Some(payload) = types.payload(expected) {
         let kind = if ty == Type::None {
             Some(ExprKind::Absent(Box::new(value)))
-        } else if ty == payload {
+        } else if value.ty == payload {
             Some(ExprKind::Present(Box::new(value)))
         } else {
             None

@@ -12,6 +12,7 @@ mod files;
 mod mappings;
 pub(crate) mod records;
 mod sequences;
+mod unions;
 mod words;
 
 use super::{

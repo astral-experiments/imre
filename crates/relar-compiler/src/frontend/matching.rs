@@ -253,14 +253,7 @@ impl Checker<'_> {
     }
 
     fn match_subject(&self, slot: usize) -> Expr {
-        match self.narrowed.get(&slot) {
-            Some(Type::None) => none(),
-            Some(&ty) => Expr {
-                ty,
-                kind: ExprKind::Unwrap(Box::new(self.local(slot))),
-            },
-            None => self.local(slot),
-        }
+        self.read_local(slot)
     }
 
     fn match_fact(&mut self, subject: usize, original: Option<usize>, ty: Type) {

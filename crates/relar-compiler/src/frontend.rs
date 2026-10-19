@@ -18,6 +18,7 @@ mod expansions;
 mod matching;
 mod module_values;
 mod truthiness;
+mod unions;
 mod unpacking;
 use assignments::LocalState;
 use calls::{Parameter, ParameterKind};
@@ -119,6 +120,7 @@ const RESERVED: &[&str] = &[
     "set",
     "len",
     "divmod",
+    "isinstance",
     "input",
     "print",
     "range",
@@ -598,6 +600,29 @@ fn annotation_at(
             )),
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
+        ast::Expr::Subscript(value)
+            if matches!(
+                graph.resolve(module, &value.value),
+                Some(Binding::Intrinsic(Intrinsic::Union))
+            ) =>
+        {
+            let members = if let ast::Expr::Tuple(arguments) = &*value.slice {
+                arguments
+                    .elts
+                    .iter()
+                    .map(nested)
+                    .collect::<Result<Vec<_>, _>>()?
+            } else {
+                vec![nested(&value.slice)?]
+            };
+            types.union(&members).ok_or_else(|| {
+                error(
+                    source,
+                    expression,
+                    "finite unions support str | bytes and nullable exact types",
+                )
+            })
+        }
         ast::Expr::Subscript(value) => match &*value.value {
             ast::Expr::Name(name) if name.id == "list" => Ok(types.list(nested(&value.slice)?)),
             ast::Expr::Name(name) if name.id == "set" => {
@@ -657,16 +682,13 @@ fn annotation_at(
         ast::Expr::BinOp(union) if union.op == ast::Operator::BitOr => {
             let left = nested(&union.left)?;
             let right = nested(&union.right)?;
-            match (left, right) {
-                (Type::None, other) | (other, Type::None) if other != Type::None => {
-                    Ok(types.optional(other))
-                }
-                _ => Err(error(
+            types.union(&[left, right]).ok_or_else(|| {
+                error(
                     source,
                     expression,
-                    "only optional unions T | None are supported",
-                )),
-            }
+                    "finite unions support str | bytes and nullable exact types",
+                )
+            })
         }
         _ => Err(error(source, expression, "unsupported type annotation")),
     }
@@ -881,19 +903,39 @@ impl<'a> Checker<'a> {
         Ok((receiver, field, self.classes.fields[class][field]))
     }
 
-    /// Optional conversions are explicit in the IR; other storage is invariant.
+    /// Optional and finite-union promotions are explicit; containers stay invariant.
     fn coerce(&self, value: Expr, expected: Type, node: &impl Ranged) -> Result<Expr, String> {
         if value.ty == expected {
             return Ok(value);
         }
         if let Some(payload) = self.types.payload(expected) {
+            if let Some(actual) = self.types.payload(value.ty)
+                && self
+                    .types
+                    .members(payload)
+                    .is_some_and(|members| members.contains(&actual))
+            {
+                return Ok(Expr {
+                    ty: expected,
+                    kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
+                });
+            }
             let kind = if value.ty == Type::None {
                 ExprKind::Absent(Box::new(value))
             } else {
-                self.expect(payload, value.ty, node)?;
-                ExprKind::Present(Box::new(value))
+                ExprKind::Present(Box::new(self.coerce(value, payload, node)?))
             };
             return Ok(Expr { ty: expected, kind });
+        }
+        if self
+            .types
+            .members(expected)
+            .is_some_and(|members| members.contains(&value.ty))
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
+            });
         }
         self.expect(expected, value.ty, node)?;
         unreachable!("mismatched exact types return an error")
@@ -1085,10 +1127,22 @@ impl<'a> Checker<'a> {
             if let Some(&slot) = self.names.get(&name)
                 && let Some(payload) = self.types.payload(self.locals[slot])
             {
-                self.narrowed
-                    .insert(slot, if present { payload } else { Type::None });
+                let current = self
+                    .narrowed
+                    .get(&slot)
+                    .copied()
+                    .unwrap_or(self.locals[slot]);
+                let narrowed = if !present {
+                    Type::None
+                } else if current == Type::None {
+                    payload
+                } else {
+                    self.types.payload(current).unwrap_or(current)
+                };
+                self.narrowed.insert(slot, narrowed);
             }
         }
+        self.apply_instance_facts(test, truth);
     }
 
     /// Captures the receiver before ordered bounds. Nullable integer operands
@@ -1152,6 +1206,15 @@ impl<'a> Checker<'a> {
                 }
                 _ => {}
             }
+        }
+        let value = match &value.kind {
+            ExprKind::Present(value) => value.as_ref(),
+            _ => value,
+        };
+        if let ExprKind::Builtin(Builtin::UnionInject, args) = &value.kind
+            && matches!(args[0].ty, Type::Str | Type::Bytes)
+        {
+            self.narrowed.insert(slot, args[0].ty);
         }
     }
 
@@ -2182,10 +2245,12 @@ impl<'a> Checker<'a> {
         clauses: &[ast::ElifElseClause],
     ) -> Result<(Statement, bool), String> {
         let condition = self.condition(test)?;
+        let known = self.instance_condition(&condition);
         let before = self.assigned.clone();
         let facts = self.narrowed.clone();
         self.apply_facts(test, true);
         let (yes, yes_falls) = self.block(body)?;
+        let yes_falls = yes_falls && known != Some(false);
         let yes_assigned = self.assigned.clone();
         let yes_facts = self.narrowed.clone();
         self.assigned = before;
@@ -2201,6 +2266,7 @@ impl<'a> Checker<'a> {
         } else {
             (Vec::new(), true)
         };
+        let no_falls = no_falls && known != Some(true);
         if yes_falls && no_falls {
             self.assigned.retain(|slot| yes_assigned.contains(slot));
             self.narrowed
@@ -2358,21 +2424,7 @@ impl<'a> Checker<'a> {
                         "local may be uninitialized on this path",
                     ));
                 }
-                if let Some(&ty) = self.narrowed.get(&slot) {
-                    if ty == Type::None {
-                        (Type::None, ExprKind::None)
-                    } else {
-                        (
-                            ty,
-                            ExprKind::Unwrap(Box::new(Expr {
-                                ty: self.locals[slot],
-                                kind: ExprKind::Local(slot),
-                            })),
-                        )
-                    }
-                } else {
-                    (self.locals[slot], ExprKind::Local(slot))
-                }
+                return Ok(self.read_local(slot));
             }
             ast::Expr::List(list) => {
                 if list
@@ -2554,6 +2606,7 @@ impl<'a> Checker<'a> {
                             | Type::Set(_)
                             | Type::Tuple(_)
                             | Type::Optional(_)
+                            | Type::Union(_)
                     ) {
                         return Err(error(
                             self.source,
@@ -2813,6 +2866,9 @@ impl<'a> Checker<'a> {
         }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "open") {
             return self.open(call);
+        }
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "isinstance") {
+            return self.isinstance(call);
         }
         if let Some(kind) = self.exception_category(&call.func) {
             self.reject_builtin_keywords(call)?;

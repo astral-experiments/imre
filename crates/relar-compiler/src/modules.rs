@@ -55,6 +55,7 @@ pub(crate) enum Intrinsic {
     Argv,
     TextIO,
     BinaryIO,
+    Union,
     UnsupportedOperation,
 }
 
@@ -73,6 +74,7 @@ impl IntrinsicModule {
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
+            (Self::Typing, "Union") => Intrinsic::Union,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             _ => return None,
         };

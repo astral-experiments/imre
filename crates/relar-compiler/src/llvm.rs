@@ -4,17 +4,19 @@ use std::fmt::Write;
 
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
-    Binary, Builtin, Compare, ExceptHandler, Expr, ExprKind, Function, Module, Statement, Type,
+    Binary, Builtin, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType, Module,
+    Statement, Type,
 };
 use crate::ranges::RangeFacts;
 use crate::types::Types;
 
 mod truthiness;
+mod unions;
 
 impl Type {
     fn llvm(self) -> &'static str {
         match self {
-            Self::Int | Self::Optional(_) => "i64",
+            Self::Int | Self::Optional(_) | Self::Union(_) => "i64",
             Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
@@ -49,7 +51,7 @@ impl Type {
             | Self::TextIO
             | Self::BinaryIO
             | Self::Tuple(_) => "null",
-            Self::Bool | Self::None | Self::Optional(_) => "0",
+            Self::Bool | Self::None | Self::Optional(_) | Self::Union(_) => "0",
         }
     }
 }
@@ -347,6 +349,7 @@ impl Emitter<'_, '_> {
         }
         let family = match ty {
             Type::Int => "int",
+            Type::Union(_) => "union",
             Type::Str => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
@@ -1228,6 +1231,14 @@ impl Emitter<'_, '_> {
                         operand: "0".into(),
                         small_integer: false,
                     }
+                } else if matches!(
+                    self.module.types.payload(storage).unwrap_or(storage),
+                    Type::Union(_)
+                ) && matches!(
+                    self.module.types.payload(value.ty).unwrap_or(value.ty),
+                    Type::Str | Type::Bytes
+                ) {
+                    self.union_inject(value.clone(), storage)
                 } else {
                     self.present(value.clone(), storage)
                 };
@@ -1888,7 +1899,8 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::Iterator
             | Type::Tuple(_)
-            | Type::Optional(_) => {
+            | Type::Optional(_)
+            | Type::Union(_) => {
                 unreachable!("container comparison is rejected by the frontend")
             }
         };
@@ -2058,6 +2070,19 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
+            Builtin::UnionInject => {
+                let value = self.own_operand(args.into_iter().next().unwrap());
+                return self.union_inject(value, returns);
+            }
+            Builtin::UnionProject => {
+                let value = self.own_operand(args.into_iter().next().unwrap());
+                return self.union_project(value, returns);
+            }
+            Builtin::IsInstance(classes) => Value {
+                ty: Type::Bool,
+                operand: self.instance_test(&args[0].value, classes),
+                small_integer: false,
+            },
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("relar_input", Type::Str, &[]),
             Builtin::SysArgv => self.call("relar_sys_argv", returns, &[]),
@@ -2372,7 +2397,8 @@ impl Emitter<'_, '_> {
                     | Type::TextIO
                     | Type::BinaryIO
                     | Type::Tuple(_)
-                    | Type::Optional(_) => {
+                    | Type::Optional(_)
+                    | Type::Union(_) => {
                         unreachable!("container printing is rejected")
                     }
                 }
@@ -2484,7 +2510,7 @@ impl Emitter<'_, '_> {
     /// changing ownership. The slot's representation tag controls reclamation.
     fn word(&mut self, value: &Value) -> String {
         match value.ty {
-            Type::Int | Type::Optional(_) => value.operand.clone(),
+            Type::Int | Type::Optional(_) | Type::Union(_) => value.operand.clone(),
             Type::Float => self.instruction(format!("bitcast double {} to i64", value.operand)),
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
@@ -2513,7 +2539,7 @@ impl Emitter<'_, '_> {
     /// Changes only the compiler view of a word, leaving its ownership unchanged.
     fn decode_word(&mut self, word: String, ty: Type) -> Value {
         let operand = match ty {
-            Type::Int | Type::Optional(_) => word,
+            Type::Int | Type::Optional(_) | Type::Union(_) => word,
             Type::Float => self.instruction(format!("bitcast i64 {word} to double")),
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
@@ -2850,6 +2876,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Float => 7,
         Type::Str => 3,
         Type::Bytes => 8,
+        Type::Union(_) => 9,
         Type::ListInt => 4,
         Type::Class(_) | Type::Tuple(_) => 6,
         Type::List(_)
@@ -3118,6 +3145,9 @@ declare void @relar_error_set(ptr)
 declare i32 @relar_error_unhandled()
 declare ptr @relar_exception_new(i32, ptr)
 declare i8 @relar_exception_matches(ptr, i32)
+declare void @relar_union_retain(i64)
+declare void @relar_union_release(i64)
+declare i8 @relar_union_truthy(i64)
 declare ptr @relar_exception_message(ptr)
 declare ptr @relar_exception_with_cause(ptr, ptr)
 declare ptr @relar_exception_cause(ptr)
