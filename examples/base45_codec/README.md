@@ -41,6 +41,8 @@ The suite also accepts `--sanitize`, `--target`, `--lto-linker`, and `--opt-leve
 
 ## Benchmark
 
+The [owned string append report](../../benchmarks/results/2026-10-19-base45-string-reuse.md) compares Relar with an independent Rust implementation and CPython. Sustained ThinLTO encoding takes 1.54× Rust's time for 16 KiB inputs, 1.68× for 1 KiB, and 2.41× for 64 bytes. Large encoding is 44× faster than the previous Relar executable in a same-session comparison. ThinLTO decoding still takes 27–32× Rust's time. The report retains all sample spreads, correctness checks, allocation profiles, and independent audits.
+
 The [initial comparison](../../benchmarks/results/2026-10-19-base45.md) preserves historical ordinary and ThinLTO results, raw samples, validation, and allocation profiles. Those measurements predate the owned string append optimization. Relar now reuses uniquely owned string storage with geometric capacity growth for eligible appends, avoiding repeated whole-prefix copies in this codec. Existing aliases retain their previous contents. The upstream Python source remains unchanged.
 
 The [independent Rust reference](../../benchmarks/reference/base45_codec/README.md) implements the same typed file protocol with a fixed alphabet and preallocated byte buffers. It performs the same repeated calls and checksum, using `black_box` to prevent elimination of repeated work. Its build helper uses the repository's selected Cargo/Rust toolchain by default and records source, compiler, flags, and executable hashes; optional Ohm configuration is documented in the reference guide.

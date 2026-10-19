@@ -1,0 +1,195 @@
+{
+  "verified": true,
+  "summaries": {
+    "old": {
+      "sha256": "c69f7f73aa10b41d144896ae0a0427f9059ec7b3598afbebef04d8d592bf514c",
+      "bytes": 23526
+    },
+    "new": {
+      "sha256": "3c000ebf225c4a54ebe7c13ce3da56e8916c788bccaa130163062e8e196941be",
+      "bytes": 123763
+    }
+  },
+  "new_manifest": {
+    "sha256": "5627fd620896d2602c9a1d7ca9af7c6f4500579b9c2a4bd897792f1c7e6cffb9",
+    "bytes": 18431
+  },
+  "new_manifest_files_verified": 113,
+  "new_original_inputs_verified": 29,
+  "old_profiles_verified": 6,
+  "new_profiles_verified": 12,
+  "same_profile_inputs_outputs_repetitions_and_checksums": true,
+  "same_upstream_codec_sha256": "a22381be6391bd5b3aa9296fc3a2ba44e31ca19368bedb86f48f4f3bf8b42b9f",
+  "same_dhat_and_callgrind_engine_sha256": true,
+  "source_revisions": {
+    "old": "2963aa2a690139c23be23653009096da03c7b94e",
+    "new": "3349b85efc78e5ac09a92d8d367d914264679067"
+  },
+  "workloads": {
+    "encode-64": {
+      "old_relar": {
+        "total_allocated_bytes": 7046310,
+        "total_allocated_blocks": 160854,
+        "peak_live_bytes": 14379,
+        "exit_live_bytes": 9216,
+        "instructions": 66583941
+      },
+      "workload": {
+        "repetitions": 1024,
+        "raw_bytes_per_process": 65536,
+        "input_sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
+        "output_sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
+        "stdout": "OK\n250880\n"
+      },
+      "relar": {
+        "total_allocated_bytes": 503922,
+        "total_allocated_blocks": 7252,
+        "peak_live_bytes": 14414,
+        "exit_live_bytes": 9216,
+        "instructions": 6136042
+      },
+      "rust": {
+        "total_allocated_bytes": 102474,
+        "total_allocated_blocks": 1042,
+        "peak_live_bytes": 2170,
+        "exit_live_bytes": 544,
+        "instructions": 2280287
+      },
+      "ratios": {
+        "total_allocated_bytes": {
+          "old_relar_over_new_relar": 13.982937835617417,
+          "relar_reduction_percent": 92.84842704905121,
+          "new_relar_over_rust": 4.9175595760875925
+        },
+        "total_allocated_blocks": {
+          "old_relar_over_new_relar": 22.180639823496968,
+          "relar_reduction_percent": 95.49156377833314,
+          "new_relar_over_rust": 6.959692898272553
+        },
+        "peak_live_bytes": {
+          "old_relar_over_new_relar": 0.9975718051893991,
+          "relar_reduction_percent": -0.24341052924403694,
+          "new_relar_over_rust": 6.642396313364055
+        },
+        "instructions": {
+          "old_relar_over_new_relar": 10.85128507920904,
+          "relar_reduction_percent": 90.78450162630055,
+          "new_relar_over_rust": 2.6909077673117463
+        }
+      }
+    },
+    "encode-16384": {
+      "old_relar": {
+        "total_allocated_bytes": 408084816,
+        "total_allocated_blocks": 163914,
+        "peak_live_bytes": 95174,
+        "exit_live_bytes": 9216,
+        "instructions": 439795671
+      },
+      "workload": {
+        "repetitions": 4,
+        "raw_bytes_per_process": 65536,
+        "input_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+        "output_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+        "stdout": "OK\n98784\n"
+      },
+      "relar": {
+        "total_allocated_bytes": 557892,
+        "total_allocated_blocks": 168,
+        "peak_live_bytes": 105386,
+        "exit_live_bytes": 9216,
+        "instructions": 3337720
+      },
+      "rust": {
+        "total_allocated_bytes": 118797,
+        "total_allocated_blocks": 22,
+        "peak_live_bytes": 67453,
+        "exit_live_bytes": 544,
+        "instructions": 2060679
+      },
+      "ratios": {
+        "total_allocated_bytes": {
+          "old_relar_over_new_relar": 731.4763717708804,
+          "relar_reduction_percent": 99.86329018426406,
+          "new_relar_over_rust": 4.696179196444355
+        },
+        "total_allocated_blocks": {
+          "old_relar_over_new_relar": 975.6785714285714,
+          "relar_reduction_percent": 99.89750722940079,
+          "new_relar_over_rust": 7.636363636363637
+        },
+        "peak_live_bytes": {
+          "old_relar_over_new_relar": 0.9030990833697076,
+          "relar_reduction_percent": -10.729821169647181,
+          "new_relar_over_rust": 1.562361940907002
+        },
+        "instructions": {
+          "old_relar_over_new_relar": 131.76529816761143,
+          "relar_reduction_percent": 99.24107483995675,
+          "new_relar_over_rust": 1.6197185490801818
+        }
+      }
+    },
+    "decode-bytes-16384": {
+      "old_relar": {
+        "total_allocated_bytes": 7291988,
+        "total_allocated_blocks": 98535,
+        "peak_live_bytes": 455557,
+        "exit_live_bytes": 9216,
+        "instructions": 70934097
+      },
+      "workload": {
+        "repetitions": 4,
+        "raw_bytes_per_process": 65536,
+        "input_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+        "output_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+        "stdout": "OK\n67512\n"
+      },
+      "relar": {
+        "total_allocated_bytes": 7291628,
+        "total_allocated_blocks": 98525,
+        "peak_live_bytes": 455592,
+        "exit_live_bytes": 9216,
+        "instructions": 70473196
+      },
+      "rust": {
+        "total_allocated_bytes": 94239,
+        "total_allocated_blocks": 22,
+        "peak_live_bytes": 59279,
+        "exit_live_bytes": 544,
+        "instructions": 1618712
+      },
+      "ratios": {
+        "total_allocated_bytes": {
+          "old_relar_over_new_relar": 1.0000493716903824,
+          "relar_reduction_percent": 0.004936925293896888,
+          "new_relar_over_rust": 77.3737836776706
+        },
+        "total_allocated_blocks": {
+          "old_relar_over_new_relar": 1.0001014970819588,
+          "relar_reduction_percent": 0.010148678134669353,
+          "new_relar_over_rust": 4478.409090909091
+        },
+        "peak_live_bytes": {
+          "old_relar_over_new_relar": 0.9999231768775572,
+          "relar_reduction_percent": -0.007682902468841846,
+          "new_relar_over_rust": 7.685554749574048
+        },
+        "instructions": {
+          "old_relar_over_new_relar": 1.006540089369581,
+          "relar_reduction_percent": 0.6497594520728178,
+          "new_relar_over_rust": 43.53658711370522
+        }
+      }
+    }
+  },
+  "caveats": [
+    "Instruction totals are instrumented Callgrind guest Ir counts, not CPU cycles, CPU time, or wall-time speedups.",
+    "Each process handles 64 KiB of raw data; whole-process totals include startup, checksum, and file I/O. These profiles do not reproduce sustained benchmark batch sizes.",
+    "DHAT measures requested heap allocation bytes and blocks, not copied bytes or RSS. Global peak uses allocation-point contributions at the global peak, not summed pointwise maxima.",
+    "Historical and new Relar profiles cover the complete compiler/runtime change, not an isolated ablation of owned append. Program paths and startup details differ, so tiny changes are not meaningful.",
+    "Both versions use the same upstream codec and profile input/output/checksum. Rust is an independent implementation with direct byte processing and output preallocation; it is not an identical-source comparison.",
+    "Large encode cumulative allocation falls sharply, while peak live heap rises by about 10.7 percent. Lower total allocation does not imply lower peak memory.",
+    "Decode allocation and instruction totals remain effectively unchanged; the separate decode gap to the Rust reference remains substantial."
+  ]
+}
