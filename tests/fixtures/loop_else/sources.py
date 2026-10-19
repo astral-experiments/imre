@@ -60,10 +60,6 @@ for key in mapping:
     print(key)
 else:
     print("keys exhausted")
-for entry in mapping.values():
-    print(entry)
-else:
-    print("values exhausted")
 total = 0
 for member in {3, 1, 2}:  # noqa: PLC0208 - exercise a temporary set cursor.
     total += member
