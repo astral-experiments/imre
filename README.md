@@ -16,14 +16,14 @@ An ahead-of-time compiler for typed Python, written in Rust.
 
 | Workload | Positive requests | Relar | CPython 3.14.5 | Speedup |
 | --- | ---: | ---: | ---: | ---: |
-| Dense inventory reconciliation | 16,384 | 21.62 ms | 69.90 ms | 3.23× |
-| Sparse inventory reconciliation | 16,384 | 42.64 ms | 101.64 ms | 2.38× |
+| Dense inventory reconciliation | 16,384 | 21.32 ms | 76.65 ms | 3.60× |
+| Sparse inventory reconciliation | 16,384 | 40.98 ms | 111.09 ms | 2.71× |
 
-These [Linux measurements](benchmarks/results/2026-10-18-scalar-fstrings.md) run
+These [Linux measurements](benchmarks/results/2026-10-19-keyword-arguments.md) run
 the same inventory program under Relar and CPython, with ThinLTO for the native
 builds. Times are medians of 48 fresh processes per workload and include startup,
 file parsing, reconciliation, and complete report writing, flushing, and closing.
-Inputs are created before timing on a shared machine. Relar takes 5.3–12.1% more
+Inputs are created before timing on a shared machine. Relar takes 4.6–9.8% more
 time than the Rust BigInt reference; the [benchmark guide](benchmarks/README.md)
 describes the method, comparisons, and reproduction commands.
 
