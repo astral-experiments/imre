@@ -33,7 +33,7 @@ python3 tests/base45.py \
   --clang clang-18 --python python3.14
 ```
 
-The suite verifies the upstream hashes, builds at `-O0` and `-O3`, runs all five unchanged upstream test methods against CPython and a native adapter, and compares 269 additional cases with CPython. It checks exact results, error messages, explicit cause metadata, and file effects. Separate native checks cover every single-byte input, shared lookup-table mutation through import aliases, mixed text/bytes union storage, and recovery across repeated failures.
+The suite verifies the upstream hashes and builds at `-O0` and `-O3`. At each level, it runs all five unchanged upstream test methods against CPython and a native adapter, checking 323 validly typed native calls and 289 further CPython differential cases. Results, error messages, explicit cause metadata, and file effects must agree exactly. Separate native checks cover every single-byte input, shared lookup-table mutation through import aliases, mixed text/bytes union storage, and recovery across repeated failures.
 
 Two upstream tests deliberately pass the integer `42` to annotated APIs. Relar rejects those calls during compilation. The adapter requires that rejection before satisfying the upstream `TypeError` assertion; these are reported separately as two compile-time boundary tests, not native runtime `TypeError` tests. This does not provide a dynamically typed Python-callable extension API.
 
@@ -41,18 +41,40 @@ The suite also accepts `--sanitize`, `--target`, `--lto-linker`, and `--opt-leve
 
 ## Benchmark
 
-The [measured comparison](../../benchmarks/results/2026-10-19-base45.md) includes ordinary and ThinLTO builds, raw samples, upstream validation, and allocation profiles. ThinLTO decoding is 1.80–2.11× faster than CPython in this run; encoding 16 KiB inputs takes 1.50× as long because the native path repeatedly copies growing output strings.
+The [initial comparison](../../benchmarks/results/2026-10-19-base45.md) preserves historical ordinary and ThinLTO results, raw samples, validation, and allocation profiles. Those measurements predate the owned string append optimization. Relar now reuses uniquely owned string storage with geometric capacity growth for eligible appends, avoiding repeated whole-prefix copies in this codec. Existing aliases retain their previous contents. The upstream Python source remains unchanged.
 
-Commit measured sources before running:
+The [independent Rust reference](../../benchmarks/reference/base45_codec/README.md) implements the same typed file protocol with a fixed alphabet and preallocated byte buffers. It performs the same repeated calls and checksum, using `black_box` to prevent elimination of repeated work. Its build helper uses the repository's selected Cargo/Rust toolchain by default and records source, compiler, flags, and executable hashes; optional Ohm configuration is documented in the reference guide.
+
+Commit measured sources, build the reference, then run the three-engine comparison:
+
+```sh
+python3 benchmarks/reference/base45_codec/build.py \
+  --artifact-dir benchmarks/local/base45-reference \
+  --target-dir benchmarks/local/base45-reference-target
+python3 benchmarks/base45_benchmark.py \
+  --compiler target/release/relar --runtime target/release/librelar_runtime.a \
+  --clang clang-18 --python python3.14 \
+  --rust benchmarks/local/base45-reference/base45-reference \
+  --artifact-dir benchmarks/local/base45-normal \
+  --output benchmarks/local/base45-normal.json
+```
+
+The harness compares encode, bytes decode, and text decode at 64, 1,024, and 16,384 decoded bytes per call. By default, each process represents 2 MiB of raw data through repeated API calls; decoding consumes the corresponding 3 MiB of Base45 data. All three engines are pinned to one CPU. Six warmup rounds cover every execution order once, and 24 measured rounds cover every order four times. Omitting `--rust` retains a two-engine Relar/CPython comparison with alternating order. Custom `--samples` and `--warmups` must balance all execution orders.
+
+The exact measured executables pass validation before timing. Relar passes the upstream and CPython checks above. The Rust validator runs 295 checks, including four declared Unicode `repr` message boundaries: those four compare error category, cause, suppression, and unchanged output, while permitting different character quoting. Relar matches CPython's exact messages in every case. The reference guide describes this diagnostic boundary; timed decoder inputs use valid ASCII Base45 and do not exercise it. The harness reads `build-record.json` beside the Rust executable unless `--rust-build-record` selects another record.
+
+For sustained encoder comparisons, increase the repeated work and time only the native engines:
 
 ```sh
 python3 benchmarks/base45_benchmark.py \
   --compiler target/release/relar --runtime target/release/librelar_runtime.a \
   --clang clang-18 --python python3.14 \
-  --artifact-dir benchmarks/local/base45-normal \
-  --output benchmarks/local/base45-normal.json
+  --rust benchmarks/local/base45-reference/base45-reference \
+  --native-only --operations encode --batch-bytes 67108864 \
+  --artifact-dir benchmarks/local/base45-native-encode \
+  --output benchmarks/local/base45-native-encode.json
 ```
 
-The harness compares encode, bytes decode, and text decode at 64, 1,024, and 16,384 decoded bytes per call. Each process represents about 2 MiB of raw data through repeated API calls; decoding consumes the corresponding 3 MiB of Base45 data. The exact measured binary passes the full compatibility validator before timing. It pins both implementations to one CPU, alternates their order over 20 measured rounds, and records all durations, output hashes, source/tool identities, CPython build settings, and the generated executable and LLVM hashes. Timings include process startup, imports, one input read, codec calls, and one output write; fixture preparation and result verification are outside the clock. Run without tracing and with other builds and profiling stopped.
+This handles 64 MiB of raw data per process at each payload size, alternates Relar and Rust execution order, and retains CPython validation. `--operations` can select any combination of the three codec operations. Larger batches reduce the proportion of process startup in each sample; measurements still include startup, imports where applicable, one input read, codec calls, checksum, and one output write. Fixture preparation and result verification are outside the clock. Every duration, output hash, source/tool identity, CPython build setting, and generated executable/LLVM hash is recorded. Run without tracing and with other builds and profiling stopped.
 
-For ThinLTO, supply a runtime built with `-Clinker-plugin-lto` together with `--target` and `--lto-linker /path/to/ld.lld`. Use a fresh artifact directory for each comparison. `--allow-dirty` permits exploratory runs and records that state; published measurements use committed sources.
+For ThinLTO, supply a runtime built with `-Clinker-plugin-lto` together with `--target` and `--lto-linker /path/to/ld.lld`. Build a separate Rust reference with `CARGO_PROFILE_RELEASE_LTO=thin`; the reference guide documents matching LLVM optimization budgets. Use separate artifact and target directories for ordinary and ThinLTO builds, and a fresh artifact directory for each comparison. `--allow-dirty` permits exploratory runs and records that state; published measurements use committed sources.

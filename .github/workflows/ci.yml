@@ -66,6 +66,10 @@ jobs:
         run: python3 tests/module_values.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compile unchanged python-base45 and compare its upstream tests with CPython
         run: python3 tests/base45.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
+      - name: Validate the independent Rust Base45 reference
+        run: |
+          python3 benchmarks/reference/base45_codec/build.py --artifact-dir /tmp/relar-base45-reference --target-dir target/base45-reference
+          python3 benchmarks/base45_validate.py --rust /tmp/relar-base45-reference/base45-reference --output /tmp/relar-base45-reference/validation.json
       - name: Compare exception propagation and cleanup with CPython
         run: python3 tests/exceptions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compare output and interactive I/O with CPython
