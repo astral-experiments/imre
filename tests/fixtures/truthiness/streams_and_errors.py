@@ -13,7 +13,7 @@ def binary_truth(stream: BinaryIO | None) -> None:
         print(stream.closed)
 
 
-with open("truth.txt", "w") as writer:
+with open("truth.txt", "w", encoding="utf-8") as writer:
     text_truth(writer)
     if writer:
         writer.write("present\n")
