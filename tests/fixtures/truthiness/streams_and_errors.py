@@ -20,7 +20,7 @@ def buffered_text(path: str) -> TextIO:
 
 
 def read_text(path: str) -> str:
-    with open(path, encoding="utf-8") as reader:
+    with open(path, "r", encoding="utf-8") as reader:
         return reader.read()
 
 
