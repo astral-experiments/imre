@@ -65,6 +65,28 @@ REJECTED.update(
     }
 )
 
+COMPATIBILITY_REJECTIONS = {
+    "operator_in_dead_code": (
+        "def unused(value: float | None) -> float:\n    return 0.0\n    return value + 1.0\n",
+        "Relar: arithmetic requires int or float operands",
+    ),
+    "assignment_in_unused_function": (
+        "def unused() -> None:\n    value: float = None\n",
+        "Relar: expected float, got None",
+    ),
+    "argument_in_dead_code": (
+        "def identity(value: float) -> float:\n    return value\ndef unused() -> float:\n    return 0.0\n    return identity(None)\n",
+        "Relar: expected float, got None",
+    ),
+    "return_in_unused_function": (
+        "def unused(value: float | None) -> float:\n    return value\n",
+        "Relar: expected float, got float | None",
+    ),
+}
+REJECTED.update(
+    {name: source for name, (source, _) in COMPATIBILITY_REJECTIONS.items()}
+)
+
 IMPORTED_REJECTIONS = {
     "unused_recursive_case": {
         "main.py": "import helper\nprint(1)\n",
@@ -221,6 +243,11 @@ def main() -> None:
             ), (name, result.stderr)
             if "recursive" in name:
                 assert "recursive calls are unsupported" in result.stderr, (
+                    name,
+                    result.stderr,
+                )
+            if name in COMPATIBILITY_REJECTIONS:
+                assert COMPATIBILITY_REJECTIONS[name][1] in result.stderr, (
                     name,
                     result.stderr,
                 )

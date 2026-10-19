@@ -19,7 +19,7 @@ pub struct CompileOptions {
     pub address_sanitizer: bool,
 }
 
-/// Checks Python syntax and general type correctness with Ruff and ty.
+/// Checks source syntax, ty diagnostics, and Relar's exact type contract.
 pub fn check(source: &str) -> Result<(), String> {
     frontend::lower(&modules::SourceGraph::single(source)?).map(|_| ())
 }
