@@ -12,6 +12,7 @@ An ahead-of-time compiler for typed Python, written in Rust.
 - Compile first-party Python programs and packages into native executables.
 - Use static imports, typed classes, containers, comprehensions, slicing, keyword arguments, and scalar f-strings.
 - Use binary64 floats, immutable bytes, structural pattern matching, and assignment expressions.
+- Use Python truth tests and operand-returning `and`/`or` with exact result types.
 - Preserve arbitrary-precision integers, shared mutation, and supported exception behavior.
 - Run compiled programs without a Python installation or a CPython dependency.
 

@@ -486,6 +486,16 @@ pub unsafe extern "C" fn relar_str_len(value: *const Str) -> usize {
     Int::from_usize(unsafe { &*value }.chars().count()).into_raw()
 }
 
+/// Tests emptiness without counting Unicode code points.
+///
+/// # Safety
+/// The argument must be a live string handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_truthy(value: *const Str) -> u8 {
+    // SAFETY: the caller roots this immutable string for the duration of the call.
+    u8::from(!unsafe { &*value }.is_empty())
+}
+
 /// # Safety
 /// Both arguments must be live string handles.
 #[unsafe(no_mangle)]

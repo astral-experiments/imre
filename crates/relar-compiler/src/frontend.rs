@@ -15,6 +15,7 @@ mod assignments;
 mod calls;
 mod comprehensions;
 mod matching;
+mod truthiness;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
 
@@ -834,6 +835,7 @@ impl<'a> Checker<'a> {
         let value = match expression {
             ast::Expr::Named(value) => self.named_expression(value, Some(expected))?,
             ast::Expr::If(value) => self.conditional(value, Some(expected))?,
+            ast::Expr::BoolOp(value) => self.boolean_value(value, Some(expected))?,
             ast::Expr::Subscript(subscript)
                 if matches!(&*subscript.slice, ast::Expr::Slice(_))
                     && (matches!(concrete, Type::Str | Type::Bytes)
@@ -944,44 +946,41 @@ impl<'a> Checker<'a> {
     /// reach literals before the branches join. Only optional promotion can
     /// widen a result; unrelated concrete storage types never share a value.
     fn conditional(&mut self, value: &ast::ExprIf, expected: Option<Type>) -> Result<Expr, String> {
+        self.conditional_with(value, |checker, arm| {
+            if let Some(expected) = expected {
+                checker.expr_expected(arm, expected)
+            } else {
+                checker.expr(arm)
+            }
+        })
+    }
+
+    /// Checks branch-local facts once for value, contextual, and truth consumers.
+    fn conditional_with(
+        &mut self,
+        value: &ast::ExprIf,
+        mut check: impl FnMut(&mut Self, &ast::Expr) -> Result<Expr, String>,
+    ) -> Result<Expr, String> {
         let test = self.condition(&value.test)?;
         let before = self.local_state();
         self.apply_facts(&value.test, true);
-        let yes = if let Some(expected) = expected {
-            self.expr_expected(&value.body, expected)?
-        } else {
-            self.expr(&value.body)?
-        };
+        let yes = check(self, &value.body)?;
         let yes_state = self.local_state();
         self.restore_state(before);
         self.apply_facts(&value.test, false);
-        let no = if let Some(expected) = expected {
-            self.expr_expected(&value.orelse, expected)?
-        } else {
-            self.expr(&value.orelse)?
-        };
+        let no = check(self, &value.orelse)?;
         self.join_states([yes_state, self.local_state()]);
         // Context can promote both concrete arms for optional storage. Keep the
         // expression's narrower result when those original values agree.
         let yes = assignments::unpromoted(yes);
         let no = assignments::unpromoted(no);
-        let ty = if yes.ty == no.ty {
-            yes.ty
-        } else if yes.ty == Type::None {
-            self.types.optional(no.ty)
-        } else if no.ty == Type::None {
-            self.types.optional(yes.ty)
-        } else if self.types.payload(yes.ty) == Some(no.ty) {
-            yes.ty
-        } else if self.types.payload(no.ty) == Some(yes.ty) {
-            no.ty
-        } else {
-            return Err(error(
+        let ty = self.types.join(yes.ty, no.ty).ok_or_else(|| {
+            error(
                 self.source,
                 value,
                 "conditional branches require the same concrete type or its optional form",
-            ));
-        };
+            )
+        })?;
         let yes = self.coerce(yes, ty, &*value.body)?;
         let no = self.coerce(no, ty, &*value.orelse)?;
         Ok(Expr {
@@ -996,7 +995,14 @@ impl<'a> Checker<'a> {
                 self.assigned.insert(slot);
             }
         }
-        for (name, present) in narrowing::facts(test, truth) {
+        let always_truthy = |name: &str| {
+            self.names.get(name).is_some_and(|&slot| {
+                self.types
+                    .payload(self.locals[slot])
+                    .is_some_and(|payload| self.types.truthiness(payload) == Some(true))
+            })
+        };
+        for (name, present) in narrowing::facts(test, truth, &always_truthy) {
             if let Some(&slot) = self.names.get(&name)
                 && let Some(payload) = self.types.payload(self.locals[slot])
             {
@@ -2118,12 +2124,6 @@ impl<'a> Checker<'a> {
         Ok(Statement::Assign(slot, value))
     }
 
-    fn condition(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        let expression_ir = self.expr(expression)?;
-        self.expect(Type::Bool, expression_ir.ty, expression)?;
-        Ok(expression_ir)
-    }
-
     fn binary_op(
         &self,
         op: ast::Operator,
@@ -2278,12 +2278,13 @@ impl<'a> Checker<'a> {
                 (ty, ExprKind::Binary(op, Box::new(left), Box::new(right)))
             }
             ast::Expr::UnaryOp(unary) => {
-                let value = self.expr(&unary.operand)?;
+                let value = if unary.op == ast::UnaryOp::Not {
+                    self.condition(&unary.operand)?
+                } else {
+                    self.expr(&unary.operand)?
+                };
                 match unary.op {
-                    ast::UnaryOp::Not => {
-                        self.expect(Type::Bool, value.ty, expression)?;
-                        (Type::Bool, ExprKind::Not(Box::new(value)))
-                    }
+                    ast::UnaryOp::Not => (Type::Bool, ExprKind::Not(Box::new(value))),
                     ast::UnaryOp::USub | ast::UnaryOp::UAdd => {
                         if !matches!(value.ty, Type::Int | Type::Float) {
                             return Err(error(
@@ -2301,26 +2302,7 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Expr::BoolOp(boolean) => {
-                let and = boolean.op == ast::BoolOp::And;
-                let mut values = Vec::new();
-                let mut exits = Vec::new();
-                for (index, value) in boolean.values.iter().enumerate() {
-                    values.push(self.condition(value)?);
-                    let after = self.local_state();
-                    if index + 1 == boolean.values.len() {
-                        exits.push(after);
-                    } else {
-                        self.apply_facts(value, !and);
-                        exits.push(self.local_state());
-                        self.restore_state(after);
-                        self.apply_facts(value, and);
-                    }
-                }
-                self.join_states(exits);
-                (
-                    Type::Bool,
-                    ExprKind::Boolean(boolean.op == ast::BoolOp::And, values),
-                )
+                return self.boolean_value(boolean, None);
             }
             ast::Expr::Compare(compare) => {
                 if compare.ops.len() == 1
@@ -2892,6 +2874,20 @@ impl<'a> Checker<'a> {
             ));
         };
         self.reject_builtin_keywords(call)?;
+        if name.id == "bool" {
+            return match call.arguments.args.as_ref() {
+                [] => Ok(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(false),
+                }),
+                [value] => self.condition(value),
+                _ => Err(error(
+                    self.source,
+                    call,
+                    "bool accepts zero or one positional argument",
+                )),
+            };
+        }
         if name.id == "bytes" {
             let value = match call.arguments.args.as_ref() {
                 [] => {

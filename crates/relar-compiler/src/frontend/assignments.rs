@@ -67,11 +67,12 @@ impl Checker<'_> {
             ));
         }
         let existing = self.names.get(name.id.as_str()).copied();
-        let context = existing.map(|slot| self.locals[slot]).or(expected);
-        let value = if let Some(context) = context {
-            self.expr_expected(&expression.value, context)?
+        let value = if let Some(slot) = existing {
+            self.expr_expected(&expression.value, self.locals[slot])?
         } else {
-            self.expr(&expression.value)?
+            // A new binding inherits literal context, not the consumer's type:
+            // an optional guard can return a different type through `and`.
+            self.boolean_operand(&expression.value, expected)?
         };
         let value = unpromoted(value);
         let storage = existing.map_or(value.ty, |slot| self.locals[slot]);

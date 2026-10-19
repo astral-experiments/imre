@@ -27,6 +27,53 @@ struct Storage {
 pub(crate) struct Types(RefCell<Storage>);
 
 impl Types {
+    /// Joins values only when one existing concrete or nullable layout can hold both.
+    pub(crate) fn join(&self, left: Type, right: Type) -> Option<Type> {
+        if left == right || self.payload(left) == Some(right) {
+            Some(left)
+        } else if self.payload(right) == Some(left) {
+            Some(right)
+        } else if left == Type::None {
+            Some(self.optional(right))
+        } else if right == Type::None {
+            Some(self.optional(left))
+        } else {
+            None
+        }
+    }
+
+    /// Fixed tuples and nominal objects have no user-defined truth protocol.
+    /// Unknown means the value must be inspected, including nullable payloads.
+    pub(crate) fn truthiness(&self, ty: Type) -> Option<bool> {
+        match ty {
+            Type::None => Some(false),
+            Type::Tuple(_) => Some(!self.fields(ty).unwrap().is_empty()),
+            Type::Class(_) | Type::Iterator | Type::Exception | Type::TextIO | Type::BinaryIO => {
+                Some(true)
+            }
+            Type::Optional(_) if self.truthiness(self.payload(ty).unwrap()) == Some(false) => {
+                Some(false)
+            }
+            _ => None,
+        }
+    }
+
+    /// Truth excludes None; falsity excludes a payload only if that entire
+    /// concrete type is always true. Empty containers and zero remain present.
+    pub(crate) fn truth_branch(&self, ty: Type, truth: bool) -> Type {
+        if let Some(payload) = self.payload(ty) {
+            if truth {
+                payload
+            } else if self.truthiness(payload) == Some(true) {
+                Type::None
+            } else {
+                ty
+            }
+        } else {
+            ty
+        }
+    }
+
     fn intern(&self, shape: Shape) -> usize {
         let mut storage = self.0.borrow_mut();
         if let Some(&id) = storage.ids.get(&shape) {

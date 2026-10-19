@@ -22,7 +22,6 @@ REJECTED = {
     "irrefutable_case": "match 1:\n    case value:\n        pass\n    case 1:\n        pass\n",
     "irrefutable_or": "match 1:\n    case (_ as value) | (1 as value):\n        pass\n",
     "multiple_stars": "match [1, 2]:\n    case [*first, *last]:\n        pass\n",
-    "guard_truthiness": "match 1:\n    case value if value:\n        pass\n",
     "guard_optional_bool": "def bad(flag: bool | None) -> None:\n    match 1:\n        case _ if flag:\n            pass\n",
     "capture_not_definite": "def bad(values: list[int]) -> int:\n    match values:\n        case [captured]:\n            pass\n    return captured\n",
     "guard_capture_not_definite": "def bad(values: list[int]) -> int:\n    match values:\n        case [captured] if False:\n            pass\n    return captured\n",

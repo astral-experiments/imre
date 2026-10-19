@@ -30,7 +30,6 @@ REJECTED = {
     "float_dictionary_key": "values = {1.0: 2}\n",
     "float_set_element": "values = {1.0}\n",
     "float_set_comprehension": "values = {float(index) for index in range(2)}\n",
-    "float_truthiness": "if 1.0:\n    print(1)\n",
     "float_exponentiation": "print(2.0 ** 2)\n",
     "complex_literal": "print(1j)\n",
     "float_boolean_arithmetic": "print(1.0 + True)\n",
