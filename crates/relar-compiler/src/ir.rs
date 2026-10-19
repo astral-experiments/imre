@@ -375,8 +375,10 @@ pub(crate) fn walk_expressions(body: &[Statement], visit: &mut impl FnMut(&Expr)
                 }
             }
             ExprKind::Int(_)
+            | ExprKind::Float(_)
             | ExprKind::Bool(_)
             | ExprKind::Str(_)
+            | ExprKind::Bytes(_)
             | ExprKind::None
             | ExprKind::Local(_) => {}
         }

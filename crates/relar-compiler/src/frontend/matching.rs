@@ -128,7 +128,13 @@ impl Checker<'_> {
             }
         }
         let mut value = self.expr(&branch.subject)?;
-        let mut original = match &*branch.subject {
+        // A named subject stores its target before yielding the same value.
+        // Track that outer target with the same narrowing rules as a bare name.
+        let visible = match &*branch.subject {
+            ast::Expr::Named(named) => &*named.target,
+            subject => subject,
+        };
+        let mut original = match visible {
             ast::Expr::Name(name) => self.names.get(name.id.as_str()).copied(),
             _ => None,
         };

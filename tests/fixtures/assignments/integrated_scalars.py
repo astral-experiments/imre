@@ -24,7 +24,7 @@ def scalar_rebinding() -> None:
     optional: float | None = None
     print((optional := -0.0) / -1.0)
     saved: list[float | None] = [optional, (optional := 2.0), optional]
-    print((optional := None))
+    print(optional := None)
     for held in saved:
         print(number(held))
 

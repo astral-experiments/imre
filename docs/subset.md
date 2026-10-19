@@ -62,6 +62,10 @@ initialize it beforehand if it is needed afterward. Assignment expressions are
 forbidden in comprehension iterable expressions and cannot rebind any enclosing
 comprehension's iteration target, following Python's syntax restrictions.
 
+A named match subject, such as `match (record := parse())`, preserves the target's
+declared optional shape and narrows it in matching cases. Rebinding that target
+in a guard leaves later cases inspecting the original subject.
+
 ## Binary64 numbers
 
 `float` is an exact storage type. It uses IEEE 754 binary64 in native arguments, returns, locals, fields, tuples, lists, and dictionary values. An annotation never silently changes a Python value: `value: float = 1` and passing an `int` to a `float` parameter are rejected; write `float(1)` explicitly. Mixed arithmetic itself performs Python's integer-to-float conversion and may raise `OverflowError` for an integer too large to convert. Augmented assignment must leave the target's exact type unchanged, so an integer slot cannot use `/=`.
