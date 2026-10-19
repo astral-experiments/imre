@@ -382,10 +382,13 @@ impl Checker<'_> {
     /// singleton `case True` only matches a bool. Literal lowering remains shared
     /// with expressions so new scalar types need no separate literal parser.
     fn pattern_equal(&self, mut value: Expr, literal: Expr) -> Expr {
-        if value.ty == Type::Bool && literal.ty == Type::Int {
+        if value.ty == Type::Bool && matches!(literal.ty, Type::Int | Type::Float) {
             value = builtin(Type::Int, Builtin::Int, vec![value]);
         }
-        if value.ty == literal.ty {
+        if value.ty == literal.ty
+            || (matches!(value.ty, Type::Int | Type::Float)
+                && matches!(literal.ty, Type::Int | Type::Float))
+        {
             compare(value, Compare::Equal, literal)
         } else {
             boolean(false)
@@ -679,10 +682,7 @@ impl Checker<'_> {
         let mut keys = Vec::new();
         let mut seen = HashSet::new();
         for (key, child) in mapping.keys.iter().zip(&mapping.patterns) {
-            let mut key = self.pattern_literal(key)?;
-            if let ExprKind::Bool(value) = key.kind {
-                key = integer(usize::from(value));
-            }
+            let key = mapping_key(self.pattern_literal(key)?);
             if let Some(key) = literal_key(&key)
                 && !seen.insert(key)
             {
@@ -962,10 +962,41 @@ impl Checker<'_> {
     }
 }
 
+/// Canonicalize equal numeric keys without introducing a runtime conversion.
+/// Fixed precision renders every digit of an integral binary64 value, including
+/// values beyond machine integers; shortest decimal formatting would lose that.
+fn mapping_key(value: Expr) -> Expr {
+    if let ExprKind::Bool(value) = value.kind {
+        return integer(usize::from(value));
+    }
+    let number = match &value.kind {
+        ExprKind::Float(value) => *value,
+        ExprKind::Negate(inner) => match &inner.kind {
+            ExprKind::Float(value) => -*value,
+            _ => return value,
+        },
+        _ => return value,
+    };
+    if number.is_finite() && number.fract() == 0.0 {
+        integer(if number == 0.0 {
+            "0".to_owned()
+        } else {
+            format!("{number:.0}")
+        })
+    } else {
+        Expr {
+            ty: Type::Float,
+            kind: ExprKind::Float(number),
+        }
+    }
+}
+
 fn literal_key(value: &Expr) -> Option<String> {
     match &value.kind {
         ExprKind::Int(value) => Some(format!("int:{value}")),
+        ExprKind::Float(value) => Some(format!("float:{:016x}", value.to_bits())),
         ExprKind::Str(value) => Some(format!("str:{value}")),
+        ExprKind::Bytes(value) => Some(format!("bytes:{value:?}")),
         ExprKind::Negate(value) => match &value.kind {
             ExprKind::Int(value) if value == "0" => Some("int:0".to_owned()),
             ExprKind::Int(value) => Some(format!("int:-{value}")),
