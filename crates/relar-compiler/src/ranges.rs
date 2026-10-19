@@ -677,6 +677,18 @@ impl Analyzer {
                 }
                 Interval::bounded(0, 1)
             }
+            ExprKind::Conditional(test, yes, no) => {
+                self.expression(test, state, record);
+                let yes_state = self.assume(test, true, state.clone());
+                let no_state = self.assume(test, false, state.clone());
+                let yes = yes_state.map(|state| self.expression(yes, &state, record));
+                let no = no_state.map(|state| self.expression(no, &state, record));
+                match (yes, no) {
+                    (Some(yes), Some(no)) => yes.join(no),
+                    (Some(value), None) | (None, Some(value)) => value,
+                    (None, None) => Interval::UNKNOWN,
+                }
+            }
             ExprKind::Compare(values, ops) => {
                 self.expression(&values[0], state, record);
                 let mut current = Some(state.clone());
@@ -1083,6 +1095,11 @@ mod tests {
                     expression(left, output);
                     expression(right, output);
                 }
+                ExprKind::Conditional(test, yes, no) => {
+                    expression(test, output);
+                    expression(yes, output);
+                    expression(no, output);
+                }
                 ExprKind::Exception { message, .. } => {
                     if let Some(message) = message {
                         expression(message, output);
@@ -1156,6 +1173,34 @@ mod tests {
         let mut output = Vec::new();
         block(&function.body, &mut output);
         output
+    }
+
+    #[test]
+    fn conditional_results_join_only_the_selected_branch_ranges() {
+        let module =
+            module("def bounded(value: int) -> int:\n    return value if 0 <= value < 8 else 0\n");
+        let facts = analyze(&module);
+        let expression = expressions(&module.functions[0])
+            .into_iter()
+            .find(|expression| matches!(expression.kind, ExprKind::Conditional(..)))
+            .unwrap();
+        assert_eq!(facts.integer(expression), Some(IntRange { min: 0, max: 7 }));
+        let ExprKind::Conditional(_, yes, _) = &expression.kind else {
+            unreachable!();
+        };
+        assert_eq!(facts.integer(yes), Some(IntRange { min: 0, max: 7 }));
+    }
+
+    #[test]
+    fn conditional_unknown_arm_prevents_small_integer_proof() {
+        let module =
+            module("def choose(flag: bool, value: int) -> int:\n    return 0 if flag else value\n");
+        let facts = analyze(&module);
+        let expression = expressions(&module.functions[0])
+            .into_iter()
+            .find(|expression| matches!(expression.kind, ExprKind::Conditional(..)))
+            .unwrap();
+        assert_eq!(facts.integer(expression), None);
     }
 
     #[test]

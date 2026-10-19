@@ -448,6 +448,11 @@ fn children(expression: &Expr, mut visit: impl FnMut(&Expr)) {
             visit(left);
             visit(right);
         }
+        ExprKind::Conditional(test, yes, no) => {
+            visit(test);
+            visit(yes);
+            visit(no);
+        }
         ExprKind::Int(_)
         | ExprKind::Bool(_)
         | ExprKind::Str(_)
@@ -493,6 +498,11 @@ fn children_mut(expression: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
         ExprKind::Binary(_, left, right) => {
             visit(left);
             visit(right);
+        }
+        ExprKind::Conditional(test, yes, no) => {
+            visit(test);
+            visit(yes);
+            visit(no);
         }
         ExprKind::Int(_)
         | ExprKind::Bool(_)

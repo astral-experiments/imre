@@ -669,8 +669,8 @@ pub unsafe extern "C" fn relar_set_iter(value: *const Object) -> *const Object {
 }
 /// # Safety
 /// Root the cursor; output words are aligned, independent, outside runtime storage,
-/// and contain no unconsumed owner. Only success writes them; keys/set mode ignores
-/// value_out and permits null. Size errors install RuntimeError and return0.
+/// and contain no unconsumed owner. Only success writes them; keys/set/string mode
+/// ignores value_out and permits null. Size errors install RuntimeError and return0.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_mapping_iter_next(
     value: *const Object,
@@ -679,9 +679,10 @@ pub unsafe extern "C" fn relar_mapping_iter_next(
 ) -> u8 {
     // SAFETY: the rooted iterator snapshots independent owners before returning.
     let next = unsafe {
-        object(value)
-            .0
-            .with_mut(|s| s.mapping_iterator_mut().next())
+        object(value).0.with_mut(|storage| match storage {
+            Storage::StringIterator(iterator) => Ok(iterator.next()),
+            _ => storage.mapping_iterator_mut().next(),
+        })
     };
     let next = match next {
         Ok(next) => next,

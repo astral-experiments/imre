@@ -119,6 +119,9 @@ fn expression(value: &Expr, functions: &[bool]) -> bool {
         ExprKind::Binary(op, left, right) => {
             binary(*op) || expression(left, functions) || expression(right, functions)
         }
+        ExprKind::Conditional(test, yes, no) => {
+            expression(test, functions) || expression(yes, functions) || expression(no, functions)
+        }
         ExprKind::Call(id, args) => {
             functions.get(*id).copied().unwrap_or(true)
                 || args.values.iter().any(|arg| expression(arg, functions))
@@ -152,6 +155,8 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         Builtin::Print
         | Builtin::Input
         | Builtin::ListGet
+        | Builtin::StringGet
+        | Builtin::Slice
         | Builtin::Pop
         | Builtin::DictGet
         | Builtin::DictDelete
@@ -180,6 +185,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::SetAdd
         | Builtin::SetDiscard
         | Builtin::SetIter
+        | Builtin::StringIter
         | Builtin::ExceptionMessage => false,
     }
 }

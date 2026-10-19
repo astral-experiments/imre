@@ -417,7 +417,6 @@ REJECTED = {
     "iteration_target_type_mismatch": 'value = "text"\nfor value in [1]:\n    pass\n',
     "iteration_tuple_target_arity": "for first, second in [(1, 2, 3)]:\n    pass\n",
     "iteration_range_tuple_target": "for (value,) in range(2):\n    pass\n",
-    "iteration_string_iterable": 'for letter in "text":\n    print(letter)\n',
     "iteration_tuple_iterable": "for value in (1, 2):\n    print(value)\n",
     "iteration_optional_iterable": """
         def show(values: list[int] | None) -> None:
