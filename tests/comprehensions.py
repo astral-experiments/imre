@@ -19,7 +19,6 @@ BOOTSTRAP = (
 REJECTED = {
     "generator_expression": "values = (value for value in range(3))\n",
     "async_comprehension": "async def collect(values: list[int]) -> list[int]:\n    return [value async for value in values]\n",
-    "implicit_truthiness": "values = [value for value in range(3) if value]\n",
     "bool_as_integer": "values: list[int] = [True for value in range(3)]\n",
     "wrong_context": "values: list[str] = [value for value in range(3)]\n",
     "wrong_nested_context": "values: list[list[str]] = [[value] for value in range(3)]\n",
