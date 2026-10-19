@@ -1799,8 +1799,8 @@ impl<'a> Checker<'a> {
                         self.narrowed.remove(slot);
                     }
                 }
-                let facts = self.narrowed.clone();
                 let test = self.condition(&loop_.test)?;
+                let facts = self.narrowed.clone();
                 let before = self.assigned.clone();
                 self.apply_facts(&loop_.test, true);
                 self.loop_breaks.push(Vec::new());
