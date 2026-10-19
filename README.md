@@ -9,7 +9,7 @@ An ahead-of-time compiler for typed Python, written in Rust.
 
 ## Highlights
 
-- Compile first-party Python programs and packages into native executables.
+- Compile typed Python programs and selected pure-Python packages into native executables.
 - Use static imports, typed classes, containers, comprehensions, slicing, keyword arguments, and scalar f-strings.
 - Use binary64 floats, immutable bytes, structural pattern matching, and assignment expressions.
 - Use Python truth tests, operand-returning `and`/`or`, and `for`/`while` `else` suites.
@@ -97,6 +97,11 @@ and ownership, and the [benchmark guide](benchmarks/README.md) collects the exam
 programs, performance results, and reproduction instructions. Run
 `target/release/relar --help` for compiler options.
 
+The [python-base45 example](examples/base45_codec/README.md) compiles an unchanged
+upstream codec and compares it with CPython, including its original tests, error
+causes, and shared module lookup table. Its guide covers building, file-based use,
+the enforced type boundary, and benchmark reproduction.
+
 ## License
 
 Relar is licensed under either of
@@ -106,6 +111,9 @@ Relar is licensed under either of
 - MIT license ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
 
 at your option.
+
+Vendored example code retains its original license; the Base45 codec uses
+[BSD-2-Clause](examples/base45_codec/upstream/LICENSE).
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in Relar
 by you, as defined in the Apache-2.0 license, shall be dually licensed as above, without any
