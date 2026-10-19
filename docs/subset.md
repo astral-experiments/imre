@@ -11,7 +11,7 @@ This is a deliberately restricted Python dialect for closed first-party programs
 | Functions | Required parameter and return annotations; positional and keyword calls; positional-only and keyword-only parameters; scalar literal defaults; direct, fixed bindings; no recursive call cycles |
 | Types | `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed `typing.TextIO` and `typing.BinaryIO`, the sealed builtin `Exception` family, fixed nominal classes, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, and `T \| None`; locals have one inferred or declared storage type |
 | Classes | Declared fields, an explicit initializer, typed instance methods, alias-visible field mutation, and numeric field augmented assignment |
-| Statements | Single-target and fixed-tuple unpacking assignment, annotated assignment, numeric augmented assignment, local string/bytes `+=` and bytes `*=`, dictionary entry deletion, `if`/`elif`/`else`, `while`, `for` over ranges, strings, bytes, or concrete containers, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin-file `with` |
+| Statements | Single-target and fixed-tuple unpacking assignment, annotated assignment, numeric augmented assignment, local string/bytes `+=` and bytes `*=`, dictionary entry deletion, `if`/`elif`/`else`, structural `match`/`case`, `while`, `for` over ranges, strings, bytes, or concrete containers, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin-file `with` |
 | Conditions | Explicit `bool`; `and`, `or`, `not`; short-circuit evaluation; conditional expressions `yes if condition else no`; `is None`/`is not None` with local flow narrowing |
 | Integers | Arbitrary precision; `+`, `-`, `*`, `//`, `%`; `/` returns a correctly rounded float; unary `+`/`-`; all six value comparisons, including chains |
 | Floats | Binary64 literals and exact storage; `+`, `-`, `*`, `/`, `//`, `%`; unary signs; all six comparisons; mixed integer arithmetic and exact mixed comparisons; explicit numeric/string conversions |
@@ -123,6 +123,33 @@ Final reference release closes a file best-effort without callbacks or a new pen
 Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueError`. Embedded NULs in paths raise `ValueError`. Missing files, permission failures, directories opened as files, and non-directory path components use `FileNotFoundError`, `PermissionError`, `IsADirectoryError`, and `NotADirectoryError`; exclusive-create collisions use `FileExistsError`, also an `OSError`; other operating-system errors use `OSError`. Runtime-generated message text is not a CPython compatibility promise.
 
 `sys.argv` is one lazily initialized mutable `list[str]`, shared across aliases and modules. Its first element identifies the invoked native executable, corresponding to the script identity under CPython. Element writes and list mutation are supported; rebinding the module attribute or imported name is not. Native arguments must be valid UTF-8. Invalid Unix argument bytes raise `UnicodeDecodeError` when the list is first accessed; CPython's surrogateescaped strings are outside this runtime's string domain. Programs that do not use `sys.argv` emit no argument initialization or shutdown calls.
+
+## Structural pattern matching
+
+`match` evaluates its subject once and tries cases in source order. Patterns support scalar literals, the `None`/`True`/`False` singletons, captures, `_`, `|`, `as`, fixed tuple and list sequences with one starred rest, dictionary mappings with optional `**rest`, and keyword fields on declared classes. Guards require `bool` and run only after a successful pattern. The first successful guard selects one case; cases do not fall through.
+
+```python
+def describe(rows: dict[str, list[int]]) -> str:
+    match rows:
+        case {"counts": [first, *tail], **other} if first > 0:
+            return f"first:{first}, tail:{len(tail)}, other:{len(other)}"
+        case {}:
+            return "no positive first count"
+        case _:
+            return "unreachable for a dictionary"
+```
+
+Captures own their values before the guard runs. A false or raising guard leaves those bindings in place. Subsequent cases inspect the original captured subject, including mutations to that container made by an earlier guard. Starred sequence rests are new shallow lists, and mapping rests are new shallow dictionaries retaining the original insertion order. Contained lists and class instances keep their identities. Hidden subject and pattern roots are released on normal exit, exceptions, returns, and loop transfers.
+
+Relar commits captures only after the complete pattern succeeds, so a failed pattern leaves existing bindings unchanged. Python deliberately leaves partial bindings from failed patterns unspecified; programs intended to run under both implementations must not observe them. This does not apply to failed guards, whose successful pattern bindings are retained in both implementations.
+
+Each capture has one concrete storage type, following ordinary assignment rules. OR alternatives must bind the same names with the same type, or types that join as `T | None`. Duplicate captures, unreachable alternatives after an irrefutable pattern, and an unguarded irrefutable case before the final case are rejected. A local used after a match must be assigned on every path reaching that use. A successful non-None pattern narrows an optional subject; a failed `None` pattern permits later cases to use its payload. Only a still-unmodified local subject receives those facts.
+
+Sequence patterns require concrete lists or fixed tuples, including an optional subject after excluding `None`. Tuple patterns cannot request more fixed positions than the declared tuple contains, and a starred tuple rest must fit one concrete list element type; `T` and `None` can form `list[T | None]`. An empty tuple rest uses an existing capture's list annotation when available and otherwise defaults to `list[int]`. Strings and user-defined sequence protocols are excluded. Mapping patterns require a concrete dictionary and literal keys. A missing key fails the pattern even when the value type is optional; a present key containing `None` remains distinguishable. Extra entries are permitted, and `{}` matches any dictionary.
+
+Numeric literal patterns use Python value equality, so `case 1` matches `True`. Singleton patterns use identity, so `case True` does not match the integer `1`. Mapping literal keys use the dictionary's scalar equality, including `True` matching an integer key `1`; ordinary dictionary writes still require the exact declared key type. Repeated equal literal keys are rejected.
+
+Class patterns resolve imported aliases to a fixed nominal identity and inspect declared fields in keyword order. Another declared class does not match even if its fields have the same names. Positional class patterns, `__match_args__`, builtin class patterns, undeclared fields, dynamic value-pattern lookups, inheritance, metaclasses, and descriptors remain unsupported. All case bodies and guards are checked, including unreachable cases.
 
 ## Fixed classes
 
