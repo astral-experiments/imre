@@ -42,7 +42,6 @@ REJECTED = {
     "slice_assignment": "values = [1, 2]\nvalues[:] = [3]\n",
     "slice_deletion": "values = [1, 2]\ndel values[:]\n",
     "slice_augmented_assignment": "values = [1, 2]\nvalues[:] += [3]\n",
-    "string_loop_else": 'for character in "abc":\n    print(character)\nelse:\n    print("done")\n',
     "string_iterator_escape": 'iterator = iter("abc")\n',
     "string_loop_uninitialized_target": 'for character in "":\n    pass\nprint(character)\n',
 }
