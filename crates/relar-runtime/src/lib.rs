@@ -165,6 +165,9 @@ pub struct List(StorageCell<Vec<Int>>);
 /// representation directly.
 pub type Str = compact_str::CompactString;
 
+/// Immutable byte storage; ABI handles own an Rc and never expose a mutable view.
+pub type Bytes = Vec<u8>;
+
 /// LLVM's C main bypasses Rust's SIGPIPE setup. Ignore it once before publishing
 /// buffered writers, so a disconnected pipe reports an ordinary I/O error. The
 /// closed runtime has no signal API or callbacks that could change this policy.

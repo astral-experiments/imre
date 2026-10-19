@@ -34,7 +34,7 @@ unsafe fn slice_component(word: usize) -> Option<isize> {
 
 /// A finite cursor over valid indices. Keeping a count avoids advancing past
 /// the final item, where an arbitrarily large stride could otherwise overflow.
-struct SliceIndices {
+pub(super) struct SliceIndices {
     at: usize,
     stride: usize,
     remaining: usize,
@@ -53,7 +53,12 @@ impl SliceIndices {
     /// # Safety
     /// Components are omitted/None words or rooted canonical Int handles. The
     /// sequence length fits isize, as all runtime-owned allocations require.
-    unsafe fn new(length: usize, start: usize, stop: usize, step: usize) -> Result<Self> {
+    pub(super) unsafe fn new(
+        length: usize,
+        start: usize,
+        stop: usize,
+        step: usize,
+    ) -> Result<Self> {
         debug_assert!(length <= isize::MAX as usize);
         // SAFETY: all components remain rooted for this normalization.
         let step = unsafe { slice_component(step) }.unwrap_or(1);

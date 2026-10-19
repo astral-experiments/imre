@@ -40,6 +40,7 @@ pub(crate) enum Kind {
     PermissionError = 21,
     IsADirectoryError = 22,
     NotADirectoryError = 23,
+    FileExistsError = 24,
 }
 
 impl Kind {
@@ -69,6 +70,7 @@ impl Kind {
             21 => Self::PermissionError,
             22 => Self::IsADirectoryError,
             23 => Self::NotADirectoryError,
+            24 => Self::FileExistsError,
             _ => fail("SystemError", "invalid exception kind"),
         }
     }
@@ -99,6 +101,7 @@ impl Kind {
             Self::PermissionError => "PermissionError",
             Self::IsADirectoryError => "IsADirectoryError",
             Self::NotADirectoryError => "NotADirectoryError",
+            Self::FileExistsError => "FileExistsError",
         }
     }
 
@@ -129,6 +132,7 @@ impl Kind {
                     | Self::PermissionError
                     | Self::IsADirectoryError
                     | Self::NotADirectoryError
+                    | Self::FileExistsError
             ),
             _ => self == expected,
         }

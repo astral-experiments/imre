@@ -1,4 +1,4 @@
-//! Typed int/string hash tables with insertion-ordered dictionary entries.
+//! Typed int/string/bytes hash tables with insertion-ordered dictionary entries.
 //!
 //! Keys are monomorphized once per table; values are plain owned words with one
 //! shared descriptor. Sets store no value words. Active iterators keep their
@@ -11,7 +11,7 @@ use std::rc::{Rc, Weak};
 
 use super::exceptions::{Error, Kind, string_repr};
 use super::words::{OwnedWord, WordKind};
-use super::{Int, Object, Storage, StorageCell, Str, acquire_rc, fail, object};
+use super::{Bytes, Int, Object, Storage, StorageCell, Str, acquire_rc, fail, object};
 
 #[derive(Clone)]
 struct IntKey(Int);
@@ -66,6 +66,20 @@ impl ScalarKey for Rc<Str> {
     unsafe fn from_owned(word: usize) -> Self {
         // SAFETY: the caller transfers an independently acquired string owner.
         unsafe { Rc::from_raw(word as *const Str) }
+    }
+    fn into_word(self) -> usize {
+        Rc::into_raw(self) as usize
+    }
+}
+impl ScalarKey for Rc<Bytes> {
+    const KIND: u32 = 8;
+    unsafe fn borrow(word: usize) -> ManuallyDrop<Self> {
+        // SAFETY: the caller roots an exact bytes handle; ManuallyDrop does not consume it.
+        ManuallyDrop::new(unsafe { Rc::from_raw(word as *const Bytes) })
+    }
+    unsafe fn from_owned(word: usize) -> Self {
+        // SAFETY: the caller transfers an independently acquired bytes owner.
+        unsafe { Rc::from_raw(word as *const Bytes) }
     }
     fn into_word(self) -> usize {
         Rc::into_raw(self) as usize
@@ -175,6 +189,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
 enum Tables<V> {
     Int(Table<IntKey, V>),
     Str(Table<Rc<Str>, V>),
+    Bytes(Table<Rc<Bytes>, V>),
 }
 
 macro_rules! table {
@@ -182,6 +197,7 @@ macro_rules! table {
         match $self {
             Tables::Int($table) => $body,
             Tables::Str($table) => $body,
+            Tables::Bytes($table) => $body,
         }
     };
 }
@@ -191,13 +207,18 @@ impl<V: Copy> Tables<V> {
         match kind {
             2 => Self::Int(Table::new()),
             3 => Self::Str(Table::new()),
-            _ => fail("SystemError", "mapping keys must be integers or strings"),
+            8 => Self::Bytes(Table::new()),
+            _ => fail(
+                "SystemError",
+                "mapping keys must be integers, strings, or bytes",
+            ),
         }
     }
     fn key_kind(&self) -> u32 {
         match self {
             Self::Int(_) => 2,
             Self::Str(_) => 3,
+            Self::Bytes(_) => 8,
         }
     }
     fn len(&self) -> usize {
@@ -473,6 +494,7 @@ unsafe fn missing_key(value: *const Object, key: usize) -> Error {
         match kind {
             2 => Str::from(Int::borrow(key).big().to_string()),
             3 => string_repr(&*(key as *const Str)),
+            8 => super::bytes::repr(&*(key as *const Bytes)),
             _ => unreachable!(),
         }
     };
@@ -681,6 +703,7 @@ pub unsafe extern "C" fn relar_mapping_iter_next(
     let next = unsafe {
         object(value).0.with_mut(|storage| match storage {
             Storage::StringIterator(iterator) => Ok(iterator.next()),
+            Storage::BytesIterator(iterator) => Ok(iterator.next()),
             _ => storage.mapping_iterator_mut().next(),
         })
     };

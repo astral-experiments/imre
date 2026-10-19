@@ -7,6 +7,7 @@ pub(crate) enum Type {
     Float,
     Bool,
     Str,
+    Bytes,
     ListInt,
     Class(usize),
     List(usize),
@@ -20,6 +21,8 @@ pub(crate) enum Type {
     Exception,
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
     TextIO,
+    /// A sealed byte stream; aliases share its open/closed state.
+    BinaryIO,
     None,
 }
 
@@ -41,11 +44,13 @@ impl std::fmt::Display for Type {
             Self::Float => "float",
             Self::Bool => "bool",
             Self::Str => "str",
+            Self::Bytes => "bytes",
             Self::ListInt => "list[int]",
             Self::None => "None",
             Self::Iterator => "iterator",
             Self::Exception => "Exception",
             Self::TextIO => "typing.TextIO",
+            Self::BinaryIO => "typing.BinaryIO",
             Self::Class(_)
             | Self::List(_)
             | Self::Dict(_)
@@ -104,6 +109,7 @@ impl Module {
                 | ExprKind::Float(_)
                 | ExprKind::Bool(_)
                 | ExprKind::Str(_)
+                | ExprKind::Bytes(_)
                 | ExprKind::None
                 | ExprKind::Local(_) => false,
             }
@@ -188,6 +194,7 @@ pub(crate) enum ExprKind {
     Float(f64),
     Bool(bool),
     Str(String),
+    Bytes(Vec<u8>),
     None,
     Local(usize),
     List(Vec<Expr>),
@@ -258,6 +265,11 @@ pub(crate) enum Builtin {
     ListGet,
     StringGet,
     StringIter,
+    Bytes,
+    BytesGet,
+    BytesIter,
+    Encode,
+    Decode,
     /// Receiver followed by three nullable integer words for start, stop, step.
     Slice,
     Append,
@@ -268,6 +280,9 @@ pub(crate) enum Builtin {
     SysArgv,
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
+    BinaryOpen(u32),
+    BinaryRead,
+    BinaryWrite,
     TextEnter,
     TextRead,
     TextWrite,
