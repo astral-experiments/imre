@@ -1,0 +1,1640 @@
+{
+  "schema": "relar-control-flow-validation-v1",
+  "status": "passed",
+  "source_commit": "5b3e8438376091340f6610d7e603b9808d7ed65c",
+  "build_record_sha256": "ed3e4ad2cb880532f2451c42fcfa525f18a342f1b78682a19ac6ba2576465516",
+  "native_checks": {
+    "normal": 1202,
+    "thin-lto": 187,
+    "asan": 265
+  },
+  "total_native_semantic_checks": 1654,
+  "rust_unit_tests": 86,
+  "inventory_asan": {
+    "cases": 204,
+    "device_checks": 1,
+    "native_executions": 205,
+    "receipt": "/tmp/relar-control-flow-inventory-asan/receipt.json"
+  },
+  "combined_receipt": "/tmp/relar-control-flow-tests/final/combined-summary.json",
+  "test_only_restack_proof": "/tmp/relar-control-flow-tests/final/test-only-restack.json",
+  "retained_stale_rejection": "/tmp/relar-control-flow-tests/final/normal/matching.json",
+  "corrected_matching_receipt": "/tmp/relar-control-flow-tests/final/matching-v2/matching.json",
+  "retained_evidence_files": {
+    "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/build-record.json": {
+      "sha256": "ed3e4ad2cb880532f2451c42fcfa525f18a342f1b78682a19ac6ba2576465516",
+      "bytes": 887974
+    },
+    "/tmp/relar-control-flow-tests/final/combined-summary.json": {
+      "sha256": "43694a9b132ae57b64de33676eb75b8e2db44d60729cdb0012a4ba0e3e04ce45",
+      "bytes": 10805
+    },
+    "/tmp/relar-control-flow-tests/final/build-record-v1.json": {
+      "sha256": "11eeecdcc319a5e8a03cd16be1e10139545c132959a16fe1dc67a36991253e5f",
+      "bytes": 887941
+    },
+    "/tmp/relar-control-flow-tests/final/build-record-v2.json": {
+      "sha256": "ed3e4ad2cb880532f2451c42fcfa525f18a342f1b78682a19ac6ba2576465516",
+      "bytes": 887974
+    },
+    "/tmp/relar-control-flow-tests/final/test-only-restack.json": {
+      "sha256": "297d48adca44fafe7774a3f5e16c6805b23df2e659f2b27749e54cd0e2448530",
+      "bytes": 788
+    },
+    "/tmp/relar-control-flow-tests/final/normal/assignments.json": {
+      "sha256": "efd2c562525b75184c2cfbbffa04cfec19a4fe1009c8bcfd1c38481dffcccb4c",
+      "bytes": 1198
+    },
+    "/tmp/relar-control-flow-tests/final/normal/assignments.stdout.log": {
+      "sha256": "7c6ea385a6c14f8db403d21eb8db1a93fb66e8720a9efacd0f083d805090f756",
+      "bytes": 99
+    },
+    "/tmp/relar-control-flow-tests/final/normal/assignments.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/manifest.json": {
+      "sha256": "7d8a275b0184309b48a427de98db1598ce415c145506533f5f474c33004f182e",
+      "bytes": 22913
+    },
+    "/tmp/relar-control-flow-tests/final/normal/summary.json": {
+      "sha256": "19e005f799939f65686771f626ad9e41eb0a6ca30ccf4925d5e8224ddf1412d6",
+      "bytes": 24050
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/assignments.py": {
+      "sha256": "dbb770f59c5c478e9f917993136086660ed690b6e5cfb2b2121661fb752100fb",
+      "bytes": 9686
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/bytes.py": {
+      "sha256": "078a7d526a94a61919ecd73a8b79e00260007fd805bd3e6955e0b7aa31108885",
+      "bytes": 8771
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/calls.py": {
+      "sha256": "a13a6437352a0f5da3b63332e2a8bb92cc2b1daf8304b4b1b08bac5f4c647c4c",
+      "bytes": 9702
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/classes.py": {
+      "sha256": "96d97c5d5f2e7a23c812b639d935ca9665ed1d2099c0b5a0efa1e223b4f54d03",
+      "bytes": 10313
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/comprehensions.py": {
+      "sha256": "5087417762de736e9d3398c46ac79667ebecdc93d4af847a64a03abd5cfac411",
+      "bytes": 13339
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/containers.py": {
+      "sha256": "005fd337f1358dc81395ada91faeac17a148d100a35732f62fca30270218088d",
+      "bytes": 39118
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/differential.py": {
+      "sha256": "6f28393b1b78d967065d080d4aec45836213b2609cd205299d358a4803695ffc",
+      "bytes": 9209
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/exceptions.py": {
+      "sha256": "29de31304fa700d21bbafe7d9a63a08642e4c3371e2af3efcc1044e4746deec3",
+      "bytes": 19947
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/expressions.py": {
+      "sha256": "b043c506f49ffd671601794a224a8f90fa623498b956e067331650d4a98c875b",
+      "bytes": 10341
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/files.py": {
+      "sha256": "a920cc543636110913668e3383fe678e02c86a281edd90a0cda50288753f60ba",
+      "bytes": 24823
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/assignments/comprehensions.py": {
+      "sha256": "483d77074713fd4834ef338ce6202f24d8ac9d664c2e57b0da5b49178bba8bbe",
+      "bytes": 2521
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/assignments/evaluation.py": {
+      "sha256": "d87f61f539f75f59056537e16e8740e246c0c87ff1ab59cf10bd1265b6646592",
+      "bytes": 1950
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/assignments/flow.py": {
+      "sha256": "8ea00f51eba259890940c0018643d7f4f74942faf8374b35aa0abce0e7124d2e",
+      "bytes": 1228
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/assignments/imported/helper.py": {
+      "sha256": "32d40c4efaefe0b988023f9db5dc962a2edf58253cc1a4d2b954fb51adff9e06",
+      "bytes": 86
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/assignments/imported/main.py": {
+      "sha256": "e2bcd0970ad3b457b808600fb5ded6c56dd4df5f362ac78b856435377397b905",
+      "bytes": 83
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/assignments/integrated_scalars.py": {
+      "sha256": "00c74bb112e83f3428d131b2e08c1a804f4a746e990cf1a8b0ada7a34beda969",
+      "bytes": 4405
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/assignments/named_subject.py": {
+      "sha256": "d621e5a81efac21d14fe4873185033e3cb1622667f815298cd5e6dad03b5c8d7",
+      "bytes": 563
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/assignments/nested_captures.py": {
+      "sha256": "23b789d53c5b577e705a48fa17922e57ac478865e87ef5e02809f09e2284473a",
+      "bytes": 1125
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/assignments/ownership.py": {
+      "sha256": "d7be55085c2d79642b0bf0a06c1a17833f1d661b0bc0d2e40e1eee8c9dbcd32b",
+      "bytes": 1933
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/assignments/prior_guard_owner.py": {
+      "sha256": "a1cd921ce7483a79c5a1c353c4eb9a8eefdc7fe97454c03780b3e61488d9e606",
+      "bytes": 478
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/bytes/cleanup.py": {
+      "sha256": "1afca11d2f2ce7caa5ae1cbbba87a53635e73057ac79dc9eefcffecbb884e2bd",
+      "bytes": 2171
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/bytes/errors.py": {
+      "sha256": "a30d7032862d84c4d71f94a7bcc487a5c8a6797cda997c0d2b4a5ce21a73f7b0",
+      "bytes": 1596
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/bytes/file_failures.py": {
+      "sha256": "04bc428597b9b1c3ae5d4dd37a40008a599a9123c6ae6228f7defb1c7948d8e1",
+      "bytes": 785
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/bytes/files.py": {
+      "sha256": "0b5ba26b15bc47df8371748869eb17ce68a003e36b1696e0bc34f1e8d50449b6",
+      "bytes": 2753
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/bytes/imported/helpers.py": {
+      "sha256": "594c1b6bb13e5d41d7fe5df03d2fb309dc1f4818daec2dc9cd79f56f0e8b673a",
+      "bytes": 155
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/bytes/imported/main.py": {
+      "sha256": "3e344cdeeb543e777f3046e09b9da90e35ca01b1857042d6baa81e9b33bb899a",
+      "bytes": 214
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/bytes/slices.py": {
+      "sha256": "97940206a552041f8d11e13ffd4d23bb1fa6adeeb8f67fe7b5c629486bcb1841",
+      "bytes": 1187
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/bytes/storage.py": {
+      "sha256": "689f2538cb843d65414666740f587d103e824d987468535715d9a32f8c682207",
+      "bytes": 2146
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/bytes/values.py": {
+      "sha256": "1b8e162d778147acd01ef601dae0020af6ec93c178251d9cd14e0bd09b1c93c1",
+      "bytes": 3272
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/calls/cleanup.py": {
+      "sha256": "f545e4206f8890c00dfa6264a90ad77f140f411cae3ab45690e4beec0e6886b0",
+      "bytes": 1870
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/calls/contextual.py": {
+      "sha256": "23921d7bb222bfa4e214f69f8438c4990e5edebe823d7abf2652c1266bd2fc45",
+      "bytes": 1492
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/calls/defaults.py": {
+      "sha256": "2478084b2aa4271eeb465a8cf1447509b46ef7b1501f44c7892a97120ac6a673",
+      "bytes": 2291
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/calls/effects.py": {
+      "sha256": "e226c11181be624aea832f8dfe7a65b19fe454d484d2ceda6a8111f238ebcfa3",
+      "bytes": 1878
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/calls/imported/facade.py": {
+      "sha256": "57976399e1c7e95e90c26396c4d8b298c5785430343182dab84623edf7bd734c",
+      "bytes": 167
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/calls/imported/helpers.py": {
+      "sha256": "c1599dac123816671d5c354f8cb15b94a7cf670c9fe754c82d81b729c900911e",
+      "bytes": 299
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/calls/imported/main.py": {
+      "sha256": "de1c4187461a88aa7815fffa4b8eea966da36449dff4eb58065f49e08d45b5a5",
+      "bytes": 380
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/calls/ownership.py": {
+      "sha256": "209b7a8c73fe9f50a7b843c0d3d1873b2044a06b2e41cbb52a6765b49c3d5a09",
+      "bytes": 1612
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/classes/imported/facade.py": {
+      "sha256": "1fc491f43b749999d1afd898230328773a6f0e24113589a3b4f4c36cd8f271df",
+      "bytes": 103
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/classes/imported/main.py": {
+      "sha256": "2ee9d22808a2bbff00171e34dceeee35da2b5b7211ddafd056fab7e3a1d19470",
+      "bytes": 752
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/classes/imported/models/__init__.py": {
+      "sha256": "cc9368b60161036bb8d4904bd2fccb1ab462fc7490daec4bd15713714d4c4af1",
+      "bytes": 76
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/classes/imported/models/records.py": {
+      "sha256": "873d83fdac64010579e753dd2b22acd098ff9824e2ee21f1f9e89255f5e608df",
+      "bytes": 261
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/classes/ownership.py": {
+      "sha256": "01a0a4e9b35c26ae99fa00564d947aea82c612e615792afd272785c35520a7bb",
+      "bytes": 4637
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/comprehensions/cleanup.py": {
+      "sha256": "7948e8cb76c4bdc54f5dc58cdf71b9f68fdc5bb3009049afe954c587c5a7c26a",
+      "bytes": 3731
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/comprehensions/containers.py": {
+      "sha256": "eb41b01bf52539ca63d12b3a6dff04e9f7144f9a56b9400bc4ddcdc993f89450",
+      "bytes": 4527
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/comprehensions/effects.py": {
+      "sha256": "84ed6a6904d312f45499542271151c9b8e9cdb4fae1f4e420a7db269353ddcc6",
+      "bytes": 2965
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/comprehensions/imported/facade.py": {
+      "sha256": "512361b0c69ee74b13171106d7e253c77c71bb4adb5ce97cbba9e6a052f39e5a",
+      "bytes": 151
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/comprehensions/imported/helpers.py": {
+      "sha256": "67eee6918df81fcf1ab2fb65673aefe6c7e1b932e03a52fa8996e60463256286",
+      "bytes": 715
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/comprehensions/imported/main.py": {
+      "sha256": "f9294a683edf9df46a04777afee80d3ed08db7ade78b397e71eba5dc39f236ae",
+      "bytes": 574
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/comprehensions/iteration.py": {
+      "sha256": "3894961fc768597f11506a0c5d07d9c1e7b3c9a294c7eb4a2ccb8d0c9c5738fb",
+      "bytes": 2352
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/comprehensions/ownership.py": {
+      "sha256": "d921fbef3b7c9acd5ec8a61def79d838a4ed17cd3a8bc97de94e18d2241a7cea",
+      "bytes": 3867
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/comprehensions/scoping.py": {
+      "sha256": "137401b5756b0b711db61ad0ed3c500ae6d7981611b0b36bfc86a737765459c3",
+      "bytes": 1685
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/contextual.py": {
+      "sha256": "2cb63da3dfb77ebe72f0cc758a51af9fc3dcaeba5f275ffc186d3d5ab46bc083",
+      "bytes": 1039
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/dictionaries.py": {
+      "sha256": "f8603f41a2bac9a8209557538b06314d62b2d5888c6b06af13ee86510ea97f3b",
+      "bytes": 11591
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/index_proofs.py": {
+      "sha256": "c5246e43c65bb66781fa16ce4ea9daa39474569ec03af470d5a35fde11062e6a",
+      "bytes": 9217
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/iteration.py": {
+      "sha256": "1a32951ce1db29274156067b099169b1bea9633a3462e29cde409a4a0adc6afc",
+      "bytes": 6119
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/lists.py": {
+      "sha256": "958067d313b7ca0015b49532a32efc1369b24738c012becf6465b52d07d8f961",
+      "bytes": 1087
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/objects.py": {
+      "sha256": "86c25e805beccb666b331c10351f674a9d7dc7493a1311e388bd3df65adf4e89",
+      "bytes": 1107
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/optional.py": {
+      "sha256": "f091b226523e2def53faea8692ea6cedfbf1527fd57245a7f9b71d55eaa4b18e",
+      "bytes": 1956
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/optional_effects.py": {
+      "sha256": "c48d7757e1b20d1fa042aa221b7c4162b62ce50bb941078cd8651728ec0b4f77",
+      "bytes": 1917
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/optional_flow.py": {
+      "sha256": "b214eaf2cd9016f6d881491b44fcbe5fa5a8bf90ee286fa9a241adbf413c03d5",
+      "bytes": 3637
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/representation_cleanup.py": {
+      "sha256": "1bba523c14e49a219581fcfac3ec3cf0c56e35a30a27f1250529f9781f276f1a",
+      "bytes": 3795
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/representation_niches.py": {
+      "sha256": "8cddfe6474b1ec03502aaca243224761a7577a63df7defc6d4e5e3e161a2efb1",
+      "bytes": 4954
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/sets.py": {
+      "sha256": "dca2b038827e77a9cea25b1034aca14adc4eb1e9f4c6844b7c74a7ea3a92aedd",
+      "bytes": 7505
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/string_concat.py": {
+      "sha256": "e23c2e5a0ab749f429983a1b551a8c0d4fdabcb39b6c83ff56f5a24182753fe7",
+      "bytes": 4341
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/strings.py": {
+      "sha256": "d1d2aeb83b6906ccfba1242a23c3be7756915bd2cc86cfcb8ac28703a4b78c51",
+      "bytes": 884
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/containers/tuples.py": {
+      "sha256": "be3b2819fc7e8aefd2e14621e67dace0b7a8afc030721fcde6b1fecfe52a592d",
+      "bytes": 1057
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/expressions/cleanup.py": {
+      "sha256": "3632a6f6267d567750ec7515eee72cd6e5d5670c488d3351ee2a74b5e23284a1",
+      "bytes": 2675
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/expressions/conditionals.py": {
+      "sha256": "985d0174a4c93eed4c24d87d51706527aa6d69f3c3c61041ba1d8932ef14be3b",
+      "bytes": 4176
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/expressions/evaluation_order.py": {
+      "sha256": "a11f30cf4c07f417da5cf554cabf05a30ef77ec062a1f40ceeb7586184831992",
+      "bytes": 2922
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/expressions/imported/helper.py": {
+      "sha256": "b52346cdbae3667715f643c782108602cf5b51e427c500bb86e944e34e0fc6a0",
+      "bytes": 294
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/expressions/imported/main.py": {
+      "sha256": "afd4e914ef92eada8df69d9d9d52eb260ef13ac38658f2cae169311a3f388940",
+      "bytes": 290
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/expressions/shallow_copies.py": {
+      "sha256": "aa264e00e2478907ddbdfe7af88aaad33773a0da35fabe32416166a8796ddeed",
+      "bytes": 1781
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/expressions/slice_boundaries.py": {
+      "sha256": "dd9d45a02a7ca6047a55bc2b8948d7da7ec82db20ededcc65c296bfb527c5f6e",
+      "bytes": 1440
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/expressions/string_iteration.py": {
+      "sha256": "271d9734d107c38e38a6f92b94db4f064db47063d67c3a93365d93e6f6133365",
+      "bytes": 2146
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/floats/bytes.py": {
+      "sha256": "42b6a191b2ee817462c6e2c1d013f9399608e1b0fab3b440685d8c30d02c43e8",
+      "bytes": 716
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/floats/evaluation.py": {
+      "sha256": "3fb3946f41514c34746e187502c7d6d2af9a675f6d7c17e496a422277fa97be7",
+      "bytes": 1519
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/floats/storage.py": {
+      "sha256": "c171a8e0f0dd5d3e48e5c6d85cd338aaa8ffda6c69b8f89a8808b3882e4ce780",
+      "bytes": 3735
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/fstrings/effects.py": {
+      "sha256": "9d248f7a8c9fe5d216ec930a6aec9c2e4729c39845a331ebcb3680869aeb0a50",
+      "bytes": 1171
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/fstrings/files.py": {
+      "sha256": "72d78e1a305911991c96569f54b5caa2f368d038e72ebb5069949e0d16f47be9",
+      "bytes": 1701
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/fstrings/imported/helpers.py": {
+      "sha256": "d50a043e559f443e2cf69f40aa6b4e294e102a07d6332d185f27c24f390c8207",
+      "bytes": 60
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/fstrings/imported/main.py": {
+      "sha256": "00be4e17afb1b701cafb33dc2b6bc912ecaab03de41defad5d30157ace530402",
+      "bytes": 138
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/fstrings/literals.py": {
+      "sha256": "779c4a9b3f7c94946058a565028326c93244b274690d29a0e4218a990dc2ec4d",
+      "bytes": 973
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/fstrings/ownership.py": {
+      "sha256": "ea0573a530731dbbfed6079829b7dde432120b13d1a217554fb7cbca3fbd494c",
+      "bytes": 2033
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/fstrings/scalars.py": {
+      "sha256": "a3c5ce51ac92665fad1be349c869058dca60432b6626a519b4a80dda6ab13e1f",
+      "bytes": 1180
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/imports/arithmetic.py": {
+      "sha256": "61e3f1d26734cf56315c4fccf666e0570cd3b25182e105e4596faaaf5ce93c80",
+      "bytes": 214
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/imports/entry.py": {
+      "sha256": "1d573fb62ea858a814cfde55c439dcfa9c66838bac553db5b47b8cb18dd4d5ee",
+      "bytes": 774
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/imports/package/__init__.py": {
+      "sha256": "82efee395ef7da7d89ecf588a2459bb975ec94b3d2ac48b358c9e3b735597e25",
+      "bytes": 191
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/imports/package/__main__.py": {
+      "sha256": "4f217f1612640f31fe685e70a73f662438dc42eafd8a81e782f8539fce46e6d5",
+      "bytes": 66
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/imports/package/nested/__init__.py": {
+      "sha256": "3976178a3891d14d6abd358ff4d68f3a721adabbd76d10f34e5a8bb1de07ed04",
+      "bytes": 26
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/imports/package/nested/labels.py": {
+      "sha256": "802c90cda3d7cd7c61080a5e8c065a71597a29f0646981e156e126b074e4b514",
+      "bytes": 135
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/imports/package/operations.py": {
+      "sha256": "eacb80ef165efbe1225bced68a8e5387ce45af270a5152622a949469b0d4e029",
+      "bytes": 338
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/imports/package/program.py": {
+      "sha256": "b0b1f15f2bfea46039555f8ccb5fd73f32b1f94705b004b083ecc466e4aac0c6",
+      "bytes": 222
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/loop_else/condition_assignments.py": {
+      "sha256": "bba570ebd985b29d869c8a87cb20eb812860b6c17bbd9fe9f787556e0ce2c839",
+      "bytes": 726
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/loop_else/finally.py": {
+      "sha256": "39b69a20c923f16aa0467e1a36c2386aeaf3abcfd790023e39113186880a45c6",
+      "bytes": 1481
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/loop_else/flow.py": {
+      "sha256": "e32961d31bb875bd8e5e04aaa6404ca72077909282f0228ec591fdc7414cb15d",
+      "bytes": 1576
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/loop_else/nested.py": {
+      "sha256": "c2b20a1d61750fedd18ebcf0d45528f7d5991d35e0145d4e79e3e4323b3d8813",
+      "bytes": 1167
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/loop_else/parameters.py": {
+      "sha256": "1f2c02a63c96cf256c9784008c99cb7cd7b28eda7a4091f06cb6cd6b0dc9566c",
+      "bytes": 604
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/loop_else/source_lifetimes.py": {
+      "sha256": "8e7292d68086e3871f8d519db38b5f019eb88c9f565754c39b4785fe26e2b827",
+      "bytes": 2040
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/loop_else/sources.py": {
+      "sha256": "e75d22d0086b5ea1e19b5bb512c52ccfaf2c5fcec0e57b1cd8ff2d01867f5c03",
+      "bytes": 1599
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/loop_else/transfers.py": {
+      "sha256": "1df0054dbfa402c11f8584f1394035a397f91c68b2eb526b066a552824e5e9cd",
+      "bytes": 1289
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/loop_else/while_loops.py": {
+      "sha256": "5428d8ad4d16874d89a5c9f1f548e6eeed96d1ef585d23417c8fbc6a7abd790f",
+      "bytes": 818
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/matching/classes.py": {
+      "sha256": "5b5645f452a89068fd0db59bfee746899e2419a22cfb5f8ac0b9cd0c8c0a1e79",
+      "bytes": 2544
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/matching/cleanup.py": {
+      "sha256": "915480cf70c7990cd42c20974271141d89c26b2cbedb458e6eb57cdc468bc9d4",
+      "bytes": 1556
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/matching/control_flow.py": {
+      "sha256": "97a0d8bb59ba245b64fe5a979e97c8a92f48c1d4b71f0cf71a9b1070c96367cb",
+      "bytes": 2411
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/matching/guard_shadow.py": {
+      "sha256": "5f6958bf0444a5bd7896570091d62b6220b1dd0b7065418ab84e2a2d36e6e9ff",
+      "bytes": 305
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/matching/imported/main.py": {
+      "sha256": "57b7c31a4c880d925eadc1dbbcb86b5ac6bf912f0f5f51317dfff7bbcf1709e8",
+      "bytes": 600
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/matching/imported/model.py": {
+      "sha256": "1b8b37dd50aa8e2745c31b2f9d2bda1af94c48a571dadb37f146a0cd8babcfcd",
+      "bytes": 148
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/matching/mappings.py": {
+      "sha256": "eae250203af0c6d6666fbe0760b77e4b33f97f042e7a45c1bba392e4a95255ba",
+      "bytes": 2236
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/matching/numeric_and_bytes.py": {
+      "sha256": "099839aae0aada54048dc1f784baee3fca08e6bdb2b17949d50d7dc618286aa7",
+      "bytes": 2609
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/matching/numeric_keys.py": {
+      "sha256": "a38c2edd356e38b60efedf017bfe2f7e0c9f394dc5621f478b94060b235c6f75",
+      "bytes": 1630
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/matching/optional_float_captures.py": {
+      "sha256": "e07776f81362eea301c6abaa742c1d304beadef61f3de5ac2257eec178263c6d",
+      "bytes": 1037
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/matching/scalars.py": {
+      "sha256": "fb238e6b0e6125a3300449e8ca15c0bddec831cc1c37d26b2835a3496933c111",
+      "bytes": 2039
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/matching/sequences.py": {
+      "sha256": "d74ba3c5f61f912e475beb67a8fb85558b0daa5bb36198cdb03b25210e9cc683",
+      "bytes": 2384
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/truthiness/conditional_contexts.py": {
+      "sha256": "b57e08c94b6ceca549c2c8d51137678818ee3e77f22d683dabbeb2a59cb7b49c",
+      "bytes": 710
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/truthiness/containers.py": {
+      "sha256": "b9dc507bc03d0e44113a5e6b2c383e3a4d8a9fe37de5fef08ea9ccd2a43d8564",
+      "bytes": 1213
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/truthiness/contextual.py": {
+      "sha256": "597c00d4d20eacf630809e0924c795201189dddb177a77a4683c63da3d9a5a2f",
+      "bytes": 885
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/truthiness/evaluation.py": {
+      "sha256": "3f52d6b9aa24aad6dfa25f96d90fda7d3f67c4986fbce4c1deef2d838290e20b",
+      "bytes": 1453
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/truthiness/imported/helper.py": {
+      "sha256": "a22d6439323b16b5dd6a46f080796526171f0b8a872133628ac2697892d4e3f7",
+      "bytes": 183
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/truthiness/imported/main.py": {
+      "sha256": "36e58b6c4f967d8ec22d37b640aca00a26dea6df9988e68cafad39a3a9706ea5",
+      "bytes": 137
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/truthiness/optional_selection.py": {
+      "sha256": "b54c89b88bdd87fad18c38e8761fead90d16bd6697a5dbc80db49d7d9471fe84",
+      "bytes": 1773
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/truthiness/optionals.py": {
+      "sha256": "431462678cf5389489bad1a6ade5e91f30eac3f34005af46032b7b1a68e008fc",
+      "bytes": 1294
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/truthiness/ownership.py": {
+      "sha256": "1809b35cd1cd0ad738f32c9b114af723d94da7cb8fae9a75aee1309e9da019fb",
+      "bytes": 1448
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/truthiness/scalars.py": {
+      "sha256": "f5300f8b1ab65983696bcf23b911eb2decf7af1e088be54097a3f9b61f26e728",
+      "bytes": 1167
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fixtures/truthiness/streams_and_errors.py": {
+      "sha256": "c67530d7b765d6f59e7b4aad33efbec47b5c9f706e776d033c1cfc4337a8ad01",
+      "bytes": 1600
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/floats.py": {
+      "sha256": "3f5d6b0c7ac8dad2d93f8508fec4cd5c7d1afa53f3237dc8bba2472970fc9009",
+      "bytes": 11678
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/fstrings.py": {
+      "sha256": "5b64d3205acd42f4cfd291c38783499a6c54a29a17939955d9cb29bc31e71a0e",
+      "bytes": 9258
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/imports.py": {
+      "sha256": "b3f38a06a5cd40b8f7f1b233739240aad7262868425c49c23a8fbffec67b127a",
+      "bytes": 10494
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/io.py": {
+      "sha256": "631d08df643102928d7851a20080baa6bc3eefb75a2f634e00f061ff9defc6bb",
+      "bytes": 10980
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/loop_else.py": {
+      "sha256": "3d4e40793e0b7580f612288eb0e932bc2d9c7538b2e301c03faa4a52a8371a6d",
+      "bytes": 4033
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/lto.py": {
+      "sha256": "b49156b14c746a6fc34a512eb7263ad25f23d5aecb87ce352b084bb0ff0d5a3f",
+      "bytes": 4780
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/matching.py": {
+      "sha256": "f241dfdfcc5138bb3199c6b5bf7b8a8efa590319f12aabab12f6d8043f65c173",
+      "bytes": 12413
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/programs/borrowed_operands.py": {
+      "sha256": "b11f660bf7be77819c6ce8837b78cda087cfd6f00ab74715ccfea88022cb8b1c",
+      "bytes": 4222
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/programs/constant_division.py": {
+      "sha256": "9625893a535b7fbe7421acecce65cee6e9ea06f050b9e59473199d6b1fb38f19",
+      "bytes": 1233
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/programs/control_flow.py": {
+      "sha256": "0ab7519f7a2013b611e9c946f95edc48ea254c41514ef331eef10c02178d6b31",
+      "bytes": 1194
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/programs/decimal_input.py": {
+      "sha256": "540380824cecc0c073942118144c17d2185c2c9cb92d0d6ee7eb171a55bf8264",
+      "bytes": 513
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/programs/integer_matrix.py": {
+      "sha256": "36d33ac4564ce1a810cfcda04caf67d4775e9e01fdf56cca4eafc08efa8caf3c",
+      "bytes": 388
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/programs/ownership.py": {
+      "sha256": "b581438ef1fdb00edc399f550112c5c153c152f15d4d5cbfd7c33357b9d84d29",
+      "bytes": 1991
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/programs/short_strings.py": {
+      "sha256": "c35fc3f77c55f5d5cc70fa3b46312c290180207c5224d0aaee2bf7476688eed0",
+      "bytes": 1747
+    },
+    "/tmp/relar-control-flow-tests/final/source/tests/truthiness.py": {
+      "sha256": "9f10ac4744fb56869b59ad1d16465c943a692e3cf5de588f04eab10320bad21f",
+      "bytes": 3494
+    },
+    "/tmp/relar-control-flow-tests/final/run_group.py": {
+      "sha256": "fabcbfc955882aaf89a457f112d052dcbe7e2811b529f3f18609b786191a0146",
+      "bytes": 4220
+    },
+    "/tmp/relar-control-flow-tests/final/config.json": {
+      "sha256": "6b9421584bdb544d8241294c4030dab207b79e1b47858dbb424fcc782617545a",
+      "bytes": 959
+    },
+    "/tmp/relar-control-flow-tests/final/normal/bytes.json": {
+      "sha256": "917dfe430855dad5d96ac89b5d2dc1bbc7ac60ad7b72f193250e00263f0928a9",
+      "bytes": 1186
+    },
+    "/tmp/relar-control-flow-tests/final/normal/bytes.stdout.log": {
+      "sha256": "674052bcf024afc8069a1d67aeeabc35b5539f9e43b2ec1d5fc5b8e9b2c31dc3",
+      "bytes": 99
+    },
+    "/tmp/relar-control-flow-tests/final/normal/bytes.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/calls.json": {
+      "sha256": "2beb9d92fd6816630c52bc220881a146ba6a792b7751e235f43f1433fda7ad91",
+      "bytes": 1169
+    },
+    "/tmp/relar-control-flow-tests/final/normal/calls.stdout.log": {
+      "sha256": "8b5da06c502e162cae33864d6c1138395b494a40bfd167ee142360a0eac38331",
+      "bytes": 82
+    },
+    "/tmp/relar-control-flow-tests/final/normal/calls.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/classes.json": {
+      "sha256": "8d412b014e52d86b4cb68b2a1bcdcb4782f1c9cc1ae53d5684f6aa21c22a6632",
+      "bytes": 1174
+    },
+    "/tmp/relar-control-flow-tests/final/normal/classes.stdout.log": {
+      "sha256": "17b5e0bb55bf9b355d570c75aeb14d06b943d145fd3c750ef0318eb2452fd116",
+      "bytes": 83
+    },
+    "/tmp/relar-control-flow-tests/final/normal/classes.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/comprehensions.json": {
+      "sha256": "097913aae1f3d4d4d1908d28591f1e72c793ab3392a8a20f583002d47602b85e",
+      "bytes": 1196
+    },
+    "/tmp/relar-control-flow-tests/final/normal/comprehensions.stdout.log": {
+      "sha256": "0b39dc0bf421b95e47fca5fb6a0b86237f34b9b57ad573fcb86c329541b9f6bf",
+      "bytes": 91
+    },
+    "/tmp/relar-control-flow-tests/final/normal/comprehensions.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/containers.json": {
+      "sha256": "1e38bf924108b6a4f60b236cde8745f698736b4663791f198c634a4d2fdeb7f4",
+      "bytes": 1194
+    },
+    "/tmp/relar-control-flow-tests/final/normal/containers.stdout.log": {
+      "sha256": "7ee1b1d12e54c6c8aba8bb9e5bc4dce60a029e77f4aaddd6f021f7f453e2391b",
+      "bytes": 96
+    },
+    "/tmp/relar-control-flow-tests/final/normal/containers.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/differential.json": {
+      "sha256": "48fc8655494a5c6a5b2815996e43377fa5742a0a40820b2f28deb7a085b691fd",
+      "bytes": 1206
+    },
+    "/tmp/relar-control-flow-tests/final/normal/differential.stdout.log": {
+      "sha256": "bd6213d537870f3ce12fc4012cb254b21ddf4ecd47aea1515c035139a7d6c75e",
+      "bytes": 104
+    },
+    "/tmp/relar-control-flow-tests/final/normal/differential.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/exceptions.json": {
+      "sha256": "cd1743984f0998f72c0cf2fba76f091dd18ebc510364f2784d849ca7d8963b09",
+      "bytes": 1191
+    },
+    "/tmp/relar-control-flow-tests/final/normal/exceptions.stdout.log": {
+      "sha256": "2acc8d882974554d58247a8f2b8a536de2882591a83438ca391f35802fa7cf15",
+      "bytes": 94
+    },
+    "/tmp/relar-control-flow-tests/final/normal/exceptions.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/expressions.json": {
+      "sha256": "fbb5a06e1bd4b8ad76abfcf225074f1093f6f167c9bc1ce004f3217dc7ae65a3",
+      "bytes": 1200
+    },
+    "/tmp/relar-control-flow-tests/final/normal/expressions.stdout.log": {
+      "sha256": "d5f7fff5b10017814658c2e1400e04d89d63bfc0c891e6aed06bd6c37fc7aa5e",
+      "bytes": 101
+    },
+    "/tmp/relar-control-flow-tests/final/normal/expressions.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/files.json": {
+      "sha256": "22c128d7cdce1572b054250253bdec976a294f7a43c64d38d69dd443485b261b",
+      "bytes": 1163
+    },
+    "/tmp/relar-control-flow-tests/final/normal/files.stdout.log": {
+      "sha256": "150a6cd78bf0167d4285eb9f1d0e22bcff040c2064ac466c5ade34975c304a35",
+      "bytes": 76
+    },
+    "/tmp/relar-control-flow-tests/final/normal/files.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/floats.json": {
+      "sha256": "25b10c64661b1eb9e0e78468dda10d884a20535bd810ef7a3e9085c5e37e923c",
+      "bytes": 1172
+    },
+    "/tmp/relar-control-flow-tests/final/normal/floats.stdout.log": {
+      "sha256": "d75e0b28731cdf73b15b60e38b1a47e3aab148db7785631ecc3ef80829dfb506",
+      "bytes": 83
+    },
+    "/tmp/relar-control-flow-tests/final/normal/floats.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/fstrings.json": {
+      "sha256": "8c12d7dd6d62c7568cafea2aaaa3c310f62300a909bbe4fde1e3b321d366b123",
+      "bytes": 1179
+    },
+    "/tmp/relar-control-flow-tests/final/normal/fstrings.stdout.log": {
+      "sha256": "4f06dbdb68207a5293f0c8af4558a08f00dc1ca63d978e25b938a9bead6fd60d",
+      "bytes": 86
+    },
+    "/tmp/relar-control-flow-tests/final/normal/fstrings.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/imports.json": {
+      "sha256": "e514579c54f5eed041c9cb8d40946b417e90f8748803b7aad95599cdef941489",
+      "bytes": 1117
+    },
+    "/tmp/relar-control-flow-tests/final/normal/imports.stdout.log": {
+      "sha256": "29d9fdaf4f4e6d33d6e79f22dbf01c96bae4db4e8b3d1e2fae090b4b6890d835",
+      "bytes": 24
+    },
+    "/tmp/relar-control-flow-tests/final/normal/imports.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/io.json": {
+      "sha256": "34cd3f3d3e21eea8584edcb694d901ed1be18de552c0ea89e416abf60110f3c3",
+      "bytes": 1147
+    },
+    "/tmp/relar-control-flow-tests/final/normal/io.stdout.log": {
+      "sha256": "ff6b20527ed1fc9c431c42fafb7f1f6b7f32182e53ec07ab1cf5d5241f1c23e3",
+      "bytes": 66
+    },
+    "/tmp/relar-control-flow-tests/final/normal/io.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/loop_else.json": {
+      "sha256": "15c7485d2ec46ee9bbb2b41a64b0cbc4131bae381d5114da8cae9461f06737e3",
+      "bytes": 1182
+    },
+    "/tmp/relar-control-flow-tests/final/normal/loop_else.stdout.log": {
+      "sha256": "167cc46c9eef1310397e0ea7317508c8aa526ea178dda63f52ed802caa596479",
+      "bytes": 87
+    },
+    "/tmp/relar-control-flow-tests/final/normal/loop_else.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/matching-v2/matching.json": {
+      "sha256": "497d6ae8271abd5ae2a2c46f6700c500277a7096f0b5afc6f61d2771f780dcb6",
+      "bytes": 1196
+    },
+    "/tmp/relar-control-flow-tests/final/matching-v2/matching.stdout.log": {
+      "sha256": "36615f03bbd170af284f9e0030d33ba47aff68533a1ad763c8d317c8905988a9",
+      "bytes": 97
+    },
+    "/tmp/relar-control-flow-tests/final/matching-v2/matching.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/matching-v2/manifest.json": {
+      "sha256": "3fb3e223afcd6723a31ea5d97dd4270db5eedd16ac95022e34f442dacb63ec79",
+      "bytes": 23242
+    },
+    "/tmp/relar-control-flow-tests/final/matching-v2/summary.json": {
+      "sha256": "2c2c44425e849a14308c5369eb8569616b1b772e85d5db580ce73cadd990b342",
+      "bytes": 23314
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/assignments.py": {
+      "sha256": "dbb770f59c5c478e9f917993136086660ed690b6e5cfb2b2121661fb752100fb",
+      "bytes": 9686
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/bytes.py": {
+      "sha256": "078a7d526a94a61919ecd73a8b79e00260007fd805bd3e6955e0b7aa31108885",
+      "bytes": 8771
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/calls.py": {
+      "sha256": "a13a6437352a0f5da3b63332e2a8bb92cc2b1daf8304b4b1b08bac5f4c647c4c",
+      "bytes": 9702
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/classes.py": {
+      "sha256": "96d97c5d5f2e7a23c812b639d935ca9665ed1d2099c0b5a0efa1e223b4f54d03",
+      "bytes": 10313
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/comprehensions.py": {
+      "sha256": "5087417762de736e9d3398c46ac79667ebecdc93d4af847a64a03abd5cfac411",
+      "bytes": 13339
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/containers.py": {
+      "sha256": "005fd337f1358dc81395ada91faeac17a148d100a35732f62fca30270218088d",
+      "bytes": 39118
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/differential.py": {
+      "sha256": "6f28393b1b78d967065d080d4aec45836213b2609cd205299d358a4803695ffc",
+      "bytes": 9209
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/exceptions.py": {
+      "sha256": "29de31304fa700d21bbafe7d9a63a08642e4c3371e2af3efcc1044e4746deec3",
+      "bytes": 19947
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/expressions.py": {
+      "sha256": "b043c506f49ffd671601794a224a8f90fa623498b956e067331650d4a98c875b",
+      "bytes": 10341
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/files.py": {
+      "sha256": "a920cc543636110913668e3383fe678e02c86a281edd90a0cda50288753f60ba",
+      "bytes": 24823
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/assignments/comprehensions.py": {
+      "sha256": "483d77074713fd4834ef338ce6202f24d8ac9d664c2e57b0da5b49178bba8bbe",
+      "bytes": 2521
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/assignments/evaluation.py": {
+      "sha256": "d87f61f539f75f59056537e16e8740e246c0c87ff1ab59cf10bd1265b6646592",
+      "bytes": 1950
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/assignments/flow.py": {
+      "sha256": "8ea00f51eba259890940c0018643d7f4f74942faf8374b35aa0abce0e7124d2e",
+      "bytes": 1228
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/assignments/imported/helper.py": {
+      "sha256": "32d40c4efaefe0b988023f9db5dc962a2edf58253cc1a4d2b954fb51adff9e06",
+      "bytes": 86
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/assignments/imported/main.py": {
+      "sha256": "e2bcd0970ad3b457b808600fb5ded6c56dd4df5f362ac78b856435377397b905",
+      "bytes": 83
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/assignments/integrated_scalars.py": {
+      "sha256": "00c74bb112e83f3428d131b2e08c1a804f4a746e990cf1a8b0ada7a34beda969",
+      "bytes": 4405
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/assignments/named_subject.py": {
+      "sha256": "d621e5a81efac21d14fe4873185033e3cb1622667f815298cd5e6dad03b5c8d7",
+      "bytes": 563
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/assignments/nested_captures.py": {
+      "sha256": "23b789d53c5b577e705a48fa17922e57ac478865e87ef5e02809f09e2284473a",
+      "bytes": 1125
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/assignments/ownership.py": {
+      "sha256": "d7be55085c2d79642b0bf0a06c1a17833f1d661b0bc0d2e40e1eee8c9dbcd32b",
+      "bytes": 1933
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/assignments/prior_guard_owner.py": {
+      "sha256": "a1cd921ce7483a79c5a1c353c4eb9a8eefdc7fe97454c03780b3e61488d9e606",
+      "bytes": 478
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/bytes/cleanup.py": {
+      "sha256": "1afca11d2f2ce7caa5ae1cbbba87a53635e73057ac79dc9eefcffecbb884e2bd",
+      "bytes": 2171
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/bytes/errors.py": {
+      "sha256": "a30d7032862d84c4d71f94a7bcc487a5c8a6797cda997c0d2b4a5ce21a73f7b0",
+      "bytes": 1596
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/bytes/file_failures.py": {
+      "sha256": "04bc428597b9b1c3ae5d4dd37a40008a599a9123c6ae6228f7defb1c7948d8e1",
+      "bytes": 785
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/bytes/files.py": {
+      "sha256": "0b5ba26b15bc47df8371748869eb17ce68a003e36b1696e0bc34f1e8d50449b6",
+      "bytes": 2753
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/bytes/imported/helpers.py": {
+      "sha256": "594c1b6bb13e5d41d7fe5df03d2fb309dc1f4818daec2dc9cd79f56f0e8b673a",
+      "bytes": 155
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/bytes/imported/main.py": {
+      "sha256": "3e344cdeeb543e777f3046e09b9da90e35ca01b1857042d6baa81e9b33bb899a",
+      "bytes": 214
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/bytes/slices.py": {
+      "sha256": "97940206a552041f8d11e13ffd4d23bb1fa6adeeb8f67fe7b5c629486bcb1841",
+      "bytes": 1187
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/bytes/storage.py": {
+      "sha256": "689f2538cb843d65414666740f587d103e824d987468535715d9a32f8c682207",
+      "bytes": 2146
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/bytes/values.py": {
+      "sha256": "1b8e162d778147acd01ef601dae0020af6ec93c178251d9cd14e0bd09b1c93c1",
+      "bytes": 3272
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/calls/cleanup.py": {
+      "sha256": "f545e4206f8890c00dfa6264a90ad77f140f411cae3ab45690e4beec0e6886b0",
+      "bytes": 1870
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/calls/contextual.py": {
+      "sha256": "23921d7bb222bfa4e214f69f8438c4990e5edebe823d7abf2652c1266bd2fc45",
+      "bytes": 1492
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/calls/defaults.py": {
+      "sha256": "2478084b2aa4271eeb465a8cf1447509b46ef7b1501f44c7892a97120ac6a673",
+      "bytes": 2291
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/calls/effects.py": {
+      "sha256": "e226c11181be624aea832f8dfe7a65b19fe454d484d2ceda6a8111f238ebcfa3",
+      "bytes": 1878
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/calls/imported/facade.py": {
+      "sha256": "57976399e1c7e95e90c26396c4d8b298c5785430343182dab84623edf7bd734c",
+      "bytes": 167
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/calls/imported/helpers.py": {
+      "sha256": "c1599dac123816671d5c354f8cb15b94a7cf670c9fe754c82d81b729c900911e",
+      "bytes": 299
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/calls/imported/main.py": {
+      "sha256": "de1c4187461a88aa7815fffa4b8eea966da36449dff4eb58065f49e08d45b5a5",
+      "bytes": 380
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/calls/ownership.py": {
+      "sha256": "209b7a8c73fe9f50a7b843c0d3d1873b2044a06b2e41cbb52a6765b49c3d5a09",
+      "bytes": 1612
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/classes/imported/facade.py": {
+      "sha256": "1fc491f43b749999d1afd898230328773a6f0e24113589a3b4f4c36cd8f271df",
+      "bytes": 103
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/classes/imported/main.py": {
+      "sha256": "2ee9d22808a2bbff00171e34dceeee35da2b5b7211ddafd056fab7e3a1d19470",
+      "bytes": 752
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/classes/imported/models/__init__.py": {
+      "sha256": "cc9368b60161036bb8d4904bd2fccb1ab462fc7490daec4bd15713714d4c4af1",
+      "bytes": 76
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/classes/imported/models/records.py": {
+      "sha256": "873d83fdac64010579e753dd2b22acd098ff9824e2ee21f1f9e89255f5e608df",
+      "bytes": 261
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/classes/ownership.py": {
+      "sha256": "01a0a4e9b35c26ae99fa00564d947aea82c612e615792afd272785c35520a7bb",
+      "bytes": 4637
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/comprehensions/cleanup.py": {
+      "sha256": "7948e8cb76c4bdc54f5dc58cdf71b9f68fdc5bb3009049afe954c587c5a7c26a",
+      "bytes": 3731
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/comprehensions/containers.py": {
+      "sha256": "eb41b01bf52539ca63d12b3a6dff04e9f7144f9a56b9400bc4ddcdc993f89450",
+      "bytes": 4527
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/comprehensions/effects.py": {
+      "sha256": "84ed6a6904d312f45499542271151c9b8e9cdb4fae1f4e420a7db269353ddcc6",
+      "bytes": 2965
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/comprehensions/imported/facade.py": {
+      "sha256": "512361b0c69ee74b13171106d7e253c77c71bb4adb5ce97cbba9e6a052f39e5a",
+      "bytes": 151
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/comprehensions/imported/helpers.py": {
+      "sha256": "67eee6918df81fcf1ab2fb65673aefe6c7e1b932e03a52fa8996e60463256286",
+      "bytes": 715
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/comprehensions/imported/main.py": {
+      "sha256": "f9294a683edf9df46a04777afee80d3ed08db7ade78b397e71eba5dc39f236ae",
+      "bytes": 574
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/comprehensions/iteration.py": {
+      "sha256": "3894961fc768597f11506a0c5d07d9c1e7b3c9a294c7eb4a2ccb8d0c9c5738fb",
+      "bytes": 2352
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/comprehensions/ownership.py": {
+      "sha256": "d921fbef3b7c9acd5ec8a61def79d838a4ed17cd3a8bc97de94e18d2241a7cea",
+      "bytes": 3867
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/comprehensions/scoping.py": {
+      "sha256": "137401b5756b0b711db61ad0ed3c500ae6d7981611b0b36bfc86a737765459c3",
+      "bytes": 1685
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/contextual.py": {
+      "sha256": "2cb63da3dfb77ebe72f0cc758a51af9fc3dcaeba5f275ffc186d3d5ab46bc083",
+      "bytes": 1039
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/dictionaries.py": {
+      "sha256": "f8603f41a2bac9a8209557538b06314d62b2d5888c6b06af13ee86510ea97f3b",
+      "bytes": 11591
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/index_proofs.py": {
+      "sha256": "c5246e43c65bb66781fa16ce4ea9daa39474569ec03af470d5a35fde11062e6a",
+      "bytes": 9217
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/iteration.py": {
+      "sha256": "1a32951ce1db29274156067b099169b1bea9633a3462e29cde409a4a0adc6afc",
+      "bytes": 6119
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/lists.py": {
+      "sha256": "958067d313b7ca0015b49532a32efc1369b24738c012becf6465b52d07d8f961",
+      "bytes": 1087
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/objects.py": {
+      "sha256": "86c25e805beccb666b331c10351f674a9d7dc7493a1311e388bd3df65adf4e89",
+      "bytes": 1107
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/optional.py": {
+      "sha256": "f091b226523e2def53faea8692ea6cedfbf1527fd57245a7f9b71d55eaa4b18e",
+      "bytes": 1956
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/optional_effects.py": {
+      "sha256": "c48d7757e1b20d1fa042aa221b7c4162b62ce50bb941078cd8651728ec0b4f77",
+      "bytes": 1917
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/optional_flow.py": {
+      "sha256": "b214eaf2cd9016f6d881491b44fcbe5fa5a8bf90ee286fa9a241adbf413c03d5",
+      "bytes": 3637
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/representation_cleanup.py": {
+      "sha256": "1bba523c14e49a219581fcfac3ec3cf0c56e35a30a27f1250529f9781f276f1a",
+      "bytes": 3795
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/representation_niches.py": {
+      "sha256": "8cddfe6474b1ec03502aaca243224761a7577a63df7defc6d4e5e3e161a2efb1",
+      "bytes": 4954
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/sets.py": {
+      "sha256": "dca2b038827e77a9cea25b1034aca14adc4eb1e9f4c6844b7c74a7ea3a92aedd",
+      "bytes": 7505
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/string_concat.py": {
+      "sha256": "e23c2e5a0ab749f429983a1b551a8c0d4fdabcb39b6c83ff56f5a24182753fe7",
+      "bytes": 4341
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/strings.py": {
+      "sha256": "d1d2aeb83b6906ccfba1242a23c3be7756915bd2cc86cfcb8ac28703a4b78c51",
+      "bytes": 884
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/containers/tuples.py": {
+      "sha256": "be3b2819fc7e8aefd2e14621e67dace0b7a8afc030721fcde6b1fecfe52a592d",
+      "bytes": 1057
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/expressions/cleanup.py": {
+      "sha256": "3632a6f6267d567750ec7515eee72cd6e5d5670c488d3351ee2a74b5e23284a1",
+      "bytes": 2675
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/expressions/conditionals.py": {
+      "sha256": "985d0174a4c93eed4c24d87d51706527aa6d69f3c3c61041ba1d8932ef14be3b",
+      "bytes": 4176
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/expressions/evaluation_order.py": {
+      "sha256": "a11f30cf4c07f417da5cf554cabf05a30ef77ec062a1f40ceeb7586184831992",
+      "bytes": 2922
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/expressions/imported/helper.py": {
+      "sha256": "b52346cdbae3667715f643c782108602cf5b51e427c500bb86e944e34e0fc6a0",
+      "bytes": 294
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/expressions/imported/main.py": {
+      "sha256": "afd4e914ef92eada8df69d9d9d52eb260ef13ac38658f2cae169311a3f388940",
+      "bytes": 290
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/expressions/shallow_copies.py": {
+      "sha256": "aa264e00e2478907ddbdfe7af88aaad33773a0da35fabe32416166a8796ddeed",
+      "bytes": 1781
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/expressions/slice_boundaries.py": {
+      "sha256": "dd9d45a02a7ca6047a55bc2b8948d7da7ec82db20ededcc65c296bfb527c5f6e",
+      "bytes": 1440
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/expressions/string_iteration.py": {
+      "sha256": "271d9734d107c38e38a6f92b94db4f064db47063d67c3a93365d93e6f6133365",
+      "bytes": 2146
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/floats/bytes.py": {
+      "sha256": "42b6a191b2ee817462c6e2c1d013f9399608e1b0fab3b440685d8c30d02c43e8",
+      "bytes": 716
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/floats/evaluation.py": {
+      "sha256": "3fb3946f41514c34746e187502c7d6d2af9a675f6d7c17e496a422277fa97be7",
+      "bytes": 1519
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/floats/storage.py": {
+      "sha256": "c171a8e0f0dd5d3e48e5c6d85cd338aaa8ffda6c69b8f89a8808b3882e4ce780",
+      "bytes": 3735
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/fstrings/effects.py": {
+      "sha256": "9d248f7a8c9fe5d216ec930a6aec9c2e4729c39845a331ebcb3680869aeb0a50",
+      "bytes": 1171
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/fstrings/files.py": {
+      "sha256": "72d78e1a305911991c96569f54b5caa2f368d038e72ebb5069949e0d16f47be9",
+      "bytes": 1701
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/fstrings/imported/helpers.py": {
+      "sha256": "d50a043e559f443e2cf69f40aa6b4e294e102a07d6332d185f27c24f390c8207",
+      "bytes": 60
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/fstrings/imported/main.py": {
+      "sha256": "00be4e17afb1b701cafb33dc2b6bc912ecaab03de41defad5d30157ace530402",
+      "bytes": 138
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/fstrings/literals.py": {
+      "sha256": "779c4a9b3f7c94946058a565028326c93244b274690d29a0e4218a990dc2ec4d",
+      "bytes": 973
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/fstrings/ownership.py": {
+      "sha256": "ea0573a530731dbbfed6079829b7dde432120b13d1a217554fb7cbca3fbd494c",
+      "bytes": 2033
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/fstrings/scalars.py": {
+      "sha256": "a3c5ce51ac92665fad1be349c869058dca60432b6626a519b4a80dda6ab13e1f",
+      "bytes": 1180
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/imports/arithmetic.py": {
+      "sha256": "61e3f1d26734cf56315c4fccf666e0570cd3b25182e105e4596faaaf5ce93c80",
+      "bytes": 214
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/imports/entry.py": {
+      "sha256": "1d573fb62ea858a814cfde55c439dcfa9c66838bac553db5b47b8cb18dd4d5ee",
+      "bytes": 774
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/imports/package/__init__.py": {
+      "sha256": "82efee395ef7da7d89ecf588a2459bb975ec94b3d2ac48b358c9e3b735597e25",
+      "bytes": 191
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/imports/package/__main__.py": {
+      "sha256": "4f217f1612640f31fe685e70a73f662438dc42eafd8a81e782f8539fce46e6d5",
+      "bytes": 66
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/imports/package/nested/__init__.py": {
+      "sha256": "3976178a3891d14d6abd358ff4d68f3a721adabbd76d10f34e5a8bb1de07ed04",
+      "bytes": 26
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/imports/package/nested/labels.py": {
+      "sha256": "802c90cda3d7cd7c61080a5e8c065a71597a29f0646981e156e126b074e4b514",
+      "bytes": 135
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/imports/package/operations.py": {
+      "sha256": "eacb80ef165efbe1225bced68a8e5387ce45af270a5152622a949469b0d4e029",
+      "bytes": 338
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/imports/package/program.py": {
+      "sha256": "b0b1f15f2bfea46039555f8ccb5fd73f32b1f94705b004b083ecc466e4aac0c6",
+      "bytes": 222
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/loop_else/condition_assignments.py": {
+      "sha256": "bba570ebd985b29d869c8a87cb20eb812860b6c17bbd9fe9f787556e0ce2c839",
+      "bytes": 726
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/loop_else/finally.py": {
+      "sha256": "39b69a20c923f16aa0467e1a36c2386aeaf3abcfd790023e39113186880a45c6",
+      "bytes": 1481
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/loop_else/flow.py": {
+      "sha256": "e32961d31bb875bd8e5e04aaa6404ca72077909282f0228ec591fdc7414cb15d",
+      "bytes": 1576
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/loop_else/nested.py": {
+      "sha256": "c2b20a1d61750fedd18ebcf0d45528f7d5991d35e0145d4e79e3e4323b3d8813",
+      "bytes": 1167
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/loop_else/parameters.py": {
+      "sha256": "1f2c02a63c96cf256c9784008c99cb7cd7b28eda7a4091f06cb6cd6b0dc9566c",
+      "bytes": 604
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/loop_else/source_lifetimes.py": {
+      "sha256": "8e7292d68086e3871f8d519db38b5f019eb88c9f565754c39b4785fe26e2b827",
+      "bytes": 2040
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/loop_else/sources.py": {
+      "sha256": "e75d22d0086b5ea1e19b5bb512c52ccfaf2c5fcec0e57b1cd8ff2d01867f5c03",
+      "bytes": 1599
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/loop_else/transfers.py": {
+      "sha256": "1df0054dbfa402c11f8584f1394035a397f91c68b2eb526b066a552824e5e9cd",
+      "bytes": 1289
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/loop_else/while_loops.py": {
+      "sha256": "5428d8ad4d16874d89a5c9f1f548e6eeed96d1ef585d23417c8fbc6a7abd790f",
+      "bytes": 818
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/matching/classes.py": {
+      "sha256": "5b5645f452a89068fd0db59bfee746899e2419a22cfb5f8ac0b9cd0c8c0a1e79",
+      "bytes": 2544
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/matching/cleanup.py": {
+      "sha256": "915480cf70c7990cd42c20974271141d89c26b2cbedb458e6eb57cdc468bc9d4",
+      "bytes": 1556
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/matching/control_flow.py": {
+      "sha256": "97a0d8bb59ba245b64fe5a979e97c8a92f48c1d4b71f0cf71a9b1070c96367cb",
+      "bytes": 2411
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/matching/guard_shadow.py": {
+      "sha256": "5f6958bf0444a5bd7896570091d62b6220b1dd0b7065418ab84e2a2d36e6e9ff",
+      "bytes": 305
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/matching/imported/main.py": {
+      "sha256": "57b7c31a4c880d925eadc1dbbcb86b5ac6bf912f0f5f51317dfff7bbcf1709e8",
+      "bytes": 600
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/matching/imported/model.py": {
+      "sha256": "1b8b37dd50aa8e2745c31b2f9d2bda1af94c48a571dadb37f146a0cd8babcfcd",
+      "bytes": 148
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/matching/mappings.py": {
+      "sha256": "eae250203af0c6d6666fbe0760b77e4b33f97f042e7a45c1bba392e4a95255ba",
+      "bytes": 2236
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/matching/numeric_and_bytes.py": {
+      "sha256": "099839aae0aada54048dc1f784baee3fca08e6bdb2b17949d50d7dc618286aa7",
+      "bytes": 2609
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/matching/numeric_keys.py": {
+      "sha256": "a38c2edd356e38b60efedf017bfe2f7e0c9f394dc5621f478b94060b235c6f75",
+      "bytes": 1630
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/matching/optional_float_captures.py": {
+      "sha256": "e07776f81362eea301c6abaa742c1d304beadef61f3de5ac2257eec178263c6d",
+      "bytes": 1037
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/matching/optional_guards.py": {
+      "sha256": "9ed46ae3f4f324628757685492c74efbeaebfafa97aa62d5238f5a7e61b71774",
+      "bytes": 204
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/matching/scalars.py": {
+      "sha256": "fb238e6b0e6125a3300449e8ca15c0bddec831cc1c37d26b2835a3496933c111",
+      "bytes": 2039
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/matching/sequences.py": {
+      "sha256": "d74ba3c5f61f912e475beb67a8fb85558b0daa5bb36198cdb03b25210e9cc683",
+      "bytes": 2384
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/truthiness/conditional_contexts.py": {
+      "sha256": "b57e08c94b6ceca549c2c8d51137678818ee3e77f22d683dabbeb2a59cb7b49c",
+      "bytes": 710
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/truthiness/containers.py": {
+      "sha256": "b9dc507bc03d0e44113a5e6b2c383e3a4d8a9fe37de5fef08ea9ccd2a43d8564",
+      "bytes": 1213
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/truthiness/contextual.py": {
+      "sha256": "597c00d4d20eacf630809e0924c795201189dddb177a77a4683c63da3d9a5a2f",
+      "bytes": 885
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/truthiness/evaluation.py": {
+      "sha256": "3f52d6b9aa24aad6dfa25f96d90fda7d3f67c4986fbce4c1deef2d838290e20b",
+      "bytes": 1453
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/truthiness/imported/helper.py": {
+      "sha256": "a22d6439323b16b5dd6a46f080796526171f0b8a872133628ac2697892d4e3f7",
+      "bytes": 183
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/truthiness/imported/main.py": {
+      "sha256": "36e58b6c4f967d8ec22d37b640aca00a26dea6df9988e68cafad39a3a9706ea5",
+      "bytes": 137
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/truthiness/optional_selection.py": {
+      "sha256": "b54c89b88bdd87fad18c38e8761fead90d16bd6697a5dbc80db49d7d9471fe84",
+      "bytes": 1773
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/truthiness/optionals.py": {
+      "sha256": "431462678cf5389489bad1a6ade5e91f30eac3f34005af46032b7b1a68e008fc",
+      "bytes": 1294
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/truthiness/ownership.py": {
+      "sha256": "1809b35cd1cd0ad738f32c9b114af723d94da7cb8fae9a75aee1309e9da019fb",
+      "bytes": 1448
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/truthiness/scalars.py": {
+      "sha256": "f5300f8b1ab65983696bcf23b911eb2decf7af1e088be54097a3f9b61f26e728",
+      "bytes": 1167
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fixtures/truthiness/streams_and_errors.py": {
+      "sha256": "c67530d7b765d6f59e7b4aad33efbec47b5c9f706e776d033c1cfc4337a8ad01",
+      "bytes": 1600
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/floats.py": {
+      "sha256": "3f5d6b0c7ac8dad2d93f8508fec4cd5c7d1afa53f3237dc8bba2472970fc9009",
+      "bytes": 11678
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/fstrings.py": {
+      "sha256": "5b64d3205acd42f4cfd291c38783499a6c54a29a17939955d9cb29bc31e71a0e",
+      "bytes": 9258
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/imports.py": {
+      "sha256": "b3f38a06a5cd40b8f7f1b233739240aad7262868425c49c23a8fbffec67b127a",
+      "bytes": 10494
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/io.py": {
+      "sha256": "631d08df643102928d7851a20080baa6bc3eefb75a2f634e00f061ff9defc6bb",
+      "bytes": 10980
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/loop_else.py": {
+      "sha256": "3d4e40793e0b7580f612288eb0e932bc2d9c7538b2e301c03faa4a52a8371a6d",
+      "bytes": 4033
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/lto.py": {
+      "sha256": "b49156b14c746a6fc34a512eb7263ad25f23d5aecb87ce352b084bb0ff0d5a3f",
+      "bytes": 4780
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/matching.py": {
+      "sha256": "c441191745849634e89cf1701fb0d4a2f608db1a3fa598eae278990491ec176a",
+      "bytes": 12288
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/programs/borrowed_operands.py": {
+      "sha256": "b11f660bf7be77819c6ce8837b78cda087cfd6f00ab74715ccfea88022cb8b1c",
+      "bytes": 4222
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/programs/constant_division.py": {
+      "sha256": "9625893a535b7fbe7421acecce65cee6e9ea06f050b9e59473199d6b1fb38f19",
+      "bytes": 1233
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/programs/control_flow.py": {
+      "sha256": "0ab7519f7a2013b611e9c946f95edc48ea254c41514ef331eef10c02178d6b31",
+      "bytes": 1194
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/programs/decimal_input.py": {
+      "sha256": "540380824cecc0c073942118144c17d2185c2c9cb92d0d6ee7eb171a55bf8264",
+      "bytes": 513
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/programs/integer_matrix.py": {
+      "sha256": "36d33ac4564ce1a810cfcda04caf67d4775e9e01fdf56cca4eafc08efa8caf3c",
+      "bytes": 388
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/programs/ownership.py": {
+      "sha256": "b581438ef1fdb00edc399f550112c5c153c152f15d4d5cbfd7c33357b9d84d29",
+      "bytes": 1991
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/programs/short_strings.py": {
+      "sha256": "c35fc3f77c55f5d5cc70fa3b46312c290180207c5224d0aaee2bf7476688eed0",
+      "bytes": 1747
+    },
+    "/tmp/relar-control-flow-tests/final/source-v2/tests/truthiness.py": {
+      "sha256": "9f10ac4744fb56869b59ad1d16465c943a692e3cf5de588f04eab10320bad21f",
+      "bytes": 3494
+    },
+    "/tmp/relar-control-flow-tests/final/run_matching_v2.py": {
+      "sha256": "49eb2ffeecb945d4698b8a6440dafa7bfd21099ff24c42abd91ec0f924fa932c",
+      "bytes": 4143
+    },
+    "/tmp/relar-control-flow-tests/final/config-v2.json": {
+      "sha256": "194dc93d266cd6b4a1124d1677b92fb9d22e167fe6137d79884335d47963b9ff",
+      "bytes": 962
+    },
+    "/tmp/relar-control-flow-tests/final/normal/truthiness.json": {
+      "sha256": "f00a5df6b27b91e3e45c7b5fd709fa9d0e6bec4a52e7d1b0ddc147871059886f",
+      "bytes": 1185
+    },
+    "/tmp/relar-control-flow-tests/final/normal/truthiness.stdout.log": {
+      "sha256": "ca557b0266d1225666300aa3de594dde3acbbba87dc37e9e4f443b750f08a767",
+      "bytes": 88
+    },
+    "/tmp/relar-control-flow-tests/final/normal/truthiness.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/truthiness.json": {
+      "sha256": "f56b8eb8a6a698b35c47fa63d2fdb0c85e0c5b9e18c5433961abc723959b0427",
+      "bytes": 1315
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/truthiness.stdout.log": {
+      "sha256": "560dd75656956173bf0705dbd1716ac7a4c8875a699843908cf7f833d54cdeaf",
+      "bytes": 83
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/truthiness.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/manifest.json": {
+      "sha256": "c936bd1c7eabc589edcdb878d982dcf274518d687d6e3e6748872bccb16b82bb",
+      "bytes": 22905
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/summary.json": {
+      "sha256": "291d07d349a21724100cdb7e24987079484b5a33af6fdb5afc3491fde8e11a50",
+      "bytes": 23251
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/loop_else.json": {
+      "sha256": "4622e37512518cc9e91857066e4799f4ce162aa1508d3cb4115b3131e57dce24",
+      "bytes": 1312
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/loop_else.stdout.log": {
+      "sha256": "50b2d42c43f767011cc9834dfb919990f061c2bfe8a6361c9cfb5a11360c2b02",
+      "bytes": 82
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/loop_else.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/assignments.json": {
+      "sha256": "7cad052720735bca4c5c101c7ff89561429602cd6c8456268d35639c3dbb2479",
+      "bytes": 1328
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/assignments.stdout.log": {
+      "sha256": "149bc3baeaa4ea0bada7609cf6fc573e7b582843cbd60f1b66f3b8b61b73175c",
+      "bytes": 94
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/assignments.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/exceptions.json": {
+      "sha256": "c9c3eff0333abbaee3628220ef74d49d893fe1c46d0a81e1ec0ddfc1a69196d4",
+      "bytes": 1321
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/exceptions.stdout.log": {
+      "sha256": "4be6f9ad9a05c34549de276fa89593d1ea332cc66be7ccb7b0216027cb0ea3f3",
+      "bytes": 89
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/exceptions.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/files.json": {
+      "sha256": "dba4756e9269244a8fd32e4ee49f522cd55bf4bc2b0e7122de599154cc25a757",
+      "bytes": 1293
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/files.stdout.log": {
+      "sha256": "3dd64d3fc327432c225d6548a6ec9041a05e068128093bc969f1978319f64cc1",
+      "bytes": 71
+    },
+    "/tmp/relar-control-flow-tests/final/thin-lto/files.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/asan/truthiness.json": {
+      "sha256": "db00416f9821f0272d02bf3c5c375f2b525fc7a31fe7d6fa76d9dbaa0f1d502a",
+      "bytes": 1205
+    },
+    "/tmp/relar-control-flow-tests/final/asan/truthiness.stdout.log": {
+      "sha256": "4b469148b3e98f3a8c6fea2db346d9522b2da547a9d2e6017a2494e14646400e",
+      "bytes": 87
+    },
+    "/tmp/relar-control-flow-tests/final/asan/truthiness.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/asan/manifest.json": {
+      "sha256": "7efb76ed92d422e70e608523ea0b669e2f8aebe912d62338174818aa57911fe6",
+      "bytes": 22725
+    },
+    "/tmp/relar-control-flow-tests/final/asan/summary.json": {
+      "sha256": "cfa94fb9e2402536e97b58eebd504743cf41f639fd5b6fd550c5ad7d993e3d7c",
+      "bytes": 23062
+    },
+    "/tmp/relar-control-flow-tests/final/asan/loop_else.json": {
+      "sha256": "70f5b8437d8f96f3619de4709ebe34fd4eb0cd7413bdd0fb403d33682185e8e3",
+      "bytes": 1202
+    },
+    "/tmp/relar-control-flow-tests/final/asan/loop_else.stdout.log": {
+      "sha256": "1ff3fe74a7cc8e6f96d3becd9066920aa0cb1a54d8fd596fb7f9a70387501f2c",
+      "bytes": 86
+    },
+    "/tmp/relar-control-flow-tests/final/asan/loop_else.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/asan/assignments.json": {
+      "sha256": "47200a97b2fda6a1540f41a6055a3d14ed901050f113378ec75173e04de997c5",
+      "bytes": 1218
+    },
+    "/tmp/relar-control-flow-tests/final/asan/assignments.stdout.log": {
+      "sha256": "012baca9b71df9288bfce55e1962315fa9ad35b67817cc77a9bae109242f9d96",
+      "bytes": 98
+    },
+    "/tmp/relar-control-flow-tests/final/asan/assignments.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/asan/exceptions.json": {
+      "sha256": "6c78f9de3be265e834e5fd03a3f5c84aec6f21bc8961da7fd7e918f514d1489d",
+      "bytes": 1211
+    },
+    "/tmp/relar-control-flow-tests/final/asan/exceptions.stdout.log": {
+      "sha256": "e8a9330b9803894544e8e925fcf9047317917337fd7631e6f4114094cd3a0944",
+      "bytes": 93
+    },
+    "/tmp/relar-control-flow-tests/final/asan/exceptions.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/asan/files.json": {
+      "sha256": "9ff484f441481d93ed74ae6b67c491602513239a45ad5b3fc827ccc714d8e22d",
+      "bytes": 1183
+    },
+    "/tmp/relar-control-flow-tests/final/asan/files.stdout.log": {
+      "sha256": "b5a5843eee34f5ac820c8ef3a14789cf687fab67bf5d163e63f879b3f36a1bda",
+      "bytes": 75
+    },
+    "/tmp/relar-control-flow-tests/final/asan/files.stderr.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-tests/final/normal/matching.json": {
+      "sha256": "aed9b9d46c587f35dc8a8256aa2865a11a07d92b1f9fb97e58e6ae4763ed69da",
+      "bytes": 1795
+    },
+    "/tmp/relar-control-flow-rust-validation/receipt.json": {
+      "sha256": "9896f570430c44ad558eadcbed1d692b76ca9b6811dee0300b09e981132b29cb",
+      "bytes": 1806
+    },
+    "/tmp/relar-control-flow-rust-validation/0.log": {
+      "sha256": "ab0ed0fae4de338a79f8af2d982c8d6517347afc6919304df2163de53c1c8324",
+      "bytes": 8931
+    },
+    "/tmp/relar-control-flow-rust-validation/1.log": {
+      "sha256": "360af5f7792919b1ad70f1a2f8e8a78a0040e0224ad1c6579d8daddf1f8bfe84",
+      "bytes": 168
+    },
+    "/tmp/relar-control-flow-rust-validation/2.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-rust-validation/3.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-inventory-asan/receipt.json": {
+      "sha256": "140e5db307edbf88e6cfa5cdeef6678d79b5a971caad32aa4eab624e2f923626",
+      "bytes": 5943
+    },
+    "/tmp/relar-control-flow-inventory-asan/inventory_reconciliation.ll": {
+      "sha256": "fc1bcf2253579f3714c7d5db7ba883be34c8b74430c9042ced2b3f0b1c5f1dab",
+      "bytes": 206546
+    },
+    "/tmp/relar-control-flow-inventory-asan/validation.json": {
+      "sha256": "04f0201efb6ae180b13395f3c91122fc56a3b419f4f6819eb0e07e6ad9c12aad",
+      "bytes": 775224
+    },
+    "/tmp/relar-control-flow-inventory-asan/source-manifest.json": {
+      "sha256": "a3e1c5a25b2dcfbe0c4d819003b858f7165de8f5933d4a4f815612cac8d9727b",
+      "bytes": 3551
+    },
+    "/tmp/relar-control-flow-inventory-asan/tool-manifest.json": {
+      "sha256": "57ccc8725b1bceefa5cb9e10113fc25849a704243bfa4d2439dc31434d4c92bd",
+      "bytes": 8474
+    },
+    "/tmp/relar-control-flow-inventory-asan/case-corpus.json": {
+      "sha256": "d1d4dc92550ffa78a9dc01ec52268146626fdbd931f071eca1ea07dd35fe8eb0",
+      "bytes": 166396
+    },
+    "/tmp/relar-control-flow-inventory-asan/commands.json": {
+      "sha256": "ce0fa0f40d6e5406aca99660f909af0e31703eb6e30e77617a18fcf6b58264a5",
+      "bytes": 1284
+    },
+    "/tmp/relar-control-flow-inventory-asan/compile.stdout": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-inventory-asan/compile.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/tmp/relar-control-flow-inventory-asan/inputs/examples/inventory_reconciliation/__init__.py": {
+      "sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+      "bytes": 75
+    },
+    "/tmp/relar-control-flow-inventory-asan/inputs/examples/inventory_reconciliation/__main__.py": {
+      "sha256": "48c3015dcbac52a08f48b800197398076ac26f37ca480a4ee1ebab2b72c9349c",
+      "bytes": 798
+    },
+    "/tmp/relar-control-flow-inventory-asan/inputs/examples/inventory_reconciliation/load.py": {
+      "sha256": "63b6a27309c84a8e201703f23f1e825ffdc76b5f367b1f336001aa84dcee8429",
+      "bytes": 3520
+    },
+    "/tmp/relar-control-flow-inventory-asan/inputs/examples/inventory_reconciliation/model.py": {
+      "sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
+      "bytes": 1544
+    },
+    "/tmp/relar-control-flow-inventory-asan/inputs/examples/inventory_reconciliation/reconcile.py": {
+      "sha256": "eca175bf2a76c26b7429e0f7ad574be004a63e0f3424a9a3f3ac7aea4bd8d0ea",
+      "bytes": 1725
+    },
+    "/tmp/relar-control-flow-inventory-asan/inputs/examples/inventory_reconciliation/render.py": {
+      "sha256": "df456686711363c55c13f652df5a32df6b47ce666a71b8a2c8806b542e31357f",
+      "bytes": 2242
+    },
+    "/tmp/relar-control-flow-inventory-asan/inputs/benchmarks/inventory_validate.py": {
+      "sha256": "b4e824402bb37e70a68c7c72561336dfbc4b01f914ec0afb756b77d52f7d30d0",
+      "bytes": 20905
+    },
+    "/tmp/relar-control-flow-inventory-asan/inputs/benchmarks/manifest_validate.py": {
+      "sha256": "2ba1a0e0062583add10cc7e5fd347b67ad82769a74dfc761266cc604685d738d",
+      "bytes": 19931
+    },
+    "/tmp/relar-control-flow-inventory-asan/inputs/benchmarks/batch_validate.py": {
+      "sha256": "d9ceda6746224421ac5c6c8ca555b8d5beed4d8aec93487674269bb5b765f941",
+      "bytes": 10937
+    },
+    "/tmp/relar-control-flow-inventory-asan/inputs/benchmarks/incremental_validate.py": {
+      "sha256": "f384d2807c07006572a5dec0146abd026511ed59f2ae1d0a674dd9c60e95782b",
+      "bytes": 21198
+    },
+    "/tmp/relar-control-flow-inventory-asan/inputs/benchmarks/inventory_benchmark.py": {
+      "sha256": "2aeb2c8440f3c8ca4a560c4dee2ff840dd186e13e2bf96a1aecd2d5e8799290c",
+      "bytes": 30611
+    }
+  },
+  "reconciliation": "The test-only restack changed the optional Boolean match-guard rejection and added its positive fixture. All compiled sources and all four frozen artifacts are identical; the other test inputs are unchanged. The stale failure and corrected 73-check run are retained.",
+  "sanitizer_limit": "Application LLVM and the custom runtime were instrumented; leak checking was enabled outside ptrace. The prebuilt Rust standard library was not rebuilt with sanitizer instrumentation.",
+  "scope": "Semantic checks include accepted programs, expected errors, and compile-time rejections; Rust unit tests and the 205 inventory ASan outcomes are reported separately. Native artifact bytes are external to the text/source archive; their identities are joined from recorded hashes."
+}
