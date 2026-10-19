@@ -471,6 +471,30 @@ fn python_whitespace(value: char) -> bool {
     value.is_whitespace() || matches!(value, '\u{001c}'..='\u{001f}')
 }
 
+/// Removes a trailing set of Unicode scalars, or Python whitespace for null.
+///
+/// # Safety
+/// `value` roots a live string and `chars` is either another rooted string or
+/// null. The returned string owns an independent reference, including no-ops.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_rstrip(value: *const Str, chars: *const Str) -> *const Str {
+    // SAFETY: both immutable strings remain rooted throughout this call.
+    let (source, chars) = unsafe { (&*value, chars.as_ref()) };
+    let stripped = source.trim_end_matches(|character: char| {
+        chars.map_or_else(
+            || python_whitespace(character),
+            |chars| chars.contains(character),
+        )
+    });
+    if stripped.len() == source.len() {
+        // SAFETY: acquiring an independent reference preserves the caller's owner.
+        unsafe { Rc::increment_strong_count(value) };
+        value
+    } else {
+        Rc::into_raw(Rc::new(Str::new(stripped)))
+    }
+}
+
 /// Splits with Python's no-separator whitespace rules, omitting empty fields.
 ///
 /// # Safety

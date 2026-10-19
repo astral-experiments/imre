@@ -116,6 +116,7 @@ const RESERVED: &[&str] = &[
     "dict",
     "set",
     "len",
+    "divmod",
     "input",
     "print",
     "range",
@@ -2172,6 +2173,19 @@ impl<'a> Checker<'a> {
         right: Type,
         node: &impl Ranged,
     ) -> Result<(Binary, Type), String> {
+        let bitwise = match op {
+            ast::Operator::BitAnd => Some(Binary::BitAnd),
+            ast::Operator::BitOr => Some(Binary::BitOr),
+            ast::Operator::BitXor => Some(Binary::BitXor),
+            ast::Operator::LShift => Some(Binary::LeftShift),
+            ast::Operator::RShift => Some(Binary::RightShift),
+            _ => None,
+        };
+        if let Some(op) = bitwise {
+            self.expect(Type::Int, left, node)?;
+            self.expect(Type::Int, right, node)?;
+            return Ok((op, Type::Int));
+        }
         if op == ast::Operator::Mult {
             if (self.types.element(left).is_some() || left == Type::Bytes) && right == Type::Int {
                 return Ok((Binary::Repeat, left));
@@ -2333,6 +2347,20 @@ impl<'a> Checker<'a> {
                 };
                 match unary.op {
                     ast::UnaryOp::Not => (Type::Bool, ExprKind::Not(Box::new(value))),
+                    ast::UnaryOp::Invert => {
+                        self.expect(Type::Int, value.ty, expression)?;
+                        (
+                            Type::Int,
+                            ExprKind::Binary(
+                                Binary::BitXor,
+                                Box::new(value),
+                                Box::new(Expr {
+                                    ty: Type::Int,
+                                    kind: ExprKind::Int("-1".into()),
+                                }),
+                            ),
+                        )
+                    }
                     ast::UnaryOp::USub | ast::UnaryOp::UAdd => {
                         if !matches!(value.ty, Type::Int | Type::Float) {
                             return Err(error(
@@ -2346,7 +2374,6 @@ impl<'a> Checker<'a> {
                         }
                         (value.ty, ExprKind::Negate(Box::new(value)))
                     }
-                    _ => return Err(error(self.source, expression, "unsupported unary operator")),
                 }
             }
             ast::Expr::BoolOp(boolean) => {
@@ -2842,6 +2869,19 @@ impl<'a> Checker<'a> {
                 }
             }
             if receiver.ty == Type::Str
+                && attribute.attr.as_str() == "rstrip"
+                && call.arguments.args.len() <= 1
+            {
+                let mut args = vec![receiver];
+                if let Some(chars) = call.arguments.args.first() {
+                    args.push(self.expr_expected(chars, self.types.optional(Type::Str))?);
+                }
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::RStrip, args),
+                });
+            }
+            if receiver.ty == Type::Str
                 && matches!(attribute.attr.as_str(), "split" | "splitlines")
                 && call.arguments.args.is_empty()
             {
@@ -2914,6 +2954,9 @@ impl<'a> Checker<'a> {
                     "supported value methods are typed-list append/pop, dict.get, set.add/discard, and str.split()",
                 )
             })?;
+            if attribute.attr.as_str() == "extend" && call.arguments.args.len() == 1 {
+                return self.extend_list(receiver, &call.arguments.args[0], call);
+            }
             let mut args = vec![receiver];
             let (builtin, ty) = match attribute.attr.as_str() {
                 "append" if call.arguments.args.len() == 1 => {
@@ -2925,7 +2968,7 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         call,
-                        "supported list methods are append(value) and pop()",
+                        "supported list methods are append(value), extend(iterable), and pop()",
                     ));
                 }
             };
@@ -2994,6 +3037,39 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if name.id == "divmod" && args.len() == 2 {
+            let mut body = Vec::with_capacity(2);
+            let mut slots = Vec::with_capacity(2);
+            for arg in args {
+                self.expect(Type::Int, arg.ty, call)?;
+                let slot = self.hidden(Type::Int);
+                body.push(Statement::Assign(slot, arg));
+                slots.push(slot);
+            }
+            let values = [Binary::FloorDivide, Binary::Modulo]
+                .into_iter()
+                .map(|op| Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Binary(
+                        op,
+                        Box::new(self.local(slots[0])),
+                        Box::new(self.local(slots[1])),
+                    ),
+                })
+                .collect();
+            let ty = self.types.tuple(vec![Type::Int, Type::Int]);
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Scope {
+                    body,
+                    value: Box::new(Expr {
+                        ty,
+                        kind: ExprKind::Tuple(values),
+                    }),
+                    clear: slots,
+                },
+            });
+        }
         if name.id == "print" && args.len() == 1 && args[0].ty == Type::Exception {
             return Ok(Expr {
                 ty: Type::None,

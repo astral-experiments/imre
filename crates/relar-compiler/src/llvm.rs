@@ -1583,7 +1583,15 @@ impl Emitter<'_, '_> {
                         left.operand, right.operand
                     ))
                 }
-                Binary::Repeat | Binary::Concat => unreachable!("float arithmetic was checked"),
+                Binary::Repeat
+                | Binary::Concat
+                | Binary::BitAnd
+                | Binary::BitOr
+                | Binary::BitXor
+                | Binary::LeftShift
+                | Binary::RightShift => {
+                    unreachable!("float arithmetic was checked")
+                }
             };
             return Value {
                 ty: Type::Float,
@@ -1623,6 +1631,11 @@ impl Emitter<'_, '_> {
             Binary::Divide => self.call("relar_int_true_divide", Type::Float, &[left, right]),
             Binary::FloorDivide => self.call("int_floordiv", Type::Int, &[left, right]),
             Binary::Modulo => self.call("int_mod", Type::Int, &[left, right]),
+            Binary::BitAnd => self.call("int_and", Type::Int, &[left, right]),
+            Binary::BitOr => self.call("int_or", Type::Int, &[left, right]),
+            Binary::BitXor => self.call("int_xor", Type::Int, &[left, right]),
+            Binary::LeftShift => self.call("int_lshift", Type::Int, &[left, right]),
+            Binary::RightShift => self.call("int_rshift", Type::Int, &[left, right]),
         }
     }
 
@@ -1640,7 +1653,15 @@ impl Emitter<'_, '_> {
         let left = self.ranges.integer(left)?;
         let right = self.ranges.integer(right)?;
         match op {
-            Binary::Add | Binary::Subtract | Binary::Multiply => Some(false),
+            Binary::Add
+            | Binary::Subtract
+            | Binary::Multiply
+            | Binary::BitAnd
+            | Binary::BitOr
+            | Binary::BitXor => Some(false),
+            Binary::LeftShift | Binary::RightShift => {
+                (right.min >= 0 && right.max < 63).then_some(false)
+            }
             Binary::FloorDivide | Binary::Modulo => {
                 if right.min <= 0 && right.max >= 0 {
                     return None;
@@ -1707,6 +1728,21 @@ impl Emitter<'_, '_> {
                 } else {
                     result
                 }
+            }
+            Binary::BitAnd
+            | Binary::BitOr
+            | Binary::BitXor
+            | Binary::LeftShift
+            | Binary::RightShift => {
+                let instruction = match op {
+                    Binary::BitAnd => "and",
+                    Binary::BitOr => "or",
+                    Binary::BitXor => "xor",
+                    Binary::LeftShift => "shl nsw",
+                    Binary::RightShift => "ashr",
+                    _ => unreachable!(),
+                };
+                self.instruction(format!("{instruction} i64 {left}, {right}"))
             }
             Binary::Divide | Binary::Repeat | Binary::Concat => {
                 unreachable!("only proved integer arithmetic")
@@ -2238,6 +2274,22 @@ impl Emitter<'_, '_> {
             }
             Builtin::Split => self.call("relar_str_split_whitespace", returns, &[&args[0].value]),
             Builtin::SplitLines => self.call("relar_str_splitlines", returns, &[&args[0].value]),
+            Builtin::RStrip => {
+                let chars = if let Some(arg) = args.get(1) {
+                    let word = self.word(&arg.value);
+                    self.decode_word(word, Type::Str).operand
+                } else {
+                    "null".to_owned()
+                };
+                Value {
+                    ty: Type::Str,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_str_rstrip(ptr {}, ptr {chars})",
+                        args[0].value.operand,
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::IsNone => Value {
                 ty: Type::Bool,
                 operand: match args[0].value.ty {
@@ -2916,6 +2968,8 @@ fn fallible(name: &str) -> bool {
             name,
             "int_floordiv"
                 | "int_mod"
+                | "int_lshift"
+                | "int_rshift"
                 | "relar_flush_stdout"
                 | "relar_print_int"
                 | "relar_print_float"
@@ -3059,6 +3113,7 @@ declare ptr @relar_str_concat_parts(ptr, i64)
 declare ptr @relar_int_str_part(i64, ptr, ptr)
 declare ptr @relar_str_split_whitespace(ptr)
 declare ptr @relar_str_splitlines(ptr)
+declare ptr @relar_str_rstrip(ptr, ptr)
 declare ptr @relar_int_str(i64)
 declare ptr @relar_bool_str(i8)
 declare ptr @relar_none_str()
@@ -3173,6 +3228,7 @@ big:
         .unwrap();
     }
     output.push_str(&division_helpers());
+    output.push_str(&bitwise_helpers());
     output.push_str(
         r#"
 define internal i32 @compare_int(i64 %a, i64 %b) alwaysinline {
@@ -3242,6 +3298,85 @@ fast:
 done:
   %shift = shl i64 %result, 1
   %encoded = or i64 %shift, 1
+  ret i64 %encoded
+slow:
+  %fallback = call i64 @relar_int_binary(i64 %a, i64 %b, i32 {number})
+  ret i64 %fallback
+}}"#
+        )
+        .unwrap();
+    }
+    output
+}
+
+/// Tagged bitwise results remain small. Shifts guard LLVM's count and signed
+/// overflow constraints before falling back to arbitrary-precision arithmetic.
+fn bitwise_helpers() -> String {
+    let mut output = String::new();
+    for (op, number) in [("and", 5), ("or", 6), ("xor", 7)] {
+        writeln!(
+            output,
+            r#"
+define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
+entry:
+  %both = and i64 %a, %b
+  %tag = and i64 %both, 1
+  %small = icmp eq i64 %tag, 1
+  br i1 %small, label %fast, label %slow
+fast:
+  %result = {op} i64 %a, %b
+  %encoded = or i64 %result, 1
+  ret i64 %encoded
+slow:
+  %fallback = call i64 @relar_int_binary(i64 %a, i64 %b, i32 {number})
+  ret i64 %fallback
+}}"#
+        )
+        .unwrap();
+    }
+    for (op, number, calculation) in [
+        (
+            "lshift",
+            8,
+            r#"  %safe_count = icmp ult i64 %y, 63
+  br i1 %safe_count, label %shift, label %slow
+shift:
+  %result = shl i64 %x, %y
+  %restored = ashr i64 %result, %y
+  %lost = icmp ne i64 %restored, %x
+  %under = icmp slt i64 %result, -4611686018427387904
+  %over = icmp sgt i64 %result, 4611686018427387903
+  %outside = or i1 %under, %over
+  %overflow = or i1 %lost, %outside
+  br i1 %overflow, label %slow, label %done"#,
+        ),
+        (
+            "rshift",
+            9,
+            r#"  %within = icmp ult i64 %y, 63
+  %count = select i1 %within, i64 %y, i64 63
+  %result = ashr i64 %x, %count
+  br label %done"#,
+        ),
+    ] {
+        writeln!(
+            output,
+            r#"
+define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
+entry:
+  %both = and i64 %a, %b
+  %tag = and i64 %both, 1
+  %small = icmp eq i64 %tag, 1
+  %nonnegative = icmp sge i64 %b, 1
+  %can_fast = and i1 %small, %nonnegative
+  br i1 %can_fast, label %fast, label %slow
+fast:
+  %x = ashr i64 %a, 1
+  %y = ashr i64 %b, 1
+{calculation}
+done:
+  %shifted = shl i64 %result, 1
+  %encoded = or i64 %shifted, 1
   ret i64 %encoded
 slow:
   %fallback = call i64 @relar_int_binary(i64 %a, i64 %b, i32 {number})

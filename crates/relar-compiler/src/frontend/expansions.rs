@@ -3,6 +3,65 @@
 use super::*;
 
 impl Checker<'_> {
+    /// Roots the receiver before its argument, and snapshots list aliases so
+    /// extending a list by itself consumes only the original elements.
+    pub(super) fn extend_list(
+        &mut self,
+        receiver: Expr,
+        source: &ast::Expr,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let element = self.types.element(receiver.ty).unwrap();
+        let destination = self.hidden(receiver.ty);
+        let mut input = self.expansion_input(source, Some(element))?;
+        if let Iteration::Container {
+            iterable,
+            items: false,
+            start: None,
+        } = &mut input
+            && iterable.ty == receiver.ty
+        {
+            let absent = Expr {
+                ty: self.types.optional(Type::Int),
+                kind: ExprKind::Absent(Box::new(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                })),
+            };
+            *iterable = Expr {
+                ty: iterable.ty,
+                kind: ExprKind::Builtin(
+                    Builtin::Slice,
+                    vec![iterable.clone(), absent.clone(), absent.clone(), absent],
+                ),
+            };
+        }
+        let mut body = vec![Statement::Assign(destination, receiver)];
+        body.extend(self.expand_items(input, node, |checker, value| {
+            Ok(vec![Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(
+                    Builtin::Append,
+                    vec![
+                        checker.local(destination),
+                        checker.coerce(value, element, node)?,
+                    ],
+                ),
+            })])
+        })?);
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                }),
+                clear: vec![destination],
+            },
+        })
+    }
+
     /// Uses destination context for newly constructed sources, without coercing
     /// an existing mutable container to a different element layout.
     fn expansion_hint(&self, expression: &ast::Expr, element: Type) -> Option<Type> {

@@ -200,6 +200,11 @@ pub(crate) enum Binary {
     Divide,
     FloorDivide,
     Modulo,
+    BitAnd,
+    BitOr,
+    BitXor,
+    LeftShift,
+    RightShift,
     Repeat,
     Concat,
 }
@@ -238,6 +243,7 @@ pub(crate) enum Builtin {
     IsNone,
     Split,
     SplitLines,
+    RStrip,
     SysArgv,
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),

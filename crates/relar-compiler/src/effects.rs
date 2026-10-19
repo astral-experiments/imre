@@ -168,8 +168,19 @@ fn expression(value: &Expr, functions: &[bool]) -> bool {
 
 fn binary(op: Binary) -> bool {
     match op {
-        Binary::Divide | Binary::FloorDivide | Binary::Modulo | Binary::Repeat => true,
-        Binary::Add | Binary::Subtract | Binary::Multiply | Binary::Concat => false,
+        Binary::Divide
+        | Binary::FloorDivide
+        | Binary::Modulo
+        | Binary::Repeat
+        | Binary::LeftShift
+        | Binary::RightShift => true,
+        Binary::Add
+        | Binary::Subtract
+        | Binary::Multiply
+        | Binary::Concat
+        | Binary::BitAnd
+        | Binary::BitOr
+        | Binary::BitXor => false,
     }
 }
 
@@ -210,6 +221,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::IsNone
         | Builtin::Split
         | Builtin::SplitLines
+        | Builtin::RStrip
         | Builtin::Str
         | Builtin::TextClosed
         | Builtin::DictGetDefault

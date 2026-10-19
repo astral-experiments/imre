@@ -342,6 +342,62 @@ impl Interval {
                 Some(divisor) if divisor < 0 => Self::bounded(divisor + 1, 0),
                 _ => Self::UNKNOWN,
             },
+            Binary::BitAnd | Binary::BitOr | Binary::BitXor => {
+                if let (Some(left), Some(right)) = (self.singleton(), other.singleton()) {
+                    return Self::exact(match op {
+                        Binary::BitAnd => left & right,
+                        Binary::BitOr => left | right,
+                        Binary::BitXor => left ^ right,
+                        _ => unreachable!(),
+                    });
+                }
+                if matches!(op, Binary::BitAnd) {
+                    if let (Some(min), Some(max)) = (self.min, self.max)
+                        && min >= 0
+                    {
+                        return Self::bounded(0, max);
+                    }
+                    if let (Some(min), Some(max)) = (other.min, other.max)
+                        && min >= 0
+                    {
+                        return Self::bounded(0, max);
+                    }
+                }
+                let (Some(a), Some(b), Some(c), Some(d)) =
+                    (self.min, self.max, other.min, other.max)
+                else {
+                    return Self::UNKNOWN;
+                };
+                if a >= 0 && c >= 0 {
+                    let bits = 128 - b.max(d).leading_zeros();
+                    return Self::bounded(0, i128::MAX >> (127 - bits));
+                }
+                if a >= MIN_SMALL && c >= MIN_SMALL && b <= MAX_SMALL && d <= MAX_SMALL {
+                    Self::bounded(MIN_SMALL, MAX_SMALL)
+                } else {
+                    Self::UNKNOWN
+                }
+            }
+            Binary::LeftShift => {
+                let Some(shift) = other.singleton().filter(|&shift| (0..127).contains(&shift))
+                else {
+                    return Self::UNKNOWN;
+                };
+                let factor = 1_i128 << shift;
+                Self {
+                    min: self.min.and_then(|value| value.checked_mul(factor)),
+                    max: self.max.and_then(|value| value.checked_mul(factor)),
+                }
+            }
+            Binary::RightShift => {
+                let Some(shift) = other.singleton().filter(|&shift| shift >= 0) else {
+                    return Self::UNKNOWN;
+                };
+                Self {
+                    min: self.min.map(|value| value >> shift.min(127)),
+                    max: self.max.map(|value| value >> shift.min(127)),
+                }
+            }
             Binary::Divide | Binary::Repeat | Binary::Concat => Self::UNKNOWN,
         }
     }
@@ -2164,6 +2220,47 @@ def snapshot(values: list[int]) -> int:
             Interval::UNKNOWN
         );
         assert_eq!(divide(i128::MIN, -1, false), None);
+    }
+
+    #[test]
+    fn bitwise_intervals_enclose_every_signed_result() {
+        let bounds = [(-9, -1), (-3, 5), (0, 0), (0, 17), (1, 31), (-128, 127)];
+        for (a, b) in bounds {
+            for (c, d) in bounds {
+                for operation in [Binary::BitAnd, Binary::BitOr, Binary::BitXor] {
+                    let range = Interval::bounded(a, b).binary(operation, Interval::bounded(c, d));
+                    for left in a..=b {
+                        for right in c..=d {
+                            let result = match operation {
+                                Binary::BitAnd => left & right,
+                                Binary::BitOr => left | right,
+                                Binary::BitXor => left ^ right,
+                                _ => unreachable!(),
+                            };
+                            assert!(range.intersect(Interval::exact(result)).is_some());
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            Interval::bounded(0, MAX_LIST_LEN).binary(Binary::BitAnd, Interval::exact(-2)),
+            Interval::bounded(0, MAX_LIST_LEN),
+        );
+        assert!(
+            Interval::exact(MAX_SMALL)
+                .binary(Binary::LeftShift, Interval::exact(1))
+                .small()
+                .is_none()
+        );
+        assert_eq!(
+            Interval::bounded(-3, 3).binary(Binary::RightShift, Interval::exact(i128::MAX)),
+            Interval::bounded(-1, 0),
+        );
+        assert_eq!(
+            Interval::exact(0).binary(Binary::LeftShift, Interval::exact(-1)),
+            Interval::UNKNOWN,
+        );
     }
 
     #[test]
