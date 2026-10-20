@@ -15,6 +15,23 @@ class Payload:
         self.values = values
 
 
+class FileOwner:
+    handles: list[TextIO | None]
+
+    def __init__(self, handles: list[TextIO | None]) -> None:
+        self.handles = handles
+
+
+def cache_writer(prefix: str, index: int) -> TextIO:
+    stream = open(prefix + str(index) + ".txt", "w", encoding="utf-8")  # noqa: SIM115 — transferred owner
+    stream.write(prefix + str(index))
+    return stream
+
+
+def wrapped_writer(index: int) -> FileOwner:
+    return FileOwner([cache_writer("wrapped", index)])
+
+
 def payload(index: int) -> Payload:
     if index == 2:
         raise ValueError("element failed")
@@ -100,6 +117,38 @@ def cached_results() -> None:
         index += 1  # noqa: SIM113 — enumerate would change the ownership under test
 
 
+def shared_results() -> None:
+    held: list[tuple[TextIO, int]] = []
+    row: tuple[TextIO, int] | None = None
+    for row in zip((cache_writer("escapedzip", index) for index in range(3)), range(3)):
+        assert row is not None
+        index = row[1]
+        if index == 0:
+            held.append(row)
+        elif index == 1:
+            # While shared, the original cache stays rooted and a fresh tuple
+            # is yielded. Dropping the external original owner must not flush.
+            held[0] = row
+            row = None
+            read_part("escapedzip0.txt")
+        else:
+            # Once sole-owned again, the original cached tuple is reused and
+            # its first file closes as that field is replaced on the next pull.
+            read_part("escapedzip0.txt")
+        row = None
+        assert row is None
+    read_part("escapedzip2.txt")
+
+    owner: FileOwner | None = None
+    index = 0
+    for (owner,) in zip(wrapped_writer(index) for index in range(2)):
+        owner = None
+        assert owner is None
+        read_part("wrapped" + str(index) + ".txt")
+        index += 1  # noqa: SIM113 — the one-field zip cache is under test
+    read_part("wrapped1.txt")
+
+
 def recover() -> None:
     for turn in range(16):
         print(any(payload(index) for index in range(4)))
@@ -151,6 +200,8 @@ break_files()
 print(return_files())
 exhausted_frame()
 cached_results()
+shared_results()
+read_part("escapedzip1.txt")
 for path in [
     "any0.txt",
     "all0.txt",
