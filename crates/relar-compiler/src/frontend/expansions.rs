@@ -313,7 +313,12 @@ impl Checker<'_> {
         let (body, _) =
             self.lower_iteration_after(&target, input, &[], before_iteration, |checker| {
                 let slot = checker.names[&name];
-                consume(checker, checker.local(slot))
+                let mut body = consume(checker, checker.local(slot))?;
+                // Builtin consumers release each yielded item before requesting
+                // the next one. Keeping this private target alive could alter
+                // file finalization or make an iterator's tuple cache shared.
+                body.push(Statement::Clear(slot));
+                Ok(body)
             })?;
         let target = self.names.remove(&name).unwrap();
         Ok(vec![Statement::Scope {
