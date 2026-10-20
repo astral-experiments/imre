@@ -325,6 +325,72 @@ pub unsafe extern "C" fn relar_str_iter(value: *const Str) -> *const Object {
     )))))
 }
 
+/// Builds the eager integer list without allocating one-character strings.
+///
+/// ```python
+/// list(map(int, "1٢3"))  # [1, 2, 3]
+/// ```
+///
+/// Only Unicode 16 decimal digits are valid single-character integer literals.
+/// The first invalid code point installs the ordinary `int` ValueError and
+/// returns null; success transfers a fresh list containing immediate integers.
+///
+/// # Safety
+/// The caller roots the immutable string for this call. No borrowed source or
+/// private output buffer escapes, and conversion cannot invoke user code.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_int_list(value: *const Str) -> *const List {
+    // SAFETY: the caller keeps this immutable string rooted throughout conversion.
+    let text = unsafe { &*value };
+    let ascii = text.is_ascii();
+    let length = if ascii {
+        text.len()
+    } else {
+        text.chars().count()
+    };
+    let mut values = crate::take_list_buffer(length);
+    values
+        .try_reserve_exact(length)
+        .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+    if ascii {
+        let mut invalid = false;
+        for (slot, &byte) in values.spare_capacity_mut()[..length]
+            .iter_mut()
+            .zip(text.as_bytes())
+        {
+            let digit = byte.wrapping_sub(b'0');
+            invalid |= digit > 9;
+            slot.write(Int::small(i64::from(digit)).unwrap());
+        }
+        if invalid {
+            let index = text
+                .as_bytes()
+                .iter()
+                .position(|byte| !byte.is_ascii_digit())
+                .unwrap();
+            return crate::integer_text::invalid_literal(&text[index..index + 1])
+                .returning(std::ptr::null());
+        }
+    } else {
+        for (slot, character) in values.spare_capacity_mut()[..length]
+            .iter_mut()
+            .zip(text.chars())
+        {
+            let Some(digit) = crate::integer_text::decimal_digit(character) else {
+                let mut encoded = [0; 4];
+                return crate::integer_text::invalid_literal(character.encode_utf8(&mut encoded))
+                    .returning(std::ptr::null());
+            };
+            slot.write(Int::small(i64::from(digit)).unwrap());
+        }
+    }
+    // SAFETY: both equal-length zips initialized every slot. All written values,
+    // including an invalid ASCII byte's unpublished conversion, fit immediate
+    // Int storage and own no allocation. Errors leave length zero for cleanup.
+    unsafe { values.set_len(length) };
+    Rc::into_raw(Rc::new(List(StorageCell::new(values))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,6 +431,111 @@ mod tests {
             assert_eq!(message.as_str(), expected);
         }
         assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn integer_mapping_owns_canonical_digits_without_retaining_the_source() {
+        for (text, expected) in [
+            ("", vec![]),
+            ("0123456789", (0..10).collect()),
+            ("1٢३４𝟝", vec![1, 2, 3, 4, 5]),
+            ("\u{10d40}\u{116da}\u{1ccf7}\u{1e5f9}", vec![0, 0, 7, 8]),
+        ] {
+            let source = Rc::new(Str::new(text));
+            let weak = Rc::downgrade(&source);
+            // SAFETY: source stays rooted during conversion. Each checked,
+            // nonnull result transfers one independent list owner to Rc.
+            unsafe {
+                let result = relar_str_int_list(Rc::as_ptr(&source));
+                assert!(!result.is_null());
+                let result = Rc::from_raw(result);
+                let other = relar_str_int_list(Rc::as_ptr(&source));
+                assert!(!other.is_null());
+                let other = Rc::from_raw(other);
+                assert!(!Rc::ptr_eq(&result, &other));
+                assert_eq!(Rc::strong_count(&source), 1);
+                drop(source);
+                assert!(weak.upgrade().is_none());
+                result.0.with(|values| {
+                    assert_eq!(values.len(), expected.len());
+                    for (value, expected) in values.iter().zip(&expected) {
+                        assert_eq!(value.as_small(), Some(*expected));
+                    }
+                });
+                if !expected.is_empty() {
+                    assert_eq!(relar_list_set_index(Rc::as_ptr(&result), 0, integer(9)), 1);
+                    assert_eq!(
+                        Int(relar_list_get_index(Rc::as_ptr(&other), 0)).as_small(),
+                        Some(expected[0])
+                    );
+                }
+            }
+            assert_eq!(relar_error_pending(), 0);
+        }
+    }
+
+    #[test]
+    fn integer_mapping_reports_the_first_invalid_character_with_exact_repr() {
+        for (text, literal) in [
+            ("12x3y", "'x'"),
+            ("12y3x", "'y'"),
+            ("1٢x３y", "'x'"),
+            ("1x٢\u{11de0}", "'x'"),
+            ("+12", "'+'"),
+            ("-12", "'-'"),
+            ("1_2", "'_'"),
+            ("1 2", "' '"),
+            ("12\t3", "'\\t'"),
+            ("12\0x", "'\\x00'"),
+            ("12'\"", "\"'\""),
+            ("12\\x", "'\\\\'"),
+            ("12²3", "'²'"),
+            ("12\u{301}x", "'\u{301}'"),
+            ("１２\u{11de0}x", "'\\U00011de0'"),
+            ("\u{88f}1", "'\\u088f'"),
+        ] {
+            let source = Rc::new(Str::new(text));
+            // SAFETY: the immutable source remains rooted, and each pending
+            // exception is consumed before another recoverable call.
+            unsafe {
+                assert!(relar_str_int_list(Rc::as_ptr(&source)).is_null());
+            }
+            clear_error(
+                Kind::ValueError,
+                &format!("invalid literal for int() with base 10: {literal}"),
+            );
+            assert_eq!(source.as_str(), text);
+            assert_eq!(Rc::strong_count(&source), 1);
+        }
+    }
+
+    #[test]
+    fn integer_mapping_repeatedly_cleans_private_buffers_and_reuses_successes() {
+        for text in ["0123456789".repeat(128), "٠١٢٣٤٥٦٧٨٩".repeat(128)] {
+            let source = Str::from(text.clone());
+            let invalid = Str::from(format!("{text}\0x"));
+            for _ in 0..64 {
+                // SAFETY: both strings remain rooted. Successful lists are
+                // checked before adoption; failed partial results never escape.
+                unsafe {
+                    let result = relar_str_int_list(&source);
+                    assert!(!result.is_null());
+                    let result = Rc::from_raw(result);
+                    assert!(relar_str_int_list(&invalid).is_null());
+                    clear_error(
+                        Kind::ValueError,
+                        "invalid literal for int() with base 10: '\\x00'",
+                    );
+                    result.0.with(|values| {
+                        assert_eq!(values.len(), 1280);
+                        for (index, value) in values.iter().enumerate() {
+                            assert_eq!(value.as_small(), Some((index % 10) as i64));
+                        }
+                    });
+                }
+                assert_eq!(relar_error_pending(), 0);
+            }
+        }
     }
 
     #[test]

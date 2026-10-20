@@ -654,17 +654,7 @@ pub unsafe extern "C" fn relar_int_parse(value: *const Str) -> usize {
     // SAFETY: the caller keeps the immutable string alive.
     let original = unsafe { &*value };
     let source = original.trim();
-    let invalid = || {
-        let mut literal = integer_text::literal_repr(original);
-        // CPython's %.200R diagnostic truncates the rendered repr by characters.
-        if let Some((end, _)) = literal.char_indices().nth(200) {
-            literal.truncate(end);
-        }
-        Error::new(
-            Kind::ValueError,
-            compact_str::format_compact!("invalid literal for int() with base 10: {literal}"),
-        )
-    };
+    let invalid = || integer_text::invalid_literal(original);
     // Rust's signed decimal parser accepts a subset of our grammar. Ordinary
     // small inputs need neither normalization nor temporary BigInt allocations;
     // separators and larger values still take the checked path below.
