@@ -15,7 +15,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install the pinned Rust toolchain
@@ -44,6 +44,8 @@ jobs:
         run: python3 tests/inference.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compare concrete iterable consumers with CPython
         run: python3 tests/iterables.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
+      - name: Compare lazy iterator pipelines with CPython
+        run: python3 tests/iterator_pipelines.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compare conditional expressions and sequence access with CPython
         run: python3 tests/expressions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compare binary64 floats and numeric conversions with CPython
@@ -97,7 +99,7 @@ jobs:
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"
           relar_lld_dir="$(rustc --print sysroot)/lib/rustlib/$relar_target/bin"
           python3 tests/lto.py --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --rust-lld "$relar_lld_dir/rust-lld" --python python3
-          for suite in differential imports classes containers comprehensions fstrings calls inference iterables expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files; do
+          for suite in differential imports classes containers comprehensions fstrings calls inference iterables iterator_pipelines expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files; do
             python3 "tests/$suite.py" --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --lto-linker "$relar_lld_dir/gcc-ld/ld.lld" --opt-levels 3
           done
       - name: Build the runtime with AddressSanitizer
@@ -110,10 +112,10 @@ jobs:
       - name: Check generated code and runtime with AddressSanitizer
         run: |
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"
-          for suite in differential imports classes containers comprehensions fstrings calls inference iterables expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files; do
+          for suite in differential imports classes containers comprehensions fstrings calls inference iterables iterator_pipelines expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files; do
             python3 "tests/$suite.py" --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 1
           done
-          for suite in containers fstrings calls inference iterables expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions files; do
+          for suite in containers fstrings calls inference iterables iterator_pipelines expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions files; do
             python3 "tests/$suite.py" --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 0
           done
       - name: Validate the route planner against an independent oracle
@@ -149,3 +151,8 @@ jobs:
           target/release/relar build examples/inventory_reconciliation/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/inventory-reconciliation
           python3 benchmarks/reference/inventory_reconciliation/build.py --artifact-dir /tmp/relar-inventory-reference --target-dir target/inventory-reference
           python3 benchmarks/inventory_validate.py --python python3 --binary /tmp/inventory-reconciliation --rust-bigint /tmp/relar-inventory-reference/inventory-bigint --output /tmp/relar-inventory-reference/validation.json
+      - name: Validate telemetry queries against CPython and Rust
+        run: |
+          target/release/relar build examples/telemetry_comparison/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/telemetry-comparison
+          python3 benchmarks/reference/telemetry_comparison/build.py --artifact-dir /tmp/relar-telemetry-reference --target-dir target/telemetry-reference
+          python3 benchmarks/telemetry_validate.py --python python3 --binary /tmp/telemetry-comparison --rust /tmp/relar-telemetry-reference/telemetry-reference --output /tmp/relar-telemetry-reference/validation.json

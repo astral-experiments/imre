@@ -15,6 +15,7 @@ An ahead-of-time compiler for typed Python, written in Rust.
 - Use Python truth tests, operand-returning `and`/`or`, and `for`/`while` `else` suites.
 - Chain assignments, unpack sequences and starred targets, and expand typed lists, sets, and dictionaries.
 - Infer concrete function signatures and consume concrete iterables with `list`, integer `sum`, and `map(int, ...)`.
+- Compose generator expressions, `zip(strict=True)`, and `reversed`, with short-circuiting `any` and `all`.
 - Preserve arbitrary-precision integers, shared mutation, and supported exception behavior.
 - Run compiled programs without a Python installation or a CPython dependency.
 
@@ -109,6 +110,10 @@ The [luhn example](examples/luhn_checksum/README.md) compiles the unchanged,
 unannotated checksum library. Its guide covers the original upstream tests,
 Unicode decimal inputs, and comparisons with CPython and an independent Rust
 implementation.
+
+The [telemetry example](examples/telemetry_comparison/README.md) aligns two sample
+recordings, calculates integer error metrics, and searches for threshold
+violations with lazy forward and reverse iteration.
 
 ## License
 
