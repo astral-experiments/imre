@@ -342,9 +342,12 @@ def main() -> None:
         "build_ns": build_ns,
         "requested_target": args.target,
         "llvm_target": next(
-            line
-            for line in llvm.read_text().splitlines()
-            if line.startswith("target triple")
+            (
+                line
+                for line in llvm.read_text().splitlines()
+                if line.startswith("target triple")
+            ),
+            None,
         ),
         "relar_build_record": relar_record,
         "rust_build_record": rust_record,
