@@ -4,7 +4,6 @@ import argparse
 import base64
 import itertools
 import json
-import math
 import platform
 import random
 import runpy
@@ -28,6 +27,17 @@ def run_checked(command: list[str], timeout: float = 240) -> str:
     if result.returncode or result.stderr:
         raise RuntimeError((command, result.returncode, result.stdout, result.stderr))
     return result.stdout.decode()
+
+
+def engine_orders(engines) -> tuple[tuple, ...]:
+    """Balance positions and within-round directed neighbors in a fixed schedule."""
+    engines = tuple(engines)
+    if len(engines) == 4:
+        return tuple(
+            tuple(engines[(index + rotation) % 4] for index in (0, 1, 3, 2))
+            for rotation in range(4)
+        )
+    return tuple(itertools.permutations(engines))
 
 
 def baseline_provenance(record, hashes, upstream, rust_record, target, thinlto):
@@ -203,7 +213,7 @@ def measure(workload: dict, commands: dict, directory: Path, args) -> dict:
 
     gates = {name: run(name) for name in commands}
     phases = {}
-    orders = tuple(itertools.permutations(commands))
+    orders = engine_orders(commands)
     for phase, count in (("warmups", args.warmups), ("samples", args.samples)):
         samples = []
         for index in range(count):
@@ -268,18 +278,20 @@ def main() -> None:
     args = parser.parse_args()
     if bool(args.baseline) != bool(args.baseline_record):
         parser.error("--baseline and --baseline-record must be supplied together")
-    permutations = math.factorial(2 + (not args.native_only) + bool(args.baseline))
+    schedule_length = len(
+        engine_orders(range(2 + (not args.native_only) + bool(args.baseline)))
+    )
     if args.samples is None:
-        args.samples = max(12, permutations)
+        args.samples = 12
     if args.warmups is None:
-        args.warmups = max(6, permutations)
+        args.warmups = ((6 + schedule_length - 1) // schedule_length) * schedule_length
     if (
-        args.samples < max(4, permutations)
-        or args.samples % permutations
-        or args.warmups % permutations
+        args.samples < max(4, schedule_length)
+        or args.samples % schedule_length
+        or args.warmups % schedule_length
     ):
         parser.error(
-            f"samples must be >= {max(4, permutations)}; samples and warmups must be multiples of {permutations}"
+            f"samples must be >= {max(4, schedule_length)}; samples and warmups must be multiples of the {schedule_length}-round order schedule"
         )
     if len(set(args.sizes)) != len(args.sizes) or len(set(args.operations)) != len(
         args.operations
@@ -516,7 +528,8 @@ def main() -> None:
         "batch_digits": args.batch_digits,
         "samples": args.samples,
         "warmups": args.warmups,
-        "engine_orders": list(itertools.permutations(commands)),
+        "engine_orders": engine_orders(commands),
+        "order_method": "Four engines use label rotations of [0, 1, 3, 2]; two or three engines use all permutations. Each schedule balances engine positions and directed adjacent pairs within rounds. Transitions between rounds are not balanced. The schedule is fixed before measurement.",
         "ratio_interpretation": {
             "baseline_over_relar": "Preserved Relar median / current Relar median; higher means improvement.",
             "relar_over_rust": "Current Relar median / Rust median; lower is better.",
@@ -524,7 +537,7 @@ def main() -> None:
         "workload_source": "preserved baseline inputs"
         if baseline
         else "seeded generator",
-        "method": "Whole-process wall time, including startup and one input read/output write. Inputs are prepared and complete outputs verified outside timing. Identical repetitions and checksum contributions, with black_box per Rust call. All engine permutations are balanced. Empty-input controls report startup/protocol overhead without subtracting it.",
+        "method": "Whole-process wall time, including startup and one input read/output write. Inputs are prepared and complete outputs verified outside timing. Identical repetitions and checksum contributions, with black_box per Rust call. Engine order follows a fixed schedule balancing positions and within-round predecessor pairs. Empty-input controls report startup/protocol overhead without subtracting it.",
         "workloads": [],
     }
     empty = validator.oracle(codec, "checksum", b"")
