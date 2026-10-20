@@ -34,6 +34,7 @@ unsafe fn slice_component(word: usize) -> Option<isize> {
 
 /// A finite cursor over valid indices. Keeping a count avoids advancing past
 /// the final item, where an arbitrarily large stride could otherwise overflow.
+#[derive(Clone)]
 pub(super) struct SliceIndices {
     at: usize,
     stride: usize,
@@ -237,7 +238,7 @@ pub unsafe extern "C" fn relar_list_slice(
     let result = unsafe {
         (&*value).0.with(|values| {
             let slice = SliceIndices::new(values.len(), start, stop, step)?;
-            let mut result = Vec::new();
+            let mut result = crate::take_list_buffer(slice.len());
             result
                 .try_reserve_exact(slice.len())
                 .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
@@ -249,6 +250,34 @@ pub unsafe extern "C" fn relar_list_slice(
         result.map(|values| Rc::into_raw(Rc::new(List(StorageCell::new(values))))),
         std::ptr::null(),
     )
+}
+
+/// Reduces the selected integer values without allocating the temporary slice.
+///
+/// The compiler evaluates this subtotal where the original slice was created,
+/// before evaluating and adding `sum`'s start. Later source mutations therefore
+/// cannot change the numeric snapshot, and zero-step errors retain their order.
+///
+/// # Safety
+/// Root the source list and every nonzero canonical Int component. Zero denotes
+/// an omitted/None component. No source borrow escapes; success returns one
+/// owned canonical integer, while failure installs an error and returns tagged zero.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_slice_sum(
+    value: *const List,
+    start: usize,
+    stop: usize,
+    step: usize,
+) -> usize {
+    // SAFETY: normalization and exact integer addition cannot reenter the
+    // rooted list. Only an independently owned subtotal escapes its borrow.
+    let subtotal = unsafe {
+        (&*value).0.with(|values| {
+            let slice = SliceIndices::new(values.len(), start, stop, step)?;
+            Ok(crate::sum_ints(slice.map(|at| &values[at])))
+        })
+    };
+    finish(subtotal.map(Int::into_raw), 1)
 }
 
 /// Preserves the source's concrete element descriptor and acquires shallow
@@ -586,6 +615,53 @@ mod tests {
     }
 
     #[test]
+    fn integer_slice_sums_preserve_signed_and_arbitrary_precision_selection() {
+        let huge = BigInt::from(1) << 400_u32;
+        let mut cases = [
+            ([None, None, None], 3),
+            ([None, None, Some(-1)], 3),
+            ([None, Some(-1), Some(-1)], 0),
+            ([Some(-100), Some(100), Some(2)], 6),
+            ([Some(-1), Some(-6), Some(-2)], 6),
+            ([Some(4), Some(1), Some(-1)], 3),
+            ([Some(1), Some(4), Some(-1)], 0),
+            ([Some(100), Some(-100), Some(-2)], 6),
+            ([Some(-100), None, Some(-1)], 0),
+            ([None, Some(100), Some(-1)], 0),
+            ([Some(0), Some(2), None], 0),
+        ]
+        .map(|(components, expected)| (components.map(|value| value.map(BigInt::from)), expected))
+        .to_vec();
+        cases.extend([
+            ([Some(-&huge), Some(huge.clone()), None], 3),
+            ([Some(huge.clone()), Some(-&huge), Some((-1).into())], 3),
+            ([None, None, Some(huge.clone())], 1),
+            ([None, None, Some(-&huge)], 3),
+        ]);
+        for scale in [BigInt::from(1), huge] {
+            let source = List(StorageCell::new(
+                [1, -1, 2, -2, 3]
+                    .map(|value| Int::new(&scale * value))
+                    .into(),
+            ));
+            for (components, expected) in &cases {
+                let components = components.clone().map(|value| value.map(Int::new));
+                let [start, stop, step] = components
+                    .each_ref()
+                    .map(|value| value.as_ref().map_or(0, |value| value.0));
+                // SAFETY: source and all nullable slice component owners stay
+                // rooted. A successful subtotal transfers one integer owner.
+                let result = Int(unsafe { relar_list_slice_sum(&source, start, stop, step) });
+                assert_eq!(relar_error_pending(), 0);
+                assert_eq!(result.big().as_ref(), &(&scale * *expected));
+                if *expected == 0 {
+                    assert_eq!(result.as_small(), Some(0));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn unicode_indexing_and_slicing_use_code_points_and_preserve_error_messages() {
         let source = Rc::new(Str::new("aé\0e\u{301}🦀"));
         // SAFETY: every argument stays rooted; each nonnull result transfers one
@@ -640,6 +716,13 @@ mod tests {
             clear_error(Kind::ValueError, "slice step cannot be zero");
             assert!(relar_list_slice(Rc::as_ptr(&list), 0, 0, integer(0)).is_null());
             clear_error(Kind::ValueError, "slice step cannot be zero");
+            assert_eq!(relar_list_slice_sum(Rc::as_ptr(&list), 0, 0, integer(0)), 1);
+            clear_error(Kind::ValueError, "slice step cannot be zero");
+            assert_eq!(
+                relar_list_slice_sum(Rc::as_ptr(&list), 0, 0, integer(-1)),
+                1
+            );
+            assert_eq!(relar_error_pending(), 0);
             assert!(relar_seq_slice(Rc::as_ptr(&sequence), 0, 0, integer(0)).is_null());
             clear_error(Kind::ValueError, "slice step cannot be zero");
             let empty = Rc::from_raw(relar_str_slice(Rc::as_ptr(&text), 0, 0, integer(-1)));
@@ -659,6 +742,7 @@ mod tests {
             relar_list_append(Rc::as_ptr(&source), Rc::as_ptr(&big) as usize);
             relar_list_append(Rc::as_ptr(&source), integer(7));
             let slice = Rc::from_raw(relar_list_slice(Rc::as_ptr(&source), 0, 0, integer(-1)));
+            let subtotal = Int(relar_list_slice_sum(Rc::as_ptr(&source), 0, 0, integer(-1)));
             assert!(!Rc::ptr_eq(&source, &slice));
             assert_eq!(relar_list_set_index(Rc::as_ptr(&source), 0, integer(9)), 1);
             drop((source, big));
@@ -670,6 +754,10 @@ mod tests {
             let saved = Int(relar_list_get_index(Rc::as_ptr(&slice), 1));
             drop(slice);
             assert_eq!(saved.big().as_ref(), &(BigInt::from(1_u8) << 400_u32));
+            assert_eq!(
+                subtotal.big().as_ref(),
+                &((BigInt::from(1_u8) << 400_u32) + 7)
+            );
             drop(saved);
         }
         assert!(weak.upgrade().is_none());

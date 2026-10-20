@@ -1023,36 +1023,36 @@ pub unsafe extern "C" fn relar_list_len(list: *const List) -> usize {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_list_sum(list: *const List, start: usize) -> usize {
     // SAFETY: the rooted list is read without callbacks or escaped borrows.
-    let subtotal = unsafe {
-        (&*list).0.with(|values| {
-            if values.len() <= i32::MAX as usize {
-                let (sum, invalid) =
-                    values
-                        .iter()
-                        .fold((0_i64, 0_usize), |(sum, invalid), value| {
-                            // Biasing the tagged i32 interval into 33 bits also
-                            // rejects heap words by their even tag. Speculative
-                            // decoding reads only bits, never a heap allocation.
-                            (
-                                sum.wrapping_add((value.0 as i64) >> 1),
-                                invalid
-                                    | (value.0.wrapping_add(1_usize << 32) >> 33)
-                                    | (!value.0 & 1),
-                            )
-                        });
-                if invalid == 0 {
-                    // At most 2^31-1 signed i32 values sum within
-                    // [-2^62+2^31, 2^62-2^32+1], including every prefix.
-                    return Int::small(sum).unwrap();
-                }
-            }
-            values.iter().fold(Int::small(0).unwrap(), |sum, value| {
-                Int(relar_int_binary(sum.0, value.0, 0))
-            })
-        })
-    };
+    let subtotal = unsafe { (&*list).0.with(|values| sum_ints(values.iter())) };
     // SAFETY: start remains rooted, and subtotal owns the other integer.
     unsafe { relar_int_binary(start, subtotal.0, 0) }
+}
+
+/// Shares exact reduction between whole lists and normalized slice selections.
+/// Cloning the borrowed iterator permits a checked fast pass without acquiring
+/// element owners; neither pass can mutate the source or call user code.
+fn sum_ints<'a>(values: impl ExactSizeIterator<Item = &'a Int> + Clone) -> Int {
+    if values.len() <= i32::MAX as usize {
+        let (sum, invalid) = values
+            .clone()
+            .fold((0_i64, 0_usize), |(sum, invalid), value| {
+                // Biasing the tagged i32 interval into 33 bits also rejects heap
+                // words by their even tag. Decoding reads bits, never a pointer.
+                (
+                    sum.wrapping_add((value.0 as i64) >> 1),
+                    invalid | (value.0.wrapping_add(1_usize << 32) >> 33) | (!value.0 & 1),
+                )
+            });
+        if invalid == 0 {
+            // At most 2^31-1 signed i32 values sum within
+            // [-2^62+2^31, 2^62-2^32+1], including every prefix.
+            return Int::small(sum).unwrap();
+        }
+    }
+    values.fold(Int::small(0).unwrap(), |sum, value| {
+        // SAFETY: both owned/borrowed canonical integers remain live for addition.
+        Int(unsafe { relar_int_binary(sum.0, value.0, 0) })
+    })
 }
 
 /// Counts a nonempty range only when its captured components are tagged small.
