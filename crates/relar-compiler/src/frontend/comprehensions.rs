@@ -51,6 +51,7 @@ impl Helpers {
 #[derive(Clone, Copy)]
 enum Yield<'a> {
     List(&'a ast::Expr),
+    Sum(&'a ast::Expr),
     Set(&'a ast::Expr),
     Dict(&'a ast::Expr, &'a ast::Expr),
 }
@@ -82,7 +83,9 @@ impl<'a> Display<'a> {
 
     fn visit_value(self, visitor: &mut impl Visitor<'a>) {
         match self.value {
-            Yield::List(value) | Yield::Set(value) => visitor.visit_expr(value),
+            Yield::List(value) | Yield::Sum(value) | Yield::Set(value) => {
+                visitor.visit_expr(value);
+            }
             Yield::Dict(key, value) => {
                 visitor.visit_expr(key);
                 visitor.visit_expr(value);
@@ -95,7 +98,7 @@ impl<'a> Display<'a> {
     /// replace it.
     fn repeated_writes(self, index: usize) -> HashSet<String> {
         let (first, second) = match self.value {
-            Yield::List(value) | Yield::Set(value) => (value, None),
+            Yield::List(value) | Yield::Sum(value) | Yield::Set(value) => (value, None),
             Yield::Dict(key, value) => (key, Some(value)),
         };
         self.clauses[index..]
@@ -178,6 +181,32 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let display = Display::from_expr(expression)
             .ok_or_else(|| error(self.source, expression, "unsupported comprehension display"))?;
+        self.comprehension_display(expression, display, expected)
+    }
+
+    /// Reduces an immediately consumed integer comprehension in its original
+    /// eager order. Integer addition has no callbacks or recoverable failures;
+    /// the private list and its element owners cannot otherwise be observed.
+    pub(super) fn sum_comprehension(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        let ast::Expr::ListComp(value) = expression else {
+            unreachable!("sum selected a list comprehension");
+        };
+        self.comprehension_display(
+            expression,
+            Display {
+                clauses: &value.generators,
+                value: Yield::Sum(&value.elt),
+            },
+            Some(Type::Int),
+        )
+    }
+
+    fn comprehension_display(
+        &mut self,
+        expression: &ast::Expr,
+        display: Display<'_>,
+        expected: Option<Type>,
+    ) -> Result<Expr, String> {
         if display.clauses.iter().any(|clause| clause.is_async) {
             return Err(error(
                 self.source,
@@ -299,6 +328,7 @@ impl Checker<'_> {
         let ty = helper.locals[result];
         let empty = match display.value {
             Yield::List(_) => ExprKind::List(Vec::new()),
+            Yield::Sum(_) => ExprKind::Int("0".into()),
             Yield::Set(_) => ExprKind::Set {
                 element: self.types.set_element(ty).unwrap(),
                 values: Vec::new(),
@@ -447,6 +477,7 @@ impl Checker<'_> {
         let ty = self.locals[result];
         let empty = match display.value {
             Yield::List(_) => ExprKind::List(Vec::new()),
+            Yield::Sum(_) => ExprKind::Int("0".into()),
             Yield::Set(_) => ExprKind::Set {
                 element: self.types.set_element(ty).unwrap(),
                 values: Vec::new(),
@@ -542,6 +573,21 @@ impl Checker<'_> {
         result: usize,
     ) -> Result<Vec<Statement>, String> {
         match value {
+            Yield::Sum(expression) => {
+                let value = self.expr_expected(expression, Type::Int)?;
+                self.locals[result] = Type::Int;
+                Ok(vec![Statement::Assign(
+                    result,
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Binary(
+                            Binary::Add,
+                            Box::new(self.local(result)),
+                            Box::new(value),
+                        ),
+                    },
+                )])
+            }
             Yield::List(expression) | Yield::Set(expression) => {
                 let is_set = matches!(value, Yield::Set(_));
                 let element = expected.and_then(|ty| {

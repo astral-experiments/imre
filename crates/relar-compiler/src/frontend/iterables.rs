@@ -84,20 +84,14 @@ impl Checker<'_> {
                 "sum requires an integer iterable and an optional integer start",
             ));
         }
-        let (input, convert) = self.consumer_input(&call.arguments.args[0], Some(Type::Int))?;
-        let start = call.arguments.args.get(1).or_else(|| {
-            call.arguments
-                .keywords
-                .first()
-                .map(|keyword| &keyword.value)
-        });
-        let start = match start {
-            Some(start) => self.expr_expected(start, Type::Int)?,
-            None => Expr {
-                ty: Type::Int,
-                kind: ExprKind::Int("0".into()),
-            },
-        };
+        let source = &call.arguments.args[0];
+        if matches!(source, ast::Expr::ListComp(_)) {
+            let subtotal = self.sum_comprehension(source)?;
+            let start = self.sum_start(call)?;
+            return Ok(add_start(subtotal, start));
+        }
+        let (input, convert) = self.consumer_input(source, Some(Type::Int))?;
+        let start = self.sum_start(call)?;
         if !convert
             && let Iteration::Container {
                 iterable,
@@ -114,20 +108,7 @@ impl Checker<'_> {
                     ty: Type::Int,
                     kind: ExprKind::Builtin(Builtin::ListSliceSum, arguments.clone()),
                 };
-                return Ok(
-                    if matches!(&start.kind, ExprKind::Int(value) if value == "0") {
-                        subtotal
-                    } else {
-                        Expr {
-                            ty: Type::Int,
-                            kind: ExprKind::Binary(
-                                Binary::Add,
-                                Box::new(subtotal),
-                                Box::new(start),
-                            ),
-                        }
-                    },
-                );
+                return Ok(add_start(subtotal, start));
             }
             // Evaluate both arguments before borrowing the list: `start` may
             // mutate the source through an alias. Exact integer addition has
@@ -188,6 +169,23 @@ impl Checker<'_> {
                 clear,
             },
         })
+    }
+
+    /// Checks the optional starting value after checking the eager first argument.
+    fn sum_start(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let start = call.arguments.args.get(1).or_else(|| {
+            call.arguments
+                .keywords
+                .first()
+                .map(|keyword| &keyword.value)
+        });
+        match start {
+            Some(start) => self.expr_expected(start, Type::Int),
+            None => Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Int("0".into()),
+            }),
+        }
     }
 
     /// The sealed converter has no user callback or escaping iterator object.
@@ -295,6 +293,19 @@ impl Checker<'_> {
                 items,
                 start: start.map(capture),
             },
+        }
+    }
+}
+
+/// Eager producers finish before `start` is evaluated. Exact integer addition
+/// allows the producer's subtotal to replace a private materialized container.
+fn add_start(subtotal: Expr, start: Expr) -> Expr {
+    if matches!(&start.kind, ExprKind::Int(value) if value == "0") {
+        subtotal
+    } else {
+        Expr {
+            ty: Type::Int,
+            kind: ExprKind::Binary(Binary::Add, Box::new(subtotal), Box::new(start)),
         }
     }
 }
