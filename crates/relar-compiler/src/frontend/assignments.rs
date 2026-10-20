@@ -103,6 +103,7 @@ impl Checker<'_> {
             &helpers,
             self.globals,
         );
+        probe.inference = self.inference;
         probe.returns = self.returns;
         probe.names = self.names.clone();
         probe.locals = self.locals.clone();

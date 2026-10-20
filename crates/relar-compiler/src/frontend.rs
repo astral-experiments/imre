@@ -15,6 +15,7 @@ mod assignments;
 mod calls;
 mod comprehensions;
 mod expansions;
+mod inference;
 mod matching;
 mod module_values;
 mod truthiness;
@@ -184,6 +185,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     let types = Types::default();
     let mut classes = ClassInfo::new(graph, &types)?;
     let mut signatures = HashMap::new();
+    let inference = inference::Inference::default();
     let mut definitions = Vec::new();
     let mut callable_definitions = Vec::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
@@ -204,8 +206,8 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                         module_id,
                         &classes.declarations,
                         &types,
-                        definitions.len(),
                         None,
+                        &inference,
                     )
                     .map_err(|error| format!("{}:{error}", module.path.display()))?;
                     signatures.insert(
@@ -215,7 +217,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                         },
                         signature.clone(),
                     );
-                    definitions.push((module_id, function, signature));
+                    definitions.push((module_id, function.clone(), signature));
                     callable_definitions.push(DefinitionId {
                         module: module_id,
                         statement: statement_id,
@@ -249,18 +251,25 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                 module_id,
                 &classes.declarations,
                 &types,
-                definitions.len(),
                 Some(Type::Class(class_id)),
+                &inference,
             )
             .map_err(|error| format!("{}:{error}", module.path.display()))?;
             if method.name.as_str() == "__init__" && signature.returns != Type::None {
                 return Err(module.error(method, "__init__ must return None"));
             }
             classes.methods[class_id].insert(method.name.to_string(), signature.clone());
-            definitions.push((module_id, method, signature));
+            definitions.push((module_id, method.clone(), signature));
             callable_definitions.push(class.definition);
         }
     }
+    inference.solve(
+        graph,
+        &mut definitions,
+        &mut signatures,
+        &mut classes,
+        &types,
+    )?;
     let initializer_start = definitions.len();
     let helpers = Helpers::new(definitions.len() + graph.modules.len() - 1);
     let globals = ModuleValues::default();
@@ -341,7 +350,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
         functions.push(function);
         call_graph.push(calls);
         recursion_errors.push(module.error(
-            *definition,
+            definition,
             "recursive calls are unsupported in this prototype",
         ));
     }
@@ -445,8 +454,8 @@ fn signature(
     module: ModuleId,
     classes: &Classes,
     types: &Types,
-    id: usize,
     receiver: Option<Type>,
+    inference: &inference::Inference,
 ) -> Result<Signature, String> {
     let source = &graph.modules[module].source;
     if function.is_async
@@ -462,6 +471,7 @@ fn signature(
         ));
     }
     let mut params = Vec::new();
+    let mut parameter_types = Vec::new();
     for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
         let ty = if let Some(receiver) = receiver
             && index == 0
@@ -475,18 +485,22 @@ fn signature(
                     "self annotation must name its exact class",
                 ));
             }
-            receiver
+            Some(receiver)
         } else {
-            annotation(
-                parameter.annotation().ok_or_else(|| {
-                    error(source, parameter, "parameter requires a type annotation")
-                })?,
-                graph,
-                module,
-                classes,
-                types,
-            )?
+            parameter
+                .annotation()
+                .map(|value| annotation(value, graph, module, classes, types))
+                .transpose()?
+                .or(parameter
+                    .default
+                    .as_deref()
+                    .map(|value| calls::scalar_literal(value, source).map(|value| value.ty))
+                    .transpose()?)
         };
+        parameter_types.push(ty);
+        // Unresolved types exist only in the discarded discovery pass. solve()
+        // fills every slot before ordinary lowering can construct executable IR.
+        let ty = ty.unwrap_or(Type::None);
         let kind = if index < function.parameters.posonlyargs.len() {
             ParameterKind::PositionalOnly
         } else if index < function.parameters.posonlyargs.len() + function.parameters.args.len() {
@@ -506,20 +520,19 @@ fn signature(
             default,
         });
     }
-    let returns = annotation(
-        function
-            .returns
-            .as_deref()
-            .ok_or_else(|| error(source, function, "function requires a return annotation"))?,
-        graph,
-        module,
-        classes,
-        types,
-    )?;
+    let returns = function
+        .returns
+        .as_deref()
+        .map(|value| annotation(value, graph, module, classes, types))
+        .transpose()?
+        .or_else(|| {
+            (receiver.is_some() && function.name.as_str() == "__init__").then_some(Type::None)
+        });
+    let id = inference.register(parameter_types, returns);
     Ok(Signature {
         id,
         params,
-        returns,
+        returns: returns.unwrap_or(Type::None),
     })
 }
 
@@ -765,6 +778,8 @@ struct Checker<'a> {
     types: &'a Types,
     helpers: &'a Helpers,
     globals: &'a ModuleValues,
+    inference: Option<&'a inference::Inference>,
+    inferred_returns: Option<Vec<Type>>,
     comprehension_targets: HashSet<String>,
     comprehension_depth: usize,
     comprehension_exports: HashMap<String, usize>,
@@ -798,6 +813,8 @@ impl<'a> Checker<'a> {
             types,
             helpers,
             globals,
+            inference: None,
+            inferred_returns: None,
             comprehension_targets: HashSet::new(),
             comprehension_depth: 0,
             comprehension_exports: HashMap::new(),
@@ -1861,14 +1878,23 @@ impl<'a> Checker<'a> {
             }
             ast::Stmt::Return(return_) if !self.module_scope => {
                 let value = if let Some(value) = &return_.value {
-                    self.expr_expected(value, self.returns)?
+                    if self.inferred_returns.is_some() {
+                        self.expr(value)?
+                    } else {
+                        self.expr_expected(value, self.returns)?
+                    }
                 } else {
                     Expr {
                         ty: Type::None,
                         kind: ExprKind::None,
                     }
                 };
-                let value = self.coerce(value, self.returns, statement)?;
+                let value = if let Some(types) = &mut self.inferred_returns {
+                    types.push(value.ty);
+                    value
+                } else {
+                    self.coerce(value, self.returns, statement)?
+                };
                 return Ok((vec![Statement::Return(value)], false));
             }
             ast::Stmt::Break(_) | ast::Stmt::Continue(_) if !self.loop_breaks.is_empty() => {
@@ -2905,6 +2931,16 @@ impl<'a> Checker<'a> {
                 let class = &self.classes.declarations.definitions[class_id];
                 let initializer_name = class.methods[class.initializer].name.as_str();
                 let signature = self.classes.methods[class_id][initializer_name].clone();
+                if self.inference.is_some() {
+                    let (_, args) = self.infer_call(call, &signature, None, 1)?;
+                    return Ok(Expr {
+                        ty: Type::Class(class_id),
+                        kind: ExprKind::Construct {
+                            initializer: signature.id,
+                            args,
+                        },
+                    });
+                }
                 let args = self.arguments(call, &signature.params[1..], None)?;
                 self.calls.insert(signature.id);
                 return Ok(Expr {
@@ -2920,6 +2956,13 @@ impl<'a> Checker<'a> {
                 .get(&definition)
                 .ok_or_else(|| error(self.source, call, "definition is not a callable function"))?
                 .clone();
+            if self.inference.is_some() {
+                let (ty, args) = self.infer_call(call, &signature, None, 0)?;
+                return Ok(Expr {
+                    ty,
+                    kind: ExprKind::Call(signature.id, args),
+                });
+            }
             let args = self.arguments(call, &signature.params, None)?;
             self.calls.insert(signature.id);
             return Ok(Expr {
@@ -2941,6 +2984,13 @@ impl<'a> Checker<'a> {
                     .get(attribute.attr.as_str())
                     .ok_or_else(|| error(self.source, call, "unknown instance method"))?
                     .clone();
+                if self.inference.is_some() {
+                    let (ty, args) = self.infer_call(call, &signature, Some(receiver), 1)?;
+                    return Ok(Expr {
+                        ty,
+                        kind: ExprKind::Call(signature.id, args),
+                    });
+                }
                 let args = self.arguments(call, &signature.params[1..], Some(receiver))?;
                 self.calls.insert(signature.id);
                 return Ok(Expr {

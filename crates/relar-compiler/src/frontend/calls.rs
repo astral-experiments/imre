@@ -26,6 +26,42 @@ pub(super) fn scalar_default(
     types: &Types,
     source: &str,
 ) -> Result<Expr, String> {
+    let mut value = scalar_literal(expression, source)?;
+    let ty = value.ty;
+    let concrete = types.payload(expected).unwrap_or(expected);
+    if types
+        .members(concrete)
+        .is_some_and(|members| members.contains(&ty))
+    {
+        value = Expr {
+            ty: concrete,
+            kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
+        };
+    }
+    if value.ty == expected {
+        return Ok(value);
+    }
+    if let Some(payload) = types.payload(expected) {
+        let kind = if ty == Type::None {
+            Some(ExprKind::Absent(Box::new(value)))
+        } else if value.ty == payload {
+            Some(ExprKind::Present(Box::new(value)))
+        } else {
+            None
+        };
+        if let Some(kind) = kind {
+            return Ok(Expr { ty: expected, kind });
+        }
+    }
+    Err(error(
+        source,
+        expression,
+        &format!("default requires exact type {expected}, got {ty}"),
+    ))
+}
+
+/// A scalar default also supplies an exact type for an unannotated parameter.
+pub(super) fn scalar_literal(expression: &ast::Expr, source: &str) -> Result<Expr, String> {
     let (ty, kind) = match expression {
         ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
             value: ast::Number::Int(value),
@@ -71,37 +107,7 @@ pub(super) fn scalar_default(
             ));
         }
     };
-    let mut value = Expr { ty, kind };
-    let concrete = types.payload(expected).unwrap_or(expected);
-    if types
-        .members(concrete)
-        .is_some_and(|members| members.contains(&ty))
-    {
-        value = Expr {
-            ty: concrete,
-            kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
-        };
-    }
-    if value.ty == expected {
-        return Ok(value);
-    }
-    if let Some(payload) = types.payload(expected) {
-        let kind = if ty == Type::None {
-            Some(ExprKind::Absent(Box::new(value)))
-        } else if value.ty == payload {
-            Some(ExprKind::Present(Box::new(value)))
-        } else {
-            None
-        };
-        if let Some(kind) = kind {
-            return Ok(Expr { ty: expected, kind });
-        }
-    }
-    Err(error(
-        source,
-        expression,
-        &format!("default requires exact type {expected}, got {ty}"),
-    ))
+    Ok(Expr { ty, kind })
 }
 
 impl Checker<'_> {

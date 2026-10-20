@@ -230,6 +230,7 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.inference = self.inference;
         helper.comprehension_targets = targets;
         let mut params = Vec::new();
         let mut args = Vec::new();
