@@ -4057,6 +4057,22 @@ mod tests {
     }
 
     #[test]
+    fn suspended_list_pipeline_cursors_use_native_arithmetic() {
+        for (source, operation, fallback) in [
+            ("values", "add nsw i64", "@int_add("),
+            ("reversed(values)", "sub nsw i64", "@int_sub("),
+        ] {
+            let body = function_body(&format!(
+                "def same(values: list[int]) -> bool:\n    return all(left == right for left, right in zip({source}, {source}))\n"
+            ));
+            assert!(body.contains(operation));
+            assert!(!body.contains(fallback));
+            assert!(body.contains("@relar_list_get_index("));
+            assert!(!body.contains("@relar_list_get("));
+        }
+    }
+
+    #[test]
     fn bounded_accumulator_identity_keeps_native_and_fallback_arithmetic_without_extra_uses() {
         for term in ["10", "-10"] {
             let body = function_body(&format!(

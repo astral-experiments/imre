@@ -179,6 +179,7 @@ pub(crate) fn analyze(module: &Module) -> RangeFacts<'_> {
     let mut analyzer = Analyzer {
         intervals: HashMap::new(),
         cursors: HashMap::new(),
+        cleared: Vec::new(),
     };
     for function in module.functions.iter().chain([&module.entry]) {
         analyzer.function(function);
@@ -484,6 +485,7 @@ impl Flow {
 struct Analyzer {
     intervals: HashMap<*const Expr, Interval>,
     cursors: HashMap<*const Statement, Interval>,
+    cleared: Vec<Interval>,
 }
 
 impl Analyzer {
@@ -498,6 +500,19 @@ impl Analyzer {
         {
             return;
         }
+        // Match the emitter's cleanup-safe initial values. Exact integers use
+        // tagged numeric zero; nullable integers instead use the absent word.
+        self.cleared = function
+            .locals
+            .iter()
+            .map(|ty| {
+                if *ty == Type::Int {
+                    Interval::exact(0)
+                } else {
+                    Interval::UNKNOWN
+                }
+            })
+            .collect();
         self.block(&function.body, State::unknown(function.locals.len()), true);
     }
 
@@ -520,10 +535,11 @@ impl Analyzer {
                 state.0[*slot] = self.expression(value, &mut state, record)
             }
             Statement::Move(target, source) => {
-                state.0[*target] = state.0[*source];
-                state.0[*source] = Interval::UNKNOWN;
+                let value = state.0[*source];
+                state.0[*source] = self.cleared[*source];
+                state.0[*target] = value;
             }
-            Statement::Clear(slot) => state.0[*slot] = Interval::UNKNOWN,
+            Statement::Clear(slot) => state.0[*slot] = self.cleared[*slot],
             Statement::Scope { body, clear } => {
                 let mut flow = self.block(body, state, record);
                 for state in [
@@ -536,7 +552,7 @@ impl Analyzer {
                 .flatten()
                 {
                     for &slot in clear {
-                        state.0[slot] = Interval::UNKNOWN;
+                        state.0[slot] = self.cleared[slot];
                     }
                 }
                 return flow;
@@ -793,7 +809,7 @@ impl Analyzer {
                     *state = next;
                     let value = self.expression(value, state, record);
                     for &slot in clear {
-                        state.0[slot] = Interval::UNKNOWN;
+                        state.0[slot] = self.cleared[slot];
                     }
                     value
                 } else {
@@ -1557,8 +1573,116 @@ mod tests {
             let Statement::Expr(cleared) = &function.body[1] else {
                 unreachable!()
             };
-            assert_eq!(facts.integer(cleared), None);
+            assert_eq!(facts.integer(cleared), Some(IntRange { min: 0, max: 0 }));
             assert_eq!(facts.small_locals(function), [false, small, small, small]);
+        }
+    }
+
+    #[test]
+    fn moved_and_cleared_slots_reset_only_exact_integers() {
+        let mut module =
+            module("def owners(value: int, optional: int | None) -> None:\n    pass\n");
+        let function = &mut module.functions[0];
+        let optional = function.locals[1];
+        function.locals.extend([Type::Int, optional]);
+        let local = |slot, ty| {
+            Statement::Expr(Expr {
+                ty,
+                kind: ExprKind::Local(slot),
+            })
+        };
+        function.body = vec![
+            Statement::Move(2, 0),
+            Statement::Move(3, 1),
+            local(0, Type::Int),
+            local(1, optional),
+            local(2, Type::Int),
+            local(3, optional),
+            Statement::Clear(2),
+            Statement::Clear(3),
+            local(2, Type::Int),
+            local(3, optional),
+        ];
+        let facts = analyze(&module);
+        let function = &module.functions[0];
+        let ranges = expressions(function)
+            .into_iter()
+            .map(|value| facts.integer(value))
+            .collect::<Vec<_>>();
+        let zero = Some(IntRange { min: 0, max: 0 });
+        assert_eq!(ranges, [zero, None, None, None, zero, None]);
+        assert_eq!(facts.small_locals(function), [false; 4]);
+    }
+
+    #[test]
+    fn suspended_pipeline_cleanup_preserves_nonnegative_list_cursors() {
+        for source in ["values", "reversed(values)"] {
+            let module = module(&format!(
+                "def same(values: list[int]) -> bool:\n    return all(left == right for left, right in zip({source}, {source}))\n"
+            ));
+            let facts = analyze(&module);
+            let mut accesses = 0;
+            for value in expressions(&module.functions[0]) {
+                if let ExprKind::Builtin(Builtin::ListGet, args) = &value.kind {
+                    accesses += 1;
+                    assert_eq!(
+                        facts.integer(&args[1]),
+                        Some(IntRange {
+                            min: 0,
+                            max: MAX_LIST_LEN as i64 - 1,
+                        })
+                    );
+                }
+            }
+            assert_eq!(accesses, 2);
+        }
+    }
+
+    #[test]
+    fn scoped_cleanup_restores_integers_on_every_loop_exit() {
+        for exit in [
+            None,
+            Some(Statement::Break),
+            Some(Statement::Continue),
+            Some(Statement::Exhaust),
+        ] {
+            let mut module = module("def scoped(again: bool) -> int:\n    return 0\n");
+            let function = &mut module.functions[0];
+            function.locals.push(Type::Int);
+            let integer = |value: &str| Expr {
+                ty: Type::Int,
+                kind: ExprKind::Int(value.into()),
+            };
+            let mut body = vec![Statement::Assign(
+                1,
+                integer("1000000000000000000000000000000"),
+            )];
+            body.extend(exit);
+            function.body = vec![
+                Statement::Assign(1, integer("2")),
+                Statement::While(
+                    Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Local(0),
+                    },
+                    vec![Statement::Scope {
+                        body,
+                        clear: vec![1],
+                    }],
+                    Vec::new(),
+                ),
+                Statement::Return(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Local(1),
+                }),
+            ];
+            let facts = analyze(&module);
+            let function = &module.functions[0];
+            let Statement::Return(value) = &function.body[2] else {
+                unreachable!()
+            };
+            assert_eq!(facts.integer(value), Some(IntRange { min: 0, max: 2 }));
+            assert!(!facts.small_locals(function)[1]);
         }
     }
 
