@@ -3,6 +3,12 @@ def probe(log: list[str], label: str, value: int) -> int:
     return value
 
 
+def clear_strict(flags: list[int], value: int) -> int:
+    if flags:
+        flags.pop()
+    return value
+
+
 def triple(first: int, second: int, third: int, strict: bool) -> None:
     log: list[str] = []
     try:
@@ -62,6 +68,24 @@ try:
     print(len(list(zip([1], [2, 3], strict=flags))))
 except ValueError as error:
     print(error)
+
+# strict's truth value is captured before the first lazy source can mutate it.
+flags = [1]
+try:
+    print(
+        len(
+            list(
+                zip(
+                    (clear_strict(flags, value) for value in [1]),
+                    [2, 3],
+                    strict=flags,
+                )
+            )
+        )
+    )
+except ValueError as error:
+    print(error)
+print(len(flags))
 
 # A failing strict probe propagates its original exception, not a length error.
 try:
