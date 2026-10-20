@@ -101,9 +101,24 @@ impl Checker<'_> {
         let result = self.hidden(Type::Int);
         let mut body = Vec::new();
         let mut clear = vec![result];
-        let input = self.capture_consumer_input(input, &mut body, &mut clear);
+        let fixed_tuple = matches!(
+            &input,
+            Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } if matches!(iterable.ty, Type::Tuple(_))
+        );
+        // Fixed-tuple expansion already captures its source before running
+        // `start`. A second aggregate capture would hide its projection-only
+        // use from tuple scalar replacement, forcing a temporary allocation.
+        let input = if fixed_tuple {
+            input
+        } else {
+            self.capture_consumer_input(input, &mut body, &mut clear)
+        };
         let initialize = Statement::Assign(result, start);
-        let after = if convert {
+        let after = if convert || fixed_tuple {
             vec![initialize]
         } else {
             body.push(initialize);
