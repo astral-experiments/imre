@@ -1,0 +1,1903 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "audited_at_utc": "2026-10-20T19:34:06.584749+00:00",
+  "profile_directory": "/tmp/relar-telemetry-profile",
+  "profile_summary_sha256": "69c694ada6cd31bcab0c6d7166281a8b3bef7876accfdad7f26ed397d7cedd63",
+  "profile_manifest_sha256": "5fabc95162a05faf24fd021c525763e676e765db1e4540c609b4fa6282f686f7",
+  "audit_script_sha256": "926171fa5550fc877db20d06edf2fd25c71f05572bdfb8ae65de0828fad24fe1",
+  "timing_revision": "13ed29910b6f52df7959a37afd12ad46b1e5d638",
+  "build_revision": "547c7252cde4b0e5e4b1eae3f39670c71d902989",
+  "validation_revision": "547c7252cde4b0e5e4b1eae3f39670c71d902989",
+  "post_validation_changes": {
+    "paths": [
+      "benchmarks/reference/telemetry_comparison/README.md",
+      "benchmarks/telemetry_benchmark.py"
+    ],
+    "patch": "diff --git a/benchmarks/reference/telemetry_comparison/README.md b/benchmarks/reference/telemetry_comparison/README.md\nindex dce3c17..76a1b51 100644\n--- a/benchmarks/reference/telemetry_comparison/README.md\n+++ b/benchmarks/reference/telemetry_comparison/README.md\n@@ -60,6 +60,11 @@ executables against the independent oracle and CPython. Timing rechecks every\n recorded source, tool, binary, LLVM, and validation hash before and after running.\n For ThinLTO, select the corresponding Rust build and Relar runtime and add\n `--lto-linker /path/to/ld.lld` to both commands. Matching modes are required.\n+The compile command always passes an explicit target, defaulting to the Rust\n+host when `--target` is omitted. Relar's build target must match that host, and the\n+produced executable's ELF class, byte order, and machine must match the Rust\n+executable. Relar's emitted LLVM text has no target directive; it is retained and\n+hashed without treating it as target evidence.\n \n Defaults are 16, 256, and 4,096 samples, with report, full-scan predicates/search,\n and early-exit predicate/search workloads. Repetition counts target 1,048,576\ndiff --git a/benchmarks/telemetry_benchmark.py b/benchmarks/telemetry_benchmark.py\nindex 862a1eb..3c0aa6b 100644\n--- a/benchmarks/telemetry_benchmark.py\n+++ b/benchmarks/telemetry_benchmark.py\n@@ -45,6 +45,18 @@ def rust_host(record: dict) -> str:\n     )\n \n \n+def elf_target(path: Path) -> dict:\n+    with path.open(\"rb\") as stream:\n+        header = stream.read(20)\n+    assert len(header) == 20 and header[:5] == b\"\\x7fELF\\x02\", \"expected 64-bit ELF\"\n+    byte_order = {1: \"little\", 2: \"big\"}[header[5]]\n+    return {\n+        \"bits\": 64,\n+        \"byte_order\": byte_order,\n+        \"machine\": int.from_bytes(header[18:20], byte_order),\n+    }\n+\n+\n def workloads(sizes: list[int], batch_pairs: int, scenarios) -> list[dict]:\n     generator = random.Random(20261020)\n     result = []\n@@ -258,8 +270,8 @@ def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> d\n         \"--emit-llvm\",\n         str(llvm),\n     ]\n-    if args.target:\n-        command += [\"--target\", args.target]\n+    effective_target = args.target or rust_host(rust_record)\n+    command += [\"--target\", effective_target]\n     if args.lto_linker:\n         command += [\"--lto-linker\", str(paths[\"lto_linker\"])]\n     artifacts.mkdir(parents=True, exist_ok=True)\n@@ -283,12 +295,8 @@ def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> d\n     assert validation[\"input_guards_passed\"]\n     assert validation[\"source_and_binary_sha256\"][\"relar\"] == shared.sha256(binary)\n     assert validation[\"source_and_binary_sha256\"][\"rust\"] == hashes[\"rust\"]\n-    llvm_target = next(\n-        line.split('\"')[1]\n-        for line in llvm.read_text().splitlines()\n-        if line.startswith(\"target triple\")\n-    )\n-    assert llvm_target == rust_host(rust_record), \"emitted LLVM and Rust targets differ\"\n+    native_elf = elf_target(binary)\n+    assert native_elf == elf_target(paths[\"rust\"]), \"Relar and Rust ELF targets differ\"\n     assert hashes == {name: shared.sha256(path) for name, path in paths.items()}\n     return {\n         \"schema\": 1,\n@@ -302,7 +310,8 @@ def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> d\n         \"binary_sha256\": shared.sha256(binary),\n         \"llvm\": str(llvm),\n         \"llvm_sha256\": shared.sha256(llvm),\n-        \"llvm_target\": llvm_target,\n+        \"effective_target\": effective_target,\n+        \"native_elf\": native_elf,\n         \"validation_path\": str(validation_path),\n         \"validation_sha256\": shared.sha256(validation_path),\n         \"validation_command\": validation_command,\n@@ -323,6 +332,16 @@ def verify_preparation(record: dict, args, paths, hashes, revision, dirty) -> No\n     assert record[\"requested_target\"] == args.target and record[\"thinlto\"] == (\n         args.lto_linker is not None\n     )\n+    assert record[\"effective_target\"] == (\n+        args.target or rust_host(record[\"rust_build_record\"])\n+    )\n+    command = record[\"compile_command\"]\n+    assert command[command.index(\"--target\") + 1] == record[\"effective_target\"]\n+    assert (\n+        record[\"native_elf\"]\n+        == elf_target(Path(record[\"binary\"]))\n+        == elf_target(paths[\"rust\"])\n+    )\n     assert record[\"source_and_tool_paths\"] == {\n         name: str(path) for name, path in paths.items()\n     }\n",
+    "patch_sha256": "8e3672d3e78fa7bfde47318d0f383e1b2eb62ac650feaf17627a7000370245d7",
+    "reason": "Only the benchmark target-verification harness and its guide may differ. Compiler, runtime, examples, validators, tests, and Rust reference sources remain unchanged from full validation."
+  },
+  "benchmark_record_sha256": "bbe69e51b7b9315bfc3e755020999443671c7f3987a3298e033610b301c87401",
+  "timing_status_sha256": "9b51cc7cefb0a1ba31a7688c0770431b4918c7ce79a103f2be9316c3b4de524f",
+  "preparation_record_sha256": "1e7e649d58ed3f5884534101b986c9b00a0af9a275a4387cbb7a17eb087e0ad8",
+  "binary_sha256": {
+    "relar": "eca51301d8709642983f62f82c7afc34f4876afd10d70935b457356657231ca9",
+    "rust": "84e2eee85f3e938072b50811dbf4d57db18a380b51ad3ea164705937e66bf2b9"
+  },
+  "llvm_sha256": "4040e42a57c6aad6d402705e74d717b5b92bf5d49376c0dd770a0567b9aea0b3",
+  "profiles_verified": 6,
+  "evidence_files_verified": 71,
+  "complete_stdout_checksum_and_files_verified": true,
+  "quiet_input_proved_independently": true,
+  "raw_profile_counts_independently_reparsed": true,
+  "profiles_started_after_bound_timing_completed": true,
+  "metrics": {
+    "relar-callgrind-128": {
+      "instructions": 230051902,
+      "instructions_per_inspected_pair": 438.78918075561523,
+      "top_self_functions": [
+        {
+          "name": "fn_7",
+          "self_instructions": 107791232,
+          "self_fraction": 0.468551796628919,
+          "calls": 128,
+          "incoming_inclusive_instructions": 163890048
+        },
+        {
+          "name": "relar_seq_get",
+          "self_instructions": 53895168,
+          "self_fraction": 0.2342739509278215,
+          "calls": 1056768,
+          "incoming_inclusive_instructions": 53895168
+        },
+        {
+          "name": "0x00000000000ab250",
+          "self_instructions": 9426573,
+          "self_fraction": 0.04097585335330112,
+          "calls": 168150,
+          "incoming_inclusive_instructions": 10063429
+        },
+        {
+          "name": "fn_11",
+          "self_instructions": 9293658,
+          "self_fraction": 0.040398092426986325,
+          "calls": 16388,
+          "incoming_inclusive_instructions": 41962867
+        },
+        {
+          "name": "malloc",
+          "self_instructions": 7163488,
+          "self_fraction": 0.03113857324248508,
+          "calls": 159916,
+          "incoming_inclusive_instructions": 8317928
+        },
+        {
+          "name": "free",
+          "self_instructions": 5211348,
+          "self_fraction": 0.02265292290432791,
+          "calls": 168108,
+          "incoming_inclusive_instructions": 15271015
+        },
+        {
+          "name": "relar_mapping_iter_next",
+          "self_instructions": 3661248,
+          "self_fraction": 0.015914878199963765,
+          "calls": 87432,
+          "incoming_inclusive_instructions": 3661248
+        },
+        {
+          "name": "relar_str_split_whitespace",
+          "self_instructions": 3451578,
+          "self_fraction": 0.015003475172311334,
+          "calls": 8194,
+          "incoming_inclusive_instructions": 5543016
+        },
+        {
+          "name": "<compact_str::CompactString>::push",
+          "self_instructions": 2818220,
+          "self_fraction": 0.012250366006537082,
+          "calls": 48590,
+          "incoming_inclusive_instructions": 3595660
+        },
+        {
+          "name": "<relar_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
+          "self_instructions": 2785340,
+          "self_fraction": 0.012107441737212848,
+          "calls": 557068,
+          "incoming_inclusive_instructions": 2785340
+        },
+        {
+          "name": "fn_12",
+          "self_instructions": 2614296,
+          "self_fraction": 0.011363939951255,
+          "calls": 2,
+          "incoming_inclusive_instructions": 62475447
+        },
+        {
+          "name": "relar_str_splitlines",
+          "self_instructions": 2385415,
+          "self_fraction": 0.010369029680963038,
+          "calls": 2,
+          "incoming_inclusive_instructions": 4118888
+        },
+        {
+          "name": "relar_int_parse",
+          "self_instructions": 2299590,
+          "self_fraction": 0.009995961693896363,
+          "calls": 16388,
+          "incoming_inclusive_instructions": 2299590
+        },
+        {
+          "name": "0x00000000000ab650",
+          "self_instructions": 2251646,
+          "self_fraction": 0.009787556548869567,
+          "calls": 16459,
+          "incoming_inclusive_instructions": 2320398
+        },
+        {
+          "name": "<relar_runtime::objects::words::WordKind>::release",
+          "self_instructions": 1499557,
+          "self_fraction": 0.006518342108729881,
+          "calls": 32781,
+          "incoming_inclusive_instructions": 5416579
+        }
+      ]
+    },
+    "relar-dhat-128": {
+      "allocated_bytes": 7100626,
+      "allocated_blocks": 168152,
+      "peak_live_bytes": 558230,
+      "peak_live_blocks": 12316,
+      "exit_live_bytes": 9216,
+      "exit_live_blocks": 2,
+      "top_allocation_stacks": [
+        {
+          "bytes": 327680,
+          "blocks": 8192,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2357F4: alloc (library/alloc/src/alloc.rs:101)",
+            "0x2357F4: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x2357F4: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x2357F4: allocate (library/alloc/src/alloc.rs:449)",
+            "0x2357F4: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x2357F4: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x2357F4: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x2357F4: relar_str_split_whitespace (objects.rs:736)",
+            "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 327680,
+          "blocks": 8192,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2357F4: alloc (library/alloc/src/alloc.rs:101)",
+            "0x2357F4: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x2357F4: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x2357F4: allocate (library/alloc/src/alloc.rs:449)",
+            "0x2357F4: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x2357F4: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x2357F4: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x2357F4: relar_str_split_whitespace (objects.rs:736)",
+            "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x235960: alloc (library/alloc/src/alloc.rs:101)",
+            "0x235960: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x235960: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x235960: allocate (library/alloc/src/alloc.rs:449)",
+            "0x235960: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x235960: new<alloc::rc::RcInner<relar_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
+            "0x235960: new<relar_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
+            "0x235960: relar_str_split_whitespace (objects.rs:738)",
+            "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x235960: alloc (library/alloc/src/alloc.rs:101)",
+            "0x235960: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x235960: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x235960: allocate (library/alloc/src/alloc.rs:449)",
+            "0x235960: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x235960: new<alloc::rc::RcInner<relar_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
+            "0x235960: new<relar_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
+            "0x235960: relar_str_split_whitespace (objects.rs:738)",
+            "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163880,
+          "blocks": 4097,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x235ED0: alloc (library/alloc/src/alloc.rs:101)",
+            "0x235ED0: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x235ED0: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x235ED0: allocate (library/alloc/src/alloc.rs:449)",
+            "0x235ED0: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x235ED0: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x235ED0: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x235ED0: relar_str_splitlines (objects.rs:772)",
+            "0x2243B4: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163880,
+          "blocks": 4097,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x235ED0: alloc (library/alloc/src/alloc.rs:101)",
+            "0x235ED0: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x235ED0: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x235ED0: allocate (library/alloc/src/alloc.rs:449)",
+            "0x235ED0: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x235ED0: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x235ED0: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x235ED0: relar_str_splitlines (objects.rs:772)",
+            "0x2243B4: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x222CCE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x222E08: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x222F77: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2230BE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x223727: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x222CCE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x222E08: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x222F77: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2230BE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x223727: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        }
+      ]
+    },
+    "relar-dhat-256": {
+      "allocated_bytes": 7105746,
+      "allocated_blocks": 168280,
+      "peak_live_bytes": 558230,
+      "peak_live_blocks": 12316,
+      "exit_live_bytes": 9216,
+      "exit_live_blocks": 2,
+      "top_allocation_stacks": [
+        {
+          "bytes": 327680,
+          "blocks": 8192,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2357F4: alloc (library/alloc/src/alloc.rs:101)",
+            "0x2357F4: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x2357F4: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x2357F4: allocate (library/alloc/src/alloc.rs:449)",
+            "0x2357F4: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x2357F4: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x2357F4: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x2357F4: relar_str_split_whitespace (objects.rs:736)",
+            "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 327680,
+          "blocks": 8192,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2357F4: alloc (library/alloc/src/alloc.rs:101)",
+            "0x2357F4: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x2357F4: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x2357F4: allocate (library/alloc/src/alloc.rs:449)",
+            "0x2357F4: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x2357F4: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x2357F4: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x2357F4: relar_str_split_whitespace (objects.rs:736)",
+            "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x235960: alloc (library/alloc/src/alloc.rs:101)",
+            "0x235960: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x235960: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x235960: allocate (library/alloc/src/alloc.rs:449)",
+            "0x235960: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x235960: new<alloc::rc::RcInner<relar_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
+            "0x235960: new<relar_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
+            "0x235960: relar_str_split_whitespace (objects.rs:738)",
+            "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x235960: alloc (library/alloc/src/alloc.rs:101)",
+            "0x235960: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x235960: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x235960: allocate (library/alloc/src/alloc.rs:449)",
+            "0x235960: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x235960: new<alloc::rc::RcInner<relar_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
+            "0x235960: new<relar_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
+            "0x235960: relar_str_split_whitespace (objects.rs:738)",
+            "0x22554A: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22378F: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163880,
+          "blocks": 4097,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x235ED0: alloc (library/alloc/src/alloc.rs:101)",
+            "0x235ED0: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x235ED0: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x235ED0: allocate (library/alloc/src/alloc.rs:449)",
+            "0x235ED0: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x235ED0: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x235ED0: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x235ED0: relar_str_splitlines (objects.rs:772)",
+            "0x2243B4: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163880,
+          "blocks": 4097,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x235ED0: alloc (library/alloc/src/alloc.rs:101)",
+            "0x235ED0: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x235ED0: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x235ED0: allocate (library/alloc/src/alloc.rs:449)",
+            "0x235ED0: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x235ED0: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x235ED0: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x235ED0: relar_str_splitlines (objects.rs:772)",
+            "0x2243B4: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EB87: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x222CCE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x222E08: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x222F77: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2230BE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x223727: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x22566D: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x222CCE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x222E08: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x222F77: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2230BE: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        },
+        {
+          "bytes": 163840,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x223727: fn_11 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x2257F8: fn_12 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x20EA20: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+            "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+          ]
+        }
+      ]
+    },
+    "rust-callgrind-128": {
+      "instructions": 29380573,
+      "instructions_per_inspected_pair": 56.03899574279785,
+      "top_self_functions": [
+        {
+          "name": "telemetry_reference::run",
+          "self_instructions": 6832827,
+          "self_fraction": 0.23256275498779413,
+          "calls": 1,
+          "incoming_inclusive_instructions": 28984537
+        },
+        {
+          "name": "telemetry_reference::number",
+          "self_instructions": 3975647,
+          "self_fraction": 0.135315502526108,
+          "calls": 16386,
+          "incoming_inclusive_instructions": 12350843
+        },
+        {
+          "name": "telemetry_reference::load",
+          "self_instructions": 2754402,
+          "self_fraction": 0.09374909059806287,
+          "calls": 2,
+          "incoming_inclusive_instructions": 19633413
+        },
+        {
+          "name": "0x00000000000ab250",
+          "self_instructions": 2562817,
+          "self_fraction": 0.08722828516652824,
+          "calls": 41035,
+          "incoming_inclusive_instructions": 2562916
+        },
+        {
+          "name": "<alloc::vec::Vec<&str> as alloc::vec::spec_from_iter_nested::SpecFromIterNested<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure#0}>, telemetry_reference::fields::{closure#1}>>>::from_iter",
+          "self_instructions": 2421492,
+          "self_fraction": 0.08241813391454278,
+          "calls": 8194,
+          "incoming_inclusive_instructions": 2790512
+        },
+        {
+          "name": "num_bigint::biguint::convert::from_radix_digits_be",
+          "self_instructions": 2254688,
+          "self_fraction": 0.07674077697531631,
+          "calls": 16388,
+          "incoming_inclusive_instructions": 6294794
+        },
+        {
+          "name": "0x00000000000ab650",
+          "self_instructions": 2163373,
+          "self_fraction": 0.07363277087890696,
+          "calls": 16436,
+          "incoming_inclusive_instructions": 2230298
+        },
+        {
+          "name": "malloc",
+          "self_instructions": 1779431,
+          "self_fraction": 0.06056488414980879,
+          "calls": 40999,
+          "incoming_inclusive_instructions": 4005508
+        },
+        {
+          "name": "free",
+          "self_instructions": 1270984,
+          "self_fraction": 0.04325933330163438,
+          "calls": 40999,
+          "incoming_inclusive_instructions": 3829407
+        },
+        {
+          "name": "0x0000000000079f90",
+          "self_instructions": 884952,
+          "self_fraction": 0.030120311132121214,
+          "calls": 16388,
+          "incoming_inclusive_instructions": 884952
+        },
+        {
+          "name": "0x0000000000188d80",
+          "self_instructions": 477670,
+          "self_fraction": 0.016258021924895748,
+          "calls": 95,
+          "incoming_inclusive_instructions": 477670
+        },
+        {
+          "name": "<alloc::vec::Vec<telemetry_reference::Sample<i64>> as alloc::vec::spec_from_iter::SpecFromIter<telemetry_reference::Sample<i64>, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure#0}>, core::option::Option<core::convert::Infallible>>>>::from_iter",
+          "self_instructions": 376782,
+          "self_fraction": 0.01282418828250899,
+          "calls": 2,
+          "incoming_inclusive_instructions": 451954
+        },
+        {
+          "name": "<num_bigint::bigint::BigInt as core::cmp::Ord>::cmp",
+          "self_instructions": 294862,
+          "self_fraction": 0.010035951307008205,
+          "calls": 8192,
+          "incoming_inclusive_instructions": 294862
+        },
+        {
+          "name": "ceil",
+          "self_instructions": 213044,
+          "self_fraction": 0.00725118601328844,
+          "calls": 16388,
+          "incoming_inclusive_instructions": 213044
+        },
+        {
+          "name": "<alloc::vec::Vec<telemetry_reference::Sample<num_bigint::bigint::BigInt>>>::push_mut",
+          "self_instructions": 204844,
+          "self_fraction": 0.006972090026971223,
+          "calls": 8192,
+          "incoming_inclusive_instructions": 557907
+        }
+      ]
+    },
+    "rust-dhat-128": {
+      "allocated_bytes": 2656473,
+      "allocated_blocks": 41065,
+      "peak_live_bytes": 833193,
+      "peak_live_blocks": 16405,
+      "exit_live_bytes": 544,
+      "exit_live_blocks": 1,
+      "top_allocation_stacks": [
+        {
+          "bytes": 524032,
+          "blocks": 11,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AFA0D: alloc (library/alloc/src/alloc.rs:101)",
+            "0x1AFA0D: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x1AFA0D: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x1AFA0D: allocate (library/alloc/src/alloc.rs:449)",
+            "0x1AFA0D: finish_grow<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:560)",
+            "0x1AFA0D: grow_amortized<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:529)",
+            "0x1AFA0D: grow_one<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:493)",
+            "0x1AFA0D: <alloc::raw_vec::RawVec<telemetry_reference::Sample<num_bigint::bigint::BigInt>>>::grow_one (library/alloc/src/raw_vec/mod.rs:188)",
+            "0x1A784B: <alloc::vec::Vec<telemetry_reference::Sample<num_bigint::bigint::BigInt>>>::push_mut (library/alloc/src/vec/mod.rs:1039)",
+            "0x1A60B1: push<telemetry_reference::Sample<num_bigint::bigint::BigInt>, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1002)",
+            "0x1A60B1: telemetry_reference::load (main.rs:152)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 524032,
+          "blocks": 11,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AFA0D: alloc (library/alloc/src/alloc.rs:101)",
+            "0x1AFA0D: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x1AFA0D: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x1AFA0D: allocate (library/alloc/src/alloc.rs:449)",
+            "0x1AFA0D: finish_grow<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:560)",
+            "0x1AFA0D: grow_amortized<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:529)",
+            "0x1AFA0D: grow_one<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:493)",
+            "0x1AFA0D: <alloc::raw_vec::RawVec<telemetry_reference::Sample<num_bigint::bigint::BigInt>>>::grow_one (library/alloc/src/raw_vec/mod.rs:188)",
+            "0x1A784B: <alloc::vec::Vec<telemetry_reference::Sample<num_bigint::bigint::BigInt>>>::push_mut (library/alloc/src/vec/mod.rs:1039)",
+            "0x1A60B1: push<telemetry_reference::Sample<num_bigint::bigint::BigInt>, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1002)",
+            "0x1A60B1: telemetry_reference::load (main.rs:152)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1AF5D8: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1AF5D8: with_capacity_in<&str, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1AF5D8: with_capacity_in<&str, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1AF5D8: with_capacity<&str> (library/alloc/src/vec/mod.rs:522)",
+            "0x1AF5D8: <alloc::vec::Vec<&str> as alloc::vec::spec_from_iter_nested::SpecFromIterNested<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure#0}>, telemetry_reference::fields::{closure#1}>>>::from_iter (library/alloc/src/vec/spec_from_iter_nested.rs:30)",
+            "0x1A6E93: from_iter<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure_env#0}>, telemetry_reference::fields::{closure_env#1}>> (library/alloc/src/vec/spec_from_iter.rs:33)",
+            "0x1A6E93: from_iter<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure_env#0}>, telemetry_reference::fields::{closure_env#1}>> (library/alloc/src/vec/mod.rs:3941)",
+            "0x1A6E93: collect<core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure_env#0}>, telemetry_reference::fields::{closure_env#1}>, alloc::vec::Vec<&str, alloc::alloc::Global>> (library/core/src/iter/traits/iterator.rs:2090)",
+            "0x1A6E93: telemetry_reference::fields (main.rs:95)",
+            "0x1A5F45: telemetry_reference::load (main.rs:138)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1AF5D8: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1AF5D8: with_capacity_in<&str, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1AF5D8: with_capacity_in<&str, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1AF5D8: with_capacity<&str> (library/alloc/src/vec/mod.rs:522)",
+            "0x1AF5D8: <alloc::vec::Vec<&str> as alloc::vec::spec_from_iter_nested::SpecFromIterNested<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure#0}>, telemetry_reference::fields::{closure#1}>>>::from_iter (library/alloc/src/vec/spec_from_iter_nested.rs:30)",
+            "0x1A6E93: from_iter<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure_env#0}>, telemetry_reference::fields::{closure_env#1}>> (library/alloc/src/vec/spec_from_iter.rs:33)",
+            "0x1A6E93: from_iter<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure_env#0}>, telemetry_reference::fields::{closure_env#1}>> (library/alloc/src/vec/mod.rs:3941)",
+            "0x1A6E93: collect<core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure_env#0}>, telemetry_reference::fields::{closure_env#1}>, alloc::vec::Vec<&str, alloc::alloc::Global>> (library/core/src/iter/traits/iterator.rs:2090)",
+            "0x1A6E93: telemetry_reference::fields (main.rs:95)",
+            "0x1A5F45: telemetry_reference::load (main.rs:138)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 262080,
+          "blocks": 12,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AFACD: alloc (library/alloc/src/alloc.rs:101)",
+            "0x1AFACD: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x1AFACD: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x1AFACD: allocate (library/alloc/src/alloc.rs:449)",
+            "0x1AFACD: finish_grow<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:560)",
+            "0x1AFACD: grow_amortized<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:529)",
+            "0x1AFACD: grow_one<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:493)",
+            "0x1AFACD: <alloc::raw_vec::RawVec<&str>>::grow_one (library/alloc/src/raw_vec/mod.rs:188)",
+            "0x1A576B: push_mut<&str, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1039)",
+            "0x1A576B: push<&str, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1002)",
+            "0x1A576B: lines (main.rs:76)",
+            "0x1A576B: telemetry_reference::load (main.rs:118)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 262080,
+          "blocks": 12,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AFACD: alloc (library/alloc/src/alloc.rs:101)",
+            "0x1AFACD: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x1AFACD: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x1AFACD: allocate (library/alloc/src/alloc.rs:449)",
+            "0x1AFACD: finish_grow<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:560)",
+            "0x1AFACD: grow_amortized<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:529)",
+            "0x1AFACD: grow_one<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:493)",
+            "0x1AFACD: <alloc::raw_vec::RawVec<&str>>::grow_one (library/alloc/src/raw_vec/mod.rs:188)",
+            "0x1A576B: push_mut<&str, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1039)",
+            "0x1A576B: push<&str, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1002)",
+            "0x1A576B: lines (main.rs:76)",
+            "0x1A576B: telemetry_reference::load (main.rs:118)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 131008,
+          "blocks": 11,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1AE7E9: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1AE7E9: with_capacity_in<telemetry_reference::Sample<i64>, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1AE7E9: with_capacity_in<telemetry_reference::Sample<i64>, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1AE7E9: with_capacity<telemetry_reference::Sample<i64>> (library/alloc/src/vec/mod.rs:522)",
+            "0x1AE7E9: from_iter<telemetry_reference::Sample<i64>, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<core::convert::Infallible>>> (library/alloc/src/vec/spec_from_iter_nested.rs:30)",
+            "0x1AE7E9: <alloc::vec::Vec<telemetry_reference::Sample<i64>> as alloc::vec::spec_from_iter::SpecFromIter<telemetry_reference::Sample<i64>, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure#0}>, core::option::Option<core::convert::Infallible>>>>::from_iter (library/alloc/src/vec/spec_from_iter.rs:33)",
+            "0x1B08DF: from_iter<telemetry_reference::Sample<i64>, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<core::convert::Infallible>>> (library/alloc/src/vec/mod.rs:3941)",
+            "0x1B08DF: collect<core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<core::convert::Infallible>>, alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>> (library/core/src/iter/traits/iterator.rs:2090)",
+            "0x1B08DF: {closure#0}<telemetry_reference::Sample<i64>, alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>, core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>> (library/core/src/option.rs:2855)",
+            "0x1B08DF: core::iter::adapters::try_process::<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure#0}>, telemetry_reference::Sample<i64>, core::option::Option<core::convert::Infallible>, <core::option::Option<alloc::vec::Vec<telemetry_reference::Sample<i64>>> as core::iter::traits::collect::FromIterator<core::option::Option<telemetry_reference::Sample<i64>>>>::from_iter<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure#0}>>::{closure#0}, alloc::vec::Vec<telemetry_reference::Sample<i64>>> (library/core/src/iter/adapters/mod.rs:163)",
+            "0x1A0E96: from_iter<telemetry_reference::Sample<i64>, alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>, core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>> (library/core/src/option.rs:2855)",
+            "0x1A0E96: collect<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>>> (library/core/src/iter/traits/iterator.rs:2090)",
+            "0x1A0E96: native_samples (main.rs:186)",
+            "0x1A0E96: telemetry_reference::run (main.rs:464)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 131008,
+          "blocks": 11,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1AE7E9: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1AE7E9: with_capacity_in<telemetry_reference::Sample<i64>, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1AE7E9: with_capacity_in<telemetry_reference::Sample<i64>, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1AE7E9: with_capacity<telemetry_reference::Sample<i64>> (library/alloc/src/vec/mod.rs:522)",
+            "0x1AE7E9: from_iter<telemetry_reference::Sample<i64>, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<core::convert::Infallible>>> (library/alloc/src/vec/spec_from_iter_nested.rs:30)",
+            "0x1AE7E9: <alloc::vec::Vec<telemetry_reference::Sample<i64>> as alloc::vec::spec_from_iter::SpecFromIter<telemetry_reference::Sample<i64>, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure#0}>, core::option::Option<core::convert::Infallible>>>>::from_iter (library/alloc/src/vec/spec_from_iter.rs:33)",
+            "0x1B08DF: from_iter<telemetry_reference::Sample<i64>, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<core::convert::Infallible>>> (library/alloc/src/vec/mod.rs:3941)",
+            "0x1B08DF: collect<core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<core::convert::Infallible>>, alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>> (library/core/src/iter/traits/iterator.rs:2090)",
+            "0x1B08DF: {closure#0}<telemetry_reference::Sample<i64>, alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>, core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>> (library/core/src/option.rs:2855)",
+            "0x1B08DF: core::iter::adapters::try_process::<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure#0}>, telemetry_reference::Sample<i64>, core::option::Option<core::convert::Infallible>, <core::option::Option<alloc::vec::Vec<telemetry_reference::Sample<i64>>> as core::iter::traits::collect::FromIterator<core::option::Option<telemetry_reference::Sample<i64>>>>::from_iter<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure#0}>>::{closure#0}, alloc::vec::Vec<telemetry_reference::Sample<i64>>> (library/core/src/iter/adapters/mod.rs:163)",
+            "0x1A0EB8: from_iter<telemetry_reference::Sample<i64>, alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>, core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>> (library/core/src/option.rs:2855)",
+            "0x1A0EB8: collect<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>>> (library/core/src/iter/traits/iterator.rs:2090)",
+            "0x1A0EB8: native_samples (main.rs:186)",
+            "0x1A0EB8: telemetry_reference::run (main.rs:465)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 45745,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1A4E7B: {closure#1} (main.rs:112)",
+            "0x1A4E7B: telemetry_reference::load (main.rs:110)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 45743,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1A4E7B: {closure#1} (main.rs:112)",
+            "0x1A4E7B: telemetry_reference::load (main.rs:110)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 32768,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1494B0: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1494B0: with_capacity<u64> (library/alloc/src/vec/mod.rs:522)",
+            "0x1494B0: num_bigint::biguint::convert::from_radix_digits_be (convert.rs:109)",
+            "0x1A7756: UnknownInlinedFun (convert.rs:255)",
+            "0x1A7756: from_str_radix (convert.rs:36)",
+            "0x1A7756: parse_bytes (bigint.rs:710)",
+            "0x1A7756: telemetry_reference::number (main.rs:54)",
+            "0x1A5F7C: telemetry_reference::load (main.rs:144)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 32768,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1494B0: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1494B0: with_capacity<u64> (library/alloc/src/vec/mod.rs:522)",
+            "0x1494B0: num_bigint::biguint::convert::from_radix_digits_be (convert.rs:109)",
+            "0x1A7756: UnknownInlinedFun (convert.rs:255)",
+            "0x1A7756: from_str_radix (convert.rs:36)",
+            "0x1A7756: parse_bytes (bigint.rs:710)",
+            "0x1A7756: telemetry_reference::number (main.rs:54)",
+            "0x1A5FE2: telemetry_reference::load (main.rs:145)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 32768,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1494B0: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1494B0: with_capacity<u64> (library/alloc/src/vec/mod.rs:522)",
+            "0x1494B0: num_bigint::biguint::convert::from_radix_digits_be (convert.rs:109)",
+            "0x1A7756: UnknownInlinedFun (convert.rs:255)",
+            "0x1A7756: from_str_radix (convert.rs:36)",
+            "0x1A7756: parse_bytes (bigint.rs:710)",
+            "0x1A7756: telemetry_reference::number (main.rs:54)",
+            "0x1A5F7C: telemetry_reference::load (main.rs:144)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 32768,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1494B0: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1494B0: with_capacity<u64> (library/alloc/src/vec/mod.rs:522)",
+            "0x1494B0: num_bigint::biguint::convert::from_radix_digits_be (convert.rs:109)",
+            "0x1A7756: UnknownInlinedFun (convert.rs:255)",
+            "0x1A7756: from_str_radix (convert.rs:36)",
+            "0x1A7756: parse_bytes (bigint.rs:710)",
+            "0x1A7756: telemetry_reference::number (main.rs:54)",
+            "0x1A5FE2: telemetry_reference::load (main.rs:145)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 19580,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
+            "0x1A76AF: UnknownInlinedFun (convert.rs:229)",
+            "0x1A76AF: from_str_radix (convert.rs:36)",
+            "0x1A76AF: parse_bytes (bigint.rs:710)",
+            "0x1A76AF: telemetry_reference::number (main.rs:54)",
+            "0x1A5F7C: telemetry_reference::load (main.rs:144)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 19580,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
+            "0x1A76AF: UnknownInlinedFun (convert.rs:229)",
+            "0x1A76AF: from_str_radix (convert.rs:36)",
+            "0x1A76AF: parse_bytes (bigint.rs:710)",
+            "0x1A76AF: telemetry_reference::number (main.rs:54)",
+            "0x1A5F7C: telemetry_reference::load (main.rs:144)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 15937,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
+            "0x1A76AF: UnknownInlinedFun (convert.rs:229)",
+            "0x1A76AF: from_str_radix (convert.rs:36)",
+            "0x1A76AF: parse_bytes (bigint.rs:710)",
+            "0x1A76AF: telemetry_reference::number (main.rs:54)",
+            "0x1A5FE2: telemetry_reference::load (main.rs:145)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 15935,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
+            "0x1A76AF: UnknownInlinedFun (convert.rs:229)",
+            "0x1A76AF: from_str_radix (convert.rs:36)",
+            "0x1A76AF: parse_bytes (bigint.rs:710)",
+            "0x1A76AF: telemetry_reference::number (main.rs:54)",
+            "0x1A5FE2: telemetry_reference::load (main.rs:145)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 1024,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4A01294: _IO_file_doallocate (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4A11603: _IO_doallocbuf (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4A0E963: _IO_file_underflow (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4A02EEF: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4A1A2EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x18938D: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 1024,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x15A915: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1A6AC1: telemetry_reference::main (main.rs:522)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        }
+      ]
+    },
+    "rust-dhat-256": {
+      "allocated_bytes": 2656473,
+      "allocated_blocks": 41065,
+      "peak_live_bytes": 833193,
+      "peak_live_blocks": 16405,
+      "exit_live_bytes": 544,
+      "exit_live_blocks": 1,
+      "top_allocation_stacks": [
+        {
+          "bytes": 524032,
+          "blocks": 11,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AFA0D: alloc (library/alloc/src/alloc.rs:101)",
+            "0x1AFA0D: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x1AFA0D: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x1AFA0D: allocate (library/alloc/src/alloc.rs:449)",
+            "0x1AFA0D: finish_grow<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:560)",
+            "0x1AFA0D: grow_amortized<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:529)",
+            "0x1AFA0D: grow_one<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:493)",
+            "0x1AFA0D: <alloc::raw_vec::RawVec<telemetry_reference::Sample<num_bigint::bigint::BigInt>>>::grow_one (library/alloc/src/raw_vec/mod.rs:188)",
+            "0x1A784B: <alloc::vec::Vec<telemetry_reference::Sample<num_bigint::bigint::BigInt>>>::push_mut (library/alloc/src/vec/mod.rs:1039)",
+            "0x1A60B1: push<telemetry_reference::Sample<num_bigint::bigint::BigInt>, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1002)",
+            "0x1A60B1: telemetry_reference::load (main.rs:152)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 524032,
+          "blocks": 11,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AFA0D: alloc (library/alloc/src/alloc.rs:101)",
+            "0x1AFA0D: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x1AFA0D: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x1AFA0D: allocate (library/alloc/src/alloc.rs:449)",
+            "0x1AFA0D: finish_grow<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:560)",
+            "0x1AFA0D: grow_amortized<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:529)",
+            "0x1AFA0D: grow_one<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:493)",
+            "0x1AFA0D: <alloc::raw_vec::RawVec<telemetry_reference::Sample<num_bigint::bigint::BigInt>>>::grow_one (library/alloc/src/raw_vec/mod.rs:188)",
+            "0x1A784B: <alloc::vec::Vec<telemetry_reference::Sample<num_bigint::bigint::BigInt>>>::push_mut (library/alloc/src/vec/mod.rs:1039)",
+            "0x1A60B1: push<telemetry_reference::Sample<num_bigint::bigint::BigInt>, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1002)",
+            "0x1A60B1: telemetry_reference::load (main.rs:152)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1AF5D8: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1AF5D8: with_capacity_in<&str, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1AF5D8: with_capacity_in<&str, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1AF5D8: with_capacity<&str> (library/alloc/src/vec/mod.rs:522)",
+            "0x1AF5D8: <alloc::vec::Vec<&str> as alloc::vec::spec_from_iter_nested::SpecFromIterNested<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure#0}>, telemetry_reference::fields::{closure#1}>>>::from_iter (library/alloc/src/vec/spec_from_iter_nested.rs:30)",
+            "0x1A6E93: from_iter<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure_env#0}>, telemetry_reference::fields::{closure_env#1}>> (library/alloc/src/vec/spec_from_iter.rs:33)",
+            "0x1A6E93: from_iter<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure_env#0}>, telemetry_reference::fields::{closure_env#1}>> (library/alloc/src/vec/mod.rs:3941)",
+            "0x1A6E93: collect<core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure_env#0}>, telemetry_reference::fields::{closure_env#1}>, alloc::vec::Vec<&str, alloc::alloc::Global>> (library/core/src/iter/traits/iterator.rs:2090)",
+            "0x1A6E93: telemetry_reference::fields (main.rs:95)",
+            "0x1A5F45: telemetry_reference::load (main.rs:138)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 262144,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1AF5D8: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1AF5D8: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1AF5D8: with_capacity_in<&str, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1AF5D8: with_capacity_in<&str, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1AF5D8: with_capacity<&str> (library/alloc/src/vec/mod.rs:522)",
+            "0x1AF5D8: <alloc::vec::Vec<&str> as alloc::vec::spec_from_iter_nested::SpecFromIterNested<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure#0}>, telemetry_reference::fields::{closure#1}>>>::from_iter (library/alloc/src/vec/spec_from_iter_nested.rs:30)",
+            "0x1A6E93: from_iter<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure_env#0}>, telemetry_reference::fields::{closure_env#1}>> (library/alloc/src/vec/spec_from_iter.rs:33)",
+            "0x1A6E93: from_iter<&str, core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure_env#0}>, telemetry_reference::fields::{closure_env#1}>> (library/alloc/src/vec/mod.rs:3941)",
+            "0x1A6E93: collect<core::iter::adapters::filter::Filter<core::str::iter::Split<telemetry_reference::fields::{closure_env#0}>, telemetry_reference::fields::{closure_env#1}>, alloc::vec::Vec<&str, alloc::alloc::Global>> (library/core/src/iter/traits/iterator.rs:2090)",
+            "0x1A6E93: telemetry_reference::fields (main.rs:95)",
+            "0x1A5F45: telemetry_reference::load (main.rs:138)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 262080,
+          "blocks": 12,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AFACD: alloc (library/alloc/src/alloc.rs:101)",
+            "0x1AFACD: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x1AFACD: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x1AFACD: allocate (library/alloc/src/alloc.rs:449)",
+            "0x1AFACD: finish_grow<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:560)",
+            "0x1AFACD: grow_amortized<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:529)",
+            "0x1AFACD: grow_one<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:493)",
+            "0x1AFACD: <alloc::raw_vec::RawVec<&str>>::grow_one (library/alloc/src/raw_vec/mod.rs:188)",
+            "0x1A576B: push_mut<&str, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1039)",
+            "0x1A576B: push<&str, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1002)",
+            "0x1A576B: lines (main.rs:76)",
+            "0x1A576B: telemetry_reference::load (main.rs:118)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 262080,
+          "blocks": 12,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AFACD: alloc (library/alloc/src/alloc.rs:101)",
+            "0x1AFACD: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x1AFACD: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x1AFACD: allocate (library/alloc/src/alloc.rs:449)",
+            "0x1AFACD: finish_grow<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:560)",
+            "0x1AFACD: grow_amortized<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:529)",
+            "0x1AFACD: grow_one<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:493)",
+            "0x1AFACD: <alloc::raw_vec::RawVec<&str>>::grow_one (library/alloc/src/raw_vec/mod.rs:188)",
+            "0x1A576B: push_mut<&str, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1039)",
+            "0x1A576B: push<&str, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1002)",
+            "0x1A576B: lines (main.rs:76)",
+            "0x1A576B: telemetry_reference::load (main.rs:118)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 131008,
+          "blocks": 11,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1AE7E9: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1AE7E9: with_capacity_in<telemetry_reference::Sample<i64>, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1AE7E9: with_capacity_in<telemetry_reference::Sample<i64>, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1AE7E9: with_capacity<telemetry_reference::Sample<i64>> (library/alloc/src/vec/mod.rs:522)",
+            "0x1AE7E9: from_iter<telemetry_reference::Sample<i64>, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<core::convert::Infallible>>> (library/alloc/src/vec/spec_from_iter_nested.rs:30)",
+            "0x1AE7E9: <alloc::vec::Vec<telemetry_reference::Sample<i64>> as alloc::vec::spec_from_iter::SpecFromIter<telemetry_reference::Sample<i64>, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure#0}>, core::option::Option<core::convert::Infallible>>>>::from_iter (library/alloc/src/vec/spec_from_iter.rs:33)",
+            "0x1B08DF: from_iter<telemetry_reference::Sample<i64>, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<core::convert::Infallible>>> (library/alloc/src/vec/mod.rs:3941)",
+            "0x1B08DF: collect<core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<core::convert::Infallible>>, alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>> (library/core/src/iter/traits/iterator.rs:2090)",
+            "0x1B08DF: {closure#0}<telemetry_reference::Sample<i64>, alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>, core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>> (library/core/src/option.rs:2855)",
+            "0x1B08DF: core::iter::adapters::try_process::<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure#0}>, telemetry_reference::Sample<i64>, core::option::Option<core::convert::Infallible>, <core::option::Option<alloc::vec::Vec<telemetry_reference::Sample<i64>>> as core::iter::traits::collect::FromIterator<core::option::Option<telemetry_reference::Sample<i64>>>>::from_iter<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure#0}>>::{closure#0}, alloc::vec::Vec<telemetry_reference::Sample<i64>>> (library/core/src/iter/adapters/mod.rs:163)",
+            "0x1A0E96: from_iter<telemetry_reference::Sample<i64>, alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>, core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>> (library/core/src/option.rs:2855)",
+            "0x1A0E96: collect<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>>> (library/core/src/iter/traits/iterator.rs:2090)",
+            "0x1A0E96: native_samples (main.rs:186)",
+            "0x1A0E96: telemetry_reference::run (main.rs:464)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 131008,
+          "blocks": 11,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1AE7E9: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1AE7E9: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1AE7E9: with_capacity_in<telemetry_reference::Sample<i64>, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1AE7E9: with_capacity_in<telemetry_reference::Sample<i64>, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1AE7E9: with_capacity<telemetry_reference::Sample<i64>> (library/alloc/src/vec/mod.rs:522)",
+            "0x1AE7E9: from_iter<telemetry_reference::Sample<i64>, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<core::convert::Infallible>>> (library/alloc/src/vec/spec_from_iter_nested.rs:30)",
+            "0x1AE7E9: <alloc::vec::Vec<telemetry_reference::Sample<i64>> as alloc::vec::spec_from_iter::SpecFromIter<telemetry_reference::Sample<i64>, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure#0}>, core::option::Option<core::convert::Infallible>>>>::from_iter (library/alloc/src/vec/spec_from_iter.rs:33)",
+            "0x1B08DF: from_iter<telemetry_reference::Sample<i64>, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<core::convert::Infallible>>> (library/alloc/src/vec/mod.rs:3941)",
+            "0x1B08DF: collect<core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<core::convert::Infallible>>, alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>> (library/core/src/iter/traits/iterator.rs:2090)",
+            "0x1B08DF: {closure#0}<telemetry_reference::Sample<i64>, alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>, core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>> (library/core/src/option.rs:2855)",
+            "0x1B08DF: core::iter::adapters::try_process::<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure#0}>, telemetry_reference::Sample<i64>, core::option::Option<core::convert::Infallible>, <core::option::Option<alloc::vec::Vec<telemetry_reference::Sample<i64>>> as core::iter::traits::collect::FromIterator<core::option::Option<telemetry_reference::Sample<i64>>>>::from_iter<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure#0}>>::{closure#0}, alloc::vec::Vec<telemetry_reference::Sample<i64>>> (library/core/src/iter/adapters/mod.rs:163)",
+            "0x1A0EB8: from_iter<telemetry_reference::Sample<i64>, alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>, core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>> (library/core/src/option.rs:2855)",
+            "0x1A0EB8: collect<core::iter::adapters::map::Map<core::slice::iter::Iter<telemetry_reference::Sample<num_bigint::bigint::BigInt>>, telemetry_reference::native_samples::{closure_env#0}>, core::option::Option<alloc::vec::Vec<telemetry_reference::Sample<i64>, alloc::alloc::Global>>> (library/core/src/iter/traits/iterator.rs:2090)",
+            "0x1A0EB8: native_samples (main.rs:186)",
+            "0x1A0EB8: telemetry_reference::run (main.rs:465)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 45745,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1A4E7B: {closure#1} (main.rs:112)",
+            "0x1A4E7B: telemetry_reference::load (main.rs:110)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 45743,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1A4E7B: {closure#1} (main.rs:112)",
+            "0x1A4E7B: telemetry_reference::load (main.rs:110)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 32768,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1494B0: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1494B0: with_capacity<u64> (library/alloc/src/vec/mod.rs:522)",
+            "0x1494B0: num_bigint::biguint::convert::from_radix_digits_be (convert.rs:109)",
+            "0x1A7756: UnknownInlinedFun (convert.rs:255)",
+            "0x1A7756: from_str_radix (convert.rs:36)",
+            "0x1A7756: parse_bytes (bigint.rs:710)",
+            "0x1A7756: telemetry_reference::number (main.rs:54)",
+            "0x1A5F7C: telemetry_reference::load (main.rs:144)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 32768,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1494B0: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1494B0: with_capacity<u64> (library/alloc/src/vec/mod.rs:522)",
+            "0x1494B0: num_bigint::biguint::convert::from_radix_digits_be (convert.rs:109)",
+            "0x1A7756: UnknownInlinedFun (convert.rs:255)",
+            "0x1A7756: from_str_radix (convert.rs:36)",
+            "0x1A7756: parse_bytes (bigint.rs:710)",
+            "0x1A7756: telemetry_reference::number (main.rs:54)",
+            "0x1A5FE2: telemetry_reference::load (main.rs:145)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 32768,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1494B0: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1494B0: with_capacity<u64> (library/alloc/src/vec/mod.rs:522)",
+            "0x1494B0: num_bigint::biguint::convert::from_radix_digits_be (convert.rs:109)",
+            "0x1A7756: UnknownInlinedFun (convert.rs:255)",
+            "0x1A7756: from_str_radix (convert.rs:36)",
+            "0x1A7756: parse_bytes (bigint.rs:710)",
+            "0x1A7756: telemetry_reference::number (main.rs:54)",
+            "0x1A5F7C: telemetry_reference::load (main.rs:144)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 32768,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1494B0: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1494B0: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1494B0: with_capacity_in<u64, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x1494B0: with_capacity<u64> (library/alloc/src/vec/mod.rs:522)",
+            "0x1494B0: num_bigint::biguint::convert::from_radix_digits_be (convert.rs:109)",
+            "0x1A7756: UnknownInlinedFun (convert.rs:255)",
+            "0x1A7756: from_str_radix (convert.rs:36)",
+            "0x1A7756: parse_bytes (bigint.rs:710)",
+            "0x1A7756: telemetry_reference::number (main.rs:54)",
+            "0x1A5FE2: telemetry_reference::load (main.rs:145)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 19580,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
+            "0x1A76AF: UnknownInlinedFun (convert.rs:229)",
+            "0x1A76AF: from_str_radix (convert.rs:36)",
+            "0x1A76AF: parse_bytes (bigint.rs:710)",
+            "0x1A76AF: telemetry_reference::number (main.rs:54)",
+            "0x1A5F7C: telemetry_reference::load (main.rs:144)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 19580,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
+            "0x1A76AF: UnknownInlinedFun (convert.rs:229)",
+            "0x1A76AF: from_str_radix (convert.rs:36)",
+            "0x1A76AF: parse_bytes (bigint.rs:710)",
+            "0x1A76AF: telemetry_reference::number (main.rs:54)",
+            "0x1A5F7C: telemetry_reference::load (main.rs:144)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 15937,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
+            "0x1A76AF: UnknownInlinedFun (convert.rs:229)",
+            "0x1A76AF: from_str_radix (convert.rs:36)",
+            "0x1A76AF: parse_bytes (bigint.rs:710)",
+            "0x1A76AF: telemetry_reference::number (main.rs:54)",
+            "0x1A5FE2: telemetry_reference::load (main.rs:145)",
+            "0x1A08E7: telemetry_reference::run (main.rs:457)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 15935,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
+            "0x1A76AF: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
+            "0x1A76AF: UnknownInlinedFun (convert.rs:229)",
+            "0x1A76AF: from_str_radix (convert.rs:36)",
+            "0x1A76AF: parse_bytes (bigint.rs:710)",
+            "0x1A76AF: telemetry_reference::number (main.rs:54)",
+            "0x1A5FE2: telemetry_reference::load (main.rs:145)",
+            "0x1A098C: telemetry_reference::run (main.rs:458)",
+            "0x1A6744: telemetry_reference::main (main.rs:521)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 1024,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4A01294: _IO_file_doallocate (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4A11603: _IO_doallocbuf (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4A0E963: _IO_file_underflow (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4A02EEF: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4A1A2EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x18938D: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        },
+        {
+          "bytes": 1024,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x15A915: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1A6AC1: telemetry_reference::main (main.rs:522)",
+            "0x1B0B02: call_once<fn(), ()> (library/core/src/ops/function.rs:250)",
+            "0x1B0B02: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> (library/std/src/sys/backtrace.rs:166)",
+            "0x1B0AE8: std::rt::lang_start::<()>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x18973B: std::rt::lang_start_internal (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)",
+            "0x1AE5AB: main (in /tmp/relar-iterator-validation-v1/references/telemetry-thinlto/telemetry-reference)"
+          ]
+        }
+      ]
+    }
+  },
+  "allocation_growth": {
+    "relar": {
+      "allocated_bytes": {
+        "at_128_queries": 7100626,
+        "at_256_queries": 7105746,
+        "per_additional_query": 40.0,
+        "two_point_fixed_estimate": 7095506,
+        "per_additional_inspected_pair": 0.009765625
+      },
+      "allocated_blocks": {
+        "at_128_queries": 168152,
+        "at_256_queries": 168280,
+        "per_additional_query": 1.0,
+        "two_point_fixed_estimate": 168024,
+        "per_additional_inspected_pair": 0.000244140625
+      }
+    },
+    "rust": {
+      "allocated_bytes": {
+        "at_128_queries": 2656473,
+        "at_256_queries": 2656473,
+        "per_additional_query": 0.0,
+        "two_point_fixed_estimate": 2656473,
+        "per_additional_inspected_pair": 0.0
+      },
+      "allocated_blocks": {
+        "at_128_queries": 41065,
+        "at_256_queries": 41065,
+        "per_additional_query": 0.0,
+        "two_point_fixed_estimate": 41065,
+        "per_additional_inspected_pair": 0.0
+      }
+    }
+  },
+  "allocation_stack_growth": {
+    "relar": [
+      {
+        "additional_bytes": 5120,
+        "additional_blocks": 128,
+        "frames": [
+          "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+          "0x211004: fn_4 (in /tmp/relar-telemetry-prepared-thinlto/telemetry)",
+          "0x227ABB: main (in /tmp/relar-telemetry-prepared-thinlto/telemetry)"
+        ]
+      }
+    ],
+    "rust": []
+  },
+  "whole_process_instruction_ratio_relar_over_rust": 7.830068596688022,
+  "limits": [
+    "Guest instructions are not CPU cycles or wall-time speedups; inclusive call edges overlap and must not be added as independent costs.",
+    "Profiles cover whole processes including startup/loading; only allocation differences between query counts isolate descriptive query-dependent growth.",
+    "DHAT requested heap bytes/blocks are not RSS. Global-peak and exit-live counts are different metrics; exit-live memory alone does not establish leaks.",
+    "Two query counts support a descriptive allocation slope, not proof of linearity across workloads or counts.",
+    "No engines, oracle programs, builds, tests, benchmark timing, or profiles were executed by this audit."
+  ]
+}

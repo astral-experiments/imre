@@ -1,0 +1,1276 @@
+{
+  "kind": "independent-telemetry-raw-record-audit",
+  "status": "passed",
+  "completed_at_utc": "2026-10-20T19:29:15.671803+00:00",
+  "auditor_sha256": "971f0c35f4034c8cd7f410018282aa80d49feb24a67bf7dba5b92e2af4888275",
+  "engine_processes_executed_by_auditor": 0,
+  "timed_and_warmup_and_gate_process_records_checked": 2898,
+  "distinct_files_rehashed": 108,
+  "checks": {
+    "timing runner terminal success": 2,
+    "timing runner final guards": 2,
+    "timing outside ptrace": 2,
+    "final timing non-exploratory": 2,
+    "final 12 measured and 8 warmup rounds": 2,
+    "build and validation revision equality": 2,
+    "reviewed frozen implementation and timing revisions": 2,
+    "post-validation changes restricted to harness and guide": 2,
+    "recorded post-validation patch hash": 2,
+    "only the independently reviewed target-provenance patch": 2,
+    "exact Git post-validation patch": 2,
+    "exact Git post-validation path set": 2,
+    "runner protected paths cover hashes": 2,
+    "runner protected input rehash": 330,
+    "full validation index binding": 2,
+    "full validation terminal success and guards": 2,
+    "full validation source revision binding": 2,
+    "full validation compiler build binding": 2,
+    "complete runner linking modes": 2,
+    "successful scheduled linking mode": 4,
+    "timing output record hash": 4,
+    "timing record within runner interval": 4,
+    "compilation and functional validation finished before timing": 4,
+    "complete telemetry benchmark record": 4,
+    "clean timed source revision": 4,
+    "scheduled samples": 4,
+    "scheduled warmups": 4,
+    "scheduled batch_pairs": 4,
+    "single scheduled CPU affinity": 4,
+    "declared CPython comparison configuration": 4,
+    "six declared engine permutations": 4,
+    "timing bound to preparation record": 4,
+    "embedded preparation exactly matches file": 4,
+    "clean guarded preparation": 4,
+    "preparation timing revision": 4,
+    "preparation path and hash key equality": 4,
+    "rehash frozen source or tool": 306,
+    "timing source and tool binding": 4,
+    "prepared artifact hash": 12,
+    "timed native executable hash": 4,
+    "embedded functional validation matches file": 4,
+    "validated Relar executable is timed executable": 4,
+    "validated Rust executable is timed executable": 4,
+    "validation source and binary binding": 48,
+    "embedded Rust build record matches file": 4,
+    "embedded Relar build record matches file": 4,
+    "compiler build revision": 4,
+    "compiler build source guards": 4,
+    "compiler build toolchain binary rehash": 64,
+    "exact built compiler selected": 4,
+    "exact linking-mode runtime selected": 4,
+    "Rust build input guards": 4,
+    "Rust local crate freshly compiled": 4,
+    "Rust reference actual toolchain binding": 8,
+    "Rust reference disables experimental Ohm defaults": 4,
+    "Rust reproducible release build command": 4,
+    "fresh Rust artifact retained in raw Cargo output": 4,
+    "Rust fresh artifact hash binding": 4,
+    "Rust executable byte count": 4,
+    "Rust artifact O3 profile": 4,
+    "Rust embedded source content binding": 16,
+    "compiler source content binding": 200,
+    "matching linking modes": 4,
+    "Rust native host artifact path": 4,
+    "Rust explicit O3": 4,
+    "Rust matching codegen unit policy": 4,
+    "Rust explicit linking mode": 4,
+    "matching LLVM ThinLTO budget": 4,
+    "Rust optimization flag binding": 4,
+    "Rust encoded optimization flag binding": 4,
+    "matching compiler and Rust host target": 4,
+    "actual ELF64 executable": 8,
+    "actual native executable target equality": 4,
+    "frozen compiler command": 4,
+    "compiled telemetry entrypoint": 4,
+    "explicit compile flag --target": 4,
+    "explicit compile flag --runtime": 4,
+    "explicit compile flag --clang": 4,
+    "explicit compile flag --opt-level": 4,
+    "explicit compile flag --module-root": 4,
+    "explicit compile flag -o": 4,
+    "explicit compile flag --emit-llvm": 4,
+    "Relar linking mode command": 4,
+    "timing binary unsanitized": 4,
+    "functional validation input guards": 4,
+    "258 complete functional cases": 4,
+    "functional validation three engines": 4,
+    "unique functional case labels": 1032,
+    "embedded file byte count": 5438,
+    "embedded file hash": 5438,
+    "complete functional engine results": 1032,
+    "successful protocol exit": 5994,
+    "complete stdout equality": 5994,
+    "empty stderr": 5994,
+    "complete file snapshot equality": 5994,
+    "complete directory equality": 5994,
+    "all engines checked on full output device": 4,
+    "device error complete effects equal": 4,
+    "terminal output error observed": 4,
+    "timed Rust reference is full-validation reference": 4,
+    "simple timing filesystem": 46,
+    "timing threshold and repetitions": 46,
+    "timing input sample count": 92,
+    "timing input row arity": 92,
+    "increasing timing timestamps": 92,
+    "full input length alignment": 46,
+    "full timestamp alignment": 46,
+    "independent timing checksum": 46,
+    "independent complete report and input files": 46,
+    "workload repetition metadata": 46,
+    "empty protocol control": 4,
+    "source-level visit count": 46,
+    "complete phase round count": 92,
+    "declared round order": 920,
+    "positive raw duration": 2760,
+    "identical engine arguments": 2760,
+    "frozen native executable command": 1840,
+    "frozen CPython executable command": 920,
+    "isolated CPython invocation": 920,
+    "CPython example import path": 920,
+    "exact CPython program invocation": 920,
+    "all six measured permutations balanced": 46,
+    "measured engine positions balanced": 46,
+    "within-round directed predecessors balanced": 46,
+    "complete summary statistics": 138,
+    "recomputed median_seconds": 138,
+    "recomputed min_seconds": 138,
+    "recomputed max_seconds": 138,
+    "recomputed p25_seconds": 138,
+    "recomputed p75_seconds": 138,
+    "recomputed cpython_over_relar": 46,
+    "recomputed relar_over_rust": 46,
+    "recomputed cpython_over_rust": 46,
+    "workload label and size": 42,
+    "source-level work normalization": 42,
+    "mixed report workload": 6,
+    "bounded measured errors": 42,
+    "bounded measured reference values": 42,
+    "recomputed startup fraction": 126,
+    "quiet workload scans to exhaustion": 18,
+    "known timing operation": 12,
+    "complete scheduled workload cross-product": 4,
+    "frozen ThinLTO linker command": 2,
+    "early workload exits at first sample": 12,
+    "reverse workload exits at latest sample": 6,
+    "two final statuses and four timing records": 1,
+    "all 21 final workloads per linking mode": 2,
+    "final scenario batching groups": 2,
+    "pilot-selected final batching": 2,
+    "timing groups do not overlap": 1
+  },
+  "statuses": [
+    {
+      "status_record": "/tmp/relar-telemetry-full-v1-timing-status.json",
+      "sha256": "9b51cc7cefb0a1ba31a7688c0770431b4918c7ce79a103f2be9316c3b4de524f",
+      "timing_revision": "13ed29910b6f52df7959a37afd12ad46b1e5d638",
+      "validation_revision": "547c7252cde4b0e5e4b1eae3f39670c71d902989",
+      "schedule": {
+        "prefix": "/tmp/relar-telemetry-full-v1",
+        "modes": [
+          "normal",
+          "thinlto"
+        ],
+        "samples": 12,
+        "warmups": 8,
+        "batch_pairs": 8388608,
+        "sizes": [
+          16,
+          256,
+          4096
+        ],
+        "scenarios": [
+          "report-mixed",
+          "alert-quiet",
+          "within-quiet",
+          "latest-quiet"
+        ],
+        "cpu": 0,
+        "exploratory": false
+      },
+      "records": [
+        {
+          "mode": "normal",
+          "record": "/tmp/relar-telemetry-full-v1-normal.json",
+          "record_sha256": "890834d3dedc0bbd39e1788b083ff32214f72372cb1caf93599b9f3bfcaf15a7",
+          "preparation": {
+            "preparation": "/tmp/relar-telemetry-prepared-normal.json",
+            "functional_cases": 258,
+            "target": "x86_64-unknown-linux-gnu",
+            "native_sha256": "4271056dd713beaca96ba94b27b53026b21cf21f23158240b7225ea29a9455cb",
+            "rust_sha256": "de30b3c6b11618b57c5c3b44970f8aec69494bb3b34256a10ea60e99b5757812"
+          },
+          "control": {
+            "label": "empty-control",
+            "size": 0,
+            "scenario": "empty-control",
+            "repetitions": 1,
+            "medians": {
+              "relar": 0.0023866714999999997,
+              "cpython": 0.0244319115,
+              "rust": 0.0025104235
+            },
+            "ratios": {
+              "cpython_over_relar": 10.236813696396846,
+              "relar_over_rust": 0.9507047316916846,
+              "cpython_over_rust": 9.732187218610724
+            },
+            "startup_fractions": {},
+            "checked_processes": 63
+          },
+          "workloads": [
+            {
+              "label": "report-mixed-16",
+              "size": 16,
+              "scenario": "report-mixed",
+              "repetitions": 161319,
+              "medians": {
+                "relar": 0.868458323,
+                "cpython": 1.3242742490000001,
+                "rust": 0.0267124465
+              },
+              "ratios": {
+                "cpython_over_relar": 1.5248564196211867,
+                "relar_over_rust": 32.51137341538522,
+                "cpython_over_rust": 49.57517646315174
+              },
+              "startup_fractions": {
+                "relar": 0.0027481704496255944,
+                "cpython": 0.018449283838637868,
+                "rust": 0.09397954245785761
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "alert-quiet-16",
+              "size": 16,
+              "scenario": "alert-quiet",
+              "repetitions": 524288,
+              "medians": {
+                "relar": 0.8194478519999999,
+                "cpython": 1.232437924,
+                "rust": 0.021170011500000002
+              },
+              "ratios": {
+                "cpython_over_relar": 1.5039857887137402,
+                "relar_over_rust": 38.707954976784016,
+                "cpython_over_rust": 58.21621419525445
+              },
+              "startup_fractions": {
+                "relar": 0.0029125361597750576,
+                "cpython": 0.019824050383571285,
+                "rust": 0.11858394597471049
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "within-quiet-16",
+              "size": 16,
+              "scenario": "within-quiet",
+              "repetitions": 524288,
+              "medians": {
+                "relar": 0.8250966129999999,
+                "cpython": 1.2316053995,
+                "rust": 0.0234357495
+              },
+              "ratios": {
+                "cpython_over_relar": 1.4926802268911994,
+                "relar_over_rust": 35.20675167653588,
+                "cpython_over_rust": 52.5524220806337
+              },
+              "startup_fractions": {
+                "relar": 0.002892596409191659,
+                "cpython": 0.019837450785713286,
+                "rust": 0.10711940320065293
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "latest-quiet-16",
+              "size": 16,
+              "scenario": "latest-quiet",
+              "repetitions": 524288,
+              "medians": {
+                "relar": 0.7742154955,
+                "cpython": 0.994877358,
+                "rust": 0.020556035
+              },
+              "ratios": {
+                "cpython_over_relar": 1.285013492732399,
+                "relar_over_rust": 37.66365913951791,
+                "cpython_over_rust": 48.39831017995445
+              },
+              "startup_fractions": {
+                "relar": 0.003082696631457436,
+                "cpython": 0.024557711866229848,
+                "rust": 0.12212586230758997
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "report-mixed-256",
+              "size": 256,
+              "scenario": "report-mixed",
+              "repetitions": 10880,
+              "medians": {
+                "relar": 0.77042996,
+                "cpython": 0.821886202,
+                "rust": 0.018207148
+              },
+              "ratios": {
+                "cpython_over_relar": 1.0667889940313329,
+                "relar_over_rust": 42.314697502321614,
+                "cpython_over_rust": 45.14085358124183
+              },
+              "startup_fractions": {
+                "relar": 0.0030978435729576244,
+                "cpython": 0.029726635439975425,
+                "rust": 0.1378812046785142
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "alert-quiet-256",
+              "size": 256,
+              "scenario": "alert-quiet",
+              "repetitions": 32768,
+              "medians": {
+                "relar": 0.741473243,
+                "cpython": 0.9701547079999999,
+                "rust": 0.0103306035
+              },
+              "ratios": {
+                "cpython_over_relar": 1.3084149929331974,
+                "relar_over_rust": 71.77443631439344,
+                "cpython_over_rust": 93.91074858308131
+              },
+              "startup_fractions": {
+                "relar": 0.003218823501092945,
+                "cpython": 0.02518352103899701,
+                "rust": 0.2430084070112651
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "within-quiet-256",
+              "size": 256,
+              "scenario": "within-quiet",
+              "repetitions": 32768,
+              "medians": {
+                "relar": 0.7627756205,
+                "cpython": 0.9630594435,
+                "rust": 0.0110422225
+              },
+              "ratios": {
+                "cpython_over_relar": 1.262572396937272,
+                "relar_over_rust": 69.0780882652926,
+                "cpython_over_rust": 87.21608747695493
+              },
+              "startup_fractions": {
+                "relar": 0.003128929970828819,
+                "cpython": 0.025369058644197803,
+                "rust": 0.22734766483830587
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "latest-quiet-256",
+              "size": 256,
+              "scenario": "latest-quiet",
+              "repetitions": 32768,
+              "medians": {
+                "relar": 0.7513789995,
+                "cpython": 0.8041788425,
+                "rust": 0.012948216
+              },
+              "ratios": {
+                "cpython_over_relar": 1.070270586528417,
+                "relar_over_rust": 58.0295385480131,
+                "cpython_over_rust": 62.107308257755356
+              },
+              "startup_fractions": {
+                "relar": 0.0031763883494058177,
+                "cpython": 0.030381191606641902,
+                "rust": 0.1938818058024364
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "report-mixed-4096",
+              "size": 4096,
+              "scenario": "report-mixed",
+              "repetitions": 682,
+              "medians": {
+                "relar": 0.7731665285,
+                "cpython": 0.79182471,
+                "rust": 0.021260217
+              },
+              "ratios": {
+                "cpython_over_relar": 1.0241321640451744,
+                "relar_over_rust": 36.36682205548513,
+                "cpython_over_rust": 37.244432171129766
+              },
+              "startup_fractions": {
+                "relar": 0.003086878973706115,
+                "cpython": 0.03085520215705317,
+                "rust": 0.11808080322039986
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "alert-quiet-4096",
+              "size": 4096,
+              "scenario": "alert-quiet",
+              "repetitions": 2048,
+              "medians": {
+                "relar": 0.7493477820000001,
+                "cpython": 0.965333235,
+                "rust": 0.013835772999999999
+              },
+              "ratios": {
+                "cpython_over_relar": 1.2882312568184795,
+                "relar_over_rust": 54.160167415293685,
+                "cpython_over_rust": 69.77082053890304
+              },
+              "startup_fractions": {
+                "relar": 0.0031849984177306865,
+                "cpython": 0.025309303165139654,
+                "rust": 0.18144439779403726
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "within-quiet-4096",
+              "size": 4096,
+              "scenario": "within-quiet",
+              "repetitions": 2048,
+              "medians": {
+                "relar": 0.7729094415,
+                "cpython": 0.9814968024999999,
+                "rust": 0.0146328515
+              },
+              "ratios": {
+                "cpython_over_relar": 1.2698729628599057,
+                "relar_over_rust": 52.82015207357226,
+                "cpython_over_rust": 67.074883012378
+              },
+              "startup_fractions": {
+                "relar": 0.0030879057388251605,
+                "cpython": 0.024892502387953527,
+                "rust": 0.17156078567461713
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "latest-quiet-4096",
+              "size": 4096,
+              "scenario": "latest-quiet",
+              "repetitions": 2048,
+              "medians": {
+                "relar": 0.7645568005000001,
+                "cpython": 0.804176543,
+                "rust": 0.0159729565
+              },
+              "ratios": {
+                "cpython_over_relar": 1.0518205350787406,
+                "relar_over_rust": 47.8657035408567,
+                "cpython_over_rust": 50.34612991026426
+              },
+              "startup_fractions": {
+                "relar": 0.0031216405353260597,
+                "cpython": 0.030381278480041417,
+                "rust": 0.15716711555559548
+              },
+              "checked_processes": 63
+            }
+          ]
+        },
+        {
+          "mode": "thinlto",
+          "record": "/tmp/relar-telemetry-full-v1-thinlto.json",
+          "record_sha256": "bbe69e51b7b9315bfc3e755020999443671c7f3987a3298e033610b301c87401",
+          "preparation": {
+            "preparation": "/tmp/relar-telemetry-prepared-thinlto.json",
+            "functional_cases": 258,
+            "target": "x86_64-unknown-linux-gnu",
+            "native_sha256": "eca51301d8709642983f62f82c7afc34f4876afd10d70935b457356657231ca9",
+            "rust_sha256": "84e2eee85f3e938072b50811dbf4d57db18a380b51ad3ea164705937e66bf2b9"
+          },
+          "control": {
+            "label": "empty-control",
+            "size": 0,
+            "scenario": "empty-control",
+            "repetitions": 1,
+            "medians": {
+              "relar": 0.0022967804999999997,
+              "cpython": 0.024030088499999998,
+              "rust": 0.002303993
+            },
+            "ratios": {
+              "cpython_over_relar": 10.462509804485018,
+              "relar_over_rust": 0.9968695651419079,
+              "cpython_over_rust": 10.429757599089928
+            },
+            "startup_fractions": {},
+            "checked_processes": 63
+          },
+          "workloads": [
+            {
+              "label": "report-mixed-16",
+              "size": 16,
+              "scenario": "report-mixed",
+              "repetitions": 161319,
+              "medians": {
+                "relar": 0.203186091,
+                "cpython": 1.299883248,
+                "rust": 0.0198840215
+              },
+              "ratios": {
+                "cpython_over_relar": 6.3975011360398675,
+                "relar_over_rust": 10.218561220123403,
+                "cpython_over_rust": 65.37325701443241
+              },
+              "startup_fractions": {
+                "relar": 0.011303827386491725,
+                "cpython": 0.01848634370584642,
+                "rust": 0.1158715806055631
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "alert-quiet-16",
+              "size": 16,
+              "scenario": "alert-quiet",
+              "repetitions": 524288,
+              "medians": {
+                "relar": 0.1817730025,
+                "cpython": 1.231137206,
+                "rust": 0.015148921999999999
+              },
+              "ratios": {
+                "cpython_over_relar": 6.772937614869403,
+                "relar_over_rust": 11.99907178213737,
+                "cpython_over_rust": 81.26896461675624
+              },
+              "startup_fractions": {
+                "relar": 0.012635432481234388,
+                "cpython": 0.019518611234302992,
+                "rust": 0.15208956782535418
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "within-quiet-16",
+              "size": 16,
+              "scenario": "within-quiet",
+              "repetitions": 524288,
+              "medians": {
+                "relar": 0.1801393155,
+                "cpython": 1.2387568915,
+                "rust": 0.0156269615
+              },
+              "ratios": {
+                "cpython_over_relar": 6.876660367347737,
+                "relar_over_rust": 11.527469079641618,
+                "cpython_over_rust": 79.27048975579801
+              },
+              "startup_fractions": {
+                "relar": 0.012750023467253598,
+                "cpython": 0.019398550809192408,
+                "rust": 0.14743704334332683
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "latest-quiet-16",
+              "size": 16,
+              "scenario": "latest-quiet",
+              "repetitions": 524288,
+              "medians": {
+                "relar": 0.137905353,
+                "cpython": 0.988264214,
+                "rust": 0.0182709675
+              },
+              "ratios": {
+                "cpython_over_relar": 7.16624984093257,
+                "relar_over_rust": 7.547786016257761,
+                "cpython_over_rust": 54.089320338400256
+              },
+              "startup_fractions": {
+                "relar": 0.016654759587178602,
+                "cpython": 0.024315449410778723,
+                "rust": 0.12610131346355904
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "report-mixed-256",
+              "size": 256,
+              "scenario": "report-mixed",
+              "repetitions": 10880,
+              "medians": {
+                "relar": 0.1704134155,
+                "cpython": 0.8043843024999999,
+                "rust": 0.018184683
+              },
+              "ratios": {
+                "cpython_over_relar": 4.720193537227707,
+                "relar_over_rust": 9.371261269718037,
+                "cpython_over_rust": 44.23416688099539
+              },
+              "startup_fractions": {
+                "relar": 0.013477697710952807,
+                "cpython": 0.029873890409491177,
+                "rust": 0.12669965156940047
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "alert-quiet-256",
+              "size": 256,
+              "scenario": "alert-quiet",
+              "repetitions": 32768,
+              "medians": {
+                "relar": 0.1646040405,
+                "cpython": 0.9709540985,
+                "rust": 0.01008489
+              },
+              "ratios": {
+                "cpython_over_relar": 5.898725787961445,
+                "relar_over_rust": 16.321847883318508,
+                "cpython_over_rust": 96.27810501651481
+              },
+              "startup_fractions": {
+                "relar": 0.01395336647279931,
+                "cpython": 0.024748943886352005,
+                "rust": 0.22845990387599666
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "within-quiet-256",
+              "size": 256,
+              "scenario": "within-quiet",
+              "repetitions": 32768,
+              "medians": {
+                "relar": 0.162298671,
+                "cpython": 0.9540263175,
+                "rust": 0.0099868935
+              },
+              "ratios": {
+                "cpython_over_relar": 5.878213984266082,
+                "relar_over_rust": 16.251166691624377,
+                "cpython_over_rust": 95.52783530734557
+              },
+              "startup_fractions": {
+                "relar": 0.014151566897303796,
+                "cpython": 0.02518807716224243,
+                "rust": 0.23070166914266182
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "latest-quiet-256",
+              "size": 256,
+              "scenario": "latest-quiet",
+              "repetitions": 32768,
+              "medians": {
+                "relar": 0.1323160055,
+                "cpython": 0.8063049295,
+                "rust": 0.013353582999999999
+              },
+              "ratios": {
+                "cpython_over_relar": 6.093782278667716,
+                "relar_over_rust": 9.908651895150538,
+                "cpython_over_rust": 60.381167324155626
+              },
+              "startup_fractions": {
+                "relar": 0.017358296838850686,
+                "cpython": 0.02980273048175628,
+                "rust": 0.17253743807935293
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "report-mixed-4096",
+              "size": 4096,
+              "scenario": "report-mixed",
+              "repetitions": 682,
+              "medians": {
+                "relar": 0.1781101505,
+                "cpython": 0.7986670014999999,
+                "rust": 0.021053243
+              },
+              "ratios": {
+                "cpython_over_relar": 4.484118391107642,
+                "relar_over_rust": 8.459986449593538,
+                "cpython_over_rust": 37.93558082714382
+              },
+              "startup_fractions": {
+                "relar": 0.01289528133883644,
+                "cpython": 0.0300877442724795,
+                "rust": 0.10943648919076267
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "alert-quiet-4096",
+              "size": 4096,
+              "scenario": "alert-quiet",
+              "repetitions": 2048,
+              "medians": {
+                "relar": 0.169025243,
+                "cpython": 0.9662198045,
+                "rust": 0.012578361
+              },
+              "ratios": {
+                "cpython_over_relar": 5.716423105512116,
+                "relar_over_rust": 13.437779612145016,
+                "cpython_over_rust": 76.81603386164541
+              },
+              "startup_fractions": {
+                "relar": 0.01358838750493617,
+                "cpython": 0.024870209022920104,
+                "rust": 0.18317116196617347
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "within-quiet-4096",
+              "size": 4096,
+              "scenario": "within-quiet",
+              "repetitions": 2048,
+              "medians": {
+                "relar": 0.16847843,
+                "cpython": 0.9670805490000001,
+                "rust": 0.0127194955
+              },
+              "ratios": {
+                "cpython_over_relar": 5.740085238211206,
+                "relar_over_rust": 13.245684940884646,
+                "cpython_over_rust": 76.03136059916842
+              },
+              "startup_fractions": {
+                "relar": 0.013632489927642367,
+                "cpython": 0.024848073435918105,
+                "rust": 0.18113870947161384
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "latest-quiet-4096",
+              "size": 4096,
+              "scenario": "latest-quiet",
+              "repetitions": 2048,
+              "medians": {
+                "relar": 0.140339825,
+                "cpython": 0.8196878615000001,
+                "rust": 0.015856072
+              },
+              "ratios": {
+                "cpython_over_relar": 5.840735952891491,
+                "relar_over_rust": 8.850856946159176,
+                "cpython_over_rust": 51.69551837933128
+              },
+              "startup_fractions": {
+                "relar": 0.016365849822030203,
+                "cpython": 0.02931614536297485,
+                "rust": 0.1453066686377307
+              },
+              "checked_processes": 63
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "status_record": "/tmp/relar-telemetry-early-v1-timing-status.json",
+      "sha256": "1bbaf65555f0d8eb0a64035c5098a47fe693d12cf7e99c0dfcd055839944d87c",
+      "timing_revision": "13ed29910b6f52df7959a37afd12ad46b1e5d638",
+      "validation_revision": "547c7252cde4b0e5e4b1eae3f39670c71d902989",
+      "schedule": {
+        "prefix": "/tmp/relar-telemetry-early-v1",
+        "modes": [
+          "normal",
+          "thinlto"
+        ],
+        "samples": 12,
+        "warmups": 8,
+        "batch_pairs": 2097152,
+        "sizes": [
+          16,
+          256,
+          4096
+        ],
+        "scenarios": [
+          "alert-early",
+          "within-early",
+          "latest-recent"
+        ],
+        "cpu": 0,
+        "exploratory": false
+      },
+      "records": [
+        {
+          "mode": "normal",
+          "record": "/tmp/relar-telemetry-early-v1-normal.json",
+          "record_sha256": "030357302cfc760a119f4c62f7ffe29120b899a5073917a7a93699a51fff1cf5",
+          "preparation": {
+            "preparation": "/tmp/relar-telemetry-prepared-normal.json",
+            "functional_cases": 258,
+            "target": "x86_64-unknown-linux-gnu",
+            "native_sha256": "4271056dd713beaca96ba94b27b53026b21cf21f23158240b7225ea29a9455cb",
+            "rust_sha256": "de30b3c6b11618b57c5c3b44970f8aec69494bb3b34256a10ea60e99b5757812"
+          },
+          "control": {
+            "label": "empty-control",
+            "size": 0,
+            "scenario": "empty-control",
+            "repetitions": 1,
+            "medians": {
+              "relar": 0.0028036025000000003,
+              "cpython": 0.0243806355,
+              "rust": 0.0026556615
+            },
+            "ratios": {
+              "cpython_over_relar": 8.696181252513506,
+              "relar_over_rust": 1.0557077775160728,
+              "cpython_over_rust": 9.180626182967973
+            },
+            "startup_fractions": {},
+            "checked_processes": 63
+          },
+          "workloads": [
+            {
+              "label": "alert-early-16",
+              "size": 16,
+              "scenario": "alert-early",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.37006334900000004,
+                "cpython": 1.3488520935000001,
+                "rust": 0.048262058
+              },
+              "ratios": {
+                "cpython_over_relar": 3.644922138722795,
+                "relar_over_rust": 7.667790482535993,
+                "cpython_over_rust": 27.94849928488338
+              },
+              "startup_fractions": {
+                "relar": 0.007576006939287575,
+                "cpython": 0.018075099276998675,
+                "rust": 0.055025865245945375
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "within-early-16",
+              "size": 16,
+              "scenario": "within-early",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.345153786,
+                "cpython": 1.305395754,
+                "rust": 0.0487602025
+              },
+              "ratios": {
+                "cpython_over_relar": 3.7820699263603035,
+                "relar_over_rust": 7.078596238397492,
+                "cpython_over_rust": 26.771745954090328
+              },
+              "startup_fractions": {
+                "relar": 0.008122763283262956,
+                "cpython": 0.018676815383605116,
+                "rust": 0.05446370941548079
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "latest-recent-16",
+              "size": 16,
+              "scenario": "latest-recent",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.2871356345,
+                "cpython": 1.1330105645,
+                "rust": 0.03618001
+              },
+              "ratios": {
+                "cpython_over_relar": 3.9459071893774293,
+                "relar_over_rust": 7.936306112132087,
+                "cpython_over_rust": 31.315927344962038
+              },
+              "startup_fractions": {
+                "relar": 0.009764035400489451,
+                "cpython": 0.021518453811381035,
+                "rust": 0.07340134787137981
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "alert-early-256",
+              "size": 256,
+              "scenario": "alert-early",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.37278921,
+                "cpython": 1.3713092544999999,
+                "rust": 0.0489828775
+              },
+              "ratios": {
+                "cpython_over_relar": 3.6785111202655245,
+                "relar_over_rust": 7.610602500843279,
+                "cpython_over_rust": 27.995685931272615
+              },
+              "startup_fractions": {
+                "relar": 0.007520610642137417,
+                "cpython": 0.01777909353414927,
+                "rust": 0.054216118683513434
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "within-early-256",
+              "size": 256,
+              "scenario": "within-early",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.3494996145,
+                "cpython": 1.3166799125000002,
+                "rust": 0.050023967
+              },
+              "ratios": {
+                "cpython_over_relar": 3.7673286546643676,
+                "relar_over_rust": 6.986643312394636,
+                "cpython_over_rust": 26.320981550703486
+              },
+              "startup_fractions": {
+                "relar": 0.008021761351613737,
+                "cpython": 0.018516752073560627,
+                "rust": 0.05308778290214368
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "latest-recent-256",
+              "size": 256,
+              "scenario": "latest-recent",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.2890589995,
+                "cpython": 1.1467058104999999,
+                "rust": 0.036255053499999995
+              },
+              "ratios": {
+                "cpython_over_relar": 3.967030303445023,
+                "relar_over_rust": 7.9729298841056755,
+                "cpython_over_rust": 31.62885445748963
+              },
+              "startup_fractions": {
+                "relar": 0.009699066643313417,
+                "cpython": 0.02126145631839894,
+                "rust": 0.07324941611243244
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "alert-early-4096",
+              "size": 4096,
+              "scenario": "alert-early",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.3790396895,
+                "cpython": 1.3770120874999998,
+                "rust": 0.053206778499999996
+              },
+              "ratios": {
+                "cpython_over_relar": 3.6328968328262623,
+                "relar_over_rust": 7.123898499135783,
+                "cpython_over_rust": 25.880388294886146
+              },
+              "startup_fractions": {
+                "relar": 0.007396593490508334,
+                "cpython": 0.017705462226016957,
+                "rust": 0.04991208967857357
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "within-early-4096",
+              "size": 4096,
+              "scenario": "within-early",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.355717331,
+                "cpython": 1.3301490545,
+                "rust": 0.053098412
+              },
+              "ratios": {
+                "cpython_over_relar": 3.739342839328793,
+                "relar_over_rust": 6.699208462204106,
+                "cpython_over_rust": 25.050637192313776
+              },
+              "startup_fractions": {
+                "relar": 0.00788154597955195,
+                "cpython": 0.01832925070879716,
+                "rust": 0.050013953336306934
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "latest-recent-4096",
+              "size": 4096,
+              "scenario": "latest-recent",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.291735613,
+                "cpython": 1.14234114,
+                "rust": 0.040263335
+              },
+              "ratios": {
+                "cpython_over_relar": 3.915672578513752,
+                "relar_over_rust": 7.2456892356283955,
+                "cpython_over_rust": 28.371746652382377
+              },
+              "startup_fractions": {
+                "relar": 0.009610079726536507,
+                "cpython": 0.021342692341448893,
+                "rust": 0.06595731575638233
+              },
+              "checked_processes": 63
+            }
+          ]
+        },
+        {
+          "mode": "thinlto",
+          "record": "/tmp/relar-telemetry-early-v1-thinlto.json",
+          "record_sha256": "b2f630c600e24a3acd7d1e94d36e4f41d98cdb82d86517730bfd9449567738f2",
+          "preparation": {
+            "preparation": "/tmp/relar-telemetry-prepared-thinlto.json",
+            "functional_cases": 258,
+            "target": "x86_64-unknown-linux-gnu",
+            "native_sha256": "eca51301d8709642983f62f82c7afc34f4876afd10d70935b457356657231ca9",
+            "rust_sha256": "84e2eee85f3e938072b50811dbf4d57db18a380b51ad3ea164705937e66bf2b9"
+          },
+          "control": {
+            "label": "empty-control",
+            "size": 0,
+            "scenario": "empty-control",
+            "repetitions": 1,
+            "medians": {
+              "relar": 0.0022572115,
+              "cpython": 0.0243960895,
+              "rust": 0.0023070645
+            },
+            "ratios": {
+              "cpython_over_relar": 10.808065393960645,
+              "relar_over_rust": 0.9783911546469551,
+              "cpython_over_rust": 10.574515580296953
+            },
+            "startup_fractions": {},
+            "checked_processes": 63
+          },
+          "workloads": [
+            {
+              "label": "alert-early-16",
+              "size": 16,
+              "scenario": "alert-early",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.10143734,
+                "cpython": 1.37909545,
+                "rust": 0.033851688500000005
+              },
+              "ratios": {
+                "cpython_over_relar": 13.595540360186888,
+                "relar_over_rust": 2.9965223152753513,
+                "cpython_over_rust": 40.7393400775267
+              },
+              "startup_fractions": {
+                "relar": 0.022252274162551974,
+                "cpython": 0.0176899209550724,
+                "rust": 0.06815212481941631
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "within-early-16",
+              "size": 16,
+              "scenario": "within-early",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.0956503705,
+                "cpython": 1.3290463055,
+                "rust": 0.035086346500000004
+              },
+              "ratios": {
+                "cpython_over_relar": 13.894836983407188,
+                "relar_over_rust": 2.726142218882778,
+                "cpython_over_rust": 37.87930172496016
+              },
+              "startup_fractions": {
+                "relar": 0.023598565151402108,
+                "cpython": 0.018356086916642048,
+                "rust": 0.06575391085532373
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "latest-recent-16",
+              "size": 16,
+              "scenario": "latest-recent",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.0537779045,
+                "cpython": 1.1158998549999999,
+                "rust": 0.0352896705
+              },
+              "ratios": {
+                "cpython_over_relar": 20.750155019521074,
+                "relar_over_rust": 1.5238993092893853,
+                "cpython_over_rust": 31.621146901895834
+              },
+              "startup_fractions": {
+                "relar": 0.04197284221068896,
+                "cpython": 0.021862257075031165,
+                "rust": 0.06537506492161778
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "alert-early-256",
+              "size": 256,
+              "scenario": "alert-early",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.101412768,
+                "cpython": 1.3602246720000002,
+                "rust": 0.035221759500000005
+              },
+              "ratios": {
+                "cpython_over_relar": 13.41275560095155,
+                "relar_over_rust": 2.8792646772799633,
+                "cpython_over_rust": 38.61887342680879
+              },
+              "startup_fractions": {
+                "relar": 0.022257665819751613,
+                "cpython": 0.017935338185073,
+                "rust": 0.06550111444602873
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "within-early-256",
+              "size": 256,
+              "scenario": "within-early",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.09655826349999999,
+                "cpython": 1.318996606,
+                "rust": 0.0326417225
+              },
+              "ratios": {
+                "cpython_over_relar": 13.660111089301022,
+                "relar_over_rust": 2.9581240236326374,
+                "cpython_over_rust": 40.40830277875195
+              },
+              "startup_fractions": {
+                "relar": 0.02337667868271057,
+                "cpython": 0.018495945621864626,
+                "rust": 0.07067839327412945
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "latest-recent-256",
+              "size": 256,
+              "scenario": "latest-recent",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.053960336,
+                "cpython": 1.1267964825,
+                "rust": 0.032586065
+              },
+              "ratios": {
+                "cpython_over_relar": 20.88193969918942,
+                "relar_over_rust": 1.6559328657817383,
+                "cpython_over_rust": 34.57909024916019
+              },
+              "startup_fractions": {
+                "relar": 0.04183093856198375,
+                "cpython": 0.02165083924106055,
+                "rust": 0.07079911305645527
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "alert-early-4096",
+              "size": 4096,
+              "scenario": "alert-early",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.107539965,
+                "cpython": 1.3773439645,
+                "rust": 0.037793085500000004
+              },
+              "ratios": {
+                "cpython_over_relar": 12.807740494429211,
+                "relar_over_rust": 2.8454931259846457,
+                "cpython_over_rust": 36.44433753629351
+              },
+              "startup_fractions": {
+                "relar": 0.020989513061493,
+                "cpython": 0.017712416163856503,
+                "rust": 0.06104461886288696
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "within-early-4096",
+              "size": 4096,
+              "scenario": "within-early",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.10255016950000001,
+                "cpython": 1.3144253670000001,
+                "rust": 0.035274394
+              },
+              "ratios": {
+                "cpython_over_relar": 12.817388536837084,
+                "relar_over_rust": 2.9072127929398306,
+                "cpython_over_rust": 37.26287592637311
+              },
+              "startup_fractions": {
+                "relar": 0.022010802234705227,
+                "cpython": 0.018560269842996722,
+                "rust": 0.06540337730536207
+              },
+              "checked_processes": 63
+            },
+            {
+              "label": "latest-recent-4096",
+              "size": 4096,
+              "scenario": "latest-recent",
+              "repetitions": 2097152,
+              "medians": {
+                "relar": 0.059311282,
+                "cpython": 1.1507812044999999,
+                "rust": 0.038247748
+              },
+              "ratios": {
+                "cpython_over_relar": 19.40239977446449,
+                "relar_over_rust": 1.5507130511317948,
+                "cpython_over_rust": 30.08755455353868
+              },
+              "startup_fractions": {
+                "relar": 0.038057034410417905,
+                "cpython": 0.021199589813078148,
+                "rust": 0.06031896309293818
+              },
+              "checked_processes": 63
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

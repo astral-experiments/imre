@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "archive_sha256": "957090b81690fcd103d24c89b19ed27a82f585dcc0530b12864edf473e88856f",
+  "manifest_sha256": "7a0f59a0b4574f87c4bd5e9ff91d81e797179c350d9a4f0e45ada22bd60001e6",
+  "audit_script_sha256": "57a32f595aace4b72e0f651237961263d663c401e3b6a47522b26837f4b42191",
+  "validation_revision": "547c7252cde4b0e5e4b1eae3f39670c71d902989",
+  "timing_revision": "13ed29910b6f52df7959a37afd12ad46b1e5d638",
+  "members_verified": 1515,
+  "uncompressed_bytes_verified": 56559336,
+  "exclusions_verified": 54,
+  "excluded_local_files_verified": 43,
+  "source_files_verified_against_git": 425,
+  "validation_jobs": 138,
+  "timing_statuses": 2,
+  "timing_records": 4,
+  "timing_raw_output_files_verified": 414,
+  "profile_trees": [
+    "extras/profile"
+  ],
+  "limits": "Archive/provenance integrity audit; no native programs, archived scripts, builds, or measurements executed. Detailed semantic/timing/profile audits remain separately retained evidence."
+}
