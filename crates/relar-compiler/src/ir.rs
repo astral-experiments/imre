@@ -258,6 +258,11 @@ pub(crate) enum Builtin {
         min: i64,
         max: i64,
     },
+    /// A checked reduction version proves this canonical integer identity.
+    IntBounded {
+        min: i64,
+        max: i64,
+    },
     /// Internal identity guard between a read source and a mutated list.
     ListDistinct,
     StringGet,

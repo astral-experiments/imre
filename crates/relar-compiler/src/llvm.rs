@@ -2548,6 +2548,24 @@ impl Emitter<'_, '_> {
                     small_integer: true,
                 }
             }
+            Builtin::IntBounded { min, max } => {
+                debug_assert!(min <= max && *min >= -(1_i64 << 62) && *max < (1_i64 << 62));
+                debug_assert!(matches!(expressions[0].kind, ExprKind::Local(_)));
+                let word = &args[0].value.operand;
+                let tag = self.instruction(format!("and i64 {word}, 1"));
+                let tagged = self.instruction(format!("icmp eq i64 {tag}, 1"));
+                self.line(format!("call void @llvm.assume(i1 {tagged})"));
+                let encoded_min = min * 2 + 1;
+                let width = ((i128::from(*max) - i128::from(*min)) * 2) as u64;
+                let shifted = self.instruction(format!("sub i64 {word}, {encoded_min}"));
+                let bounded = self.instruction(format!("icmp ule i64 {shifted}, {width}"));
+                self.line(format!("call void @llvm.assume(i1 {bounded})"));
+                Value {
+                    ty: Type::Int,
+                    operand: word.clone(),
+                    small_integer: true,
+                }
+            }
             Builtin::ListAllI32 => {
                 let result = self.instruction(format!(
                     "call i8 @relar_list_all_i32(ptr {}, i64 {}, i64 {}, i64 {})",

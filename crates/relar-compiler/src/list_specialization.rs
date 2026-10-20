@@ -237,7 +237,7 @@ fn rewrite_expression(expression: &mut Expr, locals: &[Type]) {
 
 /// An else suite is cloned with the loop, so nested loops there would multiply
 /// versions even though they are outside the input-stability proof's body.
-fn contains_loop(body: &[Statement]) -> bool {
+pub(crate) fn contains_loop(body: &[Statement]) -> bool {
     let mut found = statements_contain_loop(body);
     walk_expressions(body, &mut |value| {
         if let ExprKind::Scope { body, .. } = &value.kind {
@@ -581,7 +581,9 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
             | Builtin::Str
             | Builtin::Len
             | Builtin::ListGet
+            | Builtin::ListGetI32
             | Builtin::ListGetBounded { .. }
+            | Builtin::IntBounded { .. }
             | Builtin::ListSum
             | Builtin::ListSliceSum
             | Builtin::StringIntList

@@ -233,6 +233,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::ListSum
         | Builtin::ListReserveRange
         | Builtin::ListDistinct
+        | Builtin::IntBounded { .. }
         | Builtin::Append
         | Builtin::IsNone
         | Builtin::Split

@@ -10,6 +10,7 @@ mod modules;
 mod narrowing;
 mod range_specialization;
 mod ranges;
+mod reductions;
 mod tuples;
 mod types;
 
@@ -34,6 +35,7 @@ pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String>
     list_bounds::specialize(&mut module);
     list_specialization::specialize(&mut module);
     range_specialization::specialize(&mut module);
+    reductions::specialize(&mut module);
     let ranges = ranges::analyze(&module);
     Ok(llvm::emit(&module, &ranges, options.address_sanitizer))
 }
@@ -61,6 +63,7 @@ pub fn compile_file(
     list_bounds::specialize(&mut module);
     list_specialization::specialize(&mut module);
     range_specialization::specialize(&mut module);
+    reductions::specialize(&mut module);
     let ranges = ranges::analyze(&module);
     Ok(Compilation {
         llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer),
