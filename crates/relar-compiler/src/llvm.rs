@@ -83,7 +83,6 @@ struct LoopTarget {
     exhausted: String,
     next: String,
     cleanup_depth: usize,
-    vectorize: Option<usize>,
 }
 
 /// Lexical cleanup obligations are separate from expression-owned SSA values.
@@ -119,7 +118,6 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         literal_globals: literal_globals(module),
         next_value: 0,
         next_label: 0,
-        hinted_loops: 0,
         current: "entry".to_owned(),
         terminated: false,
         loops: Vec::new(),
@@ -169,12 +167,6 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
     }
     output.push_str(&emitter.code);
     output.push_str("\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n");
-    if emitter.hinted_loops != 0 {
-        output.push_str("!1 = !{!\"llvm.loop.vectorize.enable\", i1 true}\n");
-        for id in 2..emitter.hinted_loops + 2 {
-            writeln!(output, "!{id} = distinct !{{!{id}, !1}}").unwrap();
-        }
-    }
     output
 }
 
@@ -186,7 +178,6 @@ struct Emitter<'a, 'module> {
     literal_globals: Vec<Option<String>>,
     next_value: usize,
     next_label: usize,
-    hinted_loops: usize,
     current: String,
     terminated: bool,
     loops: Vec<LoopTarget>,
@@ -271,17 +262,7 @@ impl Emitter<'_, '_> {
     }
 
     fn jump(&mut self, label: &str) {
-        let hint = self
-            .loops
-            .iter()
-            .rev()
-            .find(|target| target.next == label)
-            .and_then(|target| target.vectorize);
-        if let Some(hint) = hint {
-            self.line(format!("br label %{label}, !llvm.loop !{hint}"));
-        } else {
-            self.line(format!("br label %{label}"));
-        }
+        self.line(format!("br label %{label}"));
         self.terminated = true;
     }
 
@@ -1139,11 +1120,6 @@ impl Emitter<'_, '_> {
                 }
             }
             Statement::While(test, body, orelse) => {
-                let vectorize = hint_bounded_reduction(body).then(|| {
-                    let id = self.hinted_loops + 2;
-                    self.hinted_loops += 1;
-                    id
-                });
                 let (condition, body_label, end) = (self.label(), self.label(), self.label());
                 let exhausted = if orelse.is_empty() {
                     end.clone()
@@ -1160,13 +1136,12 @@ impl Emitter<'_, '_> {
                     exhausted: exhausted.clone(),
                     next: condition.clone(),
                     cleanup_depth: self.cleanups.len(),
-                    vectorize,
                 });
                 self.block(body);
+                self.loops.pop();
                 if !self.terminated {
                     self.jump(&condition);
                 }
-                self.loops.pop();
                 if !orelse.is_empty() {
                     self.start(&exhausted);
                     self.block(orelse);
@@ -1238,7 +1213,6 @@ impl Emitter<'_, '_> {
                     exhausted: exhausted.clone(),
                     next: increment.clone(),
                     cleanup_depth: self.cleanups.len(),
-                    vectorize: None,
                 });
                 self.block(body);
                 self.loops.pop();
@@ -3584,24 +3558,6 @@ fn none() -> Value {
     }
 }
 
-/// Guides profitability for the checked reduction version identified by its
-/// accumulator and indexed-read proofs. Nested loops cannot lend their facts
-/// to an enclosing loop. This adds no alias, independence, or exception claim:
-/// LLVM still checks legality and chooses its width, tails, and scalar paths.
-fn hint_bounded_reduction(body: &[Statement]) -> bool {
-    if crate::list_specialization::contains_loop(body) {
-        return false;
-    }
-    let mut accumulators = 0;
-    let mut reads = false;
-    crate::ir::walk_expressions(body, &mut |value| match value.kind {
-        ExprKind::Builtin(Builtin::IntBounded { .. }, _) => accumulators += 1,
-        ExprKind::Builtin(Builtin::ListGetBoundedInBounds { .. }, _) => reads = true,
-        _ => {}
-    });
-    accumulators == 1 && reads
-}
-
 /// This list follows the runtime's pending-error contract. Proven integer
 /// arithmetic, ownership operations, lookup-with-default, lengths and hashing
 /// remain infallible; allocation failure and invalid ABI use are fatal.
@@ -4106,68 +4062,32 @@ mod tests {
     }
 
     #[test]
-    fn bounded_reduction_hints_are_distinct_and_cover_continue_backedges() {
-        let mut source = String::new();
-        for (name, skip_zero) in [
-            ("first", ""),
-            ("second", "        if digit == 0:\n            continue\n"),
-        ] {
-            source.push_str(&format!(
-                "def {name}(text: str) -> int:\n    digits = list(map(int, text))\n    result = 0\n    cursor = 0\n    while cursor < len(digits):\n        digit = digits[cursor]\n        cursor += 1\n{skip_zero}        result += digit\n    return result\n\n"
-            ));
-        }
-        let llvm = compile(&source, &CompileOptions::default()).unwrap();
-        assert_eq!(llvm.matches(", !llvm.loop !2").count(), 1);
-        assert_eq!(llvm.matches(", !llvm.loop !3").count(), 2);
-        assert_eq!(llvm.matches(", !llvm.loop !").count(), 3);
-        assert!(llvm.contains("!2 = distinct !{!2, !1}"));
-        assert!(llvm.contains("!3 = distinct !{!3, !1}"));
-        assert_eq!(llvm.matches("llvm.loop.vectorize.enable").count(), 1);
-        assert_eq!(
-            llvm.matches("call i64 @int_add").count(),
-            2,
-            "both original arbitrary-precision loop versions remain unhinted"
-        );
-        for unsupported in [
-            "llvm.loop.parallel_accesses",
-            "llvm.access.group",
-            "llvm.loop.vectorize.width",
-            "llvm.loop.interleave.count",
-        ] {
-            assert!(!llvm.contains(unsupported));
-        }
-    }
-
-    #[test]
-    fn unrelated_and_enclosing_loops_do_not_borrow_a_reductions_hint() {
+    fn bounded_reduction_proofs_do_not_request_forced_vectorization() {
         let llvm = compile(
             r#"
-def unknown(values: list[int]) -> int:
+def total(text: str) -> int:
+    digits = list(map(int, text))
     result = 0
-    for value in values:
-        result += value
-    return result
-
-def nested(text: str, repeats: int) -> int:
-    result = 0
-    outer = 0
-    while outer < repeats:
-        digits = list(map(int, text))
-        subtotal = 0
-        cursor = 0
-        while cursor < len(digits):
-            digit = digits[cursor]
-            cursor += 1
-            subtotal += digit
-        result += subtotal
-        outer += 1
+    cursor = 0
+    while cursor < len(digits):
+        digit = digits[cursor]
+        cursor += 1
+        if digit == 0:
+            continue
+        result += digit
     return result
 "#,
             &CompileOptions::default(),
         )
         .unwrap();
-        assert_eq!(llvm.matches(", !llvm.loop !").count(), 1);
-        assert_eq!(llvm.matches(" = distinct !").count(), 1);
+        assert!(llvm.contains("call i64 @relar_list_borrow_index_proven("));
+        assert!(llvm.contains("add nsw i64"));
+        assert!(llvm.contains("call i64 @int_add"));
+        assert!(
+            !llvm.contains("!llvm.loop"),
+            "bounded arithmetic and access proofs do not guarantee backend vectorization"
+        );
+        assert!(!llvm.contains("llvm.loop.vectorize"));
     }
 
     #[test]
