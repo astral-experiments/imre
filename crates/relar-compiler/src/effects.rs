@@ -193,6 +193,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::ListGet
         | Builtin::ListGetI32
         | Builtin::StringGet
+        | Builtin::StringIntList
         | Builtin::BytesGet
         | Builtin::Decode
         | Builtin::BytesValidateUtf8

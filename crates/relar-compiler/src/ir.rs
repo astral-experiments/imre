@@ -250,6 +250,9 @@ pub(crate) enum Builtin {
     ListDistinct,
     StringGet,
     StringIter,
+    /// Eagerly converts immutable string code points into an integer list,
+    /// preserving `list(map(int, text))` errors without character objects.
+    StringIntList,
     Bytes,
     BytesGet,
     BytesIter,

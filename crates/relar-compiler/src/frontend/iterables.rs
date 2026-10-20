@@ -23,6 +23,22 @@ impl Checker<'_> {
             ));
         };
         let (input, convert) = self.consumer_input(source, element)?;
+        if convert
+            && element.is_none_or(|ty| ty == Type::Int)
+            && let Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } = &input
+            && iterable.ty == Type::Str
+        {
+            // The immutable source has no callback or observable iterator
+            // identity. Keep conversion eager and preserve its first error.
+            return Ok(Expr {
+                ty: Type::ListInt,
+                kind: ExprKind::Builtin(Builtin::StringIntList, vec![iterable.clone()]),
+            });
+        }
         let result = self.hidden(Type::None);
         let mut body = self.expand_items(input, call, |checker, value| {
             let value = checker.consumer_value(value, convert, call)?;
@@ -226,5 +242,33 @@ impl Checker<'_> {
                 start: start.map(capture),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{CompileOptions, compile};
+
+    #[test]
+    fn mapped_string_digits_use_the_bulk_list_path() {
+        let llvm = compile(
+            "def digits(text: str) -> list[int]:\n    return list(map(int, text))\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(llvm.matches("call ptr @relar_str_int_list(").count(), 1);
+        assert!(!llvm.contains("call ptr @relar_str_iter("));
+        assert!(!llvm.contains("call i64 @relar_int_parse("));
+    }
+
+    #[test]
+    fn mapped_strings_keep_requested_optional_element_storage() {
+        let llvm = compile(
+            "def digits(text: str) -> list[int | None]:\n    return list(map(int, text))\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert!(!llvm.contains("call ptr @relar_str_int_list("));
+        assert!(llvm.contains("call ptr @relar_str_iter("));
     }
 }
