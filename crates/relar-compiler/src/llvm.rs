@@ -499,15 +499,49 @@ impl Emitter<'_, '_> {
 
     /// Publishes the new owned value before releasing the replaced reference.
     fn store(&mut self, slot: usize, value: &Value) {
+        self.store_with_previous_small(slot, value, false);
+    }
+
+    /// A preceding same-slot read may prove the replaced value canonical-small
+    /// at this assignment, even when other paths store BigInts in the slot.
+    /// The caller must exclude every intervening write and cleanup, including
+    /// expression-owned scopes and walrus rebinding. This fact applies only
+    /// after successful RHS evaluation; exception cleanup keeps its own owners.
+    fn store_with_previous_small(&mut self, slot: usize, value: &Value, previous_small: bool) {
         debug_assert!(!self.borrowed_params[slot]);
-        let old = self.borrow_slot(slot);
+        debug_assert!(!previous_small || self.locals[slot] == Type::Int);
+        let old = (!previous_small).then(|| self.borrow_slot(slot));
         self.line(format!(
             "store {} {}, ptr %local{slot}",
             value.ty.llvm(),
             value.operand
         ));
         self.forget(value);
-        self.release(&old);
+        if let Some(old) = old {
+            self.release(&old);
+        }
+    }
+
+    /// Transfers an evaluated left operand's proof to the old assignment slot.
+    /// A user call cannot rebind a caller's immutable integer local, but hidden
+    /// expression statements and binding expressions can replace its owner.
+    fn assignment_replaces_small(&self, slot: usize, expression: &Expr) -> bool {
+        if self.locals[slot] != Type::Int || self.expression_rebound[slot] {
+            return false;
+        }
+        let ExprKind::Binary(_, left, right) = &expression.kind else {
+            return false;
+        };
+        let same_local = match &left.kind {
+            ExprKind::Local(source) => *source == slot,
+            ExprKind::Builtin(Builtin::IntBounded { .. }, args) => {
+                matches!(args.as_slice(), [Expr { kind: ExprKind::Local(source), .. }] if *source == slot)
+            }
+            _ => false,
+        };
+        same_local
+            && self.ranges.integer(left).is_some()
+            && expression_preserves_local(right, slot, self.locals.len())
     }
 
     fn cleanup(&mut self) {
@@ -927,8 +961,9 @@ impl Emitter<'_, '_> {
                 if self.concat_assign(*slot, expression) {
                     return;
                 }
+                let previous_small = self.assignment_replaces_small(*slot, expression);
                 let value = self.expr(expression);
-                self.store(*slot, &value);
+                self.store_with_previous_small(*slot, &value, previous_small);
             }
             Statement::Move(target, source) => {
                 debug_assert_eq!(self.locals[*target], self.locals[*source]);
@@ -3222,6 +3257,81 @@ fn read_only_integer(expression: &Expr) -> bool {
     }
 }
 
+/// Rejects every local replacement hidden inside an operand. Statement regions
+/// and expression scopes are each visited once, so nested scopes do not cause
+/// repeated recursive walks of their bodies.
+fn expression_preserves_local(expression: &Expr, slot: usize, locals: usize) -> bool {
+    fn expression_writes(expression: &Expr, written: &mut [bool]) {
+        match &expression.kind {
+            ExprKind::Scope { body, value, clear } => {
+                crate::list_specialization::mark_writes(body, written);
+                for &slot in clear {
+                    written[slot] = true;
+                }
+                crate::ir::walk_expressions(body, &mut |value| match &value.kind {
+                    ExprKind::Scope { body, clear, .. } => {
+                        crate::list_specialization::mark_writes(body, written);
+                        for &slot in clear {
+                            written[slot] = true;
+                        }
+                    }
+                    ExprKind::Bind(slot, _) => written[*slot] = true,
+                    _ => {}
+                });
+                expression_writes(value, written);
+            }
+            ExprKind::Bind(slot, value) => {
+                written[*slot] = true;
+                expression_writes(value, written);
+            }
+            ExprKind::List(values)
+            | ExprKind::Tuple(values)
+            | ExprKind::Set { values, .. }
+            | ExprKind::Compare(values, _)
+            | ExprKind::Boolean(_, values)
+            | ExprKind::Builtin(_, values) => {
+                for value in values {
+                    expression_writes(value, written);
+                }
+            }
+            ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+                for value in &args.values {
+                    expression_writes(value, written);
+                }
+            }
+            ExprKind::Dict { entries, .. } => {
+                for (key, value) in entries {
+                    expression_writes(key, written);
+                    expression_writes(value, written);
+                }
+            }
+            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
+                expression_writes(left, written);
+                expression_writes(right, written);
+            }
+            ExprKind::Conditional(test, yes, no) => {
+                expression_writes(test, written);
+                expression_writes(yes, written);
+                expression_writes(no, written);
+            }
+            ExprKind::Present(value)
+            | ExprKind::Absent(value)
+            | ExprKind::Unwrap(value)
+            | ExprKind::Not(value)
+            | ExprKind::Negate(value)
+            | ExprKind::Field(value, _) => expression_writes(value, written),
+            ExprKind::Exception {
+                message: Some(message),
+                ..
+            } => expression_writes(message, written),
+            _ => {}
+        }
+    }
+    let mut written = vec![false; locals];
+    expression_writes(expression, &mut written);
+    !written[slot]
+}
+
 /// Flattens only exact string additions, preserving both source nesting shapes'
 /// leaf order without evaluating through calls or other expression boundaries.
 fn concat_leaves(expression: &Expr) -> Vec<&Expr> {
@@ -3895,6 +4005,21 @@ slow:
 mod tests {
     use crate::{CompileOptions, compile};
 
+    /// Classifies only assignments to a source slot, excluding its argument and
+    /// zero-initialization stores. A generic replacement releases its old load
+    /// immediately after publishing the new value.
+    fn update_releases(body: &str, slot: usize) -> Vec<bool> {
+        let lines = body.lines().collect::<Vec<_>>();
+        lines
+            .windows(2)
+            .filter(|lines| {
+                lines[0].trim_start().starts_with("store i64 %v")
+                    && lines[0].ends_with(&format!(", ptr %local{slot}"))
+            })
+            .map(|lines| lines[1].contains("call void @release_int("))
+            .collect()
+    }
+
     /// Isolates source-function instructions from the always-emitted fallbacks.
     fn function_body(source: &str) -> String {
         let llvm = compile(source, &CompileOptions::default()).unwrap();
@@ -4045,5 +4170,89 @@ mod tests {
                 assert!(body.contains(&format!("{instruction} i64")));
             }
         }
+    }
+
+    #[test]
+    fn assignment_cleanup_uses_the_same_slots_evaluated_small_value() {
+        for right in ["increment", "sum(divmod(increment, 10))"] {
+            let body = function_body(&format!(
+                "def calculate(value: int, increment: int) -> int:\n    if 0 <= value <= 9:\n        value = value + {right}\n    return value\n"
+            ));
+            assert_eq!(update_releases(&body, 0), [false]);
+        }
+        let llvm = compile(
+            "def total(text: str) -> int:\n    digits = list(map(int, text))\n    return sum([sum(divmod(2 * digit, 10)) for digit in digits])\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        let body = llvm
+            .split_once("define internal i64 @fn_1(")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        // The private subtotal is local1: its guarded update is immediate, and
+        // its arbitrary-precision fallback still releases the previous owner.
+        assert_eq!(update_releases(body, 1), [false, true]);
+    }
+
+    #[test]
+    fn assignment_cleanup_retains_unknown_and_expression_rebound_owners() {
+        let body = function_body(
+            "def calculate(value: int, increment: int) -> int:\n    value = value + increment\n    return value\n",
+        );
+        assert_eq!(update_releases(&body, 0), [true]);
+        let body = function_body(
+            "def calculate(value: int) -> int:\n    if 0 <= value <= 9:\n        value = value + (value := 100000000000000000000000000000000)\n    return value\n",
+        );
+        assert_eq!(update_releases(&body, 0), [true, true]);
+    }
+
+    #[test]
+    fn assignment_cleanup_rejects_hidden_scope_replacement_after_the_read() {
+        use crate::ir::{Expr, ExprKind, Statement, Type};
+
+        let graph = crate::modules::SourceGraph::single(
+            "def calculate(value: int, increment: int) -> int:\n    if 0 <= value <= 9:\n        value = value + increment\n    return value\n",
+        )
+        .unwrap();
+        let mut module = crate::frontend::lower(&graph).unwrap();
+        let Statement::If(_, body, _) = &mut module.functions[0].body[0] else {
+            unreachable!()
+        };
+        let Statement::Assign(slot, expression) = &mut body[0] else {
+            unreachable!()
+        };
+        let ExprKind::Binary(_, _, right) = &mut expression.kind else {
+            unreachable!()
+        };
+        // Exercise a statement-owned write without a Bind node: the earlier
+        // operand stays small, but the assignment must release this new BigInt.
+        **right = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(
+                    *slot,
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Int("100000000000000000000000000000000".into()),
+                    },
+                )],
+                value: right.clone(),
+                clear: Vec::new(),
+            },
+        };
+        assert!(!module.functions[0].expression_rebound()[0]);
+        let ranges = crate::ranges::analyze(&module);
+        let llvm = super::emit(&module, &ranges, false);
+        let body = llvm
+            .split_once("@fn_0(")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        assert_eq!(update_releases(body, 0), [true, true]);
     }
 }
