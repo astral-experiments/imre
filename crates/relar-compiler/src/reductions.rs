@@ -230,6 +230,7 @@ fn version(
     let Statement::While(_, body, _) = &mut fast else {
         unreachable!()
     };
+    prove_prefix_reads(&mut body[..advance], source, cursor);
     bound_accumulator(body, *accumulator, bounds);
     Some(Statement::If(
         Expr {
@@ -242,6 +243,88 @@ fn version(
         vec![fast],
         vec![statement.clone()],
     ))
+}
+
+/// Carries the loop's relational index proof only up to its unique advance.
+/// Forward cursors start at zero and enter below the stable source length;
+/// reverse cursors start below that length and enter at a nonnegative value.
+/// The checked write/callback analysis preserves both locals and the rooted
+/// list throughout this prefix. Reads after the advance, in the else suite,
+/// and in the original fallback retain their bounds and exception checks.
+fn prove_prefix_reads(body: &mut [Statement], source: usize, cursor: usize) {
+    fn expression(value: &mut Expr, source: usize, cursor: usize) {
+        if let ExprKind::Builtin(operation, args) = &mut value.kind
+            && let Builtin::ListGetBounded { min, max } = *operation
+            && let [receiver, index] = args.as_slice()
+            && matches!(receiver.kind, ExprKind::Local(slot) if slot == source)
+            && matches!(index.kind, ExprKind::Local(slot) if slot == cursor)
+        {
+            *operation = Builtin::ListGetBoundedInBounds { min, max };
+            return;
+        }
+        match &mut value.kind {
+            ExprKind::List(values)
+            | ExprKind::Tuple(values)
+            | ExprKind::Set { values, .. }
+            | ExprKind::Compare(values, _)
+            | ExprKind::Boolean(_, values)
+            | ExprKind::Builtin(_, values) => {
+                for value in values {
+                    expression(value, source, cursor);
+                }
+            }
+            ExprKind::Dict { entries, .. } => {
+                for (key, value) in entries {
+                    expression(key, source, cursor);
+                    expression(value, source, cursor);
+                }
+            }
+            ExprKind::Present(value)
+            | ExprKind::Absent(value)
+            | ExprKind::Unwrap(value)
+            | ExprKind::Not(value)
+            | ExprKind::Negate(value)
+            | ExprKind::Field(value, _) => expression(value, source, cursor),
+            ExprKind::Scope { body, value, .. } => {
+                prove_prefix_reads(body, source, cursor);
+                expression(value, source, cursor);
+            }
+            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
+                expression(left, source, cursor);
+                expression(right, source, cursor);
+            }
+            ExprKind::Conditional(test, yes, no) => {
+                expression(test, source, cursor);
+                expression(yes, source, cursor);
+                expression(no, source, cursor);
+            }
+            ExprKind::Exception {
+                message: Some(message),
+                ..
+            } => expression(message, source, cursor),
+            // Calls and expression rebinding were rejected before versioning.
+            // Other leaves contain no access to specialize.
+            _ => {}
+        }
+    }
+    for statement in body {
+        match statement {
+            Statement::Assign(_, value)
+            | Statement::Expr(value)
+            | Statement::Return(value)
+            | Statement::Assert(value)
+            | Statement::Raise(Some(value)) => expression(value, source, cursor),
+            Statement::Scope { body, .. } => prove_prefix_reads(body, source, cursor),
+            Statement::If(test, yes, no) => {
+                expression(test, source, cursor);
+                prove_prefix_reads(yes, source, cursor);
+                prove_prefix_reads(no, source, cursor);
+            }
+            // Nested loops, mutation, and try regions cannot pass the proof.
+            // Cleanup and terminal control statements contain no expressions.
+            _ => {}
+        }
+    }
 }
 
 fn loop_source(test: &Expr, initial: &[Initial]) -> Option<(usize, usize, bool)> {
@@ -556,6 +639,17 @@ mod tests {
         result
     }
 
+    fn list_reads(body: &[Statement]) -> (usize, usize) {
+        let mut checked = 0;
+        let mut proven = 0;
+        walk_expressions(body, &mut |value| match value.kind {
+            ExprKind::Builtin(Builtin::ListGetBounded { .. }, _) => checked += 1,
+            ExprKind::Builtin(Builtin::ListGetBoundedInBounds { .. }, _) => proven += 1,
+            _ => {}
+        });
+        (checked, proven)
+    }
+
     #[test]
     fn canonical_comprehension_reduction_keeps_a_checked_fallback() {
         let mut module = lower(
@@ -593,6 +687,17 @@ def total(text: str) -> int:
         let llvm = crate::llvm::emit(&module, &ranges, false);
         assert!(llvm.contains("call void @llvm.assume"));
         assert!(llvm.contains("call i64 @int_add"));
+        assert!(llvm.contains("call i64 @relar_list_borrow_index(ptr"));
+        let lines = llvm.lines().collect::<Vec<_>>();
+        let proven = lines
+            .windows(2)
+            .filter(|lines| lines[0].contains("call i64 @relar_list_borrow_index_proven("))
+            .collect::<Vec<_>>();
+        assert_eq!(proven.len(), 1);
+        assert!(
+            proven[0][1].contains("and i64"),
+            "the proven read proceeds directly to its tag fact, without an error sentinel test"
+        );
     }
 
     #[test]
@@ -616,7 +721,88 @@ def total(text: str) -> int:
             assert_eq!(proof.len(), 1);
             assert!(i128::from(proof[0].min) - 9 >= MIN_SMALL);
             assert!(i128::from(proof[0].max) + 9 <= MAX_SMALL);
+            assert_eq!(list_reads(&module.functions[0].body), (1, 1));
         }
+    }
+
+    #[test]
+    fn only_the_exact_pre_advance_read_loses_its_bounds_check() {
+        let mut module = lower(
+            r#"
+def total(text: str, other_text: str) -> int:
+    digits = list(map(int, text))
+    other = list(map(int, other_text))
+    result = 0
+    cursor = 0
+    while cursor < len(digits):
+        digit = digits[cursor]
+        other_digit = other[cursor]
+        next_digit = digits[cursor + 1]
+        cursor += 1
+        after_advance = digits[cursor]
+        result += digit
+    else:
+        after_loop = digits[cursor]
+    return result
+"#,
+        );
+        specialize(&mut module);
+        let Statement::If(_, fast, fallback) = module.functions[0]
+            .body
+            .iter()
+            .find(|statement| matches!(statement, Statement::If(..)))
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(list_reads(fast), (4, 1));
+        assert_eq!(list_reads(fallback), (5, 0));
+    }
+
+    #[test]
+    fn prefix_scopes_and_branches_keep_the_same_cursor_and_source_proof() {
+        let mut module = lower(
+            r#"
+def total(text: str) -> int:
+    digits = list(map(int, text))
+    result = 0
+    cursor = 0
+    while cursor < len(digits):
+        digit = digits[cursor]
+        cursor += 1
+        result += digit
+    return result
+"#,
+        );
+        let Statement::While(_, body, _) = module.functions[0]
+            .body
+            .iter_mut()
+            .find(|statement| matches!(statement, Statement::While(..)))
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        let read = body.remove(0);
+        body.insert(
+            0,
+            Statement::Expr(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::If(
+                        Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Bool(true),
+                        },
+                        vec![read.clone()],
+                        vec![read],
+                    )],
+                    value: Box::new(integer(0)),
+                    clear: vec![],
+                },
+            }),
+        );
+        specialize(&mut module);
+        assert_eq!(list_reads(&module.functions[0].body), (2, 2));
     }
 
     #[test]
@@ -714,6 +900,9 @@ def total(text: str) -> int:
             let mut module = lower(source);
             specialize(&mut module);
             assert!(bounds(&module).is_empty());
+            for function in &module.functions {
+                assert_eq!(list_reads(&function.body).1, 0);
+            }
         }
     }
 
@@ -756,6 +945,7 @@ def total(text: str) -> int:
         }));
         specialize(&mut module);
         assert!(bounds(&module).is_empty());
+        assert_eq!(list_reads(&module.functions[0].body).1, 0);
     }
 
     #[test]

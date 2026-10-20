@@ -918,7 +918,9 @@ impl Analyzer {
                     Builtin::ListGetI32 => {
                         Interval::bounded(i128::from(i32::MIN), i128::from(i32::MAX))
                     }
-                    Builtin::ListGetBounded { min, max } | Builtin::IntBounded { min, max } => {
+                    Builtin::ListGetBounded { min, max }
+                    | Builtin::ListGetBoundedInBounds { min, max }
+                    | Builtin::IntBounded { min, max } => {
                         Interval::bounded(i128::from(*min), i128::from(*max))
                     }
                     Builtin::Int if args[0].ty == Type::Int => values[0],

@@ -258,6 +258,13 @@ pub(crate) enum Builtin {
         min: i64,
         max: i64,
     },
+    /// A canonical reduction loop proves its direct source/cursor access is
+    /// in bounds before advancing. The rooted list cannot change during the
+    /// loop; the borrowed result also has these exact tagged-small bounds.
+    ListGetBoundedInBounds {
+        min: i64,
+        max: i64,
+    },
     /// A checked reduction version proves this canonical integer identity.
     IntBounded {
         min: i64,

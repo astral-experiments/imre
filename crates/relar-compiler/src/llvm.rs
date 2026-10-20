@@ -2552,23 +2552,36 @@ impl Emitter<'_, '_> {
                 Type::Int,
                 &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
             ),
-            Builtin::ListGetI32 | Builtin::ListGetBounded { .. } => {
+            Builtin::ListGetI32
+            | Builtin::ListGetBounded { .. }
+            | Builtin::ListGetBoundedInBounds { .. } => {
                 let (min, max) = match builtin {
-                    Builtin::ListGetBounded { min, max } => (*min, *max),
+                    Builtin::ListGetBounded { min, max }
+                    | Builtin::ListGetBoundedInBounds { min, max } => (*min, *max),
                     _ => (i64::from(i32::MIN), i64::from(i32::MAX)),
                 };
                 debug_assert!(min <= max && min >= -(1_i64 << 62) && max < (1_i64 << 62));
-                let nonnegative = self.nonnegative_index(&expressions[1]);
-                let index = self.index_word(&args[1].value, nonnegative);
-                let name = if nonnegative {
+                let in_bounds = matches!(builtin, Builtin::ListGetBoundedInBounds { .. });
+                let nonnegative = in_bounds || self.nonnegative_index(&expressions[1]);
+                let mut index = args[1].value.clone();
+                index.small_integer |= in_bounds;
+                let index = self.index_word(&index, nonnegative);
+                let name = if in_bounds {
+                    "relar_list_borrow_index_proven"
+                } else if nonnegative {
                     "relar_list_borrow_index"
                 } else {
                     "relar_list_get"
                 };
-                let word = self.checked_int_list_word(format!(
+                let call = format!(
                     "call i64 @{name}(ptr {}, i64 {index})",
                     args[0].value.operand
-                ));
+                );
+                let word = if in_bounds {
+                    self.instruction(call)
+                } else {
+                    self.checked_int_list_word(call)
+                };
                 let tag = self.instruction(format!("and i64 {word}, 1"));
                 let tagged = self.instruction(format!("icmp eq i64 {tag}, 1"));
                 self.line(format!("call void @llvm.assume(i1 {tagged})"));
@@ -3149,7 +3162,8 @@ impl Emitter<'_, '_> {
     }
 
     /// A proved nonnegative immediate can cross the specialized ABI as an
-    /// exact native index. The runtime still checks the current container size.
+    /// exact native index. Its separate current-size check is retained unless
+    /// the caller also carries the canonical loop's relational bounds proof.
     fn index_word(&mut self, index: &Value, nonnegative: bool) -> String {
         if nonnegative {
             debug_assert!(index.small_integer);
@@ -3769,6 +3783,7 @@ declare i8 @relar_list_set(ptr, i64, i64)
 declare i64 @relar_list_get_index(ptr, i64)
 declare i8 @relar_list_set_index(ptr, i64, i64)
 declare i64 @relar_list_borrow_index(ptr, i64)
+declare i64 @relar_list_borrow_index_proven(ptr, i64) nounwind memory(argmem: read)
 declare i8 @relar_list_copy_index(ptr, i64, i64)
 declare void @relar_list_append(ptr, i64)
 declare void @relar_list_append_pair(ptr, i64, i64)

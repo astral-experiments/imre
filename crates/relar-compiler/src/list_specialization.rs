@@ -583,6 +583,7 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
             | Builtin::ListGet
             | Builtin::ListGetI32
             | Builtin::ListGetBounded { .. }
+            | Builtin::ListGetBoundedInBounds { .. }
             | Builtin::IntBounded { .. }
             | Builtin::ListSum
             | Builtin::ListSliceSum
