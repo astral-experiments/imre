@@ -60,3 +60,7 @@ for value in reversed(range(huge, huge + 7, 2)):
     print(value)
 for value in reversed(range(-huge, -huge - 7, -2)):
     print(value)
+print(any(value > huge for value in reversed(range(huge + 3))))
+for value in reversed(range(-huge, huge)):
+    print(value)
+    break

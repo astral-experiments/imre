@@ -18,6 +18,7 @@ REJECTED = {
     "generator_optional_unchecked": "def bad(values: list[int | None]) -> int:\n    return sum(value + 1 for value in values)\nbad([None])\n",
     "generator_dynamic_dead_element": 'print(any(eval("1") for value in range(0)))\n',
     "generator_target_rebound": "print(any((value := 1) for value in range(3)))\n",
+    "generator_target_index_walrus": "values = [0, 0]\nsaved = 0\nprint(any(0 for values[(saved := 1)] in [4, 5]))\n",
     "generator_uninitialized_export": "print(any((saved := value) for value in range(0)))\nprint(saved)\n",
     "generator_short_circuit_export": "print(any(value > 0 or (saved := value) > 0 for value in [1]))\nprint(saved)\n",
     "generator_constructor_partial_self": "class Item:\n    value: int\n    def __init__(self) -> None:\n        self.value = sum(self.value + value for value in range(0))\nItem()\n",
