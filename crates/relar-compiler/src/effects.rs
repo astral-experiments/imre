@@ -251,6 +251,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::SetDiscard
         | Builtin::SetIter
         | Builtin::StringIter
+        | Builtin::StringReverseIter
         | Builtin::BytesIter
         | Builtin::Encode
         | Builtin::ExceptionMessage

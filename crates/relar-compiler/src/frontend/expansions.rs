@@ -122,6 +122,9 @@ impl Checker<'_> {
         expression: &ast::Expr,
         element: Option<Type>,
     ) -> Result<Iteration, String> {
+        if let Some(input) = self.pipeline_input(expression)? {
+            return Ok(Iteration::Prepared(input));
+        }
         if let ast::Expr::Call(call) = expression {
             if self.graph.resolve(self.module, &call.func).is_some() {
                 return Ok(Iteration::Container {

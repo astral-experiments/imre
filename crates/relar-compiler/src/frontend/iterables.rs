@@ -215,7 +215,7 @@ impl Checker<'_> {
         Ok((self.expansion_input(expression, element)?, false))
     }
 
-    fn consumer_value(
+    pub(super) fn consumer_value(
         &self,
         value: Expr,
         convert: bool,
@@ -293,6 +293,11 @@ impl Checker<'_> {
                 items,
                 start: start.map(capture),
             },
+            Iteration::Prepared(mut input) => {
+                body.append(&mut input.evaluate);
+                clear.extend(&input.clear);
+                Iteration::Prepared(input)
+            }
         }
     }
 }

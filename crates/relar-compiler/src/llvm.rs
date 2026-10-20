@@ -2673,6 +2673,9 @@ impl Emitter<'_, '_> {
             }
             Builtin::BytesIter => self.call("relar_bytes_iter", Type::Iterator, &[&args[0].value]),
             Builtin::StringIter => self.call("relar_str_iter", Type::Iterator, &[&args[0].value]),
+            Builtin::StringReverseIter => {
+                self.call("relar_str_reverse_iter", Type::Iterator, &[&args[0].value])
+            }
             Builtin::StringIntList => {
                 self.call("relar_str_int_list", Type::ListInt, &[&args[0].value])
             }
@@ -3756,6 +3759,7 @@ declare ptr @relar_str_literal(ptr, i64)
 declare ptr @relar_str_get(ptr, i64)
 declare ptr @relar_str_slice(ptr, i64, i64, i64)
 declare ptr @relar_str_iter(ptr)
+declare ptr @relar_str_reverse_iter(ptr)
 declare ptr @relar_str_int_list(ptr)
 declare void @relar_str_retain(ptr)
 declare void @relar_str_release(ptr)
