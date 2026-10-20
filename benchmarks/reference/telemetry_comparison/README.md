@@ -60,6 +60,11 @@ executables against the independent oracle and CPython. Timing rechecks every
 recorded source, tool, binary, LLVM, and validation hash before and after running.
 For ThinLTO, select the corresponding Rust build and Relar runtime and add
 `--lto-linker /path/to/ld.lld` to both commands. Matching modes are required.
+The compile command always passes an explicit target, defaulting to the Rust
+host when `--target` is omitted. Relar's build target must match that host, and the
+produced executable's ELF class, byte order, and machine must match the Rust
+executable. Relar's emitted LLVM text has no target directive; it is retained and
+hashed without treating it as target evidence.
 
 Defaults are 16, 256, and 4,096 samples, with report, full-scan predicates/search,
 and early-exit predicate/search workloads. Repetition counts target 1,048,576

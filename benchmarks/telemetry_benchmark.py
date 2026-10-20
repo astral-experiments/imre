@@ -45,6 +45,18 @@ def rust_host(record: dict) -> str:
     )
 
 
+def elf_target(path: Path) -> dict:
+    with path.open("rb") as stream:
+        header = stream.read(20)
+    assert len(header) == 20 and header[:5] == b"\x7fELF\x02", "expected 64-bit ELF"
+    byte_order = {1: "little", 2: "big"}[header[5]]
+    return {
+        "bits": 64,
+        "byte_order": byte_order,
+        "machine": int.from_bytes(header[18:20], byte_order),
+    }
+
+
 def workloads(sizes: list[int], batch_pairs: int, scenarios) -> list[dict]:
     generator = random.Random(20261020)
     result = []
@@ -258,8 +270,8 @@ def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> 
         "--emit-llvm",
         str(llvm),
     ]
-    if args.target:
-        command += ["--target", args.target]
+    effective_target = args.target or rust_host(rust_record)
+    command += ["--target", effective_target]
     if args.lto_linker:
         command += ["--lto-linker", str(paths["lto_linker"])]
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -283,12 +295,8 @@ def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> 
     assert validation["input_guards_passed"]
     assert validation["source_and_binary_sha256"]["relar"] == shared.sha256(binary)
     assert validation["source_and_binary_sha256"]["rust"] == hashes["rust"]
-    llvm_target = next(
-        line.split('"')[1]
-        for line in llvm.read_text().splitlines()
-        if line.startswith("target triple")
-    )
-    assert llvm_target == rust_host(rust_record), "emitted LLVM and Rust targets differ"
+    native_elf = elf_target(binary)
+    assert native_elf == elf_target(paths["rust"]), "Relar and Rust ELF targets differ"
     assert hashes == {name: shared.sha256(path) for name, path in paths.items()}
     return {
         "schema": 1,
@@ -302,7 +310,8 @@ def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> 
         "binary_sha256": shared.sha256(binary),
         "llvm": str(llvm),
         "llvm_sha256": shared.sha256(llvm),
-        "llvm_target": llvm_target,
+        "effective_target": effective_target,
+        "native_elf": native_elf,
         "validation_path": str(validation_path),
         "validation_sha256": shared.sha256(validation_path),
         "validation_command": validation_command,
@@ -322,6 +331,16 @@ def verify_preparation(record: dict, args, paths, hashes, revision, dirty) -> No
     assert record["revision"] == revision and record["dirty"] == dirty
     assert record["requested_target"] == args.target and record["thinlto"] == (
         args.lto_linker is not None
+    )
+    assert record["effective_target"] == (
+        args.target or rust_host(record["rust_build_record"])
+    )
+    command = record["compile_command"]
+    assert command[command.index("--target") + 1] == record["effective_target"]
+    assert (
+        record["native_elf"]
+        == elf_target(Path(record["binary"]))
+        == elf_target(paths["rust"])
     )
     assert record["source_and_tool_paths"] == {
         name: str(path) for name, path in paths.items()
