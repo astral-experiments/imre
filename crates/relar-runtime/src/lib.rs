@@ -1031,8 +1031,12 @@ pub unsafe extern "C" fn relar_list_sum(list: *const List, start: usize) -> usiz
 /// Shares exact reduction between whole lists and normalized slice selections.
 /// Cloning the borrowed iterator permits a checked fast pass without acquiring
 /// element owners; neither pass can mutate the source or call user code.
-fn sum_ints<'a>(values: impl ExactSizeIterator<Item = &'a Int> + Clone) -> Int {
-    if values.len() <= i32::MAX as usize {
+fn sum_ints<'a>(values: impl Iterator<Item = &'a Int> + Clone) -> Int {
+    let (length, upper) = values.size_hint();
+    // Callers use standard slice iterators and adapters. Equal bounds retain
+    // the exact-count proof for a chain even though Chain cannot implement
+    // ExactSizeIterator generally: its component lengths might overflow usize.
+    if upper == Some(length) && length <= i32::MAX as usize {
         let (sum, invalid) = values
             .clone()
             .fold((0_i64, 0_usize), |(sum, invalid), value| {

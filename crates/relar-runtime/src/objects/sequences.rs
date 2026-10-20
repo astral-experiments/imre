@@ -274,10 +274,51 @@ pub unsafe extern "C" fn relar_list_slice_sum(
     let subtotal = unsafe {
         (&*value).0.with(|values| {
             let slice = SliceIndices::new(values.len(), start, stop, step)?;
-            Ok(crate::sum_ints(slice.map(|at| &values[at])))
+            Ok(sum_integer_slice(values, slice))
         })
     };
     finish(subtotal.map(Int::into_raw), 1)
+}
+
+/// Exposes unit and alternating strides as bounded slice iterators, so the
+/// checked integer reduction can vectorize without a bounds check per item.
+/// Both its speculative pass and arbitrary-precision fallback retain the
+/// original selection order, including reverse slices.
+fn sum_integer_slice(values: &[Int], slice: SliceIndices) -> Int {
+    if slice.len() == 0 {
+        return Int::small(0).unwrap();
+    }
+    if slice.stride > 2 {
+        return crate::sum_ints(slice.map(|at| &values[at]));
+    }
+    // Normalization proves both endpoints are valid and their distance fits
+    // the source length. Slicing checks that bound once before iteration.
+    let distance = (slice.len() - 1) * slice.stride;
+    let (first, last) = if slice.reverse {
+        (slice.at - distance, slice.at)
+    } else {
+        (slice.at, slice.at + distance)
+    };
+    let values = &values[first..=last];
+    if slice.stride == 1 {
+        if slice.reverse {
+            crate::sum_ints(values.iter().rev())
+        } else {
+            crate::sum_ints(values.iter())
+        }
+    } else if slice.reverse {
+        let (remainder, pairs) = values.as_rchunks::<2>();
+        crate::sum_ints(
+            pairs
+                .iter()
+                .rev()
+                .map(|pair| &pair[1])
+                .chain(remainder.iter().rev()),
+        )
+    } else {
+        let (pairs, remainder) = values.as_chunks::<2>();
+        crate::sum_ints(pairs.iter().map(|pair| &pair[0]).chain(remainder.iter()))
+    }
 }
 
 /// Preserves the source's concrete element descriptor and acquires shallow
@@ -656,6 +697,37 @@ mod tests {
                 assert_eq!(result.big().as_ref(), &(&scale * *expected));
                 if *expected == 0 {
                     assert_eq!(result.as_small(), Some(0));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn integer_slice_sums_cross_vector_and_remainder_boundaries() {
+        for length in [1, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 128, 129] {
+            for heap_at in [None, Some(0), Some(length / 2), Some(length - 1)] {
+                let mut numbers: Vec<BigInt> = (0..length)
+                    .map(|at| BigInt::from([i32::MIN, i32::MAX, 1, -1][at % 4]))
+                    .collect();
+                if let Some(at) = heap_at {
+                    numbers[at] = BigInt::from(1) << 400_u32;
+                }
+                let source = List(StorageCell::new(
+                    numbers.iter().cloned().map(Int::new).collect(),
+                ));
+                for step in [-2_i64, -1, 1, 2] {
+                    let parity = if step < 0 { (length - 1) % 2 } else { 0 };
+                    let expected: BigInt = numbers
+                        .iter()
+                        .enumerate()
+                        .filter(|(at, _)| step.abs() == 1 || at % 2 == parity)
+                        .map(|(_, value)| value)
+                        .sum();
+                    // SAFETY: the source and immediate step stay rooted; the
+                    // subtotal owns its result across vector and scalar tails.
+                    let actual = Int(unsafe { relar_list_slice_sum(&source, 0, 0, integer(step)) });
+                    assert_eq!(actual.big().as_ref(), &expected);
+                    assert_eq!(relar_error_pending(), 0);
                 }
             }
         }
