@@ -15,6 +15,8 @@ pub(super) struct Prepared {
     ready: usize,
     /// An empty tuple has no element type or executable item assignment.
     elementless: bool,
+    /// Enclosing slots a later pull may replace, after constructor arguments.
+    writes: HashSet<usize>,
     pub clear: Vec<usize>,
 }
 
@@ -373,6 +375,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            writes: HashSet::new(),
             clear: arguments,
         }
     }
@@ -403,6 +406,7 @@ impl Checker<'_> {
                 value,
                 ready,
                 elementless: true,
+                writes: HashSet::new(),
                 clear: vec![source, value, ready],
             });
         }
@@ -615,6 +619,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            writes: HashSet::new(),
             clear,
         })
     }
@@ -661,6 +666,10 @@ impl Checker<'_> {
         let value = self.hidden(ty);
         let mut evaluate = Vec::new();
         let mut clear = vec![strict, ready, done, value];
+        let writes = inputs
+            .iter()
+            .flat_map(|input| input.writes.iter().copied())
+            .collect();
         for input in &mut inputs {
             evaluate.append(&mut input.evaluate);
             clear.extend(&input.clear);
@@ -742,6 +751,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            writes,
             clear,
         })
     }
@@ -832,6 +842,10 @@ impl Checker<'_> {
             }
         }
         self.restore_state(before);
+        let mut writes = inputs
+            .iter()
+            .flat_map(|input| input.writes.iter().copied())
+            .collect::<HashSet<_>>();
         for expression in generator
             .generators
             .iter()
@@ -841,6 +855,7 @@ impl Checker<'_> {
             for name in narrowing::expression_assignments(expression) {
                 if let Some(slot) = self.names.get(&name) {
                     self.narrowed.remove(slot);
+                    writes.insert(*slot);
                 }
             }
         }
@@ -926,6 +941,7 @@ impl Checker<'_> {
             value,
             ready,
             elementless: false,
+            writes,
             clear,
         })
     }
@@ -940,6 +956,11 @@ impl Checker<'_> {
         before_iteration: Vec<Statement>,
         lower_body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
     ) -> Result<(Vec<Statement>, bool), String> {
+        // A later consumer argument or zip constructor argument may have
+        // established new facts since this lazy body was checked.
+        for slot in &input.writes {
+            self.narrowed.remove(slot);
+        }
         let before = self.assigned.clone();
         let mut facts = self.narrowed.clone();
         let binding = self.bind_pattern(target, self.local(input.value))?;
