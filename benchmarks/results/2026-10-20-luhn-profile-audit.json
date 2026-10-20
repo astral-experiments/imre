@@ -1,0 +1,181 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "audited_at_utc": "2026-10-20T01:22:26.523582+00:00",
+  "auditor_sha256": "e1595c477aefe29b16a0e6a319dc19fb38cc36cf2909882edc8004c869fe1cea",
+  "profile_summary_sha256": "d23c5c229621e46b05f834349227bb9620831f63f63e80f056c174659aa2aac4",
+  "profile_manifest_sha256": "cf44c45003d22fe882e7628b0df065bb02ec5b5cf98a389cb46f398888f7dc66",
+  "profile_manifest_members": 44,
+  "guarded_inputs_verified": 90,
+  "timing_revision": "6fa8681c1734513cc278511427029dea9dca471c",
+  "build_revision": "7d4011f0413c63d0a4d111817c37f460a0656cac",
+  "validation_revision": "7d4011f0413c63d0a4d111817c37f460a0656cac",
+  "benchmark_record_sha256": "26b3b7ad62cddddae43e659080a533ae41a3079bb143096e098fe2d675c3bf57",
+  "timing_status_sha256": "6d1c5559c624b3e693df4f03192943a27bd8805d4c10af07cca0a8bbb208cb78",
+  "binary_sha256": {
+    "relar": "14fb73da2b9b539b760b4c98c85573e55a1f03da84a90e4aeb519c47ec7f5fd0",
+    "rust": "6ecadfe19c5db5427f79b93d4d74299ed5f481a972465bc1834353dbba47c5bc"
+  },
+  "workload": {
+    "operation": "checksum",
+    "digits": 4096,
+    "repetitions": 64,
+    "digits_per_process": 262144,
+    "checksum_per_call": 2,
+    "output_hex": "32",
+    "stdout": "OK\n128\n"
+  },
+  "profiles": {
+    "relar-callgrind": {
+      "instructions": 212067563,
+      "self_cost_sum": 212067563,
+      "cost_rows": 23182,
+      "call_edges": 632,
+      "function_names": 343,
+      "summary_footer_log_and_annotations_agree": true,
+      "all_function_self_and_call_edge_metrics_agree": true,
+      "top_self_functions": [
+        {
+          "name": "fn_3",
+          "instructions": 54969408
+        },
+        {
+          "name": "relar_int_parse",
+          "instructions": 24641653
+        },
+        {
+          "name": "0x00000000000ab250",
+          "instructions": 24114147
+        },
+        {
+          "name": "relar_mapping_iter_next",
+          "instructions": 20974848
+        },
+        {
+          "name": "<compact_str::CompactString>::push",
+          "instructions": 15204352
+        },
+        {
+          "name": "free",
+          "instructions": 12208451
+        },
+        {
+          "name": "malloc",
+          "instructions": 11823580
+        },
+        {
+          "name": "0x00000000000ab650",
+          "instructions": 10209140
+        },
+        {
+          "name": "calloc",
+          "instructions": 10092775
+        },
+        {
+          "name": "<relar_runtime::objects::words::WordKind>::release",
+          "instructions": 7340255
+        }
+      ]
+    },
+    "relar-dhat": {
+      "allocated_bytes": 23105570,
+      "allocated_blocks": 395039,
+      "peak_live_bytes": 123793,
+      "peak_live_blocks": 29,
+      "exit_live_bytes": 9216,
+      "exit_live_blocks": 2,
+      "allocation_sites": 37,
+      "stack_frames": 202,
+      "global_peak_instruction": 178390716,
+      "process_end_instruction": 178490768,
+      "global_peak_uses_gb_gbk_and_matches_log": true,
+      "summary_and_allocation_stacks_agree": true
+    },
+    "rust-callgrind": {
+      "instructions": 5125141,
+      "self_cost_sum": 5125141,
+      "cost_rows": 21096,
+      "call_edges": 562,
+      "function_names": 321,
+      "summary_footer_log_and_annotations_agree": true,
+      "all_function_self_and_call_edge_metrics_agree": true,
+      "top_self_functions": [
+        {
+          "name": "luhn_reference::main",
+          "instructions": 4777685
+        },
+        {
+          "name": "0x00000000000158b0",
+          "instructions": 63751
+        },
+        {
+          "name": "0x000000000000a530",
+          "instructions": 48148
+        },
+        {
+          "name": "0x000000000006b830",
+          "instructions": 43383
+        },
+        {
+          "name": "0x000000000000f240",
+          "instructions": 41201
+        },
+        {
+          "name": "0x000000000000b0d0",
+          "instructions": 30300
+        },
+        {
+          "name": "__strtoul_internal",
+          "instructions": 20636
+        },
+        {
+          "name": "0x00000000000274e0",
+          "instructions": 14124
+        },
+        {
+          "name": "0x000000000000a390",
+          "instructions": 9742
+        },
+        {
+          "name": "0x0000000000015c90",
+          "instructions": 7176
+        }
+      ]
+    },
+    "rust-dhat": {
+      "allocated_bytes": 8155,
+      "allocated_blocks": 19,
+      "peak_live_bytes": 5963,
+      "peak_live_blocks": 11,
+      "exit_live_bytes": 544,
+      "exit_live_blocks": 1,
+      "allocation_sites": 14,
+      "stack_frames": 67,
+      "global_peak_instruction": 5207798,
+      "process_end_instruction": 5214988,
+      "global_peak_uses_gb_gbk_and_matches_log": true,
+      "summary_and_allocation_stacks_agree": true
+    }
+  },
+  "checks": {
+    "four_exact_timed_binary_runs": true,
+    "all_manifests_and_snapshots_verified": true,
+    "all_commands_and_output_verified": true,
+    "profile_started_after_all_timing_completed": true,
+    "callgrind_self_rows_reconcile_with_summary_footer_log_and_annotations": true,
+    "callgrind_function_self_and_incoming_edges_verified": true,
+    "dhat_total_global_peak_exit_fields_reconcile_with_log": true,
+    "dhat_top_allocation_stacks_verified": true,
+    "source_tool_binary_guards_rehashed_before_and_after": true
+  },
+  "limits": [
+    "No benchmarks, profilers, compilers, or test programs were executed by this audit.",
+    "Callgrind guest instruction counts are not CPU cycles, wall time, or CPU-time percentages.",
+    "Incoming inclusive call costs overlap across nested calls; only self costs partition process instructions.",
+    "DHAT counts requested heap bytes/blocks, not allocator usable size or RSS.",
+    "Global peak uses summed gb/gbk contributions at t-gmax; summed independent site maxima are not a simultaneous process peak.",
+    "Profiles include process startup, decoding, file I/O, repeated calls, checksum accumulation, and exit.",
+    "Exit-live allocations do not establish leaks; ASan/LSan validation is recorded separately.",
+    "Recorded affinity matches timing; past per-child affinity is not independently observable after process exit."
+  ]
+}

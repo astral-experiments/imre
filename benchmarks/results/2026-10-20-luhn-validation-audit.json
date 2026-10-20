@@ -1,0 +1,119 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "audited_at_utc": "2026-10-20T00:53:45.274154+00:00",
+  "revision": "7d4011f0413c63d0a4d111817c37f460a0656cac",
+  "validation_revision": "7d4011f0413c63d0a4d111817c37f460a0656cac",
+  "validation_tree": "1075effc3065b7eef963a8c9e1e27ea136059843",
+  "validation_index": "/tmp/relar-luhn-validation-v1/index.json",
+  "validation_index_sha256": "0ea4e260b52165cc76deaaf6170c2ff2fc487b8822a4b88436ba75436d79a590",
+  "audit_script_sha256": "9cdc07202c0a122598f93a4df811b37e572833a80f443abce71c9b1f69a5f313",
+  "counts": {
+    "recorded_jobs": 129,
+    "passed_jobs": 129,
+    "failed_jobs": 0,
+    "rust_units": {
+      "compiler": 58,
+      "runtime": 87,
+      "total": 145
+    },
+    "language_suites": 27,
+    "suite_invocations": 81,
+    "optimization_configurations": {
+      "ordinary": [
+        "0",
+        "3"
+      ],
+      "thinlto": [
+        "3"
+      ],
+      "asan": [
+        "0",
+        "1"
+      ]
+    },
+    "generic_suite_count": 25,
+    "generic_checks_by_mode": {
+      "ordinary": 1524,
+      "thinlto": 1148,
+      "asan": 1524
+    },
+    "generic_checks_total": 4196,
+    "luhn_native": {
+      "configurations": 5,
+      "upstream_calls_per_configuration": 15,
+      "differential_cases_per_configuration": 1144,
+      "upstream_calls_total": 75,
+      "differential_cases_total": 5720,
+      "upstream_tests": 10,
+      "upstream_doctest_examples": 5
+    },
+    "base45_native": {
+      "configurations": 5,
+      "upstream_calls_per_configuration": 323,
+      "differential_cases_per_configuration": 289,
+      "compile_rejections_per_configuration": 2
+    },
+    "application_oracles": [
+      "batch",
+      "dependency",
+      "incremental",
+      "inventory",
+      "manifest",
+      "route"
+    ],
+    "dependency_boundary_checks": true,
+    "reference_builds": 9,
+    "reference_oracles": {
+      "luhn-normal": {
+        "differential_cases": 1144,
+        "exact_message_cases": 1144,
+        "upstream_adapter_calls": 15
+      },
+      "luhn-thinlto": {
+        "differential_cases": 1144,
+        "exact_message_cases": 1144,
+        "upstream_adapter_calls": 15
+      },
+      "base45-normal": {
+        "differential_cases": 295,
+        "exact_message_cases": 291,
+        "documented_diagnostic_boundaries": 4
+      },
+      "base45-thinlto": {
+        "differential_cases": 295,
+        "exact_message_cases": 291,
+        "documented_diagnostic_boundaries": 4
+      }
+    }
+  },
+  "guard_checks": {
+    "before_after_source_manifests_identical": true,
+    "clean_validation_source": true,
+    "source_files_verified_against_original_git_commit": 384,
+    "source_bytes_verified": 2569711,
+    "build_source_hashes_match_source_manifest": 46,
+    "command_record_and_output_hashes_verified": 387,
+    "runner_build_source_manifest_hashes_verified": true,
+    "reference_build_record_hashes_verified": 9,
+    "artifact_metadata_matches_build_record": true,
+    "recorded_final_tool_artifact_guards_passed": true,
+    "independent_binary_archive_rehash_performed": false,
+    "evidence_manifest_entries": 438,
+    "evidence_manifest_sha256": "d2b52716e2b707b530d7249f770852d25e0be2bea9c506b250a9021a6efa6965",
+    "build_record_sha256": "3f24ea90334422d89df3385b910443bc8d29ab7acf77902a690677e41b1720ad",
+    "source_manifest_sha256": "b4579d9e0b9ced645dc780ddad7508b5bae8695e0f09d43d5e49e6f951c9fc96"
+  },
+  "limits": [
+    "This audits the original validation at 7d4011f; later benchmark-harness commits did not run this full matrix.",
+    "129 counts orchestration commands, including tool discovery/builds; it is not a count of independent test cases.",
+    "The 4,196 generic suite checks exclude the separately reported Base45/Luhn corpus checks and application/reference oracles.",
+    "ASan/LSan covers generated programs and the runtime at O0/O1 with leak detection enabled; the compiler and Rust references are not sanitizer-instrumented.",
+    "Luhn comparison covers all four str APIs using CPython 3.14.5 / Unicode 16; no Luhn diagnostic exclusions.",
+    "Native Base45/Luhn per-case JSON lived in temporary suite directories because --output was omitted; retained summaries, exit status, and guarded harness source establish completion. Detailed Rust-reference JSON is retained.",
+    "No Ruff job occurs in this frozen index; earlier fixture Ruff checks were exploratory.",
+    "Large compiler/runtime/reference binaries and archives were not independently rehashed during CPU-sensitive timings; recorded final guards cover their identities.",
+    "Historical benchmarks/results paths are excluded from per-file source hashes; the clean committed Git tree identifies those paths.",
+    "No builds, tests, profiling, or benchmark workloads were executed by this independent audit."
+  ]
+}
