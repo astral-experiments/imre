@@ -37,6 +37,14 @@ def run_checked(command: list[str], timeout: float = 600) -> str:
     return result.stdout.decode()
 
 
+def rust_host(record: dict) -> str:
+    return next(
+        line.removeprefix("host: ")
+        for line in record["rustc_verbose"].splitlines()
+        if line.startswith("host: ")
+    )
+
+
 def workloads(sizes: list[int], batch_pairs: int, scenarios) -> list[dict]:
     generator = random.Random(20261020)
     result = []
@@ -191,11 +199,7 @@ def source_paths(args) -> tuple[dict[str, Path], dict, dict | None]:
     assert rust_record["binary_sha256"] == shared.sha256(rust)
     assert rust_record["binaries"]["reference"]["sha256"] == shared.sha256(rust)
     assert rust_record["native_artifact"]["fresh"] is False
-    rust_target = next(
-        line.removeprefix("host: ")
-        for line in rust_record["rustc_verbose"].splitlines()
-        if line.startswith("host: ")
-    )
+    rust_target = rust_host(rust_record)
     assert args.target is None or args.target == rust_target, (
         "Rust and Relar targets must match"
     )
@@ -218,10 +222,12 @@ def source_paths(args) -> tuple[dict[str, Path], dict, dict | None]:
     if args.relar_build_record:
         paths["relar_build_record"] = args.relar_build_record.resolve(strict=True)
         relar_record = json.loads(paths["relar_build_record"].read_text())
-        assert {
-            shared.sha256(paths["compiler"]),
-            shared.sha256(paths["runtime"]),
-        } <= set(relar_record["sha256"].values())
+        runtime_key = "thinlto_runtime" if thinlto else "normal_runtime"
+        assert shared.sha256(paths["compiler"]) == relar_record["sha256"]["compiler"]
+        assert shared.sha256(paths["runtime"]) == relar_record["sha256"][runtime_key]
+        for flag in ("source_matches_revision", "input_guards_passed"):
+            assert relar_record.get(flag, True) is True, flag
+        assert relar_record["target"] == rust_target
         for name, value in relar_record["source_sha256"].items():
             paths["relar_source:" + name] = ROOT / name
             assert shared.sha256(ROOT / name) == value
@@ -282,7 +288,7 @@ def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> 
         for line in llvm.read_text().splitlines()
         if line.startswith("target triple")
     )
-    assert args.target is None or llvm_target == args.target
+    assert llvm_target == rust_host(rust_record), "emitted LLVM and Rust targets differ"
     assert hashes == {name: shared.sha256(path) for name, path in paths.items()}
     return {
         "schema": 1,
