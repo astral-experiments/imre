@@ -3804,7 +3804,9 @@ declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 "#;
 
-/// The fast path uses overflow intrinsics and range checks, never `nsw` promises.
+/// Operates on tagged integers directly. For E(x) = 2x + 1, addition and
+/// subtraction produce E(x +/- y); multiplication first produces 2xy.
+/// Signed overflow is exactly failure to fit the tagged-small range.
 fn integer_helpers() -> String {
     let mut output = String::new();
     for operation in ["retain", "release"] {
@@ -3828,6 +3830,16 @@ done:
         .unwrap();
     }
     for (op, intrinsic, number) in [("add", "sadd", 0), ("sub", "ssub", 1), ("mul", "smul", 2)] {
+        let (left, decode, encode, result) = if op == "mul" {
+            (
+                "%x",
+                "  %x = ashr i64 %a, 1\n",
+                "  %encoded = or i64 %result, 1\n",
+                "%encoded",
+            )
+        } else {
+            ("%a", "", "", "%result")
+        };
         writeln!(
             output,
             r#"
@@ -3838,20 +3850,13 @@ entry:
   %small = icmp eq i64 %tag, 1
   br i1 %small, label %fast, label %big
 fast:
-  %x = ashr i64 %a, 1
-  %y = ashr i64 %b, 1
-  %pair = call {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64 %x, i64 %y)
+{decode}  %right = sub i64 %b, 1
+  %pair = call {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64 {left}, i64 %right)
   %result = extractvalue {{ i64, i1 }} %pair, 0
   %overflow = extractvalue {{ i64, i1 }} %pair, 1
-  %under = icmp slt i64 %result, -4611686018427387904
-  %over = icmp sgt i64 %result, 4611686018427387903
-  %outside = or i1 %under, %over
-  %fallback = or i1 %overflow, %outside
-  br i1 %fallback, label %big, label %done
+  br i1 %overflow, label %big, label %done
 done:
-  %shift = shl i64 %result, 1
-  %encoded = or i64 %shift, 1
-  ret i64 %encoded
+{encode}  ret i64 {result}
 big:
   %slow = call i64 @relar_int_binary(i64 %a, i64 %b, i32 {number})
   ret i64 %slow
