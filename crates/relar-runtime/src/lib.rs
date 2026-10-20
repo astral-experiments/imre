@@ -1009,6 +1009,52 @@ pub unsafe extern "C" fn relar_list_len(list: *const List) -> usize {
     (length << 1) | 1
 }
 
+/// Sums an exact integer list and an already-evaluated starting value.
+///
+/// An i32 reduction avoids per-element integer owners and arithmetic calls.
+/// Other representations retain arbitrary-precision addition. Addition cannot
+/// invoke user code, so adding the start after the list subtotal is equivalent
+/// and leaves pending exception state unchanged.
+///
+/// # Safety
+/// The caller roots the list and canonical integer start throughout this call.
+/// This nonreentrant call never mutates the list or exposes its storage.
+/// The result transfers one independently owned canonical integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_sum(list: *const List, start: usize) -> usize {
+    // SAFETY: the rooted list is read without callbacks or escaped borrows.
+    let subtotal = unsafe {
+        (&*list).0.with(|values| {
+            if values.len() <= i32::MAX as usize {
+                let (sum, invalid) =
+                    values
+                        .iter()
+                        .fold((0_i64, 0_usize), |(sum, invalid), value| {
+                            // Biasing the tagged i32 interval into 33 bits also
+                            // rejects heap words by their even tag. Speculative
+                            // decoding reads only bits, never a heap allocation.
+                            (
+                                sum.wrapping_add((value.0 as i64) >> 1),
+                                invalid
+                                    | (value.0.wrapping_add(1_usize << 32) >> 33)
+                                    | (!value.0 & 1),
+                            )
+                        });
+                if invalid == 0 {
+                    // At most 2^31-1 signed i32 values sum within
+                    // [-2^62+2^31, 2^62-2^32+1], including every prefix.
+                    return Int::small(sum).unwrap();
+                }
+            }
+            values.iter().fold(Int::small(0).unwrap(), |sum, value| {
+                Int(relar_int_binary(sum.0, value.0, 0))
+            })
+        })
+    };
+    // SAFETY: start remains rooted, and subtotal owns the other integer.
+    unsafe { relar_int_binary(start, subtotal.0, 0) }
+}
+
 /// Counts a nonempty range only when its captured components are tagged small.
 ///
 /// # Safety
@@ -1209,6 +1255,102 @@ mod tests {
         assert_eq!(weak.strong_count(), 3);
         drop(list);
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn list_sum_reduces_signed_i32_values_across_vector_boundaries() {
+        let pattern = [i32::MIN, i32::MAX, -1, 0, 1];
+        for length in [0, 1, 2, 3, 4, 7, 8, 15, 16, 17, 31, 32, 33, 257] {
+            let expected = (0..length)
+                .map(|index| BigInt::from(pattern[index % pattern.len()]))
+                .sum::<BigInt>();
+            let list = List(StorageCell::new(
+                (0..length)
+                    .map(|index| Int::small(i64::from(pattern[index % pattern.len()])).unwrap())
+                    .collect(),
+            ));
+            for start in [0, -19, MIN_SMALL, MAX_SMALL] {
+                let start = Int::small(start).unwrap();
+                // SAFETY: both exact arguments remain rooted for the sum.
+                let result = Int(unsafe { relar_list_sum(&list, start.0) });
+                assert_eq!(result.big().as_ref(), &(&expected + start.big().as_ref()));
+            }
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn list_sum_preserves_large_values_cancellation_and_canonical_results() {
+        let huge = BigInt::from(1) << 140_u32;
+        for (values, start) in [
+            (vec![], huge.clone()),
+            (vec![-huge.clone(), 17.into()], huge.clone()),
+            (vec![huge.clone(), 17.into()], -huge.clone()),
+            (vec![huge.clone(), -huge.clone(), 5.into()], 9.into()),
+            (
+                vec![BigInt::from(i32::MIN) - 1, BigInt::from(i32::MAX) + 1],
+                0.into(),
+            ),
+            (
+                vec![MAX_SMALL.into(), MAX_SMALL.into(), MIN_SMALL.into()],
+                0.into(),
+            ),
+        ] {
+            let expected = values.iter().sum::<BigInt>() + &start;
+            let list = List(StorageCell::new(values.into_iter().map(Int::new).collect()));
+            let start = Int::new(start);
+            // SAFETY: both exact arguments remain rooted for the sum.
+            let result = Int(unsafe { relar_list_sum(&list, start.0) });
+            assert_eq!(result.big().as_ref(), &expected);
+            assert_eq!(
+                result.as_small(),
+                expected
+                    .to_i64()
+                    .filter(|value| (MIN_SMALL..=MAX_SMALL).contains(value))
+            );
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn list_sum_borrows_aliased_inputs_and_owns_results_after_mutation() {
+        let positive = Rc::new(BigInt::from(1) << 120_u32);
+        let negative = Rc::new(-positive.as_ref());
+        let positive_weak = Rc::downgrade(&positive);
+        let negative_weak = Rc::downgrade(&negative);
+        let list = Rc::new(List(StorageCell::new(vec![
+            Int(Rc::into_raw(positive.clone()) as usize),
+            Int(Rc::into_raw(negative.clone()) as usize),
+            Int::small(7).unwrap(),
+        ])));
+        let alias = list.clone();
+        let start = Rc::as_ptr(&positive) as usize;
+        // SAFETY: start is rooted both directly and by the list. The aliased
+        // mutation occurs between reductions, after all storage borrows end.
+        let result = unsafe {
+            let result = Int(relar_list_sum(Rc::as_ptr(&list), start));
+            assert_eq!(result.big().as_ref(), &(positive.as_ref() + 7));
+            assert_eq!(Rc::strong_count(&positive), 2);
+            assert_eq!(Rc::strong_count(&negative), 2);
+            assert_eq!(
+                relar_list_set_index(Rc::as_ptr(&alias), 0, Int::small(42).unwrap().0),
+                1
+            );
+            let changed = Int(relar_list_sum(Rc::as_ptr(&list), start));
+            assert_eq!(changed.as_small(), Some(49));
+            result
+        };
+        drop(alias);
+        drop(list);
+        assert_eq!(Rc::strong_count(&positive), 1);
+        assert_eq!(Rc::strong_count(&negative), 1);
+        let expected = positive.as_ref() + 7;
+        drop(positive);
+        drop(negative);
+        assert!(positive_weak.upgrade().is_none());
+        assert!(negative_weak.upgrade().is_none());
+        assert_eq!(result.big().as_ref(), &expected);
+        assert_eq!(relar_error_pending(), 0);
     }
 
     #[test]
