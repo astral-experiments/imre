@@ -465,18 +465,17 @@ fn run(arguments: &[String]) -> Result<String> {
         .zip(native_samples(&observed))
         .zip(threshold.to_i128());
     let mut checksum = Integer::Small(0);
-    let mut result = String::new();
+    let mut final_native = None;
+    let mut final_big = None;
     // The CLI accepts arbitrary-precision repetition counts just as Python does.
     // Chunking avoids converting a valid but unaddressable count to a smaller one.
     let mut remaining = repetitions;
     while remaining > BigInt::zero() {
         let count = remaining.to_u64().unwrap_or(u64::MAX);
-        let mut final_native = None;
-        let mut final_big = None;
         for _ in 0..count {
             if let Some(((left, right), limit)) = &native {
                 if let Some(answer) = native_query(
-                    black_box(operation),
+                    operation,
                     black_box(left),
                     black_box(right),
                     black_box(*limit),
@@ -484,25 +483,27 @@ fn run(arguments: &[String]) -> Result<String> {
                     let answer = black_box(answer);
                     add_native(&answer, &mut checksum);
                     final_native = Some(answer);
+                    final_big = None;
                     continue;
                 }
             }
             let answer = black_box(big_query(
-                black_box(operation),
+                operation,
                 black_box(&reference),
                 black_box(&observed),
                 black_box(&threshold),
             ));
             add_big(&answer, &mut checksum);
             final_big = Some(answer);
+            final_native = None;
         }
-        result = if let Some(answer) = final_native {
-            render(&answer)?
-        } else {
-            render(&final_big.unwrap())?
-        };
         remaining -= count;
     }
+    let result = if let Some(answer) = final_native {
+        render(&answer)?
+    } else {
+        render(&final_big.unwrap())?
+    };
     let checksum = decimal(&checksum)?;
     if arguments[4].as_bytes().contains(&0) {
         return Err(Error::value("report: invalid path"));

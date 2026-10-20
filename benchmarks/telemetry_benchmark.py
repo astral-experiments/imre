@@ -189,6 +189,16 @@ def source_paths(args) -> tuple[dict[str, Path], dict, dict | None]:
         rust_record["entrypoint"] == "telemetry" and rust_record["input_guards_passed"]
     )
     assert rust_record["binary_sha256"] == shared.sha256(rust)
+    assert rust_record["binaries"]["reference"]["sha256"] == shared.sha256(rust)
+    assert rust_record["native_artifact"]["fresh"] is False
+    rust_target = next(
+        line.removeprefix("host: ")
+        for line in rust_record["rustc_verbose"].splitlines()
+        if line.startswith("host: ")
+    )
+    assert args.target is None or args.target == rust_target, (
+        "Rust and Relar targets must match"
+    )
     thinlto = args.lto_linker is not None
     assert rust_record["thinlto"] == thinlto
     environment = rust_record["environment"]
@@ -267,6 +277,12 @@ def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> 
     assert validation["input_guards_passed"]
     assert validation["source_and_binary_sha256"]["relar"] == shared.sha256(binary)
     assert validation["source_and_binary_sha256"]["rust"] == hashes["rust"]
+    llvm_target = next(
+        line.split('"')[1]
+        for line in llvm.read_text().splitlines()
+        if line.startswith("target triple")
+    )
+    assert args.target is None or llvm_target == args.target
     assert hashes == {name: shared.sha256(path) for name, path in paths.items()}
     return {
         "schema": 1,
@@ -280,6 +296,7 @@ def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> 
         "binary_sha256": shared.sha256(binary),
         "llvm": str(llvm),
         "llvm_sha256": shared.sha256(llvm),
+        "llvm_target": llvm_target,
         "validation_path": str(validation_path),
         "validation_sha256": shared.sha256(validation_path),
         "validation_command": validation_command,
@@ -450,7 +467,7 @@ def main() -> None:
         "warmups": args.warmups,
         "engine_orders": tuple(itertools.permutations(commands)),
         "order_method": "Measured rounds repeat all six engine permutations, balancing positions and within-round directed predecessors. Warmup rounds follow the same schedule but eight warmups do not form a complete cycle. Cross-round transitions are not balanced.",
-        "method": "Whole-process wall time, including startup, one read/parse/alignment of both inputs, repeated queries, and one complete report write. Rust black_box surrounds each repeated query and its result. Work is normalized by actual inspected sample pairs per call; early-exit workloads repeat more calls. Empty-input startup/protocol controls are reported without subtraction. Input preparation and complete output/file checks occur outside the timing interval.",
+        "method": "Whole-process wall time, including startup, one read/parse/alignment of both inputs, repeated queries, and one complete report write. Rust black_box surrounds each repeated query and its result. Work is normalized by source-level inspected sample pairs per call; early-exit workloads repeat more calls. Empty-input startup/protocol controls are reported without subtraction. Input preparation and complete output/file checks occur outside the timing interval.",
         "comparison": "The same query passes, thresholds, repetitions, arbitrary-precision results, and errors. Python holds typed Sample objects and generator expressions; independent Rust holds contiguous structs, uses native checked i128 reductions when values fit i64, and falls back to BigInt. Rust iterator loops and Relar generated loops need not have identical allocation/layout costs.",
         "startup_control": measure(
             control, commands, artifacts / "empty-control", args

@@ -7,6 +7,7 @@ import posixpath
 import random
 import re
 import runpy
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -591,6 +592,9 @@ def main() -> None:
     paths = {
         "validator": Path(__file__).resolve(),
         "filesystem_validator": ROOT / "benchmarks/manifest_validate.py",
+        "batch_validator": ROOT / "benchmarks/batch_validate.py",
+        "incremental_validator": ROOT / "benchmarks/incremental_validate.py",
+        "python": Path(shutil.which(args.python) or args.python).resolve(strict=True),
     }
     paths.update(
         {

@@ -63,7 +63,7 @@ For ThinLTO, select the corresponding Rust build and Relar runtime and add
 
 Defaults are 16, 256, and 4,096 samples, with report, full-scan predicates/search,
 and early-exit predicate/search workloads. Repetition counts target 1,048,576
-actually inspected sample pairs per process; early-exit cases therefore make
+source-level inspected sample pairs per process; early-exit cases therefore make
 more calls than full scans. Every process includes input loading/alignment once.
 Eight warmup rounds precede 12 measured rounds that cover all six engine orders
 twice. Measured positions and within-round directed predecessors are balanced;

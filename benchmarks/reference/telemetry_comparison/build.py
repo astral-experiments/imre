@@ -177,6 +177,13 @@ def main() -> None:
         "native_artifact": native_artifact,
         "binary_sha256": digest(destination),
         "binary_bytes": destination.stat().st_size,
+        "binaries": {
+            "reference": {
+                "name": destination.name,
+                "sha256": digest(destination),
+                "bytes": destination.stat().st_size,
+            }
+        },
         "comparison_domain": "Timestamp/value files with signed ASCII decimal tokens of at most 4,300 digits. Rust uses checked native i128 arithmetic with BigInt fallback and per-call black_box. Complete output, repetition checksums, diagnostics, and file effects are compared with the independent oracle and CPython.",
         "input_guards_passed": True,
     }
