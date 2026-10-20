@@ -156,10 +156,10 @@ def fail_after_projection(values: list[Node]) -> None:
     for value in values:
         alias = value
         try:
-            print(alias.number)
+            assert alias.number > 0
             raise ValueError("borrow failed")
         finally:
-            print(alias.text)
+            assert len(alias.text) > 0
 
 
 def writer(path: str) -> TextIO:
@@ -177,7 +177,7 @@ def first_stream(values: list[Handle]) -> TextIO:
 def fail_with_stream(values: list[Handle]) -> None:
     for value in values:
         stream = value.stream
-        stream.write(" before error")
+        assert bool(stream)
         raise ValueError("file borrow failed")
 
 
