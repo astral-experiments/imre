@@ -93,34 +93,36 @@ def mutation(values: list[int]) -> int:
 
 
 for text in ["", "0", "9", "0123", "98765"]:
-    print("forward", text, forward(text))
-    print("reverse", text, reverse(text))
+    print(f"forward {text} {forward(text)}")
+    print(f"reverse {text} {reverse(text)}")
     try:
-        print("after", text, after_advance(text))
+        print(f"after {text} {after_advance(text)}")
     except IndexError:
-        print("after", text, "IndexError")
+        print(f"after {text} IndexError")
     try:
-        print("source", text, other_source(text))
+        print(f"source {text} {other_source(text)}")
     except IndexError:
-        print("source", text, "IndexError")
+        print(f"source {text} IndexError")
     try:
-        print("index", text, other_index(text))
+        print(f"index {text} {other_index(text)}")
     except IndexError:
-        print("index", text, "IndexError")
+        print(f"index {text} IndexError")
     try:
-        print("else", text, after_loop(text))
+        print(f"else {text} {after_loop(text)}")
     except IndexError:
-        print("else", text, "IndexError")
+        print(f"else {text} IndexError")
 
 for index in [-1, -5, 1 << 100]:
     try:
-        print("arbitrary", index, arbitrary_index("1234", index))
+        print(f"arbitrary {index} {arbitrary_index('1234', index)}")
     except IndexError:
-        print("arbitrary", index, "IndexError")
+        print(f"arbitrary {index} IndexError")
 
 for values in [[1], [1, 2, 3], [1, 2, 3, 4]]:
     try:
-        print("mutation", mutation(values))
+        print(f"mutation {mutation(values)}")
     except IndexError:
-        print("mutation", "IndexError")
-    print(values)
+        print("mutation IndexError")
+    print(len(values))
+    for value in values:
+        print(value)
