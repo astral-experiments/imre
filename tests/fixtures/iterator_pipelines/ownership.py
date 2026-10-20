@@ -43,6 +43,28 @@ def return_files() -> bool:
     return False
 
 
+def read_part(path: str) -> int:
+    with open(path, "r", encoding="utf-8") as stream:
+        text = stream.read()
+    print(text)
+    return len(text)
+
+
+def exhausted_frame() -> None:
+    # The yielded scalar keeps no file owner. On exhaustion the source list and
+    # generator's last private target both disappear before the strict probe.
+    try:
+        _rows = list(
+            zip(
+                (0 for stream in [open_part("exhaust", 0)]),
+                (read_part("exhaust0.txt") for index in range(2)),
+                strict=True,
+            )
+        )
+    except ValueError as error:
+        print(error)
+
+
 def recover() -> None:
     for turn in range(16):
         print(any(payload(index) for index in range(4)))
@@ -92,6 +114,7 @@ except ValueError as error:
 print(any(zip((open_part("zip", index) for index in range(4)), [1], strict=True)))
 break_files()
 print(return_files())
+exhausted_frame()
 for path in [
     "any0.txt",
     "all0.txt",
