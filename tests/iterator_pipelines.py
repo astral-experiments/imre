@@ -50,6 +50,8 @@ REJECTED = {
     "generator_backedge_optional": 'value: str | None = "ok"\nprint(all((value := None) for index in range(2) if len(value) > 0))\n',
     "generator_inner_backedge_optional": 'value: str | None = "ok"\nprint(any((value := None) for outer in range(1) if value is not None for inner in range(2) if len(value) > 0))\n',
     "generator_export_invalidates_optional": "value: int | None = 1\nprint(any((value := None) for index in range(1)))\nprint(value + 1)\n",
+    "generator_after_start_optional": "value: int | None = None\nprint(sum(((value := None) or 0 for index in [1]), (value := 1)))\nprint(value + 1)\n",
+    "generator_after_strict_optional": "value: int | None = None\nfor left, right in zip(((value := None) or 0 for index in [1]), [2], strict=(value := 1)):\n    print(value + 1)\n",
 }
 
 ERRORS = {
