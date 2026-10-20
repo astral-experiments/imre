@@ -16,6 +16,7 @@ REJECTED = {
     "generator_target_leaks": "values = list(target for target in range(3))\nprint(target)\n",
     "generator_later_target_unbound": "def bad() -> list[int]:\n    later = 9\n    return list(later for first in range(1) if later > 0 for later in range(2))\nbad()\n",
     "generator_optional_unchecked": "def bad(values: list[int | None]) -> int:\n    return sum(value + 1 for value in values)\nbad([None])\n",
+    "generator_wrong_context": 'values: list[int] = list(value for value in ["wrong"])\n',
     "generator_dynamic_dead_element": 'print(any(eval("1") for value in range(0)))\n',
     "generator_target_rebound": "print(any((value := 1) for value in range(3)))\n",
     "generator_target_index_walrus": "values = [0, 0]\nsaved = 0\nprint(any(0 for values[(saved := 1)] in [4, 5]))\n",
@@ -53,6 +54,8 @@ REJECTED = {
     "generator_export_invalidates_optional": "value: int | None = 1\nprint(any((value := None) for index in range(1)))\nprint(value + 1)\n",
     "generator_after_start_optional": "value: int | None = None\nprint(sum(((value := None) or 0 for index in [1]), (value := 1)))\nprint(value + 1)\n",
     "generator_after_strict_optional": "value: int | None = None\nfor left, right in zip(((value := None) or 0 for index in [1]), [2], strict=(value := 1)):\n    print(value + 1)\n",
+    "generator_suspended_optional": "value: int | None = 1\nfor result in (value + item for outer in [0] if value is not None for item in range(2)):\n    value = None\n",
+    "generator_sibling_suspended_optional": "value: int | None = 1\nfor result, ignored in zip((value + item for outer in [0] if value is not None for item in range(2)), ((value := None) for index in range(2))):\n    print(result)\n",
 }
 
 ERRORS = {

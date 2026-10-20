@@ -7,6 +7,22 @@ def show(values: list[int]) -> None:
         print(value)
 
 
+def contexts() -> None:
+    rows: list[list[str]] = list([] for index in range(1))
+    print(len(rows))
+    print(len(rows[0]))
+    rows[0].append("contextual string")
+    print(rows[0][0])
+    pairs: list[tuple[int, str | None]] = list(enumerate([None, "x"]))
+    for index, value in pairs:
+        print(index)
+        if value is None:
+            print("absent")
+        else:
+            print(value)
+
+
+contexts()
 show(list(value * value for value in range(6) if value % 2))
 print(sum(value * value for value in range(6) if value % 2))
 print(sum((value for value in range(0)), start=9))
