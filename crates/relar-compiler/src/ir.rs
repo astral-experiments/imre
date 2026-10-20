@@ -276,6 +276,10 @@ pub(crate) enum Builtin {
     StringIter,
     /// Linear Unicode iteration from the final code point toward the first.
     StringReverseIter,
+    /// Private, initially zeroed tuple storage for iterator result caching.
+    TupleCacheNew,
+    /// Reuses an exclusively owned iterator cache or allocates a separate result.
+    TupleCacheResult,
     /// Eagerly converts immutable string code points into an integer list,
     /// preserving `list(map(int, text))` errors without character objects.
     StringIntList,

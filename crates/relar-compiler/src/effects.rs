@@ -252,6 +252,8 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::SetIter
         | Builtin::StringIter
         | Builtin::StringReverseIter
+        | Builtin::TupleCacheNew
+        | Builtin::TupleCacheResult
         | Builtin::BytesIter
         | Builtin::Encode
         | Builtin::ExceptionMessage

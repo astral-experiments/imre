@@ -81,6 +81,29 @@ pub unsafe extern "C" fn relar_record_retain(payload: *const usize) {
     header.references.set(next);
 }
 
+/// Acquires the next private iterator result, reusing its cache only when no
+/// earlier yielded tuple still aliases it. A shared cache remains unchanged;
+/// the returned fresh record starts with cleanup-safe zero fields instead.
+///
+/// # Safety
+/// `payload` is the live, fully rooted cache record on its execution thread.
+/// The caller borrows it without adding a temporary owner before this call.
+/// Before publishing the returned owner, initialize every field to its declared
+/// representation. A reused record may be mutated only through this result.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_record_cached_result(payload: *const usize) -> *mut usize {
+    // SAFETY: the caller roots this cache and its immutable descriptor.
+    let header = unsafe { &*payload.cast::<Header>().sub(1) };
+    if header.references.get() == 1 {
+        header.references.set(2);
+        payload.cast_mut()
+    } else {
+        // SAFETY: a fresh record uses the cache's static descriptor; it does not
+        // expose or mutate any existing tuple's observable field values.
+        unsafe { relar_record_new(header.descriptor) }
+    }
+}
+
 /// Consumes a record owner, releasing initialized fields only on the final drop.
 /// This also handles constructors interrupted after any subset of field writes.
 ///

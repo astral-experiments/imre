@@ -186,27 +186,44 @@ impl Checker<'_> {
                 input.evaluate.append(&mut input.acquire);
                 let ty = self.types.tuple(vec![Type::Int, self.locals[input.value]]);
                 let value = self.hidden(ty);
-                input.next.push(Statement::If(
-                    self.local(input.ready),
+                let cache = self.iterator_tuple_cache(ty, &mut input.evaluate, &mut input.clear);
+                let mut result = if let Some(cache) = cache {
                     vec![
                         Statement::Assign(
                             value,
                             Expr {
                                 ty,
-                                kind: ExprKind::Tuple(vec![
-                                    self.local(counter),
-                                    self.local(input.value),
-                                ]),
+                                kind: ExprKind::Builtin(
+                                    Builtin::TupleCacheResult,
+                                    vec![self.local(cache)],
+                                ),
                             },
                         ),
-                        Statement::Clear(input.value),
-                        Statement::Assign(
-                            counter,
-                            binary(Binary::Add, self.local(counter), integer(1)),
-                        ),
-                    ],
-                    Vec::new(),
-                ));
+                        Statement::SetField(self.local(value), 0, self.local(counter)),
+                        Statement::SetField(self.local(value), 1, self.local(input.value)),
+                    ]
+                } else {
+                    vec![Statement::Assign(
+                        value,
+                        Expr {
+                            ty,
+                            kind: ExprKind::Tuple(vec![
+                                self.local(counter),
+                                self.local(input.value),
+                            ]),
+                        },
+                    )]
+                };
+                result.extend([
+                    Statement::Clear(input.value),
+                    Statement::Assign(
+                        counter,
+                        binary(Binary::Add, self.local(counter), integer(1)),
+                    ),
+                ]);
+                input
+                    .next
+                    .push(Statement::If(self.local(input.ready), result, Vec::new()));
                 input.next.insert(0, Statement::Clear(value));
                 input.value = value;
                 input.elementless = false;
@@ -215,6 +232,43 @@ impl Checker<'_> {
             }
             _ => Ok(None),
         }
+    }
+
+    /// Only file resources have observable final drops in the sealed language.
+    /// Their transitive owners retain CPython's iterator tuple cache, including
+    /// shared-result behavior; other exact tuples can be scalar-replaced.
+    fn iterator_tuple_cache(
+        &mut self,
+        ty: Type,
+        evaluate: &mut Vec<Statement>,
+        clear: &mut Vec<usize>,
+    ) -> Option<usize> {
+        fn owns_file(checker: &Checker<'_>, ty: Type) -> bool {
+            match ty {
+                Type::TextIO | Type::BinaryIO => true,
+                Type::Class(class) => checker.classes.fields[class]
+                    .iter()
+                    .any(|ty| owns_file(checker, *ty)),
+                _ => checker
+                    .types
+                    .children(ty)
+                    .into_iter()
+                    .any(|ty| owns_file(checker, ty)),
+            }
+        }
+        if !owns_file(self, ty) {
+            return None;
+        }
+        let cache = self.hidden(ty);
+        evaluate.push(Statement::Assign(
+            cache,
+            Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::TupleCacheNew, Vec::new()),
+            },
+        ));
+        clear.push(cache);
+        Some(cache)
     }
 
     /// Adapts existing concrete iteration without introducing a public iterator
@@ -678,22 +732,29 @@ impl Checker<'_> {
         for input in &mut inputs {
             evaluate.append(&mut input.acquire);
         }
+        let cache = self.iterator_tuple_cache(ty, &mut evaluate, &mut clear);
         evaluate.push(Statement::Assign(done, boolean(inputs.is_empty())));
-        let mut success = vec![
-            Statement::Assign(
-                value,
-                Expr {
-                    ty,
-                    kind: ExprKind::Tuple(
-                        inputs.iter().map(|input| self.local(input.value)).collect(),
-                    ),
-                },
-            ),
-            Statement::Assign(ready, boolean(true)),
-        ];
+        let mut success = vec![Statement::Assign(ready, boolean(true))];
+        if cache.is_none() {
+            success.insert(
+                0,
+                Statement::Assign(
+                    value,
+                    Expr {
+                        ty,
+                        kind: ExprKind::Tuple(
+                            inputs.iter().map(|input| self.local(input.value)).collect(),
+                        ),
+                    },
+                ),
+            );
+        }
         success.extend(inputs.iter().map(|input| Statement::Clear(input.value)));
         for index in (0..inputs.len()).rev() {
-            let mut exhausted = vec![Statement::Assign(done, boolean(true))];
+            let mut exhausted = vec![
+                Statement::Assign(done, boolean(true)),
+                Statement::Clear(value),
+            ];
             let strict_checks = if index == 0 {
                 let mut probes = Vec::new();
                 for (other_index, input) in inputs.iter().enumerate().skip(1) {
@@ -732,12 +793,31 @@ impl Checker<'_> {
                     .map(Statement::Clear),
             );
             let mut step = inputs[index].next.clone();
+            if cache.is_some() {
+                success.insert(0, Statement::Clear(inputs[index].value));
+                success.insert(
+                    0,
+                    Statement::SetField(self.local(value), index, self.local(inputs[index].value)),
+                );
+            }
             step.push(Statement::If(
                 self.local(inputs[index].ready),
                 success,
                 exhausted,
             ));
             success = step;
+        }
+        if let Some(cache) = cache {
+            success.insert(
+                0,
+                Statement::Assign(
+                    value,
+                    Expr {
+                        ty,
+                        kind: ExprKind::Builtin(Builtin::TupleCacheResult, vec![self.local(cache)]),
+                    },
+                ),
+            );
         }
         let next = vec![
             Statement::Clear(value),
@@ -776,6 +856,17 @@ impl Checker<'_> {
                 self.source,
                 generator,
                 "assignment expressions are forbidden in comprehension iterables",
+            ));
+        }
+        if generator
+            .generators
+            .iter()
+            .any(|clause| !narrowing::expression_assignments(&clause.target).is_empty())
+        {
+            return Err(error(
+                self.source,
+                generator,
+                "assignment expressions are forbidden in comprehension targets",
             ));
         }
         let first = self.expansion_input(&generator.generators[0].iter, None)?;
