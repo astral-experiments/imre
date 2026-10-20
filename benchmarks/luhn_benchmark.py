@@ -4,6 +4,7 @@ import argparse
 import base64
 import itertools
 import json
+import math
 import platform
 import random
 import runpy
@@ -29,17 +30,117 @@ def run_checked(command: list[str], timeout: float = 240) -> str:
     return result.stdout.decode()
 
 
-def workloads(codec, sizes: list[int], batch_digits: int, operations) -> list[dict]:
+def baseline_provenance(record, hashes, upstream, rust_record, target, thinlto):
+    """Bind a preserved binary to unchanged executable sources and build tools."""
+    if (
+        not record.get("input_guards_passed")
+        or record.get("dirty") is not False
+        or record.get("binary_sha256") != hashes["baseline"]
+        or record.get("validation", {}).get("relar", {}).get("binary_sha256")
+        != hashes["baseline"]
+        or record.get("upstream") != upstream
+    ):
+        raise ValueError("baseline record must identify a validated, committed binary")
+    if record.get("thinlto") != thinlto or record.get("requested_target") != target:
+        raise ValueError("baseline target and linking mode must match")
+    command = record["compile_command"]
+    if (
+        "--opt-level" not in command
+        or command[command.index("--opt-level") + 1] != "3"
+        or ("--lto-linker" in command) != thinlto
+    ):
+        raise ValueError("baseline compilation must use matching O3/linking options")
+    original = record["source_and_tool_sha256"]
+    matched_tools = [
+        "python",
+        "clang",
+        "validator",
+        "shared_harness",
+        "shared_validator",
+    ]
+    if thinlto:
+        matched_tools.append("lto_linker")
+    if any(original.get(name) != hashes[name] for name in matched_tools):
+        raise ValueError("baseline protocol, validator, or benchmark tool changed")
+    old_rust = record["rust_build_record"]
+    if not old_rust.get("input_guards_passed") or any(
+        old_rust.get(name) != rust_record[name]
+        for name in ("sources", "tool_sha256", "thinlto", "llvm_budget")
+    ):
+        raise ValueError("baseline Rust sources, toolchain, or LLVM budgets changed")
+    source_keys = {
+        name
+        for name in original.keys() | hashes.keys()
+        if name.startswith(("example:", "rust_source:"))
+    }
+    differences = []
+    for name in sorted(source_keys):
+        before, after = original.get(name), hashes.get(name)
+        if before == after:
+            continue
+        if not name.endswith(".md"):
+            raise ValueError(
+                f"baseline executable source or upstream pin changed: {name}"
+            )
+        differences.append(
+            {"path": name, "baseline_sha256": before, "current_sha256": after}
+        )
+    return {
+        "record_sha256": hashes["baseline_record"],
+        "binary_sha256": hashes["baseline"],
+        "revision": record["revision"],
+        "requested_target": target,
+        "thinlto": thinlto,
+        "documentation_differences": differences,
+        "source_policy": "All recorded example and Rust sources must match except Markdown documentation. The current benchmark harness differs intentionally; its validators, shared measurement helpers, Python, Clang, Rust toolchain, and optional ThinLTO linker must match.",
+    }
+
+
+def workloads(
+    codec, sizes: list[int], batch_digits: int, operations, baseline=None
+) -> list[dict]:
     generator = random.Random(3917)
+    captured = {}
+    if baseline is not None:
+        captured = {item["label"]: item for item in baseline["workloads"]}
+        if len(captured) != len(baseline["workloads"]):
+            raise ValueError("baseline workload labels must be distinct")
     result = []
     for size in sizes:
-        payload = bytes(generator.randrange(48, 58) for _ in range(size))
+        generated = bytes(generator.randrange(48, 58) for _ in range(size))
         for operation in operations:
+            label = f"{operation}-{size}"
+            payload = generated
+            if baseline is not None:
+                if label not in captured:
+                    raise ValueError(f"baseline does not contain workload {label}")
+                original = captured[label]
+                payload = base64.b64decode(original["input_base64"], validate=True)
+                if (
+                    original["operation"] != operation
+                    or original["digits"] != size
+                    or len(payload) != size
+                    or original["input_sha256"] != validator.digest(payload)
+                ):
+                    raise ValueError(f"invalid baseline workload {label}")
+                expected = validator.oracle(
+                    codec, operation, payload, original["repetitions"]
+                )
+                if (
+                    expected["stdout"] != original["expected_stdout"]
+                    or expected["output"]
+                    != base64.b64decode(
+                        original["expected_output_base64"], validate=True
+                    )
+                    or validator.digest(expected["output"])
+                    != original["expected_output_sha256"]
+                ):
+                    raise ValueError(f"baseline workload oracle changed: {label}")
             repetitions = max(1, batch_digits // size)
             expected = validator.oracle(codec, operation, payload, repetitions)
             result.append(
                 {
-                    "label": f"{operation}-{size}",
+                    "label": label,
                     "operation": operation,
                     "digits": size,
                     "repetitions": repetitions,
@@ -116,7 +217,14 @@ def measure(workload: dict, commands: dict, directory: Path, args) -> dict:
     ratios = {
         f"{left}_over_{right}": summaries[left]["median_seconds"]
         / summaries[right]["median_seconds"]
-        for left, right in (("cpython", "relar"), ("relar", "rust"), ("cpython", "rust"))
+        for left, right in (
+            ("cpython", "relar"),
+            ("relar", "rust"),
+            ("cpython", "rust"),
+            ("baseline", "relar"),
+            ("baseline", "rust"),
+            ("cpython", "baseline"),
+        )
         if left in commands and right in commands
     }
     return {**workload, "gates": gates, **phases, "summary": summaries, **ratios}
@@ -135,8 +243,8 @@ def main() -> None:
     parser.add_argument("--lto-linker", type=Path)
     parser.add_argument("--artifact-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--samples", type=shared.positive_int, default=12)
-    parser.add_argument("--warmups", type=shared.positive_int, default=6)
+    parser.add_argument("--samples", type=shared.positive_int)
+    parser.add_argument("--warmups", type=shared.positive_int)
     parser.add_argument(
         "--batch-digits", type=shared.positive_int, default=16 * 1024 * 1024
     )
@@ -150,18 +258,28 @@ def main() -> None:
         default=validator.OPERATIONS,
     )
     parser.add_argument("--native-only", action="store_true")
+    parser.add_argument("--baseline", type=Path, help="preserved Relar executable")
+    parser.add_argument(
+        "--baseline-record", type=Path, help="its original benchmark JSON"
+    )
     parser.add_argument("--timeout", type=shared.positive_float, default=120)
     parser.add_argument("--cpu", type=int)
     parser.add_argument("--allow-dirty", action="store_true")
     args = parser.parse_args()
-    permutations = 2 if args.native_only else 6
+    if bool(args.baseline) != bool(args.baseline_record):
+        parser.error("--baseline and --baseline-record must be supplied together")
+    permutations = math.factorial(2 + (not args.native_only) + bool(args.baseline))
+    if args.samples is None:
+        args.samples = max(12, permutations)
+    if args.warmups is None:
+        args.warmups = max(6, permutations)
     if (
         args.samples < max(4, permutations)
         or args.samples % permutations
         or args.warmups % permutations
     ):
         parser.error(
-            "samples and warmups must balance all engine permutations; at least four samples"
+            f"samples must be >= {max(4, permutations)}; samples and warmups must be multiples of {permutations}"
         )
     if len(set(args.sizes)) != len(args.sizes) or len(set(args.operations)) != len(
         args.operations
@@ -203,6 +321,11 @@ def main() -> None:
         "shared_harness": HERE / "benchmark.py",
         "shared_validator": HERE / "validate.py",
     }
+    baseline = None
+    if args.baseline:
+        paths["baseline"] = Path(shared.executable(str(args.baseline)))
+        paths["baseline_record"] = args.baseline_record.resolve(strict=True)
+        baseline = json.loads(paths["baseline_record"].read_text())
     paths.update(
         {
             "example:" + str(path.relative_to(validator.PACKAGE)): path
@@ -261,7 +384,10 @@ def main() -> None:
         artifacts / "luhn.ll",
         artifacts / "validation.json",
     )
+    baseline_validation_path = artifacts / "baseline-validation.json"
     outputs = [binary, llvm, validation_path, args.output.resolve()]
+    if baseline is not None:
+        outputs.append(baseline_validation_path)
     protected = list(paths.values())
     for output in outputs:
         assert all(
@@ -271,6 +397,17 @@ def main() -> None:
         ), "output would replace a source, tool, or another output"
         protected.append(output)
     hashes = {name: shared.sha256(path) for name, path in paths.items()}
+    baseline_info = (
+        baseline_provenance(
+            baseline, hashes, provenance, rust_record, args.target, thinlto
+        )
+        if baseline is not None
+        else None
+    )
+    codec, _ = validator.load_upstream()
+    selected_workloads = workloads(
+        codec, args.sizes, args.batch_digits, args.operations, baseline
+    )
     revision = run_checked(["git", "-C", str(ROOT), "rev-parse", "HEAD"]).strip()
     dirty = bool(run_checked(["git", "-C", str(ROOT), "status", "--porcelain"]).strip())
     if dirty and not args.allow_dirty:
@@ -321,7 +458,25 @@ def main() -> None:
     validation = json.loads(validation_path.read_text())
     assert validation["relar"]["binary_sha256"] == binary_hash
     assert validation["rust"]["binary_sha256"] == hashes["rust"]
+    baseline_validation_command = None
+    baseline_validation = None
+    if baseline is not None:
+        baseline_validation_command = [
+            str(python),
+            "-I",
+            "-B",
+            str(HERE / "luhn_validate.py"),
+            "--binary",
+            str(paths["baseline"]),
+            "--output",
+            str(baseline_validation_path),
+        ]
+        run_checked(baseline_validation_command)
+        baseline_validation = json.loads(baseline_validation_path.read_text())
+        assert baseline_validation["relar"]["binary_sha256"] == hashes["baseline"]
     commands = {"relar": [str(binary)], "rust": [str(rust)]}
+    if baseline is not None:
+        commands["baseline"] = [str(paths["baseline"])]
     if not args.native_only:
         commands["cpython"] = validator.python_command(str(python))
     record = {
@@ -353,15 +508,25 @@ def main() -> None:
         "rust_build_record": rust_record,
         "validation_command": validation_command,
         "validation": validation,
+        "baseline_provenance": baseline_info,
+        "baseline_record": baseline,
+        "baseline_validation_command": baseline_validation_command,
+        "baseline_validation": baseline_validation,
         "thinlto": thinlto,
         "batch_digits": args.batch_digits,
         "samples": args.samples,
         "warmups": args.warmups,
         "engine_orders": list(itertools.permutations(commands)),
+        "ratio_interpretation": {
+            "baseline_over_relar": "Preserved Relar median / current Relar median; higher means improvement.",
+            "relar_over_rust": "Current Relar median / Rust median; lower is better.",
+        },
+        "workload_source": "preserved baseline inputs"
+        if baseline
+        else "seeded generator",
         "method": "Whole-process wall time, including startup and one input read/output write. Inputs are prepared and complete outputs verified outside timing. Identical repetitions and checksum contributions, with black_box per Rust call. All engine permutations are balanced. Empty-input controls report startup/protocol overhead without subtracting it.",
         "workloads": [],
     }
-    codec, _ = validator.load_upstream()
     empty = validator.oracle(codec, "checksum", b"")
     control = {
         "label": "empty-control",
@@ -378,7 +543,7 @@ def main() -> None:
         control, commands, artifacts / "empty-control", args
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    for workload in workloads(codec, args.sizes, args.batch_digits, args.operations):
+    for workload in selected_workloads:
         result = measure(workload, commands, artifacts / workload["label"], args)
         result["startup_control_fraction"] = {
             name: record["startup_control"]["summary"][name]["median_seconds"]
