@@ -7,10 +7,9 @@ class Row:
     values: list[int]
 
     def __init__(self, index: int) -> None:
-        number = (1 << 100) + index
-        self.number = number
+        self.number = (1 << 100) + index
         self.text = "row " + str(index)
-        self.values = [number]
+        self.values = [(1 << 100) + index]
 
 
 def mutate(rows: list[Row], mode: int) -> int:
@@ -51,6 +50,30 @@ def erase_float(values: list[float], index: int) -> int:
 def erase_optional_float(values: list[float | None], index: int) -> int:
     values[index] = None
     return index
+
+
+def replace_union(values: list[str | bytes], index: int) -> int:
+    if index == 0:
+        values[index] = b"replacement bytes"
+    else:
+        values[index] = "replacement text"
+    return index
+
+
+def union_values(seed: int) -> None:
+    values: list[str | bytes] = [
+        "original text " + str(seed),
+        ("original bytes " + str(seed)).encode(),
+    ]
+    for value, index in zip(
+        values, (replace_union(values, index) for index in range(2)), strict=True
+    ):
+        print(index)
+        if isinstance(value, str):
+            print(value)
+        else:
+            print(value.decode())
+        print(isinstance(values[index], bytes))
 
 
 def nullable_values() -> None:
@@ -129,6 +152,7 @@ def strict_probe(reverse: bool, grow: bool) -> None:
 for mode in range(3):
     selected_before_mutation(mode)
 nullable_values()
+union_values(17)
 for reverse in [False, True]:
     for grow in [False, True]:
         strict_probe(reverse, grow)
