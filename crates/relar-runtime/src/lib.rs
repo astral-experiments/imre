@@ -847,6 +847,20 @@ pub unsafe extern "C" fn relar_list_borrow_index(list: *const List, at: usize) -
     finish(result, 0)
 }
 
+/// Borrows a list element after the compiler has proved its current bounds.
+///
+/// # Safety
+/// `list` must remain rooted, and `at` must be an exact decoded native index
+/// strictly below the current length. No storage access may overlap this call.
+/// The selected element must remain in place until the returned canonical word
+/// is consumed. This does not acquire a reference; the word must not be released.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_borrow_index_proven(list: *const List, at: usize) -> usize {
+    // SAFETY: the caller proves the index is in bounds and roots its element.
+    // Only its borrowed word escapes this nonreentrant storage access.
+    unsafe { (&*list).0.with(|values| values.get_unchecked(at).0) }
+}
+
 /// Returns one after replacement, or zero with a pending error and no mutation.
 ///
 /// # Safety
@@ -1885,6 +1899,39 @@ mod tests {
             drop(saved);
         }
         assert!(source_weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn proven_indices_borrow_boundary_values_without_acquiring_owners() {
+        let big = Rc::new(BigInt::from(1_u128 << 100));
+        let weak = Rc::downgrade(&big);
+        let list = relar_list_new();
+        // SAFETY: the exact indices are in bounds after all three appends.
+        // Every borrowed word is consumed before the list is released.
+        unsafe {
+            relar_list_append(list, Int::small(MIN_SMALL).unwrap().0);
+            relar_list_append(list, Rc::as_ptr(&big) as usize);
+            relar_list_append(list, Int::small(MAX_SMALL).unwrap().0);
+            drop(big);
+            assert_eq!(
+                Int::borrow(relar_list_borrow_index_proven(list, 0)).as_small(),
+                Some(MIN_SMALL)
+            );
+            assert_eq!(
+                Int::borrow(relar_list_borrow_index_proven(list, 1))
+                    .big()
+                    .as_ref(),
+                &BigInt::from(1_u128 << 100)
+            );
+            assert_eq!(weak.strong_count(), 1);
+            assert_eq!(
+                Int::borrow(relar_list_borrow_index_proven(list, 2)).as_small(),
+                Some(MAX_SMALL)
+            );
+            relar_list_release(list);
+        }
+        assert!(weak.upgrade().is_none());
+        assert_eq!(relar_error_pending(), 0);
     }
 
     #[test]
