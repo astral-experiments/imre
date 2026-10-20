@@ -15,7 +15,8 @@ library corpus.
 
 `src/unicode.rs` lists all 76 decimal-zero code points in Unicode 16.0, generated
 independently from CPython 3.14.5's `unicodedata` database. Each following group of
-ten contains digits 0–9. The reference does not share Relar's ICU conversion code.
+ten contains digits 0–9. The reference performs its own decimal lookup and
+streaming arithmetic; it links no Relar runtime code.
 The validator checks every decimal character supported by the selected CPython.
 This is an explicit Unicode 16 comparison domain, not a claim of universal
 compatibility across newer Unicode databases.

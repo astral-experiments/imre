@@ -227,6 +227,7 @@ def corpus() -> list[tuple[str, str, bytes, int]]:
         " 123",
         "123 ",
         "١x٢y",
+        "\U00011de0",  # A Unicode17 decimal digit is unassigned in Unicode16.
     ]
     for index, value in enumerate(invalid):
         for operation in OPERATIONS:
