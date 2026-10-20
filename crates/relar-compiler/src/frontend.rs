@@ -16,6 +16,7 @@ mod calls;
 mod comprehensions;
 mod expansions;
 mod inference;
+mod iterables;
 mod matching;
 mod module_values;
 mod truthiness;
@@ -126,6 +127,8 @@ const RESERVED: &[&str] = &[
     "print",
     "range",
     "enumerate",
+    "map",
+    "sum",
     "open",
     "None",
     "True",
@@ -986,6 +989,12 @@ impl<'a> Checker<'a> {
                 self.set_literal(set, self.types.set_element(concrete))?
             }
             ast::Expr::Call(call)
+                if self.types.element(concrete).is_some()
+                    && matches!(&*call.func, ast::Expr::Name(name) if name.id == "list") =>
+            {
+                self.list_call(call, self.types.element(concrete))?
+            }
+            ast::Expr::Call(call)
                 if self.types.mapping(concrete).is_some()
                     && matches!(&*call.func, ast::Expr::Name(name) if name.id == "dict")
                     && call.arguments.args.is_empty()
@@ -1420,6 +1429,20 @@ impl<'a> Checker<'a> {
         orelse: &[ast::Stmt],
         lower_body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
     ) -> Result<(Vec<Statement>, bool), String> {
+        self.lower_iteration_after(target, input, orelse, Vec::new(), lower_body)
+    }
+
+    /// A consumer can evaluate its remaining arguments after acquiring an
+    /// iterator, preserving `sum(map(int, values), start())` mutation checks.
+    /// Supplying extra statements requires already validated range arguments.
+    fn lower_iteration_after(
+        &mut self,
+        target: &ast::Expr,
+        input: Iteration,
+        orelse: &[ast::Stmt],
+        before_iteration: Vec<Statement>,
+        lower_body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
+    ) -> Result<(Vec<Statement>, bool), String> {
         if let Iteration::Range(args) = input {
             let ast::Expr::Name(name) = target else {
                 return Err(error(self.source, target, "range target must be a name"));
@@ -1447,17 +1470,19 @@ impl<'a> Checker<'a> {
                     .chain(orelse)
                     .collect();
             }
+            let mut output = before_iteration;
+            output.push(Statement::For {
+                target,
+                cursor,
+                stop,
+                step,
+                args,
+                body,
+                orelse,
+            });
             return Ok((
                 vec![Statement::Scope {
-                    body: vec![Statement::For {
-                        target,
-                        cursor,
-                        stop,
-                        step,
-                        args,
-                        body,
-                        orelse,
-                    }],
+                    body: output,
                     clear,
                 }],
                 falls,
@@ -1677,6 +1702,7 @@ impl<'a> Checker<'a> {
                 .chain(orelse)
                 .collect();
         }
+        output.extend(before_iteration);
         output.push(Statement::While(test, body, orelse));
         Ok((
             vec![Statement::Scope {
@@ -3167,6 +3193,18 @@ impl<'a> Checker<'a> {
                 "only statically bound direct calls are supported",
             ));
         };
+        match name.id.as_str() {
+            "list" => return self.list_call(call, None),
+            "sum" => return self.sum_call(call),
+            "map" => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "map(int, iterable) is supported only directly inside list() or sum()",
+                ));
+            }
+            _ => {}
+        }
         self.reject_builtin_keywords(call)?;
         if name.id == "bool" {
             return match call.arguments.args.as_ref() {

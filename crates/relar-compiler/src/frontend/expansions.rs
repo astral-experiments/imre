@@ -89,6 +89,7 @@ impl Checker<'_> {
                 if call.arguments.args.is_empty() && call.arguments.keywords.is_empty() =>
             {
                 match &*call.func {
+                    ast::Expr::Name(name) if name.id == "list" => Some(self.types.list(element)),
                     ast::Expr::Name(name) if name.id == "set" => {
                         let element = self.types.payload(element).unwrap_or(element);
                         matches!(element, Type::Int | Type::Str | Type::Bytes)
@@ -116,7 +117,7 @@ impl Checker<'_> {
 
     /// Existing range/enumerate/items syntax remains confined to an eager
     /// consumer; no public iterator layout is introduced by display expansion.
-    fn expansion_input(
+    pub(super) fn expansion_input(
         &mut self,
         expression: &ast::Expr,
         element: Option<Type>,
@@ -247,10 +248,22 @@ impl Checker<'_> {
 
     /// Fixed tuples copy directly from rooted fields. Other sources share the
     /// normal iteration lowering with one private target that cannot escape.
-    fn expand_items(
+    pub(super) fn expand_items(
         &mut self,
         input: Iteration,
         node: &impl Ranged,
+        consume: impl FnMut(&mut Self, Expr) -> Result<Vec<Statement>, String>,
+    ) -> Result<Vec<Statement>, String> {
+        self.expand_items_after(input, node, Vec::new(), consume)
+    }
+
+    /// Remaining consumer arguments run after iterator acquisition, even for
+    /// an empty source. Fixed tuples hold their original fields through effects.
+    pub(super) fn expand_items_after(
+        &mut self,
+        input: Iteration,
+        node: &impl Ranged,
+        before_iteration: Vec<Statement>,
         mut consume: impl FnMut(&mut Self, Expr) -> Result<Vec<Statement>, String>,
     ) -> Result<Vec<Statement>, String> {
         if let Iteration::Container {
@@ -262,6 +275,7 @@ impl Checker<'_> {
         {
             let captured = self.hidden(iterable.ty);
             let mut body = vec![Statement::Assign(captured, iterable.clone())];
+            body.extend(before_iteration);
             for (index, ty) in fields.into_iter().enumerate() {
                 body.extend(consume(
                     self,
@@ -285,10 +299,11 @@ impl Checker<'_> {
             id: name.clone().into(),
             ctx: ast::ExprContext::Store,
         });
-        let (body, _) = self.lower_iteration(&target, input, &[], |checker| {
-            let slot = checker.names[&name];
-            consume(checker, checker.local(slot))
-        })?;
+        let (body, _) =
+            self.lower_iteration_after(&target, input, &[], before_iteration, |checker| {
+                let slot = checker.names[&name];
+                consume(checker, checker.local(slot))
+            })?;
         let target = self.names.remove(&name).unwrap();
         Ok(vec![Statement::Scope {
             body,
@@ -297,7 +312,7 @@ impl Checker<'_> {
     }
 
     /// Promotes copied values into the destination layout at each insertion.
-    fn expansion_insert(
+    pub(super) fn expansion_insert(
         &mut self,
         result: usize,
         element: &mut Option<Type>,

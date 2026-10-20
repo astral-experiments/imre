@@ -137,7 +137,8 @@ impl Checker<'_> {
                     self.types.element(concrete).is_some()
                 }
                 ast::Expr::Call(call) => matches!(&*call.func, ast::Expr::Name(name)
-                    if (name.id == "dict" && self.types.mapping(concrete).is_some())
+                    if (name.id == "list" && self.types.element(concrete).is_some())
+                        || (name.id == "dict" && self.types.mapping(concrete).is_some())
                         || (name.id == "set" && self.types.set_element(concrete).is_some())),
                 _ => false,
             };
