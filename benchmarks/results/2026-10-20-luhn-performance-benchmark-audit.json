@@ -1,0 +1,1319 @@
+{
+  "status": "passed",
+  "at_utc": "2026-10-20T10:50:41.991245+00:00",
+  "auditor_sha256": "0a3ea5e30e719474db14a32009edc0d25581871886bf15d3d2e1a54cfaee58ad",
+  "timing_status_sha256": "4248951520c721e5d5d219d6dae67e6014b7ec998747ae06d4ea67a793c330ab",
+  "validation_index_sha256": "793c61af6f1ca927c54215d45a5cd30fdeddad5547545a8adb014c0df121bdda",
+  "head": "8b54eae6572a93926265d78562656dd395ad28b0",
+  "timing_revision": "8b54eae6572a93926265d78562656dd395ad28b0",
+  "build_revision": "8b54eae6572a93926265d78562656dd395ad28b0",
+  "validation_revision": "8b54eae6572a93926265d78562656dd395ad28b0",
+  "post_validation_changes": {
+    "paths": [],
+    "patch": "",
+    "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "reason": "Any post-validation changes are limited to the benchmark harness and recorded exactly. Compiler, runtime, validators, example, and Rust reference sources remain at the validated revision."
+  },
+  "identities": {
+    "normal": {
+      "record_sha256": "539f57043f061df56ea58a901cedf2c3faee2884da26486ed8e24ddb49094460",
+      "binary_sha256": "add25ad4a6d2b8c2b5e0f83e46f028af657bb45464a194a0fbf0402becc7ef2b",
+      "rust_binary_sha256": "4e7784e3c256b691940b90c3609d50d2a3c35c71b57152a9bbc16426ff4c7cdc",
+      "baseline_binary_sha256": "3d2dd42d6e168d00da1e1b6fb79f14405cab6c4d724aefc70b190ebbc2d92328",
+      "baseline_record_sha256": "c3414ec6371467649fae88c995191f711e7423eb0502a26aa96eda9231402590",
+      "baseline_validation_sha256": "82de3f890ef44da24f55b254fe6548761f5641483c343094469a0af791bade58",
+      "baseline_revision": "6fa8681c1734513cc278511427029dea9dca471c",
+      "baseline_documentation_differences": [
+        {
+          "path": "example:README.md",
+          "baseline_sha256": "77fa9eeae232e21a28aa5b3cca4199b8c184376ea5b3ff35dc29c0e143293c6f",
+          "current_sha256": "452da6d5e07726c795ff62367f4a66326b88555e0e93aa7aa3aea8ed30ebe695"
+        }
+      ],
+      "validation_sha256": "248faf8dee8a3b5375b74481e2fa24289eeeb3fd8fe2ba2107ff7ebe337bba0b",
+      "llvm_sha256": "adf7ba8037b872b988ac760a52e65c9d8c75a1617c180a2875f69d0dc3d21618",
+      "cpu": {
+        "model": "AMD EPYC-Milan Processor",
+        "allowed_cpus_before_pinning": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "affinity": [
+          0
+        ]
+      }
+    },
+    "thinlto": {
+      "record_sha256": "9279ec2e8a120885946bd355918869f801cc239483dfeb30ede626f10ff153b5",
+      "binary_sha256": "de4607551b8c53b616c3acb6249bbcd38abfc8ebdb86c934455e41970c5316f5",
+      "rust_binary_sha256": "6ecadfe19c5db5427f79b93d4d74299ed5f481a972465bc1834353dbba47c5bc",
+      "baseline_binary_sha256": "14fb73da2b9b539b760b4c98c85573e55a1f03da84a90e4aeb519c47ec7f5fd0",
+      "baseline_record_sha256": "26b3b7ad62cddddae43e659080a533ae41a3079bb143096e098fe2d675c3bf57",
+      "baseline_validation_sha256": "7fb970c6019838b61fcc3ceab0fdcf116d55241f4c847de7474887b670d762ee",
+      "baseline_revision": "6fa8681c1734513cc278511427029dea9dca471c",
+      "baseline_documentation_differences": [
+        {
+          "path": "example:README.md",
+          "baseline_sha256": "77fa9eeae232e21a28aa5b3cca4199b8c184376ea5b3ff35dc29c0e143293c6f",
+          "current_sha256": "452da6d5e07726c795ff62367f4a66326b88555e0e93aa7aa3aea8ed30ebe695"
+        }
+      ],
+      "validation_sha256": "60142ef4aef6f1d1ed2471c7f8bb7dd16d69538919e6536bacef5376f77d8f9e",
+      "llvm_sha256": "adf7ba8037b872b988ac760a52e65c9d8c75a1617c180a2875f69d0dc3d21618",
+      "cpu": {
+        "model": "AMD EPYC-Milan Processor",
+        "allowed_cpus_before_pinning": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "affinity": [
+          0
+        ]
+      }
+    }
+  },
+  "checked_executions_including_gates": 2184,
+  "schedule": {
+    "engines": [
+      "relar",
+      "rust",
+      "baseline",
+      "cpython"
+    ],
+    "orders": [
+      [
+        "relar",
+        "rust",
+        "cpython",
+        "baseline"
+      ],
+      [
+        "rust",
+        "baseline",
+        "relar",
+        "cpython"
+      ],
+      [
+        "baseline",
+        "cpython",
+        "rust",
+        "relar"
+      ],
+      [
+        "cpython",
+        "relar",
+        "baseline",
+        "rust"
+      ]
+    ],
+    "warmups_per_point": 8,
+    "samples_per_point": 12,
+    "position_balance_verified": true,
+    "within_round_predecessor_balance_verified": true,
+    "cross_round_predecessor_balance_claimed": false,
+    "fixed_before_measurement": true
+  },
+  "timed_sample_duration_count": 1248,
+  "workload_sample_duration_count_excluding_controls": 1152,
+  "limits": [
+    "This audits stored records and recomputes tiny CPython output oracles; no compiler, native test, profile, or timing workload is run.",
+    "The exact four-order schedule balances engine positions and directed adjacent pairs within each round; transitions between rounds are not balanced.",
+    "The baseline is remeasured under current conditions from its exact preserved binary; the older timing medians are not substituted.",
+    "Build, full-validation, and timing use one exact frozen revision with no post-validation source changes. The preserved baseline revision is reported separately."
+  ],
+  "units": {
+    "durations": "seconds",
+    "ratios": "dimensionless",
+    "input_size": "ASCII digits"
+  },
+  "comparison": [
+    {
+      "mode": "normal",
+      "label": "checksum-16",
+      "digits": 16,
+      "repetitions": 1048576,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.1053299425,
+          "min_seconds": 0.099435376,
+          "max_seconds": 0.10807375,
+          "p25_seconds": 0.10461536275,
+          "p75_seconds": 0.1057056005
+        },
+        "rust": {
+          "median_seconds": 0.027918239999999997,
+          "min_seconds": 0.027213518,
+          "max_seconds": 0.034838627,
+          "p25_seconds": 0.02760893175,
+          "p75_seconds": 0.028695632000000002
+        },
+        "baseline": {
+          "median_seconds": 1.8766647645,
+          "min_seconds": 1.839176073,
+          "max_seconds": 1.936819555,
+          "p25_seconds": 1.86832436925,
+          "p75_seconds": 1.8881872625
+        },
+        "cpython": {
+          "median_seconds": 2.08270792,
+          "min_seconds": 2.044014911,
+          "max_seconds": 2.156140344,
+          "p25_seconds": 2.072469085,
+          "p75_seconds": 2.1113500285
+        }
+      },
+      "cpython_over_relar": 19.773180071754048,
+      "relar_over_rust": 3.772800237407516,
+      "baseline_over_relar": 17.817011193184694,
+      "baseline_over_rust": 67.22002405953958,
+      "cpython_over_baseline": 1.109792201248525,
+      "startup_control_fraction": {
+        "relar": 0.022466194738499926,
+        "rust": 0.08439228260807272,
+        "baseline": 0.001423232881292795,
+        "cpython": 0.012549148994449496
+      }
+    },
+    {
+      "mode": "normal",
+      "label": "verify-16",
+      "digits": 16,
+      "repetitions": 1048576,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.1281702435,
+          "min_seconds": 0.126229609,
+          "max_seconds": 0.131288772,
+          "p25_seconds": 0.12779646849999998,
+          "p75_seconds": 0.12870347675
+        },
+        "rust": {
+          "median_seconds": 0.0290693785,
+          "min_seconds": 0.027612803,
+          "max_seconds": 0.029645577,
+          "p25_seconds": 0.0289642085,
+          "p75_seconds": 0.029196757
+        },
+        "baseline": {
+          "median_seconds": 1.8700144815000002,
+          "min_seconds": 1.841478993,
+          "max_seconds": 1.936015183,
+          "p25_seconds": 1.8516728679999999,
+          "p75_seconds": 1.8940807
+        },
+        "cpython": {
+          "median_seconds": 2.119007611,
+          "min_seconds": 2.076980409,
+          "max_seconds": 2.21553771,
+          "p25_seconds": 2.1118754825,
+          "p75_seconds": 2.129423479
+        }
+      },
+      "cpython_over_relar": 16.532757940808622,
+      "relar_over_rust": 4.409115368599986,
+      "baseline_over_relar": 14.590082927477626,
+      "baseline_over_rust": 64.32935886468987,
+      "cpython_over_baseline": 1.1331503750175635,
+      "startup_control_fraction": {
+        "relar": 0.018462655101376943,
+        "rust": 0.08105037402158424,
+        "baseline": 0.0014282942867145916,
+        "cpython": 0.012334175613303166
+      }
+    },
+    {
+      "mode": "normal",
+      "label": "generate-16",
+      "digits": 16,
+      "repetitions": 1048576,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.179192968,
+          "min_seconds": 0.178013181,
+          "max_seconds": 0.181378626,
+          "p25_seconds": 0.1789187335,
+          "p75_seconds": 0.1795897455
+        },
+        "rust": {
+          "median_seconds": 0.0293642255,
+          "min_seconds": 0.028971855,
+          "max_seconds": 0.036347801,
+          "p25_seconds": 0.02916716175,
+          "p75_seconds": 0.02951863675
+        },
+        "baseline": {
+          "median_seconds": 2.048851635,
+          "min_seconds": 2.006508367,
+          "max_seconds": 2.140373851,
+          "p25_seconds": 2.022841754,
+          "p75_seconds": 2.053506684
+        },
+        "cpython": {
+          "median_seconds": 2.1945241810000002,
+          "min_seconds": 2.182863757,
+          "max_seconds": 2.218059253,
+          "p25_seconds": 2.1906163739999998,
+          "p75_seconds": 2.2009560905
+        }
+      },
+      "cpython_over_relar": 12.246709262609011,
+      "relar_over_rust": 6.102424462037999,
+      "baseline_over_relar": 11.433772529511314,
+      "baseline_over_rust": 69.77373317746795,
+      "cpython_over_baseline": 1.0710996069756902,
+      "startup_control_fraction": {
+        "relar": 0.013205668874238411,
+        "rust": 0.08023654497544978,
+        "baseline": 0.0013036234319621681,
+        "cpython": 0.011909739808877502
+      }
+    },
+    {
+      "mode": "normal",
+      "label": "append-16",
+      "digits": 16,
+      "repetitions": 1048576,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.23436143799999998,
+          "min_seconds": 0.232122448,
+          "max_seconds": 0.243978198,
+          "p25_seconds": 0.23368110749999998,
+          "p75_seconds": 0.2368427965
+        },
+        "rust": {
+          "median_seconds": 0.057718404,
+          "min_seconds": 0.05707677,
+          "max_seconds": 0.064635345,
+          "p25_seconds": 0.057444547750000005,
+          "p75_seconds": 0.0589108015
+        },
+        "baseline": {
+          "median_seconds": 2.1076657415,
+          "min_seconds": 2.082288618,
+          "max_seconds": 2.16247502,
+          "p25_seconds": 2.09037579725,
+          "p75_seconds": 2.12626630475
+        },
+        "cpython": {
+          "median_seconds": 2.339686655,
+          "min_seconds": 2.3253167,
+          "max_seconds": 2.417898293,
+          "p25_seconds": 2.3332144745,
+          "p75_seconds": 2.34626618475
+        }
+      },
+      "cpython_over_relar": 9.98324073689973,
+      "relar_over_rust": 4.060428247461589,
+      "baseline_over_relar": 8.993227552648829,
+      "baseline_over_rust": 36.516355190625156,
+      "cpython_over_baseline": 1.1100843027105776,
+      "startup_control_fraction": {
+        "relar": 0.010097066395368337,
+        "rust": 0.040820324830880626,
+        "baseline": 0.0012672460093691757,
+        "cpython": 0.011170817230651768
+      }
+    },
+    {
+      "mode": "normal",
+      "label": "checksum-256",
+      "digits": 256,
+      "repetitions": 65536,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.042593914,
+          "min_seconds": 0.042230372,
+          "max_seconds": 0.060359342,
+          "p25_seconds": 0.042444220250000005,
+          "p75_seconds": 0.0428819535
+        },
+        "rust": {
+          "median_seconds": 0.024937084499999998,
+          "min_seconds": 0.024630186,
+          "max_seconds": 0.035576358,
+          "p25_seconds": 0.024747003,
+          "p75_seconds": 0.02515970325
+        },
+        "baseline": {
+          "median_seconds": 1.369072251,
+          "min_seconds": 1.352059621,
+          "max_seconds": 1.385972393,
+          "p25_seconds": 1.3638953010000001,
+          "p75_seconds": 1.3754798240000001
+        },
+        "cpython": {
+          "median_seconds": 1.5571619765,
+          "min_seconds": 1.536524006,
+          "max_seconds": 1.58594735,
+          "p25_seconds": 1.54718041925,
+          "p75_seconds": 1.56333408975
+        }
+      },
+      "cpython_over_relar": 36.55832090237117,
+      "relar_over_rust": 1.7080550855894963,
+      "baseline_over_relar": 32.14243826007631,
+      "baseline_over_rust": 54.901055133369745,
+      "cpython_over_baseline": 1.137384805924315,
+      "startup_control_fraction": {
+        "relar": 0.05555636422611925,
+        "rust": 0.09448113310920528,
+        "baseline": 0.0019509058035827502,
+        "cpython": 0.01678451721428866
+      }
+    },
+    {
+      "mode": "normal",
+      "label": "verify-256",
+      "digits": 256,
+      "repetitions": 65536,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.043307478999999996,
+          "min_seconds": 0.042583463,
+          "max_seconds": 0.044149436,
+          "p25_seconds": 0.04286695375,
+          "p75_seconds": 0.043588928
+        },
+        "rust": {
+          "median_seconds": 0.024865998,
+          "min_seconds": 0.024490689,
+          "max_seconds": 0.025135137,
+          "p25_seconds": 0.024825520750000003,
+          "p75_seconds": 0.0249345095
+        },
+        "baseline": {
+          "median_seconds": 1.380957833,
+          "min_seconds": 1.369090007,
+          "max_seconds": 1.388752122,
+          "p25_seconds": 1.37463591375,
+          "p75_seconds": 1.3852459819999998
+        },
+        "cpython": {
+          "median_seconds": 1.5588596275,
+          "min_seconds": 1.545841919,
+          "max_seconds": 1.578329117,
+          "p25_seconds": 1.5556998995,
+          "p75_seconds": 1.5650724249999999
+        }
+      },
+      "cpython_over_relar": 35.995159808309324,
+      "relar_over_rust": 1.7416344600365525,
+      "baseline_over_relar": 31.88728286400601,
+      "baseline_over_rust": 55.53599067288592,
+      "cpython_over_baseline": 1.1288249287912906,
+      "startup_control_fraction": {
+        "relar": 0.05464097783202758,
+        "rust": 0.09475123419538599,
+        "baseline": 0.001934114812323889,
+        "cpython": 0.01676623830582847
+      }
+    },
+    {
+      "mode": "normal",
+      "label": "generate-256",
+      "digits": 256,
+      "repetitions": 65536,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.0479743505,
+          "min_seconds": 0.047773101,
+          "max_seconds": 0.048636057,
+          "p25_seconds": 0.047851386,
+          "p75_seconds": 0.0481047955
+        },
+        "rust": {
+          "median_seconds": 0.024845541,
+          "min_seconds": 0.024430798,
+          "max_seconds": 0.025499557,
+          "p25_seconds": 0.02459966175,
+          "p75_seconds": 0.0249205475
+        },
+        "baseline": {
+          "median_seconds": 1.3895111975,
+          "min_seconds": 1.37500455,
+          "max_seconds": 1.405932252,
+          "p25_seconds": 1.38151651075,
+          "p75_seconds": 1.3957110670000001
+        },
+        "cpython": {
+          "median_seconds": 1.5598622720000002,
+          "min_seconds": 1.540618495,
+          "max_seconds": 1.581738224,
+          "p25_seconds": 1.55060537,
+          "p75_seconds": 1.5657719879999998
+        }
+      },
+      "cpython_over_relar": 32.51450526672581,
+      "relar_over_rust": 1.9309038390429898,
+      "baseline_over_relar": 28.963627084435466,
+      "baseline_over_rust": 55.92597872994595,
+      "cpython_over_baseline": 1.1225978421811171,
+      "startup_control_fraction": {
+        "relar": 0.04932558701341876,
+        "rust": 0.09482924924033652,
+        "baseline": 0.0019222090507838455,
+        "cpython": 0.01675546134370509
+      }
+    },
+    {
+      "mode": "normal",
+      "label": "append-256",
+      "digits": 256,
+      "repetitions": 65536,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.054061376,
+          "min_seconds": 0.053341595,
+          "max_seconds": 0.055274884,
+          "p25_seconds": 0.0539004875,
+          "p75_seconds": 0.0545343405
+        },
+        "rust": {
+          "median_seconds": 0.028394712000000003,
+          "min_seconds": 0.027950179,
+          "max_seconds": 0.031400681,
+          "p25_seconds": 0.02831013725,
+          "p75_seconds": 0.029220169749999997
+        },
+        "baseline": {
+          "median_seconds": 1.41024014,
+          "min_seconds": 1.392120056,
+          "max_seconds": 1.448358802,
+          "p25_seconds": 1.3994533464999999,
+          "p75_seconds": 1.4406352187500002
+        },
+        "cpython": {
+          "median_seconds": 1.5875083315,
+          "min_seconds": 1.561233468,
+          "max_seconds": 1.669476022,
+          "p25_seconds": 1.5738793185,
+          "p75_seconds": 1.6239409230000001
+        }
+      },
+      "cpython_over_relar": 29.364926477269094,
+      "relar_over_rust": 1.9039240827658332,
+      "baseline_over_relar": 26.085909097097343,
+      "baseline_over_rust": 49.66559055080396,
+      "cpython_over_baseline": 1.125700713284193,
+      "startup_control_fraction": {
+        "relar": 0.04377178634890832,
+        "rust": 0.08297615415151946,
+        "baseline": 0.0018939547416371226,
+        "cpython": 0.016463669186104046
+      }
+    },
+    {
+      "mode": "normal",
+      "label": "checksum-4096",
+      "digits": 4096,
+      "repetitions": 4096,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.0387515935,
+          "min_seconds": 0.038176772,
+          "max_seconds": 0.040393007,
+          "p25_seconds": 0.038399354000000004,
+          "p75_seconds": 0.0389187665
+        },
+        "rust": {
+          "median_seconds": 0.024377905499999998,
+          "min_seconds": 0.024256516,
+          "max_seconds": 0.026162252,
+          "p25_seconds": 0.0242821905,
+          "p75_seconds": 0.024513753
+        },
+        "baseline": {
+          "median_seconds": 1.3311558865,
+          "min_seconds": 1.31796635,
+          "max_seconds": 1.366297544,
+          "p25_seconds": 1.3251786344999998,
+          "p75_seconds": 1.34824855875
+        },
+        "cpython": {
+          "median_seconds": 1.4567354140000002,
+          "min_seconds": 1.44339108,
+          "max_seconds": 1.495770523,
+          "p25_seconds": 1.45033076075,
+          "p75_seconds": 1.4712526645000001
+        }
+      },
+      "cpython_over_relar": 37.59162610951728,
+      "relar_over_rust": 1.5896194814603741,
+      "baseline_over_relar": 34.350997372533854,
+      "baseline_over_rust": 54.60501463097394,
+      "cpython_over_baseline": 1.0943387087669993,
+      "startup_control_fraction": {
+        "relar": 0.06106492111092154,
+        "rust": 0.09664833592861372,
+        "baseline": 0.0020064749944671487,
+        "cpython": 0.01794163287911939
+      }
+    },
+    {
+      "mode": "normal",
+      "label": "verify-4096",
+      "digits": 4096,
+      "repetitions": 4096,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.038473952,
+          "min_seconds": 0.037791415,
+          "max_seconds": 0.039300515,
+          "p25_seconds": 0.038253779,
+          "p75_seconds": 0.03866299525
+        },
+        "rust": {
+          "median_seconds": 0.0244800365,
+          "min_seconds": 0.023335822,
+          "max_seconds": 0.024700692,
+          "p25_seconds": 0.02423362525,
+          "p75_seconds": 0.024625983749999997
+        },
+        "baseline": {
+          "median_seconds": 1.327581161,
+          "min_seconds": 1.312897879,
+          "max_seconds": 1.35458617,
+          "p25_seconds": 1.3185603465,
+          "p75_seconds": 1.3360608135
+        },
+        "cpython": {
+          "median_seconds": 1.449088629,
+          "min_seconds": 1.428330019,
+          "max_seconds": 1.46977999,
+          "p25_seconds": 1.43786266075,
+          "p75_seconds": 1.45823586175
+        }
+      },
+      "cpython_over_relar": 37.66414817484827,
+      "relar_over_rust": 1.5716460226683076,
+      "baseline_over_relar": 34.50597331410093,
+      "baseline_over_rust": 54.231175717405485,
+      "cpython_over_baseline": 1.0915254536366534,
+      "startup_control_fraction": {
+        "relar": 0.061505586948801094,
+        "rust": 0.09624511793517954,
+        "baseline": 0.0020118777506515097,
+        "cpython": 0.018036310186241893
+      }
+    },
+    {
+      "mode": "normal",
+      "label": "generate-4096",
+      "digits": 4096,
+      "repetitions": 4096,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.039153391499999995,
+          "min_seconds": 0.038759648,
+          "max_seconds": 0.043556768,
+          "p25_seconds": 0.0389996055,
+          "p75_seconds": 0.039346037
+        },
+        "rust": {
+          "median_seconds": 0.024345577,
+          "min_seconds": 0.023881288,
+          "max_seconds": 0.029330681,
+          "p25_seconds": 0.024261696250000003,
+          "p75_seconds": 0.02438325325
+        },
+        "baseline": {
+          "median_seconds": 1.326420352,
+          "min_seconds": 1.317476094,
+          "max_seconds": 1.343350562,
+          "p25_seconds": 1.32179704125,
+          "p75_seconds": 1.337470396
+        },
+        "cpython": {
+          "median_seconds": 1.4612489045000001,
+          "min_seconds": 1.44100193,
+          "max_seconds": 1.494414927,
+          "p25_seconds": 1.4540022067499998,
+          "p75_seconds": 1.467847137
+        }
+      },
+      "cpython_over_relar": 37.32113230855111,
+      "relar_over_rust": 1.6082342800912048,
+      "baseline_over_relar": 33.87753400621757,
+      "baseline_over_rust": 54.48301151375463,
+      "cpython_over_baseline": 1.101648434673596,
+      "startup_control_fraction": {
+        "relar": 0.06043826369421919,
+        "rust": 0.09677667528684983,
+        "baseline": 0.0020136384336780742,
+        "cpython": 0.017886214949083643
+      }
+    },
+    {
+      "mode": "normal",
+      "label": "append-4096",
+      "digits": 4096,
+      "repetitions": 4096,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.040885280499999996,
+          "min_seconds": 0.040370638,
+          "max_seconds": 0.042267658,
+          "p25_seconds": 0.0407561255,
+          "p75_seconds": 0.04102742475
+        },
+        "rust": {
+          "median_seconds": 0.028340947999999998,
+          "min_seconds": 0.02784743,
+          "max_seconds": 0.030707537,
+          "p25_seconds": 0.028221294999999997,
+          "p75_seconds": 0.02857307
+        },
+        "baseline": {
+          "median_seconds": 1.328640625,
+          "min_seconds": 1.322079164,
+          "max_seconds": 1.369201583,
+          "p25_seconds": 1.32677627925,
+          "p75_seconds": 1.34448198825
+        },
+        "cpython": {
+          "median_seconds": 1.455665447,
+          "min_seconds": 1.44364783,
+          "max_seconds": 1.489137623,
+          "p25_seconds": 1.449648099,
+          "p75_seconds": 1.47986292125
+        }
+      },
+      "cpython_over_relar": 35.603655623690784,
+      "relar_over_rust": 1.4426221910431507,
+      "baseline_over_relar": 32.496796126909295,
+      "baseline_over_rust": 46.880599230484464,
+      "cpython_over_baseline": 1.0956051016428914,
+      "startup_control_fraction": {
+        "relar": 0.05787811581725604,
+        "rust": 0.0831335634926538,
+        "baseline": 0.0020102734702997656,
+        "cpython": 0.017954820631254566
+      }
+    },
+    {
+      "mode": "thinlto",
+      "label": "checksum-16",
+      "digits": 16,
+      "repetitions": 1048576,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.07590470499999999,
+          "min_seconds": 0.074941894,
+          "max_seconds": 0.078699798,
+          "p25_seconds": 0.07514819425000001,
+          "p75_seconds": 0.07624313775
+        },
+        "rust": {
+          "median_seconds": 0.025640262,
+          "min_seconds": 0.025149889,
+          "max_seconds": 0.026322553,
+          "p25_seconds": 0.0255801425,
+          "p75_seconds": 0.025709188
+        },
+        "baseline": {
+          "median_seconds": 1.2456206394999998,
+          "min_seconds": 1.234781214,
+          "max_seconds": 1.305079548,
+          "p25_seconds": 1.2431334715,
+          "p75_seconds": 1.24805845025
+        },
+        "cpython": {
+          "median_seconds": 2.0727572335,
+          "min_seconds": 2.053162363,
+          "max_seconds": 2.122119751,
+          "p25_seconds": 2.0648709842499997,
+          "p75_seconds": 2.0805381365000004
+        }
+      },
+      "cpython_over_relar": 27.307361691215323,
+      "relar_over_rust": 2.9603716607888013,
+      "baseline_over_relar": 16.41032185685986,
+      "baseline_over_rust": 48.58065176947099,
+      "cpython_over_baseline": 1.6640357166304005,
+      "startup_control_fraction": {
+        "relar": 0.03163954065825037,
+        "rust": 0.08411747118652688,
+        "baseline": 0.001916693513490871,
+        "cpython": 0.012888502362088128
+      }
+    },
+    {
+      "mode": "thinlto",
+      "label": "verify-16",
+      "digits": 16,
+      "repetitions": 1048576,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.0749605195,
+          "min_seconds": 0.073862004,
+          "max_seconds": 0.080007202,
+          "p25_seconds": 0.0744728445,
+          "p75_seconds": 0.076200898
+        },
+        "rust": {
+          "median_seconds": 0.027101406,
+          "min_seconds": 0.026485546,
+          "max_seconds": 0.027312796,
+          "p25_seconds": 0.02704842925,
+          "p75_seconds": 0.0271431525
+        },
+        "baseline": {
+          "median_seconds": 1.2510256,
+          "min_seconds": 1.226379452,
+          "max_seconds": 1.282492456,
+          "p25_seconds": 1.24305060175,
+          "p75_seconds": 1.26346383475
+        },
+        "cpython": {
+          "median_seconds": 2.110346092,
+          "min_seconds": 2.082430733,
+          "max_seconds": 2.132096733,
+          "p25_seconds": 2.09603653325,
+          "p75_seconds": 2.118327861
+        }
+      },
+      "cpython_over_relar": 28.152767697934642,
+      "relar_over_rust": 2.7659273286411783,
+      "baseline_over_relar": 16.689126600836858,
+      "baseline_over_rust": 46.16091135640711,
+      "cpython_over_baseline": 1.686892811785786,
+      "startup_control_fraction": {
+        "relar": 0.03203806505102996,
+        "rust": 0.07958236557911423,
+        "baseline": 0.001908412585641733,
+        "cpython": 0.012658936181734122
+      }
+    },
+    {
+      "mode": "thinlto",
+      "label": "generate-16",
+      "digits": 16,
+      "repetitions": 1048576,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.1094100935,
+          "min_seconds": 0.106802085,
+          "max_seconds": 0.113484261,
+          "p25_seconds": 0.10741171299999999,
+          "p75_seconds": 0.1109110375
+        },
+        "rust": {
+          "median_seconds": 0.0265994025,
+          "min_seconds": 0.026089548,
+          "max_seconds": 0.029568004,
+          "p25_seconds": 0.026470187500000002,
+          "p75_seconds": 0.02671882275
+        },
+        "baseline": {
+          "median_seconds": 1.355433493,
+          "min_seconds": 1.349611713,
+          "max_seconds": 1.387282415,
+          "p25_seconds": 1.35228555825,
+          "p75_seconds": 1.36135226575
+        },
+        "cpython": {
+          "median_seconds": 2.1953825785,
+          "min_seconds": 2.17373308,
+          "max_seconds": 2.281183476,
+          "p25_seconds": 2.18529187175,
+          "p75_seconds": 2.21390832125
+        }
+      },
+      "cpython_over_relar": 20.0656311339319,
+      "relar_over_rust": 4.11325380335141,
+      "baseline_over_relar": 12.388559863537637,
+      "baseline_over_rust": 50.957290976742804,
+      "cpython_over_baseline": 1.6196903720011586,
+      "startup_control_fraction": {
+        "relar": 0.021950351408848764,
+        "rust": 0.08108430255153287,
+        "baseline": 0.0017614091818815637,
+        "cpython": 0.01216860184717914
+      }
+    },
+    {
+      "mode": "thinlto",
+      "label": "append-16",
+      "digits": 16,
+      "repetitions": 1048576,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.1555303765,
+          "min_seconds": 0.150090997,
+          "max_seconds": 0.157080798,
+          "p25_seconds": 0.15439932825,
+          "p75_seconds": 0.15615989275000003
+        },
+        "rust": {
+          "median_seconds": 0.050472127000000006,
+          "min_seconds": 0.047843348,
+          "max_seconds": 0.052503272,
+          "p25_seconds": 0.050021668,
+          "p75_seconds": 0.05123184625
+        },
+        "baseline": {
+          "median_seconds": 1.4419347425,
+          "min_seconds": 1.423250658,
+          "max_seconds": 1.48572796,
+          "p25_seconds": 1.4364008689999999,
+          "p75_seconds": 1.4603416982500002
+        },
+        "cpython": {
+          "median_seconds": 2.336595647,
+          "min_seconds": 2.308686912,
+          "max_seconds": 2.361875359,
+          "p25_seconds": 2.32540576375,
+          "p75_seconds": 2.34751124625
+        }
+      },
+      "cpython_over_relar": 15.02340378504774,
+      "relar_over_rust": 3.081510246239474,
+      "baseline_over_relar": 9.27108115436215,
+      "baseline_over_rust": 28.568931570884654,
+      "cpython_over_baseline": 1.6204586644114376,
+      "startup_control_fraction": {
+        "relar": 0.01544129226743047,
+        "rust": 0.04273237781320371,
+        "baseline": 0.0016557427528659469,
+        "cpython": 0.011433187652429106
+      }
+    },
+    {
+      "mode": "thinlto",
+      "label": "checksum-256",
+      "digits": 256,
+      "repetitions": 65536,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.034015211000000004,
+          "min_seconds": 0.033708038,
+          "max_seconds": 0.035330269,
+          "p25_seconds": 0.0338383925,
+          "p75_seconds": 0.03459321175
+        },
+        "rust": {
+          "median_seconds": 0.023202756999999997,
+          "min_seconds": 0.02280699,
+          "max_seconds": 0.024375018,
+          "p25_seconds": 0.023077942249999997,
+          "p75_seconds": 0.02337369425
+        },
+        "baseline": {
+          "median_seconds": 0.9463835985,
+          "min_seconds": 0.932478048,
+          "max_seconds": 0.974393901,
+          "p25_seconds": 0.94162265875,
+          "p75_seconds": 0.95804443625
+        },
+        "cpython": {
+          "median_seconds": 1.5591305675,
+          "min_seconds": 1.55411841,
+          "max_seconds": 1.586083415,
+          "p25_seconds": 1.55864271825,
+          "p75_seconds": 1.5638435157500001
+        }
+      },
+      "cpython_over_relar": 45.836275056473994,
+      "relar_over_rust": 1.4659986742092763,
+      "baseline_over_relar": 27.82236448570023,
+      "baseline_over_rust": 40.7875494494038,
+      "cpython_over_baseline": 1.6474615261414,
+      "startup_control_fraction": {
+        "relar": 0.07060341327884162,
+        "rust": 0.0929542122946855,
+        "baseline": 0.0025227328577799735,
+        "cpython": 0.017134380568803776
+      }
+    },
+    {
+      "mode": "thinlto",
+      "label": "verify-256",
+      "digits": 256,
+      "repetitions": 65536,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.03388559,
+          "min_seconds": 0.033491947,
+          "max_seconds": 0.034827984,
+          "p25_seconds": 0.03374997325,
+          "p75_seconds": 0.03407506475
+        },
+        "rust": {
+          "median_seconds": 0.025077455499999998,
+          "min_seconds": 0.024546538,
+          "max_seconds": 0.025742874,
+          "p25_seconds": 0.024858744,
+          "p75_seconds": 0.02547872525
+        },
+        "baseline": {
+          "median_seconds": 0.9498539205000001,
+          "min_seconds": 0.936134396,
+          "max_seconds": 0.977160725,
+          "p25_seconds": 0.9476451575,
+          "p75_seconds": 0.956604283
+        },
+        "cpython": {
+          "median_seconds": 1.563747374,
+          "min_seconds": 1.556070437,
+          "max_seconds": 1.612842656,
+          "p25_seconds": 1.559256999,
+          "p75_seconds": 1.5832214980000001
+        }
+      },
+      "cpython_over_relar": 46.14785736355778,
+      "relar_over_rust": 1.3512371699752395,
+      "baseline_over_relar": 28.03120501959683,
+      "baseline_over_rust": 37.87680614167574,
+      "cpython_over_baseline": 1.6463030159172776,
+      "startup_control_fraction": {
+        "relar": 0.07087348929146578,
+        "rust": 0.08600529666975185,
+        "baseline": 0.002513515971743573,
+        "cpython": 0.01708379303727611
+      }
+    },
+    {
+      "mode": "thinlto",
+      "label": "generate-256",
+      "digits": 256,
+      "repetitions": 65536,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.037489132,
+          "min_seconds": 0.037164884,
+          "max_seconds": 0.039499599,
+          "p25_seconds": 0.037295201,
+          "p75_seconds": 0.037624617500000006
+        },
+        "rust": {
+          "median_seconds": 0.0240120635,
+          "min_seconds": 0.02334421,
+          "max_seconds": 0.025490796,
+          "p25_seconds": 0.023780545,
+          "p75_seconds": 0.0247594235
+        },
+        "baseline": {
+          "median_seconds": 0.9644386675000001,
+          "min_seconds": 0.956180761,
+          "max_seconds": 0.998985881,
+          "p25_seconds": 0.961163812,
+          "p75_seconds": 0.969584668
+        },
+        "cpython": {
+          "median_seconds": 1.571242727,
+          "min_seconds": 1.558961621,
+          "max_seconds": 1.601612904,
+          "p25_seconds": 1.5679126325,
+          "p75_seconds": 1.589109527
+        }
+      },
+      "cpython_over_relar": 41.91195269605068,
+      "relar_over_rust": 1.5612624046242425,
+      "baseline_over_relar": 25.725820152357755,
+      "baseline_over_rust": 40.164755832000864,
+      "cpython_over_baseline": 1.6291784847998123,
+      "startup_control_fraction": {
+        "relar": 0.06406096572201245,
+        "rust": 0.08982126838037056,
+        "baseline": 0.0024755052658649236,
+        "cpython": 0.017002297634183417
+      }
+    },
+    {
+      "mode": "thinlto",
+      "label": "append-256",
+      "digits": 256,
+      "repetitions": 65536,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.0421606875,
+          "min_seconds": 0.041661823,
+          "max_seconds": 0.043791828,
+          "p25_seconds": 0.041843074,
+          "p75_seconds": 0.0423752345
+        },
+        "rust": {
+          "median_seconds": 0.026437082,
+          "min_seconds": 0.025954148,
+          "max_seconds": 0.027269085,
+          "p25_seconds": 0.0262245065,
+          "p75_seconds": 0.02659566525
+        },
+        "baseline": {
+          "median_seconds": 0.974638465,
+          "min_seconds": 0.965491075,
+          "max_seconds": 0.984198704,
+          "p25_seconds": 0.9727496345,
+          "p75_seconds": 0.97717705425
+        },
+        "cpython": {
+          "median_seconds": 1.5780575175,
+          "min_seconds": 1.551009726,
+          "max_seconds": 1.595646566,
+          "p25_seconds": 1.57396584025,
+          "p75_seconds": 1.5878577937499998
+        }
+      },
+      "cpython_over_relar": 37.4295964101629,
+      "relar_over_rust": 1.5947557109366306,
+      "baseline_over_relar": 23.117233678886283,
+      "baseline_over_rust": 36.86634043046052,
+      "cpython_over_baseline": 1.6191209091055114,
+      "startup_control_fraction": {
+        "relar": 0.05696278078956848,
+        "rust": 0.08158215040525274,
+        "baseline": 0.0024495985801258114,
+        "cpython": 0.016928873760141638
+      }
+    },
+    {
+      "mode": "thinlto",
+      "label": "checksum-4096",
+      "digits": 4096,
+      "repetitions": 4096,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.030554876,
+          "min_seconds": 0.030156029,
+          "max_seconds": 0.033253114,
+          "p25_seconds": 0.0304216265,
+          "p75_seconds": 0.030644563
+        },
+        "rust": {
+          "median_seconds": 0.0225883775,
+          "min_seconds": 0.022261474,
+          "max_seconds": 0.024416155,
+          "p25_seconds": 0.0224438455,
+          "p75_seconds": 0.0227541205
+        },
+        "baseline": {
+          "median_seconds": 0.8926198095,
+          "min_seconds": 0.879085392,
+          "max_seconds": 0.897265351,
+          "p25_seconds": 0.8906811665000001,
+          "p75_seconds": 0.8936910600000001
+        },
+        "cpython": {
+          "median_seconds": 1.4465362124999999,
+          "min_seconds": 1.422265632,
+          "max_seconds": 1.497261849,
+          "p25_seconds": 1.4425990847499999,
+          "p75_seconds": 1.46612801775
+        }
+      },
+      "cpython_over_relar": 47.342238027737366,
+      "relar_over_rust": 1.3526813070128654,
+      "baseline_over_relar": 29.213661659108023,
+      "baseline_over_rust": 39.516774035673876,
+      "cpython_over_baseline": 1.6205513221920043,
+      "startup_control_fraction": {
+        "relar": 0.07859923895616529,
+        "rust": 0.09548246659150265,
+        "baseline": 0.0026746807258706713,
+        "cpython": 0.018468073090150867
+      }
+    },
+    {
+      "mode": "thinlto",
+      "label": "verify-4096",
+      "digits": 4096,
+      "repetitions": 4096,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.030480442,
+          "min_seconds": 0.030230508,
+          "max_seconds": 0.03151053,
+          "p25_seconds": 0.030409230750000002,
+          "p75_seconds": 0.0310001885
+        },
+        "rust": {
+          "median_seconds": 0.02407986,
+          "min_seconds": 0.023576152,
+          "max_seconds": 0.024729869,
+          "p25_seconds": 0.024035677249999998,
+          "p75_seconds": 0.0242663665
+        },
+        "baseline": {
+          "median_seconds": 0.896312615,
+          "min_seconds": 0.891326787,
+          "max_seconds": 0.912391141,
+          "p25_seconds": 0.89413253675,
+          "p75_seconds": 0.90177400525
+        },
+        "cpython": {
+          "median_seconds": 1.4508681220000001,
+          "min_seconds": 1.438779985,
+          "max_seconds": 1.487885504,
+          "p25_seconds": 1.44552302475,
+          "p75_seconds": 1.46039773125
+        }
+      },
+      "cpython_over_relar": 47.59996990857285,
+      "relar_over_rust": 1.265806445718538,
+      "baseline_over_relar": 29.406155429110903,
+      "baseline_over_rust": 37.22250108596977,
+      "cpython_over_baseline": 1.6187076893925008,
+      "startup_control_fraction": {
+        "relar": 0.07879118025913141,
+        "rust": 0.08956837788924021,
+        "baseline": 0.0026636610486621345,
+        "cpython": 0.01841293229544125
+      }
+    },
+    {
+      "mode": "thinlto",
+      "label": "generate-4096",
+      "digits": 4096,
+      "repetitions": 4096,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.0310827335,
+          "min_seconds": 0.030838228,
+          "max_seconds": 0.03148898,
+          "p25_seconds": 0.030917905,
+          "p75_seconds": 0.03131858975
+        },
+        "rust": {
+          "median_seconds": 0.023092006999999998,
+          "min_seconds": 0.022730879,
+          "max_seconds": 0.023491555,
+          "p25_seconds": 0.022944583750000004,
+          "p75_seconds": 0.023157442
+        },
+        "baseline": {
+          "median_seconds": 0.894909141,
+          "min_seconds": 0.892655908,
+          "max_seconds": 0.914384579,
+          "p25_seconds": 0.8938675337499999,
+          "p75_seconds": 0.8988406635
+        },
+        "cpython": {
+          "median_seconds": 1.4512851895,
+          "min_seconds": 1.447174383,
+          "max_seconds": 1.580189843,
+          "p25_seconds": 1.44882771725,
+          "p75_seconds": 1.4631640275
+        }
+      },
+      "cpython_over_relar": 46.69104116920734,
+      "relar_over_rust": 1.346038631462393,
+      "baseline_over_relar": 28.791198206554128,
+      "baseline_over_rust": 38.75406503211263,
+      "cpython_over_baseline": 1.6217123314644968,
+      "startup_control_fraction": {
+        "relar": 0.07726444007892677,
+        "rust": 0.09340002365320607,
+        "baseline": 0.002667838432549881,
+        "cpython": 0.018407640822961764
+      }
+    },
+    {
+      "mode": "thinlto",
+      "label": "append-4096",
+      "digits": 4096,
+      "repetitions": 4096,
+      "summary": {
+        "relar": {
+          "median_seconds": 0.0326848755,
+          "min_seconds": 0.032273661,
+          "max_seconds": 0.033921858,
+          "p25_seconds": 0.032573831500000004,
+          "p75_seconds": 0.0330243605
+        },
+        "rust": {
+          "median_seconds": 0.026909617,
+          "min_seconds": 0.026354824,
+          "max_seconds": 0.027940124,
+          "p25_seconds": 0.02673539925,
+          "p75_seconds": 0.02717207325
+        },
+        "baseline": {
+          "median_seconds": 0.906068061,
+          "min_seconds": 0.899031576,
+          "max_seconds": 0.960363603,
+          "p25_seconds": 0.9040915095000001,
+          "p75_seconds": 0.92244726375
+        },
+        "cpython": {
+          "median_seconds": 1.458972527,
+          "min_seconds": 1.449981053,
+          "max_seconds": 1.535967559,
+          "p25_seconds": 1.45293632425,
+          "p75_seconds": 1.47864602625
+        }
+      },
+      "cpython_over_relar": 44.637542737465836,
+      "relar_over_rust": 1.2146168970000577,
+      "baseline_over_relar": 27.721325143184345,
+      "baseline_over_rust": 33.67078992614425,
+      "cpython_over_baseline": 1.6102239884603988,
+      "startup_control_fraction": {
+        "relar": 0.0734771041119615,
+        "rust": 0.0801495614002979,
+        "baseline": 0.0026349819652234712,
+        "cpython": 0.01831065082145992
+      }
+    }
+  ]
+}

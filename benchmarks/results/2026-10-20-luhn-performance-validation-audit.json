@@ -1,0 +1,260 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "audited_at_utc": "2026-10-20T10:10:20.358047+00:00",
+  "revision": "8b54eae6572a93926265d78562656dd395ad28b0",
+  "validation_revision": "8b54eae6572a93926265d78562656dd395ad28b0",
+  "validation_tree": "828263223d7e12d12c1863268567e5ab8ce3b1fd",
+  "validation_index": "/tmp/relar-luhn-performance-validation-v3/index.json",
+  "validation_index_sha256": "793c61af6f1ca927c54215d45a5cd30fdeddad5547545a8adb014c0df121bdda",
+  "audit_script_sha256": "d552b60041c618cb6b037ef89b988a964ac6f7af5da1e8c32d7af4cf5d5d95e6",
+  "unicode_audits": {
+    "runtime": {
+      "audit_path": "/tmp/relar-luhn-tests-validation-dev/unicode-tables-audit.json",
+      "audit_sha256": "7b709a3cfc98f52c23fab5fca4e1c2d5acc4364943c8efee67dd18cf520b1761",
+      "source_path": "crates/relar-runtime/src/integer_text.rs",
+      "source_sha256": "61483a52ce8c37bfe88e03413c7cd4027e39183d3d88fbf1977720a6c1c2bbdf",
+      "original_audited_source_sha256": "82f87dc1be5fec2588e8c2888187e58e4f75f77d7ecb0d0d30444892382cf58d",
+      "whole_source_file_unchanged": false,
+      "unchanged_implementation_scope": {
+        "kind": "suffix beginning at the decimal_digit doc comment through end of file",
+        "start_marker": "/// Returns the decimal value of a Unicode 16.0 digit.\n",
+        "sha256": "7f82b26f7e180e5ae583dce8dc7ba1564ed2dbc7bd28a5e5c8d7cb702ebd4305",
+        "bytes": 3806,
+        "coverage": "decimal conversion, Unicode printability tables, and literal_repr implementation"
+      },
+      "applicable_source_revision": "8b54eae6572a93926265d78562656dd395ad28b0",
+      "original_validated_revision": "7d4011f0413c63d0a4d111817c37f460a0656cac",
+      "codepoints_checked_by_original_audit": 1114112,
+      "exhaustive_audit_rerun": false,
+      "basis": "Exact byte identity of the relevant Unicode implementation with the original audited Git blob; the moved invalid_literal wrapper is outside that unchanged implementation scope"
+    },
+    "reference": {
+      "audit_path": "/tmp/relar-luhn-unicode-table-validation.json",
+      "audit_sha256": "721300298744164c65da03d97e8f8f8e92235ac8f3d3245c8d374e63819e67bb",
+      "source_path": "benchmarks/reference/luhn_checksum/src/unicode.rs",
+      "source_sha256": "e594819475d89df36fe2661511aebf7e6e42cc606e387cf4cba3938c99efaf56",
+      "original_audited_source_sha256": "e594819475d89df36fe2661511aebf7e6e42cc606e387cf4cba3938c99efaf56",
+      "whole_source_file_unchanged": true,
+      "unchanged_implementation_scope": {
+        "kind": "entire file",
+        "sha256": "e594819475d89df36fe2661511aebf7e6e42cc606e387cf4cba3938c99efaf56",
+        "bytes": 14178
+      },
+      "applicable_source_revision": "8b54eae6572a93926265d78562656dd395ad28b0",
+      "original_validated_revision": "7d4011f0413c63d0a4d111817c37f460a0656cac",
+      "codepoints_checked_by_original_audit": 1114112,
+      "exhaustive_audit_rerun": false,
+      "basis": "Exact whole-file byte identity with the original audited Git blob"
+    }
+  },
+  "fresh_compilation": {
+    "clippy": {
+      "record_sha256": "1de83e1146be737ea03faf41f75b288434a677fcbe8f3c6a69ed31340501f9be",
+      "inputs_sha256": "914bea48ef0972b0d85b7ad2ed3c05fb51de7a530d6b19f87add2cfb3613f821",
+      "packages": [
+        "relar-compiler",
+        "relar-runtime"
+      ],
+      "unchanged_source_timestamps": 44,
+      "raw_cargo_artifacts_fresh_false": 6,
+      "canonical_verbose_compiler_invocations": 6,
+      "copied_output_sha256_verified": {}
+    },
+    "unit": {
+      "record_sha256": "36daf7e179b2c4e566fb6d0a1bef5df4f8f350126a17b526879113fb2933bf20",
+      "inputs_sha256": "27b1b19c7abccd3f23301d9251303bd9f53cc298a52f4cc519c7356b0f22aa83",
+      "packages": [
+        "relar-compiler",
+        "relar-runtime"
+      ],
+      "unchanged_source_timestamps": 44,
+      "raw_cargo_artifacts_fresh_false": 5,
+      "canonical_verbose_compiler_invocations": 5,
+      "copied_output_sha256_verified": {}
+    },
+    "build-ordinary": {
+      "record_sha256": "39be3a3c8dba7945257703b9748f03326176f5da4d129d8c7d20e34cb44996d8",
+      "inputs_sha256": "e47a064131866df0fa4b2064cc3e279a887fec2b0416df8b7407ccde9f69e66a",
+      "packages": [
+        "relar-compiler",
+        "relar-runtime"
+      ],
+      "unchanged_source_timestamps": 44,
+      "raw_cargo_artifacts_fresh_false": 3,
+      "canonical_verbose_compiler_invocations": 3,
+      "copied_output_sha256_verified": {
+        "compiler": "89c80803c726e1860ebd1fcd87ac81232b513d4dbb656c85f257a3c15dfdf050",
+        "ordinary": "39c51f20047dde4769de36617f244005df474bf9f89ce55ed8d811504dbc7441"
+      }
+    },
+    "build-thinlto": {
+      "record_sha256": "f5a219a4a2ed223ab6e230fc3d144cbf80a86ae01b9338f8978564fd1b1372b3",
+      "inputs_sha256": "15a616942783280df309a3009803c89f39502d9402c4e7c7034e08624c24b617",
+      "packages": [
+        "relar-runtime"
+      ],
+      "unchanged_source_timestamps": 13,
+      "raw_cargo_artifacts_fresh_false": 1,
+      "canonical_verbose_compiler_invocations": 1,
+      "copied_output_sha256_verified": {
+        "thinlto": "03e6dcd3fe9f02548e9f38bb428a0ddcdc2000fc388c46e186bb2714b7f82e45"
+      }
+    },
+    "build-asan": {
+      "record_sha256": "6a2cde69667aeeebf8eab2b3e8a0a908ac5c5e6b677551e094024b51b038168a",
+      "inputs_sha256": "893efe0abe5988e8892cc9a0a405c44a8bcaa13bfc070ab51d9424ee63d6c22b",
+      "packages": [
+        "relar-runtime"
+      ],
+      "unchanged_source_timestamps": 13,
+      "raw_cargo_artifacts_fresh_false": 1,
+      "canonical_verbose_compiler_invocations": 1,
+      "copied_output_sha256_verified": {
+        "asan": "a4725c5d69455347380285b66b3ee2ad99242f09e5573c53605f209bcb5939ff"
+      }
+    }
+  },
+  "counts": {
+    "recorded_jobs": 129,
+    "passed_jobs": 129,
+    "failed_jobs": 0,
+    "rust_units": {
+      "compiler": 90,
+      "runtime": 100,
+      "total": 190
+    },
+    "language_suites": 27,
+    "suite_invocations": 81,
+    "optimization_configurations": {
+      "ordinary": [
+        "0",
+        "3"
+      ],
+      "thinlto": [
+        "3"
+      ],
+      "asan": [
+        "0",
+        "1"
+      ]
+    },
+    "generic_suite_count": 25,
+    "generic_checks_by_mode": {
+      "ordinary": 1548,
+      "thinlto": 1160,
+      "asan": 1548
+    },
+    "generic_checks_total": 4256,
+    "iterable_fixtures": [
+      "tests/fixtures/iterables/bulk_mapping.py",
+      "tests/fixtures/iterables/comprehension_sum.py",
+      "tests/fixtures/iterables/comprehension_sum_scope.py",
+      "tests/fixtures/iterables/divmod_sum.py",
+      "tests/fixtures/iterables/effects.py",
+      "tests/fixtures/iterables/empty_contexts.py",
+      "tests/fixtures/iterables/iterator_capture.py",
+      "tests/fixtures/iterables/list_bounds.py",
+      "tests/fixtures/iterables/list_specialization.py",
+      "tests/fixtures/iterables/list_sum.py",
+      "tests/fixtures/iterables/mapping.py",
+      "tests/fixtures/iterables/proven_reads.py",
+      "tests/fixtures/iterables/reduction_bounds.py",
+      "tests/fixtures/iterables/reverse_slice_sum.py",
+      "tests/fixtures/iterables/slice_sum.py",
+      "tests/fixtures/iterables/sources.py",
+      "tests/fixtures/iterables/sums.py"
+    ],
+    "iterable_fixture_count": 17,
+    "iterable_checks_by_mode": {
+      "ordinary": 76,
+      "thinlto": 54,
+      "asan": 76
+    },
+    "iterable_expected_error_cases": 5,
+    "iterable_compile_rejections": 32,
+    "luhn_native": {
+      "configurations": 5,
+      "upstream_calls_per_configuration": 15,
+      "differential_cases_per_configuration": 1144,
+      "upstream_calls_total": 75,
+      "differential_cases_total": 5720,
+      "upstream_tests": 10,
+      "upstream_doctest_examples": 5
+    },
+    "base45_native": {
+      "configurations": 5,
+      "upstream_calls_per_configuration": 323,
+      "differential_cases_per_configuration": 289,
+      "compile_rejections_per_configuration": 2
+    },
+    "application_oracles": [
+      "batch",
+      "dependency",
+      "incremental",
+      "inventory",
+      "manifest",
+      "route"
+    ],
+    "dependency_boundary_checks": true,
+    "reference_builds": 9,
+    "reference_oracles": {
+      "luhn-normal": {
+        "differential_cases": 1144,
+        "exact_message_cases": 1144,
+        "upstream_adapter_calls": 15
+      },
+      "luhn-thinlto": {
+        "differential_cases": 1144,
+        "exact_message_cases": 1144,
+        "upstream_adapter_calls": 15
+      },
+      "base45-normal": {
+        "differential_cases": 295,
+        "exact_message_cases": 291,
+        "documented_diagnostic_boundaries": 4
+      },
+      "base45-thinlto": {
+        "differential_cases": 295,
+        "exact_message_cases": 291,
+        "documented_diagnostic_boundaries": 4
+      }
+    }
+  },
+  "guard_checks": {
+    "before_after_source_manifests_identical": true,
+    "clean_validation_source": true,
+    "source_files_verified_against_original_git_commit": 399,
+    "source_bytes_verified": 2745648,
+    "build_source_hashes_match_source_manifest": 49,
+    "command_record_and_output_hashes_verified": 387,
+    "runner_build_source_manifest_hashes_verified": true,
+    "reference_build_record_hashes_verified": 9,
+    "artifact_metadata_matches_build_record": true,
+    "fresh_cargo_json_inputs_and_compiler_invocations_independently_reparsed": true,
+    "unit_test_execution_order_bound_to_raw_cargo_artifact_executables": [
+      "relar_compiler",
+      "relar",
+      "relar_runtime"
+    ],
+    "frozen_compiler_and_three_runtime_copies_independently_rehashed": true,
+    "recorded_final_tool_artifact_guards_passed": true,
+    "independent_binary_archive_rehash_performed": true,
+    "evidence_manifest_entries": 448,
+    "evidence_manifest_sha256": "16537eadd88b7276fdc25283c060527dfff0b52366630a48c9ae9e1aa8e2487f",
+    "build_record_sha256": "7573d96af44ff6062d3eb3213c22e487978863f88ee107b39494f06b7dd0154a",
+    "source_manifest_sha256": "3322779d1b1125fbd203294af080ff02e76985c68440997143d302d9a6a1c86a"
+  },
+  "limits": [
+    "This audits validation at 8b54eae6572a93926265d78562656dd395ad28b0; later commits do not inherit a claim that this full matrix ran at their revision.",
+    "129 counts orchestration commands, including tool discovery/builds; it is not a count of independent test cases.",
+    "The 4,256 generic suite checks exclude the separately reported Base45/Luhn corpus checks and application/reference oracles.",
+    "ASan/LSan covers generated programs and the runtime at O0/O1 with leak detection enabled; the compiler and Rust references are not sanitizer-instrumented.",
+    "Luhn comparison covers all four str APIs using CPython 3.14.5 / Unicode 16; no Luhn diagnostic exclusions.",
+    "Native Base45/Luhn per-case JSON lived in temporary suite directories because --output was omitted; retained summaries, exit status, and guarded harness source establish completion. Detailed Rust-reference JSON is retained.",
+    "Ruff checks, if any, are identified only by their retained jobs; earlier exploratory checks are not counted in this matrix.",
+    "All native artifacts were independently rehashed by this audit.",
+    "Historical benchmarks/results paths are excluded from per-file source hashes; the clean committed Git tree identifies those paths.",
+    "No builds, tests, profiling, or benchmark workloads were executed by this independent audit."
+  ]
+}
