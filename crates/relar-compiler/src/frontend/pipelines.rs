@@ -910,7 +910,7 @@ impl Checker<'_> {
                 let input = self.expansion_input(&clause.iter, None)?;
                 self.prepare_iteration(input, clause, false)?
             };
-            bindings.push(self.bind_pattern(&clause.target, self.local(input.value))?);
+            bindings.push(self.bind_iterator_pattern(&clause.target, input.value)?);
             let mut conditions = Vec::new();
             for condition in &clause.ifs {
                 conditions.push(self.condition(condition)?);
@@ -1054,7 +1054,7 @@ impl Checker<'_> {
         }
         let before = self.assigned.clone();
         let mut facts = self.narrowed.clone();
-        let binding = self.bind_pattern(target, self.local(input.value))?;
+        let binding = self.bind_iterator_pattern(target, input.value)?;
         let mut rebound = narrowing::expression_assignments(target);
         target_names(target, &mut rebound);
         for name in rebound {
