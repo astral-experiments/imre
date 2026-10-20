@@ -65,6 +65,41 @@ def exhausted_frame() -> None:
         print(error)
 
 
+def previous_part(prefix: str, index: int) -> int:
+    if index > 0:
+        read_part(prefix + str(index - 1) + ".txt")
+    return index
+
+
+def cached_results() -> None:
+    stream: TextIO | None = None
+    for stream, index in zip(
+        (open_part("cachedzip", index) for index in range(2)),
+        (previous_part("cachedzip", index) for index in range(2)),
+    ):
+        # zip owns its current tuple after unpacking. Its next pull replaces
+        # each old field before advancing the following source.
+        stream = None
+        assert stream is None
+        read_part("cachedzip" + str(index) + ".txt")
+    read_part("cachedzip1.txt")
+    for index, stream in enumerate(
+        open_part("cachedenum", index) for index in range(2)
+    ):
+        stream = None
+        assert stream is None
+        read_part("cachedenum" + str(index) + ".txt")
+    read_part("cachedenum1.txt")
+
+    # A generator's yielded temporary has no cached tuple retaining it.
+    index = 0
+    for stream in (open_part("uncached", index) for index in range(2)):
+        stream = None
+        assert stream is None
+        read_part("uncached" + str(index) + ".txt")
+        index += 1  # noqa: SIM113 — enumerate would change the ownership under test
+
+
 def recover() -> None:
     for turn in range(16):
         print(any(payload(index) for index in range(4)))
@@ -115,6 +150,7 @@ print(any(zip((open_part("zip", index) for index in range(4)), [1], strict=True)
 break_files()
 print(return_files())
 exhausted_frame()
+cached_results()
 for path in [
     "any0.txt",
     "all0.txt",
