@@ -893,6 +893,25 @@ impl Checker<'_> {
         first.evaluate.append(&mut first.acquire);
         let mut first = Some(first);
         for (index, clause) in generator.generators.iter().enumerate() {
+            let input = if index == 0 {
+                first.take().unwrap()
+            } else {
+                // An inner source is constructed immediately under the outer
+                // clause's successful filters, before the first suspension.
+                let input = self.expansion_input(&clause.iter, None)?;
+                self.prepare_iteration(input, clause, false)?
+            };
+            if index != 0 {
+                // Later pulls resume this clause without rechecking its outer
+                // filters. Only private target slots cannot be rebound by a
+                // consumer or a sibling iterator while the generator pauses.
+                let stable = self
+                    .comprehension_targets
+                    .iter()
+                    .filter_map(|name| self.names.get(name).copied())
+                    .collect::<HashSet<_>>();
+                self.narrowed.retain(|slot, _| stable.contains(slot));
+            }
             let repeated_writes = generator.generators[index..]
                 .iter()
                 .flat_map(|clause| std::iter::once(&clause.target).chain(clause.ifs.iter()))
@@ -904,12 +923,6 @@ impl Checker<'_> {
                     self.narrowed.remove(slot);
                 }
             }
-            let input = if index == 0 {
-                first.take().unwrap()
-            } else {
-                let input = self.expansion_input(&clause.iter, None)?;
-                self.prepare_iteration(input, clause, false)?
-            };
             bindings.push(self.bind_iterator_pattern(&clause.target, input.value)?);
             let mut conditions = Vec::new();
             for condition in &clause.ifs {
