@@ -82,6 +82,15 @@ subtracting it. Increase `--batch-digits` when that control is a significant
 fraction of a sample; `--native-only` measures Relar/Rust while retaining CPython
 validation.
 
+To measure an optimization on the same program, preserve the previous executable
+and its JSON record, then add `--baseline /path/to/previous-luhn
+--baseline-record /path/to/previous.json`. The harness reuses the recorded input
+bytes and checks the application, reference, tool, target, and linking identities.
+With CPython, Rust, and both Relar builds, defaults become eight warmup rounds and
+twelve measured rounds. Four fixed orders balance each engine's position and
+every directed adjacent pair within a round; they do not balance transitions
+between rounds. Both counts must be multiples of four.
+
 Use committed sources, a fresh artifact directory, and an idle untraced CPU.
 The harness records CPU affinity, raw samples, commands, inputs, output hashes,
 CPython build settings, source/tool/binary hashes, LLVM output, and the Rust build
