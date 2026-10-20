@@ -234,83 +234,25 @@ impl Checker<'_> {
         skip: usize,
     ) -> Result<(Type, ir::CallArgs), String> {
         let inference = self.inference.expect("discovery call has inference state");
-        let params = &signature.params[skip..];
-        let offset = usize::from(receiver.is_some());
-        let mut values = receiver.into_iter().collect::<Vec<_>>();
-        let mut order = vec![usize::MAX; params.len() + offset];
-        if offset != 0 {
-            order[0] = 0;
-        }
-        for (index, argument) in call.arguments.args.iter().enumerate() {
-            params
-                .get(index)
-                .filter(|parameter| parameter.kind != ParameterKind::KeywordOnly)
-                .ok_or_else(|| error(self.source, argument, "too many positional arguments"))?;
-            let value = if let Some(ty) = inference.parameter(signature.id, index + skip) {
-                self.expr_expected(argument, ty)?
-            } else {
-                self.expr(argument)?
-            };
-            inference.learn_parameter(signature.id, index + skip, value.ty);
-            order[index + offset] = values.len();
-            values.push(value);
-        }
-        for keyword in &call.arguments.keywords {
-            let name = keyword
-                .arg
-                .as_ref()
-                .expect("call lowering rejects argument unpacking")
-                .as_str();
-            let index = params
-                .iter()
-                .position(|parameter| parameter.name == name)
-                .ok_or_else(|| {
-                    error(
-                        self.source,
-                        keyword,
-                        &format!("unexpected keyword argument {name:?}"),
-                    )
-                })?;
-            if params[index].kind == ParameterKind::PositionalOnly {
-                return Err(error(
-                    self.source,
-                    keyword,
-                    &format!("parameter {name:?} is positional-only"),
-                ));
-            }
-            if order[index + offset] != usize::MAX {
-                return Err(error(
-                    self.source,
-                    keyword,
-                    &format!("multiple values for argument {name:?}"),
-                ));
-            }
-            let value = if let Some(ty) = inference.parameter(signature.id, index + skip) {
-                self.expr_expected(&keyword.value, ty)?
-            } else {
-                self.expr(&keyword.value)?
-            };
-            inference.learn_parameter(signature.id, index + skip, value.ty);
-            order[index + offset] = values.len();
-            values.push(value);
-        }
-        for (index, parameter) in params.iter().enumerate() {
-            if order[index + offset] == usize::MAX {
-                let default = parameter.default.as_ref().ok_or_else(|| {
-                    error(
-                        self.source,
-                        call,
-                        &format!("missing required argument {:?}", parameter.name),
-                    )
-                })?;
-                order[index + offset] = values.len();
-                values.push(default.clone());
-            }
-        }
+        let args = self.arguments_with(
+            call,
+            &signature.params[skip..],
+            receiver,
+            |checker, index, argument| {
+                let index = index + skip;
+                let value = if let Some(ty) = inference.parameter(signature.id, index) {
+                    checker.expr_expected(argument, ty)?
+                } else {
+                    checker.expr(argument)?
+                };
+                inference.learn_parameter(signature.id, index, value.ty);
+                Ok(value)
+            },
+        )?;
         self.calls.insert(signature.id);
         let returns = inference.pending.borrow()[signature.id]
             .returns
             .ok_or_else(|| error(self.source, call, DEFERRED))?;
-        Ok((returns, ir::CallArgs { values, order }))
+        Ok((returns, args))
     }
 }

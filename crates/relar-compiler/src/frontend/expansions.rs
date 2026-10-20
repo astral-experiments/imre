@@ -209,11 +209,18 @@ impl Checker<'_> {
                         .get("items")
                         .ok_or_else(|| error(self.source, call, "unknown instance method"))?
                         .clone();
-                    let args = self.arguments(call, &signature.params[1..], Some(iterable))?;
+                    let (returns, args) = if self.inference.is_some() {
+                        self.infer_call(call, &signature, Some(iterable), 1)?
+                    } else {
+                        (
+                            signature.returns,
+                            self.arguments(call, &signature.params[1..], Some(iterable))?,
+                        )
+                    };
                     self.calls.insert(signature.id);
                     return Ok(Iteration::Container {
                         iterable: Expr {
-                            ty: signature.returns,
+                            ty: returns,
                             kind: ExprKind::Call(signature.id, args),
                         },
                         items: false,

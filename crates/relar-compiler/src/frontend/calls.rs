@@ -124,6 +124,20 @@ impl Checker<'_> {
         params: &[Parameter],
         receiver: Option<Expr>,
     ) -> Result<ir::CallArgs, String> {
+        self.arguments_with(call, params, receiver, |checker, index, argument| {
+            checker.expr_expected(argument, params[index].ty)
+        })
+    }
+
+    /// Discovery and final checking share binding, defaults, and evaluation order.
+    /// Only the source of the parameter's concrete type differs between passes.
+    pub(super) fn arguments_with(
+        &mut self,
+        call: &ast::ExprCall,
+        params: &[Parameter],
+        receiver: Option<Expr>,
+        mut check: impl FnMut(&mut Self, usize, &ast::Expr) -> Result<Expr, String>,
+    ) -> Result<ir::CallArgs, String> {
         let offset = usize::from(receiver.is_some());
         let mut values = receiver.into_iter().collect::<Vec<_>>();
         let mut order = vec![usize::MAX; params.len() + offset];
@@ -133,12 +147,12 @@ impl Checker<'_> {
         // Without starred arguments Python requires all positional expressions
         // before keyword expressions, so these two lists retain source order.
         for (index, argument) in call.arguments.args.iter().enumerate() {
-            let parameter = params
+            params
                 .get(index)
                 .filter(|parameter| parameter.kind != ParameterKind::KeywordOnly)
                 .ok_or_else(|| error(self.source, argument, "too many positional arguments"))?;
             order[index + offset] = values.len();
-            values.push(self.expr_expected(argument, parameter.ty)?);
+            values.push(check(self, index, argument)?);
         }
         for keyword in &call.arguments.keywords {
             let name = keyword
@@ -172,7 +186,7 @@ impl Checker<'_> {
                 ));
             }
             order[index + offset] = values.len();
-            values.push(self.expr_expected(&keyword.value, parameter.ty)?);
+            values.push(check(self, index, &keyword.value)?);
         }
         for (index, parameter) in params.iter().enumerate() {
             if order[index + offset] == usize::MAX {
