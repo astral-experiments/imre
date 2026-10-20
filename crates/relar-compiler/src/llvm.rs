@@ -2599,18 +2599,13 @@ impl Emitter<'_, '_> {
             Builtin::IntBounded { min, max } => {
                 debug_assert!(min <= max && *min >= -(1_i64 << 62) && *max < (1_i64 << 62));
                 debug_assert!(matches!(expressions[0].kind, ExprKind::Local(_)));
-                let word = &args[0].value.operand;
-                let tag = self.instruction(format!("and i64 {word}, 1"));
-                let tagged = self.instruction(format!("icmp eq i64 {tag}, 1"));
-                self.line(format!("call void @llvm.assume(i1 {tagged})"));
-                let encoded_min = min * 2 + 1;
-                let width = ((i128::from(*max) - i128::from(*min)) * 2) as u64;
-                let shifted = self.instruction(format!("sub i64 {word}, {encoded_min}"));
-                let bounded = self.instruction(format!("icmp ule i64 {shifted}, {width}"));
-                self.line(format!("call void @llvm.assume(i1 {bounded})"));
+                // Range analysis already uses the checked induction proof to
+                // select native arithmetic and old-value cleanup. Repeating
+                // it as llvm.assume adds a use of the loop-carried subtotal
+                // that prevents LLVM from recognizing an ordinary reduction.
                 Value {
                     ty: Type::Int,
-                    operand: word.clone(),
+                    operand: args[0].value.operand.clone(),
                     small_integer: true,
                 }
             }
@@ -4045,6 +4040,25 @@ mod tests {
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn bounded_accumulator_identity_keeps_native_and_fallback_arithmetic_without_extra_uses() {
+        for term in ["10", "-10"] {
+            let body = function_body(&format!(
+                "def total(values: list[int]) -> int:\n    result = 0\n    cursor = 0\n    while cursor < len(values):\n        cursor += 1\n        result += {term}\n    return result\n"
+            ));
+            assert!(
+                !body.contains("call void @llvm.assume"),
+                "the accumulator proof must not add a second use of its recurrence"
+            );
+            assert!(body.contains("add nsw i64"));
+            assert!(
+                body.contains("call i64 @int_add"),
+                "lists outside the checked subtotal budget retain arbitrary-precision arithmetic"
+            );
+            assert!(body.contains("icmp sle i64"));
+        }
     }
 
     #[test]
