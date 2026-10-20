@@ -875,8 +875,14 @@ impl Checker<'_> {
             let mut available = bindings[index].clone();
             available.push(Statement::Clear(inputs[index].value));
             available.extend(accepted);
-            let mut exhausted = inputs[index]
-                .clear
+            // Exhausting the outermost clause destroys the suspended frame
+            // before a surrounding zip can perform its remaining strict probes.
+            let exhausted_roots = if index == 0 {
+                &clear
+            } else {
+                &inputs[index].clear
+            };
+            let mut exhausted = exhausted_roots
                 .iter()
                 .copied()
                 .map(Statement::Clear)
