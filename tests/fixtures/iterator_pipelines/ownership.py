@@ -149,6 +149,28 @@ def shared_results() -> None:
     read_part("wrapped1.txt")
 
 
+def erase_sequence_owner(owners: list[FileOwner | None], index: int) -> int:
+    owners[index] = None
+    # The earlier zip pull owns the old record before this alias removes it.
+    # Its buffered file must remain open until the selected owner is released.
+    read_part("sequence0.txt")
+    return index
+
+
+def sequence_resources() -> None:
+    owners: list[FileOwner | None] = [FileOwner([cache_writer("sequence", 0)])]
+    for owner, index in zip(
+        owners,
+        (erase_sequence_owner(owners, index) for index in range(1)),
+        strict=True,
+    ):
+        assert owner is not None
+        stream = owner.handles[0]
+        assert stream is not None
+        stream.write(" still open")
+        print(owners[index] is None)
+
+
 def recover() -> None:
     for turn in range(16):
         print(any(payload(index) for index in range(4)))
@@ -201,6 +223,8 @@ print(return_files())
 exhausted_frame()
 cached_results()
 shared_results()
+sequence_resources()
+read_part("sequence0.txt")
 read_part("escapedzip1.txt")
 for path in [
     "any0.txt",
