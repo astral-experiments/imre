@@ -1,0 +1,85 @@
+"""Compare immediate lazy iterator pipelines and their observable effects."""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from assignments import main
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "iterator_pipelines"
+
+REJECTED = {
+    "generator_escaped": "values = (value for value in range(3))\n",
+    "generator_returned": "def values():\n    return (value for value in range(3))\nprint(1)\n",
+    "generator_stored": "values = [(value for value in range(3))]\n",
+    "generator_argument": "def take(value: int) -> int:\n    return value\nprint(take(value for value in range(3)))\n",
+    "generator_target_leaks": "values = list(target for target in range(3))\nprint(target)\n",
+    "generator_later_target_unbound": "def bad() -> list[int]:\n    later = 9\n    return list(later for first in range(1) if later > 0 for later in range(2))\nbad()\n",
+    "generator_optional_unchecked": "def bad(values: list[int | None]) -> int:\n    return sum(value + 1 for value in values)\nbad([None])\n",
+    "generator_dynamic_dead_element": 'print(any(eval("1") for value in range(0)))\n',
+    "generator_target_rebound": "print(any((value := 1) for value in range(3)))\n",
+    "generator_uninitialized_export": "print(any((saved := value) for value in range(0)))\nprint(saved)\n",
+    "generator_short_circuit_export": "print(any(value > 0 or (saved := value) > 0 for value in [1]))\nprint(saved)\n",
+    "generator_constructor_partial_self": "class Item:\n    value: int\n    def __init__(self) -> None:\n        self.value = sum(self.value + value for value in range(0))\nItem()\n",
+    "generator_constructor_partial_source": "class Item:\n    values: list[int]\n    def __init__(self) -> None:\n        self.values = list(self for self in self.values)\nItem()\n",
+    "generator_async": "async def bad(values: list[int]):\n    return any(value async for value in values)\n",
+    "generator_yield_function": "def values():\n    yield 1\nprint(any(values()))\n",
+    "zip_escaped": "values = zip([1], [2])\n",
+    "zip_scalar": "values = list(zip([1], 2))\n",
+    "zip_unknown_keyword": "values = list(zip([1], exact=True))\n",
+    "zip_iterable_keyword": "values = list(zip(iterable=[1]))\n",
+    "zip_duplicate_strict": "values = list(zip([1], strict=True, strict=False))\n",
+    "reversed_escaped": "values = reversed([1])\n",
+    "reversed_missing": "values = list(reversed())\n",
+    "reversed_extra": "values = list(reversed([1], [2]))\n",
+    "reversed_keyword": "values = list(reversed(sequence=[1]))\n",
+    "reversed_scalar": "values = list(reversed(1))\n",
+    "reversed_generator": "values = list(reversed(value for value in range(3)))\n",
+    "reversed_zip": "values = list(reversed(zip([1], [2])))\n",
+    "reversed_set": "values = list(reversed({1, 2}))\n",
+    "reversed_heterogeneous_tuple": 'values = list(reversed((1, "two")))\n',
+    "any_missing": "print(any())\n",
+    "any_extra": "print(any([1], [2]))\n",
+    "any_keyword": "print(any(iterable=[1]))\n",
+    "any_scalar": "print(any(1))\n",
+    "all_missing": "print(all())\n",
+    "all_extra": "print(all([1], [2]))\n",
+    "all_keyword": "print(all(iterable=[1]))\n",
+    "all_scalar": "print(all(None))\n",
+    "any_not_optional_guard": "def bad(value: int | None) -> None:\n    if any(value is not None for index in range(1)):\n        print(value + 1)\nbad(None)\n",
+    "generator_backedge_optional": 'value: str | None = "ok"\nprint(all((value := None) for index in range(2) if len(value) > 0))\n',
+}
+
+ERRORS = {
+    "outer_range_before_start": (
+        'def start() -> int:\n    print("unexpected start")\n    return 7\nprint(sum((value for value in range(0, 3, 0)), start()))\n',
+        "ValueError",
+    ),
+    "inner_range_after_start": (
+        'def start() -> int:\n    print("start")\n    return 7\nprint(sum((inner for outer in range(1) for inner in range(0, 3, 0)), start()))\n',
+        "ValueError",
+    ),
+    "generator_element_failure": (
+        "def item(index: int) -> int:\n    print(index)\n    return 10 // (2 - index)\nprint(sum(item(index) for index in range(4)))\n",
+        "ZeroDivisionError",
+    ),
+    "zip_conversion_failure": (
+        'def observe(value: int) -> int:\n    print(value)\n    return value\nvalues = list(zip((observe(value) for value in range(3)), map(int, "1x2"), strict=True))\n',
+        "ValueError",
+    ),
+    "reversed_zero_step": (
+        'print("before")\nvalues = list(reversed(range(0, 3, 0)))\n',
+        "ValueError",
+    ),
+}
+
+
+if __name__ == "__main__":
+    main(
+        fixtures=FIXTURES,
+        rejections=REJECTED,
+        imported_rejections={},
+        errors=ERRORS,
+        label="iterator pipeline",
+        description=__doc__,
+    )
