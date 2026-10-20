@@ -107,9 +107,10 @@ impl Checker<'_> {
     pub(super) fn pipeline_input(
         &mut self,
         expression: &ast::Expr,
+        element: Option<Type>,
     ) -> Result<Option<Prepared>, String> {
         if let ast::Expr::Generator(generator) = expression {
-            return self.generator_input(generator).map(Some);
+            return self.generator_input(generator, element).map(Some);
         }
         let ast::Expr::Call(call) = expression else {
             return Ok(None);
@@ -121,7 +122,7 @@ impl Checker<'_> {
             return Ok(None);
         };
         match name.id.as_str() {
-            "zip" => self.zip_input(call).map(Some),
+            "zip" => self.zip_input(call, element).map(Some),
             "reversed" => {
                 if !call.arguments.keywords.is_empty() || call.arguments.args.len() != 1 {
                     return Err(error(
@@ -130,7 +131,7 @@ impl Checker<'_> {
                         "reversed requires one positional sequence",
                     ));
                 }
-                let input = self.expansion_input(&call.arguments.args[0], None)?;
+                let input = self.expansion_input(&call.arguments.args[0], element)?;
                 let mut input = self.prepare_iteration(input, call, true)?;
                 input.evaluate.append(&mut input.acquire);
                 Ok(Some(input))
@@ -174,8 +175,15 @@ impl Checker<'_> {
                         "enumerate requires an iterable and an optional positional integer start",
                     ));
                 }
-                let source = self.expansion_input(&call.arguments.args[0], None)?;
+                let fields =
+                    element.and_then(|ty| self.types.fields(self.types.payload(ty).unwrap_or(ty)));
+                let element = fields.as_deref().and_then(|fields| match fields {
+                    [Type::Int, element] => Some(*element),
+                    _ => None,
+                });
+                let source = self.expansion_input(&call.arguments.args[0], element)?;
                 let mut input = self.prepare_iteration(source, call, false)?;
+                self.hint_empty_iteration(&input, element);
                 let start = if let Some(start) = call.arguments.args.get(1) {
                     self.expr_expected(start, Type::Int)?
                 } else {
@@ -680,7 +688,15 @@ impl Checker<'_> {
 
     /// Obtains one element from each source in order. Strict mismatch checking
     /// retains successful earlier pulls and performs only CPython's extra probes.
-    fn zip_input(&mut self, call: &ast::ExprCall) -> Result<Prepared, String> {
+    ///
+    /// ```python
+    /// any(zip([1], [2, 3], strict=True))  # True: no second row is requested.
+    /// ```
+    fn zip_input(
+        &mut self,
+        call: &ast::ExprCall,
+        element: Option<Type>,
+    ) -> Result<Prepared, String> {
         if call
             .arguments
             .args
@@ -700,9 +716,16 @@ impl Checker<'_> {
             ));
         }
         let mut inputs = Vec::new();
-        for expression in &call.arguments.args {
-            let input = self.expansion_input(expression, None)?;
-            inputs.push(self.prepare_iteration(input, expression, false)?);
+        let fields = element.and_then(|ty| self.types.fields(self.types.payload(ty).unwrap_or(ty)));
+        for (index, expression) in call.arguments.args.iter().enumerate() {
+            let hint = fields
+                .as_ref()
+                .and_then(|fields| fields.get(index))
+                .copied();
+            let input = self.expansion_input(expression, hint)?;
+            let input = self.prepare_iteration(input, expression, false)?;
+            self.hint_empty_iteration(&input, hint);
+            inputs.push(input);
         }
         let strict_expression = match call.arguments.keywords.first() {
             Some(keyword) => self.condition(&keyword.value)?,
@@ -839,7 +862,16 @@ impl Checker<'_> {
     /// Resumes private comprehension targets while all captured enclosing names
     /// continue to refer to their live slots. Only the leftmost iterator is
     /// acquired at creation; every inner source and predicate remains lazy.
-    fn generator_input(&mut self, generator: &ast::ExprGenerator) -> Result<Prepared, String> {
+    ///
+    /// ```python
+    /// factor = 1
+    /// sum((factor * x for x in [1, 2]), (factor := 2))  # 8
+    /// ```
+    fn generator_input(
+        &mut self,
+        generator: &ast::ExprGenerator,
+        element: Option<Type>,
+    ) -> Result<Prepared, String> {
         if generator.generators.iter().any(|clause| clause.is_async) {
             return Err(error(
                 self.source,
@@ -932,7 +964,11 @@ impl Checker<'_> {
             filters.push(conditions);
             inputs.push(input);
         }
-        let yielded = self.expr(&generator.elt)?;
+        let yielded = if let Some(element) = element {
+            self.expr_expected(&generator.elt, element)?
+        } else {
+            self.expr(&generator.elt)?
+        };
         let value = self.hidden(yielded.ty);
         let ready = self.hidden(Type::Bool);
         let done = self.hidden(Type::Bool);

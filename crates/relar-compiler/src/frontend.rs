@@ -1363,7 +1363,7 @@ impl<'a> Checker<'a> {
 
     /// Checks an iterable in its current lexical scope, before target binding.
     fn iteration_input(&mut self, expression: &ast::Expr) -> Result<Iteration, String> {
-        if let Some(input) = self.pipeline_input(expression)? {
+        if let Some(input) = self.pipeline_input(expression, None)? {
             return Ok(Iteration::Prepared(input));
         }
         if let ast::Expr::Call(call) = expression
@@ -1385,34 +1385,11 @@ impl<'a> Checker<'a> {
                 .collect::<Result<Vec<_>, _>>()?;
             return Ok(Iteration::Range(args));
         }
-        let ((iterable, items), start) = if let ast::Expr::Call(call) = expression
-            && matches!(&*call.func, ast::Expr::Name(name) if name.id == "enumerate")
-        {
-            if !call.arguments.keywords.is_empty() || !(1..=2).contains(&call.arguments.args.len())
-            {
-                return Err(error(
-                    self.source,
-                    call,
-                    "enumerate requires a concrete container and an optional positional integer start",
-                ));
-            }
-            let iterable = self.iteration_source(&call.arguments.args[0])?;
-            let start = if let Some(start) = call.arguments.args.get(1) {
-                self.expr_expected(start, Type::Int)?
-            } else {
-                Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Int("0".into()),
-                }
-            };
-            (iterable, Some(start))
-        } else {
-            (self.iteration_source(expression)?, None)
-        };
+        let (iterable, items) = self.iteration_source(expression)?;
         Ok(Iteration::Container {
             iterable,
             items,
-            start,
+            start: None,
         })
     }
 

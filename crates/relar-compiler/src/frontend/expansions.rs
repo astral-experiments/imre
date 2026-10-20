@@ -122,7 +122,7 @@ impl Checker<'_> {
         expression: &ast::Expr,
         element: Option<Type>,
     ) -> Result<Iteration, String> {
-        if let Some(input) = self.pipeline_input(expression)? {
+        if let Some(input) = self.pipeline_input(expression, element)? {
             self.hint_empty_iteration(&input, element);
             return Ok(Iteration::Prepared(input));
         }
@@ -136,48 +136,6 @@ impl Checker<'_> {
             }
             if matches!(&*call.func, ast::Expr::Name(name) if name.id == "range") {
                 return self.iteration_input(expression);
-            }
-            if matches!(&*call.func, ast::Expr::Name(name) if name.id == "enumerate") {
-                if !call.arguments.keywords.is_empty()
-                    || !(1..=2).contains(&call.arguments.args.len())
-                {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "enumerate requires a concrete container and an optional positional integer start",
-                    ));
-                }
-                let fields =
-                    element.and_then(|ty| self.types.fields(self.types.payload(ty).unwrap_or(ty)));
-                let element = fields.as_deref().and_then(|fields| match fields {
-                    [Type::Int, element] => Some(*element),
-                    _ => None,
-                });
-                let Iteration::Container {
-                    iterable,
-                    items,
-                    start: None,
-                } = self.expansion_input(&call.arguments.args[0], element)?
-                else {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "enumerate requires a concrete container",
-                    ));
-                };
-                let start = if let Some(start) = call.arguments.args.get(1) {
-                    self.expr_expected(start, Type::Int)?
-                } else {
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Int("0".into()),
-                    }
-                };
-                return Ok(Iteration::Container {
-                    iterable,
-                    items,
-                    start: Some(start),
-                });
             }
             if let ast::Expr::Attribute(attribute) = &*call.func
                 && attribute.attr.as_str() == "items"
