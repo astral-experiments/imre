@@ -13,6 +13,8 @@ pub(super) struct Prepared {
     next: Vec<Statement>,
     value: usize,
     ready: usize,
+    /// An empty tuple has no element type or executable item assignment.
+    elementless: bool,
     pub clear: Vec<usize>,
 }
 
@@ -155,6 +157,7 @@ impl Checker<'_> {
                 ));
                 input.next.insert(0, Statement::Clear(value));
                 input.value = value;
+                input.elementless = false;
                 input.clear.push(value);
                 input.evaluate.append(&mut input.acquire);
                 Ok(Some(input))
@@ -204,6 +207,7 @@ impl Checker<'_> {
                 ));
                 input.next.insert(0, Statement::Clear(value));
                 input.value = value;
+                input.elementless = false;
                 input.clear.extend([counter, value]);
                 Ok(Some(input))
             }
@@ -368,6 +372,7 @@ impl Checker<'_> {
             next,
             value,
             ready,
+            elementless: false,
             clear: arguments,
         }
     }
@@ -384,6 +389,23 @@ impl Checker<'_> {
         let mapping = self.types.mapping(iterable.ty);
         let set_element = self.types.set_element(iterable.ty);
         let fields = self.types.fields(iterable.ty);
+        if fields.as_ref().is_some_and(Vec::is_empty) {
+            let source = self.hidden(iterable.ty);
+            let value = self.hidden(Type::Int);
+            let ready = self.hidden(Type::Bool);
+            return Ok(Prepared {
+                evaluate: vec![Statement::Assign(source, iterable)],
+                acquire: Vec::new(),
+                next: vec![
+                    Statement::Clear(value),
+                    Statement::Assign(ready, boolean(false)),
+                ],
+                value,
+                ready,
+                elementless: true,
+                clear: vec![source, value, ready],
+            });
+        }
         let tuple_element = fields.as_ref().and_then(|fields| {
             let first = fields.first().copied().unwrap_or(Type::None);
             fields.iter().all(|ty| *ty == first).then_some(first)
@@ -592,6 +614,7 @@ impl Checker<'_> {
             next,
             value,
             ready,
+            elementless: false,
             clear,
         })
     }
@@ -718,6 +741,7 @@ impl Checker<'_> {
             next,
             value,
             ready,
+            elementless: false,
             clear,
         })
     }
@@ -768,6 +792,17 @@ impl Checker<'_> {
         first.evaluate.append(&mut first.acquire);
         let mut first = Some(first);
         for (index, clause) in generator.generators.iter().enumerate() {
+            let repeated_writes = generator.generators[index..]
+                .iter()
+                .flat_map(|clause| std::iter::once(&clause.target).chain(clause.ifs.iter()))
+                .chain([&*generator.elt])
+                .flat_map(narrowing::expression_assignments)
+                .collect::<HashSet<_>>();
+            for name in repeated_writes {
+                if let Some(slot) = self.names.get(&name) {
+                    self.narrowed.remove(slot);
+                }
+            }
             let input = if index == 0 {
                 first.take().unwrap()
             } else {
@@ -797,6 +832,18 @@ impl Checker<'_> {
             }
         }
         self.restore_state(before);
+        for expression in generator
+            .generators
+            .iter()
+            .flat_map(|clause| clause.ifs.iter())
+            .chain([&*generator.elt])
+        {
+            for name in narrowing::expression_assignments(expression) {
+                if let Some(slot) = self.names.get(&name) {
+                    self.narrowed.remove(slot);
+                }
+            }
+        }
         let exported = self
             .comprehension_exports
             .values()
@@ -872,6 +919,7 @@ impl Checker<'_> {
             next,
             value,
             ready,
+            elementless: false,
             clear,
         })
     }
@@ -933,6 +981,16 @@ impl Checker<'_> {
         ))
     }
 
+    /// A statically empty tuple can adopt its consumer's element layout because
+    /// it has no item-producing branch that could violate that representation.
+    pub(super) fn hint_empty_iteration(&mut self, input: &Prepared, element: Option<Type>) {
+        if input.elementless
+            && let Some(element) = element
+        {
+            self.locals[input.value] = element;
+        }
+    }
+
     /// Quantifiers consume truth values immediately and never pull after their
     /// deciding element. Fixed tuples preserve eager field evaluation first.
     pub(super) fn quantifier_call(
@@ -978,7 +1036,7 @@ impl Checker<'_> {
                 ));
             }
         } else {
-            body.extend(self.expand_items(input, call, |checker, value| {
+            body.extend(self.expand_items(input, call, |_checker, value| {
                 let deciding = if all { not(truth(value)) } else { truth(value) };
                 Ok(vec![Statement::If(
                     deciding,

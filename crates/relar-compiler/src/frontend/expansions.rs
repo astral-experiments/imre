@@ -123,6 +123,7 @@ impl Checker<'_> {
         element: Option<Type>,
     ) -> Result<Iteration, String> {
         if let Some(input) = self.pipeline_input(expression)? {
+            self.hint_empty_iteration(&input, element);
             return Ok(Iteration::Prepared(input));
         }
         if let ast::Expr::Call(call) = expression {
