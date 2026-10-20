@@ -192,6 +192,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::Input
         | Builtin::ListGet
         | Builtin::ListGetI32
+        | Builtin::ListGetBounded { .. }
         | Builtin::ListSliceSum
         | Builtin::StringGet
         | Builtin::StringIntList

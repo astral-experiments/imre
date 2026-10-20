@@ -2517,7 +2517,12 @@ impl Emitter<'_, '_> {
                 Type::Int,
                 &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
             ),
-            Builtin::ListGetI32 => {
+            Builtin::ListGetI32 | Builtin::ListGetBounded { .. } => {
+                let (min, max) = match builtin {
+                    Builtin::ListGetBounded { min, max } => (*min, *max),
+                    _ => (i64::from(i32::MIN), i64::from(i32::MAX)),
+                };
+                debug_assert!(min <= max && min >= -(1_i64 << 62) && max < (1_i64 << 62));
                 let nonnegative = self.nonnegative_index(&expressions[1]);
                 let index = self.index_word(&args[1].value, nonnegative);
                 let name = if nonnegative {
@@ -2532,8 +2537,10 @@ impl Emitter<'_, '_> {
                 let tag = self.instruction(format!("and i64 {word}, 1"));
                 let tagged = self.instruction(format!("icmp eq i64 {tag}, 1"));
                 self.line(format!("call void @llvm.assume(i1 {tagged})"));
-                let shifted = self.instruction(format!("add i64 {word}, 4294967295"));
-                let bounded = self.instruction(format!("icmp ule i64 {shifted}, 8589934590"));
+                let encoded_min = min * 2 + 1;
+                let width = ((i128::from(max) - i128::from(min)) * 2) as u64;
+                let shifted = self.instruction(format!("sub i64 {word}, {encoded_min}"));
+                let bounded = self.instruction(format!("icmp ule i64 {shifted}, {width}"));
                 self.line(format!("call void @llvm.assume(i1 {bounded})"));
                 Value {
                     ty: Type::Int,

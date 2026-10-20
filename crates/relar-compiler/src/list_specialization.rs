@@ -273,7 +273,7 @@ fn statements_contain_loop(body: &[Statement]) -> bool {
 
 /// Marks all statement-owned writes, including cleanup on abrupt scope exits.
 /// Embedded expression scopes are visited separately by the shared IR walker.
-fn mark_writes(body: &[Statement], written: &mut [bool]) {
+pub(crate) fn mark_writes(body: &[Statement], written: &mut [bool]) {
     for statement in body {
         match statement {
             Statement::Assign(slot, _) | Statement::Clear(slot) => written[*slot] = true,
@@ -571,7 +571,7 @@ impl Plan<'_> {
 }
 
 /// These closed operations neither call user code nor mutate existing containers.
-fn readonly_builtin(operation: &Builtin) -> bool {
+pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
     matches!(
         operation,
         Builtin::GlobalGet(_)
@@ -581,6 +581,10 @@ fn readonly_builtin(operation: &Builtin) -> bool {
             | Builtin::Str
             | Builtin::Len
             | Builtin::ListGet
+            | Builtin::ListGetBounded { .. }
+            | Builtin::ListSum
+            | Builtin::ListSliceSum
+            | Builtin::StringIntList
             | Builtin::StringGet
             | Builtin::Bytes
             | Builtin::BytesGet

@@ -252,6 +252,12 @@ pub(crate) enum Builtin {
     ListReserveRange,
     /// The guarded loop proves all elements fit i32 and cannot be replaced.
     ListGetI32,
+    /// Every call site and intervening operation preserve these exact element
+    /// bounds. The access still checks its index and returns a tagged-small Int.
+    ListGetBounded {
+        min: i64,
+        max: i64,
+    },
     /// Internal identity guard between a read source and a mutated list.
     ListDistinct,
     StringGet,

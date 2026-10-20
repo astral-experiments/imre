@@ -3,6 +3,7 @@ mod classes;
 mod effects;
 mod frontend;
 mod ir;
+mod list_bounds;
 mod list_specialization;
 mod llvm;
 mod modules;
@@ -30,6 +31,7 @@ pub fn check(source: &str) -> Result<(), String> {
 pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String> {
     let mut module = frontend::lower(&modules::SourceGraph::single(source)?)?;
     tuples::scalarize(&mut module);
+    list_bounds::specialize(&mut module);
     list_specialization::specialize(&mut module);
     range_specialization::specialize(&mut module);
     let ranges = ranges::analyze(&module);
@@ -56,6 +58,7 @@ pub fn compile_file(
     let graph = modules::SourceGraph::load(path, module_root)?;
     let mut module = frontend::lower(&graph)?;
     tuples::scalarize(&mut module);
+    list_bounds::specialize(&mut module);
     list_specialization::specialize(&mut module);
     range_specialization::specialize(&mut module);
     let ranges = ranges::analyze(&module);
