@@ -7,7 +7,7 @@ use crate::ir::{
     Binary, Builtin, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType, Module,
     Statement, Type,
 };
-use crate::ranges::RangeFacts;
+use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
 
 mod truthiness;
@@ -1434,17 +1434,13 @@ impl Emitter<'_, '_> {
                 let left_value = self.operand(left);
                 let right_value = self.operand(right);
                 let result = if let Some(adjust_floor) = direct {
-                    let right_constant = self
-                        .ranges
-                        .integer(right)
-                        .filter(|range| range.min == range.max)
-                        .map(|range| range.min);
+                    let bounds = self.ranges.integer(left).zip(self.ranges.integer(right));
                     self.small_binary(
                         *op,
                         &left_value.value,
                         &right_value.value,
                         adjust_floor,
-                        right_constant,
+                        bounds,
                     )
                 } else {
                     self.binary(*op, &left_value.value, &right_value.value)
@@ -1949,11 +1945,15 @@ impl Emitter<'_, '_> {
         left: &Value,
         right: &Value,
         adjust_floor: bool,
-        right_constant: Option<i64>,
+        bounds: Option<(IntRange, IntRange)>,
     ) -> Value {
         debug_assert!(left.small_integer && right.small_integer);
         let left = self.instruction(format!("ashr i64 {}, 1", left.operand));
         let right = self.instruction(format!("ashr i64 {}, 1", right.operand));
+        let right_constant = bounds
+            .map(|(_, right)| right)
+            .filter(|right| right.min == right.max)
+            .map(|right| right.min);
         let result = match op {
             Binary::Add | Binary::Subtract | Binary::Multiply => {
                 let instruction = match op {
@@ -1975,6 +1975,23 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("ashr i64 {left}, {}", divisor.trailing_zeros()))
                 } else {
                     self.instruction(format!("and i64 {left}, {}", divisor - 1))
+                }
+            }
+            Binary::FloorDivide | Binary::Modulo
+                if bounds.is_some_and(|(left, right)| {
+                    left.min >= 0 && right.min > 0 && left.max < 2 * right.min
+                }) =>
+            {
+                // A nonnegative numerator below twice a positive divisor has
+                // quotient zero or one. Both operands were still evaluated,
+                // and their small-integer bounds make the subtraction exact.
+                let at_least = self.instruction(format!("icmp uge i64 {left}, {right}"));
+                if matches!(op, Binary::FloorDivide) {
+                    self.instruction(format!("zext i1 {at_least} to i64"))
+                } else {
+                    let subtract =
+                        self.instruction(format!("select i1 {at_least}, i64 {right}, i64 0"));
+                    self.instruction(format!("sub nsw i64 {left}, {subtract}"))
                 }
             }
             Binary::FloorDivide | Binary::Modulo => {
@@ -3972,6 +3989,36 @@ mod tests {
             // Interval division currently requires a singleton divisor. A
             // merely bounded divisor therefore retains the complete helper.
             assert!(body.contains(&format!("call i64 @int_{helper}")));
+        }
+    }
+
+    #[test]
+    fn bounded_nonnegative_division_uses_a_single_comparison() {
+        for divisor in [3_i64, 10, (1 << 61) + 1] {
+            let upper = (2 * divisor - 1).min((1 << 62) - 1);
+            for operation in ["//", "%"] {
+                let body = function_body(&format!(
+                    "def calculate(value: int) -> int:\n    if 0 <= value <= {upper}:\n        return value {operation} {divisor}\n    return 0\n"
+                ));
+                assert!(body.contains("icmp uge i64"));
+                assert!(!body.contains("sdiv i64"));
+                assert!(!body.contains("srem i64"));
+                assert!(!body.contains("call i64 @int_floordiv"));
+                assert!(!body.contains("call i64 @int_mod"));
+            }
+        }
+    }
+
+    #[test]
+    fn comparison_division_requires_nonnegative_and_strict_upper_bounds() {
+        for (lower, upper, divisor) in [(-1, 19, 10), (0, 20, 10), (0, 19, -10)] {
+            for operation in ["//", "%"] {
+                let body = function_body(&format!(
+                    "def calculate(value: int) -> int:\n    if {lower} <= value <= {upper}:\n        return value {operation} {divisor}\n    return 0\n"
+                ));
+                let instruction = if operation == "//" { "sdiv" } else { "srem" };
+                assert!(body.contains(&format!("{instruction} i64")));
+            }
         }
     }
 }
