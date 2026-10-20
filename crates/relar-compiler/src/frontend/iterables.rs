@@ -98,6 +98,22 @@ impl Checker<'_> {
                 kind: ExprKind::Int("0".into()),
             },
         };
+        if !convert
+            && let Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } = &input
+            && iterable.ty == Type::ListInt
+        {
+            // Evaluate both arguments before borrowing the list: `start` may
+            // mutate the source through an alias. Exact integer addition has
+            // no callbacks or recoverable errors during the reduction.
+            return Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::ListSum, vec![iterable.clone(), start]),
+            });
+        }
         let result = self.hidden(Type::Int);
         let mut body = Vec::new();
         let mut clear = vec![result];

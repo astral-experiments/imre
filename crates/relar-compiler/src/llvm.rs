@@ -2490,6 +2490,11 @@ impl Emitter<'_, '_> {
                 returns,
                 self.nonnegative_index(&expressions[1]),
             ),
+            Builtin::ListSum => self.call(
+                "relar_list_sum",
+                Type::Int,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::ListGetI32 => {
                 let nonnegative = self.nonnegative_index(&expressions[1]);
                 let index = self.index_word(&args[1].value, nonnegative);
@@ -3595,6 +3600,7 @@ declare i8 @relar_str_equal(ptr, ptr)
 declare i64 @relar_int_parse(ptr)
 declare ptr @relar_input()
 declare ptr @relar_list_new()
+declare i64 @relar_list_sum(ptr, i64)
 declare i8 @relar_list_all_i32(ptr, i64, i64, i64)
 declare void @relar_list_reserve_range(ptr, i64, i64, i64, i64)
 declare void @relar_list_retain(ptr)

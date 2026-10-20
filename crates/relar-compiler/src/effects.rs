@@ -228,6 +228,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::IsInstance(_)
         | Builtin::Len
         | Builtin::ListAllI32
+        | Builtin::ListSum
         | Builtin::ListReserveRange
         | Builtin::ListDistinct
         | Builtin::Append

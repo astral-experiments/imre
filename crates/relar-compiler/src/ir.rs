@@ -239,6 +239,9 @@ pub(crate) enum Builtin {
     Str,
     Len,
     ListGet,
+    /// Reduces an exact integer list after evaluating its source and start.
+    /// Integer addition cannot invoke callbacks or raise a recoverable error.
+    ListSum,
     /// Internal loop guard over [list, start, stop, step]. Scanning is limited
     /// to four elements per planned iteration; true proves every value fits i32.
     ListAllI32,
