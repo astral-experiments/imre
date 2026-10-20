@@ -140,6 +140,26 @@ pub unsafe extern "C" fn relar_seq_get_index(value: *const Object, at: usize) ->
     finish(owned.map(OwnedWord::into_word), 0)
 }
 
+/// Borrows one concrete sequence word after its current bounds were proved.
+/// Zero remains an ordinary scalar or absent value, never an error sentinel.
+///
+/// # Safety
+/// `value` must root an exact sequence, and `at` must be a decoded native index
+/// strictly below its current length. No mutable storage access may overlap the
+/// call. Consume or acquire the returned word with its exact declared type before
+/// removing or replacing that element. This does not acquire a reference, and
+/// neither a storage reference nor a growable buffer pointer escapes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_seq_borrow_index_proven(value: *const Object, at: usize) -> usize {
+    // SAFETY: the caller proves current bounds and roots the selected element;
+    // only the copied word escapes this nonreentrant storage access.
+    unsafe {
+        object(value)
+            .0
+            .with(|storage| *storage.sequence().values.get_unchecked(at))
+    }
+}
+
 /// Acquires the replacement before any existing container owner can be displaced.
 unsafe fn replacement(value: *const Object, word: usize, kind: u32) -> OwnedWord {
     // SAFETY: only copied descriptor metadata escapes this rooted storage read.
@@ -1440,6 +1460,92 @@ mod tests {
             }
         }
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn proven_sequence_reads_borrow_exact_scalar_and_optional_words() {
+        use num_bigint::BigInt;
+
+        let text = Rc::new(Str::from("borrowed sequence word"));
+        let big = Rc::new(BigInt::from(1_u128 << 100));
+        let float = Rc::new(-0.0_f64);
+        let text_weak = Rc::downgrade(&text);
+        let big_weak = Rc::downgrade(&big);
+        let float_weak = Rc::downgrade(&float);
+        let cases = [
+            (0, vec![0]),
+            (1, vec![0, 1]),
+            (257, vec![0, 1, 2]),
+            (258, vec![0, 1, Rc::as_ptr(&big) as usize]),
+            (259, vec![0, Rc::as_ptr(&text) as usize]),
+            (263, vec![0, Rc::as_ptr(&float) as usize]),
+            (
+                7,
+                vec![
+                    0,
+                    (-0.0_f64).to_bits() as usize,
+                    f64::NAN.to_bits() as usize,
+                ],
+            ),
+        ];
+        for (kind, words) in cases {
+            // SAFETY: each descriptor matches its rooted values. All accesses
+            // are in bounds and their borrowed words expire before mutation.
+            unsafe {
+                let sequence = relar_seq_new(kind);
+                for &word in &words {
+                    relar_seq_append(sequence, word, kind);
+                }
+                for (index, &word) in words.iter().enumerate() {
+                    assert_eq!(relar_seq_borrow_index_proven(sequence, index), word);
+                }
+                relar_object_release(sequence);
+            }
+        }
+        assert_eq!(Rc::strong_count(&text), 1);
+        assert_eq!(Rc::strong_count(&big), 1);
+        assert_eq!(Rc::strong_count(&float), 1);
+        drop((text, big, float));
+        assert!(text_weak.upgrade().is_none());
+        assert!(big_weak.upgrade().is_none());
+        assert!(float_weak.upgrade().is_none());
+        assert_eq!(crate::relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn proven_sequence_record_is_acquired_before_its_source_owner_is_removed() {
+        use records::{
+            RecordDescriptor, relar_record_new, relar_record_release, relar_record_retain,
+        };
+
+        let kinds = [3];
+        let descriptor = RecordDescriptor {
+            length: 1,
+            kinds: kinds.as_ptr(),
+        };
+        let text = Rc::new(Str::from("retained before mutation"));
+        let weak = Rc::downgrade(&text);
+        // SAFETY: immutable metadata outlives the record. The borrowed read is
+        // immediately acquired, matching compiler lowering, before removing
+        // the source owner. Every independent record owner is released once.
+        unsafe {
+            let record = relar_record_new(&descriptor);
+            record.cast::<*const Str>().write(Rc::into_raw(text));
+            let sequence = relar_seq_new(6);
+            relar_seq_append(sequence, record as usize, 6);
+            relar_record_release(record);
+            let saved = relar_seq_borrow_index_proven(sequence, 0) as *const usize;
+            relar_record_retain(saved);
+            relar_record_release(relar_seq_pop(sequence) as *const usize);
+            relar_object_release(sequence);
+            assert_eq!(
+                (&*saved.cast::<*const Str>().read()).as_str(),
+                "retained before mutation"
+            );
+            relar_record_release(saved);
+        }
+        assert!(weak.upgrade().is_none());
+        assert_eq!(crate::relar_error_pending(), 0);
     }
 
     #[test]

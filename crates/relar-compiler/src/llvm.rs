@@ -2546,6 +2546,27 @@ impl Emitter<'_, '_> {
                 returns,
                 self.nonnegative_index(&expressions[1]),
             ),
+            Builtin::SequenceGetInBounds => {
+                debug_assert!(matches!(args[0].value.ty, Type::List(_)));
+                debug_assert_eq!(self.module.types.element(args[0].value.ty), Some(returns));
+                debug_assert!(
+                    expressions
+                        .iter()
+                        .all(|arg| matches!(arg.kind, ExprKind::Local(_)))
+                );
+                let mut index = args[1].value.clone();
+                index.small_integer = true;
+                let index = self.index_word(&index, true);
+                let word = self.instruction(format!(
+                    "call i64 @relar_seq_borrow_index_proven(ptr {}, i64 {index})",
+                    args[0].value.operand
+                ));
+                let value = self.decode_word(word, returns);
+                // Acquire before argument cleanup, target replacement, or the
+                // next iterator pull can remove the source element's owner.
+                self.retain(&value);
+                value
+            }
             Builtin::ListSum => self.call(
                 "relar_list_sum",
                 Type::Int,
@@ -3705,6 +3726,7 @@ declare ptr @relar_seq_new(i32)
 declare i64 @relar_seq_get(ptr, i64)
 declare void @relar_seq_set(ptr, i64, i64, i32)
 declare i64 @relar_seq_get_index(ptr, i64)
+declare i64 @relar_seq_borrow_index_proven(ptr, i64) nounwind memory(argmem: read)
 declare void @relar_seq_set_index(ptr, i64, i64, i32)
 declare void @relar_seq_append(ptr, i64, i32)
 declare i64 @relar_seq_pop(ptr)
@@ -4070,6 +4092,38 @@ mod tests {
             assert!(body.contains("@relar_list_get_index("));
             assert!(!body.contains("@relar_list_get("));
         }
+    }
+
+    #[test]
+    fn proven_sequence_reads_acquire_the_static_element_without_an_error_poll() {
+        for (ty, retain) in [
+            ("str", Some("@relar_str_retain(")),
+            ("str | None", Some("@relar_str_retain(")),
+            ("int | None", Some("@retain_int(")),
+            ("float | None", Some("@relar_float_box_retain(")),
+            ("list[int]", Some("@relar_list_retain(")),
+            ("tuple[int]", Some("@relar_record_retain(")),
+            ("bool | None", None),
+            ("float", None),
+            ("None", None),
+        ] {
+            let body = function_body(&format!(
+                "def populated(values: list[{ty}]) -> bool:\n    return any(value for value in values)\n"
+            ));
+            let (_, pull) = body.split_once("@relar_seq_borrow_index_proven(").unwrap();
+            if let Some(retain) = retain {
+                let acquired = pull.split_once("store ").unwrap().0;
+                assert!(acquired.contains(retain), "{ty}: {acquired}");
+            }
+            assert!(!body.contains("@relar_seq_get("));
+            assert!(!body.contains("@relar_seq_get_index("));
+            assert!(!body.contains("@relar_error_pending("));
+        }
+        let checked = function_body(
+            "def item(values: list[str], index: int) -> str:\n    return values[index]\n",
+        );
+        assert!(checked.contains("@relar_seq_get("));
+        assert!(checked.contains("@relar_error_pending("));
     }
 
     #[test]

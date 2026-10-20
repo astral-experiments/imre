@@ -239,6 +239,10 @@ pub(crate) enum Builtin {
     Str,
     Len,
     ListGet,
+    /// An iterator's live-length guard proves this hidden sequence/cursor read
+    /// in bounds, with no intervening mutation or user code. Returns an owned
+    /// element of a generic typed list; the index is canonical and nonnegative.
+    SequenceGetInBounds,
     /// Reduces an exact integer list after evaluating its source and start.
     /// Integer addition cannot invoke callbacks or raise a recoverable error.
     ListSum,

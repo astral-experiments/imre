@@ -581,6 +581,7 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
             | Builtin::Str
             | Builtin::Len
             | Builtin::ListGet
+            | Builtin::SequenceGetInBounds
             | Builtin::ListGetI32
             | Builtin::ListGetBounded { .. }
             | Builtin::ListGetBoundedInBounds { .. }

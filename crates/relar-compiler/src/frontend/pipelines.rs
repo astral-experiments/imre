@@ -573,6 +573,8 @@ impl Checker<'_> {
                     kind: ExprKind::Builtin(
                         if ty == Type::Bytes {
                             Builtin::BytesGet
+                        } else if matches!(ty, Type::List(_)) {
+                            Builtin::SequenceGetInBounds
                         } else {
                             Builtin::ListGet
                         },

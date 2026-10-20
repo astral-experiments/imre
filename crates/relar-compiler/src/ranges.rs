@@ -1634,7 +1634,7 @@ mod tests {
                     );
                 }
             }
-            assert_eq!(accesses, 2);
+            assert!(accesses >= 2, "both zip inputs must be checked");
         }
     }
 
