@@ -106,6 +106,29 @@ impl Checker<'_> {
             } = &input
             && iterable.ty == Type::ListInt
         {
+            if let ExprKind::Builtin(Builtin::Slice, arguments) = &iterable.kind {
+                // Capture the slice's numeric snapshot before evaluating
+                // `start`, which may mutate or replace the original list.
+                // Exact integer addition has no observable intermediate work.
+                let subtotal = Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::ListSliceSum, arguments.clone()),
+                };
+                return Ok(
+                    if matches!(&start.kind, ExprKind::Int(value) if value == "0") {
+                        subtotal
+                    } else {
+                        Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Binary(
+                                Binary::Add,
+                                Box::new(subtotal),
+                                Box::new(start),
+                            ),
+                        }
+                    },
+                );
+            }
             // Evaluate both arguments before borrowing the list: `start` may
             // mutate the source through an alias. Exact integer addition has
             // no callbacks or recoverable errors during the reduction.

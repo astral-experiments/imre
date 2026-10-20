@@ -242,6 +242,9 @@ pub(crate) enum Builtin {
     /// Reduces an exact integer list after evaluating its source and start.
     /// Integer addition cannot invoke callbacks or raise a recoverable error.
     ListSum,
+    /// Sums a private integer slice at the slice's original evaluation point.
+    /// Nullable bounds and zero-step errors match ordinary slicing.
+    ListSliceSum,
     /// Internal loop guard over [list, start, stop, step]. Scanning is limited
     /// to four elements per planned iteration; true proves every value fits i32.
     ListAllI32,

@@ -2495,6 +2495,11 @@ impl Emitter<'_, '_> {
                 Type::Int,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::ListSliceSum => self.call(
+                "relar_list_slice_sum",
+                Type::Int,
+                &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
+            ),
             Builtin::ListGetI32 => {
                 let nonnegative = self.nonnegative_index(&expressions[1]);
                 let index = self.index_word(&args[1].value, nonnegative);
@@ -3447,6 +3452,7 @@ fn fallible(name: &str) -> bool {
                 | "relar_list_pop"
                 | "relar_list_repeat"
                 | "relar_list_slice"
+                | "relar_list_slice_sum"
                 | "relar_str_get"
                 | "relar_str_slice"
                 | "relar_str_int_list"
@@ -3601,6 +3607,7 @@ declare i64 @relar_int_parse(ptr)
 declare ptr @relar_input()
 declare ptr @relar_list_new()
 declare i64 @relar_list_sum(ptr, i64)
+declare i64 @relar_list_slice_sum(ptr, i64, i64, i64)
 declare i8 @relar_list_all_i32(ptr, i64, i64, i64)
 declare void @relar_list_reserve_range(ptr, i64, i64, i64, i64)
 declare void @relar_list_retain(ptr)
