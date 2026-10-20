@@ -48,6 +48,7 @@ REJECTED = {
     "all_scalar": "print(all(None))\n",
     "any_not_optional_guard": "def bad(value: int | None) -> None:\n    if any(value is not None for index in range(1)):\n        print(value + 1)\nbad(None)\n",
     "generator_backedge_optional": 'value: str | None = "ok"\nprint(all((value := None) for index in range(2) if len(value) > 0))\n',
+    "generator_inner_backedge_optional": 'value: str | None = "ok"\nprint(any((value := None) for outer in range(1) if value is not None for inner in range(2) if len(value) > 0))\n',
     "generator_export_invalidates_optional": "value: int | None = 1\nprint(any((value := None) for index in range(1)))\nprint(value + 1)\n",
 }
 

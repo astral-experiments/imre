@@ -63,6 +63,7 @@ finally:
 
 # The target survives iteration; the generator's private target does not replace it.
 target = 80
+value = -1
 for value in (target for target in [6, 7]):
     print(value)
 print(target)

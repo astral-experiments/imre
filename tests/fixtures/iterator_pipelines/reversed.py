@@ -48,7 +48,7 @@ print(values[0])
 
 for text in ["", "a", "é好🙂", "e\u0301", "\x00🙂é"]:
     for character in reversed(text):
-        print(ord(character))
+        print(character)
     print("end string")
 
 for start, stop, step in [(0, 0, 1), (0, 7, 2), (7, -2, -3), (2, 7, -1)]:
