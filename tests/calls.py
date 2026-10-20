@@ -59,8 +59,6 @@ REJECTED = {
     "none_default_for_int": "def take(value: int = None) -> None:\n    pass\n",
     "bool_default_for_optional_int": "def take(value: int | None = False) -> None:\n    pass\n",
     "surrogate_default": 'def take(value: str = "\\ud800") -> None:\n    pass\n',
-    "missing_keyword_annotation": "def take(*, value) -> None:\n    pass\ntake(value=1)\n",
-    "missing_default_annotation": "def take(value=1) -> None:\n    pass\ntake()\n",
     "method_self_keyword": CLASS + "item = Item()\nitem.add(self=item, amount=2)\n",
     "constructor_self_keyword": CLASS + "Item(self=Item())\n",
     "constructor_unknown_keyword": CLASS + "Item(unknown=1)\n",

@@ -46,7 +46,6 @@ REJECTED = {
     "empty_loop": 'def f() -> int:\n    for x in range(0):\n        pass\n    return x\nf()\n',
     "rebind_type": 'def f() -> None:\n    x = 1\n    x = "wrong"\nf()\n',
     "rebind_builtin": 'def f() -> None:\n    len = 1\nf()\n',
-    "missing_annotation": 'def f(x) -> None:\n    pass\nf(1)\n',
     "dead_dynamic_code": 'def f() -> None:\n    if False:\n        eval("1 + 2")\nf()\n',
     "import": 'import math\nprint(1)\n',
     "recursive": 'def f(x: int) -> int:\n    return f(x)\nf(1)\n',

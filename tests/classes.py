@@ -33,7 +33,6 @@ REJECTED = {
     "wrong_method_arity": CELL + "value = Cell(1)\nvalue.add()\n",
     "explicit_initializer_call": CELL + "value = Cell(1)\nvalue.__init__(2)\n",
     "missing_method_annotation": CELL.replace("amount: int", "amount"),
-    "missing_method_return": CELL.replace("def add(self, amount: int) -> int:", "def add(self, amount: int):"),
     "wrong_method_return": CELL.replace("return self.value", 'return "wrong"'),
     "wrong_self_name": CELL.replace("def __init__(self,", "def __init__(other,").replace("self.value = value", "other.value = value"),
     "wrong_self_annotation": CELL.replace("def __init__(self,", "def __init__(self: int,"),
