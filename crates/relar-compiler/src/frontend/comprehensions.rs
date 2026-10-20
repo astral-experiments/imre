@@ -8,6 +8,8 @@ use ruff_python_ast::visitor::{Visitor, walk_expr};
 
 use super::*;
 
+mod slices;
+
 pub(super) struct Helper {
     pub function: ir::Function,
     pub calls: HashSet<usize>,
@@ -387,6 +389,9 @@ impl Checker<'_> {
                 ),
             };
             body = vec![Statement::Return(gather)];
+        }
+        if matches!(display.value, Yield::Sum(_)) && display.clauses.len() == 1 {
+            slices::fuse(&mut body, &params, &mut args);
         }
         self.helpers.finish(
             id,
