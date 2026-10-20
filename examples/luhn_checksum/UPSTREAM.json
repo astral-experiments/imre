@@ -1,0 +1,27 @@
+{
+  "repository": "https://github.com/mmcloughlin/luhn",
+  "tag": "0.2.0",
+  "commit": "d6f3fa71072f99334a4c1d2a3f062fa93982797f",
+  "license": "MIT",
+  "files": {
+    "luhn.py": {
+      "upstream_path": "luhn.py",
+      "git_blob": "63a4a53e596ec7979baa3b27d5a8d3a5e7b8f898",
+      "sha256": "c6e9aadd736116ff52b7e59c0f8e8d753278a85eafcd1ca2b423b2939498ad36",
+      "bytes": 1037
+    },
+    "upstream/test.py": {
+      "upstream_path": "test.py",
+      "git_blob": "8454d18afa2b2a515f5bc9966bd931bed0d45184",
+      "sha256": "e8e9ab6a14fb51cf8e9dc67b5e2921b8ebdc82063b71eb31cdcbde4866fb4c59",
+      "bytes": 693
+    },
+    "upstream/LICENSE": {
+      "upstream_path": "LICENSE",
+      "git_blob": "c0190c9a61cc703ad45e7cdee78427bb258d46dd",
+      "sha256": "e839aa96610def32e2551898e101976c0f2d9f7a42e82b2870ffaa82860cc884",
+      "bytes": 1086
+    }
+  },
+  "tag_object": "9af1b18365ff86186bba7e25c0f0fb6cf8d4635b"
+}
