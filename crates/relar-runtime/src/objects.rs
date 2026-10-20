@@ -1509,7 +1509,7 @@ mod tests {
         assert!(text_weak.upgrade().is_none());
         assert!(big_weak.upgrade().is_none());
         assert!(float_weak.upgrade().is_none());
-        assert_eq!(crate::relar_error_pending(), 0);
+        assert_eq!(exceptions::relar_error_pending(), 0);
     }
 
     #[test]
@@ -1545,7 +1545,7 @@ mod tests {
             relar_record_release(saved);
         }
         assert!(weak.upgrade().is_none());
-        assert_eq!(crate::relar_error_pending(), 0);
+        assert_eq!(exceptions::relar_error_pending(), 0);
     }
 
     #[test]
