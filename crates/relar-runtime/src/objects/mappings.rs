@@ -680,7 +680,7 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
         })
     };
     match result {
-        Ok(values) => Rc::into_raw(Rc::new(List(StorageCell::new(values)))),
+        Ok(values) => crate::new_list(values),
         Err(error) => error.returning(std::ptr::null()),
     }
 }

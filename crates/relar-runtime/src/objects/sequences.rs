@@ -246,10 +246,7 @@ pub unsafe extern "C" fn relar_list_slice(
             Ok(result)
         })
     };
-    finish(
-        result.map(|values| Rc::into_raw(Rc::new(List(StorageCell::new(values))))),
-        std::ptr::null(),
-    )
+    finish(result.map(crate::new_list), std::ptr::null())
 }
 
 /// Reduces the selected integer values without allocating the temporary slice.
@@ -458,7 +455,7 @@ pub unsafe extern "C" fn relar_str_int_list(value: *const Str) -> *const List {
     // including an invalid ASCII byte's unpublished conversion, fit immediate
     // Int storage and own no allocation. Errors leave length zero for cleanup.
     unsafe { values.set_len(length) };
-    Rc::into_raw(Rc::new(List(StorageCell::new(values))))
+    crate::new_list(values)
 }
 
 #[cfg(test)]
