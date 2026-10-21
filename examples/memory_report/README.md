@@ -91,7 +91,9 @@ The [benchmark guide](../../benchmarks/reference/memory_report/README.md) compar
 the unchanged upstream script, typed CPython port, Relar, and independent Rust on
 real captures and clearly labeled larger copies.
 
-The [dataclass results](../../benchmarks/results/2026-10-21-dataclass-records.md)
-take 1.16–1.47× Rust's time on 65,024 items per input file, with the same report
-semantics in ordinary and ThinLTO builds. The report includes the original
-CPython comparison, full validation, and replayable benchmark evidence.
+The [native-path results](../../benchmarks/results/2026-10-21-native-paths.md)
+take 0.91–1.28× Rust's time for complete directory comparisons and
+1.38–1.63× for repeated parsing, comparison, and rendering. Both layouts contain
+65,024 items per side and meet the ≤2× target in ordinary and ThinLTO builds.
+Complete directory runs are 2.13–2.89× faster than the unchanged upstream
+CPython script. The report includes validation and replayable benchmark evidence.
