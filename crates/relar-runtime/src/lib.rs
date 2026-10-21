@@ -15,8 +15,17 @@
 //! buffer address may escape. Aliased handles are allowed and observe sequential
 //! mutations. Future callback or threaded extension boundaries must uphold these
 //! invariants before entering this ABI.
+//!
+//! Recoverable language errors set an owned thread-local pending exception.
+//! Generated code checks it immediately, before acquiring a returned word or
+//! reading out parameters. Integer failures return tagged zero, pointer failures
+//! return null, and generic slot-word failures return an uninterpreted zero.
+//! Cleanup/error-state entry points remain valid while pending. Invalid ABI
+//! inputs and allocator exhaustion remain fatal; neither uses Rust unwinding.
 
 mod objects;
+
+use objects::exceptions::{Error, Kind, Result, finish};
 
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
@@ -183,7 +192,7 @@ fn write_output(
 /// Handles write failures only after releasing the writer lock.
 fn output(write: impl FnOnce(&mut BufWriter<io::Stdout>) -> io::Result<()>) {
     if write_output(write).is_err() {
-        fail("OSError", "could not write standard output");
+        Error::new(Kind::OSError, "could not write standard output").raise();
     }
 }
 
@@ -201,7 +210,7 @@ fn flush_stdout() -> io::Result<()> {
         .flush()
 }
 
-/// Reports a terminal language error outside the normal execution path.
+/// Reports an unrecoverable allocation failure or violated internal ABI contract.
 #[cold]
 #[inline(never)]
 fn fail(kind: &str, message: &str) -> ! {
@@ -216,7 +225,7 @@ fn fail(kind: &str, message: &str) -> ! {
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_flush_stdout() {
     if flush_stdout().is_err() {
-        fail("OSError", "could not write standard output");
+        Error::new(Kind::OSError, "could not write standard output").raise();
     }
 }
 
@@ -278,7 +287,11 @@ pub unsafe extern "C" fn relar_int_binary(a: usize, b: usize, op: u32) -> usize 
             2 => x.checked_mul(y),
             3 | 4 => {
                 if y == 0 {
-                    fail("ZeroDivisionError", "integer division or modulo by zero");
+                    return Error::new(
+                        Kind::ZeroDivisionError,
+                        "integer division or modulo by zero",
+                    )
+                    .returning(1);
                 }
                 let (q, r) = (x / y, x % y);
                 let adjust = r != 0 && (r < 0) != (y < 0);
@@ -303,7 +316,11 @@ pub unsafe extern "C" fn relar_int_binary(a: usize, b: usize, op: u32) -> usize 
         2 => a.as_ref() * b.as_ref(),
         3 | 4 => {
             if b.is_zero() {
-                fail("ZeroDivisionError", "integer division or modulo by zero");
+                return Error::new(
+                    Kind::ZeroDivisionError,
+                    "integer division or modulo by zero",
+                )
+                .returning(1);
             }
             let (q, r) = (a.as_ref() / b.as_ref(), a.as_ref() % b.as_ref());
             let adjust = !r.is_zero() && r.is_negative() != b.is_negative();
@@ -441,24 +458,34 @@ pub unsafe extern "C" fn relar_int_parse(value: *const Str) -> usize {
         || digits.contains("__")
         || !digits.bytes().all(|c| c.is_ascii_digit() || c == b'_')
     {
-        fail("ValueError", "expected an ASCII decimal integer");
+        return Error::new(Kind::ValueError, "expected an ASCII decimal integer").returning(1);
     }
-    Int::new(
+    finish(
         BigInt::parse_bytes(source.replace('_', "").as_bytes(), 10)
-            .unwrap_or_else(|| fail("ValueError", "invalid integer input")),
+            .map(|value| Int::new(value).into_raw())
+            .ok_or_else(|| Error::new(Kind::ValueError, "invalid integer input")),
+        1,
     )
-    .into_raw()
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_input() -> *const Str {
     // A preceding print must be visible before waiting for the next input line.
-    relar_flush_stdout();
+    if flush_stdout().is_err() {
+        return Error::new(Kind::OSError, "could not write standard output")
+            .returning(std::ptr::null());
+    }
     let mut line = String::new();
     match io::stdin().read_line(&mut line) {
-        Ok(0) => fail("EOFError", "EOF when reading a line"),
+        Ok(0) => {
+            return Error::new(Kind::EOFError, "EOF when reading a line")
+                .returning(std::ptr::null());
+        }
         Ok(_) => {}
-        Err(_) => fail("OSError", "could not read standard input"),
+        Err(_) => {
+            return Error::new(Kind::OSError, "could not read standard input")
+                .returning(std::ptr::null());
+        }
     }
     if line.ends_with('\n') {
         line.pop();
@@ -493,21 +520,21 @@ pub unsafe extern "C" fn relar_list_release(value: *const List) {
 
 /// Converts an index before a storage borrow, without truncating large integers.
 #[inline]
-fn decode_index(value: &Int) -> isize {
+fn decode_index(value: &Int) -> Result<isize> {
     if let Some(raw) = value
         .as_small()
         .and_then(|value| isize::try_from(value).ok())
     {
-        raw
+        Ok(raw)
     } else {
-        big_index(&value.big()).unwrap_or_else(|| fail("IndexError", "list index out of range"))
+        big_index(&value.big()).ok_or_else(Error::index)
     }
 }
 
 /// Normalizes negative indices and rejects out-of-bounds accesses.
 // Expose the bounds check to get/set so LLVM can remove their redundant checks.
 #[inline]
-fn index(raw: isize, length: usize) -> usize {
+fn index(raw: isize, length: usize) -> Result<usize> {
     let normalized = if raw < 0 {
         // An underflow wraps above `length`, so the same bounds check rejects it.
         length.wrapping_add_signed(raw)
@@ -515,9 +542,9 @@ fn index(raw: isize, length: usize) -> usize {
         raw as usize
     };
     if normalized >= length {
-        fail("IndexError", "list index out of range");
+        return Err(Error::index());
     }
-    normalized
+    Ok(normalized)
 }
 
 /// Keeps arbitrary-precision conversion out of the common indexed-access path.
@@ -533,10 +560,17 @@ fn big_index(value: &BigInt) -> Option<isize> {
 pub unsafe extern "C" fn relar_list_get(list: *const List, at: usize) -> usize {
     // SAFETY: the caller roots the index; conversion cannot call user code.
     let at = unsafe { Int::borrow(at) };
-    let at = decode_index(&at);
+    let at = match decode_index(&at) {
+        Ok(at) => at,
+        Err(error) => return error.returning(1),
+    };
     // SAFETY: this rooted list is accessed only for the nonreentrant clone.
-    let owned = unsafe { (&*list).0.with(|list| list[index(at, list.len())].clone()) };
-    owned.into_raw()
+    let owned = unsafe {
+        (&*list)
+            .0
+            .with(|list| Ok(list[index(at, list.len())?].clone()))
+    };
+    finish(owned.map(Int::into_raw), 1)
 }
 
 /// Reads an element using a compiler-proven nonnegative, decoded index.
@@ -550,13 +584,11 @@ pub unsafe extern "C" fn relar_list_get(list: *const List, at: usize) -> usize {
 pub unsafe extern "C" fn relar_list_get_index(list: *const List, at: usize) -> usize {
     // SAFETY: the caller roots the list, and the owned clone cannot reenter.
     let owned = unsafe {
-        (&*list).0.with(|list| {
-            list.get(at)
-                .unwrap_or_else(|| fail("IndexError", "list index out of range"))
-                .clone()
-        })
+        (&*list)
+            .0
+            .with(|list| list.get(at).cloned().ok_or_else(Error::index))
     };
-    owned.into_raw()
+    finish(owned.map(Int::into_raw), 1)
 }
 
 /// Borrows an integer word without retaining it or exposing list storage.
@@ -571,13 +603,12 @@ pub unsafe extern "C" fn relar_list_get_index(list: *const List, at: usize) -> u
 pub unsafe extern "C" fn relar_list_borrow_index(list: *const List, at: usize) -> usize {
     // SAFETY: the caller roots the list and its element throughout consumption.
     // Only the word escapes this nonreentrant access, never a storage reference.
-    unsafe {
-        (&*list).0.with(|list| {
-            list.get(at)
-                .unwrap_or_else(|| fail("IndexError", "list index out of range"))
-                .0
-        })
-    }
+    let result = unsafe {
+        (&*list)
+            .0
+            .with(|list| list.get(at).map(|value| value.0).ok_or_else(Error::index))
+    };
+    finish(result, 1)
 }
 
 /// # Safety
@@ -586,15 +617,18 @@ pub unsafe extern "C" fn relar_list_borrow_index(list: *const List, at: usize) -
 pub unsafe extern "C" fn relar_list_set(list: *const List, at: usize, value: usize) {
     // SAFETY: the caller roots both integers; conversion and acquisition cannot reenter.
     let (at, value) = unsafe { (Int::borrow(at), Int::borrow(value)) };
-    let at = decode_index(&at);
+    let at = match decode_index(&at) {
+        Ok(at) => at,
+        Err(error) => return error.raise(),
+    };
     // SAFETY: no storage reference escapes this exclusive, nonreentrant access.
     let old = unsafe {
         (&*list).0.with_mut(|list| {
-            let at = index(at, list.len());
-            std::mem::replace(&mut list[at], (*value).clone())
+            let at = index(at, list.len())?;
+            Ok(std::mem::replace(&mut list[at], (*value).clone()))
         })
     };
-    drop(old);
+    finish(old.map(drop), ());
 }
 
 /// Replaces an element using a compiler-proven nonnegative, decoded index.
@@ -611,13 +645,11 @@ pub unsafe extern "C" fn relar_list_set_index(list: *const List, at: usize, valu
     // SAFETY: replacement cannot reenter and returns the displaced owner.
     let old = unsafe {
         (&*list).0.with_mut(|list| {
-            let slot = list
-                .get_mut(at)
-                .unwrap_or_else(|| fail("IndexError", "list index out of range"));
-            std::mem::replace(slot, (*value).clone())
+            let slot = list.get_mut(at).ok_or_else(Error::index)?;
+            Ok(std::mem::replace(slot, (*value).clone()))
         })
     };
-    drop(old);
+    finish(old.map(drop), ());
 }
 
 /// Copies an element within one list, acquiring the source before replacement.
@@ -633,21 +665,20 @@ pub unsafe extern "C" fn relar_list_copy_index(
     destination: usize,
     source: usize,
 ) {
+    let mut copied = None;
     // SAFETY: the caller roots the list; cloning cannot reenter, and only the
     // displaced owner escapes this exclusive access. Self-copy acquires first.
     let old = unsafe {
         (&*list).0.with_mut(|list| {
-            let value = list
-                .get(source)
-                .unwrap_or_else(|| fail("IndexError", "list index out of range"))
-                .clone();
-            let slot = list
-                .get_mut(destination)
-                .unwrap_or_else(|| fail("IndexError", "list index out of range"));
-            std::mem::replace(slot, value)
+            copied = Some(list.get(source).ok_or_else(Error::index)?.clone());
+            let slot = list.get_mut(destination).ok_or_else(Error::index)?;
+            Ok(std::mem::replace(slot, copied.take().unwrap()))
         })
     };
-    drop(old);
+    // A failed destination check also releases the acquired source only here,
+    // after exclusive storage access has ended.
+    drop(copied);
+    finish(old.map(drop), ());
 }
 
 /// # Safety
@@ -674,10 +705,10 @@ pub unsafe extern "C" fn relar_list_pop(list: *const List) -> usize {
     let owned = unsafe {
         (&*list).0.with_mut(|list| {
             list.pop()
-                .unwrap_or_else(|| fail("IndexError", "pop from empty list"))
+                .ok_or_else(|| Error::new(Kind::IndexError, "pop from empty list"))
         })
     };
-    owned.into_raw()
+    finish(owned.map(Int::into_raw), 1)
 }
 
 /// # Safety
@@ -700,12 +731,11 @@ pub unsafe extern "C" fn relar_list_repeat(list: *const List, count: usize) -> *
     let count = count
         .as_small()
         .map(|value| value as isize)
-        .unwrap_or_else(|| {
-            count
-                .big()
-                .to_isize()
-                .unwrap_or_else(|| fail("OverflowError", "list repeat count is too large"))
-        });
+        .or_else(|| count.big().to_isize());
+    let Some(count) = count else {
+        return Error::new(Kind::OverflowError, "list repeat count is too large")
+            .returning(std::ptr::null());
+    };
     if count <= 0 {
         return relar_list_new();
     }
@@ -717,7 +747,8 @@ pub unsafe extern "C" fn relar_list_repeat(list: *const List, count: usize) -> *
             let length = list
                 .len()
                 .checked_mul(count)
-                .unwrap_or_else(|| fail("MemoryError", "list is too large"));
+                .filter(|&length| length <= isize::MAX as usize / size_of::<Int>())
+                .ok_or_else(|| Error::new(Kind::MemoryError, "list is too large"))?;
             let mut result = Vec::new();
             result
                 .try_reserve_exact(length)
@@ -727,20 +758,23 @@ pub unsafe extern "C" fn relar_list_repeat(list: *const List, count: usize) -> *
                     result.extend(list.iter().cloned());
                 }
             }
-            result
+            Ok(result)
         })
     };
-    Rc::into_raw(Rc::new(List(StorageCell::new(result))))
+    finish(
+        result.map(|values| Rc::into_raw(Rc::new(List(StorageCell::new(values))))),
+        std::ptr::null(),
+    )
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn relar_assert_fail() -> ! {
-    fail("AssertionError", "assertion failed")
+pub extern "C" fn relar_assert_fail() {
+    Error::new(Kind::AssertionError, "").raise();
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn relar_range_step_zero() -> ! {
-    fail("ValueError", "range() arg 3 must not be zero")
+pub extern "C" fn relar_range_step_zero() {
+    Error::new(Kind::ValueError, "range() arg 3 must not be zero").raise();
 }
 
 #[cfg(test)]

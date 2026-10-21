@@ -109,6 +109,20 @@ fn inspect_writes(
                 inspect_writes(facts, no, small, moves);
             }
             Statement::While(_, body) => inspect_writes(facts, body, small, moves),
+            Statement::Scope { body, .. } => inspect_writes(facts, body, small, moves),
+            Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } => {
+                for body in [body, orelse, finalbody] {
+                    inspect_writes(facts, body, small, moves);
+                }
+                for handler in handlers {
+                    inspect_writes(facts, &handler.body, small, moves);
+                }
+            }
             Statement::For {
                 target,
                 cursor,
@@ -131,6 +145,7 @@ fn inspect_writes(
             | Statement::AugmentField(_, _, _, _)
             | Statement::Expr(_)
             | Statement::Return(_)
+            | Statement::Raise(_)
             | Statement::Break
             | Statement::Continue
             | Statement::Assert(_) => {}
@@ -420,6 +435,50 @@ impl Analyzer {
                 state.0[*source] = Interval::UNKNOWN;
             }
             Statement::Clear(slot) => state.0[*slot] = Interval::UNKNOWN,
+            Statement::Scope { body, clear } => {
+                let mut flow = self.block(body, state, record);
+                for state in [&mut flow.next, &mut flow.breaks, &mut flow.continues]
+                    .into_iter()
+                    .flatten()
+                {
+                    for &slot in clear {
+                        state.0[slot] = Interval::UNKNOWN;
+                    }
+                }
+                return flow;
+            }
+            Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } => {
+                let unknown = State::unknown(state.0.len());
+                let mut flow = self.block(body, state, record);
+                if let Some(next) = flow.next.take() {
+                    flow = flow.join(self.block(orelse, next, record));
+                }
+                // A handler sees any completed prefix, not the normal exit.
+                // Finally may also run on return or an uncaught exception.
+                for handler in handlers {
+                    flow = flow.join(self.block(&handler.body, unknown.clone(), record));
+                }
+                let final_flow = self.block(finalbody, unknown.clone(), record);
+                if !finalbody.is_empty() {
+                    if final_flow.next.is_none() {
+                        flow.next = None;
+                    }
+                    flow.breaks = merge(flow.breaks, final_flow.breaks);
+                    flow.continues = merge(flow.continues, final_flow.continues);
+                }
+                for state in [&mut flow.next, &mut flow.breaks, &mut flow.continues]
+                    .into_iter()
+                    .flatten()
+                {
+                    *state = unknown.clone();
+                }
+                return flow;
+            }
             Statement::IterNext {
                 key, value, ready, ..
             } => {
@@ -454,6 +513,12 @@ impl Analyzer {
             }
             Statement::Return(value) => {
                 self.expression(value, &state, record);
+                return Flow::default();
+            }
+            Statement::Raise(value) => {
+                if let Some(value) = value {
+                    self.expression(value, &state, record);
+                }
                 return Flow::default();
             }
             Statement::Assert(test) => {
@@ -668,6 +733,12 @@ impl Analyzer {
             | ExprKind::Not(value)
             | ExprKind::Field(value, _) => {
                 self.expression(value, state, record);
+                Interval::UNKNOWN
+            }
+            ExprKind::Exception { message, .. } => {
+                if let Some(message) = message {
+                    self.expression(message, state, record);
+                }
                 Interval::UNKNOWN
             }
             ExprKind::Str(_) | ExprKind::None => Interval::UNKNOWN,
@@ -1007,6 +1078,11 @@ mod tests {
                     expression(left, output);
                     expression(right, output);
                 }
+                ExprKind::Exception { message, .. } => {
+                    if let Some(message) = message {
+                        expression(message, output);
+                    }
+                }
                 ExprKind::Int(_)
                 | ExprKind::Bool(_)
                 | ExprKind::Str(_)
@@ -1038,6 +1114,25 @@ mod tests {
                     Statement::While(test, body) => {
                         expression(test, output);
                         block(body, output);
+                    }
+                    Statement::Scope { body, .. } => block(body, output),
+                    Statement::Try {
+                        body,
+                        handlers,
+                        orelse,
+                        finalbody,
+                    } => {
+                        for body in [body, orelse, finalbody] {
+                            block(body, output);
+                        }
+                        for handler in handlers {
+                            block(&handler.body, output);
+                        }
+                    }
+                    Statement::Raise(value) => {
+                        if let Some(value) = value {
+                            expression(value, output);
+                        }
                     }
                     Statement::For { args, body, .. } => {
                         for arg in args {
@@ -1244,13 +1339,16 @@ def descending(values: list[int]) -> None:
         assert_eq!(facts.integer(value), None);
         let function = &module.functions[0];
         let small = facts.small_locals(function);
+        let Statement::Scope { body, .. } = &function.body[1] else {
+            panic!("expected range scope")
+        };
         let Statement::For {
             target,
             cursor,
             stop,
             step,
             ..
-        } = &function.body[1]
+        } = &body[0]
         else {
             panic!("expected range loop")
         };
@@ -1279,6 +1377,13 @@ def controls(values: list[int], step: int) -> None:
         let loops = module.functions[0]
             .body
             .iter()
+            .flat_map(|statement| {
+                if let Statement::Scope { body, .. } = statement {
+                    body.as_slice()
+                } else {
+                    std::slice::from_ref(statement)
+                }
+            })
             .filter(|statement| matches!(statement, Statement::For { .. }))
             .collect::<Vec<_>>();
         assert_eq!(loops.len(), 5);
