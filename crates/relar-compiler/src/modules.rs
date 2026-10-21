@@ -52,6 +52,8 @@ pub(crate) enum IntrinsicModule {
     Tempfile,
     Subprocess,
     Os,
+    Urllib,
+    UrllibParse,
     Collections,
     CollectionsAbc,
     Io,
@@ -68,6 +70,7 @@ pub(crate) enum Intrinsic {
     Callable,
     UnsupportedOperation,
     JsonDecode,
+    JsonEncode,
     Dataclass,
     DataclassField,
     SelfType,
@@ -78,6 +81,7 @@ pub(crate) enum Intrinsic {
     SubprocessError,
     CalledProcessError,
     Environ,
+    Unquote,
 }
 
 impl IntrinsicModule {
@@ -90,6 +94,8 @@ impl IntrinsicModule {
             "tempfile" => Some(Self::Tempfile),
             "subprocess" => Some(Self::Subprocess),
             "os" => Some(Self::Os),
+            "urllib" => Some(Self::Urllib),
+            "urllib.parse" => Some(Self::UrllibParse),
             "collections" => Some(Self::Collections),
             "collections.abc" => Some(Self::CollectionsAbc),
             "io" => Some(Self::Io),
@@ -100,6 +106,9 @@ impl IntrinsicModule {
     }
 
     fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::Urllib && name == "parse" {
+            return Some(Binding::IntrinsicModule(Self::UrllibParse));
+        }
         if self == Self::Collections && name == "abc" {
             return Some(Binding::IntrinsicModule(Self::CollectionsAbc));
         }
@@ -115,6 +124,7 @@ impl IntrinsicModule {
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::RelarJson, "decode") => Intrinsic::JsonDecode,
+            (Self::RelarJson, "encode") => Intrinsic::JsonEncode,
             (Self::Dataclasses, "dataclass") => Intrinsic::Dataclass,
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
             (Self::Pathlib, "Path") => Intrinsic::Path,
@@ -124,6 +134,7 @@ impl IntrinsicModule {
             (Self::Subprocess, "SubprocessError") => Intrinsic::SubprocessError,
             (Self::Subprocess, "CalledProcessError") => Intrinsic::CalledProcessError,
             (Self::Os, "environ") => Intrinsic::Environ,
+            (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
             _ => return None,
         };
         Some(Binding::Intrinsic(symbol))
@@ -416,14 +427,10 @@ impl Loader {
                 for alias in &import.names {
                     let name = alias.name.as_str();
                     if let Some(module) = self.intrinsic_module(name)? {
-                        if matches!(name, "collections.abc" | "relar.json")
-                            && alias.asname.is_none()
+                        if alias.asname.is_none()
+                            && let Some((local, _)) = name.split_once('.')
+                            && let Some(namespace) = IntrinsicModule::named(local)
                         {
-                            let (local, namespace) = if name == "collections.abc" {
-                                ("collections", IntrinsicModule::Collections)
-                            } else {
-                                ("relar", IntrinsicModule::Relar)
-                            };
                             self.bind(id, local, Binding::IntrinsicModule(namespace), alias)?;
                             continue;
                         }

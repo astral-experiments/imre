@@ -75,6 +75,7 @@ unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Vec<usize> {
                 match kind {
                     1 => left.cmp(&right),
                     3 => (&*(left as *const Str)).cmp(&*(right as *const Str)),
+                    6 => super::values::tuple_order(left as *const usize, right as *const usize),
                     8 => (&*(left as *const Bytes)).cmp(&*(right as *const Bytes)),
                     _ => fail("SystemError", "unsupported sort key representation"),
                 }
@@ -89,7 +90,8 @@ unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Vec<usize> {
 ///
 /// # Safety
 /// Both pointers are rooted exact lists of equal length with the supplied kinds;
-/// kind 2 denotes List, all others a Sequence Object. Keys are bool/int/str/bytes.
+/// Kind 2 denotes List, all others a Sequence Object. Keys are ordered scalars or
+/// immutable tuples whose fields have a compiler-proved total order.
 /// Values own each element independently and cannot be accessed reentrantly.
 /// The same list may supply both pointers: key reading ends before any mutation.
 #[unsafe(no_mangle)]
@@ -127,20 +129,27 @@ fn string_capacity(length: Option<usize>) -> usize {
         .unwrap_or_else(|| fail("MemoryError", "string is too large"))
 }
 
+/// Joins an exact string sequence, retaining a single item without copying it.
+///
 /// # Safety
 /// The separator and exact list[str] are rooted. No callback or mutation occurs
-/// during the call; only a fresh string owner escapes the storage borrow.
+/// during the call; only an independent string owner escapes the storage borrow.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_str_join(
     separator: *const Str,
     values: *const Object,
 ) -> *const Str {
     // SAFETY: immutable string contents remain rooted by the caller and list.
-    let result = unsafe {
+    unsafe {
         let separator = &*separator;
         object(values).0.with(|storage| {
             let values = storage.sequence();
             values.check_kind(3);
+            if let [word] = values.values.as_slice() {
+                let value = *word as *const Str;
+                Rc::increment_strong_count(value);
+                return value;
+            }
             let separators = string_capacity(
                 separator
                     .len()
@@ -156,10 +165,9 @@ pub unsafe extern "C" fn relar_str_join(
                 }
                 result.push_str(&*(word as *const Str));
             }
-            result
+            Rc::into_raw(Rc::new(result))
         })
-    };
-    Rc::into_raw(Rc::new(result))
+    }
 }
 
 /// # Safety
@@ -288,6 +296,23 @@ mod tests {
             super::super::relar_object_release(values);
         }
         assert!(texts.iter().all(|text| Rc::strong_count(text) == 1));
+    }
+
+    #[test]
+    fn single_item_join_keeps_an_owner_after_the_input_list_is_released() {
+        let separator = Rc::new(Str::from("unused separator"));
+        let text = Rc::new(Str::from("an independently owned λ🙂 string"));
+        // SAFETY: the list retains text; joining transfers a second string owner.
+        unsafe {
+            let values = super::super::relar_seq_new(3);
+            super::super::relar_seq_append(values, Rc::as_ptr(&text) as usize, 3);
+            let joined = Rc::from_raw(relar_str_join(Rc::as_ptr(&separator), values));
+            assert!(Rc::ptr_eq(&text, &joined));
+            super::super::relar_object_release(values);
+            drop(text);
+            assert_eq!(Rc::strong_count(&joined), 1);
+            assert_eq!(joined.as_str(), "an independently owned λ🙂 string");
+        }
     }
 
     #[test]

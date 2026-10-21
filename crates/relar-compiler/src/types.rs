@@ -29,6 +29,44 @@ struct Storage {
 pub(crate) struct Types(RefCell<Storage>);
 
 impl Types {
+    /// Hash keys have immutable value semantics without user-defined protocols.
+    /// Tuple fields may be nullable; mutable records and containers never enter
+    /// a key, even when the surrounding tuple itself is immutable.
+    pub(crate) fn hashable_key(&self, ty: Type) -> bool {
+        matches!(ty, Type::Int | Type::Str | Type::Bytes)
+            || matches!(ty, Type::Tuple(_)) && self.immutable_key_field(ty)
+    }
+
+    fn immutable_key_field(&self, ty: Type) -> bool {
+        if let Some(payload) = self.payload(ty) {
+            return self.immutable_key_field(payload);
+        }
+        match ty {
+            Type::Int | Type::Bool | Type::Str | Type::Bytes | Type::None => true,
+            Type::Tuple(_) => self
+                .fields(ty)
+                .unwrap()
+                .into_iter()
+                .all(|field| self.immutable_key_field(field)),
+            _ => false,
+        }
+    }
+
+    /// A sealed total order permits native stable sorting without comparison
+    /// callbacks. Nullable fields and floats are excluded because they need
+    /// fallible comparisons or Python's observable boxed-NaN identity.
+    pub(crate) fn ordered_key(&self, ty: Type) -> bool {
+        match ty {
+            Type::Int | Type::Bool | Type::Str | Type::Bytes => true,
+            Type::Tuple(_) => self
+                .fields(ty)
+                .unwrap()
+                .into_iter()
+                .all(|field| field == Type::None || self.ordered_key(field)),
+            _ => false,
+        }
+    }
+
     /// Joins values only when one existing concrete or nullable layout can hold both.
     pub(crate) fn join(&self, left: Type, right: Type) -> Option<Type> {
         if left == right || self.payload(left) == Some(right) {

@@ -22,7 +22,7 @@ def main() -> None:
         2,
         1000000000000000000000000000000,
     ]
-    for text in ["", "a", "aé🌍\x00e\u0301"]:
+    for text in ["", "a", "abc\x00xyz", "aé🌍\x00e\u0301"]:
         numbers = [index for index in range(len(text))]
         print(text[:])
         print(text[::])

@@ -5,6 +5,7 @@
 //! a nullable value; optional booleans use 0=None, 1=False, and 2=True.
 //! Bare float words hold all binary64 bits; nullable floats instead own an Rc<f64>.
 
+use smallvec::SmallVec;
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 
@@ -158,16 +159,17 @@ impl Drop for OwnedWord {
 }
 
 /// A homogeneous buffer; the descriptor is shared by all element words.
+/// Three words fit inline; spilling preserves their existing owned references.
 pub(super) struct Words {
     pub(super) kind: WordKind,
-    pub(super) values: Vec<usize>,
+    pub(super) values: SmallVec<[usize; 3]>,
 }
 
 impl Words {
     pub(super) fn new(kind: u32) -> Self {
         Self {
             kind: WordKind::new(kind),
-            values: Vec::new(),
+            values: SmallVec::new(),
         }
     }
 
@@ -191,6 +193,74 @@ impl Drop for Words {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn inline_words_fit_the_existing_object_layout() {
+        assert_eq!(std::mem::size_of::<Words>(), 40);
+        assert_eq!(std::mem::size_of::<Object>(), 48);
+    }
+
+    #[test]
+    fn sequence_spill_preserves_aliases_views_and_transferred_owners() {
+        use super::super::{
+            relar_seq_append, relar_seq_data_readonly, relar_seq_len, relar_seq_new, relar_seq_pop,
+        };
+
+        // SAFETY: every handle stays rooted, readonly views end before mutation,
+        // and each new or popped owner is adopted exactly once.
+        unsafe {
+            let child = Rc::from_raw(relar_seq_new(1));
+            let weak = Rc::downgrade(&child);
+            let word = Rc::as_ptr(&child) as usize;
+            let sequence = Rc::from_raw(relar_seq_new(5));
+            let alias = Rc::clone(&sequence);
+            for _ in 0..3 {
+                relar_seq_append(Rc::as_ptr(&sequence), word, 5);
+            }
+            assert_eq!(Rc::strong_count(&child), 4);
+            assert!(
+                !sequence
+                    .0
+                    .with(|storage| storage.sequence().values.spilled())
+            );
+            {
+                let view = relar_seq_data_readonly(Rc::as_ptr(&sequence));
+                assert_eq!(std::slice::from_raw_parts(view, 3), &[word; 3]);
+            }
+
+            relar_seq_append(Rc::as_ptr(&alias), word, 5);
+            assert_eq!(Rc::strong_count(&child), 5);
+            assert!(
+                sequence
+                    .0
+                    .with(|storage| storage.sequence().values.spilled())
+            );
+            assert_eq!(
+                Int(relar_seq_len(Rc::as_ptr(&sequence))).as_small(),
+                Some(4)
+            );
+            {
+                let view = relar_seq_data_readonly(Rc::as_ptr(&alias));
+                assert_eq!(std::slice::from_raw_parts(view, 4), &[word; 4]);
+            }
+
+            let popped = Rc::from_raw(relar_seq_pop(Rc::as_ptr(&alias)) as *const Object);
+            assert!(Rc::ptr_eq(&child, &popped));
+            assert_eq!(Rc::strong_count(&child), 5);
+            assert_eq!(
+                Int(relar_seq_len(Rc::as_ptr(&sequence))).as_small(),
+                Some(3)
+            );
+            drop(child);
+            drop(sequence);
+            assert_eq!(Rc::strong_count(&popped), 4);
+            drop(alias);
+            assert_eq!(Rc::strong_count(&popped), 1);
+            drop(popped);
+            assert!(weak.upgrade().is_none());
+        }
+    }
 
     #[test]
     fn float_words_distinguish_unboxed_bits_from_optional_owners() {

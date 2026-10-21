@@ -2,6 +2,7 @@
 //! No operation calls user code or mutates a container; acyclic checked types
 //! bound recursion and keep every borrowed child rooted by its original owner.
 
+use std::cmp::Ordering;
 use std::fmt::Write;
 use std::rc::Rc;
 
@@ -12,6 +13,50 @@ use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
 const GENERATED_EQ: u32 = 1;
 const GENERATED_REPR: u32 = 2;
 const TUPLE: u32 = 1;
+
+/// Compares an exact immutable tuple lexicographically. The checker excludes
+/// nullable and float fields, so comparison is total and cannot invoke Python
+/// protocols or raise an exception partway through a native sort.
+///
+/// # Safety
+/// Both pointers root initialized tuples of the same exact ordered type.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_tuple_compare(left: *const usize, right: *const usize) -> i32 {
+    // SAFETY: the caller proves the identical static ordered tuple shape.
+    unsafe { tuple_order(left, right) as i32 }
+}
+
+/// # Safety
+/// Both rooted tuples share a descriptor containing only ordered scalar/tuple fields.
+pub(super) unsafe fn tuple_order(left: *const usize, right: *const usize) -> Ordering {
+    if left == right {
+        return Ordering::Equal;
+    }
+    // SAFETY: the exact tuple type supplies this live immutable descriptor.
+    let layout = unsafe { descriptor(left) };
+    for index in 0..layout.length {
+        // SAFETY: both payloads have the same initialized concrete field layout.
+        let order = unsafe {
+            let kind = WordKind::new(*layout.kinds.add(index));
+            let left = kind.read_record_field(left.add(index));
+            let right = kind.read_record_field(right.add(index));
+            match kind.raw() {
+                0 => Ordering::Equal,
+                1 => left.cmp(&right),
+                2 if left & right & 1 != 0 => (left as isize).cmp(&(right as isize)),
+                2 => crate::relar_int_compare(left, right).cmp(&0),
+                3 => (&*(left as *const Str)).cmp(&*(right as *const Str)),
+                6 => tuple_order(left as *const usize, right as *const usize),
+                8 => (&*(left as *const Bytes)).cmp(&*(right as *const Bytes)),
+                _ => unreachable!("the checker proves ordered immutable tuple fields"),
+            }
+        };
+        if order != Ordering::Equal {
+            return order;
+        }
+    }
+    Ordering::Equal
+}
 
 /// Uses Python 3.13+ dataclass equality: identical objects compare equal before
 /// fieldwise comparison, which deliberately has no tuple-style NaN shortcut.

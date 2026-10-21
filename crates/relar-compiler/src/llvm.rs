@@ -1,5 +1,6 @@
 //! Ownership lowering and textual LLVM emission, with no C or interpreter layer.
 
+use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
@@ -15,10 +16,12 @@ mod callables;
 mod conditionals;
 mod integer_regions;
 mod json;
+mod literals;
 mod paths;
 mod processes;
 mod records;
 mod stdlib;
+mod text;
 mod truthiness;
 mod unions;
 
@@ -139,6 +142,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         code: String::new(),
         entry_allocas: String::new(),
         strings: Vec::new(),
+        string_literals: BTreeMap::new(),
         literal_globals: literal_globals(module),
         next_value: 0,
         next_label: 0,
@@ -197,6 +201,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         }
         output.push_str("\"\n");
     }
+    output.push_str(&emitter.string_literal_pool());
     output.push_str(&emitter.code);
     // Layout hints never replace the representation, overflow, or error guards.
     output.push_str("\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n");
@@ -209,6 +214,7 @@ struct Emitter<'a, 'module> {
     code: String,
     entry_allocas: String,
     strings: Vec<Vec<u8>>,
+    string_literals: BTreeMap<Vec<u8>, usize>,
     literal_globals: Vec<Option<String>>,
     next_value: usize,
     next_label: usize,
@@ -1152,6 +1158,9 @@ impl Emitter<'_, '_> {
                 value.operand
             ));
         }
+        if entry {
+            self.line("call void @relar_init_string_literals()");
+        }
         if entry && self.uses_sys_argv {
             self.line("call void @relar_args_init(i32 %argc, ptr %argv)");
         }
@@ -1163,6 +1172,7 @@ impl Emitter<'_, '_> {
         self.cleanup();
         if entry {
             self.cleanup_globals();
+            self.line("call void @relar_clear_string_literals()");
             if self.uses_sys_argv {
                 self.line("call void @relar_args_clear()");
             }
@@ -1179,6 +1189,7 @@ impl Emitter<'_, '_> {
         self.cleanup();
         if entry {
             self.cleanup_globals();
+            self.line("call void @relar_clear_string_literals()");
             if self.uses_sys_argv {
                 self.line("call void @relar_args_clear()");
             }
@@ -1591,11 +1602,13 @@ impl Emitter<'_, '_> {
 
     /// Emits exact source bytes without routing arbitrary byte values through UTF-8.
     fn literal_bytes(&mut self, contents: &[u8], ty: Type) -> Value {
+        if ty == Type::Str {
+            return self.string_literal(contents);
+        }
         let id = self.strings.len();
         self.strings.push(contents.to_vec());
         let function = match ty {
             Type::Int => "relar_int_literal",
-            Type::Str => "relar_str_literal",
             Type::Bytes => "relar_bytes_literal",
             _ => unreachable!("literal representation was checked"),
         };
@@ -2527,6 +2540,26 @@ impl Emitter<'_, '_> {
                 };
                 self.instruction(format!("icmp {predicate} i8 {equal}, 0"))
             }
+            Type::Tuple(_) => {
+                if matches!(op, Compare::Equal | Compare::NotEqual) {
+                    let equal = self.instruction(format!(
+                        "call i8 @relar_record_equal(ptr {}, ptr {})",
+                        left.operand, right.operand
+                    ));
+                    let predicate = if matches!(op, Compare::Equal) {
+                        "ne"
+                    } else {
+                        "eq"
+                    };
+                    self.instruction(format!("icmp {predicate} i8 {equal}, 0"))
+                } else {
+                    let order = self.instruction(format!(
+                        "call i32 @relar_tuple_compare(ptr {}, ptr {})",
+                        left.operand, right.operand
+                    ));
+                    self.instruction(format!("icmp {predicate} i32 {order}, 0"))
+                }
+            }
             Type::Bool
             | Type::None
             | Type::Class(_)
@@ -2544,7 +2577,6 @@ impl Emitter<'_, '_> {
             | Type::Dict(_)
             | Type::Set(_)
             | Type::Iterator
-            | Type::Tuple(_)
             | Type::Optional(_)
             | Type::Callable(_)
             | Type::Union(_) => {
@@ -2703,21 +2735,41 @@ impl Emitter<'_, '_> {
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
+        if matches!(builtin, Builtin::ListGet)
+            && let Some(value) = self.rsplit_last(expressions)
+        {
+            return value;
+        }
         let args = expressions
             .iter()
             .map(|arg| self.operand(arg))
             .collect::<Vec<_>>();
         let result = match builtin {
+            Builtin::Text(operation) => self.text_builtin(*operation, &args, returns),
             Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
-            Builtin::JsonDecode(class) => Value {
+            Builtin::JsonDecode(schema) => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
-                    "call ptr @relar_json_decode(ptr {}, ptr @json_class_{class})",
+                    "call ptr @relar_json_decode(ptr {}, ptr @{})",
                     args[0].value.operand,
+                    json::schema_name(*schema),
                 )),
                 small_integer: false,
             },
+            Builtin::JsonEncode(schema) => {
+                let word = self.word(&args[0].value);
+                let ascii = self.instruction(format!("zext i1 {} to i8", args[2].value.operand));
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @relar_json_encode(i64 {word}, ptr @{}, i64 {}, i8 {ascii})",
+                        json::schema_name(*schema),
+                        args[1].value.operand,
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::SortByKeys
             | Builtin::StringJoin
             | Builtin::StringReplace
@@ -3530,7 +3582,7 @@ impl Emitter<'_, '_> {
     /// the caller keeps both operands rooted throughout either operation.
     fn set_member(&mut self, set: &Value, value: &Value, insert: bool) {
         debug_assert!(matches!(set.ty, Type::Set(_)));
-        debug_assert!(matches!(value.ty, Type::Int | Type::Str | Type::Bytes));
+        debug_assert!(self.module.types.hashable_key(value.ty));
         let word = self.word(value);
         let operation = if insert { "add" } else { "discard" };
         self.line(format!(
@@ -4114,10 +4166,12 @@ declare void @relar_exception_reraise()
 declare void @relar_flush_stdout()
 declare ptr @relar_record_new(ptr)
 declare ptr @relar_json_decode(ptr, ptr)
+declare ptr @relar_json_encode(i64, ptr, i64, i8)
 declare ptr @relar_record_cached_result(ptr)
 declare void @relar_record_retain(ptr)
 declare void @relar_record_release(ptr)
 declare i8 @relar_record_equal(ptr, ptr) nounwind memory(read)
+declare i32 @relar_tuple_compare(ptr, ptr) nounwind memory(read)
 declare ptr @relar_value_repr(i64, i32)
 declare void @relar_object_retain(ptr)
 declare void @relar_object_release(ptr)
@@ -4157,6 +4211,13 @@ declare ptr @relar_str_append_utf8_owned(ptr, ptr, i64)
 declare i8 @relar_str_get_part(ptr, i64, ptr, ptr)
 declare ptr @relar_int_str_part(i64, ptr, ptr)
 declare ptr @relar_str_split_whitespace(ptr)
+declare ptr @relar_str_split(ptr, ptr, i64, i8)
+declare ptr @relar_str_rsplit_last(ptr, ptr)
+declare ptr @relar_str_strip(ptr, ptr, i32)
+declare i8 @relar_str_affix(ptr, ptr, i8)
+declare i64 @relar_str_find(ptr, ptr, i64)
+declare void @relar_str_partition(ptr, ptr, ptr)
+declare ptr @relar_str_unquote(ptr)
 declare ptr @relar_str_splitlines(ptr)
 declare ptr @relar_str_rstrip(ptr, ptr)
 declare void @relar_sort_by_keys(ptr, i32, ptr, i32, i8)
@@ -4473,6 +4534,43 @@ slow:
 #[cfg(test)]
 mod tests {
     use crate::{CompileOptions, compile};
+
+    #[test]
+    fn string_constants_are_rooted_once_and_cleared_on_both_main_exits() {
+        let llvm = compile(
+            "def text() -> str:\n    return 'shared'\nprint('shared')\nprint(text())\n",
+            &CompileOptions {
+                address_sanitizer: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(llvm.matches("call ptr @relar_str_literal(").count(), 1);
+        for operation in ["init", "clear"] {
+            assert!(llvm.contains(&format!(
+                "define internal void @relar_{operation}_string_literals() sanitize_address {{"
+            )));
+        }
+        let body = llvm
+            .split_once("define internal ptr @fn_0(")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        assert!(!body.contains("@relar_str_literal("));
+        assert!(body.contains("@relar_str_retain("));
+        let main = llvm.split_once("define i32 @main(").unwrap().1;
+        assert_eq!(
+            main.matches("call void @relar_init_string_literals()")
+                .count(),
+            1
+        );
+        assert_eq!(
+            main.matches("call void @relar_clear_string_literals()")
+                .count(),
+            2
+        );
+    }
 
     /// Classifies only assignments to a source slot, excluding its argument and
     /// zero-initialization stores. A generic replacement releases its old load
