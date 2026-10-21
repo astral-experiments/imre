@@ -12,6 +12,7 @@ enum Shape {
     Set(Type),
     Tuple(Vec<Type>),
     Optional(Type),
+    Union(Vec<Type>),
 }
 
 #[derive(Default)]
@@ -38,7 +39,48 @@ impl Types {
         } else if right == Type::None {
             Some(self.optional(left))
         } else {
-            None
+            self.union(&[left, right])
+        }
+    }
+
+    /// Canonicalizes a deliberately bounded union. Mutable container layouts
+    /// remain invariant; only str and bytes may form a nonnullable sum today.
+    pub(crate) fn union(&self, values: &[Type]) -> Option<Type> {
+        let mut members = Vec::new();
+        let mut nullable = false;
+        for &value in values {
+            let value = if let Some(payload) = self.payload(value) {
+                nullable = true;
+                payload
+            } else {
+                value
+            };
+            if value == Type::None {
+                nullable = true;
+            } else {
+                for member in self.members(value).unwrap_or_else(|| vec![value]) {
+                    if !members.contains(&member) {
+                        members.push(member);
+                    }
+                }
+            }
+        }
+        let ty = match members.as_slice() {
+            [] if nullable => Type::None,
+            [member] => *member,
+            [a, b] if matches!((a, b), (Type::Str, Type::Bytes) | (Type::Bytes, Type::Str)) => {
+                Type::Union(self.intern(Shape::Union(vec![Type::Str, Type::Bytes])))
+            }
+            _ => return None,
+        };
+        Some(if nullable { self.optional(ty) } else { ty })
+    }
+
+    pub(crate) fn members(&self, ty: Type) -> Option<Vec<Type>> {
+        let Type::Union(id) = ty else { return None };
+        match &self.0.borrow().shapes[id] {
+            Shape::Union(members) => Some(members.clone()),
+            _ => unreachable!("union type identity has a union shape"),
         }
     }
 
@@ -190,7 +232,9 @@ impl Types {
         } else if let Some((key, value)) = self.mapping(ty) {
             vec![key, value]
         } else {
-            self.fields(ty).unwrap_or_default()
+            self.fields(ty)
+                .or_else(|| self.members(ty))
+                .unwrap_or_default()
         }
     }
 
@@ -226,6 +270,13 @@ impl Types {
                 "{} | None",
                 self.describe(self.payload(ty).unwrap(), class_name)
             ),
+            Type::Union(_) => self
+                .members(ty)
+                .unwrap()
+                .into_iter()
+                .map(|ty| self.describe(ty, class_name))
+                .collect::<Vec<_>>()
+                .join(" | "),
             _ => ty.to_string(),
         }
     }

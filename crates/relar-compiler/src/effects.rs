@@ -168,8 +168,19 @@ fn expression(value: &Expr, functions: &[bool]) -> bool {
 
 fn binary(op: Binary) -> bool {
     match op {
-        Binary::Divide | Binary::FloorDivide | Binary::Modulo | Binary::Repeat => true,
-        Binary::Add | Binary::Subtract | Binary::Multiply | Binary::Concat => false,
+        Binary::Divide
+        | Binary::FloorDivide
+        | Binary::Modulo
+        | Binary::Repeat
+        | Binary::LeftShift
+        | Binary::RightShift => true,
+        Binary::Add
+        | Binary::Subtract
+        | Binary::Multiply
+        | Binary::Concat
+        | Binary::BitAnd
+        | Binary::BitOr
+        | Binary::BitXor => false,
     }
 }
 
@@ -204,12 +215,18 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         Builtin::Float => args
             .first()
             .is_none_or(|arg| !matches!(arg.ty, Type::Float | Type::Bool)),
-        Builtin::Bool
+        Builtin::GlobalGet(_)
+        | Builtin::GlobalSet(_)
+        | Builtin::Bool
+        | Builtin::UnionInject
+        | Builtin::UnionProject
+        | Builtin::IsInstance(_)
         | Builtin::Len
         | Builtin::Append
         | Builtin::IsNone
         | Builtin::Split
         | Builtin::SplitLines
+        | Builtin::RStrip
         | Builtin::Str
         | Builtin::TextClosed
         | Builtin::DictGetDefault
@@ -223,7 +240,10 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::StringIter
         | Builtin::BytesIter
         | Builtin::Encode
-        | Builtin::ExceptionMessage => false,
+        | Builtin::ExceptionMessage
+        | Builtin::ExceptionWithCause
+        | Builtin::ExceptionCause
+        | Builtin::ExceptionSuppressContext => false,
     }
 }
 
@@ -260,6 +280,7 @@ mod tests {
         let module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
+            globals: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(call(1, Vec::new()))]),
                 function(vec![Statement::Return(call(2, Vec::new()))]),
@@ -291,6 +312,7 @@ mod tests {
         let module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
+            globals: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(integer())]),
                 function(vec![Statement::Raise(None)]),

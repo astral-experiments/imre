@@ -1,8 +1,9 @@
 //! Explicit language errors; no Rust unwind crosses the generated-code ABI.
 //!
 //! Pending and dynamically active errors own independent references. Their
-//! storage contains only a kind and immutable rendered message, so exceptions
-//! cannot introduce traceback or container ownership cycles.
+//! Explicit causes form an immutable chain: the compiler attaches them only to
+//! freshly constructed, unescaped exceptions. No traceback or mutable exception
+//! attributes can introduce ownership cycles.
 
 use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
@@ -142,6 +143,24 @@ impl Kind {
 pub(super) struct Exception {
     kind: Kind,
     message: Rc<Str>,
+    cause: Option<Rc<Object>>,
+    suppress_context: bool,
+}
+
+impl Drop for Exception {
+    /// Release uniquely owned cause tails iteratively, including very long chains.
+    fn drop(&mut self) {
+        let mut next = self.cause.take();
+        while let Some(cause) = next {
+            let Ok(object) = Rc::try_unwrap(cause) else {
+                break;
+            };
+            let Storage::Exception(mut exception) = object.0.into_inner() else {
+                unreachable!("exception causes have exact exception storage");
+            };
+            next = exception.cause.take();
+        }
+    }
 }
 
 /// An owned error returned from a storage access before pending state is changed.
@@ -201,6 +220,8 @@ fn new_exception(kind: Kind, message: Rc<Str>) -> Rc<Object> {
     Rc::new(Object(StorageCell::new(Storage::Exception(Exception {
         kind,
         message,
+        cause: None,
+        suppress_context: false,
     }))))
 }
 
@@ -244,18 +265,19 @@ unsafe fn acquire_exception(value: *const Object) -> Option<Rc<Object>> {
 }
 
 impl Storage {
-    fn exception_kind(&self) -> Kind {
+    fn exception(&self) -> &Exception {
         match self {
-            Self::Exception(exception) => exception.kind,
+            Self::Exception(exception) => exception,
             _ => fail("SystemError", "expected an exception object"),
         }
     }
 
+    fn exception_kind(&self) -> Kind {
+        self.exception().kind
+    }
+
     fn exception_message(&self) -> Rc<Str> {
-        match self {
-            Self::Exception(exception) => exception.message.clone(),
-            _ => fail("SystemError", "expected an exception object"),
-        }
+        self.exception().message.clone()
     }
 }
 
@@ -338,6 +360,61 @@ pub unsafe extern "C" fn relar_exception_message(value: *const Object) -> *const
     Rc::into_raw(unsafe { object(value).0.with(Storage::exception_message) })
 }
 
+/// Attaches an explicit cause before publishing a fresh exception and returns
+/// an additional owned reference to that same exception. Null represents `from None`.
+///
+/// # Safety
+/// `value` is a fresh, unescaped exception, and `cause` is a rooted exception or
+/// null. The cause cannot contain `value`; neither input is consumed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_exception_with_cause(
+    value: *const Object,
+    cause: *const Object,
+) -> *const Object {
+    // SAFETY: the caller roots the nullable exception cause.
+    let cause = unsafe { acquire_exception(cause) };
+    // SAFETY: the fresh object cannot alias a cause, and no storage borrow escapes.
+    unsafe {
+        object(value).0.with_mut(|storage| {
+            let Storage::Exception(exception) = storage else {
+                fail("SystemError", "expected an exception object");
+            };
+            debug_assert!(exception.cause.is_none() && !exception.suppress_context);
+            exception.cause = cause;
+            exception.suppress_context = true;
+        });
+        relar_exception_retain(value);
+    }
+    value
+}
+
+/// Returns an independently owned explicit cause, or null when absent.
+///
+/// # Safety
+/// `value` is a rooted exception.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_exception_cause(value: *const Object) -> *const Object {
+    // SAFETY: the returned clone owns the cause after storage access ends.
+    unsafe {
+        object(value)
+            .0
+            .with(|storage| storage.exception().cause.clone())
+            .map_or(std::ptr::null(), Rc::into_raw)
+    }
+}
+
+/// # Safety
+/// `value` is a rooted exception.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_exception_suppress_context(value: *const Object) -> u8 {
+    // SAFETY: only immutable metadata escapes storage access.
+    unsafe {
+        object(value)
+            .0
+            .with(|storage| u8::from(storage.exception().suppress_context))
+    }
+}
+
 /// Acquires the dynamically active exception, or returns null outside a handler.
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_exception_current() -> *const Object {
@@ -394,15 +471,35 @@ pub extern "C" fn relar_error_unhandled() -> i32 {
     let Some(pending) = pending else {
         return 0;
     };
-    // SAFETY: pending owns an exception; only an acquired message and kind escape.
-    let (kind, message) = unsafe {
-        pending
-            .0
-            .with(|storage| (storage.exception_kind(), storage.exception_message()))
-    };
+    let mut chain = Vec::new();
+    let mut current = Some(pending.clone());
+    while let Some(exception) = current {
+        // SAFETY: the current owner roots the exception; only owned data escapes.
+        let (kind, message, cause) = unsafe {
+            exception.0.with(|storage| {
+                let exception = storage.exception();
+                (
+                    exception.kind,
+                    exception.message.clone(),
+                    exception.cause.clone(),
+                )
+            })
+        };
+        chain.push((kind, message));
+        current = cause;
+    }
     drop(pending);
     let _ = crate::flush_stdout();
-    let _ = writeln!(io::stderr().lock(), "{}: {message}", kind.name());
+    let mut stderr = io::stderr().lock();
+    for (index, (kind, message)) in chain.into_iter().rev().enumerate() {
+        if index != 0 {
+            let _ = writeln!(
+                stderr,
+                "\nThe above exception was the direct cause of the following exception:\n"
+            );
+        }
+        let _ = writeln!(stderr, "{}: {message}", kind.name());
+    }
     1
 }
 
@@ -438,6 +535,60 @@ mod tests {
     fn message(value: &Rc<Object>) -> Rc<Str> {
         // SAFETY: the rooted exception accessor transfers one string reference.
         unsafe { Rc::from_raw(relar_exception_message(Rc::as_ptr(value))) }
+    }
+
+    #[test]
+    fn explicit_causes_preserve_identity_and_independent_ownership() {
+        let original = new_exception(Kind::KeyError, Rc::new(Str::new("original")));
+        let wrapped = new_exception(Kind::ValueError, Rc::new(Str::new("wrapped")));
+        let weak = Rc::downgrade(&original);
+        // SAFETY: wrapped is fresh; every borrowed input remains rooted and each
+        // transferred reference is adopted immediately.
+        unsafe {
+            assert!(relar_exception_cause(Rc::as_ptr(&wrapped)).is_null());
+            assert_eq!(relar_exception_suppress_context(Rc::as_ptr(&wrapped)), 0);
+            let result = Rc::from_raw(relar_exception_with_cause(
+                Rc::as_ptr(&wrapped),
+                Rc::as_ptr(&original),
+            ));
+            assert!(Rc::ptr_eq(&result, &wrapped));
+            assert_eq!(relar_exception_suppress_context(Rc::as_ptr(&wrapped)), 1);
+            let cause = Rc::from_raw(relar_exception_cause(Rc::as_ptr(&wrapped)));
+            assert!(Rc::ptr_eq(&cause, &original));
+            drop((original, wrapped, result));
+            assert_eq!(message(&cause).as_str(), "original");
+            drop(cause);
+            assert!(weak.upgrade().is_none());
+
+            let suppressed = new_exception(Kind::ValueError, Rc::new(Str::new("hidden")));
+            drop(Rc::from_raw(relar_exception_with_cause(
+                Rc::as_ptr(&suppressed),
+                std::ptr::null(),
+            )));
+            assert!(relar_exception_cause(Rc::as_ptr(&suppressed)).is_null());
+            assert_eq!(relar_exception_suppress_context(Rc::as_ptr(&suppressed)), 1);
+        }
+    }
+
+    #[test]
+    fn deep_cause_chains_release_without_recursive_drop() {
+        let message = Rc::new(Str::new("chain"));
+        let mut tail = new_exception(Kind::ValueError, message.clone());
+        let weak_first = Rc::downgrade(&tail);
+        for _ in 0..100_000 {
+            let next = new_exception(Kind::ValueError, message.clone());
+            // SAFETY: next is fresh and tail remains rooted until attachment.
+            unsafe {
+                drop(Rc::from_raw(relar_exception_with_cause(
+                    Rc::as_ptr(&next),
+                    Rc::as_ptr(&tail),
+                )));
+            }
+            tail = next;
+        }
+        drop(tail);
+        assert!(weak_first.upgrade().is_none());
+        assert_eq!(Rc::strong_count(&message), 1);
     }
 
     #[test]

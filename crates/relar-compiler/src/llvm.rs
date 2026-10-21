@@ -4,17 +4,19 @@ use std::fmt::Write;
 
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
-    Binary, Builtin, Compare, ExceptHandler, Expr, ExprKind, Function, Module, Statement, Type,
+    Binary, Builtin, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType, Module,
+    Statement, Type,
 };
 use crate::ranges::RangeFacts;
 use crate::types::Types;
 
 mod truthiness;
+mod unions;
 
 impl Type {
     fn llvm(self) -> &'static str {
         match self {
-            Self::Int | Self::Optional(_) => "i64",
+            Self::Int | Self::Optional(_) | Self::Union(_) => "i64",
             Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
@@ -49,7 +51,7 @@ impl Type {
             | Self::TextIO
             | Self::BinaryIO
             | Self::Tuple(_) => "null",
-            Self::Bool | Self::None | Self::Optional(_) => "0",
+            Self::Bool | Self::None | Self::Optional(_) | Self::Union(_) => "0",
         }
     }
 }
@@ -141,6 +143,15 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
     output.push_str(DECLARATIONS);
     output.push_str(&record_layouts(module));
     output.push_str(&integer_helpers());
+    for (slot, ty) in module.globals.iter().enumerate() {
+        writeln!(
+            output,
+            "@module_value_{slot} = internal global {} {}",
+            ty.llvm(),
+            ty.initial()
+        )
+        .unwrap();
+    }
     for (id, bytes) in emitter.strings.iter().enumerate() {
         write!(
             output,
@@ -338,6 +349,7 @@ impl Emitter<'_, '_> {
         }
         let family = match ty {
             Type::Int => "int",
+            Type::Union(_) => "union",
             Type::Str => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
@@ -502,6 +514,24 @@ impl Emitter<'_, '_> {
                 continue;
             }
             let value = self.take_slot(slot);
+            self.release(&value);
+        }
+    }
+
+    /// Releases initialized module owners and harmless defaults on either exit.
+    fn cleanup_globals(&mut self) {
+        for slot in (0..self.module.globals.len()).rev() {
+            let ty = self.module.globals[slot];
+            let value = Value {
+                ty,
+                operand: self.instruction(format!("load {}, ptr @module_value_{slot}", ty.llvm())),
+                small_integer: false,
+            };
+            self.line(format!(
+                "store {} {}, ptr @module_value_{slot}",
+                ty.llvm(),
+                ty.initial()
+            ));
             self.release(&value);
         }
     }
@@ -790,6 +820,7 @@ impl Emitter<'_, '_> {
         self.start(&self.return_exit.clone());
         self.cleanup();
         if entry {
+            self.cleanup_globals();
             if self.uses_sys_argv {
                 self.line("call void @relar_args_clear()");
             }
@@ -805,6 +836,7 @@ impl Emitter<'_, '_> {
         self.start(&self.error_exit.clone());
         self.cleanup();
         if entry {
+            self.cleanup_globals();
             if self.uses_sys_argv {
                 self.line("call void @relar_args_clear()");
             }
@@ -1199,6 +1231,14 @@ impl Emitter<'_, '_> {
                         operand: "0".into(),
                         small_integer: false,
                     }
+                } else if matches!(
+                    self.module.types.payload(storage).unwrap_or(storage),
+                    Type::Union(_)
+                ) && matches!(
+                    self.module.types.payload(value.ty).unwrap_or(value.ty),
+                    Type::Str | Type::Bytes
+                ) {
+                    self.union_inject(value.clone(), storage)
                 } else {
                     self.present(value.clone(), storage)
                 };
@@ -1583,7 +1623,15 @@ impl Emitter<'_, '_> {
                         left.operand, right.operand
                     ))
                 }
-                Binary::Repeat | Binary::Concat => unreachable!("float arithmetic was checked"),
+                Binary::Repeat
+                | Binary::Concat
+                | Binary::BitAnd
+                | Binary::BitOr
+                | Binary::BitXor
+                | Binary::LeftShift
+                | Binary::RightShift => {
+                    unreachable!("float arithmetic was checked")
+                }
             };
             return Value {
                 ty: Type::Float,
@@ -1623,6 +1671,11 @@ impl Emitter<'_, '_> {
             Binary::Divide => self.call("relar_int_true_divide", Type::Float, &[left, right]),
             Binary::FloorDivide => self.call("int_floordiv", Type::Int, &[left, right]),
             Binary::Modulo => self.call("int_mod", Type::Int, &[left, right]),
+            Binary::BitAnd => self.call("int_and", Type::Int, &[left, right]),
+            Binary::BitOr => self.call("int_or", Type::Int, &[left, right]),
+            Binary::BitXor => self.call("int_xor", Type::Int, &[left, right]),
+            Binary::LeftShift => self.call("int_lshift", Type::Int, &[left, right]),
+            Binary::RightShift => self.call("int_rshift", Type::Int, &[left, right]),
         }
     }
 
@@ -1640,7 +1693,15 @@ impl Emitter<'_, '_> {
         let left = self.ranges.integer(left)?;
         let right = self.ranges.integer(right)?;
         match op {
-            Binary::Add | Binary::Subtract | Binary::Multiply => Some(false),
+            Binary::Add
+            | Binary::Subtract
+            | Binary::Multiply
+            | Binary::BitAnd
+            | Binary::BitOr
+            | Binary::BitXor => Some(false),
+            Binary::LeftShift | Binary::RightShift => {
+                (right.min >= 0 && right.max < 63).then_some(false)
+            }
             Binary::FloorDivide | Binary::Modulo => {
                 if right.min <= 0 && right.max >= 0 {
                     return None;
@@ -1707,6 +1768,21 @@ impl Emitter<'_, '_> {
                 } else {
                     result
                 }
+            }
+            Binary::BitAnd
+            | Binary::BitOr
+            | Binary::BitXor
+            | Binary::LeftShift
+            | Binary::RightShift => {
+                let instruction = match op {
+                    Binary::BitAnd => "and",
+                    Binary::BitOr => "or",
+                    Binary::BitXor => "xor",
+                    Binary::LeftShift => "shl nsw",
+                    Binary::RightShift => "ashr",
+                    _ => unreachable!(),
+                };
+                self.instruction(format!("{instruction} i64 {left}, {right}"))
             }
             Binary::Divide | Binary::Repeat | Binary::Concat => {
                 unreachable!("only proved integer arithmetic")
@@ -1823,7 +1899,8 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::Iterator
             | Type::Tuple(_)
-            | Type::Optional(_) => {
+            | Type::Optional(_)
+            | Type::Union(_) => {
                 unreachable!("container comparison is rejected by the frontend")
             }
         };
@@ -1973,6 +2050,39 @@ impl Emitter<'_, '_> {
             .map(|arg| self.operand(arg))
             .collect::<Vec<_>>();
         let result = match builtin {
+            Builtin::GlobalGet(slot) => {
+                let value = Value {
+                    ty: returns,
+                    operand: self
+                        .instruction(format!("load {}, ptr @module_value_{slot}", returns.llvm())),
+                    small_integer: false,
+                };
+                self.retain(&value);
+                value
+            }
+            Builtin::GlobalSet(slot) => {
+                let value = &args[0].value;
+                self.retain(value);
+                self.line(format!(
+                    "store {} {}, ptr @module_value_{slot}",
+                    value.ty.llvm(),
+                    value.operand
+                ));
+                none()
+            }
+            Builtin::UnionInject => {
+                let value = self.own_operand(args.into_iter().next().unwrap());
+                return self.union_inject(value, returns);
+            }
+            Builtin::UnionProject => {
+                let value = self.own_operand(args.into_iter().next().unwrap());
+                return self.union_project(value, returns);
+            }
+            Builtin::IsInstance(classes) => Value {
+                ty: Type::Bool,
+                operand: self.instance_test(&args[0].value, classes),
+                small_integer: false,
+            },
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("relar_input", Type::Str, &[]),
             Builtin::SysArgv => self.call("relar_sys_argv", returns, &[]),
@@ -2035,6 +2145,40 @@ impl Emitter<'_, '_> {
             }
             Builtin::ExceptionMessage => {
                 self.call("relar_exception_message", Type::Str, &[&args[0].value])
+            }
+            Builtin::ExceptionWithCause => {
+                let cause =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
+                Value {
+                    ty: Type::Exception,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_exception_with_cause(ptr {}, ptr {cause})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::ExceptionCause => {
+                let cause = self.instruction(format!(
+                    "call ptr @relar_exception_cause(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!("ptrtoint ptr {cause} to i64")),
+                    small_integer: false,
+                }
+            }
+            Builtin::ExceptionSuppressContext => {
+                let flag = self.instruction(format!(
+                    "call i8 @relar_exception_suppress_context(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i8 {flag}, 0")),
+                    small_integer: false,
+                }
             }
             Builtin::Str => match args[0].value.ty {
                 Type::Str => return self.own_operand(args.into_iter().next().unwrap()),
@@ -2204,6 +2348,22 @@ impl Emitter<'_, '_> {
             }
             Builtin::Split => self.call("relar_str_split_whitespace", returns, &[&args[0].value]),
             Builtin::SplitLines => self.call("relar_str_splitlines", returns, &[&args[0].value]),
+            Builtin::RStrip => {
+                let chars = if let Some(arg) = args.get(1) {
+                    let word = self.word(&arg.value);
+                    self.decode_word(word, Type::Str).operand
+                } else {
+                    "null".to_owned()
+                };
+                Value {
+                    ty: Type::Str,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_str_rstrip(ptr {}, ptr {chars})",
+                        args[0].value.operand,
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::IsNone => Value {
                 ty: Type::Bool,
                 operand: match args[0].value.ty {
@@ -2237,7 +2397,8 @@ impl Emitter<'_, '_> {
                     | Type::TextIO
                     | Type::BinaryIO
                     | Type::Tuple(_)
-                    | Type::Optional(_) => {
+                    | Type::Optional(_)
+                    | Type::Union(_) => {
                         unreachable!("container printing is rejected")
                     }
                 }
@@ -2349,7 +2510,7 @@ impl Emitter<'_, '_> {
     /// changing ownership. The slot's representation tag controls reclamation.
     fn word(&mut self, value: &Value) -> String {
         match value.ty {
-            Type::Int | Type::Optional(_) => value.operand.clone(),
+            Type::Int | Type::Optional(_) | Type::Union(_) => value.operand.clone(),
             Type::Float => self.instruction(format!("bitcast double {} to i64", value.operand)),
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
@@ -2378,7 +2539,7 @@ impl Emitter<'_, '_> {
     /// Changes only the compiler view of a word, leaving its ownership unchanged.
     fn decode_word(&mut self, word: String, ty: Type) -> Value {
         let operand = match ty {
-            Type::Int | Type::Optional(_) => word,
+            Type::Int | Type::Optional(_) | Type::Union(_) => word,
             Type::Float => self.instruction(format!("bitcast i64 {word} to double")),
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
@@ -2715,6 +2876,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Float => 7,
         Type::Str => 3,
         Type::Bytes => 8,
+        Type::Union(_) => 9,
         Type::ListInt => 4,
         Type::Class(_) | Type::Tuple(_) => 6,
         Type::List(_)
@@ -2882,6 +3044,8 @@ fn fallible(name: &str) -> bool {
             name,
             "int_floordiv"
                 | "int_mod"
+                | "int_lshift"
+                | "int_rshift"
                 | "relar_flush_stdout"
                 | "relar_print_int"
                 | "relar_print_float"
@@ -2981,7 +3145,13 @@ declare void @relar_error_set(ptr)
 declare i32 @relar_error_unhandled()
 declare ptr @relar_exception_new(i32, ptr)
 declare i8 @relar_exception_matches(ptr, i32)
+declare void @relar_union_retain(i64)
+declare void @relar_union_release(i64)
+declare i8 @relar_union_truthy(i64)
 declare ptr @relar_exception_message(ptr)
+declare ptr @relar_exception_with_cause(ptr, ptr)
+declare ptr @relar_exception_cause(ptr)
+declare i8 @relar_exception_suppress_context(ptr)
 declare ptr @relar_exception_current()
 declare ptr @relar_exception_swap_active(ptr)
 declare void @relar_exception_raise(ptr)
@@ -3022,6 +3192,7 @@ declare ptr @relar_str_concat_parts(ptr, i64)
 declare ptr @relar_int_str_part(i64, ptr, ptr)
 declare ptr @relar_str_split_whitespace(ptr)
 declare ptr @relar_str_splitlines(ptr)
+declare ptr @relar_str_rstrip(ptr, ptr)
 declare ptr @relar_int_str(i64)
 declare ptr @relar_bool_str(i8)
 declare ptr @relar_none_str()
@@ -3136,6 +3307,7 @@ big:
         .unwrap();
     }
     output.push_str(&division_helpers());
+    output.push_str(&bitwise_helpers());
     output.push_str(
         r#"
 define internal i32 @compare_int(i64 %a, i64 %b) alwaysinline {
@@ -3205,6 +3377,85 @@ fast:
 done:
   %shift = shl i64 %result, 1
   %encoded = or i64 %shift, 1
+  ret i64 %encoded
+slow:
+  %fallback = call i64 @relar_int_binary(i64 %a, i64 %b, i32 {number})
+  ret i64 %fallback
+}}"#
+        )
+        .unwrap();
+    }
+    output
+}
+
+/// Tagged bitwise results remain small. Shifts guard LLVM's count and signed
+/// overflow constraints before falling back to arbitrary-precision arithmetic.
+fn bitwise_helpers() -> String {
+    let mut output = String::new();
+    for (op, number) in [("and", 5), ("or", 6), ("xor", 7)] {
+        writeln!(
+            output,
+            r#"
+define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
+entry:
+  %both = and i64 %a, %b
+  %tag = and i64 %both, 1
+  %small = icmp eq i64 %tag, 1
+  br i1 %small, label %fast, label %slow
+fast:
+  %result = {op} i64 %a, %b
+  %encoded = or i64 %result, 1
+  ret i64 %encoded
+slow:
+  %fallback = call i64 @relar_int_binary(i64 %a, i64 %b, i32 {number})
+  ret i64 %fallback
+}}"#
+        )
+        .unwrap();
+    }
+    for (op, number, calculation) in [
+        (
+            "lshift",
+            8,
+            r#"  %safe_count = icmp ult i64 %y, 63
+  br i1 %safe_count, label %shift, label %slow
+shift:
+  %result = shl i64 %x, %y
+  %restored = ashr i64 %result, %y
+  %lost = icmp ne i64 %restored, %x
+  %under = icmp slt i64 %result, -4611686018427387904
+  %over = icmp sgt i64 %result, 4611686018427387903
+  %outside = or i1 %under, %over
+  %overflow = or i1 %lost, %outside
+  br i1 %overflow, label %slow, label %done"#,
+        ),
+        (
+            "rshift",
+            9,
+            r#"  %within = icmp ult i64 %y, 63
+  %count = select i1 %within, i64 %y, i64 63
+  %result = ashr i64 %x, %count
+  br label %done"#,
+        ),
+    ] {
+        writeln!(
+            output,
+            r#"
+define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
+entry:
+  %both = and i64 %a, %b
+  %tag = and i64 %both, 1
+  %small = icmp eq i64 %tag, 1
+  %nonnegative = icmp sge i64 %b, 1
+  %can_fast = and i1 %small, %nonnegative
+  br i1 %can_fast, label %fast, label %slow
+fast:
+  %x = ashr i64 %a, 1
+  %y = ashr i64 %b, 1
+{calculation}
+done:
+  %shifted = shl i64 %result, 1
+  %encoded = or i64 %shifted, 1
   ret i64 %encoded
 slow:
   %fallback = call i64 @relar_int_binary(i64 %a, i64 %b, i32 {number})

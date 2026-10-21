@@ -16,11 +16,14 @@ mod calls;
 mod comprehensions;
 mod expansions;
 mod matching;
+mod module_values;
 mod truthiness;
+mod unions;
 mod unpacking;
 use assignments::LocalState;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
+use module_values::{Initialization, ModuleValues};
 
 #[derive(Clone)]
 struct Signature {
@@ -116,6 +119,8 @@ const RESERVED: &[&str] = &[
     "dict",
     "set",
     "len",
+    "divmod",
+    "isinstance",
     "input",
     "print",
     "range",
@@ -180,6 +185,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     let mut classes = ClassInfo::new(graph, &types)?;
     let mut signatures = HashMap::new();
     let mut definitions = Vec::new();
+    let mut callable_definitions = Vec::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
         for name in module.bindings.keys() {
             if reserved(name) {
@@ -210,6 +216,10 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                         signature.clone(),
                     );
                     definitions.push((module_id, function, signature));
+                    callable_definitions.push(DefinitionId {
+                        module: module_id,
+                        statement: statement_id,
+                    });
                 }
                 ast::Stmt::Expr(value) => {
                     if let ast::Expr::StringLiteral(value) = &*value.value {
@@ -248,9 +258,32 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
             }
             classes.methods[class_id].insert(method.name.to_string(), signature.clone());
             definitions.push((module_id, method, signature));
+            callable_definitions.push(class.definition);
         }
     }
-    let helpers = Helpers::new(definitions.len());
+    let initializer_start = definitions.len();
+    let helpers = Helpers::new(definitions.len() + graph.modules.len() - 1);
+    let globals = ModuleValues::default();
+    let mut initializations = Vec::new();
+    let mut available = HashSet::new();
+    for &module_id in &graph.initialization {
+        if module_id == graph.entry {
+            continue;
+        }
+        let checker = Checker::new(
+            graph,
+            module_id,
+            &signatures,
+            &classes,
+            &types,
+            &helpers,
+            &globals,
+        );
+        initializations.push(
+            Initialization::lower(checker, &mut available)
+                .map_err(|error| format!("{}:{error}", graph.modules[module_id].path.display()))?,
+        );
+    }
     let mut functions = Vec::new();
     let mut call_graph = Vec::new();
     let mut recursion_errors = Vec::new();
@@ -264,8 +297,9 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                 &classes,
                 &types,
                 &helpers,
-                signature.returns,
+                &globals,
             );
+            checker.returns = signature.returns;
             let mut params = Vec::new();
             for (parameter, signature) in definition
                 .parameters
@@ -326,6 +360,9 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     }
     let mut entry = None;
     for (module_id, module) in graph.modules.iter().enumerate() {
+        if module_id != graph.entry {
+            continue;
+        }
         let mut checker = Checker::new(
             graph,
             module_id,
@@ -333,7 +370,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
             &classes,
             &types,
             &helpers,
-            Type::None,
+            &globals,
         );
         checker.module_scope = true;
         let statements = module
@@ -341,17 +378,41 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
             .iter()
             .map(|&index| module.parsed.syntax().body[index].clone())
             .collect::<Vec<_>>();
-        let (body, _) = checker
+        let (mut body, _) = checker
             .block(&statements)
             .map_err(|error| format!("{}:{error}", module.path.display()))?;
         if module_id == graph.entry {
+            let mut startup = (0..initializations.len())
+                .map(|index| {
+                    Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Call(
+                            initializer_start + index,
+                            ir::CallArgs::positional(Vec::new()),
+                        ),
+                    })
+                })
+                .collect::<Vec<_>>();
+            startup.append(&mut body);
             entry = Some(ir::Function {
                 params: Vec::new(),
                 returns: Type::None,
                 locals: checker.locals,
-                body,
+                body: startup,
             });
         }
+    }
+    for initialization in &initializations {
+        functions.push(ir::Function {
+            params: Vec::new(),
+            returns: Type::None,
+            locals: initialization.function.locals.clone(),
+            body: initialization.function.body.clone(),
+        });
+        call_graph.push(initialization.calls.clone());
+        let module = &graph.modules[initialization.module];
+        recursion_errors
+            .push(module.error(module.parsed.syntax(), "recursive module initialization"));
     }
     // Entry code and inactive module guards can create helpers too. Validate the
     // complete graph only after every source expression has been lowered.
@@ -366,9 +427,13 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
             return Err(diagnostic);
         }
     }
+    for initialization in &initializations {
+        initialization.validate(graph, &functions, &callable_definitions)?;
+    }
     Ok(ir::Module {
         types,
         class_fields: classes.fields,
+        globals: globals.into_types(),
         functions,
         entry: entry.expect("source graph has an entry module"),
     })
@@ -535,6 +600,29 @@ fn annotation_at(
             )),
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
+        ast::Expr::Subscript(value)
+            if matches!(
+                graph.resolve(module, &value.value),
+                Some(Binding::Intrinsic(Intrinsic::Union))
+            ) =>
+        {
+            let members = if let ast::Expr::Tuple(arguments) = &*value.slice {
+                arguments
+                    .elts
+                    .iter()
+                    .map(nested)
+                    .collect::<Result<Vec<_>, _>>()?
+            } else {
+                vec![nested(&value.slice)?]
+            };
+            types.union(&members).ok_or_else(|| {
+                error(
+                    source,
+                    expression,
+                    "finite unions support str | bytes and nullable exact types",
+                )
+            })
+        }
         ast::Expr::Subscript(value) => match &*value.value {
             ast::Expr::Name(name) if name.id == "list" => Ok(types.list(nested(&value.slice)?)),
             ast::Expr::Name(name) if name.id == "set" => {
@@ -594,16 +682,13 @@ fn annotation_at(
         ast::Expr::BinOp(union) if union.op == ast::Operator::BitOr => {
             let left = nested(&union.left)?;
             let right = nested(&union.right)?;
-            match (left, right) {
-                (Type::None, other) | (other, Type::None) if other != Type::None => {
-                    Ok(types.optional(other))
-                }
-                _ => Err(error(
+            types.union(&[left, right]).ok_or_else(|| {
+                error(
                     source,
                     expression,
-                    "only optional unions T | None are supported",
-                )),
-            }
+                    "finite unions support str | bytes and nullable exact types",
+                )
+            })
         }
         _ => Err(error(source, expression, "unsupported type annotation")),
     }
@@ -679,6 +764,7 @@ struct Checker<'a> {
     classes: &'a ClassInfo,
     types: &'a Types,
     helpers: &'a Helpers,
+    globals: &'a ModuleValues,
     comprehension_targets: HashSet<String>,
     comprehension_depth: usize,
     comprehension_exports: HashMap<String, usize>,
@@ -701,7 +787,7 @@ impl<'a> Checker<'a> {
         classes: &'a ClassInfo,
         types: &'a Types,
         helpers: &'a Helpers,
-        returns: Type,
+        globals: &'a ModuleValues,
     ) -> Self {
         Self {
             source: &graph.modules[module].source,
@@ -711,11 +797,12 @@ impl<'a> Checker<'a> {
             classes,
             types,
             helpers,
+            globals,
             comprehension_targets: HashSet::new(),
             comprehension_depth: 0,
             comprehension_exports: HashMap::new(),
             narrowed: HashMap::new(),
-            returns,
+            returns: Type::None,
             names: HashMap::new(),
             locals: Vec::new(),
             assigned: HashSet::new(),
@@ -816,19 +903,39 @@ impl<'a> Checker<'a> {
         Ok((receiver, field, self.classes.fields[class][field]))
     }
 
-    /// Optional conversions are explicit in the IR; other storage is invariant.
+    /// Optional and finite-union promotions are explicit; containers stay invariant.
     fn coerce(&self, value: Expr, expected: Type, node: &impl Ranged) -> Result<Expr, String> {
         if value.ty == expected {
             return Ok(value);
         }
         if let Some(payload) = self.types.payload(expected) {
+            if let Some(actual) = self.types.payload(value.ty)
+                && self
+                    .types
+                    .members(payload)
+                    .is_some_and(|members| members.contains(&actual))
+            {
+                return Ok(Expr {
+                    ty: expected,
+                    kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
+                });
+            }
             let kind = if value.ty == Type::None {
                 ExprKind::Absent(Box::new(value))
             } else {
-                self.expect(payload, value.ty, node)?;
-                ExprKind::Present(Box::new(value))
+                ExprKind::Present(Box::new(self.coerce(value, payload, node)?))
             };
             return Ok(Expr { ty: expected, kind });
+        }
+        if self
+            .types
+            .members(expected)
+            .is_some_and(|members| members.contains(&value.ty))
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
+            });
         }
         self.expect(expected, value.ty, node)?;
         unreachable!("mismatched exact types return an error")
@@ -1020,10 +1127,22 @@ impl<'a> Checker<'a> {
             if let Some(&slot) = self.names.get(&name)
                 && let Some(payload) = self.types.payload(self.locals[slot])
             {
-                self.narrowed
-                    .insert(slot, if present { payload } else { Type::None });
+                let current = self
+                    .narrowed
+                    .get(&slot)
+                    .copied()
+                    .unwrap_or(self.locals[slot]);
+                let narrowed = if !present {
+                    Type::None
+                } else if current == Type::None {
+                    payload
+                } else {
+                    self.types.payload(current).unwrap_or(current)
+                };
+                self.narrowed.insert(slot, narrowed);
             }
         }
+        self.apply_instance_facts(test, truth);
     }
 
     /// Captures the receiver before ordered bounds. Nullable integer operands
@@ -1087,6 +1206,15 @@ impl<'a> Checker<'a> {
                 }
                 _ => {}
             }
+        }
+        let value = match &value.kind {
+            ExprKind::Present(value) => value.as_ref(),
+            _ => value,
+        };
+        if let ExprKind::Builtin(Builtin::UnionInject, args) = &value.kind
+            && matches!(args[0].ty, Type::Str | Type::Bytes)
+        {
+            self.narrowed.insert(slot, args[0].ty);
         }
     }
 
@@ -1786,31 +1914,33 @@ impl<'a> Checker<'a> {
             ast::Stmt::With(with_) if !with_.is_async => {
                 return self.with_items(&with_.items, &with_.body);
             }
-            ast::Stmt::Raise(raise) if raise.cause.is_none() => {
-                let value = raise
+            ast::Stmt::Raise(raise) => {
+                let mut value = raise
                     .exc
                     .as_deref()
-                    .map(|value| {
-                        if let Some(kind) = self.exception_category(value) {
-                            if matches!(kind, 0 | 18) {
-                                return Err(error(
-                                    self.source,
-                                    value,
-                                    "this exception category is catch-only",
-                                ));
-                            }
-                            Ok(Expr {
-                                ty: Type::Exception,
-                                kind: ExprKind::Exception {
-                                    kind,
-                                    message: None,
-                                },
-                            })
-                        } else {
-                            self.expr_expected(value, Type::Exception)
-                        }
-                    })
+                    .map(|value| self.raised_exception(value))
                     .transpose()?;
+                if let Some(cause) = &raise.cause {
+                    let raised = value.take().expect("raise from has an exception");
+                    if !matches!(raised.kind, ExprKind::Exception { .. }) {
+                        return Err(error(
+                            self.source,
+                            raise,
+                            "explicit causes require a freshly constructed builtin exception",
+                        ));
+                    }
+                    let expected = self.types.optional(Type::Exception);
+                    let cause = if self.exception_category(cause).is_some() {
+                        let cause = self.raised_exception(cause)?;
+                        self.coerce(cause, expected, raise)?
+                    } else {
+                        self.expr_expected(cause, expected)?
+                    };
+                    value = Some(Expr {
+                        ty: Type::Exception,
+                        kind: ExprKind::Builtin(Builtin::ExceptionWithCause, vec![raised, cause]),
+                    });
+                }
                 return Ok((vec![Statement::Raise(value)], false));
             }
             ast::Stmt::Pass(_) => None,
@@ -1884,6 +2014,28 @@ impl<'a> Checker<'a> {
 
     /// Imported exception aliases resolve by identity; a spelling alone cannot
     /// turn an arbitrary first-party definition into a builtin category.
+    /// Class-form raises construct a new instance, just like an explicit call.
+    fn raised_exception(&mut self, value: &ast::Expr) -> Result<Expr, String> {
+        if let Some(kind) = self.exception_category(value) {
+            if matches!(kind, 0 | 18) {
+                return Err(error(
+                    self.source,
+                    value,
+                    "this exception category is catch-only",
+                ));
+            }
+            Ok(Expr {
+                ty: Type::Exception,
+                kind: ExprKind::Exception {
+                    kind,
+                    message: None,
+                },
+            })
+        } else {
+            self.expr_expected(value, Type::Exception)
+        }
+    }
+
     fn exception_category(&self, expression: &ast::Expr) -> Option<u32> {
         match self.graph.resolve(self.module, expression) {
             Some(Binding::Intrinsic(Intrinsic::UnsupportedOperation)) => Some(19),
@@ -2093,10 +2245,12 @@ impl<'a> Checker<'a> {
         clauses: &[ast::ElifElseClause],
     ) -> Result<(Statement, bool), String> {
         let condition = self.condition(test)?;
+        let known = self.instance_condition(&condition);
         let before = self.assigned.clone();
         let facts = self.narrowed.clone();
         self.apply_facts(test, true);
         let (yes, yes_falls) = self.block(body)?;
+        let yes_falls = yes_falls && known != Some(false);
         let yes_assigned = self.assigned.clone();
         let yes_facts = self.narrowed.clone();
         self.assigned = before;
@@ -2112,6 +2266,7 @@ impl<'a> Checker<'a> {
         } else {
             (Vec::new(), true)
         };
+        let no_falls = no_falls && known != Some(true);
         if yes_falls && no_falls {
             self.assigned.retain(|slot| yes_assigned.contains(slot));
             self.narrowed
@@ -2148,6 +2303,19 @@ impl<'a> Checker<'a> {
         right: Type,
         node: &impl Ranged,
     ) -> Result<(Binary, Type), String> {
+        let bitwise = match op {
+            ast::Operator::BitAnd => Some(Binary::BitAnd),
+            ast::Operator::BitOr => Some(Binary::BitOr),
+            ast::Operator::BitXor => Some(Binary::BitXor),
+            ast::Operator::LShift => Some(Binary::LeftShift),
+            ast::Operator::RShift => Some(Binary::RightShift),
+            _ => None,
+        };
+        if let Some(op) = bitwise {
+            self.expect(Type::Int, left, node)?;
+            self.expect(Type::Int, right, node)?;
+            return Ok((op, Type::Int));
+        }
         if op == ast::Operator::Mult {
             if (self.types.element(left).is_some() || left == Type::Bytes) && right == Type::Int {
                 return Ok((Binary::Repeat, left));
@@ -2184,6 +2352,19 @@ impl<'a> Checker<'a> {
     }
 
     fn expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(Binding::Value(definition)) = self.graph.resolve(self.module, expression) {
+            let (slot, ty) = self.globals.get(definition).ok_or_else(|| {
+                error(
+                    self.source,
+                    expression,
+                    "module value is not initialized on this path",
+                )
+            })?;
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::GlobalGet(slot), Vec::new()),
+            });
+        }
         if matches!(
             self.graph.resolve(self.module, expression),
             Some(Binding::Intrinsic(Intrinsic::Argv))
@@ -2243,21 +2424,7 @@ impl<'a> Checker<'a> {
                         "local may be uninitialized on this path",
                     ));
                 }
-                if let Some(&ty) = self.narrowed.get(&slot) {
-                    if ty == Type::None {
-                        (Type::None, ExprKind::None)
-                    } else {
-                        (
-                            ty,
-                            ExprKind::Unwrap(Box::new(Expr {
-                                ty: self.locals[slot],
-                                kind: ExprKind::Local(slot),
-                            })),
-                        )
-                    }
-                } else {
-                    (self.locals[slot], ExprKind::Local(slot))
-                }
+                return Ok(self.read_local(slot));
             }
             ast::Expr::List(list) => {
                 if list
@@ -2309,6 +2476,20 @@ impl<'a> Checker<'a> {
                 };
                 match unary.op {
                     ast::UnaryOp::Not => (Type::Bool, ExprKind::Not(Box::new(value))),
+                    ast::UnaryOp::Invert => {
+                        self.expect(Type::Int, value.ty, expression)?;
+                        (
+                            Type::Int,
+                            ExprKind::Binary(
+                                Binary::BitXor,
+                                Box::new(value),
+                                Box::new(Expr {
+                                    ty: Type::Int,
+                                    kind: ExprKind::Int("-1".into()),
+                                }),
+                            ),
+                        )
+                    }
                     ast::UnaryOp::USub | ast::UnaryOp::UAdd => {
                         if !matches!(value.ty, Type::Int | Type::Float) {
                             return Err(error(
@@ -2322,7 +2503,6 @@ impl<'a> Checker<'a> {
                         }
                         (value.ty, ExprKind::Negate(Box::new(value)))
                     }
-                    _ => return Err(error(self.source, expression, "unsupported unary operator")),
                 }
             }
             ast::Expr::BoolOp(boolean) => {
@@ -2426,6 +2606,7 @@ impl<'a> Checker<'a> {
                             | Type::Set(_)
                             | Type::Tuple(_)
                             | Type::Optional(_)
+                            | Type::Union(_)
                     ) {
                         return Err(error(
                             self.source,
@@ -2521,6 +2702,26 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Attribute(attribute) => {
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::Exception {
+                    let (ty, builtin) = match attribute.attr.as_str() {
+                        "__cause__" => (
+                            self.types.optional(Type::Exception),
+                            Builtin::ExceptionCause,
+                        ),
+                        "__suppress_context__" => (Type::Bool, Builtin::ExceptionSuppressContext),
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                attribute,
+                                "unsupported exception attribute",
+                            ));
+                        }
+                    };
+                    return Ok(Expr {
+                        ty,
+                        kind: ExprKind::Builtin(builtin, vec![receiver]),
+                    });
+                }
                 if matches!(receiver.ty, Type::TextIO | Type::BinaryIO)
                     && attribute.attr.as_str() == "closed"
                 {
@@ -2666,6 +2867,9 @@ impl<'a> Checker<'a> {
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "open") {
             return self.open(call);
         }
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "isinstance") {
+            return self.isinstance(call);
+        }
         if let Some(kind) = self.exception_category(&call.func) {
             self.reject_builtin_keywords(call)?;
             if matches!(kind, 0 | 18) {
@@ -2798,6 +3002,19 @@ impl<'a> Checker<'a> {
                 }
             }
             if receiver.ty == Type::Str
+                && attribute.attr.as_str() == "rstrip"
+                && call.arguments.args.len() <= 1
+            {
+                let mut args = vec![receiver];
+                if let Some(chars) = call.arguments.args.first() {
+                    args.push(self.expr_expected(chars, self.types.optional(Type::Str))?);
+                }
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::RStrip, args),
+                });
+            }
+            if receiver.ty == Type::Str
                 && matches!(attribute.attr.as_str(), "split" | "splitlines")
                 && call.arguments.args.is_empty()
             {
@@ -2870,6 +3087,9 @@ impl<'a> Checker<'a> {
                     "supported value methods are typed-list append/pop, dict.get, set.add/discard, and str.split()",
                 )
             })?;
+            if attribute.attr.as_str() == "extend" && call.arguments.args.len() == 1 {
+                return self.extend_list(receiver, &call.arguments.args[0], call);
+            }
             let mut args = vec![receiver];
             let (builtin, ty) = match attribute.attr.as_str() {
                 "append" if call.arguments.args.len() == 1 => {
@@ -2881,7 +3101,7 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         call,
-                        "supported list methods are append(value) and pop()",
+                        "supported list methods are append(value), extend(iterable), and pop()",
                     ));
                 }
             };
@@ -2950,6 +3170,39 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if name.id == "divmod" && args.len() == 2 {
+            let mut body = Vec::with_capacity(2);
+            let mut slots = Vec::with_capacity(2);
+            for arg in args {
+                self.expect(Type::Int, arg.ty, call)?;
+                let slot = self.hidden(Type::Int);
+                body.push(Statement::Assign(slot, arg));
+                slots.push(slot);
+            }
+            let values = [Binary::FloorDivide, Binary::Modulo]
+                .into_iter()
+                .map(|op| Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Binary(
+                        op,
+                        Box::new(self.local(slots[0])),
+                        Box::new(self.local(slots[1])),
+                    ),
+                })
+                .collect();
+            let ty = self.types.tuple(vec![Type::Int, Type::Int]);
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Scope {
+                    body,
+                    value: Box::new(Expr {
+                        ty,
+                        kind: ExprKind::Tuple(values),
+                    }),
+                    clear: slots,
+                },
+            });
+        }
         if name.id == "print" && args.len() == 1 && args[0].ty == Type::Exception {
             return Ok(Expr {
                 ty: Type::None,

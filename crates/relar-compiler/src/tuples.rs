@@ -113,20 +113,29 @@ fn scalarize_function(function: &mut Function, producers: &[Option<Producer>]) {
     }
 }
 
+/// A private expression scope may stage arguments before returning a fixed
+/// tuple. Its cleanup changes ownership, not the final tuple's field layout.
+fn tuple_elements<'a>(
+    expression: &'a Expr,
+    producers: &'a [Option<Producer>],
+) -> Option<&'a [Expr]> {
+    match &expression.kind {
+        ExprKind::Tuple(elements) => Some(elements.as_slice()),
+        ExprKind::Call(id, _) => producers[*id]
+            .as_ref()
+            .map(|producer| producer.elements.as_slice()),
+        ExprKind::Scope { value, .. } => tuple_elements(value, producers),
+        _ => None,
+    }
+}
+
 /// A local is eligible only when every assignment has a known tuple shape and
 /// every read is a direct field projection or len; whole-value aliases escape.
 fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[Option<Producer>]) {
     for statement in statements {
         match statement {
             Statement::Assign(slot, value) => {
-                let elements = match &value.kind {
-                    ExprKind::Tuple(elements) => Some(elements.as_slice()),
-                    ExprKind::Call(id, _) => producers[*id]
-                        .as_ref()
-                        .map(|producer| producer.elements.as_slice()),
-                    _ => None,
-                };
-                if let Some(elements) = elements {
+                if let Some(elements) = tuple_elements(value, producers) {
                     let fields = elements.iter().map(|value| value.ty).collect::<Vec<_>>();
                     let candidate = &mut candidates[*slot];
                     if candidate.fields.as_ref().is_some_and(|old| old != &fields) {
@@ -265,6 +274,34 @@ fn expand_assignment(
     let mut staged_output = Vec::new();
     let mut arguments = Vec::new();
     let elements = match value.kind {
+        ExprKind::Scope {
+            mut body,
+            value,
+            clear,
+        } => {
+            // Publish only after the RHS scope has cleaned up: its cleanup may
+            // release the old destination as well as private argument roots.
+            let staged = targets
+                .iter()
+                .map(|&slot| {
+                    let ty = locals[slot];
+                    new_local(locals, ty)
+                })
+                .collect::<Vec<_>>();
+            expand_assignment(*value, &staged, locals, producers, &mut body);
+            let mut body = vec![Statement::Scope { body, clear }];
+            body.extend(
+                targets
+                    .iter()
+                    .zip(&staged)
+                    .map(|(&target, &source)| Statement::Move(target, source)),
+            );
+            output.push(Statement::Scope {
+                body,
+                clear: staged,
+            });
+            return;
+        }
         ExprKind::Tuple(elements) => elements,
         ExprKind::Call(id, args) => {
             let producer = producers[id].as_ref().expect("checked tuple producer");
@@ -703,6 +740,72 @@ print(total([10, 20]))
         assert!(cleared.contains(&Type::Int));
         assert!(cleared.contains(&Type::Str));
         assert!(cleared.contains(&Type::ListInt));
+    }
+
+    #[test]
+    fn scoped_tuple_constructor_publishes_after_rhs_cleanup() {
+        let graph = crate::modules::SourceGraph::single(
+            r#"
+def replace() -> str:
+    pair = ("old", "owner")
+    pair = ("new", "value")
+    return pair[0] + pair[1]
+"#,
+        )
+        .unwrap();
+        let mut module = crate::frontend::lower(&graph).unwrap();
+        let Statement::Assign(slot, value) = &mut module.functions[0].body[1] else {
+            panic!("fixture replaces the tuple");
+        };
+        *value = Expr {
+            ty: value.ty,
+            kind: ExprKind::Scope {
+                body: Vec::new(),
+                value: Box::new(value.clone()),
+                clear: vec![*slot],
+            },
+        };
+        scalarize(&mut module);
+        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        assert!(!after.contains("call ptr @relar_record_new("));
+        let Statement::Scope {
+            body,
+            clear: staged,
+        } = &module.functions[0].body[1]
+        else {
+            panic!("staging owners need cleanup on failed RHS evaluation");
+        };
+        let [
+            Statement::Scope { clear: old, .. },
+            Statement::Move(a, x),
+            Statement::Move(b, y),
+        ] = body.as_slice()
+        else {
+            panic!("the RHS cleanup must precede both destination writes");
+        };
+        assert_eq!(old, &vec![*a, *b]);
+        assert_eq!(staged, &vec![*x, *y]);
+    }
+
+    #[test]
+    fn divmod_scalarization_keeps_single_operand_evaluation() {
+        let graph = crate::modules::SourceGraph::single(
+            r#"
+def operand(value: int) -> int:
+    print(value)
+    return value
+
+def calculate(left: int, right: int) -> int:
+    quotient, remainder = divmod(operand(left), operand(right))
+    return quotient + remainder
+"#,
+        )
+        .unwrap();
+        let mut module = crate::frontend::lower(&graph).unwrap();
+        scalarize(&mut module);
+        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        assert!(!after.contains("call ptr @relar_record_new("));
+        assert_eq!(after.matches("call i64 @fn_0(").count(), 2);
     }
 
     #[test]

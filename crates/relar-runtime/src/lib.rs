@@ -137,6 +137,10 @@ impl<T> StorageCell<T> {
         Self(UnsafeCell::new(value))
     }
 
+    fn into_inner(self) -> T {
+        self.0.into_inner()
+    }
+
     /// # Safety
     /// No mutable reference to this storage may be live. The closure must not
     /// reenter an operation on this cell, and no storage reference or buffer
@@ -311,11 +315,17 @@ pub unsafe extern "C" fn relar_int_literal(data: *const u8, length: usize) -> us
 pub unsafe extern "C" fn relar_int_binary(a: usize, b: usize, op: u32) -> usize {
     // SAFETY: both handles are borrowed by the ABI call.
     let (a, b) = unsafe { (Int::borrow(a), Int::borrow(b)) };
+    if matches!(op, 8 | 9) {
+        return finish(integer_shift(&a, &b, op == 8).map(Int::into_raw), 1);
+    }
     if let (Some(x), Some(y)) = (a.as_small(), b.as_small()) {
         let result = match op {
             0 => x.checked_add(y),
             1 => x.checked_sub(y),
             2 => x.checked_mul(y),
+            5 => Some(x & y),
+            6 => Some(x | y),
+            7 => Some(x ^ y),
             3 | 4 => {
                 if y == 0 {
                     return Error::new(
@@ -345,6 +355,9 @@ pub unsafe extern "C" fn relar_int_binary(a: usize, b: usize, op: u32) -> usize 
         0 => a.as_ref() + b.as_ref(),
         1 => a.as_ref() - b.as_ref(),
         2 => a.as_ref() * b.as_ref(),
+        5 => a.as_ref() & b.as_ref(),
+        6 => a.as_ref() | b.as_ref(),
+        7 => a.as_ref() ^ b.as_ref(),
         3 | 4 => {
             if b.is_zero() {
                 return Error::new(
@@ -366,6 +379,59 @@ pub unsafe extern "C" fn relar_int_binary(a: usize, b: usize, op: u32) -> usize 
         _ => fail("SystemError", "invalid integer operation"),
     };
     Int::new(result).into_raw()
+}
+
+/// Validates the count before zero shortcuts. Unbounded right shifts retain
+/// the infinite sign extension; impossible left shifts follow CPython 3.14's
+/// signed-64-bit bit-count limit without attempting an enormous allocation.
+fn integer_shift(value: &Int, count: &Int, left: bool) -> Result<Int> {
+    let shift = if let Some(count) = count.as_small() {
+        if count < 0 {
+            return Err(Error::new(Kind::ValueError, "negative shift count"));
+        }
+        Some(count as u64)
+    } else {
+        let count = count.big();
+        if count.is_negative() {
+            return Err(Error::new(Kind::ValueError, "negative shift count"));
+        }
+        count.to_u64()
+    };
+    if value.as_small() == Some(0) || shift == Some(0) {
+        return Ok(value.clone());
+    }
+    if let Some(value) = value.as_small() {
+        if !left {
+            return Ok(Int::small(value >> shift.unwrap_or(u64::MAX).min(63)).unwrap());
+        }
+        if let Some(shift) = shift.filter(|&shift| shift < 63)
+            && let Ok(result) = i64::try_from(i128::from(value) << shift)
+            && let Some(result) = Int::small(result)
+        {
+            return Ok(result);
+        }
+    }
+    let value = value.big();
+    if !left {
+        return Ok(if shift.is_none_or(|shift| shift >= value.bits()) {
+            Int::small(-i64::from(value.is_negative())).unwrap()
+        } else {
+            Int::new(value.as_ref() >> shift.unwrap() as usize)
+        });
+    }
+    let shift = shift
+        .filter(|&shift| shift <= i64::MAX as u64)
+        .ok_or_else(|| Error::new(Kind::OverflowError, "too many digits in integer"))?;
+    // CPython's 64-bit limit counts 30-bit digits, including the carry digit
+    // reserved before normalization. This also prevents native size overflow.
+    let digits = value.bits().div_ceil(30) + shift / 30 + u64::from(shift % 30 != 0);
+    if digits > (i64::MAX as u64 - 1) / 30 {
+        return Err(Error::new(
+            Kind::OverflowError,
+            "too many digits in integer",
+        ));
+    }
+    Ok(Int::new(value.as_ref() << shift as usize))
 }
 
 /// # Safety
@@ -967,6 +1033,54 @@ mod tests {
             assert_eq!(quotient.as_small(), Some(q));
             assert_eq!(remainder.as_small(), Some(r));
         }
+    }
+
+    #[test]
+    fn shifts_validate_counts_and_preserve_big_integer_owners() {
+        for (value, count, operation, kind) in [
+            (BigInt::from(0), BigInt::from(-1), 8, Kind::ValueError),
+            (
+                BigInt::from(0),
+                -(BigInt::from(1) << 130_u32),
+                9,
+                Kind::ValueError,
+            ),
+            (
+                BigInt::from(1),
+                BigInt::from(1) << 130_u32,
+                8,
+                Kind::OverflowError,
+            ),
+            (
+                BigInt::from(-1),
+                BigInt::from(i64::MAX),
+                8,
+                Kind::OverflowError,
+            ),
+        ] {
+            let value = Int::new(value);
+            let count = Int::new(count);
+            // SAFETY: the operands remain rooted; a failed integer call returns
+            // tagged zero and the pending exception transfers one owned handle.
+            unsafe {
+                assert_eq!(relar_int_binary(value.0, count.0, operation), 1);
+                assert_eq!(relar_error_pending(), 1);
+                let error = relar_error_take();
+                assert_eq!(relar_exception_matches(error, kind as u32), 1);
+                objects::relar_object_release(error);
+            }
+        }
+        let owner = Rc::new(BigInt::from(1) << 130_u32);
+        let value = Int(Rc::into_raw(owner.clone()) as usize);
+        let zero = Int::small(0).unwrap();
+        // SAFETY: zero shifting returns an independent owner of the live input.
+        let copy = Int(unsafe { relar_int_binary(value.0, zero.0, 8) });
+        assert_eq!(Rc::strong_count(&owner), 3);
+        drop(value);
+        assert_eq!(copy.big().as_ref(), owner.as_ref());
+        drop(copy);
+        assert_eq!(Rc::strong_count(&owner), 1);
+        assert_eq!(relar_error_pending(), 0);
     }
 
     #[test]

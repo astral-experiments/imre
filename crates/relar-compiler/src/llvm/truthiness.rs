@@ -57,6 +57,13 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i8 {byte}, 0"))
                 }
+                Type::Union(_) => {
+                    let byte = self.instruction(format!(
+                        "call i8 @relar_union_truthy(i64 {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i8 {byte}, 0"))
+                }
                 Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_) => {
                     let family = match value.ty {
                         Type::ListInt => "list",
@@ -142,6 +149,15 @@ impl Emitter<'_, '_> {
     fn selected_operand(&mut self, value: Value, returns: Type, truth: bool) -> Value {
         if value.ty == returns {
             return value;
+        }
+        if matches!(
+            self.module.types.payload(returns).unwrap_or(returns),
+            Type::Union(_)
+        ) && matches!(
+            self.module.types.payload(value.ty).unwrap_or(value.ty),
+            Type::Str | Type::Bytes
+        ) {
+            return self.union_inject(value, returns);
         }
         let selected = self.module.types.truth_branch(value.ty, truth);
         if selected == Type::None {

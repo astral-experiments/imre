@@ -8,7 +8,7 @@
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 
-use super::{Bytes, Int, List, Object, Str, fail, records};
+use super::{Bytes, Int, List, Object, Str, fail, records, unions};
 
 pub(super) const NULLABLE: u32 = 256;
 
@@ -17,7 +17,7 @@ pub(super) struct WordKind(u32);
 
 impl WordKind {
     pub(super) fn new(kind: u32) -> Self {
-        if kind & !NULLABLE > 8 {
+        if kind & !NULLABLE > 9 {
             fail("SystemError", "invalid concrete word representation");
         }
         Self(kind)
@@ -59,7 +59,7 @@ impl WordKind {
         let valid = match self.base() {
             0 => word == 0,
             1 => word <= if nullable { 2 } else { 1 },
-            2..=6 | 8 => word != 0 || nullable,
+            2..=6 | 8 | 9 => word != 0 || nullable,
             7 => true,
             _ => unreachable!(),
         };
@@ -100,6 +100,7 @@ impl WordKind {
                 7 if self.0 & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::increment_strong_count(word as *const Bytes),
+                9 => unions::relar_union_retain(word),
                 _ => unreachable!(),
             }
         }
@@ -124,6 +125,7 @@ impl WordKind {
                 7 if self.0 & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::decrement_strong_count(word as *const Bytes),
+                9 => unions::relar_union_release(word),
                 _ => unreachable!(),
             }
         }

@@ -9,10 +9,11 @@ pub(super) struct LocalState {
     pub(super) narrowed: HashMap<usize, Type>,
 }
 
-/// Removes a storage-only optional promotion while preserving RHS evaluation.
+/// Removes storage-only optional/union promotions while preserving RHS evaluation.
 pub(super) fn unpromoted(value: Expr) -> Expr {
     match value.kind {
-        ExprKind::Present(inner) | ExprKind::Absent(inner) => *inner,
+        ExprKind::Present(inner) | ExprKind::Absent(inner) => unpromoted(*inner),
+        ExprKind::Builtin(Builtin::UnionInject, mut args) => unpromoted(args.pop().unwrap()),
         _ => value,
     }
 }
@@ -100,8 +101,9 @@ impl Checker<'_> {
             self.classes,
             self.types,
             &helpers,
-            self.returns,
+            self.globals,
         );
+        probe.returns = self.returns;
         probe.names = self.names.clone();
         probe.locals = self.locals.clone();
         probe.assigned = self.assigned.clone();

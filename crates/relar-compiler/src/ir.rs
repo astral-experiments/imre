@@ -15,6 +15,8 @@ pub(crate) enum Type {
     Set(usize),
     Tuple(usize),
     Optional(usize),
+    /// A closed str/bytes union with one owned tagged-pointer word.
+    Union(usize),
     /// An internal container or string cursor, never available in user annotations.
     Iterator,
     /// A sealed builtin exception with an immutable category and string message.
@@ -37,6 +39,7 @@ impl std::fmt::Display for Type {
             Self::Set(id) => return write!(f, "set#{id}"),
             Self::Tuple(id) => return write!(f, "tuple#{id}"),
             Self::Optional(id) => return write!(f, "optional#{id}"),
+            Self::Union(id) => return write!(f, "union#{id}"),
             _ => {}
         }
         f.write_str(match self {
@@ -56,7 +59,8 @@ impl std::fmt::Display for Type {
             | Self::Dict(_)
             | Self::Set(_)
             | Self::Tuple(_)
-            | Self::Optional(_) => {
+            | Self::Optional(_)
+            | Self::Union(_) => {
                 unreachable!()
             }
         })
@@ -69,6 +73,8 @@ pub(crate) struct Module {
     /// identities refer to this compilation's interned type universe.
     pub types: crate::types::Types,
     pub class_fields: Vec<Vec<Type>>,
+    /// Fixed module bindings own their exact storage until process cleanup.
+    pub globals: Vec<Type>,
     pub functions: Vec<Function>,
     pub entry: Function,
 }
@@ -200,6 +206,11 @@ pub(crate) enum Binary {
     Divide,
     FloorDivide,
     Modulo,
+    BitAnd,
+    BitOr,
+    BitXor,
+    LeftShift,
+    RightShift,
     Repeat,
     Concat,
 }
@@ -216,6 +227,10 @@ pub(crate) enum Compare {
 
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    /// Reads an initialized module binding with an independent owned reference.
+    GlobalGet(usize),
+    /// Publishes one fixed module binding after its initializer succeeds.
+    GlobalSet(usize),
     Print,
     Input,
     Int,
@@ -236,8 +251,14 @@ pub(crate) enum Builtin {
     Append,
     Pop,
     IsNone,
+    /// Promotes an exact str/bytes owner without allocating or changing identity.
+    UnionInject,
+    /// Projects a member proved by local control flow, acquiring its own owner.
+    UnionProject,
+    IsInstance(Vec<InstanceType>),
     Split,
     SplitLines,
+    RStrip,
     SysArgv,
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
@@ -266,6 +287,36 @@ pub(crate) enum Builtin {
     SetDiscard,
     SetIter,
     ExceptionMessage,
+    /// Attaches an explicit cause to a fresh, unescaped builtin exception.
+    ExceptionWithCause,
+    ExceptionCause,
+    ExceptionSuppressContext,
+}
+
+/// Sealed Python runtime categories; parameterized container annotations are
+/// never runtime classes, and exception categories use their existing hierarchy.
+#[derive(Clone, Copy)]
+pub(crate) enum InstanceType {
+    Exact(Type),
+    List,
+    Dict,
+    Set,
+    Tuple,
+    Exception(u32),
+}
+
+impl InstanceType {
+    pub(crate) fn accepts(self, ty: Type) -> bool {
+        match self {
+            Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool),
+            Self::Exact(expected) => expected == ty,
+            Self::List => matches!(ty, Type::ListInt | Type::List(_)),
+            Self::Dict => matches!(ty, Type::Dict(_)),
+            Self::Set => matches!(ty, Type::Set(_)),
+            Self::Tuple => matches!(ty, Type::Tuple(_)),
+            Self::Exception(_) => ty == Type::Exception,
+        }
+    }
 }
 
 #[derive(Clone)]

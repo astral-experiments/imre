@@ -1,4 +1,4 @@
-//! Loads a closed graph of first-party modules without executing Python initialization.
+//! Loads a closed graph of first-party modules and orders their initialization.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -37,6 +37,7 @@ pub(crate) struct DefinitionId {
 pub(crate) enum Binding {
     Module(ModuleId),
     Definition(DefinitionId),
+    Value(DefinitionId),
     IntrinsicModule(IntrinsicModule),
     Intrinsic(Intrinsic),
 }
@@ -54,6 +55,7 @@ pub(crate) enum Intrinsic {
     Argv,
     TextIO,
     BinaryIO,
+    Union,
     UnsupportedOperation,
 }
 
@@ -72,6 +74,7 @@ impl IntrinsicModule {
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
+            (Self::Typing, "Union") => Intrinsic::Union,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             _ => return None,
         };
@@ -102,6 +105,9 @@ impl SourceModule {
 pub(crate) struct SourceGraph {
     pub(crate) modules: Vec<SourceModule>,
     pub(crate) entry: ModuleId,
+    /// Imports precede executable statements, so dependency completion order
+    /// also gives Python's module initialization order.
+    pub(crate) initialization: Vec<ModuleId>,
 }
 
 impl SourceGraph {
@@ -191,7 +197,7 @@ impl SourceGraph {
                     .get(attribute.attr.as_str())
                     .copied(),
                 Binding::IntrinsicModule(module) => module.symbol(attribute.attr.as_str()),
-                Binding::Definition(_) | Binding::Intrinsic(_) => None,
+                Binding::Definition(_) | Binding::Value(_) | Binding::Intrinsic(_) => None,
             },
             _ => None,
         }
@@ -206,6 +212,7 @@ struct Loader {
     by_path: HashMap<PathBuf, ModuleId>,
     loading: HashSet<ModuleId>,
     allow_imports: bool,
+    initialization: Vec<ModuleId>,
 }
 
 impl Loader {
@@ -218,6 +225,7 @@ impl Loader {
             by_path: HashMap::new(),
             loading: HashSet::new(),
             allow_imports: true,
+            initialization: Vec::new(),
         })
     }
 
@@ -254,6 +262,7 @@ impl Loader {
         Ok(SourceGraph {
             modules: self.modules,
             entry,
+            initialization: self.initialization,
         })
     }
 
@@ -263,7 +272,7 @@ impl Loader {
         for (index, statement) in parsed.syntax().body.iter().enumerate() {
             match statement {
                 ast::Stmt::FunctionDef(function) => {
-                    if executable {
+                    if executable && id == 0 {
                         return Err(self.modules[id].error(
                             statement,
                             "definitions must precede executable module statements",
@@ -280,7 +289,7 @@ impl Loader {
                     )?;
                 }
                 ast::Stmt::ClassDef(class) => {
-                    if executable {
+                    if executable && id == 0 {
                         return Err(self.modules[id].error(
                             statement,
                             "definitions must precede executable module statements",
@@ -309,8 +318,18 @@ impl Loader {
                 ast::Stmt::Expr(value)
                     if matches!(&*value.value, ast::Expr::StringLiteral(_)) && !executable => {}
                 _ => {
-                    if id != 0 && !main_guard(statement) {
-                        return Err(self.modules[id].error(statement, "library modules may contain only definitions, imports, docstrings, and an inactive __main__ guard"));
+                    if id != 0
+                        && let Some(name) = value_name(statement)
+                    {
+                        self.bind(
+                            id,
+                            name,
+                            Binding::Value(DefinitionId {
+                                module: id,
+                                statement: index,
+                            }),
+                            statement,
+                        )?;
                     }
                     executable = true;
                     self.modules[id].executable.push(index);
@@ -318,6 +337,7 @@ impl Loader {
             }
         }
         self.loading.remove(&id);
+        self.initialization.push(id);
         Ok(())
     }
 
@@ -402,7 +422,7 @@ impl Loader {
                         .copied()
                     {
                         if self.loading.contains(&target)
-                            && matches!(binding, Binding::Definition(_))
+                            && matches!(binding, Binding::Definition(_) | Binding::Value(_))
                         {
                             return Err(format!("cyclic import through {name:?}"));
                         }
@@ -563,16 +583,16 @@ impl Loader {
     }
 }
 
-/// Only this side-effect-free false guard is allowed in an imported library module.
-fn main_guard(statement: &ast::Stmt) -> bool {
-    let ast::Stmt::If(statement) = statement else {
-        return false;
+/// Module values use one unconditional, fixed binding; their contents may mutate.
+pub(crate) fn value_name(statement: &ast::Stmt) -> Option<&str> {
+    let target = match statement {
+        ast::Stmt::Assign(assignment) if assignment.targets.len() == 1 => &assignment.targets[0],
+        ast::Stmt::AnnAssign(assignment) => &assignment.target,
+        _ => return None,
     };
-    let ast::Expr::Compare(compare) = &*statement.test else {
-        return false;
-    };
-    statement.elif_else_clauses.is_empty()
-        && compare.ops.as_ref() == [ast::CmpOp::Eq]
-        && matches!(compare.operands.as_ref(), [ast::Expr::Name(name), ast::Expr::StringLiteral(value)]
-            if name.id == "__name__" && value.value.to_str() == "__main__")
+    if let ast::Expr::Name(name) = target {
+        Some(name.id.as_str())
+    } else {
+        None
+    }
 }
