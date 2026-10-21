@@ -11,6 +11,7 @@ use crate::ir::{
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
 
+mod callables;
 mod conditionals;
 mod integer_regions;
 mod truthiness;
@@ -26,6 +27,7 @@ impl Type {
             | Self::Bytes
             | Self::ListInt
             | Self::Class(_)
+            | Self::Callable(_)
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
@@ -46,6 +48,7 @@ impl Type {
             | Self::Bytes
             | Self::ListInt
             | Self::Class(_)
+            | Self::Callable(_)
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
@@ -148,6 +151,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         sanitize,
         ranges,
         effects: effects::analyze(module),
+        callable_targets: crate::callables::Targets::analyze(module),
         integer_regions: integer_regions::analyze(module),
         uses_sys_argv: module.uses_sys_argv(),
     };
@@ -160,6 +164,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
     );
     output.push_str(DECLARATIONS);
     output.push_str(&record_layouts(module));
+    output.push_str(&callables::adapters(module, sanitize));
     output.push_str(&integer_helpers());
     for (slot, ty) in module.globals.iter().enumerate() {
         writeln!(
@@ -215,6 +220,7 @@ struct Emitter<'a, 'module> {
     sanitize: bool,
     ranges: &'a RangeFacts<'module>,
     effects: ExceptionEffects,
+    callable_targets: crate::callables::Targets,
     integer_regions: Vec<Option<integer_regions::Summary>>,
     uses_sys_argv: bool,
 }
@@ -385,7 +391,7 @@ impl Emitter<'_, '_> {
             Type::Str => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
-            Type::Class(_) | Type::Tuple(_) => "record",
+            Type::Class(_) | Type::Tuple(_) | Type::Callable(_) => "record",
             Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
@@ -1841,6 +1847,12 @@ impl Emitter<'_, '_> {
                 }
                 result
             }
+            ExprKind::Callable { function, receiver } => {
+                self.callable_value(expression.ty, *function, receiver.as_deref())
+            }
+            ExprKind::Invoke { callable, args } => {
+                self.invoke_callable(callable, args, expression.ty)
+            }
             ExprKind::Construct { initializer, args } => {
                 // Arguments are evaluated and rooted before __init__ starts.
                 let values = self.call_operands(args);
@@ -2490,6 +2502,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::Tuple(_)
             | Type::Optional(_)
+            | Type::Callable(_)
             | Type::Union(_) => {
                 unreachable!("container comparison is rejected by the frontend")
             }
@@ -3165,6 +3178,7 @@ impl Emitter<'_, '_> {
                     | Type::BinaryIO
                     | Type::Tuple(_)
                     | Type::Optional(_)
+                    | Type::Callable(_)
                     | Type::Union(_) => {
                         unreachable!("container printing is rejected")
                     }
@@ -3285,6 +3299,7 @@ impl Emitter<'_, '_> {
             | Type::Bytes
             | Type::ListInt
             | Type::Class(_)
+            | Type::Callable(_)
             | Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
@@ -3314,6 +3329,7 @@ impl Emitter<'_, '_> {
             | Type::Bytes
             | Type::ListInt
             | Type::Class(_)
+            | Type::Callable(_)
             | Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
@@ -3657,6 +3673,16 @@ fn expression_preserves_local(expression: &Expr, slot: usize, locals: usize) -> 
                     expression_writes(value, written);
                 }
             }
+            ExprKind::Callable {
+                receiver: Some(receiver),
+                ..
+            } => expression_writes(receiver, written),
+            ExprKind::Invoke { callable, args } => {
+                expression_writes(callable, written);
+                for value in &args.values {
+                    expression_writes(value, written);
+                }
+            }
             ExprKind::Dict { entries, .. } => {
                 for (key, value) in entries {
                     expression_writes(key, written);
@@ -3750,7 +3776,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Bytes => 8,
         Type::Union(_) => 9,
         Type::ListInt => 4,
-        Type::Class(_) | Type::Tuple(_) => 6,
+        Type::Class(_) | Type::Tuple(_) | Type::Callable(_) => 6,
         Type::List(_)
         | Type::Dict(_)
         | Type::Set(_)
@@ -3766,7 +3792,8 @@ fn record_name(ty: Type) -> String {
     match ty {
         Type::Class(id) => format!("class_{id}"),
         Type::Tuple(id) => format!("tuple_{id}"),
-        _ => unreachable!("only classes and tuples have fixed record layouts"),
+        Type::Callable(_) => "callable".to_owned(),
+        _ => unreachable!("only classes, tuples, and callables have fixed record layouts"),
     }
 }
 

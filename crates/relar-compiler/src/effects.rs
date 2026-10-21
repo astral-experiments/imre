@@ -7,6 +7,7 @@
 //! remain fallible. Catching an error does not make its containing function
 //! infallible here; every handler, else and finally body is included.
 
+use crate::callables::Targets;
 use crate::ir::{Binary, Builtin, Expr, ExprKind, Module, Statement, Type};
 
 pub(crate) struct ExceptionEffects {
@@ -27,11 +28,12 @@ impl ExceptionEffects {
 /// the current frontend rejects them, and its acyclic graph reaches a fixed
 /// point after at most one successful transition per function.
 pub(crate) fn analyze(module: &Module) -> ExceptionEffects {
+    let targets = Targets::analyze(module);
     let mut functions = vec![true; module.functions.len()];
     loop {
         let mut changed = false;
         for (id, function) in module.functions.iter().enumerate() {
-            if functions[id] && !block(&function.body, &functions) {
+            if functions[id] && !block(&function.body, &functions, &targets) {
                 functions[id] = false;
                 changed = true;
             }
@@ -44,36 +46,42 @@ pub(crate) fn analyze(module: &Module) -> ExceptionEffects {
 
 /// Any potentially failing path is enough; unreachable branches and caught
 /// errors deliberately remain conservative rather than requiring control flow.
-fn block(body: &[Statement], functions: &[bool]) -> bool {
+fn block(body: &[Statement], functions: &[bool], targets: &Targets) -> bool {
     body.iter().any(|statement| match statement {
         Statement::Assign(_, value) | Statement::Expr(value) | Statement::Return(value) => {
-            expression(value, functions)
+            expression(value, functions, targets)
         }
         Statement::Move(..)
         | Statement::Clear(_)
         | Statement::Break
         | Statement::Continue
         | Statement::Exhaust => false,
-        Statement::Scope { body, .. } => block(body, functions),
+        Statement::Scope { body, .. } => block(body, functions, targets),
         Statement::SetItem(receiver, index, value) => {
             !matches!(receiver.ty, Type::Dict(_))
-                || expression(receiver, functions)
-                || expression(index, functions)
-                || expression(value, functions)
+                || expression(receiver, functions, targets)
+                || expression(index, functions, targets)
+                || expression(value, functions, targets)
         }
         // The initial indexed read may fail even for a dictionary assignment.
         Statement::AugmentItem(..) => true,
         Statement::SetField(receiver, _, value) => {
-            expression(receiver, functions) || expression(value, functions)
+            expression(receiver, functions, targets) || expression(value, functions, targets)
         }
         Statement::AugmentField(receiver, _, op, value) => {
-            binary(*op) || expression(receiver, functions) || expression(value, functions)
+            binary(*op)
+                || expression(receiver, functions, targets)
+                || expression(value, functions, targets)
         }
         Statement::If(test, yes, no) => {
-            expression(test, functions) || block(yes, functions) || block(no, functions)
+            expression(test, functions, targets)
+                || block(yes, functions, targets)
+                || block(no, functions, targets)
         }
         Statement::While(test, body, orelse) => {
-            expression(test, functions) || block(body, functions) || block(orelse, functions)
+            expression(test, functions, targets)
+                || block(body, functions, targets)
+                || block(orelse, functions, targets)
         }
         Statement::For {
             args, body, orelse, ..
@@ -81,9 +89,9 @@ fn block(body: &[Statement], functions: &[bool]) -> bool {
             // The implicit step is exactly one. An explicit step is kept
             // fallible even when a separate range proof could exclude zero.
             !matches!(args.len(), 1 | 2)
-                || args.iter().any(|arg| expression(arg, functions))
-                || block(body, functions)
-                || block(orelse, functions)
+                || args.iter().any(|arg| expression(arg, functions, targets))
+                || block(body, functions, targets)
+                || block(orelse, functions, targets)
         }
         Statement::IterNext { .. } | Statement::Assert(_) | Statement::Raise(_) => true,
         Statement::Try {
@@ -92,19 +100,19 @@ fn block(body: &[Statement], functions: &[bool]) -> bool {
             orelse,
             finalbody,
         } => {
-            block(body, functions)
+            block(body, functions, targets)
                 || handlers
                     .iter()
-                    .any(|handler| block(&handler.body, functions))
-                || block(orelse, functions)
-                || block(finalbody, functions)
+                    .any(|handler| block(&handler.body, functions, targets))
+                || block(orelse, functions, targets)
+                || block(finalbody, functions, targets)
         }
     })
 }
 
 /// Includes every evaluated child; fixed-layout reads and writes themselves
 /// cannot fail, but their receiver, replacement or initializer still can.
-fn expression(value: &Expr, functions: &[bool]) -> bool {
+fn expression(value: &Expr, functions: &[bool], targets: &Targets) -> bool {
     match &value.kind {
         ExprKind::Int(_)
         | ExprKind::Float(_)
@@ -117,12 +125,14 @@ fn expression(value: &Expr, functions: &[bool]) -> bool {
         | ExprKind::Tuple(values)
         | ExprKind::Set { values, .. }
         | ExprKind::Compare(values, _)
-        | ExprKind::Boolean(_, values) => values.iter().any(|value| expression(value, functions)),
-        ExprKind::Dict { entries, .. } => entries
+        | ExprKind::Boolean(_, values) => values
             .iter()
-            .any(|(key, value)| expression(key, functions) || expression(value, functions)),
+            .any(|value| expression(value, functions, targets)),
+        ExprKind::Dict { entries, .. } => entries.iter().any(|(key, value)| {
+            expression(key, functions, targets) || expression(value, functions, targets)
+        }),
         ExprKind::Scope { body, value, .. } => {
-            block(body, functions) || expression(value, functions)
+            block(body, functions, targets) || expression(value, functions, targets)
         }
         ExprKind::Bind(_, value)
         | ExprKind::Present(value)
@@ -130,7 +140,7 @@ fn expression(value: &Expr, functions: &[bool]) -> bool {
         | ExprKind::Unwrap(value)
         | ExprKind::Not(value)
         | ExprKind::Negate(value)
-        | ExprKind::Field(value, _) => expression(value, functions),
+        | ExprKind::Field(value, _) => expression(value, functions, targets),
         ExprKind::Binary(op, left, right) => {
             (matches!(op, Binary::Concat) && left.ty == Type::Bytes)
                 || binary(*op)
@@ -138,30 +148,54 @@ fn expression(value: &Expr, functions: &[bool]) -> bool {
                     (left.ty, right.ty),
                     (Type::Int, Type::Float) | (Type::Float, Type::Int)
                 )
-                || expression(left, functions)
-                || expression(right, functions)
+                || expression(left, functions, targets)
+                || expression(right, functions, targets)
         }
         ExprKind::Conditional(test, yes, no) => {
-            expression(test, functions) || expression(yes, functions) || expression(no, functions)
+            expression(test, functions, targets)
+                || expression(yes, functions, targets)
+                || expression(no, functions, targets)
         }
         ExprKind::BooleanValue(_, left, right) => {
-            expression(left, functions) || expression(right, functions)
+            expression(left, functions, targets) || expression(right, functions, targets)
         }
         ExprKind::Call(id, args) => {
             functions.get(*id).copied().unwrap_or(true)
-                || args.values.iter().any(|arg| expression(arg, functions))
+                || args
+                    .values
+                    .iter()
+                    .any(|arg| expression(arg, functions, targets))
+        }
+        ExprKind::Callable { receiver, .. } => receiver
+            .as_ref()
+            .is_some_and(|receiver| expression(receiver, functions, targets)),
+        ExprKind::Invoke { callable, args } => {
+            let candidates = targets.get(callable.ty);
+            candidates.is_empty()
+                || candidates
+                    .iter()
+                    .any(|target| functions.get(target.function).copied().unwrap_or(true))
+                || expression(callable, functions, targets)
+                || args
+                    .values
+                    .iter()
+                    .any(|arg| expression(arg, functions, targets))
         }
         ExprKind::Construct {
             initializer, args, ..
         } => {
             functions.get(*initializer).copied().unwrap_or(true)
-                || args.values.iter().any(|arg| expression(arg, functions))
+                || args
+                    .values
+                    .iter()
+                    .any(|arg| expression(arg, functions, targets))
         }
         ExprKind::Exception { message, .. } => message
             .as_ref()
-            .is_some_and(|message| expression(message, functions)),
+            .is_some_and(|message| expression(message, functions, targets)),
         ExprKind::Builtin(builtin, args) => {
-            builtin_raises(builtin, args) || args.iter().any(|arg| expression(arg, functions))
+            builtin_raises(builtin, args)
+                || args.iter().any(|arg| expression(arg, functions, targets))
         }
     }
 }
@@ -293,6 +327,90 @@ mod tests {
     }
 
     #[test]
+    fn unknown_callbacks_keep_escaping_error_checks() {
+        let callback = Expr {
+            ty: Type::Callable(0),
+            kind: ExprKind::Local(0),
+        };
+        let invocation = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Invoke {
+                callable: Box::new(callback),
+                args: CallArgs::positional(vec![integer()]),
+            },
+        };
+        assert!(expression(&invocation, &[], &Targets::default()));
+    }
+
+    #[test]
+    fn callbacks_require_every_target_and_evaluated_child_to_be_infallible() {
+        let callback = Type::Callable(0);
+        let reference = |function| Expr {
+            ty: callback,
+            kind: ExprKind::Callable {
+                function,
+                receiver: None,
+            },
+        };
+        let invocation = |callable, args| Expr {
+            ty: Type::Int,
+            kind: ExprKind::Invoke {
+                callable: Box::new(callable),
+                args: CallArgs::positional(args),
+            },
+        };
+        let local = Expr {
+            ty: callback,
+            kind: ExprKind::Local(0),
+        };
+        let mut module = Module {
+            types: Default::default(),
+            class_fields: Vec::new(),
+            globals: Vec::new(),
+            functions: vec![
+                function(vec![Statement::Return(integer())]),
+                function(vec![Statement::Return(integer())]),
+                function(vec![Statement::Return(invocation(
+                    local.clone(),
+                    vec![integer()],
+                ))]),
+                function(vec![Statement::Raise(None)]),
+            ],
+            entry: function(vec![
+                Statement::Expr(reference(1)),
+                Statement::Expr(reference(0)),
+            ]),
+        };
+        assert_eq!(analyze(&module).functions, [false, false, false, true]);
+        let targets = Targets::analyze(&module);
+        let functions = [false, false, false, true];
+        assert!(expression(
+            &invocation(local.clone(), vec![call(3, Vec::new())]),
+            &functions,
+            &targets,
+        ));
+        assert!(expression(
+            &invocation(
+                Expr {
+                    ty: callback,
+                    kind: ExprKind::Scope {
+                        body: vec![Statement::Raise(None)],
+                        value: Box::new(local),
+                        clear: Vec::new(),
+                    },
+                },
+                vec![integer()]
+            ),
+            &functions,
+            &targets,
+        ));
+        // One failing alternative poisons the whole exact signature, even if
+        // no local value-flow analysis would select it at this particular call.
+        module.entry.body.push(Statement::Expr(reference(3)));
+        assert!(analyze(&module).may_raise(2));
+    }
+
+    #[test]
     fn transitive_calls_converge_and_uncertain_cycles_stay_fallible() {
         let module = Module {
             types: Default::default(),
@@ -403,7 +521,7 @@ def conversion(values: list[str]) -> bool:
                     Vec::new()
                 },
             };
-            assert!(block(&[statement], &[]));
+            assert!(block(&[statement], &[], &Targets::default()));
         }
         assert!(block(
             &[Statement::Scope {
@@ -415,7 +533,8 @@ def conversion(values: list[str]) -> bool:
                 }],
                 clear: vec![0],
             }],
-            &[]
+            &[],
+            &Targets::default()
         ));
     }
 
@@ -430,9 +549,17 @@ def conversion(values: list[str]) -> bool:
             body: Vec::new(),
             orelse: Vec::new(),
         };
-        assert!(!block(&[range(vec![integer()])], &[]));
-        assert!(block(&[range(vec![integer(), integer(), integer()])], &[]));
-        assert!(block(&[range(vec![call(0, Vec::new())])], &[true]));
+        assert!(!block(&[range(vec![integer()])], &[], &Targets::default()));
+        assert!(block(
+            &[range(vec![integer(), integer(), integer()])],
+            &[],
+            &Targets::default()
+        ));
+        assert!(block(
+            &[range(vec![call(0, Vec::new())])],
+            &[true],
+            &Targets::default()
+        ));
         let value = Expr {
             ty: Type::Int,
             kind: ExprKind::Builtin(
@@ -440,7 +567,7 @@ def conversion(values: list[str]) -> bool:
                 vec![integer(), integer(), call(0, Vec::new())],
             ),
         };
-        assert!(expression(&value, &[true]));
+        assert!(expression(&value, &[true], &Targets::default()));
     }
 
     #[test]

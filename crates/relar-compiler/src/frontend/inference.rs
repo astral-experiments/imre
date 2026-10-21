@@ -48,17 +48,50 @@ impl Inference {
         }
     }
 
-    fn parameter(&self, id: usize, index: usize) -> Option<Type> {
+    pub(super) fn parameter(&self, id: usize, index: usize) -> Option<Type> {
         self.pending.borrow()[id].params[index]
     }
 
-    fn learn_parameter(&self, id: usize, index: usize, ty: Type) {
+    pub(super) fn learn_parameter(&self, id: usize, index: usize, ty: Type) {
         let mut pending = self.pending.borrow_mut();
         let slot = &mut pending[id].params[index];
         if slot.is_none() {
             *slot = Some(ty);
             self.revision.set(self.revision.get() + 1);
         }
+    }
+
+    /// An exact callback boundary can supply missing formal types. The ordinary
+    /// final body check still enforces every inferred parameter and return.
+    pub(super) fn callable_signature(
+        &self,
+        signature: &mut Signature,
+        skip: usize,
+        expected: Option<(Vec<Type>, Type)>,
+    ) -> Result<(), &'static str> {
+        if let Some((params, returns)) = expected {
+            if params.len() + skip != signature.params.len() {
+                return Err("function value does not match its Callable parameter count");
+            }
+            for (index, ty) in params.into_iter().enumerate() {
+                self.learn_parameter(signature.id, index + skip, ty);
+            }
+            let mut pending = self.pending.borrow_mut();
+            if pending[signature.id].returns.is_none() {
+                pending[signature.id].returns = Some(returns);
+                self.revision.set(self.revision.get() + 1);
+            }
+        }
+        let ready = {
+            let pending = self.pending.borrow();
+            pending[signature.id].returns.is_some()
+                && pending[signature.id].params.iter().all(Option::is_some)
+        };
+        if !ready {
+            return Err(DEFERRED);
+        }
+        self.update(signature);
+        Ok(())
     }
 
     /// Stops when every signature is concrete, or no new type evidence is available.

@@ -11,6 +11,7 @@ enum Shape {
     Dict(Type, Type),
     Set(Type),
     Tuple(Vec<Type>),
+    Callable(Vec<Type>, Type),
     Optional(Type),
     Union(Vec<Type>),
 }
@@ -90,9 +91,12 @@ impl Types {
         match ty {
             Type::None => Some(false),
             Type::Tuple(_) => Some(!self.fields(ty).unwrap().is_empty()),
-            Type::Class(_) | Type::Iterator | Type::Exception | Type::TextIO | Type::BinaryIO => {
-                Some(true)
-            }
+            Type::Class(_)
+            | Type::Callable(_)
+            | Type::Iterator
+            | Type::Exception
+            | Type::TextIO
+            | Type::BinaryIO => Some(true),
             Type::Optional(_) if self.truthiness(self.payload(ty).unwrap()) == Some(false) => {
                 Some(false)
             }
@@ -137,6 +141,20 @@ impl Types {
 
     pub(crate) fn tuple(&self, elements: Vec<Type>) -> Type {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
+    }
+
+    /// Callable types describe full positional calls; names and defaults remain
+    /// properties of direct source definitions rather than part of this ABI.
+    pub(crate) fn callable(&self, params: Vec<Type>, returns: Type) -> Type {
+        Type::Callable(self.intern(Shape::Callable(params, returns)))
+    }
+
+    pub(crate) fn signature(&self, ty: Type) -> Option<(Vec<Type>, Type)> {
+        let Type::Callable(id) = ty else { return None };
+        match &self.0.borrow().shapes[id] {
+            Shape::Callable(params, returns) => Some((params.clone(), *returns)),
+            _ => unreachable!("callable type identity has a callable shape"),
+        }
     }
 
     pub(crate) fn dict(&self, key: Type, value: Type) -> Type {
@@ -241,6 +259,18 @@ impl Types {
     pub(crate) fn describe(&self, ty: Type, class_name: &impl Fn(usize) -> String) -> String {
         match ty {
             Type::Class(id) => class_name(id),
+            Type::Callable(_) => {
+                let (params, returns) = self.signature(ty).unwrap();
+                format!(
+                    "Callable[[{}], {}]",
+                    params
+                        .iter()
+                        .map(|&ty| self.describe(ty, class_name))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    self.describe(returns, class_name)
+                )
+            }
             Type::List(_) => format!(
                 "list[{}]",
                 self.describe(self.element(ty).unwrap(), class_name)

@@ -527,6 +527,17 @@ fn children(expression: &Expr, mut visit: impl FnMut(&Expr)) {
                 visit(value);
             }
         }
+        ExprKind::Callable { receiver, .. } => {
+            if let Some(receiver) = receiver {
+                visit(receiver);
+            }
+        }
+        ExprKind::Invoke { callable, args } => {
+            visit(callable);
+            for value in &args.values {
+                visit(value);
+            }
+        }
         ExprKind::Scope { .. } => {
             unreachable!("scoped statements require the full inspection or rewrite pass")
         }
@@ -580,6 +591,17 @@ fn children_mut(expression: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
             }
         }
         ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+            for value in &mut args.values {
+                visit(value);
+            }
+        }
+        ExprKind::Callable { receiver, .. } => {
+            if let Some(receiver) = receiver {
+                visit(receiver);
+            }
+        }
+        ExprKind::Invoke { callable, args } => {
+            visit(callable);
             for value in &mut args.values {
                 visit(value);
             }

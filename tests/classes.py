@@ -44,7 +44,6 @@ REJECTED = {
         + "    def other(self, amount: int) -> int:\n        return self.add(amount)\n",
     "constructor_factory_recursion": CELL.replace("self.value = value", "self.value = construct_value(value)")
         + "def construct_value(value: int) -> int:\n    return Cell(value).value\n",
-    "first_class_method": CELL + "value = Cell(1)\nmethod = value.add\n",
     "unbound_method_call": CELL + "Cell.add(Cell(1), 2)\n",
     "untyped_constructor": CELL.replace("def __init__(self, value: int)", "def __init__(self, value)"),
     "dynamic_attribute": CELL + "value = Cell(1)\nvalue.extra = 2\n",

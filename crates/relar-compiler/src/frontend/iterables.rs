@@ -197,6 +197,7 @@ impl Checker<'_> {
     ) -> Result<(Iteration, bool), String> {
         if let ast::Expr::Call(call) = expression
             && matches!(&*call.func, ast::Expr::Name(name) if name.id == "map")
+            && matches!(call.arguments.args.as_ref(), [ast::Expr::Name(name), _] if name.id == "int")
         {
             if !call.arguments.keywords.is_empty()
                 || !matches!(

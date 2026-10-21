@@ -119,6 +119,7 @@ impl Checker<'_> {
         if let Some(hint) = hint {
             let concrete = self.types.payload(hint).unwrap_or(hint);
             let contextual = match expression {
+                ast::Expr::Lambda(_) => self.types.signature(concrete).is_some(),
                 ast::Expr::List(_) | ast::Expr::ListComp(_) => {
                     self.types.element(concrete).is_some()
                 }

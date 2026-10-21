@@ -12,6 +12,7 @@ use crate::narrowing;
 use crate::types::Types;
 
 mod assignments;
+mod callables;
 mod calls;
 mod comprehensions;
 mod expansions;
@@ -60,6 +61,17 @@ impl ClassInfo {
                             &declarations,
                             types,
                         )
+                        .and_then(|ty| {
+                            if callables::contains_callable(ty, types) {
+                                Err(error(
+                                    &graph.modules[class.definition.module].source,
+                                    &field.annotation,
+                                    "class fields cannot contain callable values",
+                                ))
+                            } else {
+                                Ok(ty)
+                            }
+                        })
                         .map_err(|error| {
                             format!(
                                 "{}:{error}",
@@ -129,6 +141,7 @@ const RESERVED: &[&str] = &[
     "range",
     "enumerate",
     "map",
+    "filter",
     "sum",
     "zip",
     "reversed",
@@ -438,6 +451,20 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
         call_graph.push(helper.calls);
         recursion_errors.push(helper.recursion_error);
     }
+    let entry = entry.expect("source graph has an entry module");
+    let callable_targets = callables::targets(&functions, &entry);
+    for (function, calls) in functions.iter().zip(&mut call_graph) {
+        ir::walk_expressions(&function.body, &mut |value| {
+            if let ExprKind::Invoke { callable, .. } = &value.kind
+                && let Some(targets) = callable_targets.get(&callable.ty)
+            {
+                calls.extend(targets);
+            }
+        });
+    }
+    for function in functions.iter().chain([&entry]) {
+        callables::validate_storage(function, &types)?;
+    }
     let mut states = vec![0; functions.len()];
     for (id, diagnostic) in recursion_errors.into_iter().enumerate() {
         if !visit(id, &call_graph, &mut states) {
@@ -445,14 +472,14 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
         }
     }
     for initialization in &initializations {
-        initialization.validate(graph, &functions, &callable_definitions)?;
+        initialization.validate(graph, &functions, &callable_definitions, &callable_targets)?;
     }
     Ok(ir::Module {
         types,
         class_fields: classes.fields,
         globals: globals.into_types(),
         functions,
-        entry: entry.expect("source graph has an entry module"),
+        entry,
     })
 }
 
@@ -621,6 +648,33 @@ fn annotation_at(
             )),
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
+        ast::Expr::Subscript(value)
+            if matches!(
+                graph.resolve(module, &value.value),
+                Some(Binding::Intrinsic(Intrinsic::Callable))
+            ) =>
+        {
+            let ast::Expr::Tuple(arguments) = &*value.slice else {
+                return Err(error(
+                    source,
+                    expression,
+                    "Callable requires an exact parameter list and return type",
+                ));
+            };
+            let [ast::Expr::List(parameters), returns] = arguments.elts.as_slice() else {
+                return Err(error(
+                    source,
+                    expression,
+                    "Callable requires Callable[[T, ...], R]; ellipsis is unsupported",
+                ));
+            };
+            let parameters = parameters
+                .elts
+                .iter()
+                .map(nested)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(types.callable(parameters, nested(returns)?))
+        }
         ast::Expr::Subscript(value)
             if matches!(
                 graph.resolve(module, &value.value),
@@ -971,7 +1025,56 @@ impl<'a> Checker<'a> {
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
         let concrete = self.types.payload(expected).unwrap_or(expected);
+        if matches!(concrete, Type::Callable(_)) {
+            if let Some(Binding::Definition(definition)) =
+                self.graph.resolve(self.module, expression)
+                && let Some(signature) = self.functions.get(&definition).cloned()
+            {
+                let value = self.callable_value(&signature, None, Some(concrete), expression)?;
+                return self.coerce(value, expected, expression);
+            }
+            if let ast::Expr::Attribute(attribute) = expression
+                && self.graph.resolve(self.module, expression).is_none()
+            {
+                if attribute.attr.as_str().starts_with("__") {
+                    return Err(error(
+                        self.source,
+                        attribute,
+                        "special methods cannot be used as function values",
+                    ));
+                }
+                let receiver = self.expr(&attribute.value)?;
+                if let Type::Class(class) = receiver.ty
+                    && let Some(signature) = self.classes.methods[class]
+                        .get(attribute.attr.as_str())
+                        .cloned()
+                {
+                    let value = self.callable_value(
+                        &signature,
+                        Some(receiver),
+                        Some(concrete),
+                        expression,
+                    )?;
+                    return self.coerce(value, expected, expression);
+                }
+                return Err(error(
+                    self.source,
+                    expression,
+                    "expected a fixed bound method",
+                ));
+            }
+        }
         let value = match expression {
+            ast::Expr::Lambda(lambda) => {
+                let (params, returns) = self.types.signature(concrete).ok_or_else(|| {
+                    error(
+                        self.source,
+                        lambda,
+                        "a lambda requires an exact Callable context",
+                    )
+                })?;
+                self.lambda_value(lambda, Some(params), Some(returns))?
+            }
             ast::Expr::Named(value) => self.named_expression(value, Some(expected))?,
             ast::Expr::If(value) => self.conditional(value, Some(expected))?,
             ast::Expr::BoolOp(value) => self.boolean_value(value, Some(expected))?,
@@ -2400,6 +2503,11 @@ impl<'a> Checker<'a> {
     }
 
     fn expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if let Some(Binding::Definition(definition)) = self.graph.resolve(self.module, expression)
+            && let Some(signature) = self.functions.get(&definition).cloned()
+        {
+            return self.callable_value(&signature, None, None, expression);
+        }
         if let Some(Binding::Value(definition)) = self.graph.resolve(self.module, expression) {
             let (slot, ty) = self.globals.get(definition).ok_or_else(|| {
                 error(
@@ -2443,6 +2551,7 @@ impl<'a> Checker<'a> {
                 (Type::Bytes, ExprKind::Bytes(value.value.bytes().collect()))
             }
             ast::Expr::FString(value) => return self.fstring(value),
+            ast::Expr::Lambda(lambda) => return self.lambda_value(lambda, None, None),
             ast::Expr::Named(value) => return self.named_expression(value, None),
             ast::Expr::If(value) => return self.conditional(value, None),
             ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
@@ -2778,6 +2887,20 @@ impl<'a> Checker<'a> {
                         kind: ExprKind::Builtin(Builtin::TextClosed, vec![receiver]),
                     });
                 }
+                if let Type::Class(class) = receiver.ty
+                    && let Some(signature) = self.classes.methods[class]
+                        .get(attribute.attr.as_str())
+                        .cloned()
+                {
+                    if attribute.attr.as_str().starts_with("__") {
+                        return Err(error(
+                            self.source,
+                            attribute,
+                            "special methods cannot be used as function values",
+                        ));
+                    }
+                    return self.callable_value(&signature, Some(receiver), None, attribute);
+                }
                 let (receiver, field, ty) = self.field_value(attribute, receiver)?;
                 (ty, ExprKind::Field(Box::new(receiver), field))
             }
@@ -2999,6 +3122,12 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Call(signature.id, args),
             });
         }
+        if matches!(&*call.func, ast::Expr::Name(name) if self.names.contains_key(name.id.as_str()))
+            || !matches!(&*call.func, ast::Expr::Name(_) | ast::Expr::Attribute(_))
+        {
+            let callable = self.expr(&call.func)?;
+            return self.invoke(call, callable);
+        }
         if let ast::Expr::Attribute(attribute) = &*call.func {
             let receiver = self.expr(&attribute.value)?;
             if let Type::Class(class) = receiver.ty {
@@ -3200,7 +3329,7 @@ impl<'a> Checker<'a> {
             "list" => return self.list_call(call, None),
             "sum" => return self.sum_call(call),
             "any" | "all" => return self.quantifier_call(call, name.id == "all"),
-            "map" | "zip" | "reversed" | "enumerate" | "range" => {
+            "map" | "filter" | "zip" | "reversed" | "enumerate" | "range" => {
                 return Err(error(
                     self.source,
                     call,

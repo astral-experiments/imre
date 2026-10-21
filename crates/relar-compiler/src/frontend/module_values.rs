@@ -96,6 +96,13 @@ impl Initialization {
                     }
                     _ => unreachable!(),
                 };
+                if callables::contains_callable(value.ty, checker.types) {
+                    return Err(error(
+                        checker.source,
+                        statement,
+                        "imported module values cannot contain callable values",
+                    ));
+                }
                 let slot = checker.globals.insert(definition, value.ty);
                 body.push(Statement::Expr(Expr {
                     ty: Type::None,
@@ -131,16 +138,20 @@ impl Initialization {
         graph: &SourceGraph,
         functions: &[ir::Function],
         callables: &[DefinitionId],
+        targets: &HashMap<Type, HashSet<usize>>,
     ) -> Result<(), String> {
         let module = &graph.modules[self.module];
         for checkpoint in &self.checkpoints {
             let mut reads = HashSet::new();
             let mut calls = Vec::new();
+            let mut references = Vec::new();
             let mut visited = HashSet::new();
             collect(
                 &self.function.body[checkpoint.body.clone()],
                 &mut reads,
                 &mut calls,
+                &mut references,
+                targets,
             );
             while let Some(id) = calls.pop() {
                 if !visited.insert(id) {
@@ -154,7 +165,23 @@ impl Initialization {
                         "module initialization calls a definition before it is available",
                     ));
                 }
-                collect(&functions[id].body, &mut reads, &mut calls);
+                collect(
+                    &functions[id].body,
+                    &mut reads,
+                    &mut calls,
+                    &mut references,
+                    targets,
+                );
+            }
+            if references.iter().any(|&id| {
+                callables
+                    .get(id)
+                    .is_some_and(|definition| !checkpoint.definitions.contains(definition))
+            }) {
+                return Err(module.error(
+                    &module.parsed.syntax().body[checkpoint.statement],
+                    "module initialization references a function before it is available",
+                ));
             }
             if reads.iter().any(|&slot| slot >= checkpoint.initialized) {
                 return Err(module.error(
@@ -167,7 +194,13 @@ impl Initialization {
     }
 }
 
-fn collect(body: &[Statement], reads: &mut HashSet<usize>, calls: &mut Vec<usize>) {
+fn collect(
+    body: &[Statement],
+    reads: &mut HashSet<usize>,
+    calls: &mut Vec<usize>,
+    references: &mut Vec<usize>,
+    targets: &HashMap<Type, HashSet<usize>>,
+) {
     ir::walk_expressions(body, &mut |value| match &value.kind {
         ExprKind::Builtin(Builtin::GlobalGet(slot), _) => {
             reads.insert(*slot);
@@ -176,6 +209,12 @@ fn collect(body: &[Statement], reads: &mut HashSet<usize>, calls: &mut Vec<usize
         | ExprKind::Construct {
             initializer: id, ..
         } => calls.push(*id),
+        ExprKind::Callable { function, .. } => references.push(*function),
+        ExprKind::Invoke { callable, .. } => {
+            if let Some(targets) = targets.get(&callable.ty) {
+                calls.extend(targets);
+            }
+        }
         _ => {}
     });
 }

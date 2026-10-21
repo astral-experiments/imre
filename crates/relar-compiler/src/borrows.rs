@@ -1,5 +1,6 @@
 //! Borrows projections only while unchanged caller roots preserve every heap edge.
 
+use crate::callables::Targets;
 use crate::ir::{self, Builtin, Expr, ExprKind, Function, Module, Statement, Type};
 use crate::list_specialization::readonly_builtin;
 use crate::types::Types;
@@ -18,23 +19,32 @@ pub(crate) struct FunctionBorrows {
 /// Computes closed-callgraph edge preservation before deriving local roots.
 /// The separate initializer summary applies only to a newly allocated receiver.
 pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
-    let (preserves, initializes) = summaries(module, true);
-    let (readonly, readonly_initializes) = summaries(module, false);
+    let targets = Targets::analyze(module);
+    let (preserves, initializes) = summaries(module, true, &targets);
+    let (readonly, readonly_initializes) = summaries(module, false, &targets);
     module
         .functions
         .iter()
         .chain([&module.entry])
         .map(|function| {
-            let mut facts = if preserves_edges(function, &preserves, &initializes, false, true) {
-                local_roots(function, &module.types)
-            } else {
-                FunctionBorrows {
-                    rooted: vec![false; function.locals.len()],
-                    locals: vec![false; function.locals.len()],
-                    length_roots: vec![None; function.locals.len()],
-                }
-            };
-            if preserves_edges(function, &readonly, &readonly_initializes, false, false) {
+            let mut facts =
+                if preserves_edges(function, &preserves, &initializes, false, true, &targets) {
+                    local_roots(function, &module.types)
+                } else {
+                    FunctionBorrows {
+                        rooted: vec![false; function.locals.len()],
+                        locals: vec![false; function.locals.len()],
+                        length_roots: vec![None; function.locals.len()],
+                    }
+                };
+            if preserves_edges(
+                function,
+                &readonly,
+                &readonly_initializes,
+                false,
+                false,
+                &targets,
+            ) {
                 facts.length_roots = length_roots(function, &facts);
             }
             facts
@@ -44,7 +54,7 @@ pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
 
 /// Edge preservation permits append; length/buffer invariance additionally
 /// excludes it and reserve, including through every ordinary or fresh call.
-fn summaries(module: &Module, append: bool) -> (Vec<bool>, Vec<bool>) {
+fn summaries(module: &Module, append: bool, targets: &Targets) -> (Vec<bool>, Vec<bool>) {
     // Unknown callees and unexpected recursive cycles retain ordinary owners.
     // The checked call graph is acyclic, so proving upward loses no precision.
     let mut preserves = vec![false; module.functions.len()];
@@ -52,8 +62,8 @@ fn summaries(module: &Module, append: bool) -> (Vec<bool>, Vec<bool>) {
     loop {
         let mut changed = false;
         for (id, function) in module.functions.iter().enumerate() {
-            let safe = preserves_edges(function, &preserves, &initializes, false, append);
-            let fresh = preserves_edges(function, &preserves, &initializes, true, append);
+            let safe = preserves_edges(function, &preserves, &initializes, false, append, targets);
+            let fresh = preserves_edges(function, &preserves, &initializes, true, append, targets);
             changed |= preserves[id] != safe || initializes[id] != fresh;
             preserves[id] = safe;
             initializes[id] = fresh;
@@ -166,6 +176,7 @@ fn preserves_edges(
     constructors: &[bool],
     fresh: bool,
     append: bool,
+    targets: &Targets,
 ) -> bool {
     let written = written(function);
     let receiver = function
@@ -188,6 +199,15 @@ fn preserves_edges(
     ir::walk_expressions(&function.body, &mut |expression| {
         safe &= match &expression.kind {
             ExprKind::Call(id, _) => calls.get(*id).copied().unwrap_or(false),
+            ExprKind::Invoke { callable, .. } => {
+                let candidates = targets.get(callable.ty);
+                // Even a bound initializer is an ordinary call on an existing
+                // receiver; only Construct may use the fresh-object summary.
+                !candidates.is_empty()
+                    && candidates
+                        .iter()
+                        .all(|target| calls.get(target.function).copied().unwrap_or(false))
+            }
             ExprKind::Construct { initializer, .. } => {
                 constructors.get(*initializer).copied().unwrap_or(false)
             }
@@ -450,6 +470,86 @@ mod tests {
     }
 
     #[test]
+    fn unknown_callbacks_disable_projection_and_buffer_borrows() {
+        let ty = Type::Class(0);
+        let callback = Type::Callable(0);
+        let function = function(
+            vec![0, 1],
+            vec![ty, callback, ty],
+            vec![
+                Statement::Assign(2, local(0, ty)),
+                Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Invoke {
+                        callable: Box::new(local(1, callback)),
+                        args: CallArgs::positional(vec![local(2, ty)]),
+                    },
+                }),
+            ],
+        );
+        let facts = analyze(&module(vec![function]));
+        assert!(facts[0].locals.iter().all(|&borrowed| !borrowed));
+        assert!(facts[0].length_roots.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn callback_target_joins_distinguish_edge_preservation_from_readonly() {
+        let list = Type::ListInt;
+        let callback = Type::Callable(0);
+        let mut module = module(vec![
+            function(vec![0], vec![list], Vec::new()),
+            function(vec![0], vec![list], Vec::new()),
+            function(
+                vec![0, 1],
+                vec![list, callback, list],
+                vec![
+                    Statement::Assign(2, local(0, list)),
+                    Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Invoke {
+                            callable: Box::new(local(1, callback)),
+                            args: CallArgs::positional(vec![local(2, list)]),
+                        },
+                    }),
+                ],
+            ),
+        ]);
+        module.entry.body = [0, 1]
+            .into_iter()
+            .map(|function| {
+                Statement::Expr(Expr {
+                    ty: callback,
+                    kind: ExprKind::Callable {
+                        function,
+                        receiver: None,
+                    },
+                })
+            })
+            .collect();
+        let facts = analyze(&module);
+        assert!(facts[2].locals[2]);
+        assert_eq!(facts[2].length_roots[2], Some(0));
+
+        let integer = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Int("1".into()),
+        };
+        module.functions[1].body = vec![Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::Append, vec![local(0, list), integer.clone()]),
+        })];
+        let facts = analyze(&module);
+        assert!(facts[2].locals[2]);
+        assert!(facts[2].length_roots.iter().all(Option::is_none));
+
+        module.functions[1].body =
+            vec![Statement::SetItem(local(0, list), integer.clone(), integer)];
+        let facts = analyze(&module);
+        assert!(facts[2].rooted.iter().all(|&rooted| !rooted));
+        assert!(facts[2].length_roots.iter().all(Option::is_none));
+    }
+
+    #[test]
     fn expression_scopes_include_definitions_and_parameter_cleanup() {
         let ty = Type::Class(0);
         let scoped = |clear| Expr {
@@ -509,10 +609,34 @@ mod tests {
                 }),
             ],
         );
-        let facts = analyze(&module(vec![initializer, fresh, ordinary]));
+        let callback = Type::Callable(0);
+        let indirect = function(
+            vec![0, 1],
+            vec![ty, callback, ty],
+            vec![
+                Statement::Expr(Expr {
+                    ty: callback,
+                    kind: ExprKind::Callable {
+                        function: 0,
+                        receiver: Some(Box::new(local(0, ty))),
+                    },
+                }),
+                Statement::Assign(2, local(0, ty)),
+                Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Invoke {
+                        callable: Box::new(local(1, callback)),
+                        args: CallArgs::positional(vec![local(0, ty)]),
+                    },
+                }),
+            ],
+        );
+        let module = module(vec![initializer, fresh, ordinary, indirect]);
+        let facts = analyze(&module);
         assert!(facts[1].locals[1]);
         assert!(!facts[0].rooted.iter().any(|&rooted| rooted));
         assert!(!facts[2].rooted.iter().any(|&rooted| rooted));
+        assert!(!facts[3].rooted.iter().any(|&rooted| rooted));
     }
 
     #[test]

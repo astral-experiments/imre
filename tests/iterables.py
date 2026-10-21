@@ -32,8 +32,6 @@ REJECTED = {
     "sum_duplicate_start": "print(sum([1], 2, start=3))\n",
     "map_escaped": 'values = map(int, "12")\n',
     "map_wrong_callback": "values = list(map(str, [1]))\n",
-    "map_user_callback": 'def convert(value: str) -> int:\n    return int(value)\nvalues = list(map(convert, ["1"]))\n',
-    "map_lambda": 'values = list(map(lambda value: int(value), "12"))\n',
     "map_missing_source": "values = list(map(int))\n",
     "map_extra_source": 'values = list(map(int, "12", "34"))\n',
     "map_keyword": 'values = list(map(int, iterable="12"))\n',
