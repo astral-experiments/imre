@@ -9,7 +9,7 @@ def line(output: TextIO, value: str) -> None:
 
 def show(report: Report, *, output: TextIO) -> None:
     shortages: list[Fulfillment] = [
-        result for result in report.results if result.shortage > 0
+        result for result in report.results if result.shortage
     ]
     untouched: list[tuple[str, int]] = [
         (sku, quantity)

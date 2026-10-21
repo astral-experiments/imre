@@ -180,7 +180,7 @@ Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueErr
 
 ## Structural pattern matching
 
-`match` evaluates its subject once and tries cases in source order. Patterns support scalar literals, the `None`/`True`/`False` singletons, captures, `_`, `|`, `as`, fixed tuple and list sequences with one starred rest, dictionary mappings with optional `**rest`, and keyword fields on declared classes. Guards require `bool` and run only after a successful pattern. The first successful guard selects one case; cases do not fall through.
+`match` evaluates its subject once and tries cases in source order. Patterns support scalar literals, the `None`/`True`/`False` singletons, captures, `_`, `|`, `as`, fixed tuple and list sequences with one starred rest, dictionary mappings with optional `**rest`, and keyword fields on declared classes. Guards use Python truth tests and run only after a successful pattern. The first successful guard selects one case; cases do not fall through.
 
 ```python
 def describe(rows: dict[str, list[int]]) -> str:
@@ -259,7 +259,7 @@ Narrowing applies to local bindings, not mutable fields or indexed elements. Cop
 
 ## Eager comprehensions
 
-List, dictionary, and set comprehensions support nested `for` clauses and zero or more explicit boolean filters per clause. Sources are the existing concrete lists, strings, dictionary keys or `.items()`, sets, `range`, and loop-head `enumerate` forms. Targets use the same name-only fixed-tuple unpacking as ordinary loops.
+List, dictionary, and set comprehensions support nested `for` clauses and zero or more filters using Python truth tests per clause. Sources are the existing concrete lists, strings, dictionary keys or `.items()`, sets, `range`, and loop-head `enumerate` forms. Targets use the same name-only fixed-tuple unpacking as ordinary loops.
 
 ```python
 def positives(rows: list[list[int]]) -> list[int]:

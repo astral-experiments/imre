@@ -2,12 +2,11 @@ from .model import Fulfillment, Inventory, Report, Request, Stock
 
 
 def fulfill(request: Request, *, inventory: Inventory) -> Fulfillment:
-    filled = 0
-    if request.sku in inventory.remaining:
-        available = inventory.remaining[request.sku]
-        quantity = request.quantity
-        # min is outside the native subset.
-        filled = available if available < quantity else quantity  # noqa: FURB136
+    available = inventory.remaining.get(request.sku)
+    quantity = request.quantity
+    # Missing or empty stock fills nothing; min is outside the native subset.
+    filled = (available and (available if available < quantity else quantity)) or 0  # noqa: FURB136
+    if available is not None:
         inventory.remaining[request.sku] = available - filled
     return Fulfillment(request, filled=filled, shortage=request.quantity - filled)
 

@@ -27,7 +27,7 @@ class Reader:
     def count_value(self, token: str) -> int:
         # Short counts stay within the native small-integer range. Delegate long
         # tokens to int() so CPython's configured conversion limit still applies.
-        if len(token) == 0 or len(token) > 18:
+        if not token or len(token) > 18:
             return self.number(token)
         sign = token[0]
         digits = token[1:] if sign == "+" or sign == "-" else token
@@ -36,14 +36,15 @@ class Reader:
         for character in digits:
             if character == "_":
                 if not previous_digit:
-                    raise ValueError(self.label + ": invalid integer")
+                    break
                 previous_digit = False
             else:
                 value = value * 10 + self.number(character)
                 previous_digit = True
-        if not previous_digit:
-            raise ValueError(self.label + ": invalid integer")
-        return -value if sign == "-" else value
+        else:
+            if previous_digit:
+                return -value if sign == "-" else value
+        raise ValueError(self.label + ": invalid integer")
 
     def count(self) -> int:
         fields = self.next()
@@ -81,13 +82,16 @@ def read_stock(lines: list[str]) -> list[Stock]:
     reader = Reader(lines)
     count = reader.count()
     result: list[Stock] = []
-    for _ in range(count):
+    while count:
         sku, quantity = reader.item()
         if quantity < 0:
-            raise ValueError("stock: negative quantity")
+            break
         result.append(Stock(sku, quantity=quantity))
-    reader.finish()
-    return result
+        count -= 1
+    else:
+        reader.finish()
+        return result
+    raise ValueError("stock: negative quantity")
 
 
 def read_request(reader: Reader, *, batch: int, row: int) -> Request:
