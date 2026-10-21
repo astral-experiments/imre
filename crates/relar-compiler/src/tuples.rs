@@ -514,10 +514,10 @@ print(total([10, 20]))
         let graph = crate::modules::SourceGraph::single(source).unwrap();
         let mut module = crate::frontend::lower(&graph).unwrap();
         let before = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
-        assert_eq!(before.matches("call ptr @relar_object_new(").count(), 2);
+        assert_eq!(before.matches("call ptr @relar_record_new(").count(), 2);
         scalarize(&mut module);
         let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
-        assert!(!after.contains("call ptr @relar_object_new("));
+        assert!(!after.contains("call ptr @relar_record_new("));
         let function = &module.functions[0];
         fn collect_cleared(body: &[Statement], locals: &[Type], cleared: &mut Vec<Type>) {
             for statement in body {

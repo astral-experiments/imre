@@ -1,10 +1,8 @@
-//! Dictionaries and sets with immutable scalar keys and owned typed values.
+//! Typed int/string hash tables with insertion-ordered dictionary entries.
 //!
-//! A randomized hash index points into insertion-ordered entries. Deleted entries
-//! become tombstones; active iterators hold a lease that prevents compaction.
-//! Iterators root their owner and retain only an integer cursor between calls,
-//! never a Rust reference or iterator into storage across a Python loop body.
-//! Dictionaries expose insertion order; sets deliberately promise no order.
+//! Keys are monomorphized once per table; values are plain owned words with one
+//! shared descriptor. Sets store no value words. Active iterators keep their
+//! owner's entry directory stable through a compaction lease, never a Rust borrow.
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -12,134 +10,94 @@ use std::mem::ManuallyDrop;
 use std::rc::{Rc, Weak};
 
 use super::exceptions::{Error, Kind, string_repr};
-use super::{Int, Object, Slot, Storage, StorageCell, Str, acquire_rc, fail, object};
+use super::words::{OwnedWord, WordKind};
+use super::{Int, Object, Storage, StorageCell, Str, acquire_rc, fail, object};
 
-#[derive(Clone, Copy)]
-enum KeyKind {
-    Int,
-    Str,
-}
-
-impl KeyKind {
-    fn from_representation(kind: u32) -> Self {
-        match kind {
-            2 => Self::Int,
-            3 => Self::Str,
-            _ => fail("SystemError", "mapping keys must be integers or strings"),
-        }
-    }
-}
-
-/// Immutable keys compare by scalar value, never by allocation identity.
-/// Canonical integer handles make small and arbitrary-precision ranges disjoint.
 #[derive(Clone)]
-enum Key {
-    Int(Int),
-    Str(Rc<Str>),
-}
+struct IntKey(Int);
 
-impl Key {
-    /// Borrows a rooted ABI word without changing its reference count.
-    /// The temporary must not outlive that root or be dropped as an owned key.
-    unsafe fn borrow(word: usize, kind: KeyKind) -> ManuallyDrop<Self> {
-        if word == 0 {
-            fail("TypeError", "unexpected null mapping key");
-        }
-        ManuallyDrop::new(match kind {
-            KeyKind::Int => Self::Int(Int(word)),
-            KeyKind::Str => {
-                // SAFETY: the caller roots this Rc<Str>; ManuallyDrop prevents
-                // consumption of its borrowed reference.
-                Self::Str(unsafe { Rc::from_raw(word as *const Str) })
-            }
-        })
-    }
-
-    fn into_word(self) -> usize {
-        match self {
-            Self::Int(value) => value.into_raw(),
-            Self::Str(value) => Rc::into_raw(value) as usize,
-        }
-    }
-}
-
-impl PartialEq for Key {
+impl PartialEq for IntKey {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Int(a), Self::Int(b)) => match (a.as_small(), b.as_small()) {
-                (Some(a), Some(b)) => a == b,
-                (None, None) => a.big() == b.big(),
-                _ => false,
-            },
-            (Self::Str(a), Self::Str(b)) => a == b,
+        match (self.0.as_small(), other.0.as_small()) {
+            (Some(a), Some(b)) => a == b,
+            (None, None) => self.0.big() == other.0.big(),
             _ => false,
         }
     }
 }
-
-impl Eq for Key {}
-
-impl Hash for Key {
+impl Eq for IntKey {}
+impl Hash for IntKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        match self {
-            Self::Int(value) => {
-                if let Some(value) = value.as_small() {
-                    0_u8.hash(state);
-                    value.hash(state);
-                } else {
-                    1_u8.hash(state);
-                    value.big().hash(state);
-                }
-            }
-            Self::Str(value) => {
-                2_u8.hash(state);
-                value.hash(state);
-            }
+        if let Some(value) = self.0.as_small() {
+            0_u8.hash(state);
+            value.hash(state);
+        } else {
+            1_u8.hash(state);
+            self.0.big().hash(state);
         }
     }
 }
 
-struct Entry {
-    key: Key,
-    value: Slot,
+/// Only the table's exact immutable scalar key representation implements this.
+trait ScalarKey: Clone + Eq + Hash {
+    const KIND: u32;
+    unsafe fn borrow(word: usize) -> ManuallyDrop<Self>;
+    unsafe fn from_owned(word: usize) -> Self;
+    fn into_word(self) -> usize;
+}
+impl ScalarKey for IntKey {
+    const KIND: u32 = 2;
+    unsafe fn borrow(word: usize) -> ManuallyDrop<Self> {
+        ManuallyDrop::new(Self(Int(word)))
+    }
+    unsafe fn from_owned(word: usize) -> Self {
+        Self(Int(word))
+    }
+    fn into_word(self) -> usize {
+        self.0.into_raw()
+    }
+}
+impl ScalarKey for Rc<Str> {
+    const KIND: u32 = 3;
+    unsafe fn borrow(word: usize) -> ManuallyDrop<Self> {
+        // SAFETY: the caller roots an exact string handle; ManuallyDrop does not consume it.
+        ManuallyDrop::new(unsafe { Rc::from_raw(word as *const Str) })
+    }
+    unsafe fn from_owned(word: usize) -> Self {
+        // SAFETY: the caller transfers an independently acquired string owner.
+        unsafe { Rc::from_raw(word as *const Str) }
+    }
+    fn into_word(self) -> usize {
+        Rc::into_raw(self) as usize
+    }
 }
 
-// Every live key has an ordered entry. Vec's isize::MAX-byte allocation limit
-// therefore gives dictionaries and sets the compiler's shared MAX_LIST_LEN bound.
-const _: () = assert!(size_of::<Option<Entry>>() >= 8);
-
-/// Boxed mapping state keeps dictionary metadata from enlarging every Object.
-pub(super) struct Mapping {
-    key_kind: KeyKind,
-    value_kind: u32,
-    index: HashMap<Key, usize>,
-    entries: Vec<Option<Entry>>,
+struct Entry<K, V> {
+    key: K,
+    value: V,
+}
+struct Table<K, V> {
+    index: HashMap<K, usize>,
+    entries: Vec<Option<Entry<K, V>>>,
     iterators: Weak<()>,
 }
 
-impl Mapping {
-    fn new(key_kind: u32, value_kind: u32) -> Self {
-        if value_kind > 5 {
-            fail("SystemError", "invalid dictionary value representation");
-        }
+// Every live entry needs at least eight bytes, including key-only set entries.
+// This retains the compiler's common 2^60-1 bound for container lengths.
+const _: () = assert!(size_of::<Option<Entry<IntKey, ()>>>() >= 8);
+const _: () = assert!(size_of::<Option<Entry<Rc<Str>, ()>>>() >= 8);
+
+impl<K: ScalarKey, V: Copy> Table<K, V> {
+    fn new() -> Self {
         Self {
-            key_kind: KeyKind::from_representation(key_kind),
-            value_kind,
             index: HashMap::new(),
             entries: Vec::new(),
             iterators: Weak::new(),
         }
     }
 
-    fn entry(&self, key: &Key) -> Option<&Entry> {
-        self.index
-            .get(key)
-            .map(|&position| self.entries[position].as_ref().unwrap())
-    }
-
-    /// Existing keys retain their position and original key owner. Return the
-    /// unused incoming key and displaced value for destruction after storage access.
-    fn insert(&mut self, key: Key, value: Slot) -> Option<(Key, Slot)> {
+    /// Preserves first-insertion position and returns owners displaced by an update.
+    fn insert(&mut self, key: K, value: V) -> Option<(K, V)> {
         if let Some(&position) = self.index.get(&key) {
             let entry = self.entries[position].as_mut().unwrap();
             return Some((key, std::mem::replace(&mut entry.value, value)));
@@ -147,27 +105,23 @@ impl Mapping {
         self.compact();
         self.index
             .try_reserve(1)
-            .unwrap_or_else(|_| fail("MemoryError", "dictionary allocation failed"));
+            .unwrap_or_else(|_| fail("MemoryError", "mapping allocation failed"));
         self.entries
             .try_reserve(1)
-            .unwrap_or_else(|_| fail("MemoryError", "dictionary allocation failed"));
-        let previous = self.index.insert(key.clone(), self.entries.len());
-        debug_assert!(previous.is_none());
+            .unwrap_or_else(|_| fail("MemoryError", "mapping allocation failed"));
+        self.index.insert(key.clone(), self.entries.len());
         self.entries.push(Some(Entry { key, value }));
         None
     }
 
-    /// Removes both key owners and the value without dropping them inside the
-    /// mutable access. Reinsertion will append a new entry at the end.
-    fn remove(&mut self, key: &Key) -> Option<(Key, Entry)> {
-        let (indexed_key, position) = self.index.remove_entry(key)?;
+    /// Returns both removed key owners, avoiding any drop during mutable access.
+    fn remove(&mut self, key: &K) -> Option<(K, Entry<K, V>)> {
+        let (indexed, position) = self.index.remove_entry(key)?;
         let entry = self.entries[position].take().unwrap();
         self.compact();
-        Some((indexed_key, entry))
+        Some((indexed, entry))
     }
 
-    /// Compaction moves live owners but drops only empty tombstones. A shared
-    /// lease blocks it while an iterator could still use an old entry position.
     fn compact(&mut self) {
         if self.iterators.strong_count() != 0
             || self.entries.len() < 32
@@ -193,6 +147,143 @@ impl Mapping {
         self.iterators = Rc::downgrade(&lease);
         lease
     }
+
+    unsafe fn lookup(&self, word: usize) -> Option<&Entry<K, V>> {
+        // SAFETY: the caller roots this table's exact key representation.
+        let key = unsafe { K::borrow(word) };
+        self.index
+            .get(&*key)
+            .map(|&position| self.entries[position].as_ref().unwrap())
+    }
+
+    fn next(&self, position: usize) -> Option<(usize, OwnedWord, V)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .skip(position)
+            .find_map(|(position, entry)| {
+                entry.as_ref().map(|entry| {
+                    let word = entry.key.clone().into_word();
+                    // SAFETY: cloning acquired one owner of this exact key kind.
+                    let key = unsafe { OwnedWord::from_owned(word, WordKind::new(K::KIND)) };
+                    (position + 1, key, entry.value)
+                })
+            })
+    }
+}
+
+enum Tables<V> {
+    Int(Table<IntKey, V>),
+    Str(Table<Rc<Str>, V>),
+}
+
+macro_rules! table {
+    ($self:expr, $table:ident => $body:expr) => {
+        match $self {
+            Tables::Int($table) => $body,
+            Tables::Str($table) => $body,
+        }
+    };
+}
+
+impl<V: Copy> Tables<V> {
+    fn new(kind: u32) -> Self {
+        match kind {
+            2 => Self::Int(Table::new()),
+            3 => Self::Str(Table::new()),
+            _ => fail("SystemError", "mapping keys must be integers or strings"),
+        }
+    }
+    fn key_kind(&self) -> u32 {
+        match self {
+            Self::Int(_) => 2,
+            Self::Str(_) => 3,
+        }
+    }
+    fn len(&self) -> usize {
+        table!(self, table => table.index.len())
+    }
+    #[cfg(test)]
+    fn entry_count(&self) -> usize {
+        table!(self, table => table.entries.len())
+    }
+    fn lease(&mut self) -> Rc<()> {
+        table!(self, table => table.iterator_lease())
+    }
+    unsafe fn lookup(&self, word: usize) -> Option<V> {
+        // SAFETY: each dispatched table borrows its exact rooted key kind.
+        table!(self, table => unsafe { table.lookup(word) }.map(|entry| entry.value))
+    }
+    fn insert(&mut self, key: OwnedWord, value: V) -> Option<(OwnedWord, V)> {
+        fn insert<K: ScalarKey, V: Copy>(
+            table: &mut Table<K, V>,
+            key: OwnedWord,
+            value: V,
+        ) -> Option<(OwnedWord, V)> {
+            assert_eq!(key.kind.raw(), K::KIND);
+            // SAFETY: the key temporary transfers one exact typed owner.
+            let key = unsafe { K::from_owned(key.into_word()) };
+            table.insert(key, value).map(|(key, value)| {
+                // SAFETY: insert transfers the unused incoming key reference.
+                (
+                    unsafe { OwnedWord::from_owned(key.into_word(), WordKind::new(K::KIND)) },
+                    value,
+                )
+            })
+        }
+        table!(self, table => insert(table, key, value))
+    }
+    unsafe fn remove(&mut self, word: usize) -> Option<(OwnedWord, OwnedWord, V)> {
+        unsafe fn remove<K: ScalarKey, V: Copy>(
+            table: &mut Table<K, V>,
+            word: usize,
+        ) -> Option<(OwnedWord, OwnedWord, V)> {
+            // SAFETY: the caller roots an exact key of this table's kind.
+            let key = unsafe { K::borrow(word) };
+            table.remove(&key).map(|(indexed, entry)| {
+                // SAFETY: the table transferred two independent key owners.
+                unsafe {
+                    (
+                        OwnedWord::from_owned(indexed.into_word(), WordKind::new(K::KIND)),
+                        OwnedWord::from_owned(entry.key.into_word(), WordKind::new(K::KIND)),
+                        entry.value,
+                    )
+                }
+            })
+        }
+        // SAFETY: dispatch preserves the exact key kind.
+        table!(self, table => unsafe { remove(table, word) })
+    }
+    fn next(&self, position: usize) -> Option<(usize, OwnedWord, V)> {
+        table!(self, table => table.next(position))
+    }
+}
+
+pub(super) struct Mapping {
+    tables: Tables<usize>,
+    value_kind: WordKind,
+}
+pub(super) struct Set {
+    tables: Tables<()>,
+}
+
+impl Mapping {
+    fn new(key_kind: u32, value_kind: u32) -> Self {
+        Self {
+            tables: Tables::new(key_kind),
+            value_kind: WordKind::new(value_kind),
+        }
+    }
+}
+impl Drop for Mapping {
+    fn drop(&mut self) {
+        table!(&mut self.tables, table => {
+            for entry in table.entries.iter_mut().flatten() {
+                // SAFETY: each dictionary entry owns one word of the shared kind.
+                unsafe { self.value_kind.release(entry.value) };
+            }
+        });
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -201,7 +292,6 @@ enum IterationError {
     DictionaryKeys,
     SetSize,
 }
-
 impl IterationError {
     fn message(self) -> &'static str {
         match self {
@@ -211,16 +301,12 @@ impl IterationError {
         }
     }
 }
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum IteratorKind {
     DictionaryKeys,
     DictionaryItems,
     Set,
 }
-
-/// The owner and lease are ordinary Rc fields: releasing an iterator never
-/// calls back into mapping storage. Each yielded key/value is independently owned.
 pub(super) struct MappingIterator {
     owner: Rc<Object>,
     _lease: Rc<()>,
@@ -232,46 +318,51 @@ pub(super) struct MappingIterator {
 }
 
 impl MappingIterator {
-    /// Checks size before scanning current entries, including after the last
-    /// yielded item. Exhaustion is permanent; replacing existing values is allowed.
-    fn next(&mut self) -> Result<Option<(Key, Option<Slot>)>, IterationError> {
+    /// Checks current size and snapshots owners before returning to a loop body.
+    /// Exhaustion is permanent; size failures stay sticky after size restoration.
+    fn next(&mut self) -> Result<Option<(OwnedWord, Option<OwnedWord>)>, IterationError> {
         if self.exhausted {
             return Ok(None);
         }
-        // SAFETY: the rooted owner is a distinct mapping allocation, and no
-        // storage reference escapes. Key/value clones cannot reenter either cell.
+        // SAFETY: the iterator and rooted mapping are distinct allocations;
+        // snapshot acquisition cannot reenter and no storage reference escapes.
         let result = unsafe {
             self.owner.0.with(|storage| {
-                let mapping = storage.iteration_mapping(self.kind);
-                if mapping.index.len() != self.expected_len {
+                let length = storage.iteration_len(self.kind);
+                if length != self.expected_len {
                     return Err(if self.kind == IteratorKind::Set {
                         IterationError::SetSize
                     } else {
                         IterationError::DictionarySize
                     });
                 }
-                for (position, entry) in mapping.entries.iter().enumerate().skip(self.position) {
-                    if let Some(entry) = entry {
-                        if self.kind != IteratorKind::Set && self.remaining == 0 {
-                            return Err(IterationError::DictionaryKeys);
-                        }
-                        return Ok(Some((
-                            position + 1,
-                            entry.key.clone(),
-                            (self.kind == IteratorKind::DictionaryItems)
-                                .then(|| entry.value.clone()),
-                        )));
-                    }
+                let next = if self.kind == IteratorKind::Set {
+                    storage
+                        .set()
+                        .tables
+                        .next(self.position)
+                        .map(|(position, key, ())| (position, key, None))
+                } else {
+                    let mapping = storage.dictionary();
+                    mapping
+                        .tables
+                        .next(self.position)
+                        .map(|(position, key, word)| {
+                            let value = (self.kind == IteratorKind::DictionaryItems)
+                                .then(|| mapping.value_kind.acquire(word));
+                            (position, key, value)
+                        })
+                };
+                if next.is_some() && self.kind != IteratorKind::Set && self.remaining == 0 {
+                    return Err(IterationError::DictionaryKeys);
                 }
-                Ok(None)
+                Ok(next)
             })
         };
         let result = match result {
             Ok(result) => result,
             Err(error) => {
-                // CPython keeps size failures sticky even if a handler restores
-                // the size. Keys-changed failures instead exhaust the iterator.
-                if matches!(error, IterationError::DictionaryKeys) {
+                if error == IterationError::DictionaryKeys {
                     self.exhausted = true;
                 } else {
                     self.expected_len = usize::MAX;
@@ -293,237 +384,196 @@ impl MappingIterator {
 impl Storage {
     fn dictionary(&self) -> &Mapping {
         match self {
-            Self::Dictionary(mapping) => mapping,
+            Self::Dictionary(value) => value,
             _ => fail("SystemError", "expected a dictionary object"),
         }
     }
-
     fn dictionary_mut(&mut self) -> &mut Mapping {
         match self {
-            Self::Dictionary(mapping) => mapping,
+            Self::Dictionary(value) => value,
             _ => fail("SystemError", "expected a dictionary object"),
         }
     }
-
-    fn set(&self) -> &Mapping {
+    fn set(&self) -> &Set {
         match self {
-            Self::Set(mapping) => mapping,
+            Self::Set(value) => value,
             _ => fail("SystemError", "expected a set object"),
         }
     }
-
-    fn set_mut(&mut self) -> &mut Mapping {
+    fn set_mut(&mut self) -> &mut Set {
         match self {
-            Self::Set(mapping) => mapping,
+            Self::Set(value) => value,
             _ => fail("SystemError", "expected a set object"),
         }
     }
-
-    fn iteration_mapping(&self, kind: IteratorKind) -> &Mapping {
+    fn iteration_len(&self, kind: IteratorKind) -> usize {
         if kind == IteratorKind::Set {
-            self.set()
+            self.set().tables.len()
         } else {
-            self.dictionary()
+            self.dictionary().tables.len()
         }
     }
-
-    fn iteration_mapping_mut(&mut self, kind: IteratorKind) -> &mut Mapping {
+    fn iteration_lease(&mut self, kind: IteratorKind) -> Rc<()> {
         if kind == IteratorKind::Set {
-            self.set_mut()
+            self.set_mut().tables.lease()
         } else {
-            self.dictionary_mut()
+            self.dictionary_mut().tables.lease()
         }
     }
-
     fn mapping_iterator_mut(&mut self) -> &mut MappingIterator {
         match self {
-            Self::MappingIterator(iterator) => iterator,
+            Self::MappingIterator(value) => value,
             _ => fail("SystemError", "expected a mapping iterator"),
         }
     }
 }
 
-/// Creates a typed dictionary; key kinds are exactly 2 (int) and 3 (str).
-/// Values use the ordinary slot representation kinds 0 through 5.
+/// Creates a dictionary with concrete scalar keys and one shared value descriptor.
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_dict_new(key_kind: u32, value_kind: u32) -> *const Object {
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
         Box::new(Mapping::new(key_kind, value_kind)),
     )))))
 }
-
 /// # Safety
-/// `value` must be a rooted dictionary. Returns an owned canonical integer word.
+/// `value` is a rooted dictionary.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_len(value: *const Object) -> usize {
-    // SAFETY: only a copied length escapes this nonreentrant storage access.
-    let length = unsafe {
-        object(value)
-            .0
-            .with(|storage| storage.dictionary().index.len())
-    };
-    Int::from_usize(length).into_raw()
+    // SAFETY: only its copied length escapes.
+    Int::from_usize(unsafe { object(value).0.with(|s| s.dictionary().tables.len()) }).into_raw()
 }
-
 /// # Safety
-/// `value` and `key` must be rooted handles matching the dictionary's key kind.
+/// Both inputs are rooted and `key` has the dictionary's exact key representation.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_contains(value: *const Object, key: usize) -> u8 {
-    // SAFETY: the immutable key remains rooted; hashing cannot call user code.
+    // SAFETY: hashing/equality cannot call user code.
     u8::from(unsafe {
-        object(value).0.with(|storage| {
-            let mapping = storage.dictionary();
-            let key = Key::borrow(key, mapping.key_kind);
-            mapping.index.contains_key(&*key)
-        })
+        object(value)
+            .0
+            .with(|s| s.dictionary().tables.lookup(key).is_some())
     })
 }
-
-/// Acquires a found value before leaving storage. Missing and a stored None are
-/// distinct, allowing LLVM to flatten Optional values without nested boxes.
-unsafe fn lookup(value: *const Object, key: usize) -> Option<Slot> {
-    // SAFETY: the caller roots the dictionary/key, and cloning cannot reenter.
+unsafe fn lookup(value: *const Object, key: usize) -> Option<OwnedWord> {
+    // SAFETY: only an independently acquired value leaves storage.
     unsafe {
-        object(value).0.with(|storage| {
-            let mapping = storage.dictionary();
-            let key = Key::borrow(key, mapping.key_kind);
-            mapping.entry(&key).map(|entry| entry.value.clone())
+        object(value).0.with(|s| {
+            let mapping = s.dictionary();
+            mapping
+                .tables
+                .lookup(key)
+                .map(|word| mapping.value_kind.acquire(word))
         })
     }
 }
-
-/// Formats the actual missing scalar key after dictionary storage access ends.
 unsafe fn missing_key(value: *const Object, key: usize) -> Error {
-    // SAFETY: the caller roots the dictionary; only immutable kind metadata escapes.
-    let kind = unsafe {
-        object(value)
-            .0
-            .with(|storage| storage.dictionary().key_kind)
-    };
-    // SAFETY: the caller roots a key of the dictionary's exact declared kind.
-    let key = unsafe { Key::borrow(key, kind) };
-    let message = match &*key {
-        Key::Int(value) => Str::from(value.big().to_string()),
-        Key::Str(value) => string_repr(value),
+    // SAFETY: only copied key-kind metadata leaves storage.
+    let kind = unsafe { object(value).0.with(|s| s.dictionary().tables.key_kind()) };
+    // SAFETY: the caller roots the exact immutable key kind.
+    let message = unsafe {
+        match kind {
+            2 => Str::from(Int::borrow(key).big().to_string()),
+            3 => string_repr(&*(key as *const Str)),
+            _ => unreachable!(),
+        }
     };
     Error::new(Kind::KeyError, message)
 }
-
 /// # Safety
-/// The dictionary and exact-kind key must be rooted. The returned word owns its
-/// declared value type. A missing key sets KeyError; check pending before using
-/// or acquiring the returned word, which is uninterpreted zero on failure.
+/// Inputs are rooted exact kinds; success transfers a value owner. Check pending
+/// before interpreting zero, which is also a valid nullable/scalar value.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_get(value: *const Object, key: usize) -> usize {
-    // SAFETY: the caller satisfies lookup's handle contract.
+    // SAFETY: the caller supplies lookup's rooted handles.
     if let Some(owned) = unsafe { lookup(value, key) } {
         return owned.into_word();
     }
-    // SAFETY: both borrowed handles remain rooted after lookup returns.
+    // SAFETY: input roots remain live after storage access ends.
     unsafe { missing_key(value, key) }.returning(0)
 }
-
-/// Writes one owned value only when the key exists; missing leaves `out` untouched.
-///
 /// # Safety
-/// Dictionary/key handles must be rooted and correctly typed. On success, `out`
-/// must point to writable, aligned usize storage outside runtime allocations.
-/// The caller must consume each owned result before reusing that output slot.
+/// Root the exact inputs; `out` is an aligned writable word outside runtime
+/// storage. Missing leaves it untouched; success transfers one independently owned value.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_try_get(
     value: *const Object,
     key: usize,
     out: *mut usize,
 ) -> u8 {
-    // SAFETY: the caller satisfies lookup's handle contract.
+    // SAFETY: the caller roots the exact inputs.
     let Some(owned) = (unsafe { lookup(value, key) }) else {
         return 0;
     };
-    // SAFETY: the caller supplies an independent writable word slot on success.
+    // SAFETY: success permits this independent output slot.
     unsafe { out.write(owned.into_word()) };
     1
 }
-
 /// # Safety
-/// The dictionary, key, and default are rooted values of the dictionary's exact
-/// key/value kinds. The default has already been evaluated by the caller.
-/// Returns one owned value, whether found or acquired from the default.
+/// The eagerly evaluated default has the dictionary's exact value kind and is
+/// rooted alongside both other inputs. Success always transfers one owned value.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_get_default(
     value: *const Object,
     key: usize,
     default: usize,
 ) -> usize {
-    // SAFETY: the caller satisfies lookup's handle contract.
+    // SAFETY: all declared input representations remain rooted.
     if let Some(owned) = unsafe { lookup(value, key) } {
         return owned.into_word();
     }
-    // SAFETY: only the immutable representation kind escapes the storage read.
-    let kind = unsafe {
-        object(value)
-            .0
-            .with(|storage| storage.dictionary().value_kind)
-    };
-    // SAFETY: the caller roots a default of the dictionary's declared value kind.
-    unsafe { Slot::acquire(default, kind) }.into_word()
+    // SAFETY: only copied representation metadata escapes this rooted read.
+    let kind = unsafe { object(value).0.with(|s| s.dictionary().value_kind) };
+    // SAFETY: the eager default remains rooted and has this exact value kind.
+    unsafe { kind.acquire(default) }.into_word()
 }
-
-/// Replaces a value without moving its key, or appends a newly inserted key.
-///
 /// # Safety
-/// All handles must be rooted with the dictionary's exact key/value types.
-/// The replacement must preserve the compiler's acyclic heap type graph.
+/// Inputs match this dictionary's concrete types and preserve heap acyclicity.
+/// Acquisition precedes mutation, including replacement of the sole stored owner.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_set(value: *const Object, key: usize, word: usize) {
-    // SAFETY: only immutable kind metadata escapes this rooted storage read.
+    // SAFETY: only copied descriptor metadata leaves storage.
     let (key_kind, value_kind) = unsafe {
-        object(value).0.with(|storage| {
-            let mapping = storage.dictionary();
-            (mapping.key_kind, mapping.value_kind)
+        object(value).0.with(|s| {
+            let mapping = s.dictionary();
+            (WordKind::new(mapping.tables.key_kind()), mapping.value_kind)
         })
     };
-    // SAFETY: acquire both arguments before mutation, including self-assignment.
-    let (key, new) = unsafe {
-        (
-            (*Key::borrow(key, key_kind)).clone(),
-            Slot::acquire(word, value_kind),
-        )
-    };
-    // SAFETY: insertion cannot reenter. Displaced owners are returned for later drop.
+    // SAFETY: both arguments are rooted before replacing any old owners.
+    let (key, new) = unsafe { (key_kind.acquire(key), value_kind.acquire(word)) };
+    // SAFETY: insertion cannot reenter; displaced owners leave storage together.
     let old = unsafe {
-        object(value)
-            .0
-            .with_mut(|storage| storage.dictionary_mut().insert(key, new))
+        object(value).0.with_mut(|s| {
+            s.dictionary_mut()
+                .tables
+                .insert(key, new.into_word())
+                .map(|(key, word)| (key, OwnedWord::from_owned(word, value_kind)))
+        })
     };
     drop(old);
 }
-
 /// # Safety
-/// The dictionary and exact-kind key must be rooted. Missing keys set KeyError;
-/// removed key/value owners are dropped after storage access.
+/// Root the dictionary and its exact key. Missing sets KeyError; removal drops
+/// both key owners and the value only after mutable storage access has ended.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_delete(value: *const Object, key: usize) {
-    // SAFETY: lookup/removal cannot reenter; removed owners escape the access.
+    // SAFETY: lookup/removal cannot reenter; returned values own their references.
     let old = unsafe {
-        object(value).0.with_mut(|storage| {
-            let mapping = storage.dictionary_mut();
-            let key = Key::borrow(key, mapping.key_kind);
-            mapping.remove(&key)
+        object(value).0.with_mut(|s| {
+            let mapping = s.dictionary_mut();
+            mapping
+                .tables
+                .remove(key)
+                .map(|(a, b, word)| (a, b, OwnedWord::from_owned(word, mapping.value_kind)))
         })
     };
     if old.is_none() {
-        // SAFETY: the unchanged dictionary and missing input key remain rooted.
+        // SAFETY: the missing input remains rooted after the failed lookup.
         unsafe { missing_key(value, key) }.raise();
     }
     drop(old);
 }
-
-/// Creates an internal iterator: mode 0 yields keys; mode 1 yields key/value pairs.
-/// The compiler releases it with the ordinary Object ABI on every loop exit.
-///
 /// # Safety
-/// `value` must be a rooted dictionary. Iterators are internal values and must
-/// never be inserted into user containers, which would invalidate acyclicity.
+/// Root a dictionary. Mode0 yields keys, mode1 items. Release the internal
+/// iterator on every loop exit and never store it in a user container.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_iter(value: *const Object, mode: u32) -> *const Object {
     let kind = match mode {
@@ -531,20 +581,17 @@ pub unsafe extern "C" fn relar_dict_iter(value: *const Object, mode: u32) -> *co
         1 => IteratorKind::DictionaryItems,
         _ => fail("SystemError", "invalid dictionary iteration mode"),
     };
-    // SAFETY: the caller roots a dictionary and the mode was checked above.
+    // SAFETY: the caller roots this exact container shape.
     unsafe { new_iterator(value, kind) }
 }
-
-/// Acquires a rooted mapping owner and a compaction lease for this exact mode.
 unsafe fn new_iterator(value: *const Object, kind: IteratorKind) -> *const Object {
-    // SAFETY: the caller roots the mapping; the new iterator acquires its owner.
+    // SAFETY: acquire an independent root before reading mutable cursor metadata.
     let owner = unsafe { acquire_rc::<Object>(value as usize) };
-    // SAFETY: only the independent lease and copied size escape; no callbacks run.
+    // SAFETY: the independent owner roots storage; only a lease and size escape.
     let (lease, length) = unsafe {
-        owner.0.with_mut(|storage| {
-            let mapping = storage.iteration_mapping_mut(kind);
-            (mapping.iterator_lease(), mapping.index.len())
-        })
+        owner
+            .0
+            .with_mut(|s| (s.iteration_lease(kind), s.iteration_len(kind)))
     };
     let iterator = MappingIterator {
         owner,
@@ -559,103 +606,82 @@ unsafe fn new_iterator(value: *const Object, kind: IteratorKind) -> *const Objec
         iterator,
     )))))
 }
-
-/// Creates a typed set; key kinds are exactly 2 (int) and 3 (str).
-/// Its iteration order is unspecified even though the storage is shared with dicts.
 #[unsafe(no_mangle)]
-pub extern "C" fn relar_set_new(key_kind: u32) -> *const Object {
+pub extern "C" fn relar_set_new(kind: u32) -> *const Object {
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Set(Box::new(
-        Mapping::new(key_kind, 0),
+        Set {
+            tables: Tables::new(kind),
+        },
     ))))))
 }
-
 /// # Safety
-/// `value` must be a rooted set. Returns an owned canonical integer word.
+/// `value` is a rooted set.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_set_len(value: *const Object) -> usize {
-    // SAFETY: only a copied length escapes this nonreentrant storage access.
-    let length = unsafe { object(value).0.with(|storage| storage.set().index.len()) };
-    Int::from_usize(length).into_raw()
+    // SAFETY: only the copied length escapes storage.
+    Int::from_usize(unsafe { object(value).0.with(|s| s.set().tables.len()) }).into_raw()
 }
-
 /// # Safety
-/// `value` and `key` must be rooted handles matching the set's exact key kind.
+/// Root both the set and its exact-kind scalar key.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_set_contains(value: *const Object, key: usize) -> u8 {
-    // SAFETY: the immutable key remains rooted; hashing cannot call user code.
+    // SAFETY: hashing/equality cannot reenter user code.
     u8::from(unsafe {
-        object(value).0.with(|storage| {
-            let mapping = storage.set();
-            let key = Key::borrow(key, mapping.key_kind);
-            mapping.index.contains_key(&*key)
-        })
+        object(value)
+            .0
+            .with(|s| s.set().tables.lookup(key).is_some())
     })
 }
-
 /// # Safety
-/// The set and exact-kind key must be rooted. Duplicate adds leave size unchanged.
+/// Root the set and exact key, including keys rooted only by this set.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_set_add(value: *const Object, key: usize) {
-    // SAFETY: only immutable kind metadata escapes the rooted storage read.
-    let kind = unsafe { object(value).0.with(|storage| storage.set().key_kind) };
-    // SAFETY: acquire before mutation, including a key rooted only by this set.
-    let key = unsafe { (*Key::borrow(key, kind)).clone() };
-    // SAFETY: insertion cannot reenter, and displaced owners escape the access.
+    // SAFETY: copied metadata leaves storage before acquiring the key.
+    let kind = unsafe {
+        object(value)
+            .0
+            .with(|s| WordKind::new(s.set().tables.key_kind()))
+    };
+    // SAFETY: the caller roots this exact scalar key until acquisition completes.
+    let key = unsafe { kind.acquire(key) };
+    // SAFETY: unused incoming owners leave mutation before dropping.
     let old = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.set_mut().insert(key, Slot::None))
+            .with_mut(|s| s.set_mut().tables.insert(key, ()))
     };
     drop(old);
 }
-
 /// # Safety
-/// The set and exact-kind key must be rooted. A missing key is a no-op;
-/// removed owners are dropped after mutable storage access ends.
+/// Root the set and exact key. Missing is a no-op; removed owners drop afterward.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_set_discard(value: *const Object, key: usize) {
-    // SAFETY: lookup/removal cannot reenter; removed owners escape the access.
-    let old = unsafe {
-        object(value).0.with_mut(|storage| {
-            let mapping = storage.set_mut();
-            let key = Key::borrow(key, mapping.key_kind);
-            mapping.remove(&key)
-        })
-    };
+    // SAFETY: returned key owners remain independent of their former table slots.
+    let old = unsafe { object(value).0.with_mut(|s| s.set_mut().tables.remove(key)) };
     drop(old);
 }
-
-/// Creates an internal iterator yielding owned keys in unspecified order.
-///
 /// # Safety
-/// `value` must be a rooted set. The compiler must release the iterator on every
-/// loop exit and never insert it into user containers, preserving acyclicity.
+/// Root the set and release this internal cursor on every loop exit.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_set_iter(value: *const Object) -> *const Object {
-    // SAFETY: the caller roots the exact storage shape required by this mode.
+    // SAFETY: the caller supplies the exact set shape.
     unsafe { new_iterator(value, IteratorKind::Set) }
 }
-
-/// Writes independently owned key/value words for one step, returning 1, or
-/// leaves outputs untouched and returns 0 after permanent exhaustion.
-///
 /// # Safety
-/// `value` must be a rooted internal mapping iterator. On success `key_out`, and
-/// `value_out` for items mode, must be distinct writable aligned usize slots
-/// outside runtime allocations. Keys-only/set modes ignore `value_out` and accept
-/// null. Prior owned outputs must be consumed before the slots are reused.
+/// Root the cursor; output words are aligned, independent, outside runtime storage,
+/// and contain no unconsumed owner. Only success writes them; keys/set mode ignores
+/// value_out and permits null. Size errors install RuntimeError and return0.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_mapping_iter_next(
     value: *const Object,
     key_out: *mut usize,
     value_out: *mut usize,
 ) -> u8 {
-    // SAFETY: the iterator owns its distinct container; only acquired values
-    // escape, and mutable iterator access ends before output ownership transfers.
+    // SAFETY: the rooted iterator snapshots independent owners before returning.
     let next = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.mapping_iterator_mut().next())
+            .with_mut(|s| s.mapping_iterator_mut().next())
     };
     let next = match next {
         Ok(next) => next,
@@ -664,7 +690,7 @@ pub unsafe extern "C" fn relar_mapping_iter_next(
     let Some((key, item)) = next else {
         return 0;
     };
-    // SAFETY: the caller supplies independent writable word slots for this mode.
+    // SAFETY: the caller provides writable output slots only for the selected mode.
     unsafe {
         key_out.write(key.into_word());
         if let Some(item) = item {
@@ -678,7 +704,7 @@ pub unsafe extern "C" fn relar_mapping_iter_next(
 mod tests {
     use super::*;
     use crate::objects::{
-        relar_object_get, relar_object_new, relar_object_release, relar_object_set,
+        relar_object_release, relar_seq_append, relar_seq_get_index, relar_seq_new,
     };
     use num_bigint::BigInt;
 
@@ -699,7 +725,9 @@ mod tests {
         values
     }
 
-    unsafe fn step(iterator: *const Object) -> Result<Option<(Key, Option<Slot>)>, IterationError> {
+    unsafe fn step(
+        iterator: *const Object,
+    ) -> Result<Option<(OwnedWord, Option<OwnedWord>)>, IterationError> {
         // SAFETY: the caller roots the iterator; the result contains only owned values.
         unsafe {
             object(iterator)
@@ -791,7 +819,7 @@ mod tests {
         // SAFETY: each dictionary has the supplied primitive value representation;
         // output slots are independent stack words and contain no owned old value.
         unsafe {
-            for (kind, stored, default) in [(0, 0, 0), (1, 1, 0), (5, 0, 0)] {
+            for (kind, stored, default) in [(0, 0, 0), (1, 1, 0), (261, 0, 0)] {
                 let dictionary = relar_dict_new(2, kind);
                 relar_dict_set(dictionary, integer(0), stored);
                 let mut out = 73;
@@ -812,9 +840,9 @@ mod tests {
         // SAFETY: the new field object is owned by this Rc and contains one Int;
         // the default result acquires ownership independently of that Rc.
         unsafe {
-            let default = Rc::from_raw(relar_object_new(1));
+            let default = Rc::from_raw(relar_seq_new(2));
             let weak = Rc::downgrade(&default);
-            relar_object_set(Rc::as_ptr(&default), 0, integer(17), 2);
+            relar_seq_append(Rc::as_ptr(&default), integer(17), 2);
             let result = Rc::from_raw(relar_dict_get_default(
                 dictionary,
                 integer(0),
@@ -823,7 +851,7 @@ mod tests {
             drop(default);
             relar_object_release(dictionary);
             assert_eq!(
-                Int(relar_object_get(Rc::as_ptr(&result), 0)).as_small(),
+                Int(relar_seq_get_index(Rc::as_ptr(&result), 0)).as_small(),
                 Some(17)
             );
             drop(result);
@@ -897,7 +925,9 @@ mod tests {
                 (80..100).chain(100..179).collect::<Vec<_>>()
             );
             assert_eq!(
-                object(dictionary).0.with(|s| s.dictionary().entries.len()),
+                object(dictionary)
+                    .0
+                    .with(|s| s.dictionary().tables.entry_count()),
                 179
             );
             relar_object_release(iterator);
@@ -905,7 +935,12 @@ mod tests {
             for key in 80..100 {
                 relar_dict_delete(dictionary, integer(key));
             }
-            assert!(object(dictionary).0.with(|s| s.dictionary().entries.len()) < 100);
+            assert!(
+                object(dictionary)
+                    .0
+                    .with(|s| s.dictionary().tables.entry_count())
+                    < 100
+            );
             relar_dict_set(dictionary, integer(120), integer(999));
             let iterator = relar_dict_iter(dictionary, 0);
             assert_eq!(collect_keys(iterator), (100..179).collect::<Vec<_>>());

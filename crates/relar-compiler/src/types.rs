@@ -98,6 +98,20 @@ impl Types {
         }
     }
 
+    /// Enumerates concrete tuple layouts for native field access and destruction.
+    pub(crate) fn tuples(&self) -> Vec<(Type, Vec<Type>)> {
+        self.0
+            .borrow()
+            .shapes
+            .iter()
+            .enumerate()
+            .filter_map(|(id, shape)| match shape {
+                Shape::Tuple(fields) => Some((Type::Tuple(id), fields.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub(crate) fn payload(&self, ty: Type) -> Option<Type> {
         let Type::Optional(id) = ty else {
             return None;

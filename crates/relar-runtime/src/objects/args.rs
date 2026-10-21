@@ -5,7 +5,7 @@ use std::ffi::{CStr, c_char};
 use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
-use super::{Object, Slot, Storage, StorageCell, Str, fail};
+use super::{Object, Storage, StorageCell, Str, Words, fail};
 
 #[derive(Clone, Copy)]
 struct Arguments {
@@ -38,8 +38,9 @@ pub unsafe extern "C" fn relar_args_init(argc: i32, argv: *const *const c_char) 
 
 /// Decodes all inputs before publishing a list, so a failed access can be retried.
 fn decode(arguments: Arguments) -> Result<Rc<Object>> {
-    let mut values = Vec::new();
+    let mut values = Words::new(3);
     values
+        .values
         .try_reserve_exact(arguments.count)
         .unwrap_or_else(|_| fail("MemoryError", "argument list allocation failed"));
     for index in 0..arguments.count {
@@ -55,7 +56,9 @@ fn decode(arguments: Arguments) -> Result<Rc<Object>> {
                 ),
             )
         })?;
-        values.push(Slot::Str(Rc::new(Str::new(text))));
+        values
+            .values
+            .push(Rc::into_raw(Rc::new(Str::new(text))) as usize);
     }
     Ok(Rc::new(Object(StorageCell::new(Storage::Sequence(values)))))
 }

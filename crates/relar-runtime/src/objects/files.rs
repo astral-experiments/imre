@@ -379,7 +379,7 @@ mod tests {
         let path = directory.0.join("output");
         let file = open(path.to_str().unwrap(), 1);
         let weak = Rc::downgrade(&file);
-        let values = relar_seq_new();
+        let values = relar_seq_new(5);
         // SAFETY: all values are rooted with their declared kinds and form no cycle.
         unsafe {
             assert_eq!(relar_text_write(Rc::as_ptr(&file), &Str::new("")), 1);
