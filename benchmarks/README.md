@@ -59,3 +59,7 @@ callgrind_annotate --auto=no --inclusive=no --threshold=100 benchmarks/local/cal
 ```
 
 Callgrind reports executed instructions, not CPU cycles or elapsed-time shares. Rust inline source locations may split one function across several rows; aggregate them by function when comparing totals. LLVM may inline generated Python functions into their callers, and identical runtime functions can share a symbol address: `relar_list_retain` and `relar_str_retain` currently do so. Inspect symbols and callers before attributing that shared entry to strings.
+
+## Dependency planner
+
+The [dependency-planner package](../examples/dependency_planner/README.md) exercises static imports, typed classes, general lists, tuples, and optional values in a complete scheduling program. Its independent oracle and `dependency_benchmark.py` compare the unchanged package on CPython and Relar, using the same fresh-process timing, single-CPU affinity, and tracing guard. See the package README for input semantics, correctness checks, reproduction commands, and the compact per-sample output records.
