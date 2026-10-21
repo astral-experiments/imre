@@ -144,19 +144,25 @@ pub unsafe extern "C" fn relar_seq_get_index(value: *const Object, at: usize) ->
 /// Zero remains an ordinary scalar or absent value, never an error sentinel.
 ///
 /// # Safety
-/// `value` must root an exact sequence, and `at` must be a decoded native index
+/// `value` must be a non-null rooted exact sequence, and `at` a decoded native index
 /// strictly below its current length. No mutable storage access may overlap the
 /// call. Consume or acquire the returned word with its exact declared type before
 /// removing or replacing that element. This does not acquire a reference, and
 /// neither a storage reference nor a growable buffer pointer escapes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_seq_borrow_index_proven(value: *const Object, at: usize) -> usize {
-    // SAFETY: the caller proves current bounds and roots the selected element;
-    // only the copied word escapes this nonreentrant storage access.
+    // SAFETY: SequenceGetInBounds supplies a non-null exact sequence and proves
+    // its current bounds. Its two emission paths either acquire the result
+    // immediately or keep an unchanged caller root. Neither a storage reference
+    // nor a pointer into the movable buffer escapes this nonreentrant read.
     unsafe {
-        object(value)
-            .0
-            .with(|storage| *storage.sequence().values.get_unchecked(at))
+        (&*value).0.with(|storage| {
+            let Storage::Sequence(values) = storage else {
+                // Exact kind is part of the same caller proof as the index.
+                std::hint::unreachable_unchecked()
+            };
+            *values.values.get_unchecked(at)
+        })
     }
 }
 
