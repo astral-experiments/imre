@@ -73,3 +73,8 @@ python3 benchmarks/memory_validate.py --binary /tmp/memory-report \
 The [benchmark guide](../../benchmarks/reference/memory_report/README.md) compares
 the unchanged upstream script, typed CPython port, Relar, and independent Rust on
 real captures and clearly labeled larger copies.
+
+The [dataclass results](../../benchmarks/results/2026-10-21-dataclass-records.md)
+take 1.16–1.47× Rust's time on 65,024 items per input file, with the same report
+semantics in ordinary and ThinLTO builds. The report includes the original
+CPython comparison, full validation, and replayable benchmark evidence.
