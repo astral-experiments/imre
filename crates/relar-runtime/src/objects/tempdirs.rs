@@ -606,8 +606,8 @@ mod tests {
         .unwrap();
         symlink(&outside.0, directory.0.join("external")).unwrap();
         symlink("absent", nested.join("broken")).unwrap();
-        fs::set_permissions(&nested, fs::Permissions::from_mode(0)).unwrap();
-        fs::set_permissions(&directory.0, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&nested, fs::Permissions::from_mode(0o0)).unwrap();
+        fs::set_permissions(&directory.0, fs::Permissions::from_mode(0o0)).unwrap();
         cleanup(directory.0.to_str().unwrap()).unwrap();
         cleanup(directory.0.to_str().unwrap()).unwrap();
         assert!(fs::symlink_metadata(&directory.0).is_err());

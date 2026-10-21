@@ -201,7 +201,20 @@ def main() -> None:
                 "bytes": producer_destination.stat().st_size,
             },
         },
-        "comparison_domain": "Schema-directed memory report JSON with arbitrary-precision integers, known-field duplicate rejection, scalar/list defaults, and depth 128. Rust stores native i64 values with checked BigInt fallback, stable sorting, and exact rational-to-binary64 rounding. File and directory modes read selected JSON before writing one complete report. Prepared-project run mode validates a manifest and sequentially launches old/new executables with matching cwd/environment, captures both UTF-8 text streams, and checks status before report decoding. A separate compute mode repeats decode/compare/render over preloaded text with black-boxed input and an output-length checksum. Full output and file effects are checked against an independent oracle, typed CPython, and unchanged upstream models/rendering on the shared domain. The separately built producer emits deterministic captured bytes for every engine's process benchmarks.",
+        "comparison_domain": (
+            "Schema-directed memory report JSON with arbitrary-precision integers, known-field duplicate rejection, "
+            "scalar/list defaults, and depth 128. Rust stores native i64 values with checked BigInt fallback, stable "
+            "sorting, and exact rational-to-binary64 rounding. All file-output modes finish rendering, write and close "
+            "a staged file in a sibling temporary directory, then atomically replace the report entry. Prepared-project "
+            "run mode validates a manifest and sequentially launches old/new executables with matching cwd/environment "
+            "and captured UTF-8 text streams. Optional capture directories preserve the manifest and publish each decoded "
+            "stream by staged replacement before checking status and decoding the report; completed captures survive "
+            "later failures. Temporary workspaces clean up on normal and error exits. A separate compute mode repeats "
+            "decode/compare/render over preloaded text with black-boxed input and an output-length checksum. Full output "
+            "and filesystem effects are checked against an independent oracle, typed CPython, and atomic-output adapters "
+            "using unchanged upstream models/rendering on the shared domain. The separately built producer emits "
+            "deterministic captured bytes for every engine's process benchmarks."
+        ),
         "input_guards_passed": True,
     }
     output.write_text(json.dumps(record, indent=2) + "\n")
