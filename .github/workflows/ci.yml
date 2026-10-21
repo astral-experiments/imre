@@ -51,3 +51,7 @@ jobs:
         run: |
           target/release/relar build examples/dependency_planner/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/dependency-planner
           python3 benchmarks/dependency_validate.py --binary /tmp/dependency-planner
+      - name: Validate the Rust planner references and integer boundaries
+        run: |
+          python3 benchmarks/reference/dependency_planner/build.py --artifact-dir /tmp/relar-rust-reference --target-dir target/rust-reference
+          python3 benchmarks/reference/dependency_planner/check_boundaries.py --python python3 --relar /tmp/dependency-planner --rust-bigint /tmp/relar-rust-reference/planner-bigint --rust-i64 /tmp/relar-rust-reference/planner-i64 --output /tmp/relar-rust-reference/validation.json
