@@ -15,6 +15,7 @@ mod assignments;
 mod callables;
 mod calls;
 mod comprehensions;
+mod dataclass_values;
 mod expansions;
 mod inference;
 mod iterables;
@@ -22,6 +23,7 @@ mod json;
 mod matching;
 mod module_values;
 mod pipelines;
+mod records;
 mod stdlib;
 mod truthiness;
 mod unions;
@@ -36,6 +38,7 @@ struct Signature {
     id: usize,
     params: Vec<Parameter>,
     returns: Type,
+    method: Option<records::MethodContext>,
 }
 
 struct ClassInfo {
@@ -51,19 +54,27 @@ impl ClassInfo {
         let fields = declarations
             .definitions
             .iter()
-            .map(|class| {
+            .enumerate()
+            .map(|(class_id, class)| {
                 class
                     .fields
                     .iter()
                     .map(|field| {
-                        annotation(
+                        annotation_in_class(
                             &field.annotation,
                             graph,
                             class.definition.module,
                             &declarations,
                             types,
+                            Some(class_id),
                         )
                         .and_then(|ty| {
+                            records::field_default(
+                                field,
+                                ty,
+                                types,
+                                &graph.modules[class.definition.module].source,
+                            )?;
                             if callables::contains_callable(ty, types) {
                                 Err(error(
                                     &graph.modules[class.definition.module].source,
@@ -130,6 +141,10 @@ const RESERVED: &[&str] = &[
     "float",
     "bool",
     "str",
+    "repr",
+    "property",
+    "classmethod",
+    "staticmethod",
     "bytes",
     "list",
     "tuple",
@@ -209,6 +224,7 @@ fn pattern_elements(target: &ast::Expr) -> Option<&[ast::Expr]> {
 pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     let types = Types::default();
     let mut classes = ClassInfo::new(graph, &types)?;
+    dataclass_values::validate(&classes, graph, &types)?;
     let mut signatures = HashMap::new();
     let inference = inference::Inference::default();
     let mut definitions = Vec::new();
@@ -269,22 +285,34 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                     .map_err(|error| format!("{}:{error}", module.path.display()))?;
             }
         }
-        for method in &class.methods {
-            let signature = signature(
-                method,
+        for (index, method) in class.methods.iter().enumerate() {
+            let context = records::MethodContext {
+                class: class_id,
+                index,
+            };
+            let mut method =
+                records::executable_method(method, context, &classes.declarations, graph, &types)?;
+            let mut signature = signature(
+                &method,
                 graph,
                 module_id,
                 &classes.declarations,
                 &types,
-                Some(Type::Class(class_id)),
+                Some(context),
                 &inference,
             )
             .map_err(|error| format!("{}:{error}", module.path.display()))?;
-            if method.name.as_str() == "__init__" && signature.returns != Type::None {
-                return Err(module.error(method, "__init__ must return None"));
+            if method.name.as_str() == "__init__" {
+                if signature.returns != Type::None {
+                    return Err(module.error(&method, "__init__ must return None"));
+                }
+                records::factory_defaults(&mut signature, class, &types, &module.source)?;
+                if class.generated_initializer {
+                    records::private_initializer_parameters(&mut method, module);
+                }
             }
             classes.methods[class_id].insert(method.name.to_string(), signature.clone());
-            definitions.push((module_id, method.clone(), signature));
+            definitions.push((module_id, method, signature));
             callable_definitions.push(class.definition);
         }
     }
@@ -334,6 +362,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                 &globals,
             );
             checker.returns = signature.returns;
+            checker.method_context(signature.method);
             let mut params = Vec::new();
             for (parameter, signature) in definition
                 .parameters
@@ -481,6 +510,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
     Ok(ir::Module {
         types,
+        class_metadata: dataclass_values::metadata(&classes, graph),
         class_fields: classes.fields,
         json_records,
         globals: globals.into_types(),
@@ -495,10 +525,19 @@ fn signature(
     module: ModuleId,
     classes: &Classes,
     types: &Types,
-    receiver: Option<Type>,
+    method: Option<records::MethodContext>,
     inference: &inference::Inference,
 ) -> Result<Signature, String> {
     let source = &graph.modules[module].source;
+    let owner = method.map(|context| context.class);
+    let receiver = method
+        .filter(|context| {
+            matches!(
+                context.kind(classes),
+                crate::classes::MethodKind::Instance | crate::classes::MethodKind::Property
+            )
+        })
+        .map(|context| Type::Class(context.class));
     if function.is_async
         || !function.decorator_list.is_empty()
         || function.type_params.is_some()
@@ -518,7 +557,7 @@ fn signature(
             && index == 0
         {
             if let Some(declared) = parameter.annotation()
-                && annotation(declared, graph, module, classes, types)? != receiver
+                && annotation_in_class(declared, graph, module, classes, types, owner)? != receiver
             {
                 return Err(error(
                     source,
@@ -530,7 +569,7 @@ fn signature(
         } else {
             parameter
                 .annotation()
-                .map(|value| annotation(value, graph, module, classes, types))
+                .map(|value| annotation_in_class(value, graph, module, classes, types, owner))
                 .transpose()?
                 .or(parameter
                     .default
@@ -564,7 +603,7 @@ fn signature(
     let returns = function
         .returns
         .as_deref()
-        .map(|value| annotation(value, graph, module, classes, types))
+        .map(|value| annotation_in_class(value, graph, module, classes, types, owner))
         .transpose()?
         .or_else(|| {
             (receiver.is_some() && function.name.as_str() == "__init__").then_some(Type::None)
@@ -574,6 +613,7 @@ fn signature(
         id,
         params,
         returns: returns.unwrap_or(Type::None),
+        method,
     })
 }
 
@@ -592,6 +632,17 @@ fn annotation(
     classes: &Classes,
     types: &Types,
 ) -> Result<Type, String> {
+    annotation_in_class(expression, graph, module, classes, types, None)
+}
+
+fn annotation_in_class(
+    expression: &ast::Expr,
+    graph: &SourceGraph,
+    module: ModuleId,
+    classes: &Classes,
+    types: &Types,
+    owner: Option<usize>,
+) -> Result<Type, String> {
     annotation_at(
         expression,
         graph,
@@ -599,6 +650,7 @@ fn annotation(
         classes,
         types,
         &graph.modules[module].source,
+        owner,
     )
 }
 
@@ -611,21 +663,29 @@ fn annotation_at(
     classes: &Classes,
     types: &Types,
     source: &str,
+    owner: Option<usize>,
 ) -> Result<Type, String> {
     if let ast::Expr::StringLiteral(value) = expression {
         check_string(value, source)?;
         let contents = value.value.to_str();
         let parsed = ruff_python_parser::parse_expression(contents)
             .map_err(|_| error(source, expression, "invalid quoted type annotation"))?;
-        return annotation_at(parsed.expr(), graph, module, classes, types, contents).map_err(
-            |message| {
-                error(
-                    source,
-                    expression,
-                    &format!("invalid quoted annotation: {message}"),
-                )
-            },
-        );
+        return annotation_at(
+            parsed.expr(),
+            graph,
+            module,
+            classes,
+            types,
+            contents,
+            owner,
+        )
+        .map_err(|message| {
+            error(
+                source,
+                expression,
+                &format!("invalid quoted annotation: {message}"),
+            )
+        });
     }
     match graph.resolve(module, expression) {
         Some(Binding::Definition(definition)) => {
@@ -633,12 +693,22 @@ fn annotation_at(
                 return Ok(Type::Class(id));
             }
         }
+        Some(Binding::Intrinsic(Intrinsic::SelfType)) => {
+            return owner.map(Type::Class).ok_or_else(|| {
+                error(
+                    source,
+                    expression,
+                    "Self is supported only inside a fixed class",
+                )
+            });
+        }
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
         _ => {}
     }
-    let nested =
-        |expression: &ast::Expr| annotation_at(expression, graph, module, classes, types, source);
+    let nested = |expression: &ast::Expr| {
+        annotation_at(expression, graph, module, classes, types, source, owner)
+    };
     match expression {
         ast::Expr::Name(name) => match name.id.as_str() {
             "int" => Ok(Type::Int),
@@ -862,6 +932,9 @@ struct Checker<'a> {
     loop_breaks: Vec<Vec<LocalState>>,
     reachable: bool,
     module_scope: bool,
+    class: Option<usize>,
+    class_receiver: Option<String>,
+    initializing: bool,
 }
 
 impl<'a> Checker<'a> {
@@ -897,12 +970,18 @@ impl<'a> Checker<'a> {
             loop_breaks: Vec::new(),
             reachable: true,
             module_scope: false,
+            class: None,
+            class_receiver: None,
+            initializing: false,
         }
     }
 
     /// Reuses a slot only at its original type and prevents rebinding fixed call targets.
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
-        if reserved(name) || self.graph.modules[self.module].bindings.contains_key(name) {
+        if reserved(name)
+            || self.graph.modules[self.module].bindings.contains_key(name)
+            || self.class_receiver.as_deref() == Some(name)
+        {
             return Err(error(
                 self.source,
                 node,
@@ -961,6 +1040,30 @@ impl<'a> Checker<'a> {
     /// Resolves a fixed field without evaluating its receiver more than once.
     fn field(&mut self, attribute: &ast::ExprAttribute) -> Result<(Expr, usize, Type), String> {
         let receiver = self.expr(&attribute.value)?;
+        if let Type::Class(class) = receiver.ty {
+            let declaration = &self.classes.declarations.definitions[class];
+            if declaration
+                .dataclass
+                .as_ref()
+                .is_some_and(|options| options.frozen)
+                && !(self.initializing && self.class == Some(class))
+            {
+                return Err(error(
+                    self.source,
+                    attribute,
+                    "frozen dataclass fields cannot be reassigned",
+                ));
+            }
+            if self.classes.methods[class]
+                .get(attribute.attr.as_str())
+                .is_some_and(|signature| {
+                    signature.method.unwrap().kind(&self.classes.declarations)
+                        == crate::classes::MethodKind::Property
+                })
+            {
+                return Err(error(self.source, attribute, "properties are read-only"));
+            }
+        }
         self.field_value(attribute, receiver)
     }
 
@@ -1030,17 +1133,17 @@ impl<'a> Checker<'a> {
 
     /// Context determines empty literals and optional elements at storage boundaries.
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
+        self.reject_class_receiver_value(expression)?;
         let concrete = self.types.payload(expected).unwrap_or(expected);
         if matches!(concrete, Type::Callable(_)) {
-            if let Some(Binding::Definition(definition)) =
-                self.graph.resolve(self.module, expression)
+            if let Some(Binding::Definition(definition)) = self.resolve(expression)
                 && let Some(signature) = self.functions.get(&definition).cloned()
             {
                 let value = self.callable_value(&signature, None, Some(concrete), expression)?;
                 return self.coerce(value, expected, expression);
             }
             if let ast::Expr::Attribute(attribute) = expression
-                && self.graph.resolve(self.module, expression).is_none()
+                && self.resolve(expression).is_none()
             {
                 if attribute.attr.as_str().starts_with("__") {
                     return Err(error(
@@ -1049,18 +1152,14 @@ impl<'a> Checker<'a> {
                         "special methods cannot be used as function values",
                     ));
                 }
+                if let Some(class) = self.class_reference(&attribute.value) {
+                    let value = self.class_attribute(attribute, class, None, Some(concrete))?;
+                    return self.coerce(value, expected, expression);
+                }
                 let receiver = self.expr(&attribute.value)?;
-                if let Type::Class(class) = receiver.ty
-                    && let Some(signature) = self.classes.methods[class]
-                        .get(attribute.attr.as_str())
-                        .cloned()
-                {
-                    let value = self.callable_value(
-                        &signature,
-                        Some(receiver),
-                        Some(concrete),
-                        expression,
-                    )?;
+                if let Type::Class(class) = receiver.ty {
+                    let value =
+                        self.class_attribute(attribute, class, Some(receiver), Some(concrete))?;
                     return self.coerce(value, expected, expression);
                 }
                 return Err(error(
@@ -1463,7 +1562,16 @@ impl<'a> Checker<'a> {
             && let ast::Expr::Attribute(attribute) = &*call.func
             && attribute.attr.as_str() == "items"
         {
+            if self.class_reference(&attribute.value).is_some() {
+                return Ok((self.call(call)?, false));
+            }
             let receiver = self.expr(&attribute.value)?;
+            if let Type::Class(class) = receiver.ty {
+                return Ok((
+                    self.class_method_call(call, attribute, class, Some(receiver))?,
+                    false,
+                ));
+            }
             if self.types.mapping(receiver.ty).is_some() {
                 if !call.arguments.args.is_empty() || !call.arguments.keywords.is_empty() {
                     return Err(error(self.source, call, "dict.items() takes no arguments"));
@@ -1864,12 +1972,13 @@ impl<'a> Checker<'a> {
                 let ast::Expr::Name(name) = &*assign.target else {
                     return Err(error(self.source, statement, "only names may be annotated"));
                 };
-                let ty = annotation(
+                let ty = annotation_in_class(
                     &assign.annotation,
                     self.graph,
                     self.module,
                     &self.classes.declarations,
                     self.types,
+                    self.class,
                 )?;
                 let slot = self.declare(name.id.as_str(), ty, statement)?;
                 if let Some(value) = &assign.value {
@@ -2198,7 +2307,10 @@ impl<'a> Checker<'a> {
     }
 
     fn exception_category(&self, expression: &ast::Expr) -> Option<u32> {
-        match self.graph.resolve(self.module, expression) {
+        if self.is_class_receiver(expression) {
+            return None;
+        }
+        match self.resolve(expression) {
             Some(Binding::Intrinsic(Intrinsic::UnsupportedOperation)) => Some(19),
             Some(_) => None,
             None => match expression {
@@ -2513,12 +2625,13 @@ impl<'a> Checker<'a> {
     }
 
     fn expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        if let Some(Binding::Definition(definition)) = self.graph.resolve(self.module, expression)
+        self.reject_class_receiver_value(expression)?;
+        if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(signature) = self.functions.get(&definition).cloned()
         {
             return self.callable_value(&signature, None, None, expression);
         }
-        if let Some(Binding::Value(definition)) = self.graph.resolve(self.module, expression) {
+        if let Some(Binding::Value(definition)) = self.resolve(expression) {
             let (slot, ty) = self.globals.get(definition).ok_or_else(|| {
                 error(
                     self.source,
@@ -2532,7 +2645,7 @@ impl<'a> Checker<'a> {
             });
         }
         if matches!(
-            self.graph.resolve(self.module, expression),
+            self.resolve(expression),
             Some(Binding::Intrinsic(Intrinsic::Argv))
         ) {
             return Ok(Expr {
@@ -2747,7 +2860,9 @@ impl<'a> Checker<'a> {
                     let (ty, right) = (pair[0].ty, pair[1].ty);
                     let numeric = matches!(ty, Type::Int | Type::Float)
                         && matches!(right, Type::Int | Type::Float);
-                    if !numeric {
+                    let records = matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
+                        && matches!((ty, right), (Type::Class(_), Type::Class(_)));
+                    if !numeric && !records {
                         self.expect(ty, right, expression)?;
                     }
                     let op = match op {
@@ -2868,6 +2983,9 @@ impl<'a> Checker<'a> {
                 )
             }
             ast::Expr::Attribute(attribute) => {
+                if let Some(class) = self.class_reference(&attribute.value) {
+                    return self.class_attribute(attribute, class, None, None);
+                }
                 let receiver = self.expr(&attribute.value)?;
                 if receiver.ty == Type::Exception {
                     let (ty, builtin) = match attribute.attr.as_str() {
@@ -2898,18 +3016,9 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if let Type::Class(class) = receiver.ty
-                    && let Some(signature) = self.classes.methods[class]
-                        .get(attribute.attr.as_str())
-                        .cloned()
+                    && self.classes.methods[class].contains_key(attribute.attr.as_str())
                 {
-                    if attribute.attr.as_str().starts_with("__") {
-                        return Err(error(
-                            self.source,
-                            attribute,
-                            "special methods cannot be used as function values",
-                        ));
-                    }
-                    return self.callable_value(&signature, Some(receiver), None, attribute);
+                    return self.class_attribute(attribute, class, Some(receiver), None);
                 }
                 let (receiver, field, ty) = self.field_value(attribute, receiver)?;
                 (ty, ExprKind::Field(Box::new(receiver), field))
@@ -2983,25 +3092,12 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        if call
-            .arguments
-            .args
-            .iter()
-            .any(|argument| matches!(argument, ast::Expr::Starred(_)))
-            || call
-                .arguments
-                .keywords
-                .iter()
-                .any(|keyword| keyword.arg.is_none())
-        {
-            return Err(error(
-                self.source,
-                call,
-                "argument unpacking is unsupported",
-            ));
+        calls::reject_unpacking(call, self.source)?;
+        if let Some(class) = self.class_reference(&call.func) {
+            return self.construct(call, class);
         }
         if matches!(
-            self.graph.resolve(self.module, &call.func),
+            self.resolve(&call.func),
             Some(Binding::Intrinsic(Intrinsic::JsonDecode))
         ) {
             return self.json_decode(call);
@@ -3039,34 +3135,10 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Exception { kind, message },
             });
         }
-        if let Some(binding) = self.graph.resolve(self.module, &call.func) {
+        if let Some(binding) = self.resolve(&call.func) {
             let Binding::Definition(definition) = binding else {
                 return Err(error(self.source, call, "a module is not callable"));
             };
-            if let Some(&class_id) = self.classes.declarations.ids.get(&definition) {
-                let class = &self.classes.declarations.definitions[class_id];
-                let initializer_name = class.methods[class.initializer].name.as_str();
-                let signature = self.classes.methods[class_id][initializer_name].clone();
-                if self.inference.is_some() {
-                    let (_, args) = self.infer_call(call, &signature, None, 1)?;
-                    return Ok(Expr {
-                        ty: Type::Class(class_id),
-                        kind: ExprKind::Construct {
-                            initializer: signature.id,
-                            args,
-                        },
-                    });
-                }
-                let args = self.arguments(call, &signature.params[1..], None)?;
-                self.calls.insert(signature.id);
-                return Ok(Expr {
-                    ty: Type::Class(class_id),
-                    kind: ExprKind::Construct {
-                        initializer: signature.id,
-                        args,
-                    },
-                });
-            }
             let signature = self
                 .functions
                 .get(&definition)
@@ -3093,32 +3165,12 @@ impl<'a> Checker<'a> {
             return self.invoke(call, callable);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func {
+            if let Some(class) = self.class_reference(&attribute.value) {
+                return self.class_method_call(call, attribute, class, None);
+            }
             let receiver = self.expr(&attribute.value)?;
             if let Type::Class(class) = receiver.ty {
-                if attribute.attr.as_str().starts_with("__") {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "special methods cannot be called directly",
-                    ));
-                }
-                let signature = self.classes.methods[class]
-                    .get(attribute.attr.as_str())
-                    .ok_or_else(|| error(self.source, call, "unknown instance method"))?
-                    .clone();
-                if self.inference.is_some() {
-                    let (ty, args) = self.infer_call(call, &signature, Some(receiver), 1)?;
-                    return Ok(Expr {
-                        ty,
-                        kind: ExprKind::Call(signature.id, args),
-                    });
-                }
-                let args = self.arguments(call, &signature.params[1..], Some(receiver))?;
-                self.calls.insert(signature.id);
-                return Ok(Expr {
-                    ty: signature.returns,
-                    kind: ExprKind::Call(signature.id, args),
-                });
+                return self.class_method_call(call, attribute, class, Some(receiver));
             }
             if receiver.ty == Type::Str {
                 match attribute.attr.as_str() {
@@ -3408,6 +3460,26 @@ impl<'a> Checker<'a> {
                     }],
                 ),
             });
+        }
+        if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
+            if name.id == "repr" || (name.id == "str" && matches!(args[0].ty, Type::Class(_))) {
+                return Ok(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Repr, args),
+                });
+            }
+            if name.id == "print" && matches!(args[0].ty, Type::Class(_)) {
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(
+                        Builtin::Print,
+                        vec![Expr {
+                            ty: Type::Str,
+                            kind: ExprKind::Builtin(Builtin::Repr, args),
+                        }],
+                    ),
+                });
+            }
         }
         let (builtin, ty) = match name.id.as_str() {
             "input" if args.is_empty() => (Builtin::Input, Type::Str),

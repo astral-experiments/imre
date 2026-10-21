@@ -311,6 +311,11 @@ impl Checker<'_> {
             self.globals,
         );
         helper.inference = self.inference;
+        helper.class = self.class;
+        helper.class_receiver = self
+            .class_receiver
+            .clone()
+            .filter(|name| !targets.contains(name));
         helper.comprehension_targets = targets;
         let mut params = Vec::new();
         let mut args = Vec::new();
@@ -515,6 +520,7 @@ impl Checker<'_> {
         let input = self.iteration_input(&display.clauses[0].iter)?;
         let before = self.local_state();
         let names = self.names.clone();
+        let class_receiver = self.class_receiver.clone();
         let targets = self.comprehension_targets.clone();
         let first_private = self.locals.len();
         let writes = narrowing::expression_assignments(expression);
@@ -524,6 +530,13 @@ impl Checker<'_> {
         }
         for name in &private_targets {
             self.names.remove(name);
+        }
+        if self
+            .class_receiver
+            .as_ref()
+            .is_some_and(|name| private_targets.contains(name))
+        {
+            self.class_receiver = None;
         }
         self.comprehension_targets.extend(private_targets);
         self.comprehension_depth += 1;
@@ -551,6 +564,7 @@ impl Checker<'_> {
         self.comprehension_depth -= 1;
         self.comprehension_targets = targets;
         self.names = names;
+        self.class_receiver = class_receiver;
         for (name, &slot) in &self.comprehension_exports {
             if !self.comprehension_targets.contains(name) {
                 self.names.insert(name.clone(), slot);

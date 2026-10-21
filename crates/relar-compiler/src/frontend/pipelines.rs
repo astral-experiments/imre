@@ -115,7 +115,7 @@ impl Checker<'_> {
         let ast::Expr::Call(call) = expression else {
             return Ok(None);
         };
-        if self.graph.resolve(self.module, &call.func).is_some() {
+        if self.resolve(&call.func).is_some() {
             return Ok(None);
         }
         let ast::Expr::Name(name) = &*call.func else {
@@ -912,6 +912,7 @@ impl Checker<'_> {
         let mut first = self.prepare_iteration(first, generator, false)?;
         let before = self.local_state();
         let names = self.names.clone();
+        let class_receiver = self.class_receiver.clone();
         let targets = self.comprehension_targets.clone();
         let first_private = self.locals.len();
         let mut private_targets = HashSet::new();
@@ -920,6 +921,13 @@ impl Checker<'_> {
         }
         for name in &private_targets {
             self.names.remove(name);
+        }
+        if self
+            .class_receiver
+            .as_ref()
+            .is_some_and(|name| private_targets.contains(name))
+        {
+            self.class_receiver = None;
         }
         self.comprehension_targets.extend(private_targets);
         self.comprehension_depth += 1;
@@ -983,6 +991,7 @@ impl Checker<'_> {
         self.comprehension_depth -= 1;
         self.comprehension_targets = targets;
         self.names = names;
+        self.class_receiver = class_receiver;
         for (name, &slot) in &self.comprehension_exports {
             if !self.comprehension_targets.contains(name) {
                 self.names.insert(name.clone(), slot);
@@ -1115,7 +1124,7 @@ impl Checker<'_> {
                 "map/filter do not accept keyword arguments",
             ));
         }
-        let definition = match self.graph.resolve(self.module, callback) {
+        let definition = match self.resolve(callback) {
             Some(Binding::Definition(definition)) => self.functions.get(&definition).cloned(),
             _ => None,
         };

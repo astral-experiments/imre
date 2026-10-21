@@ -15,6 +15,7 @@ mod callables;
 mod conditionals;
 mod integer_regions;
 mod json;
+mod records;
 mod stdlib;
 mod truthiness;
 mod unions;
@@ -2487,6 +2488,24 @@ impl Emitter<'_, '_> {
                 ));
                 self.instruction(format!("icmp {predicate} i32 {order}, 0"))
             }
+            Type::Class(class)
+                if self
+                    .module
+                    .class_metadata
+                    .get(class)
+                    .is_some_and(|metadata| metadata.dataclass_eq) =>
+            {
+                let equal = self.instruction(format!(
+                    "call i8 @relar_record_equal(ptr {}, ptr {})",
+                    left.operand, right.operand
+                ));
+                let predicate = if matches!(op, Compare::Equal) {
+                    "ne"
+                } else {
+                    "eq"
+                };
+                self.instruction(format!("icmp {predicate} i8 {equal}, 0"))
+            }
             Type::Bool
             | Type::None
             | Type::Class(_)
@@ -2817,6 +2836,7 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::Repr => self.value_repr(&args[0].value),
             Builtin::Str => match args[0].value.ty {
                 Type::Str => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Int => self.call("relar_int_str", Type::Str, &[&args[0].value]),
@@ -2834,6 +2854,7 @@ impl Emitter<'_, '_> {
                 Type::Exception => {
                     self.call("relar_exception_message", Type::Str, &[&args[0].value])
                 }
+                Type::Class(_) => self.value_repr(&args[0].value),
                 _ => unreachable!("scalar string conversion was checked"),
             },
             Builtin::Int => match args[0].value.ty {
@@ -3853,9 +3874,10 @@ fn record_layouts(module: &Module) -> String {
             "@kinds_{name} = private unnamed_addr constant [{count} x i32] [{kinds}]"
         )
         .unwrap();
+        let semantics = records::semantics(module, ty, &name, &mut output);
         writeln!(
             output,
-            "@layout_{name} = private constant {{ i64, ptr }} {{ i64 {count}, ptr @kinds_{name} }}"
+            "@layout_{name} = private constant {{ i64, ptr, ptr }} {{ i64 {count}, ptr @kinds_{name}, ptr {semantics} }}"
         )
         .unwrap();
     }
@@ -4013,6 +4035,8 @@ declare ptr @relar_json_decode(ptr, ptr)
 declare ptr @relar_record_cached_result(ptr)
 declare void @relar_record_retain(ptr)
 declare void @relar_record_release(ptr)
+declare i8 @relar_record_equal(ptr, ptr) nounwind memory(read)
+declare ptr @relar_value_repr(i64, i32)
 declare void @relar_object_retain(ptr)
 declare void @relar_object_release(ptr)
 declare ptr @relar_seq_new(i32)

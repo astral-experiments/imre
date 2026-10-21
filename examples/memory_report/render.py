@@ -1,4 +1,4 @@
-from .compare import diff_items, project_change
+from .compare import diff_items
 from .model import ProjectComparison
 
 
@@ -34,9 +34,9 @@ def format_outcome(old_bytes: int, new_bytes: int) -> str:
 def render_summary(projects: list[ProjectComparison]) -> str:
     if not projects:
         return "No memory reports to compare."
-    projects = sorted(projects, key=project_change, reverse=True)
-    any_increased = any(project_change(project) > 10_000 for project in projects)
-    any_decreased = any(project_change(project) < -10_000 for project in projects)
+    projects = sorted(projects, key=lambda project: project.total_diff_bytes, reverse=True)
+    any_increased = any(project.total_diff_bytes > 10_000 for project in projects)
+    any_decreased = any(project.total_diff_bytes < -10_000 for project in projects)
     lines = ["## Memory usage report", ""]
     if not (any_increased or any_decreased):
         lines.append("Memory usage unchanged ✅")

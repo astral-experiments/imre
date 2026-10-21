@@ -110,6 +110,25 @@ pub(super) fn scalar_literal(expression: &ast::Expr, source: &str) -> Result<Exp
     Ok(Expr { ty, kind })
 }
 
+/// Every dispatch route uses a closed signature, including methods reached
+/// through iterable consumers before ordinary call-expression lowering.
+pub(super) fn reject_unpacking(call: &ast::ExprCall, source: &str) -> Result<(), String> {
+    if call
+        .arguments
+        .args
+        .iter()
+        .any(|argument| matches!(argument, ast::Expr::Starred(_)))
+        || call
+            .arguments
+            .keywords
+            .iter()
+            .any(|keyword| keyword.arg.is_none())
+    {
+        return Err(error(source, call, "argument unpacking is unsupported"));
+    }
+    Ok(())
+}
+
 impl Checker<'_> {
     /// The receiver and supplied expressions stay in source order. The separate
     /// permutation binds each parameter only after every supplied value exists.

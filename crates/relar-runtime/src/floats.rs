@@ -62,7 +62,7 @@ pub extern "C" fn relar_print_float(value: f64) {
 /// `.3` where Python chooses `.2`. Keep Ruff's nonfinite spelling and adapt Ryu's
 /// finite exponent notation: Python switches at 1e-5 and always writes its sign
 /// and at least two exponent digits.
-fn render(value: f64) -> Str {
+pub(crate) fn render(value: f64) -> Str {
     if !value.is_finite() {
         return ruff_python_literal::float::to_string(value).into();
     }

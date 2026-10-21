@@ -1,4 +1,4 @@
-from .model import ItemDifference, MemoryItem, ProjectComparison
+from .model import ItemDifference, MemoryItem
 
 
 def item_total_bytes(item: MemoryItem) -> int:
@@ -8,10 +8,6 @@ def item_total_bytes(item: MemoryItem) -> int:
 def item_change(item: ItemDifference) -> int:
     difference = item.new_bytes - item.old_bytes
     return -difference if difference < 0 else difference
-
-
-def project_change(project: ProjectComparison) -> int:
-    return project.new.total_bytes - project.old.total_bytes
 
 
 def diff_items(

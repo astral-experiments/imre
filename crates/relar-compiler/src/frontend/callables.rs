@@ -151,7 +151,7 @@ impl Checker<'_> {
         }
         let mut bound = narrowing::expression_assignments(&lambda.body);
         bound.extend(names.iter().map(|parameter| parameter.name().to_string()));
-        if comprehensions::free_reads(&lambda.body, bound)
+        if comprehensions::free_reads(&lambda.body, bound.clone())
             .iter()
             .any(|name| self.names.contains_key(name))
         {
@@ -172,6 +172,11 @@ impl Checker<'_> {
             self.globals,
         );
         helper.inference = self.inference;
+        helper.class = self.class;
+        helper.class_receiver = self
+            .class_receiver
+            .clone()
+            .filter(|name| !bound.contains(name));
         let mut params = Vec::new();
         for (parameter, &ty) in names.iter().zip(&parameters) {
             let slot = helper.declare(parameter.name().as_str(), ty, *parameter)?;

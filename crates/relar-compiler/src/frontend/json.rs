@@ -14,13 +14,7 @@ impl Checker<'_> {
                 "decode expects text and one record class",
             ));
         };
-        let class = match self.graph.resolve(self.module, schema) {
-            Some(Binding::Definition(definition)) => {
-                self.classes.declarations.ids.get(&definition).copied()
-            }
-            _ => None,
-        }
-        .ok_or_else(|| {
+        let class = self.class_reference(schema).ok_or_else(|| {
             error(
                 self.source,
                 schema,
@@ -186,6 +180,7 @@ fn scalar_default(value: &Expr) -> Result<JsonDefault, &'static str> {
         ExprKind::Bool(value) => JsonDefault::Bool(*value),
         ExprKind::Str(value) => JsonDefault::Str(value.clone()),
         ExprKind::None => JsonDefault::None,
+        ExprKind::List(values) if values.is_empty() => JsonDefault::EmptyList,
         ExprKind::Present(value) | ExprKind::Absent(value) => return scalar_default(value),
         ExprKind::Negate(value) => match &value.kind {
             ExprKind::Int(value) => JsonDefault::Int(format!("-{value}")),

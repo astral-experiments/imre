@@ -48,7 +48,7 @@ impl Checker<'_> {
         if let Some(kind) = self.exception_category(expression) {
             return Ok(vec![InstanceType::Exception(kind)]);
         }
-        if let Some(Binding::Definition(definition)) = self.graph.resolve(self.module, expression)
+        if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(&class) = self.classes.declarations.ids.get(&definition)
         {
             return Ok(vec![InstanceType::Exact(Type::Class(class))]);

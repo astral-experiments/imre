@@ -47,7 +47,7 @@ def main() -> None:
         raise ValueError("expected --old OLD.json --new NEW.json [--output REPORT.md]")
     old = load_report(old_path)
     new = load_report(new_path)
-    rendered = render_summary([ProjectComparison(project_name(new_path), old, new)])
+    rendered = render_summary([ProjectComparison(name=project_name(new_path), old=old, new=new)])
     if output_path is None:
         print(rendered)
     else:

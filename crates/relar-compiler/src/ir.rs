@@ -77,12 +77,28 @@ pub(crate) struct Module {
     /// identities refer to this compilation's interned type universe.
     pub types: crate::types::Types,
     pub class_fields: Vec<Vec<Type>>,
+    /// Static names and generated value behavior; instance layouts stay unchanged.
+    pub class_metadata: Vec<ClassMetadata>,
     /// Checked structural constructors used by the explicit typed JSON boundary.
     pub json_records: Vec<JsonRecordSchema>,
     /// Fixed module bindings own their exact storage until process cleanup.
     pub globals: Vec<Type>,
     pub functions: Vec<Function>,
     pub entry: Function,
+}
+
+pub(crate) struct ClassMetadata {
+    pub name: String,
+    pub qualified_name: String,
+    pub dataclass_eq: bool,
+    pub dataclass_repr: bool,
+    pub fields: Vec<ClassFieldMetadata>,
+}
+
+pub(crate) struct ClassFieldMetadata {
+    pub name: String,
+    pub compare: bool,
+    pub repr: bool,
 }
 
 pub(crate) struct JsonRecordSchema {
@@ -274,6 +290,8 @@ pub(crate) enum Builtin {
     Float,
     Bool,
     Str,
+    /// Python representation of a value with a fully known storage shape.
+    Repr,
     Len,
     Abs,
     /// Stable permutation of a private materialized list by precomputed scalar keys.

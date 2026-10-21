@@ -30,7 +30,7 @@ pub(super) fn adapters(module: &Module, sanitize: bool) -> String {
     let mut output = String::from(
         "%callable = type { ptr, ptr }\n\
          @kinds_callable = private unnamed_addr constant [2 x i32] [i32 0, i32 6]\n\
-         @layout_callable = private constant { i64, ptr } { i64 2, ptr @kinds_callable }\n",
+         @layout_callable = private constant { i64, ptr, ptr } { i64 2, ptr @kinds_callable, ptr null }\n",
     );
     for (id, bound) in targets {
         let function = &module.functions[id];

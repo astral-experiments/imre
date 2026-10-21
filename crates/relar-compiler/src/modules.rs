@@ -47,6 +47,7 @@ pub(crate) enum Binding {
 pub(crate) enum IntrinsicModule {
     Sys,
     Typing,
+    Dataclasses,
     Collections,
     CollectionsAbc,
     Io,
@@ -63,6 +64,9 @@ pub(crate) enum Intrinsic {
     Callable,
     UnsupportedOperation,
     JsonDecode,
+    Dataclass,
+    DataclassField,
+    SelfType,
 }
 
 impl IntrinsicModule {
@@ -70,6 +74,7 @@ impl IntrinsicModule {
         match name {
             "sys" => Some(Self::Sys),
             "typing" => Some(Self::Typing),
+            "dataclasses" => Some(Self::Dataclasses),
             "collections" => Some(Self::Collections),
             "collections.abc" => Some(Self::CollectionsAbc),
             "io" => Some(Self::Io),
@@ -91,9 +96,12 @@ impl IntrinsicModule {
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
             (Self::Typing, "Union") => Intrinsic::Union,
+            (Self::Typing, "Self") => Intrinsic::SelfType,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::RelarJson, "decode") => Intrinsic::JsonDecode,
+            (Self::Dataclasses, "dataclass") => Intrinsic::Dataclass,
+            (Self::Dataclasses, "field") => Intrinsic::DataclassField,
             _ => return None,
         };
         Some(Binding::Intrinsic(symbol))

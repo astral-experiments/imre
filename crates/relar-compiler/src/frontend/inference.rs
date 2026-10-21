@@ -156,6 +156,7 @@ impl Inference {
                 );
                 checker.inference = Some(self);
                 checker.returns = signature.returns;
+                checker.method_context(signature.method);
                 checker.inferred_returns = infer_return.then(Vec::new);
                 let result = (|| {
                     for (parameter, signature) in function

@@ -41,12 +41,16 @@ impl Hash for IntKey {
 /// Only the table's exact immutable scalar key representation implements this.
 trait ScalarKey: Clone + Eq + Hash {
     const KIND: u32;
+    fn word(&self) -> usize;
     unsafe fn borrow(word: usize) -> ManuallyDrop<Self>;
     unsafe fn from_owned(word: usize) -> Self;
     fn into_word(self) -> usize;
 }
 impl ScalarKey for IntKey {
     const KIND: u32 = 2;
+    fn word(&self) -> usize {
+        self.0.0
+    }
     unsafe fn borrow(word: usize) -> ManuallyDrop<Self> {
         ManuallyDrop::new(Self(Int(word)))
     }
@@ -59,6 +63,9 @@ impl ScalarKey for IntKey {
 }
 impl ScalarKey for Rc<Str> {
     const KIND: u32 = 3;
+    fn word(&self) -> usize {
+        Rc::as_ptr(self) as usize
+    }
     unsafe fn borrow(word: usize) -> ManuallyDrop<Self> {
         // SAFETY: the caller roots an exact string handle; ManuallyDrop does not consume it.
         ManuallyDrop::new(unsafe { Rc::from_raw(word as *const Str) })
@@ -73,6 +80,9 @@ impl ScalarKey for Rc<Str> {
 }
 impl ScalarKey for Rc<Bytes> {
     const KIND: u32 = 8;
+    fn word(&self) -> usize {
+        Rc::as_ptr(self) as usize
+    }
     unsafe fn borrow(word: usize) -> ManuallyDrop<Self> {
         // SAFETY: the caller roots an exact bytes handle; ManuallyDrop does not consume it.
         ManuallyDrop::new(unsafe { Rc::from_raw(word as *const Bytes) })
@@ -203,6 +213,15 @@ macro_rules! table {
 }
 
 impl<V: Copy> Tables<V> {
+    /// Visits borrowed key/value words in insertion order without acquiring keys.
+    /// The predicate may inspect other immutable acyclic containers, not mutate
+    /// this table or retain a storage reference after the visit.
+    fn all(&self, mut predicate: impl FnMut(usize, V) -> bool) -> bool {
+        table!(self, table => {
+            table.entries.iter().flatten().all(|entry| predicate(entry.key.word(), entry.value))
+        })
+    }
+
     fn new(kind: u32) -> Self {
         match kind {
             2 => Self::Int(Table::new()),
@@ -315,6 +334,45 @@ pub(super) struct Set {
 }
 
 impl Mapping {
+    /// # Safety
+    /// Both tables and all values are rooted and immutable for this traversal.
+    pub(super) unsafe fn equal(&self, other: &Self) -> bool {
+        self.tables.key_kind() == other.tables.key_kind()
+            && self.value_kind == other.value_kind
+            && self.tables.len() == other.tables.len()
+            && self.tables.all(|key, left| {
+                // SAFETY: the key kind matches, and both tables root their values.
+                unsafe {
+                    other
+                        .tables
+                        .lookup(key)
+                        .is_some_and(|right| super::values::equal(left, right, self.value_kind))
+                }
+            })
+    }
+
+    /// # Safety
+    /// The table and every descendant remain rooted and immutable until return.
+    pub(super) unsafe fn write_repr(&self, output: &mut String) {
+        output.push('{');
+        let key_kind = WordKind::new(self.tables.key_kind());
+        let mut first = true;
+        self.tables.all(|key, value| {
+            if !first {
+                output.push_str(", ");
+            }
+            first = false;
+            // SAFETY: immutable entries root both exact words during formatting.
+            unsafe {
+                super::values::write_repr(output, key, key_kind);
+                output.push_str(": ");
+                super::values::write_repr(output, value, self.value_kind);
+            }
+            true
+        });
+        output.push('}');
+    }
+
     fn new(key_kind: u32, value_kind: u32) -> Self {
         Self {
             tables: Tables::new(key_kind),
@@ -338,6 +396,41 @@ impl Mapping {
                 cache.set(*character, word);
             }
         }
+    }
+}
+
+impl Set {
+    /// # Safety
+    /// Both sets remain rooted and immutable for the entire comparison.
+    pub(super) unsafe fn equal(&self, other: &Self) -> bool {
+        self.tables.key_kind() == other.tables.key_kind()
+            && self.tables.len() == other.tables.len()
+            && self.tables.all(|key, ()| {
+                // SAFETY: matching table kinds borrow this rooted scalar key.
+                unsafe { other.tables.lookup(key).is_some() }
+            })
+    }
+
+    /// # Safety
+    /// The set and its scalar keys remain rooted and immutable until return.
+    pub(super) unsafe fn write_repr(&self, output: &mut String) {
+        if self.tables.len() == 0 {
+            output.push_str("set()");
+            return;
+        }
+        output.push('{');
+        let kind = WordKind::new(self.tables.key_kind());
+        let mut first = true;
+        self.tables.all(|key, ()| {
+            if !first {
+                output.push_str(", ");
+            }
+            first = false;
+            // SAFETY: this immutable entry roots its exact scalar key.
+            unsafe { super::values::write_repr(output, key, kind) };
+            true
+        });
+        output.push('}');
     }
 }
 impl Drop for Mapping {

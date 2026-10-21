@@ -4,6 +4,7 @@ The native compiler recognizes this import and generates a concrete decoder.
 Python's dynamic parse tree stays private to this compatibility implementation.
 """
 
+import dataclasses
 import inspect
 import json
 import math
@@ -95,7 +96,7 @@ def _convert(value, annotation):
         raise TypeError("JSON schemas require concrete annotated record classes")
     if not isinstance(value, _ObjectPairs):
         raise ValueError("JSON value does not match schema")
-    fields, parameters = _schema(annotation)
+    fields, parameters, factories = _schema(annotation)
     converted = {}
     for name, child in value:
         _check_string(name)
@@ -111,7 +112,9 @@ def _convert(value, annotation):
         if parameter is None or parameter.default is inspect.Parameter.empty:
             raise ValueError("missing JSON field: " + name)
         default = parameter.default
-        if get_origin(field_type) is list and default is None:
+        if name in factories:
+            converted[name] = _convert(factories[name](), field_type)
+        elif get_origin(field_type) is list and default is None:
             converted[name] = []
         elif type(default) in (int, float, bool, str, type(None)):
             converted[name] = _convert(default, field_type)
@@ -130,7 +133,21 @@ def _schema(annotation):
     parameters = inspect.signature(annotation).parameters
     if fields.keys() != parameters.keys():
         raise TypeError("JSON record constructor parameters must match its fields")
-    return fields, parameters
+    factories = {}
+    if dataclasses.is_dataclass(annotation):
+        declared = {field.name: field for field in dataclasses.fields(annotation)}
+        if fields.keys() != declared.keys():
+            raise TypeError("JSON dataclasses require ordinary initialized fields")
+        for name, parameter in parameters.items():
+            # inspect.signature exposes this sentinel for generated parameters.
+            # Comparing its identity preserves explicit __init__ defaults even
+            # when a dataclass field separately declares a default factory.
+            if parameter.default is dataclasses._HAS_DEFAULT_FACTORY:
+                factory = declared[name].default_factory
+                if factory is not list and factory is not dict and factory is not set:
+                    raise TypeError("JSON dataclass factories must be list, dict, or set")
+                factories[name] = factory
+    return fields, parameters, factories
 
 
 def decode(text: str, schema: type[T], /) -> T:
@@ -138,8 +155,9 @@ def decode(text: str, schema: type[T], /) -> T:
 
     Unknown fields are syntax-checked and ignored. Duplicate known fields are
     rejected; duplicates entirely in ignored data have no observable effect.
-    Missing scalar fields use exact constructor defaults, and list fields whose
-    constructor defaults to None receive fresh empty lists. Explicit JSON null
+    Missing scalar fields use exact constructor defaults. Dataclass list
+    factories and explicit list parameters defaulting to None receive fresh
+    empty lists. Explicit JSON null
     is accepted only by nullable field annotations. Nesting is limited to 128
     object/array levels, including ignored values.
     """

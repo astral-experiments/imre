@@ -16,6 +16,7 @@ pub(crate) mod records;
 mod sequences;
 mod stdlib;
 mod unions;
+mod values;
 mod words;
 
 use super::{
@@ -1583,6 +1584,7 @@ mod tests {
         let descriptor = RecordDescriptor {
             length: 1,
             kinds: kinds.as_ptr(),
+            semantics: std::ptr::null(),
         };
         let text = Rc::new(Str::from("retained before mutation"));
         let weak = Rc::downgrade(&text);
@@ -1616,6 +1618,7 @@ mod tests {
         let descriptor = RecordDescriptor {
             length: 2,
             kinds: kinds.as_ptr(),
+            semantics: std::ptr::null(),
         };
         let text = Rc::new(Str::from("nested record root"));
         let weak = Rc::downgrade(&text);
