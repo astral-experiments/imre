@@ -5,13 +5,14 @@ use std::fmt::Write;
 use crate::borrows::{self, FunctionBorrows};
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
-    Binary, Builtin, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType, Module,
+    Binary, Builtin, CallArgs, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType, Module,
     Statement, Type,
 };
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
 
 mod conditionals;
+mod integer_regions;
 mod truthiness;
 mod unions;
 
@@ -147,6 +148,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         sanitize,
         ranges,
         effects: effects::analyze(module),
+        integer_regions: integer_regions::analyze(module),
         uses_sys_argv: module.uses_sys_argv(),
     };
     for (id, function) in module.functions.iter().enumerate() {
@@ -213,6 +215,7 @@ struct Emitter<'a, 'module> {
     sanitize: bool,
     ranges: &'a RangeFacts<'module>,
     effects: ExceptionEffects,
+    integer_regions: Vec<Option<integer_regions::Summary>>,
     uses_sys_argv: bool,
 }
 
@@ -305,6 +308,12 @@ impl Emitter<'_, '_> {
             args,
             self.effects.may_raise(function),
         )
+    }
+
+    /// Captures in source order, preserving earlier owners across later argument
+    /// effects and errors. Parameter reordering happens only after this step.
+    fn call_operands(&mut self, args: &CallArgs) -> Vec<Operand> {
+        args.values.iter().map(|arg| self.operand(arg)).collect()
     }
 
     fn call_with_effect(
@@ -1817,11 +1826,7 @@ impl Emitter<'_, '_> {
             ExprKind::Conditional(test, yes, no) => self.conditional(test, yes, no),
             ExprKind::Compare(values, ops) => self.comparisons(values, ops),
             ExprKind::Call(id, args) => {
-                let values = args
-                    .values
-                    .iter()
-                    .map(|arg| self.operand(arg))
-                    .collect::<Vec<_>>();
+                let values = self.call_operands(args);
                 let result = self.user_call(
                     *id,
                     expression.ty,
@@ -1838,11 +1843,7 @@ impl Emitter<'_, '_> {
             }
             ExprKind::Construct { initializer, args } => {
                 // Arguments are evaluated and rooted before __init__ starts.
-                let values = args
-                    .values
-                    .iter()
-                    .map(|arg| self.operand(arg))
-                    .collect::<Vec<_>>();
+                let values = self.call_operands(args);
                 let object = self.record(expression.ty);
                 let mut inputs = vec![&object];
                 inputs.extend(args.order.iter().map(|&index| &values[index].value));
@@ -2502,6 +2503,11 @@ impl Emitter<'_, '_> {
 
     /// Keeps a chain's middle operand rooted until its final comparison completes.
     fn comparisons(&mut self, values: &[Expr], ops: &[Compare]) -> Value {
+        if let ([left, right], [op]) = (values, ops)
+            && let Some(result) = self.integer_region_comparison(left, right, *op)
+        {
+            return result;
+        }
         if let ([left, right], [op]) = (values, ops)
             && read_only_integer(left)
             && read_only_integer(right)
