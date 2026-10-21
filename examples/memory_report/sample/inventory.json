@@ -1,0 +1,1119 @@
+{
+  "total_bytes": 9211653,
+  "struct_metadata_bytes": 675188,
+  "struct_fields_bytes": 650499,
+  "memo_metadata_bytes": 658468,
+  "memo_fields_bytes": 7227498,
+  "structs": [
+    {
+      "name": "Definition",
+      "metadata_bytes": 366200,
+      "fields_bytes": 366200,
+      "count": 9155
+    },
+    {
+      "name": "File",
+      "metadata_bytes": 20608,
+      "fields_bytes": 39572,
+      "count": 322
+    },
+    {
+      "name": "ScopeId",
+      "metadata_bytes": 78092,
+      "fields_bytes": 33468,
+      "count": 2789
+    },
+    {
+      "name": "FileRoot",
+      "metadata_bytes": 11880,
+      "fields_bytes": 24968,
+      "count": 297
+    },
+    {
+      "name": "Expression",
+      "metadata_bytes": 53196,
+      "fields_bytes": 24180,
+      "count": 1209
+    },
+    {
+      "name": "Project",
+      "metadata_bytes": 112,
+      "fields_bytes": 24013,
+      "count": 1
+    },
+    {
+      "name": "ResolverEnvironment",
+      "metadata_bytes": 56,
+      "fields_bytes": 14848,
+      "count": 1
+    },
+    {
+      "name": "MemberLookupKey",
+      "metadata_bytes": 13720,
+      "fields_bytes": 11760,
+      "count": 245
+    },
+    {
+      "name": "FunctionType",
+      "metadata_bytes": 8848,
+      "fields_bytes": 10912,
+      "count": 158
+    },
+    {
+      "name": "Specialization",
+      "metadata_bytes": 10416,
+      "fields_bytes": 10784,
+      "count": 186
+    },
+    {
+      "name": "GenericContext",
+      "metadata_bytes": 4816,
+      "fields_bytes": 8924,
+      "count": 86
+    },
+    {
+      "name": "CallableType",
+      "metadata_bytes": 2296,
+      "fields_bytes": 7616,
+      "count": 41
+    },
+    {
+      "name": "UnionType",
+      "metadata_bytes": 2912,
+      "fields_bytes": 6880,
+      "count": 52
+    },
+    {
+      "name": "TypePair",
+      "metadata_bytes": 8848,
+      "fields_bytes": 6320,
+      "count": 158
+    },
+    {
+      "name": "OverloadLiteral",
+      "metadata_bytes": 6776,
+      "fields_bytes": 5808,
+      "count": 121
+    },
+    {
+      "name": "place_by_id::interned_arguments",
+      "metadata_bytes": 14456,
+      "fields_bytes": 5560,
+      "count": 278
+    },
+    {
+      "name": "StaticClassLiteral",
+      "metadata_bytes": 4480,
+      "fields_bytes": 5120,
+      "count": 80
+    },
+    {
+      "name": "StringLiteralType",
+      "metadata_bytes": 8792,
+      "fields_bytes": 3851,
+      "count": 157
+    },
+    {
+      "name": "BoundMethodType",
+      "metadata_bytes": 4472,
+      "fields_bytes": 3784,
+      "count": 86
+    },
+    {
+      "name": "BoundTypeVarInstance",
+      "metadata_bytes": 5460,
+      "fields_bytes": 3780,
+      "count": 105
+    },
+    {
+      "name": "TypeVarSetInner",
+      "metadata_bytes": 1904,
+      "fields_bytes": 3164,
+      "count": 34
+    },
+    {
+      "name": "TypeVarInstance",
+      "metadata_bytes": 2912,
+      "fields_bytes": 2464,
+      "count": 56
+    },
+    {
+      "name": "IntersectionType",
+      "metadata_bytes": 1176,
+      "fields_bytes": 2432,
+      "count": 21
+    },
+    {
+      "name": "GenericAlias",
+      "metadata_bytes": 8232,
+      "fields_bytes": 2352,
+      "count": 147
+    },
+    {
+      "name": "Type < 'db >::apply_specialization_inner_::interned_arguments",
+      "metadata_bytes": 4368,
+      "fields_bytes": 2352,
+      "count": 84
+    },
+    {
+      "name": "TypeVarInference",
+      "metadata_bytes": 1736,
+      "fields_bytes": 1984,
+      "count": 31
+    },
+    {
+      "name": "TupleType",
+      "metadata_bytes": 1120,
+      "fields_bytes": 1600,
+      "count": 20
+    },
+    {
+      "name": "ImplicitAttributeName",
+      "metadata_bytes": 2576,
+      "fields_bytes": 1472,
+      "count": 46
+    },
+    {
+      "name": "try_call_dunder_get_inner::interned_arguments",
+      "metadata_bytes": 1344,
+      "fields_bytes": 1344,
+      "count": 24
+    },
+    {
+      "name": "FileModule",
+      "metadata_bytes": 1008,
+      "fields_bytes": 1171,
+      "count": 18
+    },
+    {
+      "name": "protocol_apply_self_with_receiver::interned_arguments",
+      "metadata_bytes": 1120,
+      "fields_bytes": 960,
+      "count": 20
+    },
+    {
+      "name": "ModuleNameIngredient",
+      "metadata_bytes": 1064,
+      "fields_bytes": 923,
+      "count": 19
+    },
+    {
+      "name": "UnionTypeInstance",
+      "metadata_bytes": 616,
+      "fields_bytes": 880,
+      "count": 11
+    },
+    {
+      "name": "ProtocolInterface",
+      "metadata_bytes": 336,
+      "fields_bytes": 864,
+      "count": 6
+    },
+    {
+      "name": "StarImportPlaceholderPredicate",
+      "metadata_bytes": 1148,
+      "fields_bytes": 820,
+      "count": 41
+    },
+    {
+      "name": "TypeVarIdentity",
+      "metadata_bytes": 1288,
+      "fields_bytes": 736,
+      "count": 23
+    },
+    {
+      "name": "try_call_bin_op_result_impl::interned_arguments",
+      "metadata_bytes": 832,
+      "fields_bytes": 704,
+      "count": 16
+    },
+    {
+      "name": "ExpressionWithContext",
+      "metadata_bytes": 1092,
+      "fields_bytes": 588,
+      "count": 21
+    },
+    {
+      "name": "CallableAndCallExpr",
+      "metadata_bytes": 1456,
+      "fields_bytes": 560,
+      "count": 28
+    },
+    {
+      "name": "ModuleLiteralType",
+      "metadata_bytes": 1248,
+      "fields_bytes": 480,
+      "count": 24
+    },
+    {
+      "name": "member_lookup_with_policy_and_receiver_inner::interned_arguments",
+      "metadata_bytes": 1120,
+      "fields_bytes": 480,
+      "count": 20
+    },
+    {
+      "name": "when_assignable_to_owned_impl::interned_arguments",
+      "metadata_bytes": 1680,
+      "fields_bytes": 480,
+      "count": 30
+    },
+    {
+      "name": "remove_self_inner::interned_arguments",
+      "metadata_bytes": 884,
+      "fields_bytes": 340,
+      "count": 17
+    },
+    {
+      "name": "Unpack",
+      "metadata_bytes": 400,
+      "fields_bytes": 320,
+      "count": 10
+    },
+    {
+      "name": "ProgramFile",
+      "metadata_bytes": 1064,
+      "fields_bytes": 304,
+      "count": 19
+    },
+    {
+      "name": "lookup_dunder_new_inner::interned_arguments",
+      "metadata_bytes": 520,
+      "fields_bytes": 280,
+      "count": 10
+    },
+    {
+      "name": "KnownClassArgument",
+      "metadata_bytes": 1092,
+      "fields_bytes": 252,
+      "count": 21
+    },
+    {
+      "name": "ResolverFile",
+      "metadata_bytes": 840,
+      "fields_bytes": 240,
+      "count": 15
+    },
+    {
+      "name": "PythonFile",
+      "metadata_bytes": 988,
+      "fields_bytes": 228,
+      "count": 19
+    },
+    {
+      "name": "ScopeWithContext",
+      "metadata_bytes": 416,
+      "fields_bytes": 224,
+      "count": 8
+    },
+    {
+      "name": "Type < 'db >::is_data_descriptor_impl_::interned_arguments",
+      "metadata_bytes": 364,
+      "fields_bytes": 196,
+      "count": 7
+    },
+    {
+      "name": "Type < 'db >::is_definitely_non_data_descriptor_impl_::interned_arguments",
+      "metadata_bytes": 392,
+      "fields_bytes": 168,
+      "count": 7
+    },
+    {
+      "name": "simplify_intersection_pair_impl::interned_arguments",
+      "metadata_bytes": 520,
+      "fields_bytes": 120,
+      "count": 10
+    },
+    {
+      "name": "InternedType",
+      "metadata_bytes": 336,
+      "fields_bytes": 96,
+      "count": 6
+    },
+    {
+      "name": "inherited_class_body_declaration::interned_arguments",
+      "metadata_bytes": 364,
+      "fields_bytes": 84,
+      "count": 7
+    },
+    {
+      "name": "is_equivalent_to_object_inner::interned_arguments",
+      "metadata_bytes": 312,
+      "fields_bytes": 72,
+      "count": 6
+    },
+    {
+      "name": "infer_implicit_alias_type::interned_arguments",
+      "metadata_bytes": 224,
+      "fields_bytes": 64,
+      "count": 4
+    },
+    {
+      "name": "protocol_bind_self::interned_arguments",
+      "metadata_bytes": 112,
+      "fields_bytes": 64,
+      "count": 2
+    },
+    {
+      "name": "TypeVarConstraints",
+      "metadata_bytes": 56,
+      "fields_bytes": 48,
+      "count": 1
+    },
+    {
+      "name": "assignable_solutions_impl::interned_arguments",
+      "metadata_bytes": 56,
+      "fields_bytes": 48,
+      "count": 1
+    },
+    {
+      "name": "Program",
+      "metadata_bytes": 56,
+      "fields_bytes": 37,
+      "count": 1
+    },
+    {
+      "name": "effective_superclass_variable_kind::interned_arguments",
+      "metadata_bytes": 56,
+      "fields_bytes": 32,
+      "count": 1
+    },
+    {
+      "name": "can_suppress_exceptions_impl::interned_arguments",
+      "metadata_bytes": 52,
+      "fields_bytes": 28,
+      "count": 1
+    },
+    {
+      "name": "AugmentedBindings",
+      "metadata_bytes": 56,
+      "fields_bytes": 24,
+      "count": 1
+    },
+    {
+      "name": "analyze_non_terminal_call_range::interned_arguments",
+      "metadata_bytes": 56,
+      "fields_bytes": 24,
+      "count": 1
+    },
+    {
+      "name": "Type < 'db >::expand_eagerly__::interned_arguments",
+      "metadata_bytes": 56,
+      "fields_bytes": 24,
+      "count": 1
+    },
+    {
+      "name": "ModuleResolveModeIngredient",
+      "metadata_bytes": 52,
+      "fields_bytes": 12,
+      "count": 1
+    },
+    {
+      "name": "is_function_definition::interned_arguments",
+      "metadata_bytes": 52,
+      "fields_bytes": 12,
+      "count": 1
+    }
+  ],
+  "queries": [
+    {
+      "name": "parsed_module",
+      "return_type": "ruff_db::parsed::ParsedModule",
+      "metadata_bytes": 656,
+      "fields_bytes": 4237214,
+      "count": 19
+    },
+    {
+      "name": "semantic_index",
+      "return_type": "ty_python_core::SemanticIndex<'_>",
+      "metadata_bytes": 338944,
+      "fields_bytes": 1913068,
+      "count": 19
+    },
+    {
+      "name": "source_text",
+      "return_type": "ruff_db::source::SourceText",
+      "metadata_bytes": 896,
+      "fields_bytes": 674419,
+      "count": 23
+    },
+    {
+      "name": "directory_listing_query",
+      "return_type": "core::result::Result<ruff_db::files::directory::DirectoryListing, ruff_db::files::directory::DirectoryListingError>",
+      "metadata_bytes": 16688,
+      "fields_bytes": 118102,
+      "count": 298
+    },
+    {
+      "name": "infer_definition_types",
+      "return_type": "ty_python_semantic::types::infer::DefinitionInference<'_>",
+      "metadata_bytes": 45032,
+      "fields_bytes": 61996,
+      "count": 535
+    },
+    {
+      "name": "site_packages_editables",
+      "return_type": "alloc::boxed::Box<[ty_module_resolver::resolve::SitePackagesEditables]>",
+      "metadata_bytes": 112,
+      "fields_bytes": 59162,
+      "count": 1
+    },
+    {
+      "name": "FunctionType < 'db >::literal_signature_",
+      "return_type": "ty_python_semantic::types::signatures::CallableSignature<'_>",
+      "metadata_bytes": 4856,
+      "fields_bytes": 22688,
+      "count": 69
+    },
+    {
+      "name": "infer_deferred_types",
+      "return_type": "ty_python_semantic::types::infer::DefinitionInference<'_>",
+      "metadata_bytes": 13248,
+      "fields_bytes": 21548,
+      "count": 152
+    },
+    {
+      "name": "infer_scope_types_impl",
+      "return_type": "ty_python_semantic::types::infer::ScopeInference<'_>",
+      "metadata_bytes": 17096,
+      "fields_bytes": 14736,
+      "count": 41
+    },
+    {
+      "name": "infer_expression_types_impl",
+      "return_type": "ty_python_semantic::types::infer::ExpressionInference<'_>",
+      "metadata_bytes": 26032,
+      "fields_bytes": 13212,
+      "count": 157
+    },
+    {
+      "name": "GenericAlias < 'db >::try_mro_",
+      "return_type": "core::result::Result<ty_python_semantic::types::mro::Mro<'_>, alloc::boxed::Box<ty_python_semantic::types::mro::StaticMroError<'_>>>",
+      "metadata_bytes": 8792,
+      "fields_bytes": 12288,
+      "count": 105
+    },
+    {
+      "name": "place_by_id",
+      "return_type": "ty_python_semantic::place::PlaceAndQualifiers<'_>",
+      "metadata_bytes": 13200,
+      "fields_bytes": 10008,
+      "count": 278
+    },
+    {
+      "name": "function_known_decorators",
+      "return_type": "ty_python_semantic::types::infer::FunctionDecoratorInference<'_>",
+      "metadata_bytes": 2776,
+      "fields_bytes": 9236,
+      "count": 62
+    },
+    {
+      "name": "Type < 'db >::class_member_with_policy_inner_",
+      "return_type": "ty_python_semantic::place::PlaceAndQualifiers<'_>",
+      "metadata_bytes": 29092,
+      "fields_bytes": 7884,
+      "count": 219
+    },
+    {
+      "name": "member_lookup_with_policy_inner",
+      "return_type": "core::result::Result<ty_python_semantic::types::ResolvedMember<'_>, ty_python_semantic::types::MemberLookupError<'_>>",
+      "metadata_bytes": 16300,
+      "fields_bytes": 7884,
+      "count": 219
+    },
+    {
+      "name": "StaticClassLiteral < 'db >::try_mro_unspecialized_",
+      "return_type": "core::result::Result<ty_python_semantic::types::mro::Mro<'_>, alloc::boxed::Box<ty_python_semantic::types::mro::StaticMroError<'_>>>",
+      "metadata_bytes": 4648,
+      "fields_bytes": 6464,
+      "count": 67
+    },
+    {
+      "name": "enum_metadata",
+      "return_type": "core::option::Option<ty_python_semantic::types::enums::EnumMetadata<'_>>",
+      "metadata_bytes": 2040,
+      "fields_bytes": 6440,
+      "count": 35
+    },
+    {
+      "name": "try_metaclass_inner",
+      "return_type": "core::result::Result<(ty_python_semantic::types::class::ClassMetaclass<'_>, core::option::Option<ty_python_semantic::types::MetaclassTransformInfo<'_>>), ty_python_semantic::types::class::MetaclassError<'_>>",
+      "metadata_bytes": 3172,
+      "fields_bytes": 2516,
+      "count": 37
+    },
+    {
+      "name": "dynamic_resolution_paths",
+      "return_type": "alloc::boxed::Box<[ty_module_resolver::path::SearchPath]>",
+      "metadata_bytes": 40,
+      "fields_bytes": 2376,
+      "count": 1
+    },
+    {
+      "name": "explicit_bases_inner",
+      "return_type": "alloc::boxed::Box<[ty_python_semantic::types::Type<'_>]>",
+      "metadata_bytes": 2592,
+      "fields_bytes": 2192,
+      "count": 56
+    },
+    {
+      "name": "StaticClassLiteral < 'db >::implicit_attribute_inner_",
+      "return_type": "ty_python_semantic::types::class::implicit_attributes::ImplicitAttribute<'_>",
+      "metadata_bytes": 3472,
+      "fields_bytes": 2024,
+      "count": 46
+    },
+    {
+      "name": "Type < 'db >::apply_specialization_inner_",
+      "return_type": "ty_python_semantic::types::Type<'_>",
+      "metadata_bytes": 3520,
+      "fields_bytes": 1344,
+      "count": 84
+    },
+    {
+      "name": "infer_unpack_types",
+      "return_type": "ty_python_semantic::types::unpacker::UnpackResult<'_>",
+      "metadata_bytes": 1976,
+      "fields_bytes": 1280,
+      "count": 10
+    },
+    {
+      "name": "implicit_attribute_names",
+      "return_type": "alloc::boxed::Box<[ruff_python_ast::name::Name]>",
+      "metadata_bytes": 1456,
+      "fields_bytes": 1072,
+      "count": 44
+    },
+    {
+      "name": "all_narrowing_constraints_for_expression",
+      "return_type": "ty_python_semantic::types::narrow::ExpressionNarrowingConstraints<'_>",
+      "metadata_bytes": 1352,
+      "fields_bytes": 1040,
+      "count": 14
+    },
+    {
+      "name": "object_member_names",
+      "return_type": "std::collections::hash::set::HashSet<ruff_python_ast::name::Name, rustc_hash::FxBuildHasher>",
+      "metadata_bytes": 40,
+      "fields_bytes": 953,
+      "count": 1
+    },
+    {
+      "name": "loop_header_reachability",
+      "return_type": "ty_python_semantic::place::LoopHeaderReachability<'_>",
+      "metadata_bytes": 1016,
+      "fields_bytes": 812,
+      "count": 7
+    },
+    {
+      "name": "suppressions",
+      "return_type": "ty_python_semantic::suppression::Suppressions",
+      "metadata_bytes": 384,
+      "fields_bytes": 720,
+      "count": 6
+    },
+    {
+      "name": "member_lookup_with_policy_and_receiver_inner",
+      "return_type": "core::result::Result<ty_python_semantic::types::ResolvedMember<'_>, ty_python_semantic::types::MemberLookupError<'_>>",
+      "metadata_bytes": 1968,
+      "fields_bytes": 720,
+      "count": 20
+    },
+    {
+      "name": "place_table",
+      "return_type": "alloc::sync::Arc<ty_python_core::place::PlaceTable>",
+      "metadata_bytes": 2944,
+      "fields_bytes": 696,
+      "count": 87
+    },
+    {
+      "name": "try_call_dunder_get_inner",
+      "return_type": "core::result::Result<core::option::Option<ty_python_semantic::types::DescriptorGetResult<'_>>, ty_python_semantic::types::DescriptorGetError<'_>>",
+      "metadata_bytes": 1056,
+      "fields_bytes": 672,
+      "count": 24
+    },
+    {
+      "name": "exported_names",
+      "return_type": "alloc::boxed::Box<[ruff_python_ast::name::Name]>",
+      "metadata_bytes": 32,
+      "fields_bytes": 672,
+      "count": 1
+    },
+    {
+      "name": "use_def_map",
+      "return_type": "alloc::sync::Arc<ty_python_core::use_def::UseDefMap<'_>>",
+      "metadata_bytes": 3008,
+      "fields_bytes": 672,
+      "count": 84
+    },
+    {
+      "name": "StaticClassLiteral < 'db >::decorators_inner_",
+      "return_type": "alloc::boxed::Box<[ty_python_semantic::types::Type<'_>]>",
+      "metadata_bytes": 800,
+      "fields_bytes": 640,
+      "count": 20
+    },
+    {
+      "name": "StaticClassLiteral < 'db >::generic_context_",
+      "return_type": "core::option::Option<ty_python_semantic::types::generics::GenericContext<'_>>",
+      "metadata_bytes": 3928,
+      "fields_bytes": 624,
+      "count": 78
+    },
+    {
+      "name": "overloads_and_implementation_inner",
+      "return_type": "(alloc::boxed::Box<[ty_python_semantic::types::function::OverloadLiteral<'_>]>, core::option::Option<ty_python_semantic::types::function::OverloadLiteral<'_>>)",
+      "metadata_bytes": 568,
+      "fields_bytes": 568,
+      "count": 13
+    },
+    {
+      "name": "ClassType < 'db >::abstract_methods_",
+      "return_type": "indexmap::map::IndexMap<ruff_python_ast::name::Name, ty_python_semantic::types::abstract_methods::AbstractMethod<'_>, core::hash::BuildHasherDefault<rustc_hash::FxHasher>>",
+      "metadata_bytes": 1120,
+      "fields_bytes": 560,
+      "count": 10
+    },
+    {
+      "name": "BoundMethodType < 'db >::callables_",
+      "return_type": "core::option::Option<ty_python_semantic::types::callable::CallableTypes<'_>>",
+      "metadata_bytes": 664,
+      "fields_bytes": 544,
+      "count": 17
+    },
+    {
+      "name": "try_call_bin_op_result_impl",
+      "return_type": "core::option::Option<ty_python_semantic::types::call::BinaryOperationResult<'_>>",
+      "metadata_bytes": 1440,
+      "fields_bytes": 512,
+      "count": 16
+    },
+    {
+      "name": "when_assignable_to_owned_impl",
+      "return_type": "ty_python_semantic::types::constraints::OwnedConstraintSet<'_>",
+      "metadata_bytes": 1304,
+      "fields_bytes": 480,
+      "count": 30
+    },
+    {
+      "name": "bound_typevar_default_type",
+      "return_type": "core::option::Option<ty_python_semantic::types::Type<'_>>",
+      "metadata_bytes": 1048,
+      "fields_bytes": 480,
+      "count": 30
+    },
+    {
+      "name": "dunder_all_names",
+      "return_type": "core::option::Option<std::collections::hash::set::HashSet<ruff_python_ast::name::Name, rustc_hash::FxBuildHasher>>",
+      "metadata_bytes": 64,
+      "fields_bytes": 480,
+      "count": 1
+    },
+    {
+      "name": "code_generator_of_static_class",
+      "return_type": "core::option::Option<ty_python_semantic::types::class::CodeGeneratorKind<'_>>",
+      "metadata_bytes": 2828,
+      "fields_bytes": 444,
+      "count": 37
+    },
+    {
+      "name": "known_class_to_class_literal",
+      "return_type": "core::result::Result<core::option::Option<ty_python_semantic::types::class::static_literal::StaticClassLiteral<'_>>, ty_python_semantic::types::class::known::KnownClassLookupError<'_>>",
+      "metadata_bytes": 1108,
+      "fields_bytes": 420,
+      "count": 21
+    },
+    {
+      "name": "module_type_symbols_inner",
+      "return_type": "smallvec::SmallVec<[ruff_python_ast::name::Name; 8]>",
+      "metadata_bytes": 48,
+      "fields_bytes": 392,
+      "count": 1
+    },
+    {
+      "name": "infer_implicit_alias_type",
+      "return_type": "ty_python_semantic::types::infer::ImplicitAliasInference<'_>",
+      "metadata_bytes": 680,
+      "fields_bytes": 384,
+      "count": 4
+    },
+    {
+      "name": "lookup_dunder_new_inner",
+      "return_type": "core::option::Option<ty_python_semantic::place::PlaceAndQualifiers<'_>>",
+      "metadata_bytes": 944,
+      "fields_bytes": 360,
+      "count": 10
+    },
+    {
+      "name": "inherited_legacy_generic_context_inner",
+      "return_type": "core::option::Option<ty_python_semantic::types::generics::GenericContext<'_>>",
+      "metadata_bytes": 2112,
+      "fields_bytes": 344,
+      "count": 43
+    },
+    {
+      "name": "infer_expression_type_impl",
+      "return_type": "ty_python_semantic::types::Type<'_>",
+      "metadata_bytes": 960,
+      "fields_bytes": 320,
+      "count": 20
+    },
+    {
+      "name": "StaticClassLiteral < 'db >::instance_layout_",
+      "return_type": "ty_python_semantic::types::class::slots::InstanceLayout",
+      "metadata_bytes": 1000,
+      "fields_bytes": 264,
+      "count": 11
+    },
+    {
+      "name": "inherited_class_body_declaration",
+      "return_type": "core::option::Option<ty_python_semantic::place::PlaceAndQualifiers<'_>>",
+      "metadata_bytes": 436,
+      "fields_bytes": 252,
+      "count": 7
+    },
+    {
+      "name": "merged_specialization_inner",
+      "return_type": "ty_python_semantic::types::generics::Specialization<'_>",
+      "metadata_bytes": 992,
+      "fields_bytes": 248,
+      "count": 31
+    },
+    {
+      "name": "resolve_module_query",
+      "return_type": "core::option::Option<ty_module_resolver::module::Module<'_>>",
+      "metadata_bytes": 29980,
+      "fields_bytes": 228,
+      "count": 19
+    },
+    {
+      "name": "known_class_to_instance",
+      "return_type": "ty_python_semantic::types::Type<'_>",
+      "metadata_bytes": 560,
+      "fields_bytes": 208,
+      "count": 13
+    },
+    {
+      "name": "union_from_two_elements",
+      "return_type": "ty_python_semantic::types::Type<'_>",
+      "metadata_bytes": 424,
+      "fields_bytes": 192,
+      "count": 12
+    },
+    {
+      "name": "file_to_module",
+      "return_type": "core::option::Option<ty_module_resolver::module::Module<'_>>",
+      "metadata_bytes": 660,
+      "fields_bytes": 180,
+      "count": 15
+    },
+    {
+      "name": "intersection_from_two_elements",
+      "return_type": "ty_python_semantic::types::Type<'_>",
+      "metadata_bytes": 392,
+      "fields_bytes": 176,
+      "count": 11
+    },
+    {
+      "name": "infer_function_default_types",
+      "return_type": "ty_python_semantic::types::infer::DefinitionInference<'_>",
+      "metadata_bytes": 128,
+      "fields_bytes": 168,
+      "count": 2
+    },
+    {
+      "name": "protocol_apply_self_with_receiver",
+      "return_type": "ty_python_semantic::types::callable::CallableType<'_>",
+      "metadata_bytes": 640,
+      "fields_bytes": 160,
+      "count": 20
+    },
+    {
+      "name": "global_scope",
+      "return_type": "ty_python_core::scope::ScopeId<'_>",
+      "metadata_bytes": 648,
+      "fields_bytes": 144,
+      "count": 18
+    },
+    {
+      "name": "file_settings",
+      "return_type": "ty_project::metadata::settings::FileSettings",
+      "metadata_bytes": 864,
+      "fields_bytes": 136,
+      "count": 17
+    },
+    {
+      "name": "script_tag",
+      "return_type": "core::option::Option<alloc::boxed::Box<ruff_python_ast::script::ScriptTag>>",
+      "metadata_bytes": 824,
+      "fields_bytes": 136,
+      "count": 17
+    },
+    {
+      "name": "remove_self_inner",
+      "return_type": "core::option::Option<ty_python_semantic::types::generics::GenericContext<'_>>",
+      "metadata_bytes": 680,
+      "fields_bytes": 136,
+      "count": 17
+    },
+    {
+      "name": "enum_class_literal",
+      "return_type": "core::option::Option<ty_python_semantic::types::enums::EnumClassLiteral<'_>>",
+      "metadata_bytes": 744,
+      "fields_bytes": 136,
+      "count": 17
+    },
+    {
+      "name": "TypeVarInstance < 'db >::lazy_default_unchecked_",
+      "return_type": "core::option::Option<ty_python_semantic::types::Type<'_>>",
+      "metadata_bytes": 384,
+      "fields_bytes": 128,
+      "count": 8
+    },
+    {
+      "name": "might_be_explicitly_abstract",
+      "return_type": "bool",
+      "metadata_bytes": 4851,
+      "fields_bytes": 117,
+      "count": 117
+    },
+    {
+      "name": "non_terminal_call_predicates",
+      "return_type": "alloc::boxed::Box<[ty_python_core::predicate::ScopedPredicateId]>",
+      "metadata_bytes": 40,
+      "fields_bytes": 100,
+      "count": 1
+    },
+    {
+      "name": "is_redundant_with_impl",
+      "return_type": "bool",
+      "metadata_bytes": 5061,
+      "fields_bytes": 99,
+      "count": 99
+    },
+    {
+      "name": "check_file_impl",
+      "return_type": "core::result::Result<alloc::boxed::Box<[ruff_db::diagnostic::Diagnostic]>, ruff_db::diagnostic::Diagnostic>",
+      "metadata_bytes": 840,
+      "fields_bytes": 96,
+      "count": 6
+    },
+    {
+      "name": "StaticClassLiteral < 'db >::slot_definition_",
+      "return_type": "ty_python_semantic::types::class::slots::SlotDefinition",
+      "metadata_bytes": 120,
+      "fields_bytes": 72,
+      "count": 3
+    },
+    {
+      "name": "cached_protocol_interface",
+      "return_type": "ty_python_semantic::types::protocol_class::ProtocolInterface<'_>",
+      "metadata_bytes": 616,
+      "fields_bytes": 48,
+      "count": 6
+    },
+    {
+      "name": "StaticClassLiteral < 'db >::has_generated_slots_",
+      "return_type": "bool",
+      "metadata_bytes": 2095,
+      "fields_bytes": 41,
+      "count": 41
+    },
+    {
+      "name": "inheritance_cycle_inner",
+      "return_type": "core::option::Option<ty_python_semantic::types::class::static_literal::InheritanceCycle>",
+      "metadata_bytes": 2278,
+      "fields_bytes": 34,
+      "count": 34
+    },
+    {
+      "name": "implicit_alias_parameters",
+      "return_type": "core::option::Option<ty_python_semantic::types::generics::GenericContext<'_>>",
+      "metadata_bytes": 288,
+      "fields_bytes": 32,
+      "count": 4
+    },
+    {
+      "name": "stub_package_index",
+      "return_type": "ty_module_resolver::resolve::StubPackageIndex",
+      "metadata_bytes": 4792,
+      "fields_bytes": 32,
+      "count": 1
+    },
+    {
+      "name": "instance_flags_inner",
+      "return_type": "ty_python_semantic::types::class::ClassInstanceFlags",
+      "metadata_bytes": 1923,
+      "fields_bytes": 29,
+      "count": 29
+    },
+    {
+      "name": "analyze_non_terminal_call",
+      "return_type": "ty_python_core::Truthiness",
+      "metadata_bytes": 2222,
+      "fields_bytes": 26,
+      "count": 26
+    },
+    {
+      "name": "assignable_solutions_impl",
+      "return_type": "ty_python_semantic::types::constraints::CandidateSolutions<'_>",
+      "metadata_bytes": 32,
+      "fields_bytes": 24,
+      "count": 1
+    },
+    {
+      "name": "value_truthiness",
+      "return_type": "ty_python_core::Truthiness",
+      "metadata_bytes": 1658,
+      "fields_bytes": 22,
+      "count": 22
+    },
+    {
+      "name": "may_exist_at_runtime",
+      "return_type": "bool",
+      "metadata_bytes": 799,
+      "fields_bytes": 17,
+      "count": 17
+    },
+    {
+      "name": "static_dunder_all",
+      "return_type": "core::option::Option<alloc::boxed::Box<[ruff_python_ast::name::Name]>>",
+      "metadata_bytes": 40,
+      "fields_bytes": 16,
+      "count": 1
+    },
+    {
+      "name": "Type < 'db >::expand_eagerly__",
+      "return_type": "ty_python_semantic::types::Type<'_>",
+      "metadata_bytes": 32,
+      "fields_bytes": 16,
+      "count": 1
+    },
+    {
+      "name": "TypeVarInstance < 'db >::lazy_constraints_unchecked_",
+      "return_type": "core::option::Option<ty_python_semantic::types::typevar::TypeVarConstraints<'_>>",
+      "metadata_bytes": 128,
+      "fields_bytes": 16,
+      "count": 2
+    },
+    {
+      "name": "protocol_bind_self",
+      "return_type": "ty_python_semantic::types::callable::CallableType<'_>",
+      "metadata_bytes": 64,
+      "fields_bytes": 16,
+      "count": 2
+    },
+    {
+      "name": "when_constraint_set_assignable_to_owned_impl",
+      "return_type": "ty_python_semantic::types::constraints::OwnedConstraintSet<'_>",
+      "metadata_bytes": 112,
+      "fields_bytes": 16,
+      "count": 1
+    },
+    {
+      "name": "TupleType < 'db >::to_class_type_",
+      "return_type": "ty_python_semantic::types::class::ClassType<'_>",
+      "metadata_bytes": 68,
+      "fields_bytes": 12,
+      "count": 1
+    },
+    {
+      "name": "simplify_intersection_pair_impl",
+      "return_type": "ty_python_semantic::types::set_theoretic::builder::IntersectionSimplification",
+      "metadata_bytes": 478,
+      "fields_bytes": 10,
+      "count": 10
+    },
+    {
+      "name": "module_type_body_scope_inner",
+      "return_type": "core::option::Option<ty_python_core::scope::ScopeId<'_>>",
+      "metadata_bytes": 48,
+      "fields_bytes": 8,
+      "count": 1
+    },
+    {
+      "name": "Project::program_",
+      "return_type": "ty_python_core::program::Program<'_>",
+      "metadata_bytes": 40,
+      "fields_bytes": 8,
+      "count": 1
+    },
+    {
+      "name": "Type < 'db >::is_definitely_non_data_descriptor_impl_",
+      "return_type": "bool",
+      "metadata_bytes": 329,
+      "fields_bytes": 7,
+      "count": 7
+    },
+    {
+      "name": "Type < 'db >::is_data_descriptor_impl_",
+      "return_type": "bool",
+      "metadata_bytes": 385,
+      "fields_bytes": 7,
+      "count": 7
+    },
+    {
+      "name": "should_check_file",
+      "return_type": "bool",
+      "metadata_bytes": 330,
+      "fields_bytes": 6,
+      "count": 6
+    },
+    {
+      "name": "is_equivalent_to_object_inner",
+      "return_type": "bool",
+      "metadata_bytes": 378,
+      "fields_bytes": 6,
+      "count": 6
+    },
+    {
+      "name": "condition_truthiness",
+      "return_type": "ty_python_core::Truthiness",
+      "metadata_bytes": 436,
+      "fields_bytes": 4,
+      "count": 4
+    },
+    {
+      "name": "is_open_file_impl",
+      "return_type": "bool",
+      "metadata_bytes": 78,
+      "fields_bytes": 2,
+      "count": 2
+    },
+    {
+      "name": "sync_context_manager_suppresses",
+      "return_type": "bool",
+      "metadata_bytes": 142,
+      "fields_bytes": 2,
+      "count": 2
+    },
+    {
+      "name": "can_suppress_exceptions_impl",
+      "return_type": "bool",
+      "metadata_bytes": 95,
+      "fields_bytes": 1,
+      "count": 1
+    },
+    {
+      "name": "effective_superclass_variable_kind",
+      "return_type": "core::option::Option<ty_python_semantic::types::overrides::VariableKind>",
+      "metadata_bytes": 39,
+      "fields_bytes": 1,
+      "count": 1
+    },
+    {
+      "name": "is_function_definition",
+      "return_type": "bool",
+      "metadata_bytes": 39,
+      "fields_bytes": 1,
+      "count": 1
+    },
+    {
+      "name": "analyze_non_terminal_call_range",
+      "return_type": "()",
+      "metadata_bytes": 184,
+      "fields_bytes": 0,
+      "count": 1
+    }
+  ]
+}

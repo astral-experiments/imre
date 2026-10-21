@@ -162,6 +162,22 @@ The [truthiness and loop-else milestone](results/2026-10-19-truthiness-loop-else
 
 The [assignment, unpacking, and expansion milestone](results/2026-10-19-assignment-unpacking-expansion.md) adopts chained assignment, starred `sys.argv` unpacking, row unpacking, and dictionary-key expansion in the inventory reconciler. ThinLTO runs the large cases 2.71–3.63× faster than CPython and takes 1.9–9.7% more time than Rust BigInt. Four families compare the updated application and unchanged previous source under ordinary and ThinLTO linking, retaining all 4,608 measured executions. The report includes the preserved-Relar comparisons, sample spreads, independently audited provenance, 2,417 semantic checks, 92 Rust tests, and inventory ASan/LSan validation. These measurements assess the compatibility milestone; they do not establish an isolated syntax cost or a native speedup.
 
+## ty memory-report comparison
+
+The [memory-report example](../examples/memory_report/README.md) ports the real
+two-file comparator from Ruff's `scripts/memory_report.py`. It decodes captured ty
+JSON into typed records, ranks memory changes, and writes a complete Markdown
+report. `memory_validate.py` checks the unchanged upstream script, typed CPython
+port, Relar, and Rust against an independent oracle, including strict JSON
+failures and filesystem effects. Only upstream's equal-change tie order may vary.
+
+`memory_benchmark.py` measures the full process, including two file reads, JSON
+decoding, comparison, formatting, and report writing. It uses genuine ty captures
+and explicitly labeled larger copies, balanced four-engine orders, and a separate
+empty-report control. Upstream also echoes its report to stderr; that work is
+included and checked. The [Rust reference guide](reference/memory_report/README.md)
+documents reproduction commands and matched ordinary/ThinLTO builds.
+
 ## Callback record pipeline
 
 The [payout example](../examples/record_pipeline/README.md) selects records with

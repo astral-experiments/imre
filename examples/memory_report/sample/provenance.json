@@ -1,0 +1,204 @@
+{
+  "schema": 1,
+  "captured_at_utc": "2026-10-21",
+  "reports": [
+    {
+      "fixture": "inventory-old.json",
+      "sha256": "acd9b7a4a66899573f0535c79266ab604e8ce8bf332332dd383d1fab9e96fb75",
+      "bytes": 30800,
+      "producer": {
+        "version": "0.0.89",
+        "binary": "/home/dev-user/.cache/relar/memory-uv/archive-v0/7Xxdkh9l-MVOT1Rf/bin/ty",
+        "binary_sha256": "d38b9f87d6e8876fbad8a339e5e479d0d4dbb23aa2bf6f303966c11272e9bb9e",
+        "command": [
+          "/home/dev-user/.cache/relar/memory-uv/archive-v0/7Xxdkh9l-MVOT1Rf/bin/ty",
+          "check",
+          "--python-version",
+          "3.14",
+          "--extra-search-path",
+          "examples",
+          "examples/inventory_reconciliation"
+        ],
+        "returncode": 0,
+        "environment": {
+          "TY_MEMORY_REPORT": "json",
+          "TY_MAX_PARALLELISM": "1"
+        },
+        "sources": {
+          "examples/inventory_reconciliation/render.py": "b9127fc3254bff9d16d2bfa3099852238d235ec0b07463fab15520d78f2036af",
+          "examples/inventory_reconciliation/load.py": "a487031da43dae551dc884721fa603062cfe89858e7642342b74e20c7366b2b0",
+          "examples/inventory_reconciliation/__main__.py": "83dddda51b6a25f0ed27c17635d06392e9a786231afac3401d634ae60dfffabf",
+          "examples/inventory_reconciliation/model.py": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
+          "examples/inventory_reconciliation/__init__.py": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+          "examples/inventory_reconciliation/reconcile.py": "6cd8d119a7dfc86a110d17d7fc10c1d0cbc713b6c3b2da5356c63927fe9dc67f"
+        }
+      },
+      "project_revision": "848477f3d06fb1afe6d4bdd93dae4b107c90229a",
+      "producer_stderr": {
+        "path": "inventory-old.stderr",
+        "sha256": "4a3a96ec5d635ef8ec0ce73ead5d7122e9e943d59057029fdf1a77fb590f0d42"
+      },
+      "note": "Unmodified TY_MEMORY_REPORT=json output. Producer warnings are retained separately."
+    },
+    {
+      "fixture": "inventory.json",
+      "sha256": "2c9296fb6baecd89df20ef9cb0e164f6f7562d77666f0ac001e7eb37e07f0043",
+      "bytes": 30818,
+      "producer": {
+        "version": "0.0.90",
+        "binary": "/home/dev-user/.cache/relar/memory-uv/archive-v0/YYGFTbINyot7UutP/bin/ty",
+        "binary_sha256": "e56df0042c10ae481d80e155386f732a67994bf41af94c164d2bd1ec68797211",
+        "command": [
+          "/home/dev-user/.cache/relar/memory-uv/archive-v0/YYGFTbINyot7UutP/bin/ty",
+          "check",
+          "--python-version",
+          "3.14",
+          "--extra-search-path",
+          "examples",
+          "examples/inventory_reconciliation"
+        ],
+        "returncode": 0,
+        "environment": {
+          "TY_MEMORY_REPORT": "json",
+          "TY_MAX_PARALLELISM": "1"
+        },
+        "sources": {
+          "examples/inventory_reconciliation/render.py": "b9127fc3254bff9d16d2bfa3099852238d235ec0b07463fab15520d78f2036af",
+          "examples/inventory_reconciliation/load.py": "a487031da43dae551dc884721fa603062cfe89858e7642342b74e20c7366b2b0",
+          "examples/inventory_reconciliation/__main__.py": "83dddda51b6a25f0ed27c17635d06392e9a786231afac3401d634ae60dfffabf",
+          "examples/inventory_reconciliation/model.py": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
+          "examples/inventory_reconciliation/__init__.py": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+          "examples/inventory_reconciliation/reconcile.py": "6cd8d119a7dfc86a110d17d7fc10c1d0cbc713b6c3b2da5356c63927fe9dc67f"
+        }
+      },
+      "project_revision": "848477f3d06fb1afe6d4bdd93dae4b107c90229a",
+      "producer_stderr": {
+        "path": "inventory-new.stderr",
+        "sha256": "5909e9f64159d113a4904833b6285de45b79146207578de3fc707614cf363cc3"
+      },
+      "note": "Unmodified TY_MEMORY_REPORT=json output. Producer warnings are retained separately."
+    },
+    {
+      "fixture": "ruff-scripts-old.json",
+      "sha256": "30dbdf19729cfa8bca64d7e4cba2020ad43d87c17b47968b3cbca31208c50882",
+      "bytes": 46891,
+      "producer": {
+        "version": "0.0.89",
+        "binary": "/home/dev-user/.cache/relar/memory-uv/archive-v0/7Xxdkh9l-MVOT1Rf/bin/ty",
+        "binary_sha256": "d38b9f87d6e8876fbad8a339e5e479d0d4dbb23aa2bf6f303966c11272e9bb9e",
+        "command": [
+          "/home/dev-user/.cache/relar/memory-uv/archive-v0/7Xxdkh9l-MVOT1Rf/bin/ty",
+          "check",
+          "--python-version",
+          "3.14",
+          "scripts"
+        ],
+        "cwd": "/home/dev-user/code/oss/ruff",
+        "returncode": 0,
+        "environment": {
+          "TY_MEMORY_REPORT": "json",
+          "TY_MAX_PARALLELISM": "1"
+        },
+        "sources": {
+          "scripts/bump-workspace-crate-versions.py": "f954b4eb4c2532e302d120f0309fc760e8afa7968b42fa0398dfc3a055c0167f",
+          "scripts/run_ty_ecosystem_repro.py": "d28d0d7eae8c8796d010e1fc1eafa2df82ab4adce66ef0e7adacb5d3df7fd3ca",
+          "scripts/generate-crate-readmes.py": "bbefd23f75d3c78fa9f7984d95cd76bf75c9cdb7f3f7e6ec43b24109e9e6f609",
+          "scripts/conformance.py": "05f1114746f471b365ab0e78edbe12d26724c44767525d2782bcc176c8632772",
+          "scripts/check-cargo-bans.py": "fdbdd6fe24ce28d84b53e18f18027bfb5b3b2b8254c743b65a56a112b9cf7df6",
+          "scripts/ecosystem_all_check.py": "9a7a7f622df519a0b7b3b46d4ffc2f459a3dd4360396c493c1de215996b3078b",
+          "scripts/add_plugin.py": "843f9fa6c1d320847b71dcfa20dd4d403ab6c4bfd2f5ae6afe99ef272dbf21b9",
+          "scripts/generate_mkdocs.py": "63fc95f911a8a95db67200366a2499b167fe5f34cae230633b6594d8f51586ee",
+          "scripts/publish-crates.py": "ba1740c8891a26f9c92712ed4c3dbdc53301078e58012f552598fa66ea2629e1",
+          "scripts/transform_readme.py": "c2d9a76d751fbc460e3dd149e7f8b3b6d1509b7b7426a511ea8c9a59062be217",
+          "scripts/build_ruff_pgo.py": "c9a2d96909517b419589f83ce79aa60d23ba2489d4f0ce882c0ab1e190695bf0",
+          "scripts/memory_report.py": "102cd577ea1409bb567ca3ea9a8863ca74878f0eaecdc8d92af71de61d8ed5f7",
+          "scripts/check_docs_formatted.py": "87c667d4df5cfc6410bcbf13d9a77017cddcaef2393565cddc4288026902011d",
+          "scripts/setup_primer_project.py": "2ffbd2bf4f208d17b55729c95b4fad97bbe921514cc9ae330f97016c9f4d5f31",
+          "scripts/collect_ty_ecosystem_run_metadata.py": "9c1bc739f6a54a8c2f579bf1a0ab18a52fbcb76dfeb82c56a7bf2ddec7ff69ef",
+          "scripts/add_rule.py": "8ce4095ee6beb8df97a239371d3cac30ac0af8e09e10d0ffe6af3da294458d17",
+          "scripts/generate_builtin_modules.py": "4d0d2be3c1cb5e099ec4adc32e946523b80e9ba0cd4b9206474cbf27fd66de08",
+          "scripts/patch-dist-manifest-checksums.py": "fe57768ceb05475af6adfd0e8631a385e87df8f4d71424637e4c2e925b98527c",
+          "scripts/generate_known_standard_library.py": "1aaa68914a48dec743dc671848377f3b1caf02656594f1aa7fcfbe02253e5d35",
+          "scripts/check-scripts.py": "74cf0e326ea4131d22d8e30b064289886433769a2d338e2fb04c9377d306ee1a",
+          "scripts/update_schemastore.py": "9f5dd0bb502999e3b06abf7c5d3ecf6301661a108da9dd5c909e8721826babab",
+          "scripts/update_ambiguous_characters.py": "14f1c2deb75f324f2867e5e7ec5726369fd10c6a48a41cd1bbcf7ef0d49a6b2d",
+          "scripts/ty_benchmark/src/benchmark/venv.py": "318c800852f7ce7e78c1b90d253d3a3ffb9f2fddbd7711c22933abfbc68da946",
+          "scripts/ty_benchmark/src/benchmark/projects.py": "cdac9f5e228f4a0e08ac4666fbce7a29e26f9060fc82119ac787faf5533a804a",
+          "scripts/ty_benchmark/src/benchmark/snapshot.py": "3694a3ce992646887d879c13334b97242c49fcf1748318bc3a83275ba0afa8da",
+          "scripts/ty_benchmark/src/benchmark/test_lsp_diagnostics.py": "2c6694db981111dd8ed5cb9e4af5f859a71004728391b40c563e804b6af7596b",
+          "scripts/ty_benchmark/src/benchmark/tool.py": "24ade85242a5a3e7fbf342b0aa8ae9e0e83fb63f67b94be1961ac956a253b49d",
+          "scripts/ty_benchmark/src/benchmark/__init__.py": "a6acef578b757bf2e44d436b8fdb402f20d7efae1d73f7d079cdb5249399565e",
+          "scripts/ty_benchmark/src/benchmark/lsp_client.py": "f6567e28322cbc5f7527506d6f4895a0986dfc61b6965059d5f2f4102cedde8e",
+          "scripts/ty_benchmark/src/benchmark/run.py": "cc58f70d75257463935d9f6332f40fcaf341f73e7cdd527420fc403b82c87da1"
+        }
+      },
+      "project_revision": "3e4fffb05a2b143fafbf31d891c79c878fe3bcd3",
+      "producer_stderr": {
+        "path": "ruff-scripts-old.stderr",
+        "sha256": "81ce7eb514af0b283953ffdf0612b85ccad9b7862cf659ea0f0fb3c954136c0b"
+      },
+      "note": "Unmodified TY_MEMORY_REPORT=json output. Producer warnings are retained separately."
+    },
+    {
+      "fixture": "ruff-scripts.json",
+      "sha256": "6f3b1e97cfb8a3d862ca4f52e6ec2bc91e454a7241aff15db788246ce089c6b1",
+      "bytes": 46913,
+      "producer": {
+        "version": "0.0.90",
+        "binary": "/home/dev-user/.cache/relar/memory-uv/archive-v0/YYGFTbINyot7UutP/bin/ty",
+        "binary_sha256": "e56df0042c10ae481d80e155386f732a67994bf41af94c164d2bd1ec68797211",
+        "command": [
+          "/home/dev-user/.cache/relar/memory-uv/archive-v0/YYGFTbINyot7UutP/bin/ty",
+          "check",
+          "--python-version",
+          "3.14",
+          "scripts"
+        ],
+        "cwd": "/home/dev-user/code/oss/ruff",
+        "returncode": 0,
+        "environment": {
+          "TY_MEMORY_REPORT": "json",
+          "TY_MAX_PARALLELISM": "1"
+        },
+        "sources": {
+          "scripts/bump-workspace-crate-versions.py": "f954b4eb4c2532e302d120f0309fc760e8afa7968b42fa0398dfc3a055c0167f",
+          "scripts/run_ty_ecosystem_repro.py": "d28d0d7eae8c8796d010e1fc1eafa2df82ab4adce66ef0e7adacb5d3df7fd3ca",
+          "scripts/generate-crate-readmes.py": "bbefd23f75d3c78fa9f7984d95cd76bf75c9cdb7f3f7e6ec43b24109e9e6f609",
+          "scripts/conformance.py": "05f1114746f471b365ab0e78edbe12d26724c44767525d2782bcc176c8632772",
+          "scripts/check-cargo-bans.py": "fdbdd6fe24ce28d84b53e18f18027bfb5b3b2b8254c743b65a56a112b9cf7df6",
+          "scripts/ecosystem_all_check.py": "9a7a7f622df519a0b7b3b46d4ffc2f459a3dd4360396c493c1de215996b3078b",
+          "scripts/add_plugin.py": "843f9fa6c1d320847b71dcfa20dd4d403ab6c4bfd2f5ae6afe99ef272dbf21b9",
+          "scripts/generate_mkdocs.py": "63fc95f911a8a95db67200366a2499b167fe5f34cae230633b6594d8f51586ee",
+          "scripts/publish-crates.py": "ba1740c8891a26f9c92712ed4c3dbdc53301078e58012f552598fa66ea2629e1",
+          "scripts/transform_readme.py": "c2d9a76d751fbc460e3dd149e7f8b3b6d1509b7b7426a511ea8c9a59062be217",
+          "scripts/build_ruff_pgo.py": "c9a2d96909517b419589f83ce79aa60d23ba2489d4f0ce882c0ab1e190695bf0",
+          "scripts/memory_report.py": "102cd577ea1409bb567ca3ea9a8863ca74878f0eaecdc8d92af71de61d8ed5f7",
+          "scripts/check_docs_formatted.py": "87c667d4df5cfc6410bcbf13d9a77017cddcaef2393565cddc4288026902011d",
+          "scripts/setup_primer_project.py": "2ffbd2bf4f208d17b55729c95b4fad97bbe921514cc9ae330f97016c9f4d5f31",
+          "scripts/collect_ty_ecosystem_run_metadata.py": "9c1bc739f6a54a8c2f579bf1a0ab18a52fbcb76dfeb82c56a7bf2ddec7ff69ef",
+          "scripts/add_rule.py": "8ce4095ee6beb8df97a239371d3cac30ac0af8e09e10d0ffe6af3da294458d17",
+          "scripts/generate_builtin_modules.py": "4d0d2be3c1cb5e099ec4adc32e946523b80e9ba0cd4b9206474cbf27fd66de08",
+          "scripts/patch-dist-manifest-checksums.py": "fe57768ceb05475af6adfd0e8631a385e87df8f4d71424637e4c2e925b98527c",
+          "scripts/generate_known_standard_library.py": "1aaa68914a48dec743dc671848377f3b1caf02656594f1aa7fcfbe02253e5d35",
+          "scripts/check-scripts.py": "74cf0e326ea4131d22d8e30b064289886433769a2d338e2fb04c9377d306ee1a",
+          "scripts/update_schemastore.py": "9f5dd0bb502999e3b06abf7c5d3ecf6301661a108da9dd5c909e8721826babab",
+          "scripts/update_ambiguous_characters.py": "14f1c2deb75f324f2867e5e7ec5726369fd10c6a48a41cd1bbcf7ef0d49a6b2d",
+          "scripts/ty_benchmark/src/benchmark/venv.py": "318c800852f7ce7e78c1b90d253d3a3ffb9f2fddbd7711c22933abfbc68da946",
+          "scripts/ty_benchmark/src/benchmark/projects.py": "cdac9f5e228f4a0e08ac4666fbce7a29e26f9060fc82119ac787faf5533a804a",
+          "scripts/ty_benchmark/src/benchmark/snapshot.py": "3694a3ce992646887d879c13334b97242c49fcf1748318bc3a83275ba0afa8da",
+          "scripts/ty_benchmark/src/benchmark/test_lsp_diagnostics.py": "2c6694db981111dd8ed5cb9e4af5f859a71004728391b40c563e804b6af7596b",
+          "scripts/ty_benchmark/src/benchmark/tool.py": "24ade85242a5a3e7fbf342b0aa8ae9e0e83fb63f67b94be1961ac956a253b49d",
+          "scripts/ty_benchmark/src/benchmark/__init__.py": "a6acef578b757bf2e44d436b8fdb402f20d7efae1d73f7d079cdb5249399565e",
+          "scripts/ty_benchmark/src/benchmark/lsp_client.py": "f6567e28322cbc5f7527506d6f4895a0986dfc61b6965059d5f2f4102cedde8e",
+          "scripts/ty_benchmark/src/benchmark/run.py": "cc58f70d75257463935d9f6332f40fcaf341f73e7cdd527420fc403b82c87da1"
+        }
+      },
+      "project_revision": "3e4fffb05a2b143fafbf31d891c79c878fe3bcd3",
+      "producer_stderr": {
+        "path": "ruff-scripts-new.stderr",
+        "sha256": "963853f0cd2c37999f9e4e945100a33500154febe24948ed1996ccbf9981a0b2"
+      },
+      "note": "Unmodified TY_MEMORY_REPORT=json output. Producer warnings are retained separately."
+    }
+  ]
+}
