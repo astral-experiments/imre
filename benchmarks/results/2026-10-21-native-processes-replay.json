@@ -1,0 +1,523 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "measurement_revision": "aca68f5631795f01c3cbb2dcdc56fd92866f6620",
+  "archive_sha256": "d94bb2a9c08e6796abdb86e35a017a778366b17205306e67fd4e307476564110",
+  "manifest_sha256": "52786bc84f65ce2fd35fc2231eab170e58331e1d4a992965c933623ff2256faf",
+  "source_tree": "dbfa7a81358914e529c67ad79be9ecc09c136ddb",
+  "source_files": 569,
+  "omitted_historical_result_files": 301,
+  "retained_logical_files": 3214,
+  "excluded_native_artifacts": 36,
+  "rust_unit_tests": 261,
+  "normal_suites": 33,
+  "normal_reported_checks": 1961,
+  "base45": {
+    "upstream_calls": 646,
+    "differential_cases": 578,
+    "type_rejections": 4
+  },
+  "luhn": {
+    "upstream_calls": 30,
+    "differential_cases": 2288
+  },
+  "affected_reported_checks": {
+    "thinlto": 501,
+    "asan": 668
+  },
+  "process_checks_per_extra_mode": 78,
+  "counts": {
+    "preparation_application_executions": 670,
+    "preparation_compute_executions": 96,
+    "preparation_process_executions": 254,
+    "gates": 48,
+    "warmups": 96,
+    "samples": 2304,
+    "preparation_workload_executions": 64,
+    "asan_application_executions": 335,
+    "asan_compute_executions": 48,
+    "asan_process_executions": 127,
+    "asan_workload_executions": 8
+  },
+  "modes": {
+    "normal": {
+      "rows": [
+        {
+          "label": "real-prepared-ty",
+          "kind": "process",
+          "records_per_side": 419,
+          "rounds": null,
+          "child_processes": 4,
+          "seconds": {
+            "relar": 0.9826998405,
+            "original": 1.0567657205,
+            "rust": 0.9656038695
+          },
+          "iqr_seconds": {
+            "relar": 0.03965414775000009,
+            "original": 0.04661284975000024,
+            "rust": 0.06588555699999987
+          },
+          "original_over_relar": 1.0753697893777159,
+          "relar_over_rust": 1.017704952869392,
+          "original_over_rust": 1.0944091608158164,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          },
+          "two_child_control_fraction": {
+            "relar": 0.007349804795251719,
+            "original": 0.06861218678222634,
+            "rust": 0.006903563366468054
+          }
+        },
+        {
+          "label": "process-empty-control",
+          "kind": "process",
+          "records_per_side": 0,
+          "rounds": null,
+          "child_processes": 2,
+          "seconds": {
+            "relar": 0.0072226519999999995,
+            "original": 0.072507007,
+            "rust": 0.0066661075
+          },
+          "iqr_seconds": {
+            "relar": 0.0002267692499999998,
+            "original": 0.002119576250000005,
+            "rust": 0.00036041899999999984
+          },
+          "original_over_relar": 10.038834350595875,
+          "relar_over_rust": 1.0834886776128347,
+          "original_over_rust": 10.876963355301426,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          }
+        },
+        {
+          "label": "captured-process-64x1",
+          "kind": "process",
+          "records_per_side": 16256,
+          "rounds": null,
+          "child_processes": 128,
+          "seconds": {
+            "relar": 0.33636851,
+            "original": 0.410577335,
+            "rust": 0.26602690799999995
+          },
+          "iqr_seconds": {
+            "relar": 0.010237013750000024,
+            "original": 0.016963654250000015,
+            "rust": 0.012150523749999975
+          },
+          "original_over_relar": 1.220617634510436,
+          "relar_over_rust": 1.2644153650802876,
+          "original_over_rust": 1.54336769196295,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          },
+          "two_child_control_fraction": {
+            "relar": 0.021472438070971624,
+            "original": 0.1765976853057415,
+            "rust": 0.025058019694759605
+          }
+        },
+        {
+          "label": "process-compute-64x1-compute-0",
+          "kind": "compute",
+          "records_per_side": 16256,
+          "rounds": 0,
+          "child_processes": 0,
+          "seconds": {
+            "relar": 0.0125464215,
+            "original": 0.08002975100000001,
+            "rust": 0.01144121
+          },
+          "iqr_seconds": {
+            "relar": 0.0004838809999999985,
+            "original": 0.0028464445000000033,
+            "rust": 0.0004837922500000001
+          },
+          "original_over_relar": 6.378691406151149,
+          "relar_over_rust": 1.096599179632224,
+          "original_over_rust": 6.9948677631124685,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          }
+        },
+        {
+          "label": "process-compute-64x1-compute-8",
+          "kind": "compute",
+          "records_per_side": 16256,
+          "rounds": 8,
+          "child_processes": 0,
+          "seconds": {
+            "relar": 0.25432473050000004,
+            "original": 0.469139246,
+            "rust": 0.1637064485
+          },
+          "iqr_seconds": {
+            "relar": 0.005356633750000006,
+            "original": 0.013303064249999996,
+            "rust": 0.0032320039999999828
+          },
+          "original_over_relar": 1.8446465865811659,
+          "relar_over_rust": 1.553541310255717,
+          "original_over_rust": 2.86573467507604,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          },
+          "amortized_seconds": {
+            "relar": 0.031790591312500005,
+            "original": 0.05864240575,
+            "rust": 0.0204633060625
+          },
+          "preload_control_fraction": {
+            "relar": 0.049332290553631385,
+            "original": 0.17058848024835682,
+            "rust": 0.06988857253231537
+          }
+        },
+        {
+          "label": "captured-process-2x32",
+          "kind": "process",
+          "records_per_side": 16256,
+          "rounds": null,
+          "child_processes": 4,
+          "seconds": {
+            "relar": 0.0854011635,
+            "original": 0.190399337,
+            "rust": 0.0580297615
+          },
+          "iqr_seconds": {
+            "relar": 0.0028182814999999917,
+            "original": 0.003918393749999999,
+            "rust": 0.0014556765000000096
+          },
+          "original_over_relar": 2.229470058683685,
+          "relar_over_rust": 1.4716786919760132,
+          "original_over_rust": 3.281063579763291,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          },
+          "two_child_control_fraction": {
+            "relar": 0.08457322715515461,
+            "original": 0.38081543844871685,
+            "rust": 0.11487394274401766
+          }
+        },
+        {
+          "label": "process-compute-2x32-compute-0",
+          "kind": "compute",
+          "records_per_side": 16256,
+          "rounds": 0,
+          "child_processes": 0,
+          "seconds": {
+            "relar": 0.010496909,
+            "original": 0.078523607,
+            "rust": 0.010178633
+          },
+          "iqr_seconds": {
+            "relar": 0.00047215525,
+            "original": 0.0013647972500000077,
+            "rust": 0.0004983579999999991
+          },
+          "original_over_relar": 7.480640920103241,
+          "relar_over_rust": 1.0312690319024176,
+          "original_over_rust": 7.71455331968448,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          }
+        },
+        {
+          "label": "process-compute-2x32-compute-8",
+          "kind": "compute",
+          "records_per_side": 16256,
+          "rounds": 8,
+          "child_processes": 0,
+          "seconds": {
+            "relar": 0.2371854445,
+            "original": 0.47218321350000003,
+            "rust": 0.166395772
+          },
+          "iqr_seconds": {
+            "relar": 0.009485982000000004,
+            "original": 0.025804686000000077,
+            "rust": 0.004337223250000022
+          },
+          "original_over_relar": 1.9907765187505004,
+          "relar_over_rust": 1.4254295145191551,
+          "original_over_rust": 2.8377116066386594,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          },
+          "amortized_seconds": {
+            "relar": 0.0296481805625,
+            "original": 0.059022901687500004,
+            "rust": 0.0207994715
+          },
+          "preload_control_fraction": {
+            "relar": 0.04425612634927098,
+            "original": 0.16629902282623182,
+            "rust": 0.061171223749603446
+          }
+        }
+      ]
+    },
+    "thinlto": {
+      "rows": [
+        {
+          "label": "real-prepared-ty",
+          "kind": "process",
+          "records_per_side": 419,
+          "rounds": null,
+          "child_processes": 4,
+          "seconds": {
+            "relar": 0.97338575,
+            "original": 1.046068197,
+            "rust": 0.9719948460000001
+          },
+          "iqr_seconds": {
+            "relar": 0.025358683249999903,
+            "original": 0.026459751000000198,
+            "rust": 0.02861300474999995
+          },
+          "original_over_relar": 1.074669725748502,
+          "relar_over_rust": 1.0014309787811364,
+          "original_over_rust": 1.076207555322778,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          },
+          "two_child_control_fraction": {
+            "relar": 0.007366921593006677,
+            "original": 0.06829837930729099,
+            "rust": 0.006863624871525296
+          }
+        },
+        {
+          "label": "process-empty-control",
+          "kind": "process",
+          "records_per_side": 0,
+          "rounds": null,
+          "child_processes": 2,
+          "seconds": {
+            "relar": 0.0071708564999999995,
+            "original": 0.07144476250000001,
+            "rust": 0.006671408
+          },
+          "iqr_seconds": {
+            "relar": 0.0002751599999999991,
+            "original": 0.003547420500000009,
+            "rust": 0.0003344987500000004
+          },
+          "original_over_relar": 9.963211856212714,
+          "relar_over_rust": 1.0748640317006544,
+          "original_over_rust": 10.70909806445656,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          }
+        },
+        {
+          "label": "captured-process-64x1",
+          "kind": "process",
+          "records_per_side": 16256,
+          "rounds": null,
+          "child_processes": 128,
+          "seconds": {
+            "relar": 0.33345070649999997,
+            "original": 0.4061590565,
+            "rust": 0.256226677
+          },
+          "iqr_seconds": {
+            "relar": 0.006883286749999995,
+            "original": 0.014768312750000012,
+            "rust": 0.005824856500000031
+          },
+          "original_over_relar": 1.2180482709518567,
+          "relar_over_rust": 1.3013894977844167,
+          "original_over_rust": 1.585155227611214,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          },
+          "two_child_control_fraction": {
+            "relar": 0.021504997171148593,
+            "original": 0.17590340866866774,
+            "rust": 0.026037132737743773
+          }
+        },
+        {
+          "label": "process-compute-64x1-compute-0",
+          "kind": "compute",
+          "records_per_side": 16256,
+          "rounds": 0,
+          "child_processes": 0,
+          "seconds": {
+            "relar": 0.012316378499999999,
+            "original": 0.0784934725,
+            "rust": 0.011071503
+          },
+          "iqr_seconds": {
+            "relar": 0.00035785350000000146,
+            "original": 0.0009018640000000022,
+            "rust": 0.00027333474999999795
+          },
+          "original_over_relar": 6.373096807637083,
+          "relar_over_rust": 1.112439611857577,
+          "original_over_rust": 7.089685339018559,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          }
+        },
+        {
+          "label": "process-compute-64x1-compute-8",
+          "kind": "compute",
+          "records_per_side": 16256,
+          "rounds": 8,
+          "child_processes": 0,
+          "seconds": {
+            "relar": 0.225435311,
+            "original": 0.4658791995,
+            "rust": 0.141157427
+          },
+          "iqr_seconds": {
+            "relar": 0.002360182999999988,
+            "original": 0.006914533499999986,
+            "rust": 0.0018818770000000318
+          },
+          "original_over_relar": 2.066575983298375,
+          "relar_over_rust": 1.5970488821675675,
+          "original_over_rust": 3.3004228640410114,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          },
+          "amortized_seconds": {
+            "relar": 0.028179413875,
+            "original": 0.0582348999375,
+            "rust": 0.017644678375
+          },
+          "preload_control_fraction": {
+            "relar": 0.05463375921618596,
+            "original": 0.16848460412965913,
+            "rust": 0.07843372633874943
+          }
+        },
+        {
+          "label": "captured-process-2x32",
+          "kind": "process",
+          "records_per_side": 16256,
+          "rounds": null,
+          "child_processes": 4,
+          "seconds": {
+            "relar": 0.085064677,
+            "original": 0.19076939599999998,
+            "rust": 0.0527269535
+          },
+          "iqr_seconds": {
+            "relar": 0.0018588225000000236,
+            "original": 0.004361982750000021,
+            "rust": 0.0007400022500000103
+          },
+          "original_over_relar": 2.242639397784347,
+          "relar_over_rust": 1.6133053657272272,
+          "original_over_rust": 3.618062173836764,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          },
+          "two_child_control_fraction": {
+            "relar": 0.08429887413785159,
+            "original": 0.3745085113127895,
+            "rust": 0.12652746948484328
+          }
+        },
+        {
+          "label": "process-compute-2x32-compute-0",
+          "kind": "compute",
+          "records_per_side": 16256,
+          "rounds": 0,
+          "child_processes": 0,
+          "seconds": {
+            "relar": 0.010330627,
+            "original": 0.0785839805,
+            "rust": 0.010160816999999999
+          },
+          "iqr_seconds": {
+            "relar": 0.0003393605000000001,
+            "original": 0.0017226614999999862,
+            "rust": 0.0004127530000000001
+          },
+          "original_over_relar": 7.606893608684158,
+          "relar_over_rust": 1.0167122387894596,
+          "original_over_rust": 7.734021831118502,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          }
+        },
+        {
+          "label": "process-compute-2x32-compute-8",
+          "kind": "compute",
+          "records_per_side": 16256,
+          "rounds": 8,
+          "child_processes": 0,
+          "seconds": {
+            "relar": 0.216646947,
+            "original": 0.4722732745,
+            "rust": 0.147878545
+          },
+          "iqr_seconds": {
+            "relar": 0.007129580250000017,
+            "original": 0.019268813750000058,
+            "rust": 0.00400642100000001
+          },
+          "original_over_relar": 2.179921208398104,
+          "relar_over_rust": 1.4650329904179136,
+          "original_over_rust": 3.193656486814906,
+          "counts": {
+            "gates": 3,
+            "warmups": 6,
+            "samples": 144
+          },
+          "amortized_seconds": {
+            "relar": 0.027080868375,
+            "original": 0.0590341593125,
+            "rust": 0.018484818125
+          },
+          "preload_control_fraction": {
+            "relar": 0.04768415684159168,
+            "original": 0.1663951460797725,
+            "rust": 0.06871055567932453
+          }
+        }
+      ]
+    }
+  },
+  "limits": "Data-only replay. Hashes bind archived source, captures and recorded external artifact identities; absent native tools/binaries cannot be rehashed here. No native execution, timing remeasurement, timestamp authentication, or proof of historical host isolation. Repeated-compute timings retain preload/startup/final-output costs and subtract no controls."
+}

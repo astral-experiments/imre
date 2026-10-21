@@ -124,13 +124,18 @@ transactions with configured callbacks, transforms gross or net payouts, and
 aggregates a report through lazy `map` and `filter`.
 
 The [memory-report comparator](examples/memory_report/README.md) ports ty's real
-report-comparison script: it compares individual files or directories of projects,
-decodes JSON into typed records, ranks changes, and writes a Markdown report.
+report-comparison script. It compares report files or directories, or launches
+old and new ty over prepared projects. It decodes JSON into typed records, ranks
+changes, and writes a Markdown report.
 Its guide includes captured ty reports and comparisons
 with the original CPython script, the typed Python port, and an independent Rust
 implementation. The [dataclass comparison](benchmarks/results/2026-10-21-dataclass-records.md)
 runs within 1.16–1.47× Rust's time on the large report inputs, using dataclasses,
 keyword-only fields, a class method, and a read-only property.
+
+The [native-process comparison](benchmarks/results/2026-10-21-native-processes.md) takes
+1.00–1.61× Rust's time for complete runs and 1.43–1.60× for repeated
+report computation, across ordinary and ThinLTO builds.
 
 ## License
 
