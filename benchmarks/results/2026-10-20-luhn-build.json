@@ -1,0 +1,258 @@
+{
+  "schema": 1,
+  "revision": "7d4011f0413c63d0a4d111817c37f460a0656cac",
+  "source_matches_revision": true,
+  "captured_at_utc": "2026-10-20T00:42:18.742540+00:00",
+  "target": "x86_64-unknown-linux-gnu",
+  "artifacts": {
+    "compiler": {
+      "source": "/home/dev-user/.cache/relar/main-target/release/relar",
+      "path": "/tmp/relar-luhn-validation-v1/artifacts/relar",
+      "sha256": "e6075e1aaa8168d2fb0a80875e1210070a4dbbb6c69d2e2ce3344bdfe8e926dc",
+      "build_job": "build-ordinary"
+    },
+    "normal_runtime": {
+      "source": "/home/dev-user/.cache/relar/main-target/release/librelar_runtime.a",
+      "path": "/tmp/relar-luhn-validation-v1/artifacts/ordinary-runtime.a",
+      "sha256": "46c750ab4440231a85c9103b79383ab90e04b923da01d124d8e273c1921ce12f",
+      "build_job": "build-ordinary"
+    },
+    "thinlto_runtime": {
+      "source": "/home/dev-user/.cache/relar/main-target/relar-luhn-validation-lto/librelar_runtime.a",
+      "path": "/tmp/relar-luhn-validation-v1/artifacts/thinlto-runtime.a",
+      "sha256": "05a1040d14001569fc177cece33d9c45bd5961d429e4046d8643d8f223d87ca0",
+      "build_job": "build-thinlto"
+    },
+    "asan_runtime": {
+      "source": "/home/dev-user/.cache/relar/main-target/x86_64-unknown-linux-gnu/relar-luhn-validation-asan/librelar_runtime.a",
+      "path": "/tmp/relar-luhn-validation-v1/artifacts/asan-runtime.a",
+      "sha256": "2b348bd782f33286bf57c9596385551a39c906d99fa3ca0236ea07cfc36661a0",
+      "build_job": "build-asan"
+    }
+  },
+  "sha256": {
+    "compiler": "e6075e1aaa8168d2fb0a80875e1210070a4dbbb6c69d2e2ce3344bdfe8e926dc",
+    "normal_runtime": "46c750ab4440231a85c9103b79383ab90e04b923da01d124d8e273c1921ce12f",
+    "thinlto_runtime": "05a1040d14001569fc177cece33d9c45bd5961d429e4046d8643d8f223d87ca0",
+    "asan_runtime": "2b348bd782f33286bf57c9596385551a39c906d99fa3ca0236ea07cfc36661a0"
+  },
+  "source_sha256": {
+    "Cargo.lock": "2b9832b6edec9b6066514222c67ff76ca5e8d1236bb303b793dd1d9747a432ea",
+    "Cargo.toml": "b79be453d2d2bb2c7fe24b6b58c230367fe7ddab7126d77a92667390157a21b6",
+    "crates/relar-compiler/Cargo.toml": "4a6b0b45c3b3a62ac54a7fd173ca140302659763507092ca94c3c285367887db",
+    "crates/relar-compiler/src/analysis.rs": "57968f1065f966e82f6e5246bb4043d1fab33458ed9f809eafffae6a5528281c",
+    "crates/relar-compiler/src/classes.rs": "61a7b33711262a841e59a47f417227e77b4ffef7e6369f6beec72bb2666a92ea",
+    "crates/relar-compiler/src/effects.rs": "6835821eba4e3e78c50573795df0e58033335882e987d546fd99e7534f76c43d",
+    "crates/relar-compiler/src/frontend.rs": "2808c36621826c1e7eaf76c0223f2a0f5c4d7ab193cb354af965aee814ad1175",
+    "crates/relar-compiler/src/frontend/assignments.rs": "a57afd5e332eac11967df5ba970f9531e34c68f9c750544a53998491c932a920",
+    "crates/relar-compiler/src/frontend/calls.rs": "a9feaaef898fb693af8b077b18cfa3131c3339e5277ea27c180568993bd9eb30",
+    "crates/relar-compiler/src/frontend/comprehensions.rs": "0c35d8bbab6e60d1b1278e6c5c09c3652f6af196f1c98a2c972658441c308a0b",
+    "crates/relar-compiler/src/frontend/expansions.rs": "5e1d501c3645c5c37af78cb873e49cb934beb19f04a41980c8c1c1e213ab1858",
+    "crates/relar-compiler/src/frontend/inference.rs": "a876932206b4aac2dc44001069b724bed048ae82680eefc56a67d95a5d6dd0b0",
+    "crates/relar-compiler/src/frontend/iterables.rs": "b30b90519a35611291ee167a8735c12fe441b35414a3ba9ec67402a74f507615",
+    "crates/relar-compiler/src/frontend/matching.rs": "a773a2ea540e6f02c12e872aa22b605d34e06be7f8c37ac054e8bb3d1e3c926e",
+    "crates/relar-compiler/src/frontend/module_values.rs": "a7d6ef3f5ed4f446a59231290e809f8ce505f1f3bce816bb5ac4520bf9153668",
+    "crates/relar-compiler/src/frontend/truthiness.rs": "cfabe32776fd75c3ed0d5f9d73b59f1fcb5e02fce394979d92a31261756a37fe",
+    "crates/relar-compiler/src/frontend/unions.rs": "3b649582a176b5e8b3e11087f4e7673c03e52849dd72ef8eaa4eb4ccff4575d5",
+    "crates/relar-compiler/src/frontend/unpacking.rs": "d3a3e73ea6812f62300be034808aecc96610b24cce5cf8e4a2ade884d21840b8",
+    "crates/relar-compiler/src/ir.rs": "7603d1610a3ca92d7c0c38b9d5154fbf8f2875c2538ae9b895375dd564273898",
+    "crates/relar-compiler/src/lib.rs": "3c8002011cdfb2f84283a18f4251f2152a39bb22f7e4cd8f2889015a6d6b5644",
+    "crates/relar-compiler/src/list_specialization.rs": "dff5ee5ce445bfba56bbbe43be7f8b41113f2a38389baa9ca1b8eb92c960e5f2",
+    "crates/relar-compiler/src/llvm.rs": "661d1fe072de9bb9c2cae9c0bb73621a79a925e5123f3dc3f81d5a5c52bb0720",
+    "crates/relar-compiler/src/llvm/truthiness.rs": "563aebbc63733b2dea66914fb2954e00bc98bb24036f7f06eca54c070ad36913",
+    "crates/relar-compiler/src/llvm/unions.rs": "7843e286ec562426a413be2bb402d2ce9655cb6a3f5b55c9a7f71bd47dd0bd5c",
+    "crates/relar-compiler/src/main.rs": "ab847928d668c12c534af1bb7efbefeccafa533426bf9123218e9e05df3757dc",
+    "crates/relar-compiler/src/modules.rs": "66c33131f512c16cd1342dd5897043e860539e2809216f92204545948610ab95",
+    "crates/relar-compiler/src/narrowing.rs": "4e62079facab3e53ab356299d1d20325ca62ec9509eac5e193a2d70f22a4d2a7",
+    "crates/relar-compiler/src/range_specialization.rs": "38f56876e1f789bab8681ca00eb359da79e1403b991e091f265419f146d5e49d",
+    "crates/relar-compiler/src/ranges.rs": "26350885fdda8cae2e8fcf064d0f6b1941c09b28d39eff08b89865ac708c5621",
+    "crates/relar-compiler/src/tuples.rs": "f407be236e862615d64d53d8d6ca62c9b77c178aebb30743ad79da295a84e26b",
+    "crates/relar-compiler/src/types.rs": "f83a88a2a6bd0fde9ebf5c92bfb0cc009c373236b209df146031b2a795073b51",
+    "crates/relar-runtime/Cargo.toml": "806bc5245a6f1d6743ef85c06372f19d458029d434e4781dcb5c57b4edbfd5b4",
+    "crates/relar-runtime/src/floats.rs": "63e69d21ce4394fa2721ae7f26c71b924287415bc3eb5f2c8859593fe78944b0",
+    "crates/relar-runtime/src/integer_text.rs": "82f87dc1be5fec2588e8c2888187e58e4f75f77d7ecb0d0d30444892382cf58d",
+    "crates/relar-runtime/src/lib.rs": "27bc0b7856a85a41632e98f359378079273107781e96c692c2e94dec83b71efa",
+    "crates/relar-runtime/src/objects.rs": "69efa0595bf7a452d9ab552f5a7b91549c5a72ac3d5e4337cbcb43d9cef9fad5",
+    "crates/relar-runtime/src/objects/args.rs": "e2faa1539ab313b526b318632fd18362d0800c68188ec92edfcf14dc9d439bb8",
+    "crates/relar-runtime/src/objects/bytes.rs": "780e25e931911be9168a1617dee1efebbeb9a37a5d7fd758a5ad58af4f7beafa",
+    "crates/relar-runtime/src/objects/exceptions.rs": "d45fbf733e3eda43f8b3f9fe052f8ca5b79c2a46f5aceff3e61fa98acab76ff6",
+    "crates/relar-runtime/src/objects/files.rs": "8ea8ccfa19926e4b0bbfcda7aa6f26c960b73f39f8b75c7368fef9889a351c11",
+    "crates/relar-runtime/src/objects/mappings.rs": "2b7327fb566b2615df4ffa4e04127e47d6a000f27db0d24c49e4fe5ca5ecf36d",
+    "crates/relar-runtime/src/objects/records.rs": "04b2689f198b5dd7655c99d0b17745f4527daa8296d8cd938ad617916f24c230",
+    "crates/relar-runtime/src/objects/sequences.rs": "90fa9ee2995ab2ef40820ce32ec083b14c8602b1404ef12759c6d2dbbc11a5d0",
+    "crates/relar-runtime/src/objects/unions.rs": "f9abb7076cf25d629c463e42f1465d6026785ab4d9ea342c0822aa42841ff011",
+    "crates/relar-runtime/src/objects/words.rs": "2799b7da4e530514c8715dfc6060b6a335afd49d2918dcf83a5c5b1edd2344e2",
+    "rust-toolchain.toml": "7553618f800829444096beea3dce84c3d07585efda504c19adb6787369bbd9e8"
+  },
+  "source_scope": "Workspace Cargo.toml, Cargo.lock, rust-toolchain.toml and every tracked file under crates; full clean-source manifest retained separately.",
+  "source_manifest": "/tmp/relar-luhn-validation-v1/source-before.json",
+  "source_manifest_sha256": "b4579d9e0b9ced645dc780ddad7508b5bae8695e0f09d43d5e49e6f951c9fc96",
+  "tools": {
+    "python": {
+      "path": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+    },
+    "runner_python": {
+      "path": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+    },
+    "clang": {
+      "path": "/usr/bin/clang-18",
+      "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+    },
+    "git": {
+      "path": "/home/dev-user/.openai/bin/git",
+      "sha256": "1013d72903eee1de84614ce65ae5a0842a69f16fb408497aa5a1ddb8b046872f"
+    },
+    "cargo": {
+      "path": "/home/dev-user/.cargo/bin/cargo",
+      "sha256": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71"
+    },
+    "rustc": {
+      "path": "/home/dev-user/.cargo/bin/rustc",
+      "sha256": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71"
+    },
+    "rustup": {
+      "path": "/home/dev-user/.cargo/bin/rustup",
+      "sha256": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71"
+    },
+    "ar": {
+      "path": "/usr/bin/ar",
+      "sha256": "6452af2eea333b8c65e1adb92964fc8f97863ab003fa13f9d12bff5345cd7dbe"
+    },
+    "nm": {
+      "path": "/usr/bin/nm",
+      "sha256": "3708df3d7ce16e2c1dcdcd722784ae382d4d582276a71ab7bbe2d542f5621202"
+    },
+    "ohm-cargo": {
+      "path": "/home/dev-user/.rustup/toolchains/ohm/bin/cargo",
+      "sha256": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e"
+    },
+    "ohm-rustc": {
+      "path": "/home/dev-user/.rustup/toolchains/ohm/bin/rustc",
+      "sha256": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba"
+    },
+    "ohm-rustfmt": {
+      "path": "/home/dev-user/.rustup/toolchains/ohm/bin/rustfmt",
+      "sha256": "7b428b45c3be46629ea04a0fda008ba6894cbc4bdd68faa8f252de5fb1453075"
+    },
+    "ohm-cargo-clippy": {
+      "path": "/home/dev-user/.rustup/toolchains/ohm/bin/cargo-clippy",
+      "sha256": "9f6491666444d5a8500dfc5308614fc80c0c4d02d437da865c5a2e3c9685727b"
+    },
+    "ohm-clippy-driver": {
+      "path": "/home/dev-user/.rustup/toolchains/ohm/bin/clippy-driver",
+      "sha256": "475dd62803b23d7decedfdd2b93d6d43866c3b795dfc1ef51eded33e1547a2eb"
+    },
+    "rust-lld": {
+      "path": "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld",
+      "sha256": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b"
+    },
+    "lto-linker": {
+      "path": "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld",
+      "sha256": "bf1b9bc68d0f70523a95618cb9be2e4d04698564229838cfe29eb913bba7ce67"
+    }
+  },
+  "archive_probes": {
+    "thinlto_bitcode_member": "relar_runtime-90af8b2bd3045305.relar_runtime.43769fdd1cec2d90-cgu.00.rcgu.o",
+    "asan_init": true
+  },
+  "build_jobs": {
+    "build-ordinary": {
+      "name": "build-ordinary",
+      "command": [
+        "/home/dev-user/.cargo/bin/cargo",
+        "+ohm",
+        "-Zohm-defaults=no",
+        "build",
+        "--workspace",
+        "--release",
+        "--locked"
+      ],
+      "cwd": "/home/dev-user/code/oss/relar",
+      "environment_overrides": {},
+      "started_at": "2026-10-20T00:41:47.266998+00:00",
+      "stdout": "/tmp/relar-luhn-validation-v1/jobs/build-ordinary/stdout",
+      "stderr": "/tmp/relar-luhn-validation-v1/jobs/build-ordinary/stderr",
+      "exit_code": 0,
+      "completed_at": "2026-10-20T00:41:49.753444+00:00",
+      "elapsed_seconds": 2.485378254961688,
+      "error": null,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "444755897f06ba332664409b844c6284c0340cdc508e8651a0dc313602b9aa4e",
+      "status": "passed",
+      "record": "/tmp/relar-luhn-validation-v1/jobs/build-ordinary/command.json",
+      "record_sha256": "ef2a9ac270f726a53eba521aa312ce330f2b3f81cf19ad35e44748b6b7b9411c"
+    },
+    "build-thinlto": {
+      "name": "build-thinlto",
+      "command": [
+        "/home/dev-user/.cargo/bin/cargo",
+        "+ohm",
+        "-Zohm-defaults=no",
+        "build",
+        "-p",
+        "relar-runtime",
+        "--profile",
+        "relar-luhn-validation-lto",
+        "--config",
+        "profile.relar-luhn-validation-lto.inherits=\"release\"",
+        "--locked"
+      ],
+      "cwd": "/home/dev-user/code/oss/relar",
+      "environment_overrides": {
+        "RUSTFLAGS": "-Clinker-plugin-lto"
+      },
+      "started_at": "2026-10-20T00:41:50.723655+00:00",
+      "stdout": "/tmp/relar-luhn-validation-v1/jobs/build-thinlto/stdout",
+      "stderr": "/tmp/relar-luhn-validation-v1/jobs/build-thinlto/stderr",
+      "exit_code": 0,
+      "completed_at": "2026-10-20T00:42:02.025745+00:00",
+      "elapsed_seconds": 11.301772969018202,
+      "error": null,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "dde68433eec1490a74a479ad1f584c851501a59d10a2b2e0c97d49934b7e6971",
+      "status": "passed",
+      "record": "/tmp/relar-luhn-validation-v1/jobs/build-thinlto/command.json",
+      "record_sha256": "055da5906f9e96f7d354fcf1b8043d2e6d00063c1d4cb730b2079df913588fd7"
+    },
+    "build-asan": {
+      "name": "build-asan",
+      "command": [
+        "/home/dev-user/.cargo/bin/cargo",
+        "+ohm",
+        "-Zohm-defaults=no",
+        "build",
+        "-p",
+        "relar-runtime",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--profile",
+        "relar-luhn-validation-asan",
+        "--config",
+        "profile.relar-luhn-validation-asan.inherits=\"release\"",
+        "--locked"
+      ],
+      "cwd": "/home/dev-user/code/oss/relar",
+      "environment_overrides": {
+        "RUSTC_BOOTSTRAP": "1",
+        "RUSTFLAGS": "-Zsanitizer=address -Cforce-frame-pointers=yes"
+      },
+      "started_at": "2026-10-20T00:42:03.026566+00:00",
+      "stdout": "/tmp/relar-luhn-validation-v1/jobs/build-asan/stdout",
+      "stderr": "/tmp/relar-luhn-validation-v1/jobs/build-asan/stderr",
+      "exit_code": 0,
+      "completed_at": "2026-10-20T00:42:16.512402+00:00",
+      "elapsed_seconds": 13.48481673101196,
+      "error": null,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "ef7fcc3b486ca000464694eda9da772aeb2d2673f5f78beb1f8be8bd14a202db",
+      "status": "passed",
+      "record": "/tmp/relar-luhn-validation-v1/jobs/build-asan/command.json",
+      "record_sha256": "111c5a1d44e83c237836ad9aa07f0f381cfecd6e160ae9d415c1b29c7a707b23"
+    }
+  },
+  "runner_sha256": "39c6a4f639acf79999a8a450c77fcc7d94024190c366143617e2c6515817dcd6",
+  "input_guards_passed": true,
+  "build_note": "Copied from successful Cargo builds in this run with clean source/tool guards before and after; validation results are recorded separately in index.json."
+}

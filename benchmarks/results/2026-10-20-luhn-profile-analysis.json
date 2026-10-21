@@ -1,0 +1,371 @@
+{
+  "schema": 1,
+  "source_revision": "6fa8681c1734513cc278511427029dea9dca471c",
+  "build_revision": "7d4011f0413c63d0a4d111817c37f460a0656cac",
+  "profile_summary_sha256": "d23c5c229621e46b05f834349227bb9620831f63f63e80f056c174659aa2aac4",
+  "profile_manifest_sha256": "cf44c45003d22fe882e7628b0df065bb02ec5b5cf98a389cb46f398888f7dc66",
+  "benchmark_record_sha256": "26b3b7ad62cddddae43e659080a533ae41a3079bb143096e098fe2d675c3bf57",
+  "binary_sha256": "14fb73da2b9b539b760b4c98c85573e55a1f03da84a90e4aeb519c47ec7f5fd0",
+  "llvm_sha256": "33c78c648acd309cd9290f663da343e6593f6a92d3190acd43d26d03422c4a10",
+  "derivation_script_sha256": "be4e25aa0e3f815e59c00b964bc5c4296086e0e904a91f82788da1d5c3ddf652",
+  "raw_profile_sha256": {
+    "relar-callgrind": "b677c0613b84c0bad523653f19ae41a93874d23a7679ef3bb9f71673bbe5e583",
+    "relar-dhat": "949ec74e9eb2fc1b0a01d4e52bd430671d66939e91dbd8aeafa88d298a8d38aa",
+    "rust-callgrind": "100a2394d8c1f1caff7c13cc5108ccfae35c8553a77646937576d720bf1a4153",
+    "rust-dhat": "5748b5439528311480e85c9cb41583b3207c09dd74926b635aabd3caf95c18bb"
+  },
+  "workload": {
+    "label": "checksum-4096",
+    "digits": 4096,
+    "repetitions": 64,
+    "digits_per_process": 262144,
+    "checksum_per_call": 2,
+    "expected_stdout": "OK\n128\n"
+  },
+  "measurement_scope": "Whole-process instrumented guest instructions and requested heap allocations for 64 calls; not CPU time or an optimization speedup estimate. Timed results use a separate 4096-call batch.",
+  "instruction_totals": {
+    "relar": 212067563,
+    "rust": 5125141
+  },
+  "instruction_ratio_relar_over_rust": 41.377898286115446,
+  "top_self_instruction_functions": [
+    {
+      "name": "fn_3",
+      "self_instructions": 54969408,
+      "self_fraction": 0.2592070528013754,
+      "calls": 64,
+      "incoming_inclusive_instructions": 211643573
+    },
+    {
+      "name": "relar_int_parse",
+      "self_instructions": 24641653,
+      "self_fraction": 0.11619718098990933,
+      "calls": 262145,
+      "incoming_inclusive_instructions": 24641653
+    },
+    {
+      "name": "0x00000000000ab250",
+      "self_instructions": 24114147,
+      "self_fraction": 0.11370973787254772,
+      "calls": 394470,
+      "incoming_inclusive_instructions": 24118124
+    },
+    {
+      "name": "relar_mapping_iter_next",
+      "self_instructions": 20974848,
+      "self_fraction": 0.09890644143442154,
+      "calls": 262208,
+      "incoming_inclusive_instructions": 54529570
+    },
+    {
+      "name": "<compact_str::CompactString>::push",
+      "self_instructions": 15204352,
+      "self_fraction": 0.07169579253381622,
+      "calls": 262144,
+      "incoming_inclusive_instructions": 19398656
+    },
+    {
+      "name": "free",
+      "self_instructions": 12208451,
+      "self_fraction": 0.05756868625872784,
+      "calls": 393821,
+      "incoming_inclusive_instructions": 36245912
+    },
+    {
+      "name": "malloc",
+      "self_instructions": 11823580,
+      "self_fraction": 0.05575383539443041,
+      "calls": 262748,
+      "incoming_inclusive_instructions": 11852571
+    },
+    {
+      "name": "0x00000000000ab650",
+      "self_instructions": 10209140,
+      "self_fraction": 0.048140978542767526,
+      "calls": 131425,
+      "incoming_inclusive_instructions": 10242123
+    },
+    {
+      "name": "calloc",
+      "self_instructions": 10092775,
+      "self_fraction": 0.04759226190570219,
+      "calls": 131075,
+      "incoming_inclusive_instructions": 20214480
+    },
+    {
+      "name": "<relar_runtime::objects::words::WordKind>::release",
+      "self_instructions": 7340255,
+      "self_fraction": 0.03461281346454667,
+      "calls": 262151,
+      "incoming_inclusive_instructions": 7341153
+    },
+    {
+      "name": "0x0000000000188d80",
+      "self_instructions": 5246148,
+      "self_fraction": 0.02473809726384228,
+      "calls": 262352,
+      "incoming_inclusive_instructions": 5246148
+    },
+    {
+      "name": "relar_list_slice",
+      "self_instructions": 4991232,
+      "self_fraction": 0.023536046387254424,
+      "calls": 128,
+      "incoming_inclusive_instructions": 5035445
+    },
+    {
+      "name": "<alloc::rc::Rc<compact_str::CompactString>>::drop_slow",
+      "self_instructions": 3145892,
+      "self_fraction": 0.014834385586823573,
+      "calls": 262155,
+      "incoming_inclusive_instructions": 25691838
+    },
+    {
+      "name": "__rustc::__rdl_alloc_zeroed",
+      "self_instructions": 2490387,
+      "self_fraction": 0.011743365957385949,
+      "calls": 131073,
+      "incoming_inclusive_instructions": 22704427
+    },
+    {
+      "name": "__rustc::__rdl_alloc",
+      "self_instructions": 2364732,
+      "self_fraction": 0.011150842526539525,
+      "calls": 262748,
+      "incoming_inclusive_instructions": 14217303
+    },
+    {
+      "name": "<alloc::rc::Rc<relar_runtime::List>>::drop_slow",
+      "self_instructions": 1171964,
+      "self_fraction": 0.005526370857574291,
+      "calls": 256,
+      "incoming_inclusive_instructions": 1246249
+    },
+    {
+      "name": "__rustc::__rdl_dealloc",
+      "self_instructions": 393819,
+      "self_fraction": 0.001857044964486153,
+      "calls": 393819,
+      "incoming_inclusive_instructions": 36639521
+    },
+    {
+      "name": "0x000000000000a530",
+      "self_instructions": 101397,
+      "self_fraction": 0.00047813535726819287,
+      "calls": 301,
+      "incoming_inclusive_instructions": 138801
+    }
+  ],
+  "checksum_function": {
+    "name": "fn_3",
+    "self_instructions": 54969408,
+    "self_fraction": 0.2592070528013754,
+    "calls": 64,
+    "incoming_inclusive_instructions": 211643573
+  },
+  "character_pipeline": {
+    "scope": "Only direct fn_3 outgoing inclusive call edges for character iteration/construction, integer parsing, and string destruction.",
+    "functions": [
+      {
+        "name": "relar_mapping_iter_next",
+        "calls_from_checksum": 262208,
+        "inclusive_instructions_from_checksum": 54529570,
+        "self_instructions_all_callers": 20974848
+      },
+      {
+        "name": "relar_int_parse",
+        "calls_from_checksum": 262144,
+        "inclusive_instructions_from_checksum": 24641536,
+        "self_instructions_all_callers": 24641653
+      },
+      {
+        "name": "<alloc::rc::Rc<compact_str::CompactString>>::drop_slow",
+        "calls_from_checksum": 262144,
+        "inclusive_instructions_from_checksum": 25690112,
+        "self_instructions_all_callers": 3145892
+      }
+    ],
+    "inclusive_instructions": 104861218,
+    "fraction_of_process_instructions": 0.4944708022131607,
+    "no_double_counting_check": "No selected root is reachable from another selected root through a positive-cost observed call edge.",
+    "observed_descendants": {
+      "relar_mapping_iter_next": [
+        "0x00000000000a92d0",
+        "0x00000000000a9bb0",
+        "0x00000000000a9c90",
+        "0x00000000000a9e50",
+        "0x00000000000ab650",
+        "0x00000000000acef0",
+        "0x0000000000188d80",
+        "0x000000000498b720",
+        "<compact_str::CompactString>::push",
+        "__default_morecore",
+        "__rustc::__rdl_alloc",
+        "__tunable_get_val",
+        "brk",
+        "malloc",
+        "sbrk"
+      ],
+      "relar_int_parse": [],
+      "<alloc::rc::Rc<compact_str::CompactString>>::drop_slow": [
+        "0x00000000000a9bb0",
+        "0x00000000000a9c90",
+        "0x00000000000ab250",
+        "__default_morecore",
+        "__rustc::__rdl_dealloc",
+        "brk",
+        "free",
+        "sbrk"
+      ]
+    }
+  },
+  "temporary_tuple_allocation_edge": {
+    "caller": "fn_3",
+    "callee": "__rustc::__rdl_alloc_zeroed",
+    "calls": 131072,
+    "inclusive_instructions": 22704254,
+    "fraction_of_process_instructions": 0.10706141796895172,
+    "scope": "Allocation only; excludes tuple arithmetic, ownership checks and destruction in fn_3 or other calls."
+  },
+  "allocation_totals": {
+    "relar": {
+      "allocated_bytes": 23105570,
+      "allocated_blocks": 395039,
+      "peak_live_bytes": 123793,
+      "peak_live_blocks": 29,
+      "exit_live_bytes": 9216,
+      "exit_live_blocks": 2
+    },
+    "rust": {
+      "allocated_bytes": 8155,
+      "allocated_blocks": 19,
+      "peak_live_bytes": 5963,
+      "peak_live_blocks": 11,
+      "exit_live_bytes": 544,
+      "exit_live_blocks": 1
+    }
+  },
+  "allocation_categories": {
+    "other": {
+      "bytes": 35874,
+      "blocks": 223,
+      "point_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        21,
+        24,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36
+      ],
+      "fraction_of_requested_bytes": 0.0015526126384244146,
+      "fraction_of_requested_blocks": 0.0005645012264611849
+    },
+    "one_character_string_owners": {
+      "bytes": 10485760,
+      "blocks": 262144,
+      "point_indices": [
+        16,
+        18
+      ],
+      "fraction_of_requested_bytes": 0.4538195768379659,
+      "fraction_of_requested_blocks": 0.6635901771723804
+    },
+    "digit_list_buffers": {
+      "bytes": 4192256,
+      "blocks": 704,
+      "point_indices": [
+        17
+      ],
+      "fraction_of_requested_bytes": 0.1814391940990852,
+      "fraction_of_requested_blocks": 0.0017821025265859828
+    },
+    "two_slices": {
+      "bytes": 2102272,
+      "blocks": 256,
+      "point_indices": [
+        19,
+        20,
+        22,
+        23
+      ],
+      "fraction_of_requested_bytes": 0.0909855069578461,
+      "fraction_of_requested_blocks": 0.0006480372823949028
+    },
+    "temporary_divmod_pairs": {
+      "bytes": 4194304,
+      "blocks": 131072,
+      "point_indices": [
+        25
+      ],
+      "fraction_of_requested_bytes": 0.18152783073518636,
+      "fraction_of_requested_blocks": 0.3317950885861902
+    },
+    "comprehension_result_buffers": {
+      "bytes": 2095104,
+      "blocks": 640,
+      "point_indices": [
+        26
+      ],
+      "fraction_of_requested_bytes": 0.09067527873149202,
+      "fraction_of_requested_blocks": 0.001620093205987257
+    }
+  },
+  "allocation_partition_check": "Every DHAT point belongs to exactly one category; bytes and blocks sum to the complete Relar process totals. Resizing requests remain attributed to their original allocation stack.",
+  "allocation_attribution_evidence": {
+    "character_owners": "All stacks containing relar_mapping_iter_next; sequences.rs StringIterator::next constructs Rc<Str>. Exactly 262144 blocks of 40 bytes, one per input character.",
+    "divmod_pair": "DHAT fn_3 site 0x20ec5f is consistent with the sole native fn_3 zeroed 32-byte allocation at 0x106c5b (reported return-IP-minus-one plus PIE bias 0x108000). The emitted fn_8 helper constructs layout_tuple_4 then computes/stores floor quotient and remainder, reads both fields for sum, and releases the record. ThinLTO inlines that helper into fn_3. Exactly one pair per doubled digit.",
+    "digit_list_buffers": "DHAT original allocation site 0x20e6ba; native fn_3 list-capacity growth after relar_int_parse and before storing the converted digit.",
+    "comprehension_result_buffers": "DHAT original allocation site 0x20f2fb; native fn_3 list-capacity growth after the divmod pair is summed.",
+    "slices": "Every DHAT stack containing relar_list_slice: both backing buffers and list owners for the two consumed slices.",
+    "assembly_command": [
+      "/usr/bin/objdump",
+      "-d",
+      "--no-show-raw-insn",
+      "--disassemble=fn_3",
+      "/tmp/relar-luhn-v2-thinlto/luhn"
+    ],
+    "objdump_sha256": "325c4205a4c658a9d1e1ebc469ae55975a2b897a3d3c1e79d9b158612d37f745",
+    "assembly_sha256": "fd3e919d17d073ff0d1567199d934013898d91ef798d195143d18263f01ffbbc",
+    "zeroed_allocation_excerpt": "  106c51:\tmov    $0x20,%edi\n  106c56:\tmov    $0x8,%esi\n  106c5b:\tcall   75cf0 <_RNvCsdDBZ5SCsGGz_7___rustc18___rdl_alloc_zeroed>\n  106c60:\ttest   %rax,%rax\n  106c63:\tje     107a43 <fn_3+0x1633>\n  106c69:\tmov    %rax,%r14\n  106c6c:\tmov    %rax,%r13\n  106c6f:\tmovq   $0x1,(%r14)\n  106c76:\tlea    0x4e1bb(%rip),%rax        # 154e38 <anon.934b7d87de1e75a8de765d6ac3ac1c1b.3.llvm.14810595723966154418+0x28>\n  106c7d:\tmov    %rax,0x8(%r14)\n  106c81:\ttest   $0x1,%bpl\n  106c85:\tjne    106c9e <fn_3+0x88e>\n  106c87:\tmov    $0x15,%esi\n  106c8c:\tmov    %rbp,%rdi",
+    "emitted_helper_sha256": "0c7a3c1d5062db722df241f06137af513e75e77ff15f4e3a4caa42f52d70abd1"
+  },
+  "separate_wall_time_reference": {
+    "repetitions": 4096,
+    "median_seconds": {
+      "relar": 0.898480894,
+      "rust": 0.02275305,
+      "cpython": 1.455759966
+    },
+    "relar_over_rust": 39.48837162490303,
+    "cpython_over_relar": 1.6202458791516607
+  },
+  "conclusions": [
+    "Character materialization/conversion/destruction is the largest separately identified CPU path: almost half of guest instructions and two thirds of allocated blocks.",
+    "Temporary divmod pairs account for another third of allocated blocks. Their allocation alone consumes about one tenth of guest instructions, before tuple ownership and cleanup.",
+    "Digit-list growth, comprehension-result growth and two slices account for most remaining requested heap bytes, but relatively few blocks.",
+    "Signature inference is compile-time work; this gap is emitted representation and runtime work, including generic integer/ownership/error checks and eager materialization.",
+    "Next targets are a semantic-preserving character-to-int consumer path, scalarized nonescaping divmod pairs, and then known-length allocation or safe elimination of consumed slice/comprehension buffers. These measurements do not establish any particular future speedup or Rust parity."
+  ]
+}

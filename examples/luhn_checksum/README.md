@@ -10,6 +10,13 @@ string call sites for `checksum`, `verify`, `generate`, and `append`. Compilatio
 uses the original `list(map(int, string))`, stepped slices, list comprehension,
 `sum`, and `divmod` expressions.
 
+The [recorded comparison](../../benchmarks/results/2026-10-20-luhn.md) passes the
+upstream tests and 1,144 CPython differential cases in each of five native
+configurations. ThinLTO Relar runs 1.60–1.69× faster than CPython but takes
+28.9–51.4× the streaming Rust reference's time. The report includes raw timings,
+allocation and instruction profiles, validation evidence, and reproduction
+metadata.
+
 From the repository root, after building Relar:
 
 ```sh
