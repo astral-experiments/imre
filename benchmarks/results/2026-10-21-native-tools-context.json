@@ -1,0 +1,1895 @@
+{
+  "kind": "native-tools-final-timing",
+  "status": "passed",
+  "phase": "timing",
+  "measurement_revision": "88169978bfc9436024a6bfc34fc8a6c7de285023",
+  "started_at": "2026-10-21T22:54:55.758726+00:00",
+  "cwd": "/home/dev-user/code/oss/relar-native-tools-20261021",
+  "driver": "/home/dev-user/.cache/relar-native-tools-20261021/relar-native-tools-final-3.py",
+  "driver_sha256": "b8366acaf34f94bef2e3953e37b8ef2d7b0494878ab88676ca3307267b6179c3",
+  "command": [
+    "/home/dev-user/.local/bin/python3.14",
+    "-u",
+    "/home/dev-user/.cache/relar-native-tools-20261021/relar-native-tools-final-3.py",
+    "--phase",
+    "timing",
+    "--revision",
+    "88169978bfc9436024a6bfc34fc8a6c7de285023"
+  ],
+  "python": "/home/dev-user/.local/bin/python3.14",
+  "python_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+  "cpu": 31,
+  "available_affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31
+  ],
+  "samples": 20,
+  "warmups": 2,
+  "compute_rounds": 4,
+  "windows": [
+    {
+      "mode": "normal",
+      "command": [
+        "/home/dev-user/.local/bin/python3.14",
+        "-P",
+        "-s",
+        "-B",
+        "/home/dev-user/code/oss/relar-native-tools-20261021/benchmarks/native_tools_benchmark.py",
+        "--compiler",
+        "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/relar",
+        "--runtime",
+        "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/normal_runtime.a",
+        "--relar-build-record",
+        "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/build-record.json",
+        "--catalog-rust",
+        "/home/dev-user/.cache/relar-native-tools-20261021/reference-python-catalog-normal-final-3/python-catalog-reference",
+        "--conformance-rust",
+        "/home/dev-user/.cache/relar-native-tools-20261021/reference-conformance-report-normal-final/conformance-report-reference",
+        "--catalog-codon-record",
+        "/home/dev-user/.cache/relar-native-tools-20261021/codon-catalog-final-3/build-record.json",
+        "--conformance-codon-record",
+        "/home/dev-user/.cache/relar-native-tools-20261021/codon-development-13/build-record.json",
+        "--conformance-unchanged",
+        "/home/dev-user/.cache/relar-native-tools-20261021/conformance-real-inputs",
+        "--conformance-changed",
+        "/home/dev-user/.cache/relar-native-tools-20261021/conformance-changed-inputs-ty0.0.60",
+        "--python",
+        "/home/dev-user/.local/bin/python3.14",
+        "--clang",
+        "/usr/lib/llvm-18/bin/clang",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--artifact-dir",
+        "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-normal-final-3",
+        "--output",
+        "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-normal-final-3.json",
+        "--samples",
+        "20",
+        "--warmups",
+        "2",
+        "--compute-rounds",
+        "4",
+        "--prepared-record",
+        "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-prepared-normal-final-3.json",
+        "--cpu",
+        "31"
+      ],
+      "output": "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-normal-final-3.json",
+      "artifact_dir": "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-normal-final-3",
+      "log": "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-normal-final-3.log",
+      "started_at": "2026-10-21T22:54:57.141658+00:00",
+      "preparation": "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-prepared-normal-final-3.json",
+      "preparation_sha256": "82de6a284208e294dc20aa747b1d44cdfc5a7c9a434439363919f568532a102d",
+      "idle_probe": {
+        "seconds": 2,
+        "busy_fraction": {
+          "0": 0.01,
+          "1": 0.0,
+          "2": 0.0,
+          "3": 0.0,
+          "4": 0.0,
+          "5": 0.0,
+          "6": 0.0,
+          "7": 0.0,
+          "8": 0.0,
+          "9": 0.0,
+          "10": 0.0,
+          "11": 0.0,
+          "12": 0.0,
+          "13": 0.01507537688442211,
+          "14": 0.004975124378109453,
+          "15": 0.005,
+          "16": 0.0,
+          "17": 0.0,
+          "18": 0.0,
+          "19": 0.0,
+          "20": 0.0,
+          "21": 0.0,
+          "22": 0.0,
+          "23": 0.015,
+          "24": 0.005,
+          "25": 0.0,
+          "26": 0.0,
+          "27": 0.010050251256281407,
+          "28": 0.0,
+          "29": 0.0,
+          "30": 0.0,
+          "31": 0.0
+        },
+        "processes": [
+          "    PID    PPID ELAPSED %CPU %MEM COMMAND",
+          "3943301 3943114       0  300  0.0 ps",
+          "3943114 3372981       4 13.8  0.0 python3.14",
+          "    906     900  559706 12.9  1.8 falcon-sensor-b",
+          "2388668 2388667   60695  6.0  1.0 codex",
+          "      1       0  559716  0.7  0.0 systemd",
+          "2556426 2388668   40936  0.4  0.0 codex-code-mode",
+          "   1432    1346  559686  0.3  0.0 xds-server",
+          "   1436    1346  559686  0.3  0.0 envoy",
+          "2737517       1  398084  0.2  0.0 applied-devbox-",
+          "2408936       1   57973  0.2  0.0 devbox-agent",
+          "   1354       1  559686  0.1  0.0 redis-server",
+          "   1335       1  559686  0.1  0.0 dbus-daemon",
+          "   1428       1  559686  0.1  0.0 containerd",
+          "   2036       1  559678  0.1  0.0 git",
+          "2680875 2680864   38773  0.1  0.0 codex",
+          "   1060       1  559705  0.1  0.0 systemd-resolve",
+          "   1441    1346  559686  0.1  0.0 dns-responder",
+          "    652       1  559707  0.1  0.1 systemd-journal",
+          "     17       2  559716  0.0  0.0 rcu_preempt"
+        ]
+      },
+      "exit_code": 0,
+      "finished_at": "2026-10-21T23:07:16.409946+00:00",
+      "log_sha256": "b800f865c8b6ea997e9e1af6a46c1a13431f75720e9e65cde3d45cf570207da1",
+      "output_sha256": "eb0cb68b634526c635abd07070c20d1487943517fdc223a26987ef4d44c1361c",
+      "summary": [
+        {
+          "label": "catalog-real",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.28626068849999997,
+              "min_seconds": 0.278430919,
+              "max_seconds": 0.292765343,
+              "p25_seconds": 0.28448810075,
+              "p75_seconds": 0.28931917175
+            },
+            "port": {
+              "median_seconds": 2.972906885,
+              "min_seconds": 2.929394509,
+              "max_seconds": 3.169213004,
+              "p25_seconds": 2.9540099252500003,
+              "p75_seconds": 2.9845876660000004
+            },
+            "original": {
+              "median_seconds": 0.999933134,
+              "min_seconds": 0.978527281,
+              "max_seconds": 1.02063,
+              "p25_seconds": 0.9956124255,
+              "p75_seconds": 1.006696953
+            },
+            "codon": {
+              "median_seconds": 0.567205551,
+              "min_seconds": 0.560455459,
+              "max_seconds": 0.581922211,
+              "p25_seconds": 0.56570707525,
+              "p75_seconds": 0.57088938025
+            },
+            "rust": {
+              "median_seconds": 0.1554545375,
+              "min_seconds": 0.153279727,
+              "max_seconds": 0.162587494,
+              "p25_seconds": 0.15453345525,
+              "p75_seconds": 0.15606930525
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.8414431196644871,
+            "codon_over_rust": 3.648690865649387,
+            "original_over_relar": 3.4930857577393133,
+            "port_over_relar": 10.385313123425957,
+            "codon_over_relar": 1.981430122215332,
+            "original_over_rust": 6.43231873498707
+          }
+        },
+        {
+          "label": "catalog-real-compute-0",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.030103135500000003,
+              "min_seconds": 0.028632678,
+              "max_seconds": 0.031740917,
+              "p25_seconds": 0.029210557249999998,
+              "p75_seconds": 0.03086456925
+            },
+            "port": {
+              "median_seconds": 0.1056091995,
+              "min_seconds": 0.104075093,
+              "max_seconds": 0.109710545,
+              "p25_seconds": 0.10510511975,
+              "p75_seconds": 0.1076617775
+            },
+            "original": {
+              "median_seconds": 0.139807907,
+              "min_seconds": 0.137141065,
+              "max_seconds": 0.154350288,
+              "p25_seconds": 0.1387246315,
+              "p75_seconds": 0.14143966325000001
+            },
+            "codon": {
+              "median_seconds": 0.030098923,
+              "min_seconds": 0.029134437,
+              "max_seconds": 0.035667032,
+              "p25_seconds": 0.029575697249999998,
+              "p75_seconds": 0.03055984325
+            },
+            "rust": {
+              "median_seconds": 0.028638860500000002,
+              "min_seconds": 0.027143765,
+              "max_seconds": 0.029976451,
+              "p25_seconds": 0.027671134500000003,
+              "p75_seconds": 0.02929838225
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0511289546593519,
+            "codon_over_rust": 1.0509818643098596,
+            "original_over_relar": 4.644297169642012,
+            "port_over_relar": 3.508245827083361,
+            "codon_over_relar": 0.9998600644108983,
+            "original_over_rust": 4.881755229053195
+          }
+        },
+        {
+          "label": "catalog-real-compute-4",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.9680682275,
+              "min_seconds": 0.951810767,
+              "max_seconds": 1.022997314,
+              "p25_seconds": 0.96154502275,
+              "p75_seconds": 0.9758988292499999
+            },
+            "port": {
+              "median_seconds": 11.5770466805,
+              "min_seconds": 11.426634566,
+              "max_seconds": 11.85909392,
+              "p25_seconds": 11.504875673,
+              "p75_seconds": 11.693072526249999
+            },
+            "original": {
+              "median_seconds": 3.4634512705000002,
+              "min_seconds": 3.414329015,
+              "max_seconds": 3.804665026,
+              "p25_seconds": 3.44000102025,
+              "p75_seconds": 3.5208362840000005
+            },
+            "codon": {
+              "median_seconds": 2.2829585975,
+              "min_seconds": 2.236549416,
+              "max_seconds": 2.621723426,
+              "p25_seconds": 2.25443599375,
+              "p75_seconds": 2.330263205
+            },
+            "rust": {
+              "median_seconds": 0.4944841565,
+              "min_seconds": 0.48876678,
+              "max_seconds": 0.51905814,
+              "p25_seconds": 0.49181661474999994,
+              "p75_seconds": 0.4991162785
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.9577335588506364,
+            "codon_over_rust": 4.616848826176699,
+            "original_over_relar": 3.577693360977494,
+            "port_over_relar": 11.958916067721065,
+            "codon_over_relar": 2.3582620859230707,
+            "original_over_rust": 7.0041703560627635
+          }
+        },
+        {
+          "label": "conformance-unchanged-github",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.035286925,
+              "min_seconds": 0.034783418,
+              "max_seconds": 0.03659712,
+              "p25_seconds": 0.03509402225,
+              "p75_seconds": 0.0357925785
+            },
+            "port": {
+              "median_seconds": 0.2515807545,
+              "min_seconds": 0.244224869,
+              "max_seconds": 0.257850616,
+              "p25_seconds": 0.25086836549999997,
+              "p75_seconds": 0.25409259475
+            },
+            "original": {
+              "median_seconds": 0.15321489900000002,
+              "min_seconds": 0.148502727,
+              "max_seconds": 0.161744008,
+              "p25_seconds": 0.15220133275,
+              "p75_seconds": 0.15404443875
+            },
+            "codon": {
+              "median_seconds": 0.0586594495,
+              "min_seconds": 0.056183198,
+              "max_seconds": 0.060137455,
+              "p25_seconds": 0.058159894749999996,
+              "p75_seconds": 0.058926848500000004
+            },
+            "rust": {
+              "median_seconds": 0.023767523,
+              "min_seconds": 0.023151947,
+              "max_seconds": 0.025427213,
+              "p25_seconds": 0.02349770375,
+              "p75_seconds": 0.02389853575
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.4846698581084785,
+            "codon_over_rust": 2.4680506041794934,
+            "original_over_relar": 4.341973663049417,
+            "port_over_relar": 7.129574325334384,
+            "codon_over_relar": 1.662356510237149,
+            "original_over_rust": 6.446397422230327
+          }
+        },
+        {
+          "label": "conformance-unchanged-github-compute-0",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0106303495,
+              "min_seconds": 0.01017002,
+              "max_seconds": 0.011824504,
+              "p25_seconds": 0.010461682,
+              "p75_seconds": 0.010950396250000001
+            },
+            "port": {
+              "median_seconds": 0.085655618,
+              "min_seconds": 0.082846072,
+              "max_seconds": 0.090088116,
+              "p25_seconds": 0.08488162225000001,
+              "p75_seconds": 0.0868002605
+            },
+            "original": {
+              "median_seconds": 0.09534443100000001,
+              "min_seconds": 0.09254925,
+              "max_seconds": 0.100973117,
+              "p25_seconds": 0.09481201524999999,
+              "p75_seconds": 0.09606477274999999
+            },
+            "codon": {
+              "median_seconds": 0.019784383500000002,
+              "min_seconds": 0.019325381,
+              "max_seconds": 0.021254449,
+              "p25_seconds": 0.01966110075,
+              "p75_seconds": 0.02033924175
+            },
+            "rust": {
+              "median_seconds": 0.0097785415,
+              "min_seconds": 0.009421971,
+              "max_seconds": 0.01021865,
+              "p25_seconds": 0.00963817675,
+              "p75_seconds": 0.010076767
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0871099232947983,
+            "codon_over_rust": 2.023244826439608,
+            "original_over_relar": 8.969077733521367,
+            "port_over_relar": 8.057648339784125,
+            "codon_over_relar": 1.8611225811531409,
+            "original_over_rust": 9.750373406913496
+          }
+        },
+        {
+          "label": "conformance-unchanged-github-compute-4",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.10030456700000001,
+              "min_seconds": 0.096770768,
+              "max_seconds": 0.106651336,
+              "p25_seconds": 0.099240902,
+              "p75_seconds": 0.10107901225
+            },
+            "port": {
+              "median_seconds": 0.725692265,
+              "min_seconds": 0.715840825,
+              "max_seconds": 0.902450517,
+              "p25_seconds": 0.722519563,
+              "p75_seconds": 0.7289553034999999
+            },
+            "original": {
+              "median_seconds": 0.3006823305,
+              "min_seconds": 0.29697513,
+              "max_seconds": 0.391149277,
+              "p25_seconds": 0.299713806,
+              "p75_seconds": 0.303418552
+            },
+            "codon": {
+              "median_seconds": 0.140317207,
+              "min_seconds": 0.133691649,
+              "max_seconds": 0.181507966,
+              "p25_seconds": 0.1397029785,
+              "p75_seconds": 0.14199886625000002
+            },
+            "rust": {
+              "median_seconds": 0.051680567,
+              "min_seconds": 0.050420825,
+              "max_seconds": 0.059941529,
+              "p25_seconds": 0.05141480175,
+              "p75_seconds": 0.05227782525
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.9408565505869937,
+            "codon_over_rust": 2.7150864463232383,
+            "original_over_relar": 2.997693320384903,
+            "port_over_relar": 7.234887569974753,
+            "codon_over_relar": 1.398911447372082,
+            "original_over_rust": 5.818092717519915
+          }
+        },
+        {
+          "label": "conformance-changed-github",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.036824473999999996,
+              "min_seconds": 0.036231421,
+              "max_seconds": 0.039245957,
+              "p25_seconds": 0.036526723500000004,
+              "p75_seconds": 0.03717805575
+            },
+            "port": {
+              "median_seconds": 0.252678087,
+              "min_seconds": 0.245051165,
+              "max_seconds": 0.449534328,
+              "p25_seconds": 0.250182679,
+              "p75_seconds": 0.255000905
+            },
+            "original": {
+              "median_seconds": 0.155717723,
+              "min_seconds": 0.152260526,
+              "max_seconds": 0.198599451,
+              "p25_seconds": 0.1545437285,
+              "p75_seconds": 0.15733958975
+            },
+            "codon": {
+              "median_seconds": 0.059839953,
+              "min_seconds": 0.058563677,
+              "max_seconds": 0.102581237,
+              "p25_seconds": 0.059386747499999996,
+              "p75_seconds": 0.06047349925
+            },
+            "rust": {
+              "median_seconds": 0.0243064775,
+              "min_seconds": 0.023836388,
+              "max_seconds": 0.063062801,
+              "p25_seconds": 0.024130656,
+              "p75_seconds": 0.024651316000000003
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.5150066067779668,
+            "codon_over_rust": 2.461893254586149,
+            "original_over_relar": 4.228647583669492,
+            "port_over_relar": 6.861688968048805,
+            "codon_over_relar": 1.6250049627321224,
+            "original_over_rust": 6.406429026994965
+          }
+        },
+        {
+          "label": "conformance-changed-github-compute-0",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0107091935,
+              "min_seconds": 0.010238047,
+              "max_seconds": 0.011450575,
+              "p25_seconds": 0.010574616500000002,
+              "p75_seconds": 0.010834986999999999
+            },
+            "port": {
+              "median_seconds": 0.086556019,
+              "min_seconds": 0.084189543,
+              "max_seconds": 0.089965474,
+              "p25_seconds": 0.08557212175,
+              "p75_seconds": 0.08760047625
+            },
+            "original": {
+              "median_seconds": 0.096010451,
+              "min_seconds": 0.090757827,
+              "max_seconds": 0.098812321,
+              "p25_seconds": 0.09535966925,
+              "p75_seconds": 0.09712172075
+            },
+            "codon": {
+              "median_seconds": 0.0201814035,
+              "min_seconds": 0.019444805,
+              "max_seconds": 0.021201001,
+              "p25_seconds": 0.020038070499999998,
+              "p75_seconds": 0.02045171925
+            },
+            "rust": {
+              "median_seconds": 0.0099951185,
+              "min_seconds": 0.008564316,
+              "max_seconds": 0.010919492,
+              "p25_seconds": 0.00972144625,
+              "p75_seconds": 0.01019423
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0714423745951587,
+            "codon_over_rust": 2.019125986350237,
+            "original_over_relar": 8.965236364437713,
+            "port_over_relar": 8.082403124007424,
+            "codon_over_relar": 1.8844933094168108,
+            "original_over_rust": 9.605734139120012
+          }
+        },
+        {
+          "label": "conformance-changed-github-compute-4",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.104965809,
+              "min_seconds": 0.10294786,
+              "max_seconds": 0.11154348,
+              "p25_seconds": 0.10390458949999999,
+              "p75_seconds": 0.10602966425
+            },
+            "port": {
+              "median_seconds": 0.726241213,
+              "min_seconds": 0.719259795,
+              "max_seconds": 0.739709221,
+              "p25_seconds": 0.723812253,
+              "p75_seconds": 0.72894945875
+            },
+            "original": {
+              "median_seconds": 0.306310339,
+              "min_seconds": 0.302715147,
+              "max_seconds": 0.317461237,
+              "p25_seconds": 0.30452173050000003,
+              "p75_seconds": 0.30913013225
+            },
+            "codon": {
+              "median_seconds": 0.150433549,
+              "min_seconds": 0.147711337,
+              "max_seconds": 0.158659637,
+              "p25_seconds": 0.14976107925,
+              "p75_seconds": 0.152634931
+            },
+            "rust": {
+              "median_seconds": 0.0555581825,
+              "min_seconds": 0.054204668,
+              "max_seconds": 0.058656663,
+              "p25_seconds": 0.054716577499999995,
+              "p75_seconds": 0.055885591
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.8892952266752066,
+            "codon_over_rust": 2.707675849547454,
+            "original_over_relar": 2.918191570361736,
+            "port_over_relar": 6.918835951619256,
+            "codon_over_relar": 1.4331671468373097,
+            "original_over_rust": 5.513325404408253
+          }
+        },
+        {
+          "label": "conformance-changed-diff",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.03611191,
+              "min_seconds": 0.035571399,
+              "max_seconds": 0.037302868,
+              "p25_seconds": 0.03596423025,
+              "p75_seconds": 0.036342535749999995
+            },
+            "port": {
+              "median_seconds": 0.25139417,
+              "min_seconds": 0.247775673,
+              "max_seconds": 0.268817188,
+              "p25_seconds": 0.250536653,
+              "p75_seconds": 0.25266523124999996
+            },
+            "original": {
+              "median_seconds": 0.155295522,
+              "min_seconds": 0.151372962,
+              "max_seconds": 0.15864057,
+              "p25_seconds": 0.154452847,
+              "p75_seconds": 0.15627016025
+            },
+            "codon": {
+              "median_seconds": 0.0591782555,
+              "min_seconds": 0.058289889,
+              "max_seconds": 0.060526292,
+              "p25_seconds": 0.05873949825000001,
+              "p75_seconds": 0.05960611
+            },
+            "rust": {
+              "median_seconds": 0.024051924,
+              "min_seconds": 0.02342437,
+              "max_seconds": 0.027046695,
+              "p25_seconds": 0.02366159625,
+              "p75_seconds": 0.02441145125
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.501414606166226,
+            "codon_over_rust": 2.4604374893251784,
+            "original_over_relar": 4.300396240464711,
+            "port_over_relar": 6.961530697213191,
+            "codon_over_relar": 1.6387462058916298,
+            "original_over_rust": 6.456677727736043
+          }
+        },
+        {
+          "label": "conformance-changed-diff-compute-0",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0105786345,
+              "min_seconds": 0.010002668,
+              "max_seconds": 0.010951012,
+              "p25_seconds": 0.010241216499999999,
+              "p75_seconds": 0.010733725999999999
+            },
+            "port": {
+              "median_seconds": 0.086193974,
+              "min_seconds": 0.082608894,
+              "max_seconds": 0.092521144,
+              "p25_seconds": 0.08554035774999999,
+              "p75_seconds": 0.08724310275
+            },
+            "original": {
+              "median_seconds": 0.0958562805,
+              "min_seconds": 0.091265535,
+              "max_seconds": 0.09916629,
+              "p25_seconds": 0.09513417375,
+              "p75_seconds": 0.09623412925
+            },
+            "codon": {
+              "median_seconds": 0.0195541065,
+              "min_seconds": 0.018832392,
+              "max_seconds": 0.020528605,
+              "p25_seconds": 0.0192211465,
+              "p75_seconds": 0.02000261625
+            },
+            "rust": {
+              "median_seconds": 0.009716002000000001,
+              "min_seconds": 0.009453892,
+              "max_seconds": 0.010228391,
+              "p25_seconds": 0.009563598750000001,
+              "p75_seconds": 0.00988423825
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0887847182411035,
+            "codon_over_rust": 2.012567154679466,
+            "original_over_relar": 9.061309425143671,
+            "port_over_relar": 8.147930056568265,
+            "codon_over_relar": 1.848452794167338,
+            "original_over_rust": 9.865815229350508
+          }
+        },
+        {
+          "label": "conformance-changed-diff-compute-4",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.10134205299999999,
+              "min_seconds": 0.097612307,
+              "max_seconds": 0.103354077,
+              "p25_seconds": 0.10108414724999999,
+              "p75_seconds": 0.10181021199999998
+            },
+            "port": {
+              "median_seconds": 0.7239529330000001,
+              "min_seconds": 0.715732882,
+              "max_seconds": 0.743537478,
+              "p25_seconds": 0.7209831277500001,
+              "p75_seconds": 0.72624212325
+            },
+            "original": {
+              "median_seconds": 0.304644005,
+              "min_seconds": 0.297382907,
+              "max_seconds": 0.309389977,
+              "p25_seconds": 0.30309991799999997,
+              "p75_seconds": 0.3057257095
+            },
+            "codon": {
+              "median_seconds": 0.147122933,
+              "min_seconds": 0.144729594,
+              "max_seconds": 0.15500436,
+              "p25_seconds": 0.14640975925,
+              "p75_seconds": 0.148314239
+            },
+            "rust": {
+              "median_seconds": 0.053852322,
+              "min_seconds": 0.053290842,
+              "max_seconds": 0.055744381,
+              "p25_seconds": 0.0537056205,
+              "p75_seconds": 0.05450619725
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.8818511298361469,
+            "codon_over_rust": 2.7319700903519073,
+            "original_over_relar": 3.0060966398618354,
+            "port_over_relar": 7.143657658089877,
+            "codon_over_relar": 1.4517461275429266,
+            "original_over_rust": 5.657026358120639
+          }
+        }
+      ]
+    },
+    {
+      "mode": "thinlto",
+      "command": [
+        "/home/dev-user/.local/bin/python3.14",
+        "-P",
+        "-s",
+        "-B",
+        "/home/dev-user/code/oss/relar-native-tools-20261021/benchmarks/native_tools_benchmark.py",
+        "--compiler",
+        "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/relar",
+        "--runtime",
+        "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/thinlto_runtime.a",
+        "--relar-build-record",
+        "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/build-record.json",
+        "--catalog-rust",
+        "/home/dev-user/.cache/relar-native-tools-20261021/reference-python-catalog-thinlto-final-3/python-catalog-reference",
+        "--conformance-rust",
+        "/home/dev-user/.cache/relar-native-tools-20261021/reference-conformance-report-thinlto-final/conformance-report-reference",
+        "--catalog-codon-record",
+        "/home/dev-user/.cache/relar-native-tools-20261021/codon-catalog-final-3/build-record.json",
+        "--conformance-codon-record",
+        "/home/dev-user/.cache/relar-native-tools-20261021/codon-development-13/build-record.json",
+        "--conformance-unchanged",
+        "/home/dev-user/.cache/relar-native-tools-20261021/conformance-real-inputs",
+        "--conformance-changed",
+        "/home/dev-user/.cache/relar-native-tools-20261021/conformance-changed-inputs-ty0.0.60",
+        "--python",
+        "/home/dev-user/.local/bin/python3.14",
+        "--clang",
+        "/usr/lib/llvm-18/bin/clang",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--artifact-dir",
+        "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-thinlto-final-3",
+        "--output",
+        "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-thinlto-final-3.json",
+        "--samples",
+        "20",
+        "--warmups",
+        "2",
+        "--compute-rounds",
+        "4",
+        "--lto-linker",
+        "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld",
+        "--workload-preparation",
+        "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-prepared-normal-final-3.json",
+        "--prepared-record",
+        "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-prepared-thinlto-final-3.json",
+        "--cpu",
+        "31"
+      ],
+      "output": "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-thinlto-final-3.json",
+      "artifact_dir": "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-thinlto-final-3",
+      "log": "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-thinlto-final-3.log",
+      "started_at": "2026-10-21T23:07:17.875633+00:00",
+      "preparation": "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-prepared-thinlto-final-3.json",
+      "preparation_sha256": "0f45a5daef386b0db7258249a8632bba3bb2a6f61c3f42783df3c2c09b383708",
+      "idle_probe": {
+        "seconds": 2,
+        "busy_fraction": {
+          "0": 0.005025125628140704,
+          "1": 0.0,
+          "2": 0.04,
+          "3": 0.5326633165829145,
+          "4": 0.005025125628140704,
+          "5": 0.035175879396984924,
+          "6": 0.0,
+          "7": 0.0,
+          "8": 0.0,
+          "9": 0.01,
+          "10": 0.0,
+          "11": 0.0,
+          "12": 0.0,
+          "13": 0.1,
+          "14": 0.0,
+          "15": 0.004975124378109453,
+          "16": 0.0,
+          "17": 0.010050251256281407,
+          "18": 0.0,
+          "19": 0.005,
+          "20": 0.0,
+          "21": 0.0,
+          "22": 0.0,
+          "23": 0.0,
+          "24": 0.0,
+          "25": 0.0,
+          "26": 0.0,
+          "27": 0.0,
+          "28": 0.0,
+          "29": 0.0,
+          "30": 0.0,
+          "31": 0.004975124378109453
+        },
+        "processes": [
+          "    PID    PPID ELAPSED %CPU %MEM COMMAND",
+          "    906     900  560446 13.0  1.9 falcon-sensor-b",
+          "2388668 2388667   61436  6.0  1.0 codex",
+          "      1       0  560457  0.7  0.0 systemd",
+          "2556426 2388668   41677  0.4  0.0 codex-code-mode",
+          "   1432    1346  560427  0.3  0.0 xds-server",
+          "   1436    1346  560427  0.3  0.0 envoy",
+          "2737517       1  398825  0.2  0.0 applied-devbox-",
+          "2408936       1   58713  0.2  0.0 devbox-agent",
+          "   1354       1  560427  0.1  0.0 redis-server",
+          "   1335       1  560427  0.1  0.0 dbus-daemon",
+          "3943114 3372981     745  0.1  0.0 python3.14",
+          "   1428       1  560427  0.1  0.0 containerd",
+          "   2036       1  560419  0.1  0.0 git",
+          "2680875 2680864   39513  0.1  0.0 codex",
+          "   1060       1  560446  0.1  0.0 systemd-resolve",
+          "   1441    1346  560427  0.1  0.0 dns-responder",
+          "    652       1  560448  0.1  0.1 systemd-journal",
+          "     17       2  560457  0.0  0.0 rcu_preempt",
+          "2475211 2737517   50748  0.0  0.0 codex"
+        ]
+      },
+      "exit_code": 0,
+      "finished_at": "2026-10-21T23:19:26.001285+00:00",
+      "log_sha256": "3a1c86884341ea8ab83eff2ccb677da2baf808d3bafdde874b6124fb57db7809",
+      "output_sha256": "da42234ca5d6c7499e3a5892ccfd567b1c4444864f0a094cefa1d172282cf95c",
+      "summary": [
+        {
+          "label": "catalog-real",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.2148446985,
+              "min_seconds": 0.21047264,
+              "max_seconds": 0.220950264,
+              "p25_seconds": 0.21385294675,
+              "p75_seconds": 0.2158320035
+            },
+            "port": {
+              "median_seconds": 2.9791188615,
+              "min_seconds": 2.932978902,
+              "max_seconds": 3.045720317,
+              "p25_seconds": 2.9546030585,
+              "p75_seconds": 2.99176934725
+            },
+            "original": {
+              "median_seconds": 0.997993532,
+              "min_seconds": 0.974784054,
+              "max_seconds": 1.015680394,
+              "p25_seconds": 0.99245053225,
+              "p75_seconds": 1.0022244235
+            },
+            "codon": {
+              "median_seconds": 0.568819126,
+              "min_seconds": 0.553429411,
+              "max_seconds": 0.581025716,
+              "p25_seconds": 0.5652146785000001,
+              "p75_seconds": 0.57009715525
+            },
+            "rust": {
+              "median_seconds": 0.1215605285,
+              "min_seconds": 0.118658977,
+              "max_seconds": 0.123477583,
+              "p25_seconds": 0.1206745125,
+              "p75_seconds": 0.12248942399999999
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.767388651160726,
+            "codon_over_rust": 4.679307773822322,
+            "original_over_relar": 4.645185750301398,
+            "port_over_relar": 13.86638293753383,
+            "codon_over_relar": 2.6475827887370467,
+            "original_over_rust": 8.209848577616212
+          }
+        },
+        {
+          "label": "catalog-real-compute-0",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.029683438,
+              "min_seconds": 0.027980208,
+              "max_seconds": 0.030402789,
+              "p25_seconds": 0.02908931125,
+              "p75_seconds": 0.03005201825
+            },
+            "port": {
+              "median_seconds": 0.1056405265,
+              "min_seconds": 0.10399337,
+              "max_seconds": 0.109459846,
+              "p25_seconds": 0.10462025750000001,
+              "p75_seconds": 0.10699921575
+            },
+            "original": {
+              "median_seconds": 0.1388174245,
+              "min_seconds": 0.135648872,
+              "max_seconds": 0.142356894,
+              "p25_seconds": 0.1382736125,
+              "p75_seconds": 0.14022371299999997
+            },
+            "codon": {
+              "median_seconds": 0.029871905,
+              "min_seconds": 0.029003352,
+              "max_seconds": 0.033436874,
+              "p25_seconds": 0.02953044925,
+              "p75_seconds": 0.030297909749999997
+            },
+            "rust": {
+              "median_seconds": 0.028231306999999997,
+              "min_seconds": 0.027136931,
+              "max_seconds": 0.029733518,
+              "p25_seconds": 0.027778802000000002,
+              "p75_seconds": 0.028689278
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0514369030098394,
+            "codon_over_rust": 1.0581127186212103,
+            "original_over_relar": 4.676595227951696,
+            "port_over_relar": 3.558904682806621,
+            "codon_over_relar": 1.0063492308404438,
+            "original_over_rust": 4.917144803108124
+          }
+        },
+        {
+          "label": "catalog-real-compute-4",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.691478528,
+              "min_seconds": 0.67755741,
+              "max_seconds": 1.021866085,
+              "p25_seconds": 0.68440983425,
+              "p75_seconds": 0.70124199825
+            },
+            "port": {
+              "median_seconds": 11.5765109585,
+              "min_seconds": 11.401004512,
+              "max_seconds": 11.950833156,
+              "p25_seconds": 11.464418033,
+              "p75_seconds": 11.7510499725
+            },
+            "original": {
+              "median_seconds": 3.4858856075,
+              "min_seconds": 3.400608999,
+              "max_seconds": 3.820288301,
+              "p25_seconds": 3.4353166677500004,
+              "p75_seconds": 3.5657850865000005
+            },
+            "codon": {
+              "median_seconds": 2.2839818745000002,
+              "min_seconds": 2.216128352,
+              "max_seconds": 2.57444238,
+              "p25_seconds": 2.243521579,
+              "p75_seconds": 2.3435160287500003
+            },
+            "rust": {
+              "median_seconds": 0.362284138,
+              "min_seconds": 0.356669519,
+              "max_seconds": 0.662942538,
+              "p25_seconds": 0.35886320475,
+              "p75_seconds": 0.3678020145
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.9086635473949456,
+            "codon_over_rust": 6.304393802910577,
+            "original_over_relar": 5.041205860118914,
+            "port_over_relar": 16.741678142896724,
+            "codon_over_relar": 3.3030409217565757,
+            "original_over_rust": 9.621965860122753
+          }
+        },
+        {
+          "label": "conformance-unchanged-github",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0298535835,
+              "min_seconds": 0.029013943,
+              "max_seconds": 0.031603419,
+              "p25_seconds": 0.029558677,
+              "p75_seconds": 0.030097583499999997
+            },
+            "port": {
+              "median_seconds": 0.2506035535,
+              "min_seconds": 0.24727755,
+              "max_seconds": 0.259995358,
+              "p25_seconds": 0.249404296,
+              "p75_seconds": 0.25243778499999997
+            },
+            "original": {
+              "median_seconds": 0.15266515,
+              "min_seconds": 0.148964601,
+              "max_seconds": 0.157325845,
+              "p25_seconds": 0.15182163475,
+              "p75_seconds": 0.153256144
+            },
+            "codon": {
+              "median_seconds": 0.058107097499999996,
+              "min_seconds": 0.057175738,
+              "max_seconds": 0.061079287,
+              "p25_seconds": 0.05775691425,
+              "p75_seconds": 0.058456630249999995
+            },
+            "rust": {
+              "median_seconds": 0.0220868305,
+              "min_seconds": 0.021544981,
+              "max_seconds": 0.023639482,
+              "p25_seconds": 0.02183821125,
+              "p75_seconds": 0.02243360425
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.3516463351316974,
+            "codon_over_rust": 2.6308481653807227,
+            "original_over_relar": 5.113796472708209,
+            "port_over_relar": 8.394421175601918,
+            "codon_over_relar": 1.9464027660196974,
+            "original_over_rust": 6.912044260945453
+          }
+        },
+        {
+          "label": "conformance-unchanged-github-compute-0",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.010424423,
+              "min_seconds": 0.009955587,
+              "max_seconds": 0.067190064,
+              "p25_seconds": 0.010258589,
+              "p75_seconds": 0.010798876
+            },
+            "port": {
+              "median_seconds": 0.08562368149999999,
+              "min_seconds": 0.084482876,
+              "max_seconds": 0.096432775,
+              "p25_seconds": 0.084809993,
+              "p75_seconds": 0.087356295
+            },
+            "original": {
+              "median_seconds": 0.095847766,
+              "min_seconds": 0.094141333,
+              "max_seconds": 0.107349851,
+              "p25_seconds": 0.095090917,
+              "p75_seconds": 0.09721596325
+            },
+            "codon": {
+              "median_seconds": 0.019943853499999997,
+              "min_seconds": 0.019263721,
+              "max_seconds": 0.023931428,
+              "p25_seconds": 0.0195796245,
+              "p75_seconds": 0.02034630425
+            },
+            "rust": {
+              "median_seconds": 0.009896471,
+              "min_seconds": 0.009394495,
+              "max_seconds": 0.016433172,
+              "p25_seconds": 0.00961127625,
+              "p75_seconds": 0.0100025485
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0533475013466922,
+            "codon_over_rust": 2.0152490215956775,
+            "original_over_relar": 9.194539208549001,
+            "port_over_relar": 8.21375739453397,
+            "codon_over_relar": 1.9131853628733213,
+            "original_over_rust": 9.685044901359282
+          }
+        },
+        {
+          "label": "conformance-unchanged-github-compute-4",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0775731285,
+              "min_seconds": 0.075339025,
+              "max_seconds": 0.079842445,
+              "p25_seconds": 0.07736826,
+              "p75_seconds": 0.07828081825
+            },
+            "port": {
+              "median_seconds": 0.7247003615000001,
+              "min_seconds": 0.717080121,
+              "max_seconds": 0.766129087,
+              "p25_seconds": 0.72368031975,
+              "p75_seconds": 0.733441644
+            },
+            "original": {
+              "median_seconds": 0.30106779100000003,
+              "min_seconds": 0.296886973,
+              "max_seconds": 0.419143527,
+              "p25_seconds": 0.29823280775000005,
+              "p75_seconds": 0.30466453225
+            },
+            "codon": {
+              "median_seconds": 0.1405345255,
+              "min_seconds": 0.13916242,
+              "max_seconds": 0.346856985,
+              "p25_seconds": 0.13985173875,
+              "p75_seconds": 0.14603035925000002
+            },
+            "rust": {
+              "median_seconds": 0.0455364845,
+              "min_seconds": 0.044325992,
+              "max_seconds": 0.053884766,
+              "p25_seconds": 0.044982836250000005,
+              "p75_seconds": 0.046198949499999996
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.70353792902041,
+            "codon_over_rust": 3.0861962016413456,
+            "original_over_relar": 3.8810835249476887,
+            "port_over_relar": 9.342157207182897,
+            "codon_over_relar": 1.8116392650065674,
+            "original_over_rust": 6.6115729904446185
+          }
+        },
+        {
+          "label": "conformance-changed-github",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.030988727,
+              "min_seconds": 0.029673194,
+              "max_seconds": 0.033316463,
+              "p25_seconds": 0.03065195075,
+              "p75_seconds": 0.032204578250000004
+            },
+            "port": {
+              "median_seconds": 0.2530010065,
+              "min_seconds": 0.244914997,
+              "max_seconds": 0.264618159,
+              "p25_seconds": 0.251259126,
+              "p75_seconds": 0.25823763075
+            },
+            "original": {
+              "median_seconds": 0.15540332750000002,
+              "min_seconds": 0.148844336,
+              "max_seconds": 0.183805249,
+              "p25_seconds": 0.15418415325,
+              "p75_seconds": 0.159610206
+            },
+            "codon": {
+              "median_seconds": 0.060316319,
+              "min_seconds": 0.057583057,
+              "max_seconds": 0.062838625,
+              "p25_seconds": 0.058889061,
+              "p75_seconds": 0.060737151499999996
+            },
+            "rust": {
+              "median_seconds": 0.02271527,
+              "min_seconds": 0.022036479,
+              "max_seconds": 0.025301311,
+              "p25_seconds": 0.022375030749999997,
+              "p75_seconds": 0.02325907975
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.3642244622229893,
+            "codon_over_rust": 2.655320363790525,
+            "original_over_relar": 5.01483418470207,
+            "port_over_relar": 8.16429169549301,
+            "codon_over_relar": 1.946395506985492,
+            "original_over_rust": 6.8413594687626444
+          }
+        },
+        {
+          "label": "conformance-changed-github-compute-0",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.010389042,
+              "min_seconds": 0.009926661,
+              "max_seconds": 0.011146475,
+              "p25_seconds": 0.0101998725,
+              "p75_seconds": 0.010591824
+            },
+            "port": {
+              "median_seconds": 0.0858092715,
+              "min_seconds": 0.08418954,
+              "max_seconds": 0.088368421,
+              "p25_seconds": 0.08537011175,
+              "p75_seconds": 0.086569079
+            },
+            "original": {
+              "median_seconds": 0.095458213,
+              "min_seconds": 0.094834737,
+              "max_seconds": 0.099333037,
+              "p25_seconds": 0.09522421075,
+              "p75_seconds": 0.09625189375000001
+            },
+            "codon": {
+              "median_seconds": 0.019842282000000003,
+              "min_seconds": 0.018945232,
+              "max_seconds": 0.021504423,
+              "p25_seconds": 0.0195141165,
+              "p75_seconds": 0.0200338225
+            },
+            "rust": {
+              "median_seconds": 0.0097246735,
+              "min_seconds": 0.009382803,
+              "max_seconds": 0.010509411,
+              "p25_seconds": 0.00952937525,
+              "p75_seconds": 0.0099147655
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0683178206445698,
+            "codon_over_rust": 2.040405983810151,
+            "original_over_relar": 9.188355673217993,
+            "port_over_relar": 8.259594243627085,
+            "codon_over_relar": 1.9099241296743246,
+            "original_over_rust": 9.816084108119414
+          }
+        },
+        {
+          "label": "conformance-changed-github-compute-4",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0813483535,
+              "min_seconds": 0.079855535,
+              "max_seconds": 0.084374812,
+              "p25_seconds": 0.0808640715,
+              "p75_seconds": 0.0819530685
+            },
+            "port": {
+              "median_seconds": 0.727600408,
+              "min_seconds": 0.722763719,
+              "max_seconds": 0.753639499,
+              "p25_seconds": 0.72499454375,
+              "p75_seconds": 0.7368103855000001
+            },
+            "original": {
+              "median_seconds": 0.3072136215,
+              "min_seconds": 0.30208971,
+              "max_seconds": 0.324683969,
+              "p25_seconds": 0.30362605724999997,
+              "p75_seconds": 0.30952823474999996
+            },
+            "codon": {
+              "median_seconds": 0.1514610795,
+              "min_seconds": 0.149146684,
+              "max_seconds": 0.163251326,
+              "p25_seconds": 0.150514658,
+              "p75_seconds": 0.15383377225
+            },
+            "rust": {
+              "median_seconds": 0.049159639000000005,
+              "min_seconds": 0.047892986,
+              "max_seconds": 0.050920223,
+              "p25_seconds": 0.04862757775,
+              "p75_seconds": 0.049700930500000004
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.6547793099131585,
+            "codon_over_rust": 3.0810047140500765,
+            "original_over_relar": 3.7765192321931873,
+            "port_over_relar": 8.944254882798582,
+            "codon_over_relar": 1.8618825456620953,
+            "original_over_rust": 6.249305888922414
+          }
+        },
+        {
+          "label": "conformance-changed-diff",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.030504378,
+              "min_seconds": 0.029914073,
+              "max_seconds": 0.035452399,
+              "p25_seconds": 0.030165498000000002,
+              "p75_seconds": 0.0313179715
+            },
+            "port": {
+              "median_seconds": 0.254273749,
+              "min_seconds": 0.24854375,
+              "max_seconds": 0.298746802,
+              "p25_seconds": 0.25275685525,
+              "p75_seconds": 0.25908622750000004
+            },
+            "original": {
+              "median_seconds": 0.15713840950000002,
+              "min_seconds": 0.152932788,
+              "max_seconds": 0.366099392,
+              "p25_seconds": 0.1555847685,
+              "p75_seconds": 0.1641120095
+            },
+            "codon": {
+              "median_seconds": 0.0600015305,
+              "min_seconds": 0.056970496,
+              "max_seconds": 0.104357957,
+              "p25_seconds": 0.05940402275,
+              "p75_seconds": 0.060830757250000006
+            },
+            "rust": {
+              "median_seconds": 0.0230029725,
+              "min_seconds": 0.021895033,
+              "max_seconds": 0.029651742,
+              "p25_seconds": 0.0224114115,
+              "p75_seconds": 0.023716904750000004
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.3261059195719163,
+            "codon_over_rust": 2.6084250850623762,
+            "original_over_relar": 5.151339571650995,
+            "port_over_relar": 8.335647722435121,
+            "codon_over_relar": 1.9669809527012811,
+            "original_over_rust": 6.831221899691443
+          }
+        },
+        {
+          "label": "conformance-changed-diff-compute-0",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.010576897,
+              "min_seconds": 0.010013343,
+              "max_seconds": 0.011715749,
+              "p25_seconds": 0.01039221175,
+              "p75_seconds": 0.010757942
+            },
+            "port": {
+              "median_seconds": 0.086059359,
+              "min_seconds": 0.083315898,
+              "max_seconds": 0.096183644,
+              "p25_seconds": 0.08556704524999999,
+              "p75_seconds": 0.0867150165
+            },
+            "original": {
+              "median_seconds": 0.09632813500000001,
+              "min_seconds": 0.091769982,
+              "max_seconds": 0.101977098,
+              "p25_seconds": 0.09483336125,
+              "p75_seconds": 0.09783212424999999
+            },
+            "codon": {
+              "median_seconds": 0.0199725095,
+              "min_seconds": 0.01936615,
+              "max_seconds": 0.021585683,
+              "p25_seconds": 0.019836306249999998,
+              "p75_seconds": 0.0203706165
+            },
+            "rust": {
+              "median_seconds": 0.0098238635,
+              "min_seconds": 0.009400356,
+              "max_seconds": 0.010368379,
+              "p25_seconds": 0.0096163425,
+              "p75_seconds": 0.01006629
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0766534978829867,
+            "codon_over_rust": 2.033060567260528,
+            "original_over_relar": 9.107409762995708,
+            "port_over_relar": 8.136541274818125,
+            "codon_over_relar": 1.888314644644833,
+            "original_over_rust": 9.805524577982991
+          }
+        },
+        {
+          "label": "conformance-changed-diff-compute-4",
+          "summary": {
+            "relar": {
+              "median_seconds": 0.079354186,
+              "min_seconds": 0.077716505,
+              "max_seconds": 0.080920602,
+              "p25_seconds": 0.0788268825,
+              "p75_seconds": 0.079623982
+            },
+            "port": {
+              "median_seconds": 0.7240801035,
+              "min_seconds": 0.714884951,
+              "max_seconds": 0.746510344,
+              "p25_seconds": 0.719043896,
+              "p75_seconds": 0.7279865755
+            },
+            "original": {
+              "median_seconds": 0.3036545025,
+              "min_seconds": 0.298178001,
+              "max_seconds": 0.320967925,
+              "p25_seconds": 0.3024887415,
+              "p75_seconds": 0.30679850625
+            },
+            "codon": {
+              "median_seconds": 0.1501149255,
+              "min_seconds": 0.146032448,
+              "max_seconds": 0.157833301,
+              "p25_seconds": 0.146939175,
+              "p75_seconds": 0.15260352249999998
+            },
+            "rust": {
+              "median_seconds": 0.047951804,
+              "min_seconds": 0.047255159,
+              "max_seconds": 0.050351826,
+              "p25_seconds": 0.047656757,
+              "p75_seconds": 0.04833815575
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.6548738395744191,
+            "codon_over_rust": 3.1305376018804214,
+            "original_over_relar": 3.8265719529906086,
+            "port_over_relar": 9.124661722319223,
+            "codon_over_relar": 1.8917077102901667,
+            "original_over_rust": 6.332493820253352
+          }
+        }
+      ]
+    }
+  ],
+  "core_source_equivalence": {
+    "build_record": "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/build-record.json",
+    "build_record_sha256": "b68f56bb1386d105f9f8cc195f4e31b3bdc4ef9c8493cc84b534b5e371a802c3",
+    "build_revision": "10b7b5aae54b57b16eeb220f907e677af544df6c",
+    "measurement_revision": "88169978bfc9436024a6bfc34fc8a6c7de285023",
+    "source_count": 79,
+    "source_key_set": [
+      "Cargo.lock",
+      "Cargo.toml",
+      "crates/relar-compiler/Cargo.toml",
+      "crates/relar-compiler/src/analysis.rs",
+      "crates/relar-compiler/src/borrows.rs",
+      "crates/relar-compiler/src/callables.rs",
+      "crates/relar-compiler/src/classes.rs",
+      "crates/relar-compiler/src/classes/dataclasses.rs",
+      "crates/relar-compiler/src/effects.rs",
+      "crates/relar-compiler/src/frontend.rs",
+      "crates/relar-compiler/src/frontend/assignments.rs",
+      "crates/relar-compiler/src/frontend/callables.rs",
+      "crates/relar-compiler/src/frontend/calls.rs",
+      "crates/relar-compiler/src/frontend/comprehensions.rs",
+      "crates/relar-compiler/src/frontend/comprehensions/slices.rs",
+      "crates/relar-compiler/src/frontend/dataclass_values.rs",
+      "crates/relar-compiler/src/frontend/expansions.rs",
+      "crates/relar-compiler/src/frontend/inference.rs",
+      "crates/relar-compiler/src/frontend/iterables.rs",
+      "crates/relar-compiler/src/frontend/json.rs",
+      "crates/relar-compiler/src/frontend/matching.rs",
+      "crates/relar-compiler/src/frontend/module_values.rs",
+      "crates/relar-compiler/src/frontend/paths.rs",
+      "crates/relar-compiler/src/frontend/pipelines.rs",
+      "crates/relar-compiler/src/frontend/processes.rs",
+      "crates/relar-compiler/src/frontend/records.rs",
+      "crates/relar-compiler/src/frontend/stdlib.rs",
+      "crates/relar-compiler/src/frontend/text.rs",
+      "crates/relar-compiler/src/frontend/truthiness.rs",
+      "crates/relar-compiler/src/frontend/unions.rs",
+      "crates/relar-compiler/src/frontend/unpacking.rs",
+      "crates/relar-compiler/src/ir.rs",
+      "crates/relar-compiler/src/lib.rs",
+      "crates/relar-compiler/src/list_bounds.rs",
+      "crates/relar-compiler/src/list_specialization.rs",
+      "crates/relar-compiler/src/llvm.rs",
+      "crates/relar-compiler/src/llvm/callables.rs",
+      "crates/relar-compiler/src/llvm/conditionals.rs",
+      "crates/relar-compiler/src/llvm/integer_regions.rs",
+      "crates/relar-compiler/src/llvm/json.rs",
+      "crates/relar-compiler/src/llvm/literals.rs",
+      "crates/relar-compiler/src/llvm/paths.rs",
+      "crates/relar-compiler/src/llvm/processes.rs",
+      "crates/relar-compiler/src/llvm/records.rs",
+      "crates/relar-compiler/src/llvm/stdlib.rs",
+      "crates/relar-compiler/src/llvm/text.rs",
+      "crates/relar-compiler/src/llvm/truthiness.rs",
+      "crates/relar-compiler/src/llvm/unions.rs",
+      "crates/relar-compiler/src/main.rs",
+      "crates/relar-compiler/src/modules.rs",
+      "crates/relar-compiler/src/narrowing.rs",
+      "crates/relar-compiler/src/range_specialization.rs",
+      "crates/relar-compiler/src/ranges.rs",
+      "crates/relar-compiler/src/reductions.rs",
+      "crates/relar-compiler/src/tuples.rs",
+      "crates/relar-compiler/src/types.rs",
+      "crates/relar-runtime/Cargo.toml",
+      "crates/relar-runtime/src/floats.rs",
+      "crates/relar-runtime/src/integer_text.rs",
+      "crates/relar-runtime/src/lib.rs",
+      "crates/relar-runtime/src/objects.rs",
+      "crates/relar-runtime/src/objects/args.rs",
+      "crates/relar-runtime/src/objects/bytes.rs",
+      "crates/relar-runtime/src/objects/exceptions.rs",
+      "crates/relar-runtime/src/objects/files.rs",
+      "crates/relar-runtime/src/objects/json.rs",
+      "crates/relar-runtime/src/objects/json/encode.rs",
+      "crates/relar-runtime/src/objects/mappings.rs",
+      "crates/relar-runtime/src/objects/paths.rs",
+      "crates/relar-runtime/src/objects/processes.rs",
+      "crates/relar-runtime/src/objects/records.rs",
+      "crates/relar-runtime/src/objects/sequences.rs",
+      "crates/relar-runtime/src/objects/stdlib.rs",
+      "crates/relar-runtime/src/objects/tempdirs.rs",
+      "crates/relar-runtime/src/objects/text.rs",
+      "crates/relar-runtime/src/objects/unions.rs",
+      "crates/relar-runtime/src/objects/values.rs",
+      "crates/relar-runtime/src/objects/words.rs",
+      "rust-toolchain.toml"
+    ],
+    "source_sha256": {
+      "Cargo.lock": "b0d7c71786810338c3b39382fbfa17cd0f416dfead36c91e7311309a4eabc2d6",
+      "Cargo.toml": "89e4875d4b7cf31c0f693c7e70f3512830d9603902288c996f45355e76b424de",
+      "crates/relar-compiler/Cargo.toml": "dc845abdf585abf868bda78ecca4fb58340eb37c508be8bb604f5b83e9143e26",
+      "crates/relar-compiler/src/analysis.rs": "157ef71a1bfc077449044e32e7fecb836b4a2fde359f0546c78c5182d34cc610",
+      "crates/relar-compiler/src/borrows.rs": "15972e6418caaa9ffc115c5bb470e3ff3ae4d82b2ef73a6ca0565ff802505dea",
+      "crates/relar-compiler/src/callables.rs": "595e3952bddfb0fd201e6130c728555bbd8b5eff240777fa361a9fdedc732bf4",
+      "crates/relar-compiler/src/classes/dataclasses.rs": "40b09b5f0000bc8bc32803d218b24e9d2d031d5ae824e5192ed31f993fdf5cd5",
+      "crates/relar-compiler/src/classes.rs": "7f81387046a35a7189991a915bcc28eff3e3d47020f1ac2ae6ac000bfbc4719f",
+      "crates/relar-compiler/src/effects.rs": "48552becc7d9d38c7c15254a2576cad290552de6b645373cf1ca39a8d488855b",
+      "crates/relar-compiler/src/frontend/assignments.rs": "0c9287d018f5206d8dccbfd794f69e50958afc7c31d1837ccdcb2c3bd0c33ce6",
+      "crates/relar-compiler/src/frontend/callables.rs": "ff783f9f62ce3b8fdb0b9ae80d6390af0f08e600c1a1d3ecbcd227dd58dcdc21",
+      "crates/relar-compiler/src/frontend/calls.rs": "01226927407dff165e198605802dd7f99ac2ba758b23c63c6f71602f75b9850a",
+      "crates/relar-compiler/src/frontend/comprehensions/slices.rs": "cb395ca6ff5547532ab1178cb45d1ca03fb03b370a76b17e8cce825d4cfea6c4",
+      "crates/relar-compiler/src/frontend/comprehensions.rs": "939f09a14ff4d44f56c558b03aca8d7658656b6dbada87bccc3a44d814e62737",
+      "crates/relar-compiler/src/frontend/dataclass_values.rs": "461b3c93c7d41ee97f97d5dad7f86f45fc7cd2397dbd49d33d9eb7cffa94dd6f",
+      "crates/relar-compiler/src/frontend/expansions.rs": "8995e09ef48dfa10c4365c76fdc44c72432db7c50e1d4d2f2bad4e1666967b00",
+      "crates/relar-compiler/src/frontend/inference.rs": "e3c02d36d82ec9e46e713a0d62175c561d6efc84bbd48bc049447bb3aca3cb67",
+      "crates/relar-compiler/src/frontend/iterables.rs": "c42875b2f2527ed66f7485295f8170dfad5dc68262d0dfab78abb44ad7aaece8",
+      "crates/relar-compiler/src/frontend/json.rs": "3fdd031403db69b7bbefa3f489c50b2f25d8d3aecd2ef6884a30e7dc5e751109",
+      "crates/relar-compiler/src/frontend/matching.rs": "b4e1a93845a091a79244a6fd46d77098df360744b2ba8bb76eecaedd2e1ed7cb",
+      "crates/relar-compiler/src/frontend/module_values.rs": "7d0bc81e35a3f0019eb940dae82916a377fd63a38f179c27387ba22c9f4ebd6b",
+      "crates/relar-compiler/src/frontend/paths.rs": "f23e34cfa7e9c948bf79f48941509d0ecc532749ae14d18390c324e96beef0bd",
+      "crates/relar-compiler/src/frontend/pipelines.rs": "d9d947df04a01b5336358194a6e5801deb8b69991f354f5f4385527dc4c6a3d9",
+      "crates/relar-compiler/src/frontend/processes.rs": "77c56d6e346ea0e6c95d1a458bac26b340bf2c3941510ff51703c693cc95e93b",
+      "crates/relar-compiler/src/frontend/records.rs": "97678ccf045a34cd6e23efae43cd2092f93a6fe704bfe37d8de1271a79bae780",
+      "crates/relar-compiler/src/frontend/stdlib.rs": "8695c9f7c5bb0b1a24179b4573000cd5e858c055fb2cbc435e1a0076096582d7",
+      "crates/relar-compiler/src/frontend/text.rs": "87e0a5205d200fc36b9c46c7a627c909408bdefc727f87d493baaf201e4b086c",
+      "crates/relar-compiler/src/frontend/truthiness.rs": "b001519b483995ae9593984e1fd19a6fb143759e4def529f25e8eae1527a8012",
+      "crates/relar-compiler/src/frontend/unions.rs": "e0b73b197791c19784b3f71b3341d5329e9449a3c20860566a8639e72afb4646",
+      "crates/relar-compiler/src/frontend/unpacking.rs": "a99d5a5c34daaeaf24dc15f3eccec808f6e1f023e2976a88dd11522e962cebf1",
+      "crates/relar-compiler/src/frontend.rs": "6f69775cf5ae777032a6b09869896f1301af23180f9507acffa4411e8d7cf1ee",
+      "crates/relar-compiler/src/ir.rs": "ed59c88c6e67c6f14f44f40b5963d504913ec7bd018a20635e49fc5877926543",
+      "crates/relar-compiler/src/lib.rs": "869a377932775181edb198ce234f981e8f0a24a566a8c993b7ff901e2d3f0a32",
+      "crates/relar-compiler/src/list_bounds.rs": "c13bec08897e4e854326bb1d23639c599bab528d5227ca4debf354da5e8c1b9f",
+      "crates/relar-compiler/src/list_specialization.rs": "360854b9b82a68a35a4d4594954f249e5f12fd31a758da54ec99667a53f89bb4",
+      "crates/relar-compiler/src/llvm/callables.rs": "aad7ed80b1691e6b23d1b253dbd948e6b40c5d3f11f59a840a908caa533e742c",
+      "crates/relar-compiler/src/llvm/conditionals.rs": "2e0463f23aaf7bcf74351d82536fcaf4bb53bc2b75c7a1e5367d39d1dfa85796",
+      "crates/relar-compiler/src/llvm/integer_regions.rs": "d3168faaacc66d87657bbb913fa1a23fe083eb3f8a339c6c05b86897c4fbd8bf",
+      "crates/relar-compiler/src/llvm/json.rs": "9746d3bdba0b1801a0b922f6ef6c01b1bed99b79cc4640cbe35a28c42c6daa62",
+      "crates/relar-compiler/src/llvm/literals.rs": "3065f1a0528c8b158df3e798522c2804e853e302683f676f9e0c59b1ce53baee",
+      "crates/relar-compiler/src/llvm/paths.rs": "9107d0f5c52c877ddf73cb7bf665043837c517920847b529757f225e18071c66",
+      "crates/relar-compiler/src/llvm/processes.rs": "778f15da906d519319f994044762506c96c20cf0bb09199fc0208df111b00c32",
+      "crates/relar-compiler/src/llvm/records.rs": "859a9ce26f773db94688369260e76d57a481ad18bccbd66404d57bc87c7094e0",
+      "crates/relar-compiler/src/llvm/stdlib.rs": "ceadcdae7db975cb5ad3b0eeae0c4b9e9058f46092ef73f3a674079ec2a060a5",
+      "crates/relar-compiler/src/llvm/text.rs": "553cb7f68cf6830a8137b1e3d776f76b54016199edfcf9eb8eb57bdf574d13f1",
+      "crates/relar-compiler/src/llvm/truthiness.rs": "fae301b76c5cf18a2d4e88f8fb294b911b7f31794fd38d48a326e1dc194df78e",
+      "crates/relar-compiler/src/llvm/unions.rs": "8449e56e3d41d99ef076fd9f73c5fcbdf150205fb05a3e424d0d86a9114bb34a",
+      "crates/relar-compiler/src/llvm.rs": "02e0a4dbc2c17244c3f21676b6df9d4cab97fdaca935946d68dfd74a84b63c65",
+      "crates/relar-compiler/src/main.rs": "f8ddab45ff2562f15ce3a8ba644358b2f7499dcb052c1b1df6bfb06a072df95b",
+      "crates/relar-compiler/src/modules.rs": "ea202f4e0d3adb8d07df6f97fece2e368ec5c450f86d58791c1e2a236c4dd7d2",
+      "crates/relar-compiler/src/narrowing.rs": "4a9e1784691d8fce0aac76cab8a9b610c78cbfbbba40d1f92117df6bfa4be523",
+      "crates/relar-compiler/src/range_specialization.rs": "8559f83fce73c49c87c46f5d8d31ab0587e7242607299a25d4854f109ce95bb2",
+      "crates/relar-compiler/src/ranges.rs": "68f9b2450dbb6427370080f8e79d6630a7d15969dd19f0e59e98ddb8eac1712c",
+      "crates/relar-compiler/src/reductions.rs": "137b517d00aaaa85d48ff0007f2e8763559ca7a6852270fc27d8c259551a2512",
+      "crates/relar-compiler/src/tuples.rs": "3be5ad39ec8a7ec01cc8f4228abbbf72216fd68e25fdc8162a6d1711f60d4d1b",
+      "crates/relar-compiler/src/types.rs": "593fb1ea274ccd52cd6cc2beb703f0291b68c77cc69e82ce6396ca016343d3f0",
+      "crates/relar-runtime/Cargo.toml": "97ca495077b1906fbc07661abde2746a4d78daa6c5191f6b3965db0cf2146b9c",
+      "crates/relar-runtime/src/floats.rs": "0d646809f58e498887955e7e1bb4c856abaa6e6c5029b1176e23303549cec8f4",
+      "crates/relar-runtime/src/integer_text.rs": "61483a52ce8c37bfe88e03413c7cd4027e39183d3d88fbf1977720a6c1c2bbdf",
+      "crates/relar-runtime/src/lib.rs": "24d4b6bebc2b621899428ca1697156180c90211fa24fb3ccf0915e7af86b99a1",
+      "crates/relar-runtime/src/objects/args.rs": "ae7d68f461819a46453e6904986993e681bf82b9b90401182d34b580836495af",
+      "crates/relar-runtime/src/objects/bytes.rs": "ad0351bf2b588031004e0dc7d7d564c8e8cef80dcf769e0827b251fa53bddf17",
+      "crates/relar-runtime/src/objects/exceptions.rs": "0887fde59ba3ca6f77868ebc9bab498e0f40450dea1e1f631cb6f83a4fbb6219",
+      "crates/relar-runtime/src/objects/files.rs": "20d93426818a2f40e5e0ead00df40cedc5f71ade6b00532a6b26fb01d9e919df",
+      "crates/relar-runtime/src/objects/json/encode.rs": "4dd6eb98687cf6a788fdf7aeca1b4eb9d624552fdf8f91ffa49a2b758c56e7e1",
+      "crates/relar-runtime/src/objects/json.rs": "d455d937b8b980fd99241aac4c86a315e65f0b3fa2b4c8d81b81f51b42d39256",
+      "crates/relar-runtime/src/objects/mappings.rs": "28888b2fac9b3c524c8b4b0525a9cd172b52f0bbdb745853021fea659faf719d",
+      "crates/relar-runtime/src/objects/paths.rs": "7c817f379d7e1c9150db9c85875563b6153e7e9f05440b83850b1fd8c81147cc",
+      "crates/relar-runtime/src/objects/processes.rs": "70fcd8454899b894196b189a3b24c5b0d99cad7b4c2d369995ca172ce0d5e2fa",
+      "crates/relar-runtime/src/objects/records.rs": "1c2e6a8769266dd568d6fc87aaf29f82c94b884f3360de659e6f2308e251b0be",
+      "crates/relar-runtime/src/objects/sequences.rs": "27c1f59e68af047fdf9f1b9b57d6d682825ba851ddcbc989c77e78859a509a32",
+      "crates/relar-runtime/src/objects/stdlib.rs": "7d380b46a9054ced6c02d5226db32fbe2f02d77089efdb5a44ffc7147f5164a4",
+      "crates/relar-runtime/src/objects/tempdirs.rs": "44805067f118193f2da35a534ace9a99b6c27e0cd03870b60924f8b66f21ffd2",
+      "crates/relar-runtime/src/objects/text.rs": "fc3b823519d3c0332ed5867f426fab45e47b01fbde3575be8684e3eeb3e184ec",
+      "crates/relar-runtime/src/objects/unions.rs": "0be6d0c6e5c9307ae89e0a3073943a52920841746906e58da3233447171aa56d",
+      "crates/relar-runtime/src/objects/values.rs": "ba346d244eb4d92c749829793f9f4872e593cae796e176aa65c876efd4211f59",
+      "crates/relar-runtime/src/objects/words.rs": "b008018dd2a61b0561dba3ade01fe785c6a287aaa5d9b2e43a190ece3061f0bb",
+      "crates/relar-runtime/src/objects.rs": "27fde02a7ca2202211ba9a6f7d8c2aba652289db92c90f31bd8c9bff0e5d1a7a",
+      "rust-toolchain.toml": "7553618f800829444096beea3dce84c3d07585efda504c19adb6787369bbd9e8"
+    },
+    "builder_sha256": "5345141b816a56e9bfdc411e1cb2605d22c26dc9271e211f95a4a4221fba1877",
+    "artifact_sha256": {
+      "normal_runtime": "535ad6c4bc929c570da7b065f4495c7ca08f41f80a5fd3ca9bb5e4533bf5661d",
+      "compiler": "898341c4d0f7c17761e882425f3ebfe9532bb40e1ba26cee243f19f7e05789b6",
+      "thinlto_runtime": "f4dbf94a2f29d5b51622e9ca48b562f3054f4b6f28f658482c408b9ac3b7cad1",
+      "asan_runtime": "35d3582d20fd7ad42df984a0ffdce809ad4dba7b70ab685ff68d388fa59f8984"
+    },
+    "tool_sha256": {
+      "rustc": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba",
+      "cargo": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e"
+    },
+    "tool_paths": {
+      "rustc": "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/rustc",
+      "cargo": "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/cargo"
+    },
+    "settings": {
+      "CARGO_TARGET_DIR": "/home/dev-user/.cache/relar-native-tools-20261021/target",
+      "CARGO_BUILD_BUILD_DIR": "/home/dev-user/.cache/relar/ohm-build-1.98.1-1",
+      "CARGO_BUILD_JOBS": "4",
+      "CARGO_PROFILE_RELEASE_OPT_LEVEL": "3",
+      "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+      "CARGO_PROFILE_RELEASE_LTO": "off",
+      "RUSTFLAGS": "",
+      "RUSTC_WRAPPER": "",
+      "RUSTC_WORKSPACE_WRAPPER": "",
+      "CARGO_UNSTABLE_OHM_PROC_MACRO_TRUST": "all",
+      "CARGO_UNSTABLE_OHM_NATIVE_TOOL_TRUST": "all",
+      "RUSTUP_HOME": "/home/dev-user/.cache/relar-native-tools-20261021/rustup",
+      "RUSTC": "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/rustc"
+    },
+    "target": "x86_64-unknown-linux-gnu",
+    "guarded_inputs": {
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/build-record.json": "b68f56bb1386d105f9f8cc195f4e31b3bdc4ef9c8493cc84b534b5e371a802c3",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/benchmarks/native_tools_build.py": "5345141b816a56e9bfdc411e1cb2605d22c26dc9271e211f95a4a4221fba1877",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/build.py": "5345141b816a56e9bfdc411e1cb2605d22c26dc9271e211f95a4a4221fba1877",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/Cargo.lock": "b0d7c71786810338c3b39382fbfa17cd0f416dfead36c91e7311309a4eabc2d6",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/Cargo.lock": "b0d7c71786810338c3b39382fbfa17cd0f416dfead36c91e7311309a4eabc2d6",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/Cargo.toml": "89e4875d4b7cf31c0f693c7e70f3512830d9603902288c996f45355e76b424de",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/Cargo.toml": "89e4875d4b7cf31c0f693c7e70f3512830d9603902288c996f45355e76b424de",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/Cargo.toml": "dc845abdf585abf868bda78ecca4fb58340eb37c508be8bb604f5b83e9143e26",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/Cargo.toml": "dc845abdf585abf868bda78ecca4fb58340eb37c508be8bb604f5b83e9143e26",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/analysis.rs": "157ef71a1bfc077449044e32e7fecb836b4a2fde359f0546c78c5182d34cc610",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/analysis.rs": "157ef71a1bfc077449044e32e7fecb836b4a2fde359f0546c78c5182d34cc610",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/borrows.rs": "15972e6418caaa9ffc115c5bb470e3ff3ae4d82b2ef73a6ca0565ff802505dea",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/borrows.rs": "15972e6418caaa9ffc115c5bb470e3ff3ae4d82b2ef73a6ca0565ff802505dea",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/callables.rs": "595e3952bddfb0fd201e6130c728555bbd8b5eff240777fa361a9fdedc732bf4",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/callables.rs": "595e3952bddfb0fd201e6130c728555bbd8b5eff240777fa361a9fdedc732bf4",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/classes/dataclasses.rs": "40b09b5f0000bc8bc32803d218b24e9d2d031d5ae824e5192ed31f993fdf5cd5",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/classes/dataclasses.rs": "40b09b5f0000bc8bc32803d218b24e9d2d031d5ae824e5192ed31f993fdf5cd5",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/classes.rs": "7f81387046a35a7189991a915bcc28eff3e3d47020f1ac2ae6ac000bfbc4719f",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/classes.rs": "7f81387046a35a7189991a915bcc28eff3e3d47020f1ac2ae6ac000bfbc4719f",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/effects.rs": "48552becc7d9d38c7c15254a2576cad290552de6b645373cf1ca39a8d488855b",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/effects.rs": "48552becc7d9d38c7c15254a2576cad290552de6b645373cf1ca39a8d488855b",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/assignments.rs": "0c9287d018f5206d8dccbfd794f69e50958afc7c31d1837ccdcb2c3bd0c33ce6",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/assignments.rs": "0c9287d018f5206d8dccbfd794f69e50958afc7c31d1837ccdcb2c3bd0c33ce6",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/callables.rs": "ff783f9f62ce3b8fdb0b9ae80d6390af0f08e600c1a1d3ecbcd227dd58dcdc21",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/callables.rs": "ff783f9f62ce3b8fdb0b9ae80d6390af0f08e600c1a1d3ecbcd227dd58dcdc21",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/calls.rs": "01226927407dff165e198605802dd7f99ac2ba758b23c63c6f71602f75b9850a",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/calls.rs": "01226927407dff165e198605802dd7f99ac2ba758b23c63c6f71602f75b9850a",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/comprehensions/slices.rs": "cb395ca6ff5547532ab1178cb45d1ca03fb03b370a76b17e8cce825d4cfea6c4",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/comprehensions/slices.rs": "cb395ca6ff5547532ab1178cb45d1ca03fb03b370a76b17e8cce825d4cfea6c4",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/comprehensions.rs": "939f09a14ff4d44f56c558b03aca8d7658656b6dbada87bccc3a44d814e62737",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/comprehensions.rs": "939f09a14ff4d44f56c558b03aca8d7658656b6dbada87bccc3a44d814e62737",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/dataclass_values.rs": "461b3c93c7d41ee97f97d5dad7f86f45fc7cd2397dbd49d33d9eb7cffa94dd6f",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/dataclass_values.rs": "461b3c93c7d41ee97f97d5dad7f86f45fc7cd2397dbd49d33d9eb7cffa94dd6f",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/expansions.rs": "8995e09ef48dfa10c4365c76fdc44c72432db7c50e1d4d2f2bad4e1666967b00",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/expansions.rs": "8995e09ef48dfa10c4365c76fdc44c72432db7c50e1d4d2f2bad4e1666967b00",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/inference.rs": "e3c02d36d82ec9e46e713a0d62175c561d6efc84bbd48bc049447bb3aca3cb67",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/inference.rs": "e3c02d36d82ec9e46e713a0d62175c561d6efc84bbd48bc049447bb3aca3cb67",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/iterables.rs": "c42875b2f2527ed66f7485295f8170dfad5dc68262d0dfab78abb44ad7aaece8",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/iterables.rs": "c42875b2f2527ed66f7485295f8170dfad5dc68262d0dfab78abb44ad7aaece8",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/json.rs": "3fdd031403db69b7bbefa3f489c50b2f25d8d3aecd2ef6884a30e7dc5e751109",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/json.rs": "3fdd031403db69b7bbefa3f489c50b2f25d8d3aecd2ef6884a30e7dc5e751109",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/matching.rs": "b4e1a93845a091a79244a6fd46d77098df360744b2ba8bb76eecaedd2e1ed7cb",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/matching.rs": "b4e1a93845a091a79244a6fd46d77098df360744b2ba8bb76eecaedd2e1ed7cb",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/module_values.rs": "7d0bc81e35a3f0019eb940dae82916a377fd63a38f179c27387ba22c9f4ebd6b",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/module_values.rs": "7d0bc81e35a3f0019eb940dae82916a377fd63a38f179c27387ba22c9f4ebd6b",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/paths.rs": "f23e34cfa7e9c948bf79f48941509d0ecc532749ae14d18390c324e96beef0bd",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/paths.rs": "f23e34cfa7e9c948bf79f48941509d0ecc532749ae14d18390c324e96beef0bd",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/pipelines.rs": "d9d947df04a01b5336358194a6e5801deb8b69991f354f5f4385527dc4c6a3d9",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/pipelines.rs": "d9d947df04a01b5336358194a6e5801deb8b69991f354f5f4385527dc4c6a3d9",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/processes.rs": "77c56d6e346ea0e6c95d1a458bac26b340bf2c3941510ff51703c693cc95e93b",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/processes.rs": "77c56d6e346ea0e6c95d1a458bac26b340bf2c3941510ff51703c693cc95e93b",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/records.rs": "97678ccf045a34cd6e23efae43cd2092f93a6fe704bfe37d8de1271a79bae780",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/records.rs": "97678ccf045a34cd6e23efae43cd2092f93a6fe704bfe37d8de1271a79bae780",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/stdlib.rs": "8695c9f7c5bb0b1a24179b4573000cd5e858c055fb2cbc435e1a0076096582d7",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/stdlib.rs": "8695c9f7c5bb0b1a24179b4573000cd5e858c055fb2cbc435e1a0076096582d7",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/text.rs": "87e0a5205d200fc36b9c46c7a627c909408bdefc727f87d493baaf201e4b086c",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/text.rs": "87e0a5205d200fc36b9c46c7a627c909408bdefc727f87d493baaf201e4b086c",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/truthiness.rs": "b001519b483995ae9593984e1fd19a6fb143759e4def529f25e8eae1527a8012",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/truthiness.rs": "b001519b483995ae9593984e1fd19a6fb143759e4def529f25e8eae1527a8012",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/unions.rs": "e0b73b197791c19784b3f71b3341d5329e9449a3c20860566a8639e72afb4646",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/unions.rs": "e0b73b197791c19784b3f71b3341d5329e9449a3c20860566a8639e72afb4646",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend/unpacking.rs": "a99d5a5c34daaeaf24dc15f3eccec808f6e1f023e2976a88dd11522e962cebf1",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend/unpacking.rs": "a99d5a5c34daaeaf24dc15f3eccec808f6e1f023e2976a88dd11522e962cebf1",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/frontend.rs": "6f69775cf5ae777032a6b09869896f1301af23180f9507acffa4411e8d7cf1ee",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/frontend.rs": "6f69775cf5ae777032a6b09869896f1301af23180f9507acffa4411e8d7cf1ee",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/ir.rs": "ed59c88c6e67c6f14f44f40b5963d504913ec7bd018a20635e49fc5877926543",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/ir.rs": "ed59c88c6e67c6f14f44f40b5963d504913ec7bd018a20635e49fc5877926543",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/lib.rs": "869a377932775181edb198ce234f981e8f0a24a566a8c993b7ff901e2d3f0a32",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/lib.rs": "869a377932775181edb198ce234f981e8f0a24a566a8c993b7ff901e2d3f0a32",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/list_bounds.rs": "c13bec08897e4e854326bb1d23639c599bab528d5227ca4debf354da5e8c1b9f",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/list_bounds.rs": "c13bec08897e4e854326bb1d23639c599bab528d5227ca4debf354da5e8c1b9f",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/list_specialization.rs": "360854b9b82a68a35a4d4594954f249e5f12fd31a758da54ec99667a53f89bb4",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/list_specialization.rs": "360854b9b82a68a35a4d4594954f249e5f12fd31a758da54ec99667a53f89bb4",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/llvm/callables.rs": "aad7ed80b1691e6b23d1b253dbd948e6b40c5d3f11f59a840a908caa533e742c",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/llvm/callables.rs": "aad7ed80b1691e6b23d1b253dbd948e6b40c5d3f11f59a840a908caa533e742c",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/llvm/conditionals.rs": "2e0463f23aaf7bcf74351d82536fcaf4bb53bc2b75c7a1e5367d39d1dfa85796",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/llvm/conditionals.rs": "2e0463f23aaf7bcf74351d82536fcaf4bb53bc2b75c7a1e5367d39d1dfa85796",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/llvm/integer_regions.rs": "d3168faaacc66d87657bbb913fa1a23fe083eb3f8a339c6c05b86897c4fbd8bf",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/llvm/integer_regions.rs": "d3168faaacc66d87657bbb913fa1a23fe083eb3f8a339c6c05b86897c4fbd8bf",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/llvm/json.rs": "9746d3bdba0b1801a0b922f6ef6c01b1bed99b79cc4640cbe35a28c42c6daa62",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/llvm/json.rs": "9746d3bdba0b1801a0b922f6ef6c01b1bed99b79cc4640cbe35a28c42c6daa62",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/llvm/literals.rs": "3065f1a0528c8b158df3e798522c2804e853e302683f676f9e0c59b1ce53baee",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/llvm/literals.rs": "3065f1a0528c8b158df3e798522c2804e853e302683f676f9e0c59b1ce53baee",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/llvm/paths.rs": "9107d0f5c52c877ddf73cb7bf665043837c517920847b529757f225e18071c66",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/llvm/paths.rs": "9107d0f5c52c877ddf73cb7bf665043837c517920847b529757f225e18071c66",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/llvm/processes.rs": "778f15da906d519319f994044762506c96c20cf0bb09199fc0208df111b00c32",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/llvm/processes.rs": "778f15da906d519319f994044762506c96c20cf0bb09199fc0208df111b00c32",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/llvm/records.rs": "859a9ce26f773db94688369260e76d57a481ad18bccbd66404d57bc87c7094e0",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/llvm/records.rs": "859a9ce26f773db94688369260e76d57a481ad18bccbd66404d57bc87c7094e0",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/llvm/stdlib.rs": "ceadcdae7db975cb5ad3b0eeae0c4b9e9058f46092ef73f3a674079ec2a060a5",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/llvm/stdlib.rs": "ceadcdae7db975cb5ad3b0eeae0c4b9e9058f46092ef73f3a674079ec2a060a5",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/llvm/text.rs": "553cb7f68cf6830a8137b1e3d776f76b54016199edfcf9eb8eb57bdf574d13f1",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/llvm/text.rs": "553cb7f68cf6830a8137b1e3d776f76b54016199edfcf9eb8eb57bdf574d13f1",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/llvm/truthiness.rs": "fae301b76c5cf18a2d4e88f8fb294b911b7f31794fd38d48a326e1dc194df78e",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/llvm/truthiness.rs": "fae301b76c5cf18a2d4e88f8fb294b911b7f31794fd38d48a326e1dc194df78e",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/llvm/unions.rs": "8449e56e3d41d99ef076fd9f73c5fcbdf150205fb05a3e424d0d86a9114bb34a",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/llvm/unions.rs": "8449e56e3d41d99ef076fd9f73c5fcbdf150205fb05a3e424d0d86a9114bb34a",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/llvm.rs": "02e0a4dbc2c17244c3f21676b6df9d4cab97fdaca935946d68dfd74a84b63c65",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/llvm.rs": "02e0a4dbc2c17244c3f21676b6df9d4cab97fdaca935946d68dfd74a84b63c65",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/main.rs": "f8ddab45ff2562f15ce3a8ba644358b2f7499dcb052c1b1df6bfb06a072df95b",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/main.rs": "f8ddab45ff2562f15ce3a8ba644358b2f7499dcb052c1b1df6bfb06a072df95b",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/modules.rs": "ea202f4e0d3adb8d07df6f97fece2e368ec5c450f86d58791c1e2a236c4dd7d2",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/modules.rs": "ea202f4e0d3adb8d07df6f97fece2e368ec5c450f86d58791c1e2a236c4dd7d2",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/narrowing.rs": "4a9e1784691d8fce0aac76cab8a9b610c78cbfbbba40d1f92117df6bfa4be523",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/narrowing.rs": "4a9e1784691d8fce0aac76cab8a9b610c78cbfbbba40d1f92117df6bfa4be523",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/range_specialization.rs": "8559f83fce73c49c87c46f5d8d31ab0587e7242607299a25d4854f109ce95bb2",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/range_specialization.rs": "8559f83fce73c49c87c46f5d8d31ab0587e7242607299a25d4854f109ce95bb2",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/ranges.rs": "68f9b2450dbb6427370080f8e79d6630a7d15969dd19f0e59e98ddb8eac1712c",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/ranges.rs": "68f9b2450dbb6427370080f8e79d6630a7d15969dd19f0e59e98ddb8eac1712c",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/reductions.rs": "137b517d00aaaa85d48ff0007f2e8763559ca7a6852270fc27d8c259551a2512",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/reductions.rs": "137b517d00aaaa85d48ff0007f2e8763559ca7a6852270fc27d8c259551a2512",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/tuples.rs": "3be5ad39ec8a7ec01cc8f4228abbbf72216fd68e25fdc8162a6d1711f60d4d1b",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/tuples.rs": "3be5ad39ec8a7ec01cc8f4228abbbf72216fd68e25fdc8162a6d1711f60d4d1b",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-compiler/src/types.rs": "593fb1ea274ccd52cd6cc2beb703f0291b68c77cc69e82ce6396ca016343d3f0",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-compiler/src/types.rs": "593fb1ea274ccd52cd6cc2beb703f0291b68c77cc69e82ce6396ca016343d3f0",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/Cargo.toml": "97ca495077b1906fbc07661abde2746a4d78daa6c5191f6b3965db0cf2146b9c",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/Cargo.toml": "97ca495077b1906fbc07661abde2746a4d78daa6c5191f6b3965db0cf2146b9c",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/floats.rs": "0d646809f58e498887955e7e1bb4c856abaa6e6c5029b1176e23303549cec8f4",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/floats.rs": "0d646809f58e498887955e7e1bb4c856abaa6e6c5029b1176e23303549cec8f4",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/integer_text.rs": "61483a52ce8c37bfe88e03413c7cd4027e39183d3d88fbf1977720a6c1c2bbdf",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/integer_text.rs": "61483a52ce8c37bfe88e03413c7cd4027e39183d3d88fbf1977720a6c1c2bbdf",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/lib.rs": "24d4b6bebc2b621899428ca1697156180c90211fa24fb3ccf0915e7af86b99a1",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/lib.rs": "24d4b6bebc2b621899428ca1697156180c90211fa24fb3ccf0915e7af86b99a1",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/args.rs": "ae7d68f461819a46453e6904986993e681bf82b9b90401182d34b580836495af",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/args.rs": "ae7d68f461819a46453e6904986993e681bf82b9b90401182d34b580836495af",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/bytes.rs": "ad0351bf2b588031004e0dc7d7d564c8e8cef80dcf769e0827b251fa53bddf17",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/bytes.rs": "ad0351bf2b588031004e0dc7d7d564c8e8cef80dcf769e0827b251fa53bddf17",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/exceptions.rs": "0887fde59ba3ca6f77868ebc9bab498e0f40450dea1e1f631cb6f83a4fbb6219",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/exceptions.rs": "0887fde59ba3ca6f77868ebc9bab498e0f40450dea1e1f631cb6f83a4fbb6219",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/files.rs": "20d93426818a2f40e5e0ead00df40cedc5f71ade6b00532a6b26fb01d9e919df",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/files.rs": "20d93426818a2f40e5e0ead00df40cedc5f71ade6b00532a6b26fb01d9e919df",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/json/encode.rs": "4dd6eb98687cf6a788fdf7aeca1b4eb9d624552fdf8f91ffa49a2b758c56e7e1",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/json/encode.rs": "4dd6eb98687cf6a788fdf7aeca1b4eb9d624552fdf8f91ffa49a2b758c56e7e1",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/json.rs": "d455d937b8b980fd99241aac4c86a315e65f0b3fa2b4c8d81b81f51b42d39256",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/json.rs": "d455d937b8b980fd99241aac4c86a315e65f0b3fa2b4c8d81b81f51b42d39256",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/mappings.rs": "28888b2fac9b3c524c8b4b0525a9cd172b52f0bbdb745853021fea659faf719d",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/mappings.rs": "28888b2fac9b3c524c8b4b0525a9cd172b52f0bbdb745853021fea659faf719d",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/paths.rs": "7c817f379d7e1c9150db9c85875563b6153e7e9f05440b83850b1fd8c81147cc",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/paths.rs": "7c817f379d7e1c9150db9c85875563b6153e7e9f05440b83850b1fd8c81147cc",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/processes.rs": "70fcd8454899b894196b189a3b24c5b0d99cad7b4c2d369995ca172ce0d5e2fa",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/processes.rs": "70fcd8454899b894196b189a3b24c5b0d99cad7b4c2d369995ca172ce0d5e2fa",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/records.rs": "1c2e6a8769266dd568d6fc87aaf29f82c94b884f3360de659e6f2308e251b0be",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/records.rs": "1c2e6a8769266dd568d6fc87aaf29f82c94b884f3360de659e6f2308e251b0be",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/sequences.rs": "27c1f59e68af047fdf9f1b9b57d6d682825ba851ddcbc989c77e78859a509a32",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/sequences.rs": "27c1f59e68af047fdf9f1b9b57d6d682825ba851ddcbc989c77e78859a509a32",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/stdlib.rs": "7d380b46a9054ced6c02d5226db32fbe2f02d77089efdb5a44ffc7147f5164a4",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/stdlib.rs": "7d380b46a9054ced6c02d5226db32fbe2f02d77089efdb5a44ffc7147f5164a4",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/tempdirs.rs": "44805067f118193f2da35a534ace9a99b6c27e0cd03870b60924f8b66f21ffd2",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/tempdirs.rs": "44805067f118193f2da35a534ace9a99b6c27e0cd03870b60924f8b66f21ffd2",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/text.rs": "fc3b823519d3c0332ed5867f426fab45e47b01fbde3575be8684e3eeb3e184ec",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/text.rs": "fc3b823519d3c0332ed5867f426fab45e47b01fbde3575be8684e3eeb3e184ec",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/unions.rs": "0be6d0c6e5c9307ae89e0a3073943a52920841746906e58da3233447171aa56d",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/unions.rs": "0be6d0c6e5c9307ae89e0a3073943a52920841746906e58da3233447171aa56d",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/values.rs": "ba346d244eb4d92c749829793f9f4872e593cae796e176aa65c876efd4211f59",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/values.rs": "ba346d244eb4d92c749829793f9f4872e593cae796e176aa65c876efd4211f59",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects/words.rs": "b008018dd2a61b0561dba3ade01fe785c6a287aaa5d9b2e43a190ece3061f0bb",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects/words.rs": "b008018dd2a61b0561dba3ade01fe785c6a287aaa5d9b2e43a190ece3061f0bb",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/crates/relar-runtime/src/objects.rs": "27fde02a7ca2202211ba9a6f7d8c2aba652289db92c90f31bd8c9bff0e5d1a7a",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/crates/relar-runtime/src/objects.rs": "27fde02a7ca2202211ba9a6f7d8c2aba652289db92c90f31bd8c9bff0e5d1a7a",
+      "/home/dev-user/code/oss/relar-native-tools-20261021/rust-toolchain.toml": "7553618f800829444096beea3dce84c3d07585efda504c19adb6787369bbd9e8",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/sources/rust-toolchain.toml": "7553618f800829444096beea3dce84c3d07585efda504c19adb6787369bbd9e8",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/normal_runtime.a": "535ad6c4bc929c570da7b065f4495c7ca08f41f80a5fd3ca9bb5e4533bf5661d",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/relar": "898341c4d0f7c17761e882425f3ebfe9532bb40e1ba26cee243f19f7e05789b6",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/thinlto_runtime.a": "f4dbf94a2f29d5b51622e9ca48b562f3054f4b6f28f658482c408b9ac3b7cad1",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/asan_runtime.a": "35d3582d20fd7ad42df984a0ffdce809ad4dba7b70ab685ff68d388fa59f8984",
+      "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/rustc": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba",
+      "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/cargo": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/normal.log": "d3f321013e70a7ccda972c34665b115e27d90ba7b4f9134cbe5c594c800e2e6f",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/normal.jsonl": "1b96184e3738f5ed8f2028cc370722d8c069375092e41917e3899b97701af7de",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/thinlto.log": "00c5e43bc6c7868167d20c0d33a3ce395f7de7756063b38cae0ab747c0f9abe9",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/thinlto.jsonl": "1942bad8f42e9bb6c608e2c1ede43bed1570cc2faf5d4f6a9cb4fdf413195ef1",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/asan.log": "986c6b3e34c054c2ab8505871f90cc683e7592362e147aa4c99bf104ca2c9396",
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/asan.jsonl": "3ac3df80eef68d481c7106fe5995b90b057d62a3783e5b411599af4fcfcd8a03"
+    },
+    "build_git_tree_matches": true,
+    "measurement_git_tree_matches": true,
+    "retained_source_matches": true
+  },
+  "core_build_record": "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/build-record.json",
+  "core_build_record_sha256": "b68f56bb1386d105f9f8cc195f4e31b3bdc4ef9c8493cc84b534b5e371a802c3",
+  "idle_probe": {
+    "seconds": 2,
+    "busy_fraction": {
+      "0": 0.01,
+      "1": 0.0,
+      "2": 0.0,
+      "3": 0.0,
+      "4": 0.0,
+      "5": 0.0,
+      "6": 0.0,
+      "7": 0.0,
+      "8": 0.0,
+      "9": 0.0,
+      "10": 0.0,
+      "11": 0.0,
+      "12": 0.0,
+      "13": 0.01507537688442211,
+      "14": 0.004975124378109453,
+      "15": 0.005,
+      "16": 0.0,
+      "17": 0.0,
+      "18": 0.0,
+      "19": 0.0,
+      "20": 0.0,
+      "21": 0.0,
+      "22": 0.0,
+      "23": 0.015,
+      "24": 0.005,
+      "25": 0.0,
+      "26": 0.0,
+      "27": 0.010050251256281407,
+      "28": 0.0,
+      "29": 0.0,
+      "30": 0.0,
+      "31": 0.0
+    },
+    "processes": [
+      "    PID    PPID ELAPSED %CPU %MEM COMMAND",
+      "3943301 3943114       0  300  0.0 ps",
+      "3943114 3372981       4 13.8  0.0 python3.14",
+      "    906     900  559706 12.9  1.8 falcon-sensor-b",
+      "2388668 2388667   60695  6.0  1.0 codex",
+      "      1       0  559716  0.7  0.0 systemd",
+      "2556426 2388668   40936  0.4  0.0 codex-code-mode",
+      "   1432    1346  559686  0.3  0.0 xds-server",
+      "   1436    1346  559686  0.3  0.0 envoy",
+      "2737517       1  398084  0.2  0.0 applied-devbox-",
+      "2408936       1   57973  0.2  0.0 devbox-agent",
+      "   1354       1  559686  0.1  0.0 redis-server",
+      "   1335       1  559686  0.1  0.0 dbus-daemon",
+      "   1428       1  559686  0.1  0.0 containerd",
+      "   2036       1  559678  0.1  0.0 git",
+      "2680875 2680864   38773  0.1  0.0 codex",
+      "   1060       1  559705  0.1  0.0 systemd-resolve",
+      "   1441    1346  559686  0.1  0.0 dns-responder",
+      "    652       1  559707  0.1  0.1 systemd-journal",
+      "     17       2  559716  0.0  0.0 rcu_preempt"
+    ]
+  },
+  "finished_at": "2026-10-21T23:19:27.381611+00:00"
+}

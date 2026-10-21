@@ -1,0 +1,2049 @@
+{
+  "schema": 1,
+  "kind": "native-tools-evidence-replay",
+  "status": "passed",
+  "measurement_revision": "88169978bfc9436024a6bfc34fc8a6c7de285023",
+  "modes": {
+    "normal": {
+      "rows": [
+        {
+          "label": "catalog-real",
+          "tool": "catalog",
+          "rounds": null,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.2862606885,
+              "min_seconds": 0.278430919,
+              "max_seconds": 0.292765343,
+              "p25_seconds": 0.28448810075,
+              "p75_seconds": 0.28931917175
+            },
+            "port": {
+              "median_seconds": 2.972906885,
+              "min_seconds": 2.929394509,
+              "max_seconds": 3.169213004,
+              "p25_seconds": 2.95400992525,
+              "p75_seconds": 2.984587666
+            },
+            "original": {
+              "median_seconds": 0.999933134,
+              "min_seconds": 0.978527281,
+              "max_seconds": 1.02063,
+              "p25_seconds": 0.9956124255,
+              "p75_seconds": 1.006696953
+            },
+            "codon": {
+              "median_seconds": 0.567205551,
+              "min_seconds": 0.560455459,
+              "max_seconds": 0.581922211,
+              "p25_seconds": 0.56570707525,
+              "p75_seconds": 0.57088938025
+            },
+            "rust": {
+              "median_seconds": 0.1554545375,
+              "min_seconds": 0.153279727,
+              "max_seconds": 0.162587494,
+              "p25_seconds": 0.15453345525,
+              "p75_seconds": 0.15606930525
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.8414431196644874,
+            "codon_over_rust": 3.648690865649387,
+            "original_over_relar": 3.493085757739313,
+            "port_over_relar": 10.385313123425956,
+            "codon_over_relar": 1.9814301222153317,
+            "original_over_rust": 6.43231873498707
+          },
+          "iqr_seconds": {
+            "relar": 0.00483107100000002,
+            "port": 0.030577740750000082,
+            "original": 0.011084527500000108,
+            "codon": 0.005182305000000054,
+            "rust": 0.0015358500000000053
+          }
+        },
+        {
+          "label": "catalog-real-compute-0",
+          "tool": "catalog",
+          "rounds": 0,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0301031355,
+              "min_seconds": 0.028632678,
+              "max_seconds": 0.031740917,
+              "p25_seconds": 0.02921055725,
+              "p75_seconds": 0.03086456925
+            },
+            "port": {
+              "median_seconds": 0.1056091995,
+              "min_seconds": 0.104075093,
+              "max_seconds": 0.109710545,
+              "p25_seconds": 0.10510511975,
+              "p75_seconds": 0.1076617775
+            },
+            "original": {
+              "median_seconds": 0.139807907,
+              "min_seconds": 0.137141065,
+              "max_seconds": 0.154350288,
+              "p25_seconds": 0.1387246315,
+              "p75_seconds": 0.14143966325
+            },
+            "codon": {
+              "median_seconds": 0.030098923,
+              "min_seconds": 0.029134437,
+              "max_seconds": 0.035667032,
+              "p25_seconds": 0.02957569725,
+              "p75_seconds": 0.03055984325
+            },
+            "rust": {
+              "median_seconds": 0.0286388605,
+              "min_seconds": 0.027143765,
+              "max_seconds": 0.029976451,
+              "p25_seconds": 0.0276711345,
+              "p75_seconds": 0.02929838225
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0511289546593519,
+            "codon_over_rust": 1.0509818643098596,
+            "original_over_relar": 4.644297169642013,
+            "port_over_relar": 3.5082458270833614,
+            "codon_over_relar": 0.9998600644108984,
+            "original_over_rust": 4.881755229053196
+          },
+          "iqr_seconds": {
+            "relar": 0.0016540119999999998,
+            "port": 0.0025566577499999965,
+            "original": 0.0027150317499999854,
+            "codon": 0.0009841459999999982,
+            "rust": 0.0016272477500000014
+          }
+        },
+        {
+          "label": "catalog-real-compute-4",
+          "tool": "catalog",
+          "rounds": 4,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.9680682275,
+              "min_seconds": 0.951810767,
+              "max_seconds": 1.022997314,
+              "p25_seconds": 0.96154502275,
+              "p75_seconds": 0.97589882925
+            },
+            "port": {
+              "median_seconds": 11.5770466805,
+              "min_seconds": 11.426634566,
+              "max_seconds": 11.85909392,
+              "p25_seconds": 11.504875673,
+              "p75_seconds": 11.69307252625
+            },
+            "original": {
+              "median_seconds": 3.4634512705,
+              "min_seconds": 3.414329015,
+              "max_seconds": 3.804665026,
+              "p25_seconds": 3.44000102025,
+              "p75_seconds": 3.520836284
+            },
+            "codon": {
+              "median_seconds": 2.2829585975,
+              "min_seconds": 2.236549416,
+              "max_seconds": 2.621723426,
+              "p25_seconds": 2.25443599375,
+              "p75_seconds": 2.330263205
+            },
+            "rust": {
+              "median_seconds": 0.4944841565,
+              "min_seconds": 0.48876678,
+              "max_seconds": 0.51905814,
+              "p25_seconds": 0.49181661475,
+              "p75_seconds": 0.4991162785
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.9577335588506364,
+            "codon_over_rust": 4.616848826176699,
+            "original_over_relar": 3.5776933609774937,
+            "port_over_relar": 11.958916067721065,
+            "codon_over_relar": 2.3582620859230707,
+            "original_over_rust": 7.004170356062763
+          },
+          "iqr_seconds": {
+            "relar": 0.014353806500000066,
+            "port": 0.18819685325000002,
+            "original": 0.08083526375000005,
+            "codon": 0.07582721125000003,
+            "rust": 0.007299663750000018
+          },
+          "amortized_seconds": {
+            "relar": 0.242017056875,
+            "port": 2.894261670125,
+            "original": 0.865862817625,
+            "codon": 0.570739649375,
+            "rust": 0.123621039125
+          },
+          "preload_control_fraction": {
+            "relar": 0.031096088730998044,
+            "port": 0.00912229192941622,
+            "original": 0.04036664473694665,
+            "codon": 0.013184173831693853,
+            "rust": 0.05791663923614507
+          }
+        },
+        {
+          "label": "conformance-unchanged-github",
+          "tool": "conformance",
+          "rounds": null,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.035286925,
+              "min_seconds": 0.034783418,
+              "max_seconds": 0.03659712,
+              "p25_seconds": 0.03509402225,
+              "p75_seconds": 0.0357925785
+            },
+            "port": {
+              "median_seconds": 0.2515807545,
+              "min_seconds": 0.244224869,
+              "max_seconds": 0.257850616,
+              "p25_seconds": 0.2508683655,
+              "p75_seconds": 0.25409259475
+            },
+            "original": {
+              "median_seconds": 0.153214899,
+              "min_seconds": 0.148502727,
+              "max_seconds": 0.161744008,
+              "p25_seconds": 0.15220133275,
+              "p75_seconds": 0.15404443875
+            },
+            "codon": {
+              "median_seconds": 0.0586594495,
+              "min_seconds": 0.056183198,
+              "max_seconds": 0.060137455,
+              "p25_seconds": 0.05815989475,
+              "p75_seconds": 0.0589268485
+            },
+            "rust": {
+              "median_seconds": 0.023767523,
+              "min_seconds": 0.023151947,
+              "max_seconds": 0.025427213,
+              "p25_seconds": 0.02349770375,
+              "p75_seconds": 0.02389853575
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.4846698581084785,
+            "codon_over_rust": 2.4680506041794934,
+            "original_over_relar": 4.341973663049416,
+            "port_over_relar": 7.129574325334384,
+            "codon_over_relar": 1.662356510237149,
+            "original_over_rust": 6.446397422230326
+          },
+          "iqr_seconds": {
+            "relar": 0.0006985562499999959,
+            "port": 0.003224229249999988,
+            "original": 0.001843106000000011,
+            "codon": 0.0007669537499999934,
+            "rust": 0.00040083200000000027
+          }
+        },
+        {
+          "label": "conformance-unchanged-github-compute-0",
+          "tool": "conformance",
+          "rounds": 0,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0106303495,
+              "min_seconds": 0.01017002,
+              "max_seconds": 0.011824504,
+              "p25_seconds": 0.010461682,
+              "p75_seconds": 0.01095039625
+            },
+            "port": {
+              "median_seconds": 0.085655618,
+              "min_seconds": 0.082846072,
+              "max_seconds": 0.090088116,
+              "p25_seconds": 0.08488162225,
+              "p75_seconds": 0.0868002605
+            },
+            "original": {
+              "median_seconds": 0.095344431,
+              "min_seconds": 0.09254925,
+              "max_seconds": 0.100973117,
+              "p25_seconds": 0.09481201525,
+              "p75_seconds": 0.09606477275
+            },
+            "codon": {
+              "median_seconds": 0.0197843835,
+              "min_seconds": 0.019325381,
+              "max_seconds": 0.021254449,
+              "p25_seconds": 0.01966110075,
+              "p75_seconds": 0.02033924175
+            },
+            "rust": {
+              "median_seconds": 0.0097785415,
+              "min_seconds": 0.009421971,
+              "max_seconds": 0.01021865,
+              "p25_seconds": 0.00963817675,
+              "p75_seconds": 0.010076767
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0871099232947983,
+            "codon_over_rust": 2.0232448264396075,
+            "original_over_relar": 8.969077733521367,
+            "port_over_relar": 8.057648339784125,
+            "codon_over_relar": 1.8611225811531407,
+            "original_over_rust": 9.750373406913495
+          },
+          "iqr_seconds": {
+            "relar": 0.0004887142499999993,
+            "port": 0.001918638250000007,
+            "original": 0.001252757499999993,
+            "codon": 0.0006781410000000002,
+            "rust": 0.0004385902500000007
+          }
+        },
+        {
+          "label": "conformance-unchanged-github-compute-4",
+          "tool": "conformance",
+          "rounds": 4,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.100304567,
+              "min_seconds": 0.096770768,
+              "max_seconds": 0.106651336,
+              "p25_seconds": 0.099240902,
+              "p75_seconds": 0.10107901225
+            },
+            "port": {
+              "median_seconds": 0.725692265,
+              "min_seconds": 0.715840825,
+              "max_seconds": 0.902450517,
+              "p25_seconds": 0.722519563,
+              "p75_seconds": 0.7289553035
+            },
+            "original": {
+              "median_seconds": 0.3006823305,
+              "min_seconds": 0.29697513,
+              "max_seconds": 0.391149277,
+              "p25_seconds": 0.299713806,
+              "p75_seconds": 0.303418552
+            },
+            "codon": {
+              "median_seconds": 0.140317207,
+              "min_seconds": 0.133691649,
+              "max_seconds": 0.181507966,
+              "p25_seconds": 0.1397029785,
+              "p75_seconds": 0.14199886625
+            },
+            "rust": {
+              "median_seconds": 0.051680567,
+              "min_seconds": 0.050420825,
+              "max_seconds": 0.059941529,
+              "p25_seconds": 0.05141480175,
+              "p75_seconds": 0.05227782525
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.9408565505869935,
+            "codon_over_rust": 2.7150864463232383,
+            "original_over_relar": 2.9976933203849034,
+            "port_over_relar": 7.234887569974755,
+            "codon_over_relar": 1.3989114473720823,
+            "original_over_rust": 5.818092717519915
+          },
+          "iqr_seconds": {
+            "relar": 0.0018381102499999968,
+            "port": 0.0064357405000000645,
+            "original": 0.003704745999999981,
+            "codon": 0.002295887750000003,
+            "rust": 0.0008630234999999972
+          },
+          "amortized_seconds": {
+            "relar": 0.02507614175,
+            "port": 0.18142306625,
+            "original": 0.075170582625,
+            "codon": 0.03507930175,
+            "rust": 0.01292014175
+          },
+          "preload_control_fraction": {
+            "relar": 0.10598071272268192,
+            "port": 0.11803297641597435,
+            "original": 0.3170935613058912,
+            "codon": 0.14099755776923353,
+            "rust": 0.18921118841439957
+          }
+        },
+        {
+          "label": "conformance-changed-github",
+          "tool": "conformance",
+          "rounds": null,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.036824474,
+              "min_seconds": 0.036231421,
+              "max_seconds": 0.039245957,
+              "p25_seconds": 0.0365267235,
+              "p75_seconds": 0.03717805575
+            },
+            "port": {
+              "median_seconds": 0.252678087,
+              "min_seconds": 0.245051165,
+              "max_seconds": 0.449534328,
+              "p25_seconds": 0.250182679,
+              "p75_seconds": 0.255000905
+            },
+            "original": {
+              "median_seconds": 0.155717723,
+              "min_seconds": 0.152260526,
+              "max_seconds": 0.198599451,
+              "p25_seconds": 0.1545437285,
+              "p75_seconds": 0.15733958975
+            },
+            "codon": {
+              "median_seconds": 0.059839953,
+              "min_seconds": 0.058563677,
+              "max_seconds": 0.102581237,
+              "p25_seconds": 0.0593867475,
+              "p75_seconds": 0.06047349925
+            },
+            "rust": {
+              "median_seconds": 0.0243064775,
+              "min_seconds": 0.023836388,
+              "max_seconds": 0.063062801,
+              "p25_seconds": 0.024130656,
+              "p75_seconds": 0.024651316
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.515006606777967,
+            "codon_over_rust": 2.461893254586149,
+            "original_over_relar": 4.228647583669491,
+            "port_over_relar": 6.861688968048803,
+            "codon_over_relar": 1.6250049627321221,
+            "original_over_rust": 6.406429026994965
+          },
+          "iqr_seconds": {
+            "relar": 0.0006513322500000043,
+            "port": 0.004818225999999981,
+            "original": 0.0027958612500000035,
+            "codon": 0.0010867517499999965,
+            "rust": 0.0005206599999999992
+          }
+        },
+        {
+          "label": "conformance-changed-github-compute-0",
+          "tool": "conformance",
+          "rounds": 0,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0107091935,
+              "min_seconds": 0.010238047,
+              "max_seconds": 0.011450575,
+              "p25_seconds": 0.0105746165,
+              "p75_seconds": 0.010834987
+            },
+            "port": {
+              "median_seconds": 0.086556019,
+              "min_seconds": 0.084189543,
+              "max_seconds": 0.089965474,
+              "p25_seconds": 0.08557212175,
+              "p75_seconds": 0.08760047625
+            },
+            "original": {
+              "median_seconds": 0.096010451,
+              "min_seconds": 0.090757827,
+              "max_seconds": 0.098812321,
+              "p25_seconds": 0.09535966925,
+              "p75_seconds": 0.09712172075
+            },
+            "codon": {
+              "median_seconds": 0.0201814035,
+              "min_seconds": 0.019444805,
+              "max_seconds": 0.021201001,
+              "p25_seconds": 0.0200380705,
+              "p75_seconds": 0.02045171925
+            },
+            "rust": {
+              "median_seconds": 0.0099951185,
+              "min_seconds": 0.008564316,
+              "max_seconds": 0.010919492,
+              "p25_seconds": 0.00972144625,
+              "p75_seconds": 0.01019423
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0714423745951587,
+            "codon_over_rust": 2.019125986350237,
+            "original_over_relar": 8.965236364437713,
+            "port_over_relar": 8.082403124007424,
+            "codon_over_relar": 1.8844933094168108,
+            "original_over_rust": 9.605734139120012
+          },
+          "iqr_seconds": {
+            "relar": 0.0002603705000000008,
+            "port": 0.0020283545000000097,
+            "original": 0.0017620515000000003,
+            "codon": 0.0004136487499999987,
+            "rust": 0.00047278375000000053
+          }
+        },
+        {
+          "label": "conformance-changed-github-compute-4",
+          "tool": "conformance",
+          "rounds": 4,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.104965809,
+              "min_seconds": 0.10294786,
+              "max_seconds": 0.11154348,
+              "p25_seconds": 0.1039045895,
+              "p75_seconds": 0.10602966425
+            },
+            "port": {
+              "median_seconds": 0.726241213,
+              "min_seconds": 0.719259795,
+              "max_seconds": 0.739709221,
+              "p25_seconds": 0.723812253,
+              "p75_seconds": 0.72894945875
+            },
+            "original": {
+              "median_seconds": 0.306310339,
+              "min_seconds": 0.302715147,
+              "max_seconds": 0.317461237,
+              "p25_seconds": 0.3045217305,
+              "p75_seconds": 0.30913013225
+            },
+            "codon": {
+              "median_seconds": 0.150433549,
+              "min_seconds": 0.147711337,
+              "max_seconds": 0.158659637,
+              "p25_seconds": 0.14976107925,
+              "p75_seconds": 0.152634931
+            },
+            "rust": {
+              "median_seconds": 0.0555581825,
+              "min_seconds": 0.054204668,
+              "max_seconds": 0.058656663,
+              "p25_seconds": 0.0547165775,
+              "p75_seconds": 0.055885591
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.8892952266752066,
+            "codon_over_rust": 2.707675849547454,
+            "original_over_relar": 2.918191570361736,
+            "port_over_relar": 6.918835951619256,
+            "codon_over_relar": 1.4331671468373097,
+            "original_over_rust": 5.513325404408253
+          },
+          "iqr_seconds": {
+            "relar": 0.0021250747499999972,
+            "port": 0.005137205749999985,
+            "original": 0.004608401750000046,
+            "codon": 0.0028738517499999894,
+            "rust": 0.0011690134999999963
+          },
+          "amortized_seconds": {
+            "relar": 0.02624145225,
+            "port": 0.18156030325,
+            "original": 0.07657758475,
+            "codon": 0.03760838725,
+            "rust": 0.013889545625
+          },
+          "preload_control_fraction": {
+            "relar": 0.10202554147894007,
+            "port": 0.11918356800827826,
+            "original": 0.31344175751116254,
+            "codon": 0.1341549384040657,
+            "rust": 0.17990362625703246
+          }
+        },
+        {
+          "label": "conformance-changed-diff",
+          "tool": "conformance",
+          "rounds": null,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.03611191,
+              "min_seconds": 0.035571399,
+              "max_seconds": 0.037302868,
+              "p25_seconds": 0.03596423025,
+              "p75_seconds": 0.03634253575
+            },
+            "port": {
+              "median_seconds": 0.25139417,
+              "min_seconds": 0.247775673,
+              "max_seconds": 0.268817188,
+              "p25_seconds": 0.250536653,
+              "p75_seconds": 0.25266523125
+            },
+            "original": {
+              "median_seconds": 0.155295522,
+              "min_seconds": 0.151372962,
+              "max_seconds": 0.15864057,
+              "p25_seconds": 0.154452847,
+              "p75_seconds": 0.15627016025
+            },
+            "codon": {
+              "median_seconds": 0.0591782555,
+              "min_seconds": 0.058289889,
+              "max_seconds": 0.060526292,
+              "p25_seconds": 0.05873949825,
+              "p75_seconds": 0.05960611
+            },
+            "rust": {
+              "median_seconds": 0.024051924,
+              "min_seconds": 0.02342437,
+              "max_seconds": 0.027046695,
+              "p25_seconds": 0.02366159625,
+              "p75_seconds": 0.02441145125
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.501414606166226,
+            "codon_over_rust": 2.4604374893251784,
+            "original_over_relar": 4.300396240464711,
+            "port_over_relar": 6.961530697213191,
+            "codon_over_relar": 1.6387462058916298,
+            "original_over_rust": 6.456677727736043
+          },
+          "iqr_seconds": {
+            "relar": 0.0003783055000000021,
+            "port": 0.0021285782500000128,
+            "original": 0.0018173132500000078,
+            "codon": 0.0008666117499999959,
+            "rust": 0.0007498550000000007
+          }
+        },
+        {
+          "label": "conformance-changed-diff-compute-0",
+          "tool": "conformance",
+          "rounds": 0,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0105786345,
+              "min_seconds": 0.010002668,
+              "max_seconds": 0.010951012,
+              "p25_seconds": 0.0102412165,
+              "p75_seconds": 0.010733726
+            },
+            "port": {
+              "median_seconds": 0.086193974,
+              "min_seconds": 0.082608894,
+              "max_seconds": 0.092521144,
+              "p25_seconds": 0.08554035775,
+              "p75_seconds": 0.08724310275
+            },
+            "original": {
+              "median_seconds": 0.0958562805,
+              "min_seconds": 0.091265535,
+              "max_seconds": 0.09916629,
+              "p25_seconds": 0.09513417375,
+              "p75_seconds": 0.09623412925
+            },
+            "codon": {
+              "median_seconds": 0.0195541065,
+              "min_seconds": 0.018832392,
+              "max_seconds": 0.020528605,
+              "p25_seconds": 0.0192211465,
+              "p75_seconds": 0.02000261625
+            },
+            "rust": {
+              "median_seconds": 0.009716002,
+              "min_seconds": 0.009453892,
+              "max_seconds": 0.010228391,
+              "p25_seconds": 0.00956359875,
+              "p75_seconds": 0.00988423825
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0887847182411037,
+            "codon_over_rust": 2.012567154679466,
+            "original_over_relar": 9.061309425143671,
+            "port_over_relar": 8.147930056568265,
+            "codon_over_relar": 1.848452794167338,
+            "original_over_rust": 9.86581522935051
+          },
+          "iqr_seconds": {
+            "relar": 0.0004925095000000001,
+            "port": 0.0017027449999999916,
+            "original": 0.0010999554999999994,
+            "codon": 0.0007814697499999995,
+            "rust": 0.00032063950000000077
+          }
+        },
+        {
+          "label": "conformance-changed-diff-compute-4",
+          "tool": "conformance",
+          "rounds": 4,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.101342053,
+              "min_seconds": 0.097612307,
+              "max_seconds": 0.103354077,
+              "p25_seconds": 0.10108414725,
+              "p75_seconds": 0.101810212
+            },
+            "port": {
+              "median_seconds": 0.723952933,
+              "min_seconds": 0.715732882,
+              "max_seconds": 0.743537478,
+              "p25_seconds": 0.72098312775,
+              "p75_seconds": 0.72624212325
+            },
+            "original": {
+              "median_seconds": 0.304644005,
+              "min_seconds": 0.297382907,
+              "max_seconds": 0.309389977,
+              "p25_seconds": 0.303099918,
+              "p75_seconds": 0.3057257095
+            },
+            "codon": {
+              "median_seconds": 0.147122933,
+              "min_seconds": 0.144729594,
+              "max_seconds": 0.15500436,
+              "p25_seconds": 0.14640975925,
+              "p75_seconds": 0.148314239
+            },
+            "rust": {
+              "median_seconds": 0.053852322,
+              "min_seconds": 0.053290842,
+              "max_seconds": 0.055744381,
+              "p25_seconds": 0.0537056205,
+              "p75_seconds": 0.05450619725
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.881851129836147,
+            "codon_over_rust": 2.7319700903519073,
+            "original_over_relar": 3.006096639861835,
+            "port_over_relar": 7.143657658089874,
+            "codon_over_relar": 1.4517461275429264,
+            "original_over_rust": 5.657026358120639
+          },
+          "iqr_seconds": {
+            "relar": 0.0007260647499999912,
+            "port": 0.005258995500000085,
+            "original": 0.0026257914999999743,
+            "codon": 0.0019044797499999933,
+            "rust": 0.0008005767499999969
+          },
+          "amortized_seconds": {
+            "relar": 0.02533551325,
+            "port": 0.18098823325,
+            "original": 0.07616100125,
+            "codon": 0.03678073325,
+            "rust": 0.0134630805
+          },
+          "preload_control_fraction": {
+            "relar": 0.10438543710970608,
+            "port": 0.11906019033974963,
+            "original": 0.31465014550343773,
+            "codon": 0.13290998283727798,
+            "rust": 0.18041936984629928
+          }
+        }
+      ],
+      "counts": {
+        "preparation_gates": 60,
+        "timing_gates": 60,
+        "warmups": 120,
+        "samples": 1200
+      },
+      "validation_executions": {
+        "catalog": 258,
+        "catalog-compute": 67,
+        "conformance": 427
+      },
+      "revision": "88169978bfc9436024a6bfc34fc8a6c7de285023",
+      "dirty": false
+    },
+    "thinlto": {
+      "rows": [
+        {
+          "label": "catalog-real",
+          "tool": "catalog",
+          "rounds": null,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.2148446985,
+              "min_seconds": 0.21047264,
+              "max_seconds": 0.220950264,
+              "p25_seconds": 0.21385294675,
+              "p75_seconds": 0.2158320035
+            },
+            "port": {
+              "median_seconds": 2.9791188615,
+              "min_seconds": 2.932978902,
+              "max_seconds": 3.045720317,
+              "p25_seconds": 2.9546030585,
+              "p75_seconds": 2.99176934725
+            },
+            "original": {
+              "median_seconds": 0.997993532,
+              "min_seconds": 0.974784054,
+              "max_seconds": 1.015680394,
+              "p25_seconds": 0.99245053225,
+              "p75_seconds": 1.0022244235
+            },
+            "codon": {
+              "median_seconds": 0.568819126,
+              "min_seconds": 0.553429411,
+              "max_seconds": 0.581025716,
+              "p25_seconds": 0.5652146785,
+              "p75_seconds": 0.57009715525
+            },
+            "rust": {
+              "median_seconds": 0.1215605285,
+              "min_seconds": 0.118658977,
+              "max_seconds": 0.123477583,
+              "p25_seconds": 0.1206745125,
+              "p75_seconds": 0.122489424
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.767388651160726,
+            "codon_over_rust": 4.679307773822322,
+            "original_over_relar": 4.645185750301398,
+            "port_over_relar": 13.86638293753383,
+            "codon_over_relar": 2.6475827887370467,
+            "original_over_rust": 8.209848577616212
+          },
+          "iqr_seconds": {
+            "relar": 0.0019790567500000134,
+            "port": 0.03716628874999994,
+            "original": 0.009773891249999944,
+            "codon": 0.0048824767500000865,
+            "rust": 0.0018149115000000021
+          }
+        },
+        {
+          "label": "catalog-real-compute-0",
+          "tool": "catalog",
+          "rounds": 0,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.029683438,
+              "min_seconds": 0.027980208,
+              "max_seconds": 0.030402789,
+              "p25_seconds": 0.02908931125,
+              "p75_seconds": 0.03005201825
+            },
+            "port": {
+              "median_seconds": 0.1056405265,
+              "min_seconds": 0.10399337,
+              "max_seconds": 0.109459846,
+              "p25_seconds": 0.1046202575,
+              "p75_seconds": 0.10699921575
+            },
+            "original": {
+              "median_seconds": 0.1388174245,
+              "min_seconds": 0.135648872,
+              "max_seconds": 0.142356894,
+              "p25_seconds": 0.1382736125,
+              "p75_seconds": 0.140223713
+            },
+            "codon": {
+              "median_seconds": 0.029871905,
+              "min_seconds": 0.029003352,
+              "max_seconds": 0.033436874,
+              "p25_seconds": 0.02953044925,
+              "p75_seconds": 0.03029790975
+            },
+            "rust": {
+              "median_seconds": 0.028231307,
+              "min_seconds": 0.027136931,
+              "max_seconds": 0.029733518,
+              "p25_seconds": 0.027778802,
+              "p75_seconds": 0.028689278
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0514369030098394,
+            "codon_over_rust": 1.05811271862121,
+            "original_over_relar": 4.676595227951696,
+            "port_over_relar": 3.558904682806621,
+            "codon_over_relar": 1.0063492308404438,
+            "original_over_rust": 4.917144803108124
+          },
+          "iqr_seconds": {
+            "relar": 0.0009627070000000001,
+            "port": 0.0023789582500000073,
+            "original": 0.001950100499999996,
+            "codon": 0.0007674605000000008,
+            "rust": 0.0009104760000000003
+          }
+        },
+        {
+          "label": "catalog-real-compute-4",
+          "tool": "catalog",
+          "rounds": 4,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.691478528,
+              "min_seconds": 0.67755741,
+              "max_seconds": 1.021866085,
+              "p25_seconds": 0.68440983425,
+              "p75_seconds": 0.70124199825
+            },
+            "port": {
+              "median_seconds": 11.5765109585,
+              "min_seconds": 11.401004512,
+              "max_seconds": 11.950833156,
+              "p25_seconds": 11.464418033,
+              "p75_seconds": 11.7510499725
+            },
+            "original": {
+              "median_seconds": 3.4858856075,
+              "min_seconds": 3.400608999,
+              "max_seconds": 3.820288301,
+              "p25_seconds": 3.43531666775,
+              "p75_seconds": 3.5657850865
+            },
+            "codon": {
+              "median_seconds": 2.2839818745,
+              "min_seconds": 2.216128352,
+              "max_seconds": 2.57444238,
+              "p25_seconds": 2.243521579,
+              "p75_seconds": 2.34351602875
+            },
+            "rust": {
+              "median_seconds": 0.362284138,
+              "min_seconds": 0.356669519,
+              "max_seconds": 0.662942538,
+              "p25_seconds": 0.35886320475,
+              "p75_seconds": 0.3678020145
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.9086635473949456,
+            "codon_over_rust": 6.304393802910576,
+            "original_over_relar": 5.041205860118914,
+            "port_over_relar": 16.741678142896724,
+            "codon_over_relar": 3.3030409217565753,
+            "original_over_rust": 9.621965860122753
+          },
+          "iqr_seconds": {
+            "relar": 0.016832163999999983,
+            "port": 0.2866319395000012,
+            "original": 0.13046841875000004,
+            "codon": 0.09999444975000005,
+            "rust": 0.008938809749999999
+          },
+          "amortized_seconds": {
+            "relar": 0.172869632,
+            "port": 2.894127739625,
+            "original": 0.871471401875,
+            "codon": 0.570995468625,
+            "rust": 0.0905710345
+          },
+          "preload_control_fraction": {
+            "relar": 0.04292749058434971,
+            "port": 0.009125420161454944,
+            "original": 0.03982271368897753,
+            "codon": 0.01307887130520221,
+            "rust": 0.07792587099134879
+          }
+        },
+        {
+          "label": "conformance-unchanged-github",
+          "tool": "conformance",
+          "rounds": null,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0298535835,
+              "min_seconds": 0.029013943,
+              "max_seconds": 0.031603419,
+              "p25_seconds": 0.029558677,
+              "p75_seconds": 0.0300975835
+            },
+            "port": {
+              "median_seconds": 0.2506035535,
+              "min_seconds": 0.24727755,
+              "max_seconds": 0.259995358,
+              "p25_seconds": 0.249404296,
+              "p75_seconds": 0.252437785
+            },
+            "original": {
+              "median_seconds": 0.15266515,
+              "min_seconds": 0.148964601,
+              "max_seconds": 0.157325845,
+              "p25_seconds": 0.15182163475,
+              "p75_seconds": 0.153256144
+            },
+            "codon": {
+              "median_seconds": 0.0581070975,
+              "min_seconds": 0.057175738,
+              "max_seconds": 0.061079287,
+              "p25_seconds": 0.05775691425,
+              "p75_seconds": 0.05845663025
+            },
+            "rust": {
+              "median_seconds": 0.0220868305,
+              "min_seconds": 0.021544981,
+              "max_seconds": 0.023639482,
+              "p25_seconds": 0.02183821125,
+              "p75_seconds": 0.02243360425
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.3516463351316974,
+            "codon_over_rust": 2.630848165380723,
+            "original_over_relar": 5.113796472708209,
+            "port_over_relar": 8.394421175601918,
+            "codon_over_relar": 1.9464027660196976,
+            "original_over_rust": 6.912044260945453
+          },
+          "iqr_seconds": {
+            "relar": 0.0005389065000000019,
+            "port": 0.003033489000000028,
+            "original": 0.0014345092500000212,
+            "codon": 0.000699716000000003,
+            "rust": 0.0005953929999999996
+          }
+        },
+        {
+          "label": "conformance-unchanged-github-compute-0",
+          "tool": "conformance",
+          "rounds": 0,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.010424423,
+              "min_seconds": 0.009955587,
+              "max_seconds": 0.067190064,
+              "p25_seconds": 0.010258589,
+              "p75_seconds": 0.010798876
+            },
+            "port": {
+              "median_seconds": 0.0856236815,
+              "min_seconds": 0.084482876,
+              "max_seconds": 0.096432775,
+              "p25_seconds": 0.084809993,
+              "p75_seconds": 0.087356295
+            },
+            "original": {
+              "median_seconds": 0.095847766,
+              "min_seconds": 0.094141333,
+              "max_seconds": 0.107349851,
+              "p25_seconds": 0.095090917,
+              "p75_seconds": 0.09721596325
+            },
+            "codon": {
+              "median_seconds": 0.0199438535,
+              "min_seconds": 0.019263721,
+              "max_seconds": 0.023931428,
+              "p25_seconds": 0.0195796245,
+              "p75_seconds": 0.02034630425
+            },
+            "rust": {
+              "median_seconds": 0.009896471,
+              "min_seconds": 0.009394495,
+              "max_seconds": 0.016433172,
+              "p25_seconds": 0.00961127625,
+              "p75_seconds": 0.0100025485
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0533475013466922,
+            "codon_over_rust": 2.015249021595678,
+            "original_over_relar": 9.194539208549001,
+            "port_over_relar": 8.213757394533971,
+            "codon_over_relar": 1.9131853628733215,
+            "original_over_rust": 9.685044901359282
+          },
+          "iqr_seconds": {
+            "relar": 0.0005402870000000004,
+            "port": 0.0025463020000000003,
+            "original": 0.0021250462499999984,
+            "codon": 0.0007666797499999989,
+            "rust": 0.00039127224999999967
+          }
+        },
+        {
+          "label": "conformance-unchanged-github-compute-4",
+          "tool": "conformance",
+          "rounds": 4,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0775731285,
+              "min_seconds": 0.075339025,
+              "max_seconds": 0.079842445,
+              "p25_seconds": 0.07736826,
+              "p75_seconds": 0.07828081825
+            },
+            "port": {
+              "median_seconds": 0.7247003615,
+              "min_seconds": 0.717080121,
+              "max_seconds": 0.766129087,
+              "p25_seconds": 0.72368031975,
+              "p75_seconds": 0.733441644
+            },
+            "original": {
+              "median_seconds": 0.301067791,
+              "min_seconds": 0.296886973,
+              "max_seconds": 0.419143527,
+              "p25_seconds": 0.29823280775,
+              "p75_seconds": 0.30466453225
+            },
+            "codon": {
+              "median_seconds": 0.1405345255,
+              "min_seconds": 0.13916242,
+              "max_seconds": 0.346856985,
+              "p25_seconds": 0.13985173875,
+              "p75_seconds": 0.14603035925
+            },
+            "rust": {
+              "median_seconds": 0.0455364845,
+              "min_seconds": 0.044325992,
+              "max_seconds": 0.053884766,
+              "p25_seconds": 0.04498283625,
+              "p75_seconds": 0.0461989495
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.70353792902041,
+            "codon_over_rust": 3.0861962016413456,
+            "original_over_relar": 3.881083524947688,
+            "port_over_relar": 9.342157207182895,
+            "codon_over_relar": 1.8116392650065674,
+            "original_over_rust": 6.611572990444618
+          },
+          "iqr_seconds": {
+            "relar": 0.0009125582500000007,
+            "port": 0.00976132424999998,
+            "original": 0.006431724500000013,
+            "codon": 0.006178620499999982,
+            "rust": 0.0012161132500000046
+          },
+          "amortized_seconds": {
+            "relar": 0.019393282125,
+            "port": 0.181175090375,
+            "original": 0.07526694775,
+            "codon": 0.035133631375,
+            "rust": 0.011384121125
+          },
+          "preload_control_fraction": {
+            "relar": 0.13438188199409798,
+            "port": 0.11815046058866911,
+            "original": 0.31835941560417536,
+            "codon": 0.14191426220028758,
+            "rust": 0.2173305890576599
+          }
+        },
+        {
+          "label": "conformance-changed-github",
+          "tool": "conformance",
+          "rounds": null,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.030988727,
+              "min_seconds": 0.029673194,
+              "max_seconds": 0.033316463,
+              "p25_seconds": 0.03065195075,
+              "p75_seconds": 0.03220457825
+            },
+            "port": {
+              "median_seconds": 0.2530010065,
+              "min_seconds": 0.244914997,
+              "max_seconds": 0.264618159,
+              "p25_seconds": 0.251259126,
+              "p75_seconds": 0.25823763075
+            },
+            "original": {
+              "median_seconds": 0.1554033275,
+              "min_seconds": 0.148844336,
+              "max_seconds": 0.183805249,
+              "p25_seconds": 0.15418415325,
+              "p75_seconds": 0.159610206
+            },
+            "codon": {
+              "median_seconds": 0.060316319,
+              "min_seconds": 0.057583057,
+              "max_seconds": 0.062838625,
+              "p25_seconds": 0.058889061,
+              "p75_seconds": 0.0607371515
+            },
+            "rust": {
+              "median_seconds": 0.02271527,
+              "min_seconds": 0.022036479,
+              "max_seconds": 0.025301311,
+              "p25_seconds": 0.02237503075,
+              "p75_seconds": 0.02325907975
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.3642244622229893,
+            "codon_over_rust": 2.655320363790525,
+            "original_over_relar": 5.014834184702069,
+            "port_over_relar": 8.16429169549301,
+            "codon_over_relar": 1.946395506985492,
+            "original_over_rust": 6.841359468762643
+          },
+          "iqr_seconds": {
+            "relar": 0.0015526274999999971,
+            "port": 0.006978504750000003,
+            "original": 0.005426052749999993,
+            "codon": 0.0018480905000000034,
+            "rust": 0.0008840490000000013
+          }
+        },
+        {
+          "label": "conformance-changed-github-compute-0",
+          "tool": "conformance",
+          "rounds": 0,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.010389042,
+              "min_seconds": 0.009926661,
+              "max_seconds": 0.011146475,
+              "p25_seconds": 0.0101998725,
+              "p75_seconds": 0.010591824
+            },
+            "port": {
+              "median_seconds": 0.0858092715,
+              "min_seconds": 0.08418954,
+              "max_seconds": 0.088368421,
+              "p25_seconds": 0.08537011175,
+              "p75_seconds": 0.086569079
+            },
+            "original": {
+              "median_seconds": 0.095458213,
+              "min_seconds": 0.094834737,
+              "max_seconds": 0.099333037,
+              "p25_seconds": 0.09522421075,
+              "p75_seconds": 0.09625189375
+            },
+            "codon": {
+              "median_seconds": 0.019842282,
+              "min_seconds": 0.018945232,
+              "max_seconds": 0.021504423,
+              "p25_seconds": 0.0195141165,
+              "p75_seconds": 0.0200338225
+            },
+            "rust": {
+              "median_seconds": 0.0097246735,
+              "min_seconds": 0.009382803,
+              "max_seconds": 0.010509411,
+              "p25_seconds": 0.00952937525,
+              "p75_seconds": 0.0099147655
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0683178206445698,
+            "codon_over_rust": 2.0404059838101505,
+            "original_over_relar": 9.188355673217993,
+            "port_over_relar": 8.259594243627085,
+            "codon_over_relar": 1.9099241296743241,
+            "original_over_rust": 9.816084108119414
+          },
+          "iqr_seconds": {
+            "relar": 0.0003919514999999995,
+            "port": 0.0011989672499999882,
+            "original": 0.0010276830000000015,
+            "codon": 0.0005197059999999983,
+            "rust": 0.00038539025000000095
+          }
+        },
+        {
+          "label": "conformance-changed-github-compute-4",
+          "tool": "conformance",
+          "rounds": 4,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0813483535,
+              "min_seconds": 0.079855535,
+              "max_seconds": 0.084374812,
+              "p25_seconds": 0.0808640715,
+              "p75_seconds": 0.0819530685
+            },
+            "port": {
+              "median_seconds": 0.727600408,
+              "min_seconds": 0.722763719,
+              "max_seconds": 0.753639499,
+              "p25_seconds": 0.72499454375,
+              "p75_seconds": 0.7368103855
+            },
+            "original": {
+              "median_seconds": 0.3072136215,
+              "min_seconds": 0.30208971,
+              "max_seconds": 0.324683969,
+              "p25_seconds": 0.30362605725,
+              "p75_seconds": 0.30952823475
+            },
+            "codon": {
+              "median_seconds": 0.1514610795,
+              "min_seconds": 0.149146684,
+              "max_seconds": 0.163251326,
+              "p25_seconds": 0.150514658,
+              "p75_seconds": 0.15383377225
+            },
+            "rust": {
+              "median_seconds": 0.049159639,
+              "min_seconds": 0.047892986,
+              "max_seconds": 0.050920223,
+              "p25_seconds": 0.04862757775,
+              "p75_seconds": 0.0497009305
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.6547793099131587,
+            "codon_over_rust": 3.081004714050077,
+            "original_over_relar": 3.7765192321931873,
+            "port_over_relar": 8.944254882798582,
+            "codon_over_relar": 1.8618825456620953,
+            "original_over_rust": 6.2493058889224145
+          },
+          "iqr_seconds": {
+            "relar": 0.0010889970000000082,
+            "port": 0.011815841749999945,
+            "original": 0.005902177499999994,
+            "codon": 0.003319114250000005,
+            "rust": 0.0010733527499999992
+          },
+          "amortized_seconds": {
+            "relar": 0.020337088375,
+            "port": 0.181900102,
+            "original": 0.076803405375,
+            "codon": 0.037865269875,
+            "rust": 0.01228990975
+          },
+          "preload_control_fraction": {
+            "relar": 0.12771053811187463,
+            "port": 0.11793461157597372,
+            "original": 0.3107225927480563,
+            "codon": 0.13100581393915126,
+            "rust": 0.19781824475968995
+          }
+        },
+        {
+          "label": "conformance-changed-diff",
+          "tool": "conformance",
+          "rounds": null,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.030504378,
+              "min_seconds": 0.029914073,
+              "max_seconds": 0.035452399,
+              "p25_seconds": 0.030165498,
+              "p75_seconds": 0.0313179715
+            },
+            "port": {
+              "median_seconds": 0.254273749,
+              "min_seconds": 0.24854375,
+              "max_seconds": 0.298746802,
+              "p25_seconds": 0.25275685525,
+              "p75_seconds": 0.2590862275
+            },
+            "original": {
+              "median_seconds": 0.1571384095,
+              "min_seconds": 0.152932788,
+              "max_seconds": 0.366099392,
+              "p25_seconds": 0.1555847685,
+              "p75_seconds": 0.1641120095
+            },
+            "codon": {
+              "median_seconds": 0.0600015305,
+              "min_seconds": 0.056970496,
+              "max_seconds": 0.104357957,
+              "p25_seconds": 0.05940402275,
+              "p75_seconds": 0.06083075725
+            },
+            "rust": {
+              "median_seconds": 0.0230029725,
+              "min_seconds": 0.021895033,
+              "max_seconds": 0.029651742,
+              "p25_seconds": 0.0224114115,
+              "p75_seconds": 0.02371690475
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.3261059195719163,
+            "codon_over_rust": 2.6084250850623762,
+            "original_over_relar": 5.151339571650994,
+            "port_over_relar": 8.335647722435121,
+            "codon_over_relar": 1.9669809527012811,
+            "original_over_rust": 6.831221899691442
+          },
+          "iqr_seconds": {
+            "relar": 0.0011524735000000008,
+            "port": 0.006329372249999965,
+            "original": 0.008527240999999991,
+            "codon": 0.0014267344999999987,
+            "rust": 0.0013054932500000012
+          }
+        },
+        {
+          "label": "conformance-changed-diff-compute-0",
+          "tool": "conformance",
+          "rounds": 0,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.010576897,
+              "min_seconds": 0.010013343,
+              "max_seconds": 0.011715749,
+              "p25_seconds": 0.01039221175,
+              "p75_seconds": 0.010757942
+            },
+            "port": {
+              "median_seconds": 0.086059359,
+              "min_seconds": 0.083315898,
+              "max_seconds": 0.096183644,
+              "p25_seconds": 0.08556704525,
+              "p75_seconds": 0.0867150165
+            },
+            "original": {
+              "median_seconds": 0.096328135,
+              "min_seconds": 0.091769982,
+              "max_seconds": 0.101977098,
+              "p25_seconds": 0.09483336125,
+              "p75_seconds": 0.09783212425
+            },
+            "codon": {
+              "median_seconds": 0.0199725095,
+              "min_seconds": 0.01936615,
+              "max_seconds": 0.021585683,
+              "p25_seconds": 0.01983630625,
+              "p75_seconds": 0.0203706165
+            },
+            "rust": {
+              "median_seconds": 0.0098238635,
+              "min_seconds": 0.009400356,
+              "max_seconds": 0.010368379,
+              "p25_seconds": 0.0096163425,
+              "p75_seconds": 0.01006629
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.0766534978829867,
+            "codon_over_rust": 2.033060567260528,
+            "original_over_relar": 9.107409762995706,
+            "port_over_relar": 8.136541274818125,
+            "codon_over_relar": 1.888314644644833,
+            "original_over_rust": 9.80552457798299
+          },
+          "iqr_seconds": {
+            "relar": 0.00036573024999999974,
+            "port": 0.0011479712500000044,
+            "original": 0.0029987630000000015,
+            "codon": 0.0005343102499999995,
+            "rust": 0.0004499475000000006
+          }
+        },
+        {
+          "label": "conformance-changed-diff-compute-4",
+          "tool": "conformance",
+          "rounds": 4,
+          "summary": {
+            "relar": {
+              "median_seconds": 0.079354186,
+              "min_seconds": 0.077716505,
+              "max_seconds": 0.080920602,
+              "p25_seconds": 0.0788268825,
+              "p75_seconds": 0.079623982
+            },
+            "port": {
+              "median_seconds": 0.7240801035,
+              "min_seconds": 0.714884951,
+              "max_seconds": 0.746510344,
+              "p25_seconds": 0.719043896,
+              "p75_seconds": 0.7279865755
+            },
+            "original": {
+              "median_seconds": 0.3036545025,
+              "min_seconds": 0.298178001,
+              "max_seconds": 0.320967925,
+              "p25_seconds": 0.3024887415,
+              "p75_seconds": 0.30679850625
+            },
+            "codon": {
+              "median_seconds": 0.1501149255,
+              "min_seconds": 0.146032448,
+              "max_seconds": 0.157833301,
+              "p25_seconds": 0.146939175,
+              "p75_seconds": 0.1526035225
+            },
+            "rust": {
+              "median_seconds": 0.047951804,
+              "min_seconds": 0.047255159,
+              "max_seconds": 0.050351826,
+              "p25_seconds": 0.047656757,
+              "p75_seconds": 0.04833815575
+            }
+          },
+          "ratios": {
+            "relar_over_rust": 1.6548738395744191,
+            "codon_over_rust": 3.1305376018804214,
+            "original_over_relar": 3.8265719529906086,
+            "port_over_relar": 9.124661722319223,
+            "codon_over_relar": 1.8917077102901667,
+            "original_over_rust": 6.332493820253352
+          },
+          "iqr_seconds": {
+            "relar": 0.0007970994999999953,
+            "port": 0.00894267950000005,
+            "original": 0.00430976475,
+            "codon": 0.0056643475,
+            "rust": 0.0006813987499999993
+          },
+          "amortized_seconds": {
+            "relar": 0.0198385465,
+            "port": 0.181020025875,
+            "original": 0.075913625625,
+            "codon": 0.037528731375,
+            "rust": 0.011987951
+          },
+          "preload_control_fraction": {
+            "relar": 0.133287196720788,
+            "port": 0.11885336799618332,
+            "original": 0.31722939790757754,
+            "codon": 0.13304812585075027,
+            "rust": 0.20486952899623964
+          }
+        }
+      ],
+      "counts": {
+        "preparation_gates": 60,
+        "timing_gates": 60,
+        "warmups": 120,
+        "samples": 1200
+      },
+      "validation_executions": {
+        "catalog": 258,
+        "catalog-compute": 67,
+        "conformance": 427
+      },
+      "revision": "88169978bfc9436024a6bfc34fc8a6c7de285023",
+      "dirty": false
+    }
+  },
+  "cross_mode_input_parity": true,
+  "index_sha256": "f6d8498d72a0e98f0091185403231230d77415d727d6ef05c1fc2a9009a603a2",
+  "replay_script_sha256": "93ffb6ad8ef65ec88f8de953f0e3d220943fe4d05967403e85098a842be9cadc",
+  "retained_files_verified": 18949,
+  "directories_verified": 243,
+  "excluded_artifacts_not_rehashed": {
+    "/home/dev-user/.cache/relar-codon-20261021/install/codon-deploy-linux-x86_64/bin/codon": {
+      "sha256": "cde8229e41a67e87edce088fbbd851acdf1b62e913677bb7cd9a9ce5d61c5350",
+      "bytes": 408648,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-codon-20261021/install/codon-deploy-linux-x86_64/lib/codon/libcodonc.so": {
+      "sha256": "8aeedf95ba48fbcb7be24b9acb2e213a86b7773c46c40d05eee54c2526edc4b0",
+      "bytes": 178307936,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-codon-20261021/install/codon-deploy-linux-x86_64/lib/codon/libcodonrt.so": {
+      "sha256": "b7dbed21f9bd086d6331581b0bc330e48abab14766e3a69fb970c9855baf878d",
+      "bytes": 48011280,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-codon-20261021/install/codon-deploy-linux-x86_64/lib/codon/libgcc_s.so.1": {
+      "sha256": "074ac49a0547cbdd81544d6b0dfc5481a47a90455f0474f4b2f68c944613282d",
+      "bytes": 2103281,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-codon-20261021/install/codon-deploy-linux-x86_64/lib/codon/libgfortran.so.5": {
+      "sha256": "ff9d1f7776e59d49ccf46a606ecbca9caadaeae247d3b8496952f38e4c18e771",
+      "bytes": 4243353,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-codon-20261021/install/codon-deploy-linux-x86_64/lib/codon/libomp.so": {
+      "sha256": "afa02ffad7c504de5f825b2d49e7fc7d19ec00ccd52687fe9366f4e475475436",
+      "bytes": 1550504,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-codon-20261021/install/codon-deploy-linux-x86_64/lib/codon/libquadmath.so.0": {
+      "sha256": "bacc13f00a567cf2d78fa596385110572cb0d4251fd7892f4096aa2d5b97018c",
+      "bytes": 2101465,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/architecture-native-probe-final-2/codon": {
+      "sha256": "d4320add4ca86fad68a9166bc2cad28c5f076dd5424e1983c7f9c3f2a75a7099",
+      "bytes": 29048,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/architecture-native-probe-final-2/relar": {
+      "sha256": "9332db18b7b1908665975fb51d8631b2ec1d96bc6b51a565664d07bb94ff6730",
+      "bytes": 5320408,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/architecture-native-probe-final-2/relar-asan": {
+      "sha256": "046bcdcc235950ccb40066dcd19ac411bca4db933516a69cd608c319ab4ec21f",
+      "bytes": 9223904,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/normal_runtime.a": {
+      "sha256": "535ad6c4bc929c570da7b065f4495c7ca08f41f80a5fd3ca9bb5e4533bf5661d",
+      "bytes": 38374698,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/relar": {
+      "sha256": "898341c4d0f7c17761e882425f3ebfe9532bb40e1ba26cee243f19f7e05789b6",
+      "bytes": 130769128,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/thinlto_runtime.a": {
+      "sha256": "f4dbf94a2f29d5b51622e9ca48b562f3054f4b6f28f658482c408b9ac3b7cad1",
+      "bytes": 31045962,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-asan-final-2/catalog": {
+      "sha256": "4552f598a74497cc56d05fdcfa5a35f4d1ef481d3d63b187c98d7983cc64da87",
+      "bytes": 9501096,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-asan-final-2/catalog-compute": {
+      "sha256": "f57f45d201eb143584fd1a7b0e2d6d7b7518f148683d0fa882ac5db8f64e13a9",
+      "bytes": 9505520,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-asan-final-3/catalog": {
+      "sha256": "98ccef48fddc25604b150e4a429c907ad49ddc2c2b7276ef06c4627cb03c9d76",
+      "bytes": 9496688,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-asan-final-3/catalog-compute": {
+      "sha256": "b52e5d9dddca5afe76cbe7d09aea5b90f4abeff72ec502bdd103d10c891d40bd",
+      "bytes": 9501112,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-asan-preview-7/catalog": {
+      "sha256": "cab036f964b8d19c1d5013b9e9d02bd45f5a5a4c3a38e67c559bf067015d6d12",
+      "bytes": 9501096,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-asan-preview-7/catalog-compute": {
+      "sha256": "73018cdae6f7cd66f055e5cea299770d76403222c9cc704047f191e2941e873a",
+      "bytes": 9505520,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-cleanups-native-probe-final-3/codon": {
+      "sha256": "7d14187b9e00cdd564272d99a8102f90cdc4725451ebfa0f9d026ad7b1ee718c",
+      "bytes": 33304,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-cleanups-native-probe-final-3/relar": {
+      "sha256": "81d4f7739666de52ff69961b8163166876c96d23471eb4ba0f473cd47d04964c",
+      "bytes": 5332872,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-cleanups-native-probe-final-3/relar-asan": {
+      "sha256": "f351f32cb32c53994d04223db24ac37ec7a59987e1f1f2f2a8713d3dc184dc7f",
+      "bytes": 9231736,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-2/binaries/catalog-relar": {
+      "sha256": "ec9e69b3e554e0db7b64fb9b00aff6b09232f133b3b4f4d058a378d2eb19b076",
+      "bytes": 5484216,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-2/binaries/catalog-rust": {
+      "sha256": "255d7fa4d746c05b937d87dc05e906a027b4fc8367d21e862eff124cd75d3a6a",
+      "bytes": 2178688,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-3/binaries/catalog-relar": {
+      "sha256": "ea38b71508d70918884ca92b9eb8f4c8032a14651385271c38d7443b29acd9f8",
+      "bytes": 5480120,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-3/binaries/catalog-rust": {
+      "sha256": "c698b4a330d45e1d4acce9f89b314df0bcb33dc3e8ebe8baeae246449551cbdf",
+      "bytes": 2179064,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-3/binaries/catalog-relar": {
+      "sha256": "d50318634e8b9187bcd5dd95f09885a9d92d1627ddb9c04ebf9c3c806dbfa50c",
+      "bytes": 5462816,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-3/binaries/catalog-rust": {
+      "sha256": "1cd629e864407e59ebd9342cfbda166eb1bb5ff183d81f90dc10eff749ed6777",
+      "bytes": 2175888,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-7/binaries/catalog-relar": {
+      "sha256": "4c0f66f28a26e668f02c71b8231a241ddefe1a5b3aa2d3425ba636851474f43a",
+      "bytes": 5480120,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-7/binaries/catalog-rust": {
+      "sha256": "1cd629e864407e59ebd9342cfbda166eb1bb5ff183d81f90dc10eff749ed6777",
+      "bytes": 2175888,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/codon-catalog-final-2/python_catalog": {
+      "sha256": "d315fd6c7f4018468500e37b32afedf578e48bd92b3d65127ee4af20eccde2c0",
+      "bytes": 1237480,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/codon-catalog-final-2/python_catalog-compute": {
+      "sha256": "a525da41022936d692e7d38b9b5c8b01d9bff564c5a652e318c75597af3bf52d",
+      "bytes": 1241456,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/codon-catalog-final-3/python_catalog": {
+      "sha256": "d63f548a94a1b6e9eb05abc45b3be7aa2c5c1817bf60c81f31922b40db5dd76f",
+      "bytes": 1237480,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/codon-catalog-final-3/python_catalog-compute": {
+      "sha256": "aeaf739af46879dd3956a31e59f75fd8382b2b759b7cf31af81dcec0b1907224",
+      "bytes": 1241456,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/codon-development-13/conformance_report": {
+      "sha256": "cc561e57fb660ea69d813f4aeabf998755b91f5530fa79f55e9f15a1ef8a62ab",
+      "bytes": 1321608,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/codon-development-13/conformance_report-compute": {
+      "sha256": "ab0be764fbd5eb5eb9f041cf009643d60f8e7e5afcf8fa9c770113ca4af05957",
+      "bytes": 1346336,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/conformance-asan-preview-7/application": {
+      "sha256": "b6ec1f2426d2929205b546b5ea448ddea53364babedc6269a647fe4cf82db6fc",
+      "bytes": 9628504,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/conformance-asan-preview-7/compute": {
+      "sha256": "1443bfab44288cdf00f5e1f6aafce13e505c9ddb0933d321b22d794d4fb6ad88",
+      "bytes": 9628504,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/input-tools/ty-0.0.60/bin/ty": {
+      "sha256": "c4982eb6c39576b0277a20ab2522de1f76ded9279c43e9738e3a63619b95e560",
+      "bytes": 26886976,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-2/catalog": {
+      "sha256": "ec9e69b3e554e0db7b64fb9b00aff6b09232f133b3b4f4d058a378d2eb19b076",
+      "bytes": 5484216,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-2/catalog-compute": {
+      "sha256": "2e1fe7beca84a631da323efc805a94c4d3322348b48aed166206da29879c468b",
+      "bytes": 5484288,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-2/conformance": {
+      "sha256": "705fe324b7ce2f14fbea97a20088e01f71371cd8c23c01c5201730227c25a168",
+      "bytes": 5536504,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-2/conformance-compute": {
+      "sha256": "0fe7235356cc3ed7a771efedd7380b169c0c250e2fd488e9b077ef01eedca469",
+      "bytes": 5536504,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-3/catalog": {
+      "sha256": "ea38b71508d70918884ca92b9eb8f4c8032a14651385271c38d7443b29acd9f8",
+      "bytes": 5480120,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-3/catalog-compute": {
+      "sha256": "0e5ead43d7516021e7e9c0b60c5ec39a1949c3a92475c0faeb7b8a184cab6512",
+      "bytes": 5484288,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-3/conformance": {
+      "sha256": "af8a16aab89993a38222d464d3f2f7b4b9139ffc9b8a01ca511f1e521d139537",
+      "bytes": 5536504,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-3/conformance-compute": {
+      "sha256": "521e8c2208238a6b3cb58db935488e07f855a4b04a612f5d71affe8c7aa954af",
+      "bytes": 5536504,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-2/catalog": {
+      "sha256": "fbbd684d374558f7a1611434348ca9bd448f7e66b53dfea6d5948bc3f605e4ba",
+      "bytes": 5564208,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-2/catalog-compute": {
+      "sha256": "5c44f66e10ef1771bdfedd2a60181d078fd11639530124e4cad0ec33a683026f",
+      "bytes": 5595928,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-2/conformance": {
+      "sha256": "366ad44aab448fa8356c8af09a449702ec8073d276da68a388294ec99db4c18b",
+      "bytes": 5670880,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-2/conformance-compute": {
+      "sha256": "90c3149e7fdcc66eaaf9dae6448ec630c62ccc8a2a73d43121cf38ec20b25a7f",
+      "bytes": 5752680,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-3/catalog": {
+      "sha256": "0acc26c88a5bafa9391494c714595085724f6c131477fe784b11a34fea3b9399",
+      "bytes": 5559776,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-3/catalog-compute": {
+      "sha256": "2a5c5f1342aa3819d80989d27277e1322736fae44e14e3518f8822d6a6966462",
+      "bytes": 5591448,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-3/conformance": {
+      "sha256": "aa8827b9ea436e0fb1c4fc0bcfa3c46a7f256f0f4d7fca331643113b845a6153",
+      "bytes": 5670880,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-3/conformance-compute": {
+      "sha256": "ddc3e04d303a053b51829dcc151b39796489faf2df5f5d8b5636aefe58c8b0f0",
+      "bytes": 5752680,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-quick-preparation-candidate-4/catalog-compute": {
+      "sha256": "fc111969c157e7a5ef24f5bdd88fac559b59488f5f6943c4433ff0017f613c3b",
+      "bytes": 5484288,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-quick-preparation-final-3/catalog-compute": {
+      "sha256": "1142f9ef8aaaf6b6cfc8780fca89c0bf535b99f2293a9d50e5a5481985ea6166",
+      "bytes": 5484288,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-quick-preparation-thinlto-candidate-4/catalog-compute": {
+      "sha256": "e882bb7f6b50afd08b246cf5b4821ec83f4b029903fa83252deb723d85a002b2",
+      "bytes": 5591448,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-quick-preparation-thinlto-final-3/catalog-compute": {
+      "sha256": "43ac5f8d64c33aaad1d3c23cd68473ccc17e5d5c8566f70dc4add3a370a3b105",
+      "bytes": 5594200,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/reference-conformance-report-normal-final/conformance-report-reference": {
+      "sha256": "87870933dbb859cc4195f23e17f518284bd0be859ec171c357d98851e3b70c3c",
+      "bytes": 2722936,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/reference-conformance-report-thinlto-final/conformance-report-reference": {
+      "sha256": "9b728576671a21f16416d4ec409d862dcff5cef65d2b6a88247b99b9cb40c019",
+      "bytes": 4427640,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/reference-python-catalog-normal-final-2/python-catalog-reference": {
+      "sha256": "255d7fa4d746c05b937d87dc05e906a027b4fc8367d21e862eff124cd75d3a6a",
+      "bytes": 2178688,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/reference-python-catalog-normal-final-3/python-catalog-reference": {
+      "sha256": "c698b4a330d45e1d4acce9f89b314df0bcb33dc3e8ebe8baeae246449551cbdf",
+      "bytes": 2179064,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/reference-python-catalog-thinlto-final-2/python-catalog-reference": {
+      "sha256": "fd95d6ebebde8947f97b7fd9a0cc611ffb79af38fbf158082d1d69091ef3bd80",
+      "bytes": 2909760,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/reference-python-catalog-thinlto-final-3/python-catalog-reference": {
+      "sha256": "946b9babcece3db29ce257ae7266059994aeab8f5cf7fe50c11d2811d96858fe",
+      "bytes": 2910152,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/variant-native-probe-final-3/codon": {
+      "sha256": "e55c5c6d8f8c1e934a593774460677a3cfa60fc8d1fbb3ec4f3fd04b92437fb7",
+      "bytes": 41280,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/variant-native-probe-final-3/relar": {
+      "sha256": "9df1d3dd7026d1e8fa8dabb63565933aa7208681737b56389a2a0371792deb4c",
+      "bytes": 5333552,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-native-tools-20261021/variant-native-probe-final-3/relar-asan": {
+      "sha256": "4b1ecd28d52e86876b07212990007f86f98bd72fa2162a8d4381b86a4afd1e1a",
+      "bytes": 9235120,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-workspaces-20261021/input-tools/ty-0.0.89/bin/ty": {
+      "sha256": "d38b9f87d6e8876fbad8a339e5e479d0d4dbb23aa2bf6f303966c11272e9bb9e",
+      "bytes": 30174368,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.cache/relar-workspaces-20261021/input-tools/ty-0.0.90/bin/ty": {
+      "sha256": "e56df0042c10ae481d80e155386f732a67994bf41af94c164d2bd1ec68797211",
+      "bytes": 30283040,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/cargo": {
+      "sha256": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e",
+      "bytes": 37027376,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/rustc": {
+      "sha256": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba",
+      "bytes": 171720,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld": {
+      "sha256": "bf1b9bc68d0f70523a95618cb9be2e4d04698564229838cfe29eb913bba7ce67",
+      "bytes": 383536,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/home/dev-user/serc-perf-validation/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": {
+      "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+      "bytes": 32359056,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/llvm-18/bin/clang": {
+      "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+      "bytes": 140592,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/llvm-18/lib/libLLVM.so.1": {
+      "sha256": "5c3a63957e28c15cdf1503892074f032d29b72e36a9824a77dfa87e48a0dafb0",
+      "bytes": 123215144,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/llvm-18/lib/libclang-cpp.so.18.1": {
+      "sha256": "b9592746f7f8ff1156680fb1fad5faf5486df7a67aca8327cc959463416c6718",
+      "bytes": 64796088,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": {
+      "sha256": "c20a2dc8917c755f02b94049356320fe1f62ac7d9f8994731f807d9df39302da",
+      "bytes": 236616,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libbsd.so.0.12.1": {
+      "sha256": "e86cd4f0019f42c2ba5e60602e0edc8694d2948377d98c3654d0f6bddb5254bb",
+      "bytes": 80888,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libc.so.6": {
+      "sha256": "3a15d66867d83762c7f2f1e37359cb8f6c5743edb369c65285cb0b1c4f7498bf",
+      "bytes": 2129424,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libdl.so.2": {
+      "sha256": "c2994527172cc23b7fb0f7d611b71e00a37da27af12c2e5e9e0dc1a742886c96",
+      "bytes": 14408,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libedit.so.2.0.72": {
+      "sha256": "195c607216f8581dbf516346ed38f4c73500cac4b84e18eb0a4fd49931e4cd56",
+      "bytes": 220472,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libffi.so.8.1.4": {
+      "sha256": "00f593fe192f2851b8ce23b25cec2488d769beb5a8f63e8c9e563071e1075153",
+      "bytes": 47672,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1": {
+      "sha256": "d93224d2b0dab4247598be683adca02f5cf00586f99c187579cd7e92058fb7cb",
+      "bytes": 183024,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libicudata.so.74.2": {
+      "sha256": "ddbb3718b8bd9cbd780e5ab08b4503c30a6c4fa0706ebe5d074ed6b596c1714e",
+      "bytes": 30795392,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libicuuc.so.74.2": {
+      "sha256": "7560aadde38e5f4237a47a1ddd5891f9b36768a77a60faae30beee003ac01901",
+      "bytes": 2140336,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/liblzma.so.5.4.5": {
+      "sha256": "696e868dd0700a19a6d65fc01608ec2d70d3cb91f65710e89180cd2e688f30cb",
+      "bytes": 202904,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libm.so.6": {
+      "sha256": "fce00b6f25f459cf4ae0b7fae4257909a1a8a86f9149e7c029a5d617baf1ccd0",
+      "bytes": 952616,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libmd.so.0.1.0": {
+      "sha256": "423e18586b6ea740f4465afd64f7a9a4cb7264ed979c8e7256f9085af5345fef",
+      "bytes": 55536,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libmvec.so.1": {
+      "sha256": "57329ee0018b8fd8f8e51af5f87c723b6ecdf04679f4493134beab0f45d58ec5",
+      "bytes": 1018144,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libpthread.so.0": {
+      "sha256": "90491a21ce44efcf3bd4b65ec82501c091d7ebe7f8d9b341dd01d721001d9ecd",
+      "bytes": 14408,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/librt.so.1": {
+      "sha256": "6d072187d88e092e81561a44c03a4a41397319022c6d43519757cc051c576d82",
+      "bytes": 14624,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33": {
+      "sha256": "1fd75fe70354a416d75aef22bcae68c47bd25d20e2d0568c30b1a9838cf62f11",
+      "bytes": 2592224,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libtinfo.so.6.4": {
+      "sha256": "e6089d7bb95eee5b545f3770dd69095b0bca47d26701cad145af429561d16306",
+      "bytes": 208328,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libutil.so.1": {
+      "sha256": "5181d2b5de571bf054395684bfe77db685badf0163ac50b5e47d2148b52f11c3",
+      "bytes": 14408,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libxml2.so.2.9.14": {
+      "sha256": "209e941be9eb2eb9ab36caaa0b81d1c6b36c8f5d7268c24f19e81039137e6485",
+      "bytes": 1967424,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libz.so.1.3": {
+      "sha256": "86200da370f20476a2507e9097a789b5ef97269b4ca8d5e164ad82dab9d99892",
+      "bytes": 113000,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    },
+    "/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.5": {
+      "sha256": "0a2128bc10841fb29e76d08d945864dfb0b6a66da5df6df5d8299197439e54bb",
+      "bytes": 755864,
+      "reason": "native executable, library, or compiled archive; not redistributed"
+    }
+  },
+  "licenses": [
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-2/source/examples/base45_codec/upstream/LICENSE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-2/source/examples/conformance_report/upstream/LICENSE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-2/source/examples/luhn_checksum/upstream/LICENSE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-2/source/examples/memory_report/upstream/LICENSE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-2/source/examples/python_catalog/upstream/LICENSE-APACHE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-2/source/examples/python_catalog/upstream/LICENSE-MIT",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-3/source/examples/conformance_report/upstream/LICENSE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-3/source/examples/python_catalog/upstream/LICENSE-APACHE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-3/source/examples/python_catalog/upstream/LICENSE-MIT",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-3/source/examples/base45_codec/upstream/LICENSE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-3/source/examples/conformance_report/upstream/LICENSE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-3/source/examples/luhn_checksum/upstream/LICENSE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-3/source/examples/memory_report/upstream/LICENSE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-3/source/examples/python_catalog/upstream/LICENSE-APACHE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-3/source/examples/python_catalog/upstream/LICENSE-MIT",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-7/source/examples/base45_codec/upstream/LICENSE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-7/source/examples/conformance_report/upstream/LICENSE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-7/source/examples/luhn_checksum/upstream/LICENSE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-7/source/examples/memory_report/upstream/LICENSE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-7/source/examples/python_catalog/upstream/LICENSE-APACHE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-7/source/examples/python_catalog/upstream/LICENSE-MIT",
+    "/home/dev-user/.cache/relar-native-tools-20261021/codon-v0.20.4-LICENSE",
+    "/home/dev-user/.cache/relar-native-tools-20261021/input-sources/typing-835b70f3f795f8e061b1f7621178515b0a77a0ad/LICENSE",
+    "/home/dev-user/code/oss/relar-native-tools-20261021/LICENSE-APACHE",
+    "/home/dev-user/code/oss/relar-native-tools-20261021/LICENSE-MIT",
+    "/home/dev-user/code/oss/relar-native-tools-20261021/examples/conformance_report/upstream/LICENSE",
+    "/home/dev-user/code/oss/relar-native-tools-20261021/examples/python_catalog/upstream/LICENSE-APACHE",
+    "/home/dev-user/code/oss/relar-native-tools-20261021/examples/python_catalog/upstream/LICENSE-MIT"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "status": "passed",
+  "restored_files": 2220,
+  "archive_index_sha256": "f6d8498d72a0e98f0091185403231230d77415d727d6ef05c1fc2a9009a603a2",
+  "baseline_index_sha256": "415502669fa35b714fe730b1bc4dcd9dd8317af54f786e877eeaa7f0dc2bcf0f",
+  "baseline_replay_sha256": "9a15263c2ac695b3755aaecb566ed8dabaf1288c9e6d8b3618f7b903f7a6e2d3",
+  "retained_replay_identical": true,
+  "script_sha256": "a9cbc11af80507dde92e1b6e114096dffaf445c4e99b073a18d522abc2fc984b",
+  "native_engines_executed": false
+}

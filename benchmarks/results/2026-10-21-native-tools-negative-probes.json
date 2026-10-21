@@ -1,0 +1,18 @@
+{
+  "status": "passed",
+  "checks": [
+    "changed raw samples with original summary",
+    "changed published ratio",
+    "changed balanced engine order",
+    "changed cross-mode inputs",
+    "missing cross-mode source guard",
+    "changed cross-mode source hash",
+    "changed successful stdout",
+    "changed output hash",
+    "extra retained filesystem entry",
+    "changed content-addressed blob",
+    "changed excluded-artifact identity"
+  ],
+  "script_sha256": "7a51e63ba7d6858818a338145b02237afd42680cf8a350b177d3686676a06f36",
+  "archive_index_sha256": "f6d8498d72a0e98f0091185403231230d77415d727d6ef05c1fc2a9009a603a2"
+}

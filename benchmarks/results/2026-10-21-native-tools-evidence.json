@@ -1,0 +1,613 @@
+{
+  "archive": {
+    "file": "2026-10-21-native-tools-evidence.tar.xz",
+    "format": "tar.xz",
+    "index_sha256": "f6d8498d72a0e98f0091185403231230d77415d727d6ef05c1fc2a9009a603a2",
+    "root": "native-tools-evidence-final-3"
+  },
+  "comparison": {
+    "compute_rounds": 4,
+    "engines": 5,
+    "maximum_real_workload_relar_over_rust": {
+      "normal": 1.9577335588506364,
+      "thinlto": 1.9086635473949456
+    },
+    "modes": [
+      "normal",
+      "thinlto"
+    ],
+    "rows_per_mode": 12,
+    "samples_per_engine_per_row": 20,
+    "timed_engine_samples_including_preload_controls": 2400,
+    "warmup_engine_executions": 240,
+    "warmups_per_engine_per_row": 2
+  },
+  "files": {
+    "2026-10-21-native-tools-audit.json": {
+      "bytes": 1681503,
+      "sha256": "add444872b7d3d61fa08b3a20eadac7d71ff555ebbdc6ae91fa2d21a7abbf0be"
+    },
+    "2026-10-21-native-tools-baseline-replay.json": {
+      "bytes": 496,
+      "sha256": "ddc532d4195dffa8914845871ae61b1415d9cdbe50b06d7c585ca8d10637b5b5"
+    },
+    "2026-10-21-native-tools-context.json": {
+      "bytes": 101922,
+      "sha256": "ed8dfb44796f6685f0f5352883d1f124be39bf414fe1bf5482fe99a4954473c1"
+    },
+    "2026-10-21-native-tools-evidence.tar.xz": {
+      "bytes": 91614152,
+      "sha256": "c51b6329869bac01c9432075e92182ca95158e73ca06e0d145ce43f610bd4273"
+    },
+    "2026-10-21-native-tools-isolation.json": {
+      "bytes": 579,
+      "sha256": "eb504342f35a908e526f5d576d6377aa831dc2000894696ee01e03bd88d57927"
+    },
+    "2026-10-21-native-tools-negative-probes.json": {
+      "bytes": 630,
+      "sha256": "10cc18c047892585e698791d0f06381ff6a1d8af63f0ebd3ac611464914fcc49"
+    },
+    "2026-10-21-native-tools-normal.json": {
+      "bytes": 3986219,
+      "sha256": "eb0cb68b634526c635abd07070c20d1487943517fdc223a26987ef4d44c1361c"
+    },
+    "2026-10-21-native-tools-replay.json": {
+      "bytes": 85960,
+      "sha256": "3d67f8c7923710334320cff9a0dff2ae4dbf26bbf14a061943d98803cd184f42"
+    },
+    "2026-10-21-native-tools-summary.json": {
+      "bytes": 48998,
+      "sha256": "11cc859698c0f02ed9993f40918d7e5f08c2083fcd8f846020c773b4dea643ef"
+    },
+    "2026-10-21-native-tools-thinlto.json": {
+      "bytes": 4040408,
+      "sha256": "da42234ca5d6c7499e3a5892ccfd567b1c4444864f0a094cefa1d172282cf95c"
+    }
+  },
+  "kind": "relar-native-developer-tools-public-evidence",
+  "measurement_revision": "88169978bfc9436024a6bfc34fc8a6c7de285023",
+  "replay_requirements": "CPython 3.14 or newer, assertions enabled; no original checkout, Git, network, or native engines required. Native binaries and toolchains are excluded and hash-identified, not rehashed by portable replay.",
+  "schema": 1,
+  "status": "passed",
+  "verification": {
+    "corruption_probes": {
+      "archive_index_sha256": "f6d8498d72a0e98f0091185403231230d77415d727d6ef05c1fc2a9009a603a2",
+      "checks": [
+        "changed raw samples with original summary",
+        "changed published ratio",
+        "changed balanced engine order",
+        "changed cross-mode inputs",
+        "missing cross-mode source guard",
+        "changed cross-mode source hash",
+        "changed successful stdout",
+        "changed output hash",
+        "extra retained filesystem entry",
+        "changed content-addressed blob",
+        "changed excluded-artifact identity"
+      ],
+      "script_sha256": "7a51e63ba7d6858818a338145b02237afd42680cf8a350b177d3686676a06f36",
+      "status": "passed"
+    },
+    "directories_verified": 243,
+    "excluded_artifacts_not_rehashed": {
+      "/home/dev-user/.cache/relar-codon-20261021/install/codon-deploy-linux-x86_64/bin/codon": {
+        "bytes": 408648,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "cde8229e41a67e87edce088fbbd851acdf1b62e913677bb7cd9a9ce5d61c5350"
+      },
+      "/home/dev-user/.cache/relar-codon-20261021/install/codon-deploy-linux-x86_64/lib/codon/libcodonc.so": {
+        "bytes": 178307936,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "8aeedf95ba48fbcb7be24b9acb2e213a86b7773c46c40d05eee54c2526edc4b0"
+      },
+      "/home/dev-user/.cache/relar-codon-20261021/install/codon-deploy-linux-x86_64/lib/codon/libcodonrt.so": {
+        "bytes": 48011280,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "b7dbed21f9bd086d6331581b0bc330e48abab14766e3a69fb970c9855baf878d"
+      },
+      "/home/dev-user/.cache/relar-codon-20261021/install/codon-deploy-linux-x86_64/lib/codon/libgcc_s.so.1": {
+        "bytes": 2103281,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "074ac49a0547cbdd81544d6b0dfc5481a47a90455f0474f4b2f68c944613282d"
+      },
+      "/home/dev-user/.cache/relar-codon-20261021/install/codon-deploy-linux-x86_64/lib/codon/libgfortran.so.5": {
+        "bytes": 4243353,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "ff9d1f7776e59d49ccf46a606ecbca9caadaeae247d3b8496952f38e4c18e771"
+      },
+      "/home/dev-user/.cache/relar-codon-20261021/install/codon-deploy-linux-x86_64/lib/codon/libomp.so": {
+        "bytes": 1550504,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "afa02ffad7c504de5f825b2d49e7fc7d19ec00ccd52687fe9366f4e475475436"
+      },
+      "/home/dev-user/.cache/relar-codon-20261021/install/codon-deploy-linux-x86_64/lib/codon/libquadmath.so.0": {
+        "bytes": 2101465,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "bacc13f00a567cf2d78fa596385110572cb0d4251fd7892f4096aa2d5b97018c"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/architecture-native-probe-final-2/codon": {
+        "bytes": 29048,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "d4320add4ca86fad68a9166bc2cad28c5f076dd5424e1983c7f9c3f2a75a7099"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/architecture-native-probe-final-2/relar": {
+        "bytes": 5320408,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "9332db18b7b1908665975fb51d8631b2ec1d96bc6b51a565664d07bb94ff6730"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/architecture-native-probe-final-2/relar-asan": {
+        "bytes": 9223904,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "046bcdcc235950ccb40066dcd19ac411bca4db933516a69cd608c319ab4ec21f"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/normal_runtime.a": {
+        "bytes": 38374698,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "535ad6c4bc929c570da7b065f4495c7ca08f41f80a5fd3ca9bb5e4533bf5661d"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/relar": {
+        "bytes": 130769128,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "898341c4d0f7c17761e882425f3ebfe9532bb40e1ba26cee243f19f7e05789b6"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/build-final-1/thinlto_runtime.a": {
+        "bytes": 31045962,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "f4dbf94a2f29d5b51622e9ca48b562f3054f4b6f28f658482c408b9ac3b7cad1"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-asan-final-2/catalog": {
+        "bytes": 9501096,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "4552f598a74497cc56d05fdcfa5a35f4d1ef481d3d63b187c98d7983cc64da87"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-asan-final-2/catalog-compute": {
+        "bytes": 9505520,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "f57f45d201eb143584fd1a7b0e2d6d7b7518f148683d0fa882ac5db8f64e13a9"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-asan-final-3/catalog": {
+        "bytes": 9496688,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "98ccef48fddc25604b150e4a429c907ad49ddc2c2b7276ef06c4627cb03c9d76"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-asan-final-3/catalog-compute": {
+        "bytes": 9501112,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "b52e5d9dddca5afe76cbe7d09aea5b90f4abeff72ec502bdd103d10c891d40bd"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-asan-preview-7/catalog": {
+        "bytes": 9501096,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "cab036f964b8d19c1d5013b9e9d02bd45f5a5a4c3a38e67c559bf067015d6d12"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-asan-preview-7/catalog-compute": {
+        "bytes": 9505520,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "73018cdae6f7cd66f055e5cea299770d76403222c9cc704047f191e2941e873a"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-cleanups-native-probe-final-3/codon": {
+        "bytes": 33304,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "7d14187b9e00cdd564272d99a8102f90cdc4725451ebfa0f9d026ad7b1ee718c"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-cleanups-native-probe-final-3/relar": {
+        "bytes": 5332872,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "81d4f7739666de52ff69961b8163166876c96d23471eb4ba0f473cd47d04964c"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-cleanups-native-probe-final-3/relar-asan": {
+        "bytes": 9231736,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "f351f32cb32c53994d04223db24ac37ec7a59987e1f1f2f2a8713d3dc184dc7f"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-2/binaries/catalog-relar": {
+        "bytes": 5484216,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "ec9e69b3e554e0db7b64fb9b00aff6b09232f133b3b4f4d058a378d2eb19b076"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-2/binaries/catalog-rust": {
+        "bytes": 2178688,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "255d7fa4d746c05b937d87dc05e906a027b4fc8367d21e862eff124cd75d3a6a"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-3/binaries/catalog-relar": {
+        "bytes": 5480120,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "ea38b71508d70918884ca92b9eb8f4c8032a14651385271c38d7443b29acd9f8"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-final-3/binaries/catalog-rust": {
+        "bytes": 2179064,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "c698b4a330d45e1d4acce9f89b314df0bcb33dc3e8ebe8baeae246449551cbdf"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-3/binaries/catalog-relar": {
+        "bytes": 5462816,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "d50318634e8b9187bcd5dd95f09885a9d92d1627ddb9c04ebf9c3c806dbfa50c"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-3/binaries/catalog-rust": {
+        "bytes": 2175888,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "1cd629e864407e59ebd9342cfbda166eb1bb5ff183d81f90dc10eff749ed6777"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-7/binaries/catalog-relar": {
+        "bytes": 5480120,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "4c0f66f28a26e668f02c71b8231a241ddefe1a5b3aa2d3425ba636851474f43a"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/catalog-profile-preview-7/binaries/catalog-rust": {
+        "bytes": 2175888,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "1cd629e864407e59ebd9342cfbda166eb1bb5ff183d81f90dc10eff749ed6777"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/codon-catalog-final-2/python_catalog": {
+        "bytes": 1237480,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "d315fd6c7f4018468500e37b32afedf578e48bd92b3d65127ee4af20eccde2c0"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/codon-catalog-final-2/python_catalog-compute": {
+        "bytes": 1241456,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "a525da41022936d692e7d38b9b5c8b01d9bff564c5a652e318c75597af3bf52d"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/codon-catalog-final-3/python_catalog": {
+        "bytes": 1237480,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "d63f548a94a1b6e9eb05abc45b3be7aa2c5c1817bf60c81f31922b40db5dd76f"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/codon-catalog-final-3/python_catalog-compute": {
+        "bytes": 1241456,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "aeaf739af46879dd3956a31e59f75fd8382b2b759b7cf31af81dcec0b1907224"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/codon-development-13/conformance_report": {
+        "bytes": 1321608,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "cc561e57fb660ea69d813f4aeabf998755b91f5530fa79f55e9f15a1ef8a62ab"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/codon-development-13/conformance_report-compute": {
+        "bytes": 1346336,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "ab0be764fbd5eb5eb9f041cf009643d60f8e7e5afcf8fa9c770113ca4af05957"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/conformance-asan-preview-7/application": {
+        "bytes": 9628504,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "b6ec1f2426d2929205b546b5ea448ddea53364babedc6269a647fe4cf82db6fc"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/conformance-asan-preview-7/compute": {
+        "bytes": 9628504,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "1443bfab44288cdf00f5e1f6aafce13e505c9ddb0933d321b22d794d4fb6ad88"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/input-tools/ty-0.0.60/bin/ty": {
+        "bytes": 26886976,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "c4982eb6c39576b0277a20ab2522de1f76ded9279c43e9738e3a63619b95e560"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-2/catalog": {
+        "bytes": 5484216,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "ec9e69b3e554e0db7b64fb9b00aff6b09232f133b3b4f4d058a378d2eb19b076"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-2/catalog-compute": {
+        "bytes": 5484288,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "2e1fe7beca84a631da323efc805a94c4d3322348b48aed166206da29879c468b"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-2/conformance": {
+        "bytes": 5536504,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "705fe324b7ce2f14fbea97a20088e01f71371cd8c23c01c5201730227c25a168"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-2/conformance-compute": {
+        "bytes": 5536504,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "0fe7235356cc3ed7a771efedd7380b169c0c250e2fd488e9b077ef01eedca469"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-3/catalog": {
+        "bytes": 5480120,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "ea38b71508d70918884ca92b9eb8f4c8032a14651385271c38d7443b29acd9f8"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-3/catalog-compute": {
+        "bytes": 5484288,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "0e5ead43d7516021e7e9c0b60c5ec39a1949c3a92475c0faeb7b8a184cab6512"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-3/conformance": {
+        "bytes": 5536504,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "af8a16aab89993a38222d464d3f2f7b4b9139ffc9b8a01ca511f1e521d139537"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-normal-final-3/conformance-compute": {
+        "bytes": 5536504,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "521e8c2208238a6b3cb58db935488e07f855a4b04a612f5d71affe8c7aa954af"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-2/catalog": {
+        "bytes": 5564208,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "fbbd684d374558f7a1611434348ca9bd448f7e66b53dfea6d5948bc3f605e4ba"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-2/catalog-compute": {
+        "bytes": 5595928,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "5c44f66e10ef1771bdfedd2a60181d078fd11639530124e4cad0ec33a683026f"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-2/conformance": {
+        "bytes": 5670880,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "366ad44aab448fa8356c8af09a449702ec8073d276da68a388294ec99db4c18b"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-2/conformance-compute": {
+        "bytes": 5752680,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "90c3149e7fdcc66eaaf9dae6448ec630c62ccc8a2a73d43121cf38ec20b25a7f"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-3/catalog": {
+        "bytes": 5559776,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "0acc26c88a5bafa9391494c714595085724f6c131477fe784b11a34fea3b9399"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-3/catalog-compute": {
+        "bytes": 5591448,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "2a5c5f1342aa3819d80989d27277e1322736fae44e14e3518f8822d6a6966462"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-3/conformance": {
+        "bytes": 5670880,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "aa8827b9ea436e0fb1c4fc0bcfa3c46a7f256f0f4d7fca331643113b845a6153"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-preparation-thinlto-final-3/conformance-compute": {
+        "bytes": 5752680,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "ddc3e04d303a053b51829dcc151b39796489faf2df5f5d8b5636aefe58c8b0f0"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-quick-preparation-candidate-4/catalog-compute": {
+        "bytes": 5484288,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "fc111969c157e7a5ef24f5bdd88fac559b59488f5f6943c4433ff0017f613c3b"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-quick-preparation-final-3/catalog-compute": {
+        "bytes": 5484288,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "1142f9ef8aaaf6b6cfc8780fca89c0bf535b99f2293a9d50e5a5481985ea6166"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-quick-preparation-thinlto-candidate-4/catalog-compute": {
+        "bytes": 5591448,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "e882bb7f6b50afd08b246cf5b4821ec83f4b029903fa83252deb723d85a002b2"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-quick-preparation-thinlto-final-3/catalog-compute": {
+        "bytes": 5594200,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "43ac5f8d64c33aaad1d3c23cd68473ccc17e5d5c8566f70dc4add3a370a3b105"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/reference-conformance-report-normal-final/conformance-report-reference": {
+        "bytes": 2722936,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "87870933dbb859cc4195f23e17f518284bd0be859ec171c357d98851e3b70c3c"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/reference-conformance-report-thinlto-final/conformance-report-reference": {
+        "bytes": 4427640,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "9b728576671a21f16416d4ec409d862dcff5cef65d2b6a88247b99b9cb40c019"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/reference-python-catalog-normal-final-2/python-catalog-reference": {
+        "bytes": 2178688,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "255d7fa4d746c05b937d87dc05e906a027b4fc8367d21e862eff124cd75d3a6a"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/reference-python-catalog-normal-final-3/python-catalog-reference": {
+        "bytes": 2179064,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "c698b4a330d45e1d4acce9f89b314df0bcb33dc3e8ebe8baeae246449551cbdf"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/reference-python-catalog-thinlto-final-2/python-catalog-reference": {
+        "bytes": 2909760,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "fd95d6ebebde8947f97b7fd9a0cc611ffb79af38fbf158082d1d69091ef3bd80"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/reference-python-catalog-thinlto-final-3/python-catalog-reference": {
+        "bytes": 2910152,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "946b9babcece3db29ce257ae7266059994aeab8f5cf7fe50c11d2811d96858fe"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/variant-native-probe-final-3/codon": {
+        "bytes": 41280,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "e55c5c6d8f8c1e934a593774460677a3cfa60fc8d1fbb3ec4f3fd04b92437fb7"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/variant-native-probe-final-3/relar": {
+        "bytes": 5333552,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "9df1d3dd7026d1e8fa8dabb63565933aa7208681737b56389a2a0371792deb4c"
+      },
+      "/home/dev-user/.cache/relar-native-tools-20261021/variant-native-probe-final-3/relar-asan": {
+        "bytes": 9235120,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "4b1ecd28d52e86876b07212990007f86f98bd72fa2162a8d4381b86a4afd1e1a"
+      },
+      "/home/dev-user/.cache/relar-workspaces-20261021/input-tools/ty-0.0.89/bin/ty": {
+        "bytes": 30174368,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "d38b9f87d6e8876fbad8a339e5e479d0d4dbb23aa2bf6f303966c11272e9bb9e"
+      },
+      "/home/dev-user/.cache/relar-workspaces-20261021/input-tools/ty-0.0.90/bin/ty": {
+        "bytes": 30283040,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "e56df0042c10ae481d80e155386f732a67994bf41af94c164d2bd1ec68797211"
+      },
+      "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/cargo": {
+        "bytes": 37027376,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e"
+      },
+      "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/rustc": {
+        "bytes": 171720,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba"
+      },
+      "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld": {
+        "bytes": 383536,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "bf1b9bc68d0f70523a95618cb9be2e4d04698564229838cfe29eb913bba7ce67"
+      },
+      "/home/dev-user/serc-perf-validation/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": {
+        "bytes": 32359056,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+      },
+      "/usr/lib/llvm-18/bin/clang": {
+        "bytes": 140592,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "/usr/lib/llvm-18/lib/libLLVM.so.1": {
+        "bytes": 123215144,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "5c3a63957e28c15cdf1503892074f032d29b72e36a9824a77dfa87e48a0dafb0"
+      },
+      "/usr/lib/llvm-18/lib/libclang-cpp.so.18.1": {
+        "bytes": 64796088,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "b9592746f7f8ff1156680fb1fad5faf5486df7a67aca8327cc959463416c6718"
+      },
+      "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": {
+        "bytes": 236616,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "c20a2dc8917c755f02b94049356320fe1f62ac7d9f8994731f807d9df39302da"
+      },
+      "/usr/lib/x86_64-linux-gnu/libbsd.so.0.12.1": {
+        "bytes": 80888,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "e86cd4f0019f42c2ba5e60602e0edc8694d2948377d98c3654d0f6bddb5254bb"
+      },
+      "/usr/lib/x86_64-linux-gnu/libc.so.6": {
+        "bytes": 2129424,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "3a15d66867d83762c7f2f1e37359cb8f6c5743edb369c65285cb0b1c4f7498bf"
+      },
+      "/usr/lib/x86_64-linux-gnu/libdl.so.2": {
+        "bytes": 14408,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "c2994527172cc23b7fb0f7d611b71e00a37da27af12c2e5e9e0dc1a742886c96"
+      },
+      "/usr/lib/x86_64-linux-gnu/libedit.so.2.0.72": {
+        "bytes": 220472,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "195c607216f8581dbf516346ed38f4c73500cac4b84e18eb0a4fd49931e4cd56"
+      },
+      "/usr/lib/x86_64-linux-gnu/libffi.so.8.1.4": {
+        "bytes": 47672,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "00f593fe192f2851b8ce23b25cec2488d769beb5a8f63e8c9e563071e1075153"
+      },
+      "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1": {
+        "bytes": 183024,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "d93224d2b0dab4247598be683adca02f5cf00586f99c187579cd7e92058fb7cb"
+      },
+      "/usr/lib/x86_64-linux-gnu/libicudata.so.74.2": {
+        "bytes": 30795392,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "ddbb3718b8bd9cbd780e5ab08b4503c30a6c4fa0706ebe5d074ed6b596c1714e"
+      },
+      "/usr/lib/x86_64-linux-gnu/libicuuc.so.74.2": {
+        "bytes": 2140336,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "7560aadde38e5f4237a47a1ddd5891f9b36768a77a60faae30beee003ac01901"
+      },
+      "/usr/lib/x86_64-linux-gnu/liblzma.so.5.4.5": {
+        "bytes": 202904,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "696e868dd0700a19a6d65fc01608ec2d70d3cb91f65710e89180cd2e688f30cb"
+      },
+      "/usr/lib/x86_64-linux-gnu/libm.so.6": {
+        "bytes": 952616,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "fce00b6f25f459cf4ae0b7fae4257909a1a8a86f9149e7c029a5d617baf1ccd0"
+      },
+      "/usr/lib/x86_64-linux-gnu/libmd.so.0.1.0": {
+        "bytes": 55536,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "423e18586b6ea740f4465afd64f7a9a4cb7264ed979c8e7256f9085af5345fef"
+      },
+      "/usr/lib/x86_64-linux-gnu/libmvec.so.1": {
+        "bytes": 1018144,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "57329ee0018b8fd8f8e51af5f87c723b6ecdf04679f4493134beab0f45d58ec5"
+      },
+      "/usr/lib/x86_64-linux-gnu/libpthread.so.0": {
+        "bytes": 14408,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "90491a21ce44efcf3bd4b65ec82501c091d7ebe7f8d9b341dd01d721001d9ecd"
+      },
+      "/usr/lib/x86_64-linux-gnu/librt.so.1": {
+        "bytes": 14624,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "6d072187d88e092e81561a44c03a4a41397319022c6d43519757cc051c576d82"
+      },
+      "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33": {
+        "bytes": 2592224,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "1fd75fe70354a416d75aef22bcae68c47bd25d20e2d0568c30b1a9838cf62f11"
+      },
+      "/usr/lib/x86_64-linux-gnu/libtinfo.so.6.4": {
+        "bytes": 208328,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "e6089d7bb95eee5b545f3770dd69095b0bca47d26701cad145af429561d16306"
+      },
+      "/usr/lib/x86_64-linux-gnu/libutil.so.1": {
+        "bytes": 14408,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "5181d2b5de571bf054395684bfe77db685badf0163ac50b5e47d2148b52f11c3"
+      },
+      "/usr/lib/x86_64-linux-gnu/libxml2.so.2.9.14": {
+        "bytes": 1967424,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "209e941be9eb2eb9ab36caaa0b81d1c6b36c8f5d7268c24f19e81039137e6485"
+      },
+      "/usr/lib/x86_64-linux-gnu/libz.so.1.3": {
+        "bytes": 113000,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "86200da370f20476a2507e9097a789b5ef97269b4ca8d5e164ad82dab9d99892"
+      },
+      "/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.5": {
+        "bytes": 755864,
+        "reason": "native executable, library, or compiled archive; not redistributed",
+        "sha256": "0a2128bc10841fb29e76d08d945864dfb0b6a66da5df6df5d8299197439e54bb"
+      }
+    },
+    "isolated_replay": {
+      "archive_index_sha256": "f6d8498d72a0e98f0091185403231230d77415d727d6ef05c1fc2a9009a603a2",
+      "blocked_operations": {
+        "native_processes": 0,
+        "network_operations": 0,
+        "original_path_accesses": 0
+      },
+      "relocated_archive": "/tmp/relar-native-tools-evidence-final-3-isolated",
+      "replay_output": "/tmp/relar-native-tools-evidence-final-3-isolated-replay.json",
+      "replay_output_sha256": "3d67f8c7923710334320cff9a0dff2ae4dbf26bbf14a061943d98803cd184f42",
+      "script_sha256": "7f20de03d31bca210d82abd985c52a39f67898e97ef427c1630408f625a374a0",
+      "status": "passed"
+    },
+    "local_replay_byte_identical_to_remote": true,
+    "local_replay_status": "passed",
+    "portable_replay_sha256": "3d67f8c7923710334320cff9a0dff2ae4dbf26bbf14a061943d98803cd184f42",
+    "preserved_baseline_replay": {
+      "archive_index_sha256": "f6d8498d72a0e98f0091185403231230d77415d727d6ef05c1fc2a9009a603a2",
+      "baseline_index_sha256": "415502669fa35b714fe730b1bc4dcd9dd8317af54f786e877eeaa7f0dc2bcf0f",
+      "baseline_replay_sha256": "9a15263c2ac695b3755aaecb566ed8dabaf1288c9e6d8b3618f7b903f7a6e2d3",
+      "native_engines_executed": false,
+      "restored_files": 2220,
+      "retained_replay_identical": true,
+      "script_sha256": "a9cbc11af80507dde92e1b6e114096dffaf445c4e99b073a18d522abc2fc984b",
+      "status": "passed"
+    },
+    "retained_files_verified": 18949,
+    "transferred_archive_rehashed": true
+  }
+}

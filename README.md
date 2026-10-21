@@ -149,6 +149,11 @@ offline CPython release transformation, selecting and rendering 6,098 downloads
 from 58,721 raw release artifacts. Both guides explain the typed adaptations,
 accepted input domain, unchanged upstream oracle, and native Rust/Codon comparisons.
 
+In the [five-engine comparison](benchmarks/results/2026-10-21-native-tools.md),
+median complete runtimes are 1.33–1.77× Rust with ThinLTO and 1.48–1.84× with
+ordinary builds. Repeated full computation also stays below 2× in both modes;
+the tables include upstream CPython, the typed CPython port, and native Codon.
+
 ## License
 
 Relar is licensed under either of
