@@ -11,6 +11,7 @@ use crate::modules::{Binding, DefinitionId, Intrinsic, ModuleId, SourceGraph};
 use crate::narrowing;
 use crate::types::Types;
 
+mod assignments;
 mod calls;
 mod comprehensions;
 mod matching;
@@ -675,6 +676,8 @@ struct Checker<'a> {
     types: &'a Types,
     helpers: &'a Helpers,
     comprehension_targets: HashSet<String>,
+    comprehension_depth: usize,
+    comprehension_exports: HashMap<String, usize>,
     narrowed: HashMap<usize, Type>,
     returns: Type,
     names: HashMap<String, usize>,
@@ -704,6 +707,8 @@ impl<'a> Checker<'a> {
             types,
             helpers,
             comprehension_targets: HashSet::new(),
+            comprehension_depth: 0,
+            comprehension_exports: HashMap::new(),
             narrowed: HashMap::new(),
             returns,
             names: HashMap::new(),
@@ -827,7 +832,8 @@ impl<'a> Checker<'a> {
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
         let concrete = self.types.payload(expected).unwrap_or(expected);
         let value = match expression {
-            ast::Expr::If(value) => return self.conditional(value, Some(expected)),
+            ast::Expr::Named(value) => self.named_expression(value, Some(expected))?,
+            ast::Expr::If(value) => self.conditional(value, Some(expected))?,
             ast::Expr::Subscript(subscript)
                 if matches!(&*subscript.slice, ast::Expr::Slice(_))
                     && (matches!(concrete, Type::Str | Type::Bytes)
@@ -939,21 +945,26 @@ impl<'a> Checker<'a> {
     /// widen a result; unrelated concrete storage types never share a value.
     fn conditional(&mut self, value: &ast::ExprIf, expected: Option<Type>) -> Result<Expr, String> {
         let test = self.condition(&value.test)?;
-        let facts = self.narrowed.clone();
+        let before = self.local_state();
         self.apply_facts(&value.test, true);
         let yes = if let Some(expected) = expected {
             self.expr_expected(&value.body, expected)?
         } else {
             self.expr(&value.body)?
         };
-        self.narrowed = facts.clone();
+        let yes_state = self.local_state();
+        self.restore_state(before);
         self.apply_facts(&value.test, false);
         let no = if let Some(expected) = expected {
             self.expr_expected(&value.orelse, expected)?
         } else {
             self.expr(&value.orelse)?
         };
-        self.narrowed = facts;
+        self.join_states([yes_state, self.local_state()]);
+        // Context can promote both concrete arms for optional storage. Keep the
+        // expression's narrower result when those original values agree.
+        let yes = assignments::unpromoted(yes);
+        let no = assignments::unpromoted(no);
         let ty = if yes.ty == no.ty {
             yes.ty
         } else if yes.ty == Type::None {
@@ -980,6 +991,11 @@ impl<'a> Checker<'a> {
     }
 
     fn apply_facts(&mut self, test: &ast::Expr, truth: bool) {
+        for name in narrowing::guaranteed_assignments(test, Some(truth)) {
+            if let Some(&slot) = self.names.get(&name) {
+                self.assigned.insert(slot);
+            }
+        }
         for (name, present) in narrowing::facts(test, truth) {
             if let Some(&slot) = self.names.get(&name)
                 && let Some(payload) = self.types.payload(self.locals[slot])
@@ -1137,17 +1153,23 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// Builds the target once; LLVM lowering still evaluates the RHS before it.
+    /// Checks and lowers RHS evaluation before receiver/index evaluation. Target
+    /// context is queried without publishing any speculative binding effects.
     fn assignment(&mut self, target: &ast::Expr, value: &ast::Expr) -> Result<Statement, String> {
+        if let ast::Expr::Name(name) = target {
+            let value = if let Some(&slot) = self.names.get(name.id.as_str()) {
+                self.expr_expected(value, self.locals[slot])?
+            } else {
+                self.expr(value)?
+            };
+            return self.assign(target, value);
+        }
+        let value = if let Some(context) = self.assignment_context(target) {
+            self.expr_expected(value, context)?
+        } else {
+            self.expr(value)?
+        };
         match target {
-            ast::Expr::Name(name) => {
-                let value = if let Some(&slot) = self.names.get(name.id.as_str()) {
-                    self.expr_expected(value, self.locals[slot])?
-                } else {
-                    self.expr(value)?
-                };
-                self.assign(target, value)
-            }
             ast::Expr::Subscript(subscript) => {
                 let list = self.expr(&subscript.value)?;
                 let (key, element) = self
@@ -1166,12 +1188,12 @@ impl<'a> Checker<'a> {
                         )
                     })?;
                 let index = self.expr_expected(&subscript.slice, key)?;
-                let value = self.expr_expected(value, element)?;
+                let value = self.coerce(value, element, target)?;
                 Ok(Statement::SetItem(list, index, value))
             }
             ast::Expr::Attribute(attribute) => {
                 let (receiver, field, ty) = self.field(attribute)?;
-                let value = self.expr_expected(value, ty)?;
+                let value = self.coerce(value, ty, target)?;
                 Ok(Statement::SetField(receiver, field, value))
             }
             _ => Err(error(self.source, target, "unsupported assignment target")),
@@ -1718,6 +1740,11 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 self.invalidate_loop_facts(&loop_.body);
+                for name in narrowing::expression_assignments(&loop_.test) {
+                    if let Some(slot) = self.names.get(&name) {
+                        self.narrowed.remove(slot);
+                    }
+                }
                 let facts = self.narrowed.clone();
                 let test = self.condition(&loop_.test)?;
                 let before = self.assigned.clone();
@@ -1756,6 +1783,7 @@ impl<'a> Checker<'a> {
             }
             ast::Stmt::Assert(assert) => {
                 let test = self.condition(&assert.test)?;
+                let successful = self.local_state();
                 let result = if let Some(message) = &assert.msg {
                     let message = self.expr_expected(message, Type::Str)?;
                     Statement::If(
@@ -1772,6 +1800,7 @@ impl<'a> Checker<'a> {
                 } else {
                     Statement::Assert(test)
                 };
+                self.restore_state(successful);
                 self.apply_facts(&assert.test, true);
                 Some(result)
             }
@@ -2168,6 +2197,7 @@ impl<'a> Checker<'a> {
                 (Type::Bytes, ExprKind::Bytes(value.value.bytes().collect()))
             }
             ast::Expr::FString(value) => return self.fstring(value),
+            ast::Expr::Named(value) => return self.named_expression(value, None),
             ast::Expr::If(value) => return self.conditional(value, None),
             ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
             ast::Expr::Name(name) if name.id == "__name__" => {
@@ -2271,13 +2301,22 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Expr::BoolOp(boolean) => {
-                let facts = self.narrowed.clone();
+                let and = boolean.op == ast::BoolOp::And;
                 let mut values = Vec::new();
-                for value in &boolean.values {
+                let mut exits = Vec::new();
+                for (index, value) in boolean.values.iter().enumerate() {
                     values.push(self.condition(value)?);
-                    self.apply_facts(value, boolean.op == ast::BoolOp::And);
+                    let after = self.local_state();
+                    if index + 1 == boolean.values.len() {
+                        exits.push(after);
+                    } else {
+                        self.apply_facts(value, !and);
+                        exits.push(self.local_state());
+                        self.restore_state(after);
+                        self.apply_facts(value, and);
+                    }
                 }
-                self.narrowed = facts;
+                self.join_states(exits);
                 (
                     Type::Bool,
                     ExprKind::Boolean(boolean.op == ast::BoolOp::And, values),
@@ -2341,11 +2380,15 @@ impl<'a> Checker<'a> {
                     }
                     return Ok(result);
                 }
-                let values = compare
-                    .operands
-                    .iter()
-                    .map(|value| self.expr(value))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let mut values = Vec::new();
+                let mut exits = Vec::new();
+                for (index, value) in compare.operands.iter().enumerate() {
+                    values.push(self.expr(value)?);
+                    if index != 0 {
+                        exits.push(self.local_state());
+                    }
+                }
+                self.join_states(exits);
                 let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
                     let (ty, right) = (pair[0].ty, pair[1].ty);

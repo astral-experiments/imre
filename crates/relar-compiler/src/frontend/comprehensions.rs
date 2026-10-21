@@ -1,5 +1,6 @@
-//! Eager displays use private functions so iteration targets never leak into the
-//! enclosing namespace. Their existing typed loop IR also owns partial results.
+//! Eager displays normally use private functions. Displays containing assignment
+//! expressions run inline with private iteration slots so writes reach their
+//! enclosing function, including when a later iteration raises.
 
 use std::cell::RefCell;
 
@@ -88,6 +89,23 @@ impl<'a> Display<'a> {
             }
         }
     }
+
+    /// Only this clause's suffix repeats on its backedge. An earlier filter can
+    /// safely narrow a name when the remaining filters and yielded value do not
+    /// replace it.
+    fn repeated_writes(self, index: usize) -> HashSet<String> {
+        let (first, second) = match self.value {
+            Yield::List(value) | Yield::Set(value) => (value, None),
+            Yield::Dict(key, value) => (key, Some(value)),
+        };
+        self.clauses[index..]
+            .iter()
+            .flat_map(|clause| &clause.ifs)
+            .chain([first])
+            .chain(second)
+            .flat_map(narrowing::expression_assignments)
+            .collect()
+    }
 }
 
 fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
@@ -163,6 +181,20 @@ impl Checker<'_> {
                 expression,
                 "asynchronous comprehensions are unsupported",
             ));
+        }
+        if display
+            .clauses
+            .iter()
+            .any(|clause| !narrowing::expression_assignments(&clause.iter).is_empty())
+        {
+            return Err(error(
+                self.source,
+                expression,
+                "assignment expressions are forbidden in comprehension iterables",
+            ));
+        }
+        if !narrowing::expression_assignments(expression).is_empty() {
+            return self.inline_comprehension(expression, display, expected);
         }
         let input = self.iteration_input(&display.clauses[0].iter)?;
         let mut targets = HashSet::new();
@@ -303,6 +335,82 @@ impl Checker<'_> {
         })
     }
 
+    /// Shares enclosing bindings while reserving private targets and owners.
+    /// Exported assignments survive cleanup; all remaining private slots are
+    /// cleared on both normal completion and exceptional loop exits.
+    fn inline_comprehension(
+        &mut self,
+        expression: &ast::Expr,
+        display: Display<'_>,
+        expected: Option<Type>,
+    ) -> Result<Expr, String> {
+        let input = self.iteration_input(&display.clauses[0].iter)?;
+        let before = self.local_state();
+        let names = self.names.clone();
+        let targets = self.comprehension_targets.clone();
+        let first_private = self.locals.len();
+        let writes = narrowing::expression_assignments(expression);
+        let mut private_targets = HashSet::new();
+        for clause in display.clauses {
+            target_names(&clause.target, &mut private_targets);
+        }
+        for name in &private_targets {
+            self.names.remove(name);
+        }
+        self.comprehension_targets.extend(private_targets);
+        self.comprehension_depth += 1;
+        let result = self.hidden(Type::None);
+        let loops = self.comprehension_clause(display, 0, Some(input), expected, result)?;
+        let ty = self.locals[result];
+        let empty = match display.value {
+            Yield::List(_) => ExprKind::List(Vec::new()),
+            Yield::Set(_) => ExprKind::Set {
+                element: self.types.set_element(ty).unwrap(),
+                values: Vec::new(),
+            },
+            Yield::Dict(..) => {
+                let (key, value) = self.types.mapping(ty).unwrap();
+                ExprKind::Dict {
+                    key,
+                    value,
+                    entries: Vec::new(),
+                }
+            }
+        };
+        let mut body = vec![Statement::Assign(result, Expr { ty, kind: empty })];
+        body.extend(loops);
+        self.comprehension_depth -= 1;
+        self.comprehension_targets = targets;
+        self.names = names;
+        for (name, &slot) in &self.comprehension_exports {
+            if !self.comprehension_targets.contains(name) {
+                self.names.insert(name.clone(), slot);
+            }
+        }
+        self.restore_state(before);
+        for name in writes {
+            if let Some(slot) = self.names.get(&name) {
+                self.narrowed.remove(slot);
+            }
+        }
+        let exported = self
+            .comprehension_exports
+            .values()
+            .copied()
+            .collect::<HashSet<_>>();
+        let clear = (first_private..self.locals.len())
+            .filter(|slot| !exported.contains(slot))
+            .collect();
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(self.local(result)),
+                clear,
+            },
+        })
+    }
+
     /// Filters are nested in source order and contribute facts only on their true
     /// edges. Each nested iterable is evaluated anew under the preceding bindings.
     fn comprehension_clause(
@@ -318,6 +426,11 @@ impl Checker<'_> {
             Some(input) => input,
             None => self.iteration_input(&clause.iter)?,
         };
+        for name in display.repeated_writes(index) {
+            if let Some(slot) = self.names.get(&name) {
+                self.narrowed.remove(slot);
+            }
+        }
         self.lower_iteration(&clause.target, input, |checker| {
             let mut conditions = Vec::new();
             for condition in &clause.ifs {

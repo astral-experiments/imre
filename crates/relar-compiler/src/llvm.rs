@@ -115,6 +115,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         loops: Vec::new(),
         locals: Vec::new(),
         borrowed_params: Vec::new(),
+        expression_rebound: Vec::new(),
         small_locals: Vec::new(),
         temporaries: Vec::new(),
         cleanups: Vec::new(),
@@ -164,6 +165,7 @@ struct Emitter<'a, 'module> {
     loops: Vec<LoopTarget>,
     locals: Vec<Type>,
     borrowed_params: Vec<bool>,
+    expression_rebound: Vec<bool>,
     small_locals: Vec<bool>,
     temporaries: Vec<Value>,
     cleanups: Vec<Cleanup>,
@@ -410,13 +412,13 @@ impl Emitter<'_, '_> {
         self.temporaries = temporaries;
     }
 
-    /// Borrows only direct local values. No expression in the closed IR can
-    /// rebind a caller's slot: there are no closures, globals, assignment
-    /// expressions, or exposed slot addresses. List mutation can remove an
-    /// element, so this general path keeps element reads and other computed
-    /// results owned. Comparison-specific borrowing proves no mutation occurs.
+    /// Borrows direct locals only when no expression can replace their slot.
+    /// Earlier operands of a call or operator must survive a later `:=` write.
+    /// Container elements keep their existing mutation-specific ownership rules.
     fn operand(&mut self, expression: &Expr) -> Operand {
-        if let ExprKind::Local(slot) = &expression.kind {
+        if let ExprKind::Local(slot) = &expression.kind
+            && !self.expression_rebound[*slot]
+        {
             let mut value = self.borrow_slot(*slot);
             value.small_integer |= self.ranges.integer(expression).is_some();
             Operand {
@@ -688,7 +690,8 @@ impl Emitter<'_, '_> {
         self.entry_allocas.clear();
         self.locals = function.locals.clone();
         self.small_locals = self.ranges.small_locals(function);
-        let mut rebound = vec![false; self.locals.len()];
+        self.expression_rebound = function.expression_rebound();
+        let mut rebound = self.expression_rebound.clone();
         mark_rebound(&function.body, &mut rebound);
         self.borrowed_params = vec![false; self.locals.len()];
         for &slot in &function.params {
@@ -810,14 +813,18 @@ impl Emitter<'_, '_> {
     }
 
     fn block(&mut self, statements: &[Statement]) {
+        let incoming = self.temporaries.clone();
         for statement in statements {
             if self.terminated {
                 break;
             }
             self.statement(statement);
             debug_assert!(
-                self.temporaries.is_empty(),
-                "statement left expression-owned temporaries live"
+                self.temporaries
+                    .iter()
+                    .map(|value| (&value.operand, value.ty))
+                    .eq(incoming.iter().map(|value| (&value.operand, value.ty))),
+                "statement changed its enclosing expression owners"
             );
         }
     }
@@ -1146,6 +1153,32 @@ impl Emitter<'_, '_> {
                 let mut value = self.borrow_slot(*slot);
                 value.small_integer |= self.ranges.integer(expression).is_some();
                 self.retain(&value);
+                value
+            }
+            ExprKind::Bind(slot, expression) => {
+                let value = self.expr(expression);
+                self.retain(&value);
+                let storage = self.locals[*slot];
+                let stored = if storage == value.ty {
+                    value.clone()
+                } else if value.ty == Type::None {
+                    Value {
+                        ty: storage,
+                        operand: "0".into(),
+                        small_integer: false,
+                    }
+                } else {
+                    self.present(value.clone(), storage)
+                };
+                self.store(*slot, &stored);
+                value
+            }
+            ExprKind::Scope { body, value, clear } => {
+                self.cleanups.push(Cleanup::Slots(clear.clone()));
+                self.block(body);
+                let value = self.expr(value);
+                self.cleanups.pop();
+                self.clear_slots(clear);
                 value
             }
             ExprKind::List(values) => {

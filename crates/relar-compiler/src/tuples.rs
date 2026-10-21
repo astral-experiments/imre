@@ -56,6 +56,9 @@ pub(crate) fn scalarize(module: &mut Module) {
 /// Producer expressions may refer only to their own parameters. This guards the
 /// substitution independently of how frontend lowering allocates local slots.
 fn only_parameters(expression: &Expr, params: &[usize]) -> bool {
+    if matches!(expression.kind, ExprKind::Bind(..) | ExprKind::Scope { .. }) {
+        return false;
+    }
     if let ExprKind::Local(slot) = expression.kind {
         return params.contains(&slot);
     }
@@ -65,6 +68,15 @@ fn only_parameters(expression: &Expr, params: &[usize]) -> bool {
 }
 
 fn scalarize_function(function: &mut Function, producers: &[Option<Producer>]) {
+    // Named bindings can replace a tuple midway through another expression.
+    // Retain aggregate ownership until the projection pass models those writes.
+    if function
+        .expression_rebound()
+        .into_iter()
+        .any(|written| written)
+    {
+        return;
+    }
     let mut candidates = function
         .locals
         .iter()
@@ -438,7 +450,9 @@ fn children(expression: &Expr, mut visit: impl FnMut(&Expr)) {
                 visit(value);
             }
         }
-        ExprKind::Present(value)
+        ExprKind::Scope { .. } => unreachable!("expression writes bypass tuple scalarization"),
+        ExprKind::Bind(_, value)
+        | ExprKind::Present(value)
         | ExprKind::Absent(value)
         | ExprKind::Unwrap(value)
         | ExprKind::Not(value)
@@ -491,7 +505,9 @@ fn children_mut(expression: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
                 visit(value);
             }
         }
-        ExprKind::Present(value)
+        ExprKind::Scope { .. } => unreachable!("expression writes bypass tuple scalarization"),
+        ExprKind::Bind(_, value)
+        | ExprKind::Present(value)
         | ExprKind::Absent(value)
         | ExprKind::Unwrap(value)
         | ExprKind::Not(value)

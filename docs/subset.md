@@ -12,7 +12,7 @@ This is a deliberately restricted Python dialect for closed first-party programs
 | Types | `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed `typing.TextIO` and `typing.BinaryIO`, the sealed builtin `Exception` family, fixed nominal classes, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, and `T \| None`; locals have one inferred or declared storage type |
 | Classes | Declared fields, an explicit initializer, typed instance methods, alias-visible field mutation, and numeric field augmented assignment |
 | Statements | Single-target and fixed-tuple unpacking assignment, annotated assignment, numeric augmented assignment, local string/bytes `+=` and bytes `*=`, dictionary entry deletion, `if`/`elif`/`else`, structural `match`/`case`, `while`, `for` over ranges, strings, bytes, or concrete containers, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin-file `with` |
-| Conditions | Explicit `bool`; `and`, `or`, `not`; short-circuit evaluation; conditional expressions `yes if condition else no`; `is None`/`is not None` with local flow narrowing |
+| Conditions | Explicit `bool`; `and`, `or`, `not`; short-circuit evaluation; conditional expressions `yes if condition else no`; assignment expressions `(name := value)`; `is None`/`is not None` with local flow narrowing |
 | Integers | Arbitrary precision; `+`, `-`, `*`, `//`, `%`; `/` returns a correctly rounded float; unary `+`/`-`; all six value comparisons, including chains |
 | Floats | Binary64 literals and exact storage; `+`, `-`, `*`, `/`, `//`, `%`; unary signs; all six comparisons; mixed integer arithmetic and exact mixed comparisons; explicit numeric/string conversions |
 | Lists | One exact element type, including nested containers and classes; literals, shallow repetition and slicing, checked negative indexing, indexed assignment, iteration, `append(value)`, `pop()`, `len(...)`; alias-visible mutation |
@@ -29,7 +29,42 @@ Booleans have a separate exact type: use `int(flag)` to store one in an integer 
 
 Indentation must use spaces; tabs and form feeds remain valid inside string data. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
 
-Mutable global values, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generators, async, assignment expressions, slice assignment/deletion, starred or variable-length unpacking, variadic parameters, defaults other than scalar literals, loop `else`, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. Conditions cannot rely on implicit truthiness. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+Mutable global values, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generators, async, slice assignment/deletion, starred or variable-length unpacking, variadic parameters, defaults other than scalar literals, loop `else`, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. Conditions cannot rely on implicit truthiness. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+
+## Assignment expressions
+
+`(name := value)` evaluates its right-hand side once, stores it in a local, and
+returns that same value. The binding has one exact storage type, including an
+existing optional type; assigning a concrete value to optional storage does not
+make the expression result optional. An argument or container context can supply
+the type of an empty literal. Targets must be local names and cannot replace a
+fixed function, class, module binding, or builtin.
+
+Assignments follow Python's evaluation order in operands, call arguments,
+f-string fields, conditions, slices, and container displays. A skipped boolean
+operand, conditional arm, comparison suffix, or assertion message does not
+initialize its target. The checker tracks those paths and invalidates optional
+facts when an expression may replace the observed value.
+
+```python
+def running_totals(values: list[int]) -> list[int]:
+    total = 0
+    result = [(total := total + value) for value in values]
+    print(total)
+    return result
+```
+
+Inside an eager comprehension, `:=` binds in the enclosing function or entry
+scope, including through nested comprehensions. Iteration targets stay private.
+Writes already performed remain visible if a later iteration raises. A new
+binding is not definitely initialized after a possibly empty comprehension;
+initialize it beforehand if it is needed afterward. Assignment expressions are
+forbidden in comprehension iterable expressions and cannot rebind any enclosing
+comprehension's iteration target, following Python's syntax restrictions.
+
+A named match subject, such as `match (record := parse())`, preserves the target's
+declared optional shape and narrows it in matching cases. Rebinding that target
+in a guard leaves later cases inspecting the original subject.
 
 ## Binary64 numbers
 
@@ -219,7 +254,7 @@ Clauses nest from left to right. Each inner iterable is evaluated when its enclo
 
 Results have exact element/key/value types, inferred from the checked body or supplied by a typed storage, argument, or return boundary. Context also reaches nested literals and comprehensions. Filters can narrow optional local targets before constructing an element. These rules do not convert an existing container to a different element type or permit implicit truthiness.
 
-Capturing an outer local preserves its value and shared object identity; field and indexed reads still occur where written inside the body. Mutations through aliases retain the existing list/dictionary/set iteration behavior. A failure propagates through normal handlers and finally blocks, releasing the partial result and temporary owners without rolling back earlier user-visible mutations. Eager comprehensions do not expose an iterator, closure, callback, or partially built result. Generators, async clauses, assignment expressions, and new iteration protocols remain unsupported.
+Capturing an outer local preserves its value and shared object identity; field and indexed reads still occur where written inside the body. Mutations through aliases retain the existing list/dictionary/set iteration behavior. A failure propagates through normal handlers and finally blocks, releasing the partial result and temporary owners without rolling back earlier user-visible mutations. Eager comprehensions do not expose an iterator, closure, callback, or partially built result. Generators, async clauses, and new iteration protocols remain unsupported.
 
 ## Ownership and errors
 
