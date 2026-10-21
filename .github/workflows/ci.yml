@@ -84,3 +84,8 @@ jobs:
           target/release/relar build examples/batch_planner/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/batch-planner
           python3 benchmarks/reference/incremental_planner/build.py --batch --artifact-dir /tmp/relar-batch-reference --target-dir target/incremental-reference
           python3 benchmarks/batch_validate.py --python python3 --binary /tmp/batch-planner --rust-bigint /tmp/relar-batch-reference/planner-batch-bigint --output /tmp/relar-batch-reference/validation.json
+      - name: Validate file manifests and complete reports against CPython and Rust
+        run: |
+          target/release/relar build examples/manifest_planner/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/manifest-planner
+          python3 benchmarks/reference/incremental_planner/build.py --manifest --artifact-dir /tmp/relar-manifest-reference --target-dir target/incremental-reference
+          python3 benchmarks/manifest_validate.py --python python3 --binary /tmp/manifest-planner --rust-bigint /tmp/relar-manifest-reference/planner-manifest-bigint --output /tmp/relar-manifest-reference/validation.json

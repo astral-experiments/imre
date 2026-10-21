@@ -160,3 +160,46 @@ using identical old single-request source/input from comparisons of the new
 valid/mixed batch program. Its three-engine groups use all six execution orders
 over 30 rounds, with full-output checks and source/build provenance. Framing and
 cleanup make batch-versus-single time unsuitable as isolated exception overhead.
+
+## Manifest entrypoint
+
+The optional `manifest` feature adds `planner-manifest` for the
+[file-backed manifest example](../../../examples/manifest_planner/README.md).
+It reuses the same bounded parser, graph validation, scheduler, and renderer.
+It reads and closes the complete manifest before opening the report, then reads
+each exact payload path relative to the process working directory. Strict UTF-8,
+Python's full `splitlines()` boundary set, normalized input failures, request
+headers, and complete report bytes follow the example's contract. Report writes
+remain outside input recovery.
+
+```sh
+python3 benchmarks/reference/incremental_planner/build.py --manifest \
+  --artifact-dir benchmarks/local/manifest-reference-normal \
+  --target-dir benchmarks/local/manifest-reference-normal/target
+python3 benchmarks/manifest_validate.py --python python3.14 \
+  --rust-bigint benchmarks/local/manifest-reference-normal/planner-manifest-bigint
+```
+
+`--manifest` builds only the arbitrary-precision executable and records
+`entrypoint: manifest`; it is mutually exclusive with `--batch`. The default
+incremental and batch entrypoints retain their existing behavior. Toolchain,
+cache, and matched ThinLTO options are the same as above.
+
+This Linux reference explicitly checks `close(2)` after input parsing and report
+flushing, including error paths, rather than relying on Rust's infallible `Drop`.
+A close failure supersedes an earlier result; failed flushes still close the
+descriptor. It does not retry Linux `close`, request `fsync`, or promise atomic
+report replacement. Invalid UTF-8 file contents are covered; invalid UTF-8
+process arguments remain outside the common input domain.
+
+The filesystem oracle checks 196 cases against complete directory snapshots,
+including malformed payload recovery, all prior graph/parser cases, Unicode,
+missing files, directories, embedded NUL paths, line boundaries, report/input
+aliases, and terminal errors. The [manifest benchmark](../../manifest_benchmark.py)
+also retains a separate Linux `/dev/full` integration check for terminal report
+failure, with empty stdout and unchanged inputs. Its timing phase
+uses separate three-engine groups for unchanged-program regression controls and
+the new valid/mixed manifest workloads. It creates fixtures outside the clock,
+then measures fresh processes through file close; recently written inputs have
+warm page-cache contents. Every run must match all report bytes and filesystem
+effects, as well as status, stdout, and stderr.

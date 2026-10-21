@@ -31,7 +31,7 @@ fn take<'a>(lines: &'a [String], position: &mut usize) -> Result<&'a str> {
 }
 
 /// Preserve row parsing order and partial-allocation cleanup before recovery.
-fn parse(lines: &[String]) -> Result<(Vec<Task>, Vec<String>)> {
+pub(super) fn parse(lines: &[String]) -> Result<(Vec<Task>, Vec<String>)> {
     let mut position = 0;
     let task_count = count(take(lines, &mut position)?, "negative target count")?;
     let mut tasks = Vec::new();

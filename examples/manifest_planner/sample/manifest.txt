@@ -1,0 +1,3 @@
+examples/manifest_planner/sample/first.txt
+examples/manifest_planner/sample/malformed.txt
+examples/manifest_planner/sample/last.txt

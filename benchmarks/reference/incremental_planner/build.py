@@ -34,8 +34,14 @@ def sources() -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--toolchain", help="rustup toolchain; use ohm on this devbox")
-    parser.add_argument(
+    entrypoints = parser.add_mutually_exclusive_group()
+    entrypoints.add_argument(
         "--batch", action="store_true", help="build the BigInt batch entrypoint"
+    )
+    entrypoints.add_argument(
+        "--manifest",
+        action="store_true",
+        help="build the BigInt file-manifest entrypoint",
     )
     parser.add_argument("--artifact-dir", type=Path)
     parser.add_argument(
@@ -56,23 +62,24 @@ def main() -> None:
     args = parser.parse_args()
     if args.llvm_budget is not None and args.llvm_budget <= 0:
         parser.error("--llvm-budget must be a positive integer")
-    default_artifacts = (
-        ROOT / "benchmarks/local/batch-reference" if args.batch else LOCAL
+    entrypoint = (
+        "manifest" if args.manifest else "batch" if args.batch else "incremental"
     )
+    default_artifacts = ROOT / f"benchmarks/local/{entrypoint}-reference"
     artifacts = (args.artifact_dir or default_artifacts).resolve()
     target = (
         args.target_dir
         or Path(os.environ.get("CARGO_TARGET_DIR", default_artifacts / "target"))
     ).resolve()
     modes = (
-        (("bigint", ["--features", "batch", "--bin", "planner-batch"]),)
-        if args.batch
+        (("bigint", ["--features", entrypoint, "--bin", f"planner-{entrypoint}"]),)
+        if args.batch or args.manifest
         else (
             ("bigint", []),
             ("i64", ["--no-default-features", "--features", "checked-i64"]),
         )
     )
-    prefix = "planner-batch" if args.batch else "planner"
+    prefix = f"planner-{entrypoint}" if args.batch or args.manifest else "planner"
     environment = os.environ.copy()
     environment.update(
         CARGO_TARGET_DIR=str(target), RUSTFLAGS="", CARGO_ENCODED_RUSTFLAGS=""
@@ -170,7 +177,11 @@ def main() -> None:
         result = run(command)
         elapsed = time.perf_counter() - started
         destination = artifacts / f"{prefix}-{mode}"
-        executable = "planner-batch" if args.batch else "planner-reference"
+        executable = (
+            f"planner-{entrypoint}"
+            if args.batch or args.manifest
+            else "planner-reference"
+        )
         shutil.copy2(target / "release" / executable, destination)
         binaries[mode] = {
             "name": destination.name,
@@ -190,7 +201,7 @@ def main() -> None:
             raise RuntimeError(f"{name} changed during the build")
     record = {
         "completed_at_utc": datetime.now(timezone.utc).isoformat(),
-        "entrypoint": "batch" if args.batch else "incremental",
+        "entrypoint": entrypoint,
         "sources": source_hashes,
         "source_contents": source_contents,
         "binaries": binaries,

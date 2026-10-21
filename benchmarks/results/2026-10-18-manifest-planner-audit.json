@@ -1,0 +1,525 @@
+{
+  "completed_at_utc": "2026-10-18T03:48:59.464346+00:00",
+  "source_freeze": "35f07cbeac120b7631cb38b049224bb98b4b25d5",
+  "audit_script_sha256": "97a7003d09e045011e356fc247349e03ede7ce677c130b99e1e19242f7f4ccd5",
+  "status": "passed",
+  "scope": "Pure record/source/artifact audit; no workload binaries executed. Complete expected bytes reconstructed with independent oracles; every stored per-run SHA256/length and full file inventory checked against those bytes. Raw per-run bytes were already checked by the harness and are not retained in compact records.",
+  "validated_warmup_and_sample_runs": 2112,
+  "validated_oracle_runs": 2214,
+  "modes": [
+    {
+      "mode": "normal",
+      "record_sha256": "7914155d5a259e71ababad1871f833c1495b8e1676c6e01ae3335cd9b5852959",
+      "checked_file_hashes": 49,
+      "checked_frozen_sources": 56,
+      "rust_freeze_record_sha256": "571029128a0aa7b57e9c146db8de9bd6fd38245a55a52ae0269a153ca119ce4c",
+      "final_hashes": {
+        "compiler": "4dd89ab84a0732485f3bc306e8a7eb3c0d7e76fe262efad75b5bf4d89ca3bb6c",
+        "runtime": "aad4116c1ef75a4773ebf95d40a497f2f13a410b5da29e62bee8285be8f87787",
+        "baseline": "900809cc4449a803e24d5137d4850e51bf79f8204085206390e40bad81732193",
+        "control_binary": "4524c5d4bf03879276c2c3547fbc1ebd917bf6d7ccbd1557c82579d6b99e826d",
+        "control_ir": "f6f88a3851dcbdbf371db4c183050f2457d91f55df9c648925d5572c9a44e2d4",
+        "manifest_binary": "0d38036bc3aca0bd64349420d490468310631e711488b9cc627fc55c6db6e21b",
+        "manifest_ir": "4bd66cdce827a9fe07b7fe557546d25fb3680e4da9d9072d49f7e18174ec5674",
+        "rust_bigint": "bf68fd670e5ab1a7c59549d87f0752bc76d215fb2413c9cc2c591de7b5ce6204",
+        "relar_build_record": "4a139ab4b217b02b9e5609b57c9673e02c6e407ca796d949d0255fd4dffdecf1",
+        "rust_record": "d316eac7b2a532736b1cf993b1c0b00d912e87f9c1911ac90e974bcd075e0abb"
+      },
+      "warmup_runs": 66,
+      "sample_runs": 990,
+      "oracle_validation_runs": 1107,
+      "rows": [
+        {
+          "mode": "normal",
+          "group": "control",
+          "label": "layered-16384-sparse",
+          "median_ms": {
+            "cpython": 113.8766735,
+            "baseline": 58.703526,
+            "relar": 59.2572225
+          },
+          "relar_iqr_ms": [
+            58.888139,
+            60.330517
+          ],
+          "ratios_of_medians": {
+            "cpython_over_baseline": 1.939860878203466,
+            "cpython_over_relar": 1.921734915942103,
+            "baseline_over_relar": 0.9906560504080325
+          },
+          "relar_change_percent": 0.9432082495351324
+        },
+        {
+          "mode": "normal",
+          "group": "control",
+          "label": "layered-16384-all",
+          "median_ms": {
+            "cpython": 192.244702,
+            "baseline": 87.6307785,
+            "relar": 87.665593
+          },
+          "relar_iqr_ms": [
+            86.93716649999999,
+            88.87559075000001
+          ],
+          "ratios_of_medians": {
+            "cpython_over_baseline": 2.193803424900533,
+            "cpython_over_relar": 2.1929322031734846,
+            "baseline_over_relar": 0.9996028715621648
+          },
+          "relar_change_percent": 0.039728621148782395
+        },
+        {
+          "mode": "normal",
+          "group": "control",
+          "label": "wide-16384-sparse",
+          "median_ms": {
+            "cpython": 104.6726615,
+            "baseline": 29.4662755,
+            "relar": 29.558858999999998
+          },
+          "relar_iqr_ms": [
+            29.002740749999997,
+            30.20780925
+          ],
+          "ratios_of_medians": {
+            "cpython_over_baseline": 3.5522867998705845,
+            "cpython_over_relar": 3.5411604182691896,
+            "baseline_over_relar": 0.9968678256491564
+          },
+          "relar_change_percent": 0.31420156918033904
+        },
+        {
+          "mode": "normal",
+          "group": "control",
+          "label": "wide-16384-all",
+          "median_ms": {
+            "cpython": 186.34828349999998,
+            "baseline": 51.2036315,
+            "relar": 50.85333
+          },
+          "relar_iqr_ms": [
+            50.36627025,
+            51.3912775
+          ],
+          "ratios_of_medians": {
+            "cpython_over_baseline": 3.639356780778332,
+            "cpython_over_relar": 3.6644263708984246,
+            "baseline_over_relar": 1.0068884672842466
+          },
+          "relar_change_percent": -0.684134093106259
+        },
+        {
+          "mode": "normal",
+          "group": "control",
+          "label": "boundary-128-all",
+          "median_ms": {
+            "cpython": 20.8893275,
+            "baseline": 3.6081135000000004,
+            "relar": 3.605663
+          },
+          "relar_iqr_ms": [
+            3.5865672500000003,
+            3.6381284999999997
+          ],
+          "ratios_of_medians": {
+            "cpython_over_baseline": 5.789542790158901,
+            "cpython_over_relar": 5.793477510238755,
+            "baseline_over_relar": 1.0006796253560026
+          },
+          "relar_change_percent": -0.06791637790773963
+        },
+        {
+          "mode": "normal",
+          "group": "manifest",
+          "label": "layered-16384-all-valid",
+          "median_ms": {
+            "cpython": 263.673705,
+            "relar": 163.380401,
+            "rust_bigint": 89.67217450000001
+          },
+          "relar_iqr_ms": [
+            161.90879425,
+            166.51409999999998
+          ],
+          "ratios_of_medians": {
+            "cpython_over_relar": 1.6138637399965738,
+            "cpython_over_rust_bigint": 2.9404183234120187,
+            "relar_over_cpython": 0.6196309980928891,
+            "relar_over_rust_bigint": 1.8219743405464088,
+            "rust_bigint_over_cpython": 0.3400876644108293,
+            "rust_bigint_over_relar": 0.5488551500127608
+          }
+        },
+        {
+          "mode": "normal",
+          "group": "manifest",
+          "label": "layered-16384-all-mixed",
+          "median_ms": {
+            "cpython": 262.117021,
+            "relar": 163.00541299999998,
+            "rust_bigint": 89.3271975
+          },
+          "relar_iqr_ms": [
+            161.3095785,
+            165.35902524999997
+          ],
+          "ratios_of_medians": {
+            "cpython_over_relar": 1.6080264831450721,
+            "cpython_over_rust_bigint": 2.934347302231216,
+            "relar_over_cpython": 0.6218803051328742,
+            "relar_over_rust_bigint": 1.8248127956773748,
+            "rust_bigint_over_cpython": 0.34079128917003826,
+            "rust_bigint_over_relar": 0.5480014182105719
+          }
+        },
+        {
+          "mode": "normal",
+          "group": "manifest",
+          "label": "wide-16384-all-valid",
+          "median_ms": {
+            "cpython": 252.948797,
+            "relar": 96.3281025,
+            "rust_bigint": 47.2818295
+          },
+          "relar_iqr_ms": [
+            95.34672475,
+            97.09386375
+          ],
+          "ratios_of_medians": {
+            "cpython_over_relar": 2.6259086438456527,
+            "cpython_over_rust_bigint": 5.349809846084742,
+            "relar_over_cpython": 0.3808205599016942,
+            "relar_over_rust_bigint": 2.037317580953588,
+            "rust_bigint_over_cpython": 0.18692253159836136,
+            "rust_bigint_over_relar": 0.49084149145364925
+          }
+        },
+        {
+          "mode": "normal",
+          "group": "manifest",
+          "label": "wide-16384-all-mixed",
+          "median_ms": {
+            "cpython": 251.5314125,
+            "relar": 96.28662399999999,
+            "rust_bigint": 47.461774999999996
+          },
+          "relar_iqr_ms": [
+            95.2939735,
+            97.04133174999998
+          ],
+          "ratios_of_medians": {
+            "cpython_over_relar": 2.612319365356501,
+            "cpython_over_rust_bigint": 5.299662991955105,
+            "relar_over_cpython": 0.38280158745580134,
+            "relar_over_rust_bigint": 2.028719406301176,
+            "rust_bigint_over_cpython": 0.1886912434843501,
+            "rust_bigint_over_relar": 0.4929217894273664
+          }
+        },
+        {
+          "mode": "normal",
+          "group": "manifest",
+          "label": "boundary-128-all-valid",
+          "median_ms": {
+            "cpython": 29.0735095,
+            "relar": 3.3189645000000003,
+            "rust_bigint": 2.6895130000000003
+          },
+          "relar_iqr_ms": [
+            3.24865075,
+            3.4324405
+          ],
+          "ratios_of_medians": {
+            "cpython_over_relar": 8.75981333937136,
+            "cpython_over_rust_bigint": 10.809953140215347,
+            "relar_over_cpython": 0.11415768364668875,
+            "relar_over_rust_bigint": 1.2340392108162332,
+            "rust_bigint_over_cpython": 0.09250733902627063,
+            "rust_bigint_over_relar": 0.8103470223920743
+          }
+        },
+        {
+          "mode": "normal",
+          "group": "manifest",
+          "label": "boundary-128-all-mixed",
+          "median_ms": {
+            "cpython": 29.4525555,
+            "relar": 4.1494705000000005,
+            "rust_bigint": 2.8997895
+          },
+          "relar_iqr_ms": [
+            3.5829915000000003,
+            4.706607749999999
+          ],
+          "ratios_of_medians": {
+            "cpython_over_relar": 7.09790694981444,
+            "cpython_over_rust_bigint": 10.156790863612686,
+            "relar_over_cpython": 0.14088660320154564,
+            "relar_over_rust_bigint": 1.4309557642028845,
+            "rust_bigint_over_cpython": 0.09845629524405786,
+            "rust_bigint_over_relar": 0.6988336222657806
+          }
+        }
+      ]
+    },
+    {
+      "mode": "lto",
+      "record_sha256": "485df73cabc3fb19c63557b98f260c195dcc5d116f93bccfa421e3e33a7a6237",
+      "checked_file_hashes": 50,
+      "checked_frozen_sources": 56,
+      "rust_freeze_record_sha256": "41b1a97a918c00d65ec165af2e1452e35431c62225c0aa6e70b5ece63866c252",
+      "final_hashes": {
+        "compiler": "4dd89ab84a0732485f3bc306e8a7eb3c0d7e76fe262efad75b5bf4d89ca3bb6c",
+        "runtime": "414b5fb52457ba0894f1c197aeaa33f22d5160ed586e4307d084e8217d71f1d9",
+        "baseline": "a0a1972b7f280e749af29d1f3bbcd9c355070b52da33f7a1460ee4063b664ad8",
+        "control_binary": "039f78feda314d219c35ff5dfd1e84b603480cc6d1ee5fd8ed71f851d14351d8",
+        "control_ir": "f6f88a3851dcbdbf371db4c183050f2457d91f55df9c648925d5572c9a44e2d4",
+        "manifest_binary": "8d9fafdf6e2b6d488134ed6d9ab1e0380b2dd8bff40d0b248eef7a04caef9f58",
+        "manifest_ir": "4bd66cdce827a9fe07b7fe557546d25fb3680e4da9d9072d49f7e18174ec5674",
+        "rust_bigint": "f9893c502d64102dc204c0b880cf7e09744a37edaa6f83c4da24fbcc5f139f8e",
+        "relar_build_record": "4a139ab4b217b02b9e5609b57c9673e02c6e407ca796d949d0255fd4dffdecf1",
+        "rust_record": "e2fcbae1d3aff213cdf7f95951dc40e405f926a4742921259caa44ac17bf05fc"
+      },
+      "warmup_runs": 66,
+      "sample_runs": 990,
+      "oracle_validation_runs": 1107,
+      "rows": [
+        {
+          "mode": "lto",
+          "group": "control",
+          "label": "layered-16384-sparse",
+          "median_ms": {
+            "cpython": 113.82876399999999,
+            "baseline": 51.82896650000001,
+            "relar": 52.313398
+          },
+          "relar_iqr_ms": [
+            51.873116,
+            53.464504250000005
+          ],
+          "ratios_of_medians": {
+            "cpython_over_baseline": 2.1962383525436495,
+            "cpython_over_relar": 2.175900789315961,
+            "baseline_over_relar": 0.9907398196538486
+          },
+          "relar_change_percent": 0.934673277731668
+        },
+        {
+          "mode": "lto",
+          "group": "control",
+          "label": "layered-16384-all",
+          "median_ms": {
+            "cpython": 192.30867600000002,
+            "baseline": 76.82892700000001,
+            "relar": 76.95777149999999
+          },
+          "relar_iqr_ms": [
+            76.56331300000001,
+            77.37377875
+          ],
+          "ratios_of_medians": {
+            "cpython_over_baseline": 2.5030764258883895,
+            "cpython_over_relar": 2.4988857168245837,
+            "baseline_over_relar": 0.9983257766241322
+          },
+          "relar_change_percent": 0.16770311005382954
+        },
+        {
+          "mode": "lto",
+          "group": "control",
+          "label": "wide-16384-sparse",
+          "median_ms": {
+            "cpython": 102.24934099999999,
+            "baseline": 24.13788,
+            "relar": 24.190337999999997
+          },
+          "relar_iqr_ms": [
+            23.96051225,
+            24.397163499999998
+          ],
+          "ratios_of_medians": {
+            "cpython_over_baseline": 4.236053083369376,
+            "cpython_over_relar": 4.226866983007844,
+            "baseline_over_relar": 0.997831448241856
+          },
+          "relar_change_percent": 0.21732645949021911
+        },
+        {
+          "mode": "lto",
+          "group": "control",
+          "label": "wide-16384-all",
+          "median_ms": {
+            "cpython": 186.0959895,
+            "baseline": 42.180453,
+            "relar": 41.93748
+          },
+          "relar_iqr_ms": [
+            41.341233,
+            42.4852205
+          ],
+          "ratios_of_medians": {
+            "cpython_over_baseline": 4.411901159525243,
+            "cpython_over_relar": 4.437462372560297,
+            "baseline_over_relar": 1.0057936957585434
+          },
+          "relar_change_percent": -0.5760322204220958
+        },
+        {
+          "mode": "lto",
+          "group": "control",
+          "label": "boundary-128-all",
+          "median_ms": {
+            "cpython": 20.889773,
+            "baseline": 3.5265055,
+            "relar": 3.5281045
+          },
+          "relar_iqr_ms": [
+            3.4898100000000003,
+            3.57202775
+          ],
+          "ratios_of_medians": {
+            "cpython_over_baseline": 5.923646794255673,
+            "cpython_over_relar": 5.920962091684076,
+            "baseline_over_relar": 0.9995467821318784
+          },
+          "relar_change_percent": 0.045342336769360614
+        },
+        {
+          "mode": "lto",
+          "group": "manifest",
+          "label": "layered-16384-all-valid",
+          "median_ms": {
+            "cpython": 260.5899235,
+            "relar": 139.936958,
+            "rust_bigint": 81.21249399999999
+          },
+          "relar_iqr_ms": [
+            138.4808905,
+            140.93937300000002
+          ],
+          "ratios_of_medians": {
+            "cpython_over_relar": 1.8621951429014199,
+            "cpython_over_rust_bigint": 3.208741791626298,
+            "relar_over_cpython": 0.5370006488374445,
+            "relar_over_rust_bigint": 1.723096424055146,
+            "rust_bigint_over_cpython": 0.31164863517832836,
+            "rust_bigint_over_relar": 0.5803505747209396
+          }
+        },
+        {
+          "mode": "lto",
+          "group": "manifest",
+          "label": "layered-16384-all-mixed",
+          "median_ms": {
+            "cpython": 260.70951149999996,
+            "relar": 140.45715650000002,
+            "rust_bigint": 81.47684550000001
+          },
+          "relar_iqr_ms": [
+            138.91873525,
+            143.207908
+          ],
+          "ratios_of_medians": {
+            "cpython_over_relar": 1.8561497185086469,
+            "cpython_over_rust_bigint": 3.199798788233646,
+            "relar_over_cpython": 0.5387496439691654,
+            "relar_over_rust_bigint": 1.7238904579338434,
+            "rust_bigint_over_cpython": 0.31251965082217575,
+            "rust_bigint_over_relar": 0.5800832619020021
+          }
+        },
+        {
+          "mode": "lto",
+          "group": "manifest",
+          "label": "wide-16384-all-valid",
+          "median_ms": {
+            "cpython": 258.141179,
+            "relar": 79.014346,
+            "rust_bigint": 44.533704
+          },
+          "relar_iqr_ms": [
+            78.19555575000001,
+            79.64181574999999
+          ],
+          "ratios_of_medians": {
+            "cpython_over_relar": 3.2670165870891346,
+            "cpython_over_rust_bigint": 5.79653511416881,
+            "relar_over_cpython": 0.30608966111524577,
+            "relar_over_rust_bigint": 1.7742594687385536,
+            "rust_bigint_over_cpython": 0.17251685365549524,
+            "rust_bigint_over_relar": 0.5636154224449317
+          }
+        },
+        {
+          "mode": "lto",
+          "group": "manifest",
+          "label": "wide-16384-all-mixed",
+          "median_ms": {
+            "cpython": 252.8803295,
+            "relar": 77.60436600000001,
+            "rust_bigint": 43.39446349999999
+          },
+          "relar_iqr_ms": [
+            76.74666099999999,
+            78.02557
+          ],
+          "ratios_of_medians": {
+            "cpython_over_relar": 3.258583795401408,
+            "cpython_over_rust_bigint": 5.8274791091725335,
+            "relar_over_cpython": 0.30688178140799205,
+            "relar_over_rust_bigint": 1.7883471701407259,
+            "rust_bigint_over_cpython": 0.17160078676661164,
+            "rust_bigint_over_relar": 0.5591755430358131
+          }
+        },
+        {
+          "mode": "lto",
+          "group": "manifest",
+          "label": "boundary-128-all-valid",
+          "median_ms": {
+            "cpython": 29.2388725,
+            "relar": 3.2657809999999996,
+            "rust_bigint": 2.728755
+          },
+          "relar_iqr_ms": [
+            3.1405320000000003,
+            4.36645125
+          ],
+          "ratios_of_medians": {
+            "cpython_over_relar": 8.953102642216365,
+            "cpython_over_rust_bigint": 10.71509626184835,
+            "relar_over_cpython": 0.1116931235977037,
+            "relar_over_rust_bigint": 1.1968025711359207,
+            "rust_bigint_over_cpython": 0.09332627309756901,
+            "rust_bigint_over_relar": 0.8355597022580511
+          }
+        },
+        {
+          "mode": "lto",
+          "group": "manifest",
+          "label": "boundary-128-all-mixed",
+          "median_ms": {
+            "cpython": 29.6682775,
+            "relar": 4.4754130000000005,
+            "rust_bigint": 2.917697
+          },
+          "relar_iqr_ms": [
+            3.38890425,
+            4.57711375
+          ],
+          "ratios_of_medians": {
+            "cpython_over_relar": 6.629170872051361,
+            "cpython_over_rust_bigint": 10.168388801167497,
+            "relar_over_cpython": 0.15084842724691383,
+            "relar_over_rust_bigint": 1.5338854582912482,
+            "rust_bigint_over_cpython": 0.09834399722060035,
+            "rust_bigint_over_relar": 0.6519391618159038
+          }
+        }
+      ]
+    }
+  ],
+  "original_audit_sha256": "41c87c86ab1300c9ce952480e04ac017c1862695a15537fcda3d1e89fa521a9a",
+  "audit_script": "\"\"\"Audit frozen manifest comparisons without executing any benchmark program.\n\nThe benchmark checked complete bytes in memory. Its per-run records preserve\nSHA256 and length, so this audit compares those records to independently rebuilt\nfull oracle output and filesystem contents, rather than claiming to recover\nper-run bytes that the compact records intentionally omit.\n\"\"\"\n\nimport argparse\nimport base64\nimport collections\nimport hashlib\nimport io\nimport itertools\nimport json\nimport math\nimport runpy\nimport statistics\nimport subprocess\nimport tarfile\nfrom datetime import datetime, timezone\nfrom pathlib import Path\nfrom types import SimpleNamespace\n\nFREEZE = \"35f07cbeac120b7631cb38b049224bb98b4b25d5\"\nCONTROL = (\"cpython\", \"baseline\", \"relar\")\nMANIFEST = (\"cpython\", \"relar\", \"rust_bigint\")\nHARNESS_FILES = {\n    \"harness\": \"manifest_benchmark.py\",\n    \"validator\": \"manifest_validate.py\",\n    \"batch_validator\": \"batch_validate.py\",\n    \"batch_harness\": \"batch_benchmark.py\",\n    \"incremental_validator\": \"incremental_validate.py\",\n    \"incremental_harness\": \"incremental_benchmark.py\",\n    \"comparison_helpers\": \"dependency_compare.py\",\n    \"dependency_harness\": \"dependency_benchmark.py\",\n    \"shared_harness\": \"benchmark.py\",\n    \"route_validator\": \"validate.py\",\n    \"dependency_validator\": \"dependency_validate.py\",\n    \"guard_helpers\": \"reference/dependency_planner/check_boundaries.py\",\n}\n\n\ndef require(condition, message):\n    if not condition:\n        raise ValueError(message)\n\n\ndef sha(data):\n    return hashlib.sha256(data).hexdigest()\n\n\ndef file_sha(path):\n    with path.open(\"rb\") as stream:\n        return hashlib.file_digest(stream, \"sha256\").hexdigest()\n\n\ndef load(path):\n    return json.loads(path.read_text())\n\n\ndef inventory(files):\n    return {name: {\"sha256\": sha(data), \"bytes\": len(data)} for name, data in sorted(files.items())}\n\n\ndef decode_files(encoded):\n    result = {}\n    for name, value in encoded.items():\n        data = base64.b64decode(value[\"base64\"], validate=True)\n        require(value[\"sha256\"] == sha(data) and value[\"bytes\"] == len(data), f\"captured bytes: {name}\")\n        result[name] = data\n    return result\n\n\ndef category(stderr):\n    return stderr.strip().splitlines()[-1].partition(\":\")[0] if stderr.strip() else None\n\n\ndef check_run(run, stdout, returncode=0, error=None, files=None, directories=None, usage=None):\n    encoded = stdout.encode()\n    require(run[\"returncode\"] == returncode, \"run exit status\")\n    require(run[\"stdout_sha256\"] == sha(encoded) and run[\"stdout_bytes\"] == len(encoded), \"run complete stdout evidence\")\n    require(category(run[\"stderr\"]) == error, \"run error category\")\n    if error is None:\n        require(run[\"stderr\"] == \"\", \"successful run has stderr\")\n    if usage is not None:\n        require(usage in run[\"stderr\"], \"usage diagnostic\")\n    if files is not None:\n        require(run[\"files\"] == inventory(files), \"run complete filesystem inventory\")\n        require(run[\"directories\"] == directories, \"run complete directory inventory\")\n    if \"elapsed_ns\" in run:\n        require(type(run[\"elapsed_ns\"]) is int and run[\"elapsed_ns\"] > 0, \"positive raw duration\")\n\n\ndef summaries(workload, engines):\n    actual = {}\n    for engine in engines:\n        values = [sample[engine][\"elapsed_ns\"] / 1e9 for sample in workload[\"samples\"]]\n        quartiles = statistics.quantiles(values, n=4, method=\"inclusive\")\n        expected = {\n            \"median_seconds\": statistics.median(values),\n            \"min_seconds\": min(values),\n            \"max_seconds\": max(values),\n            \"p25_seconds\": quartiles[0],\n            \"p75_seconds\": quartiles[2],\n        }\n        require(set(workload[\"summary\"][engine]) == set(expected), \"summary fields\")\n        for name, value in expected.items():\n            require(math.isclose(workload[\"summary\"][engine][name], value, rel_tol=1e-14, abs_tol=0), f\"recomputed {engine}/{name}\")\n        actual[engine] = expected\n    pairs = itertools.combinations(engines, 2) if engines == CONTROL else itertools.permutations(engines, 2)\n    ratios = {f\"{left}_over_{right}\": actual[left][\"median_seconds\"] / actual[right][\"median_seconds\"] for left, right in pairs}\n    require(set(workload[\"summary\"][\"ratios_of_medians\"]) == set(ratios), \"ratio field coverage\")\n    for name, value in ratios.items():\n        require(math.isclose(workload[\"summary\"][\"ratios_of_medians\"][name], value, rel_tol=1e-14, abs_tol=0), f\"recomputed ratio {name}\")\n    return actual, ratios\n\n\ndef check_phases(workload, engines, expected):\n    cycle = list(itertools.permutations(engines))\n    measured_orders = collections.Counter()\n    positions = collections.Counter()\n    predecessors = collections.Counter()\n    for phase, count in ((\"warmups\", 2), (\"samples\", 30)):\n        require(len(workload[phase]) == count, f\"{phase} count\")\n        for index, sample in enumerate(workload[phase]):\n            order = tuple(sample[\"order\"])\n            require(sample[\"index\"] == index and order == cycle[index % 6], f\"{phase} order/index\")\n            require(set(sample) == {\"index\", \"order\", *engines}, \"sample engine coverage\")\n            for engine in engines:\n                check_run(sample[engine], **expected)\n            if phase == \"samples\":\n                measured_orders[order] += 1\n                positions.update((engine, position) for position, engine in enumerate(order))\n                predecessors.update(zip(order, order[1:]))\n    require(set(measured_orders) == set(cycle) and set(measured_orders.values()) == {5}, \"six measured orders repeated five times\")\n    require(len(positions) == 9 and set(positions.values()) == {10}, \"balanced measured engine positions\")\n    require(len(predecessors) == 6 and set(predecessors.values()) == {10}, \"balanced within-round predecessors\")\n    return summaries(workload, engines)\n\n\ndef check_encoded_expected(record, expected):\n    require(set(record) == set(expected), \"oracle expected field coverage\")\n    for key, value in expected.items():\n        if key == \"files\":\n            require(decode_files(record[key]) == value, \"oracle complete captured file bytes\")\n        else:\n            require(record[key] == value, f\"oracle metadata {key}\")\n\n\ndef check_validation(record, validator):\n    incremental = validator.batch.incremental\n    control = record[\"control\"]\n    cases = incremental.cases()\n    require(control[\"oracle_cases\"] == len(cases) == 155, \"graph corpus count\")\n    require(control[\"passed_by_engine\"] == {engine: 155 for engine in CONTROL}, \"graph pass counts\")\n    require(len(control[\"checks\"]) == len(cases), \"graph check coverage\")\n    for captured, case in zip(control[\"checks\"], cases):\n        expected = incremental.oracle(case.tasks, case.changes)\n        stdin = case.stdin_override or incremental.input_text(case.tasks, case.changes)\n        require(captured[\"case\"] == case.label and captured[\"input\"] == stdin, \"graph captured input\")\n        require(captured[\"expected_stdout\"] == expected[\"output\"], \"graph full expected output\")\n        require(captured[\"kind\"] == expected[\"kind\"] and captured[\"affected\"] == len(expected[\"order\"]), \"graph oracle metadata\")\n        require(set(captured[\"results\"]) == set(CONTROL), \"graph engines\")\n        for run in captured[\"results\"].values():\n            check_run(run, expected[\"output\"])\n    parsers = incremental.parser_cases()\n    require(control[\"parser_cases\"] == len(parsers) == 17, \"parser corpus count\")\n    require(control[\"parser_passed_by_engine\"] == {engine: 17 for engine in CONTROL}, \"parser pass counts\")\n    require(len(control[\"parser_checks\"]) == len(parsers), \"parser check coverage\")\n    for captured, (label, stdin, error, stdout) in zip(control[\"parser_checks\"], parsers):\n        require(captured[\"case\"] == label and captured[\"input\"] == stdin, \"parser captured input\")\n        require(captured[\"expected_returncode\"] == int(error is not None) and captured[\"expected_error_category\"] == error and captured[\"expected_stdout\"] == stdout, \"parser expected outcome\")\n        require(set(captured[\"results\"]) == set(CONTROL), \"parser engines\")\n        for run in captured[\"results\"].values():\n            check_run(run, stdout, int(error is not None), error)\n    manifest = record[\"manifest\"]\n    cases = validator.cases()\n    require(manifest[\"cases\"] == len(cases) == 196, \"filesystem corpus count\")\n    require(manifest[\"passed_by_engine\"] == {engine: 196 for engine in MANIFEST}, \"filesystem pass counts\")\n    require(len(manifest[\"checks\"]) == len(cases), \"filesystem check coverage\")\n    totals = collections.Counter()\n    for captured, case in zip(manifest[\"checks\"], cases):\n        require(validator.case_from_record(captured) == case, \"filesystem corpus captured inputs\")\n        expected = validator.oracle(case)\n        check_encoded_expected(captured[\"expected\"], expected)\n        require(set(captured[\"results\"]) == set(MANIFEST), \"filesystem engines\")\n        for run in captured[\"results\"].values():\n            check_run(run, expected[\"stdout\"], expected[\"returncode\"], expected[\"error_category\"], expected[\"files\"], expected[\"directories\"], expected[\"usage_message\"])\n        totals.update(completed_requests=expected[\"completed\"], invalid_requests=expected[\"invalid\"], terminal_cases=int(expected[\"returncode\"] != 0))\n    for name, total in totals.items():\n        require(manifest[name] == total, f\"filesystem aggregate {name}\")\n    device = manifest[\"linux_device_checks\"]\n    require(device[\"cases\"] == 1 and device[\"passed_by_engine\"] == {engine: 1 for engine in MANIFEST}, \"Linux failing-device checks\")\n    require(len(device[\"checks\"]) == 1, \"Linux device check coverage\")\n    captured = device[\"checks\"][0]\n    case = validator.case_from_record(captured)\n    require(case == validator.Case(\"report-device-write-is-terminal\", {\"manifest.txt\": b\"good.txt\\n\", \"good.txt\": b\"1\\nready 7\\n1\\nready\\n\"}, (\"manifest.txt\", \"/dev/full\")), \"Linux device input\")\n    expected = {\"returncode\": 1, \"error_category\": \"OSError\", \"usage_message\": None, \"stdout\": \"\", \"files\": case.files, \"directories\": []}\n    check_encoded_expected(captured[\"expected\"], expected)\n    require(set(captured[\"results\"]) == set(MANIFEST), \"Linux device engines\")\n    for run in captured[\"results\"].values():\n        check_run(run, \"\", 1, \"OSError\", case.files, [])\n    return (155 + 17 + 196 + 1) * 3\n\n\ndef check_freeze(root, paths):\n    \"\"\"Compare content with both the working files and the exact frozen Git tree.\"\"\"\n    names = sorted(set(str(path.relative_to(root)) for path in paths))\n    archive = subprocess.run([\"git\", \"-C\", str(root), \"archive\", FREEZE, \"--\", *names], check=True, capture_output=True).stdout\n    seen = set()\n    with tarfile.open(fileobj=io.BytesIO(archive)) as stream:\n        for entry in stream.getmembers():\n            if entry.isfile():\n                require(entry.name in names, \"unexpected frozen archive file\")\n                require(sha(stream.extractfile(entry).read()) == file_sha(root / entry.name), f\"source differs from frozen revision: {entry.name}\")\n                seen.add(entry.name)\n    require(seen == set(names), \"frozen source coverage\")\n\n\ndef check_provenance(root, mode, record, args):\n    local = root / \"benchmarks/local\"\n    hashes = record[\"sha256\"]\n    tools = local / \"manifest-tools-final\"\n    reference = local / f\"manifest-reference-{mode}-final\"\n    outputs = local / f\"manifest-{mode}-final\"\n    paths = {\n        \"compiler\": tools / \"relar\",\n        \"runtime\": tools / (\"librelar_runtime_lto.a\" if mode == \"lto\" else \"librelar_runtime.a\"),\n        \"relar_build_record\": tools / \"build-record.json\",\n        \"baseline\": local / f\"exception-{mode}-final/incremental_planner\",\n        \"baseline_record\": local / f\"exception-{mode}-final.json\",\n        \"rust_bigint\": reference / \"planner-manifest-bigint\",\n        \"rust_record\": reference / \"build-record.json\",\n        \"rust_build_script\": root / \"benchmarks/reference/incremental_planner/build.py\",\n        \"control_binary\": outputs / \"incremental_planner\",\n        \"control_ir\": outputs / \"incremental_planner.ll\",\n        \"manifest_binary\": outputs / \"manifest_planner\",\n        \"manifest_ir\": outputs / \"manifest_planner.ll\",\n        \"clang\": args.clang,\n        \"python\": args.python,\n        **{key: root / \"benchmarks\" / name for key, name in HARNESS_FILES.items()},\n    }\n    if mode == \"lto\":\n        paths[\"lto_linker\"] = args.linker\n    freeze_paths = {root / \"benchmarks\" / name for name in HARNESS_FILES.values()}\n    freeze_paths.add(paths[\"rust_build_script\"])\n    for key in hashes:\n        if key.startswith(\"relar_source:\"):\n            paths[key] = root / key.removeprefix(\"relar_source:\")\n            freeze_paths.add(paths[key])\n    require(set(paths) == set(hashes), \"exact recorded artifact/hash coverage\")\n    for key, path in paths.items():\n        require(file_sha(path) == hashes[key], f\"artifact SHA256: {mode}/{key}\")\n    require(record[\"git\"] == {\"revision\": FREEZE, \"dirty\": False}, \"benchmark clean source freeze\")\n    require(record[\"example\"] == \"manifest_planner\" and record[\"schema_version\"] == 1, \"comparison schema\")\n    options = record[\"options\"]\n    require(options[\"samples\"] == 30 and options[\"warmups\"] == 2 and options[\"valid_payload_repetitions\"] == 2, \"default final comparison dimensions\")\n    require(options[\"optimization_level\"] == 3 and options[\"target\"] == \"x86_64-unknown-linux-gnu\", \"native optimization/target\")\n    require(options[\"lto\"] == (\"thin\" if mode == \"lto\" else None) and options[\"llvm_budget\"] == (1000 if mode == \"lto\" else None), \"native LTO mode/budget\")\n    require(record[\"clock\"][\"monotonic\"] and not record[\"clock\"][\"adjustable\"], \"monotonic benchmark clock\")\n    require(record[\"tools\"][\"cpython\"][\"implementation\"] == \"cpython\", \"CPython identity\")\n    build = load(paths[\"relar_build_record\"])\n    require(build[\"git_head\"] == FREEZE and build[\"git_status\"] == \"\", \"Relar frozen build revision\")\n    require(set(build[\"source_contents\"]) == set(build[\"source_sha256\"]), \"complete Relar embedded source contents\")\n    for name, digest in build[\"source_sha256\"].items():\n        require(sha(build[\"source_contents\"][name].encode()) == digest, f\"Relar embedded source {name}\")\n        require(hashes[\"relar_source:\" + name] == digest, f\"Relar source identity {name}\")\n    for name, digest in build[\"sha256\"].items():\n        require(file_sha(root / name) == digest, f\"frozen Relar executable/archive {name}\")\n    expected_build = {key: build[key] for key in (\"git_head\", \"git_status\", \"rustc_verbose\", \"source_sha256\", \"sha256\", \"runtime_lto_rustflags\")}\n    require(record[\"relar_build_provenance\"] == expected_build, \"embedded Relar provenance\")\n    require(build[\"runtime_lto_rustflags\"] == \"-Clinker-plugin-lto\", \"runtime bitcode build flags\")\n    rust = load(paths[\"rust_record\"])\n    require(record[\"rust_build_record\"] == rust, \"exact embedded Rust build record\")\n    require(rust[\"entrypoint\"] == \"manifest\" and rust[\"sources\"] == record[\"rust_sources\"], \"Rust reference identity\")\n    require(set(rust[\"source_contents\"]) == set(rust[\"sources\"]), \"complete Rust embedded source contents\")\n    require(rust[\"binaries\"][\"bigint\"][\"sha256\"] == hashes[\"rust_bigint\"], \"Rust built binary hash\")\n    require(rust[\"binaries\"][\"bigint\"][\"bytes\"] == paths[\"rust_bigint\"].stat().st_size, \"Rust binary size\")\n    require(sha(rust[\"build_script\"].encode()) == rust[\"build_script_sha256\"] == hashes[\"rust_build_script\"], \"Rust build helper identity\")\n    require(rust[\"rustc_verbose\"] and rust[\"cargo_version\"], \"Rust compiler provenance\")\n    environment = rust[\"environment\"]\n    require(environment.get(\"CARGO_PROFILE_RELEASE_OPT_LEVEL\", \"3\") == \"3\", \"Rust release optimization\")\n    require(rust[\"llvm_budget\"] == (1000 if mode == \"lto\" else None), \"Rust LLVM budget\")\n    if mode == \"lto\":\n        require(environment.get(\"CARGO_PROFILE_RELEASE_LTO\") == \"thin\", \"Rust ThinLTO mode\")\n        require(environment[\"RUSTFLAGS\"] == \"-Cllvm-args=-import-instr-limit=1000 -Cllvm-args=-inline-threshold=1000\" and environment.get(\"CARGO_ENCODED_RUSTFLAGS\") is None, \"Rust matched LTO flags\")\n    else:\n        require(environment.get(\"CARGO_PROFILE_RELEASE_LTO\") in (None, \"false\", \"off\") and environment[\"RUSTFLAGS\"] == \"\" and environment.get(\"CARGO_ENCODED_RUSTFLAGS\") == \"\", \"Rust ordinary build flags\")\n    for name, digest in record[\"sources\"].items():\n        path = root / \"examples\" / name\n        require(file_sha(path) == digest, f\"Python source {name}\")\n        freeze_paths.add(path)\n    for name, digest in rust[\"sources\"].items():\n        path = root / \"benchmarks/reference/incremental_planner\" / name\n        require(file_sha(path) == digest and sha(rust[\"source_contents\"][name].encode()) == digest, f\"Rust source {name}\")\n        freeze_paths.add(path)\n    rust_freeze_path = reference / \"freeze-record.json\"\n    rust_freeze = load(rust_freeze_path)\n    require(rust_freeze[\"git_head\"] == FREEZE and rust_freeze[\"git_status\"] == \"\" and rust_freeze[\"mode\"] == mode, \"Rust source freeze\")\n    require(rust_freeze[\"binary_sha256\"] == hashes[\"rust_bigint\"] and rust_freeze[\"build_record_sha256\"] == hashes[\"rust_record\"], \"Rust freeze artifact identity\")\n    require(file_sha(root / rust_freeze[\"validation_record\"]) == rust_freeze[\"validation_sha256\"], \"Rust frozen validation identity\")\n    prior = load(paths[\"baseline_record\"])\n    require(prior[\"example\"] == \"exception_performance\" and prior[\"sha256\"][\"control_binary\"] == hashes[\"baseline\"], \"phase1 baseline executable\")\n    require(prior[\"options\"][\"lto\"] == options[\"lto\"] and prior[\"options\"][\"llvm_budget\"] == options[\"llvm_budget\"] and prior[\"options\"][\"target\"] == options[\"target\"], \"phase1 baseline target/mode\")\n    require({name: digest for name, digest in prior[\"sources\"].items() if name.startswith(\"incremental_planner/\")} == {name: digest for name, digest in record[\"sources\"].items() if name.startswith(\"incremental_planner/\")}, \"unchanged control source\")\n    baseline_provenance = {\"record_sha256\": hashes[\"baseline_record\"], **{key: prior[key] for key in (\"git\", \"sources\", \"sha256\", \"tools\", \"options\", \"compilation\", \"relar_build_provenance\")}, \"compile_commands\": prior[\"method\"][\"compile_commands\"]}\n    require(record[\"baseline_provenance\"] == baseline_provenance, \"embedded phase1 baseline provenance\")\n    for key, value in record[\"artifacts\"].items():\n        require(value[\"bytes\"] == paths[key].stat().st_size, f\"artifact size {key}\")\n    check_freeze(root, freeze_paths)\n    return prior, {\"checked_file_hashes\": len(paths), \"checked_frozen_sources\": len(freeze_paths), \"rust_freeze_record_sha256\": file_sha(rust_freeze_path), \"final_hashes\": {key: hashes[key] for key in (\"compiler\", \"runtime\", \"baseline\", \"control_binary\", \"control_ir\", \"manifest_binary\", \"manifest_ir\", \"rust_bigint\", \"relar_build_record\", \"rust_record\")}}\n\n\ndef audit_mode(root, mode, args, validator):\n    path = root / f\"benchmarks/local/manifest-{mode}-final.json\"\n    record = load(path)\n    prior, provenance = check_provenance(root, mode, record, args)\n    require(set(record[\"workloads\"]) == {\"control\", \"manifest\"}, \"workload groups\")\n    controls = record[\"workloads\"][\"control\"]\n    old_controls = prior[\"workloads\"][\"control\"]\n    require(len(controls) == len(old_controls) == 5, \"all five inherited controls\")\n    require([item[\"label\"] for item in controls] == [item[\"label\"] for item in old_controls], \"control labels/order\")\n    by_label = {item[\"label\"]: item for item in old_controls}\n    rows = []\n    for group, engines in ((\"control\", CONTROL), (\"manifest\", MANIFEST)):\n        require(record[\"method\"][\"order_cycles\"][group] == [list(order) for order in itertools.permutations(engines)], \"declared six-order cycle\")\n    for workload, old in zip(controls, old_controls):\n        for field in (\"input\", \"input_sha256\", \"expected_stdout\", \"expected_stdout_sha256\", \"expected_stdout_bytes\"):\n            require(workload[field] == old[field], f\"unchanged inherited control {field}\")\n        require(sha(workload[\"input\"].encode()) == workload[\"input_sha256\"], \"control full input hash\")\n        tasks, changes = validator.batch.parse_payload(validator.batch.payload_lines(workload[\"input\"]))\n        oracle = validator.batch.incremental.oracle(tasks, changes)\n        require(workload[\"expected_stdout\"] == oracle[\"output\"], \"control independent full output\")\n        require(workload[\"expected_stdout_sha256\"] == sha(oracle[\"output\"].encode()) and workload[\"expected_stdout_bytes\"] == len(oracle[\"output\"].encode()), \"control expected output evidence\")\n        require(workload[\"targets\"] == len(tasks) and workload[\"changed\"] == len(set(changes)) and workload[\"affected\"] == len(oracle[\"order\"]), \"control workload metadata\")\n        values, ratios = check_phases(workload, CONTROL, {\"stdout\": oracle[\"output\"]})\n        rows.append(row(mode, \"control\", workload[\"label\"], values, ratios))\n    manifests = record[\"workloads\"][\"manifest\"]\n    seeds = [item for item in old_controls if item[\"label\"].endswith(\"-all\")]\n    expected_labels = [seed[\"label\"] + suffix for seed in seeds for suffix in (\"-valid\", \"-mixed\")]\n    require(len(manifests) == 6 and [item[\"label\"] for item in manifests] == expected_labels, \"all six manifest workloads\")\n    for workload in manifests:\n        seed = by_label[workload[\"source_workload\"]]\n        mixed = workload[\"kind\"] == \"mixed_recovered_input_errors\"\n        require(workload[\"kind\"] in (\"mixed_recovered_input_errors\", \"all_valid\") and workload[\"valid_payload_repetitions\"] == 2, \"manifest kind/repetition count\")\n        files = {\"payload files/valid graph.txt\": seed[\"input\"].encode()}\n        names = [\"payload files/valid graph.txt\"]\n        if mixed:\n            files.update({\"payload files/bad integer.txt\": b\"1\\nbroken x\\n0\\n\", \"payload files/bad utf8.txt\": b\"\\xff\"})\n            names.extend((\"payload files/bad integer.txt\", \"missing payload.txt\", \"payload files/bad utf8.txt\"))\n        files[\"manifest.txt\"] = (\"\\n\".join(names * 2) + \"\\n\").encode()\n        case = validator.case_from_record(workload[\"case\"])\n        require(case == validator.Case(workload[\"label\"], files, (\"manifest.txt\", \"reports/plan.txt\"), (\"reports\",)), \"manifest exact inherited payload and framing\")\n        expected = validator.oracle(case)\n        require(expected[\"returncode\"] == 0 and workload[\"expected_stdout\"] == expected[\"stdout\"], \"manifest full expected stdout/status\")\n        require(workload[\"expected_file_inventory\"] == inventory(expected[\"files\"]), \"manifest full expected inventory\")\n        changed = {name: data for name, data in expected[\"files\"].items() if case.files.get(name) != data}\n        require(decode_files(workload[\"expected_changed_files\"]) == changed, \"manifest complete captured output bytes\")\n        for field, key in ((\"requests\", \"requests\"), (\"completed_requests\", \"completed\"), (\"invalid_requests\", \"invalid\"), (\"cleaned_requests\", \"cleaned\")):\n            require(workload[field] == expected[key], f\"manifest metadata {field}\")\n        values, ratios = check_phases(workload, MANIFEST, {\"stdout\": expected[\"stdout\"], \"files\": expected[\"files\"], \"directories\": expected[\"directories\"]})\n        rows.append(row(mode, \"manifest\", workload[\"label\"], values, ratios))\n    validation_runs = check_validation(record[\"validation\"], validator)\n    return record, {\"mode\": mode, \"record_sha256\": file_sha(path), **provenance, \"warmup_runs\": 11 * 2 * 3, \"sample_runs\": 11 * 30 * 3, \"oracle_validation_runs\": validation_runs, \"rows\": rows}\n\n\ndef row(mode, group, label, values, ratios):\n    result = {\"mode\": mode, \"group\": group, \"label\": label, \"median_ms\": {key: value[\"median_seconds\"] * 1000 for key, value in values.items()}, \"relar_iqr_ms\": [values[\"relar\"][key] * 1000 for key in (\"p25_seconds\", \"p75_seconds\")], \"ratios_of_medians\": ratios}\n    if group == \"control\":\n        result[\"relar_change_percent\"] = 100 * (values[\"relar\"][\"median_seconds\"] / values[\"baseline\"][\"median_seconds\"] - 1)\n    return result\n\n\ndef main():\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument(\"--root\", type=Path, default=Path(\"/home/dev-user/code/oss/relar\"))\n    parser.add_argument(\"--output\", type=Path, default=Path(\"/tmp/relar-manifest-final-audit.json\"))\n    parser.add_argument(\"--python\", type=Path, default=Path(\"/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\"))\n    parser.add_argument(\"--clang\", type=Path, default=Path(\"/usr/bin/clang-18\"))\n    parser.add_argument(\"--linker\", type=Path)\n    args = parser.parse_args()\n    args.root = args.root.resolve()\n    args.linker = args.linker or args.root / \"benchmarks/local/batch-linker/ld.lld\"\n    validator = SimpleNamespace(**runpy.run_path(str(args.root / \"benchmarks/manifest_validate.py\")))\n    records, results = [], []\n    for mode in (\"normal\", \"lto\"):\n        record, result = audit_mode(args.root, mode, args, validator)\n        records.append(record)\n        results.append(result)\n    require(records[0][\"sources\"] == records[1][\"sources\"] and records[0][\"rust_sources\"] == records[1][\"rust_sources\"], \"same source in both link modes\")\n    for key in (\"compiler\", \"clang\", \"python\", *HARNESS_FILES):\n        require(records[0][\"sha256\"][key] == records[1][\"sha256\"][key], f\"same tool/harness in both modes: {key}\")\n    for group in (\"control\", \"manifest\"):\n        for normal, lto in zip(records[0][\"workloads\"][group], records[1][\"workloads\"][group]):\n            require(normal[\"label\"] == lto[\"label\"], \"same workload labels in both modes\")\n            fields = (\"input\", \"expected_stdout\") if group == \"control\" else (\"case\", \"expected_changed_files\", \"expected_file_inventory\")\n            for field in fields:\n                require(normal[field] == lto[field], f\"identical cross-mode {group}/{field}\")\n    output = {\n        \"completed_at_utc\": datetime.now(timezone.utc).isoformat(),\n        \"source_freeze\": FREEZE,\n        \"audit_script_sha256\": file_sha(Path(__file__)),\n        \"status\": \"passed\",\n        \"scope\": \"Pure record/source/artifact audit; no workload binaries executed. Complete expected bytes reconstructed with independent oracles; every stored per-run SHA256/length and full file inventory checked against those bytes. Raw per-run bytes were already checked by the harness and are not retained in compact records.\",\n        \"validated_warmup_and_sample_runs\": sum(item[\"warmup_runs\"] + item[\"sample_runs\"] for item in results),\n        \"validated_oracle_runs\": sum(item[\"oracle_validation_runs\"] for item in results),\n        \"modes\": results,\n    }\n    args.output.write_text(json.dumps(output, indent=2) + \"\\n\")\n    print(f\"Audit passed: {output['validated_warmup_and_sample_runs']} warmup/sample runs, {output['validated_oracle_runs']} oracle runs; {args.output}\")\n    for mode in results:\n        print(mode[\"mode\"], \"record\", mode[\"record_sha256\"])\n        for item in mode[\"rows\"]:\n            print(item[\"mode\"], item[\"group\"], item[\"label\"], \", \".join(f\"{name}={value:.3f}ms\" for name, value in item[\"median_ms\"].items()))\n\n\nif __name__ == \"__main__\":\n    main()\n"
+}

@@ -12,6 +12,7 @@ default = ["bigint"]
 bigint = ["dep:num-bigint", "dep:num-traits"]
 checked-i64 = []
 batch = []
+manifest = ["batch"]
 
 [dependencies]
 num-bigint = { version = "=0.4.8", optional = true }
@@ -25,6 +26,11 @@ path = "src/main.rs"
 name = "planner-batch"
 path = "src/batch_main.rs"
 required-features = ["batch"]
+
+[[bin]]
+name = "planner-manifest"
+path = "src/manifest_main.rs"
+required-features = ["manifest"]
 
 [profile.release]
 debug = "line-tables-only"
