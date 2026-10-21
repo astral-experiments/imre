@@ -1,0 +1,1238 @@
+{
+  "summary": {
+    "schema": "relar-layout-validation-summary-v1",
+    "passed": true,
+    "source_commit": "6d0db50ab7851f4321704e6f97b79a2d92d58606",
+    "build_record": {
+      "path": "benchmarks/local/layout-tools-v2/build-record.json",
+      "sha256": "300e64922b3026fc2b44036ebacbe7c25d200e4ed0eacfacb9f6855f3f19dcd4"
+    },
+    "tools": {
+      "benchmarks/local/layout-tools-v2/relar": "5fc88efd11118c5bb49430be7c87c79c14edb6651f3490797e82c3722ff2e6d1",
+      "benchmarks/local/layout-tools-v2/librelar_runtime.a": "ca204d2df89a52927cdd792f96ab2a45f833658858b3d926f0e27a6bd4839daf",
+      "benchmarks/local/layout-tools-v2/librelar_runtime_lto.a": "cf4f3b157fd4e836e8a1b641bf845fb963aa104ec115f3a6396ca927887a5ebc",
+      "benchmarks/local/layout-tools-v2/librelar_runtime_asan.a": "1ae81c87bf9e9cccb16813da21dfe534158ab72a7fbc6960ee88d22e9f6d3e32"
+    },
+    "modes": {
+      "ordinary": {
+        "record": "benchmarks/local/layout-validation-v2/ordinary/results.json",
+        "sha256": "7ac230d3ee8fc90a127d31f3e5eebbac9c4e7a9ceb3a55e7a142bbec41ef3145",
+        "checks": {
+          "classes": 58,
+          "exceptions": 48,
+          "differential": 112,
+          "imports": 51,
+          "io": 20,
+          "containers": 280,
+          "files": 72
+        },
+        "total_checks": 641
+      },
+      "thinlto": {
+        "record": "benchmarks/local/layout-validation-v2/thinlto/results.json",
+        "sha256": "e5341a4357af40ad964a1e9733c39cc96c36a8c71fb56fe561f49329f4bfa4b5",
+        "checks": {
+          "classes": 56,
+          "exceptions": 32,
+          "differential": 72,
+          "imports": 47,
+          "io": 10,
+          "containers": 211,
+          "files": 51
+        },
+        "total_checks": 479
+      },
+      "asan": {
+        "record": "benchmarks/local/layout-validation-v2/asan/results.json",
+        "sha256": "ba1a91d2e96aa7c92ff61b8a20bac378c2681d85fa8cf2749acbc6b898349c54",
+        "checks": {
+          "classes": 56,
+          "exceptions": 32,
+          "differential": 72,
+          "imports": 47,
+          "io": 10,
+          "containers": 211,
+          "files": 51
+        },
+        "total_checks": 479
+      }
+    },
+    "lto_cli": {
+      "record": "benchmarks/local/layout-validation-v2/lto-cli/results.json",
+      "sha256": "8364e98c7cb3c4314e448e4720f10046a4ccd3918578ba963c2e893826c5d7f5",
+      "checks": 10
+    },
+    "sanitizer": {
+      "generated_code_asan": true,
+      "runtime_asan": true,
+      "opt_level": "1",
+      "effective_child_ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+      "execution": "outside ptrace sandbox"
+    },
+    "total_checks": 1609,
+    "attribution": "Only corrected v2 artifacts are counted. Superseded candidate and ptrace diagnostic records remain under layout-validation."
+  },
+  "records": {
+    "ordinary": {
+      "schema": "relar-layout-native-validation-v1",
+      "mode": "ordinary",
+      "started_at_unix": 1792326264.272202,
+      "repository": "/home/dev-user/code/oss/relar",
+      "head": "6d0db50ab7851f4321704e6f97b79a2d92d58606",
+      "compiler": {
+        "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+        "sha256": "5fc88efd11118c5bb49430be7c87c79c14edb6651f3490797e82c3722ff2e6d1"
+      },
+      "runtime": {
+        "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+        "sha256": "ca204d2df89a52927cdd792f96ab2a45f833658858b3d926f0e27a6bd4839daf"
+      },
+      "python": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+      "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin",
+      "runner": {
+        "path": "/tmp/relar-layout-validation-v2.py",
+        "sha256": "b6f32f808d31449c09e2d0199493b6c343007701c104b0d1db1832849bd3539b"
+      },
+      "test_sources": {
+        "tests/classes.py": "c4b409a3b5d7fb08d22c737b20aa96ab4e6cd76026a86d227ad9d497ced8a49c",
+        "tests/containers.py": "16dfcdf29ecb8a6eaba9fee44c10a94ef38c836957067bead6bf0d81aefc4ff6",
+        "tests/differential.py": "6f28393b1b78d967065d080d4aec45836213b2609cd205299d358a4803695ffc",
+        "tests/exceptions.py": "29de31304fa700d21bbafe7d9a63a08642e4c3371e2af3efcc1044e4746deec3",
+        "tests/files.py": "d977f5be7efba189fe4fbf7772cba3756def3dc671778bf218a03da3a393533c",
+        "tests/fixtures/classes/imported/facade.py": "1fc491f43b749999d1afd898230328773a6f0e24113589a3b4f4c36cd8f271df",
+        "tests/fixtures/classes/imported/main.py": "2ee9d22808a2bbff00171e34dceeee35da2b5b7211ddafd056fab7e3a1d19470",
+        "tests/fixtures/classes/imported/models/__init__.py": "cc9368b60161036bb8d4904bd2fccb1ab462fc7490daec4bd15713714d4c4af1",
+        "tests/fixtures/classes/imported/models/records.py": "873d83fdac64010579e753dd2b22acd098ff9824e2ee21f1f9e89255f5e608df",
+        "tests/fixtures/classes/ownership.py": "01a0a4e9b35c26ae99fa00564d947aea82c612e615792afd272785c35520a7bb",
+        "tests/fixtures/containers/contextual.py": "2cb63da3dfb77ebe72f0cc758a51af9fc3dcaeba5f275ffc186d3d5ab46bc083",
+        "tests/fixtures/containers/dictionaries.py": "f8603f41a2bac9a8209557538b06314d62b2d5888c6b06af13ee86510ea97f3b",
+        "tests/fixtures/containers/index_proofs.py": "c5246e43c65bb66781fa16ce4ea9daa39474569ec03af470d5a35fde11062e6a",
+        "tests/fixtures/containers/iteration.py": "1a32951ce1db29274156067b099169b1bea9633a3462e29cde409a4a0adc6afc",
+        "tests/fixtures/containers/lists.py": "958067d313b7ca0015b49532a32efc1369b24738c012becf6465b52d07d8f961",
+        "tests/fixtures/containers/objects.py": "86c25e805beccb666b331c10351f674a9d7dc7493a1311e388bd3df65adf4e89",
+        "tests/fixtures/containers/optional.py": "f091b226523e2def53faea8692ea6cedfbf1527fd57245a7f9b71d55eaa4b18e",
+        "tests/fixtures/containers/optional_effects.py": "c48d7757e1b20d1fa042aa221b7c4162b62ce50bb941078cd8651728ec0b4f77",
+        "tests/fixtures/containers/optional_flow.py": "b214eaf2cd9016f6d881491b44fcbe5fa5a8bf90ee286fa9a241adbf413c03d5",
+        "tests/fixtures/containers/representation_cleanup.py": "1bba523c14e49a219581fcfac3ec3cf0c56e35a30a27f1250529f9781f276f1a",
+        "tests/fixtures/containers/representation_niches.py": "8cddfe6474b1ec03502aaca243224761a7577a63df7defc6d4e5e3e161a2efb1",
+        "tests/fixtures/containers/sets.py": "dca2b038827e77a9cea25b1034aca14adc4eb1e9f4c6844b7c74a7ea3a92aedd",
+        "tests/fixtures/containers/strings.py": "d1d2aeb83b6906ccfba1242a23c3be7756915bd2cc86cfcb8ac28703a4b78c51",
+        "tests/fixtures/containers/tuples.py": "be3b2819fc7e8aefd2e14621e67dace0b7a8afc030721fcde6b1fecfe52a592d",
+        "tests/fixtures/imports/arithmetic.py": "61e3f1d26734cf56315c4fccf666e0570cd3b25182e105e4596faaaf5ce93c80",
+        "tests/fixtures/imports/entry.py": "1d573fb62ea858a814cfde55c439dcfa9c66838bac553db5b47b8cb18dd4d5ee",
+        "tests/fixtures/imports/package/__init__.py": "82efee395ef7da7d89ecf588a2459bb975ec94b3d2ac48b358c9e3b735597e25",
+        "tests/fixtures/imports/package/__main__.py": "4f217f1612640f31fe685e70a73f662438dc42eafd8a81e782f8539fce46e6d5",
+        "tests/fixtures/imports/package/nested/__init__.py": "3976178a3891d14d6abd358ff4d68f3a721adabbd76d10f34e5a8bb1de07ed04",
+        "tests/fixtures/imports/package/nested/labels.py": "802c90cda3d7cd7c61080a5e8c065a71597a29f0646981e156e126b074e4b514",
+        "tests/fixtures/imports/package/operations.py": "eacb80ef165efbe1225bced68a8e5387ce45af270a5152622a949469b0d4e029",
+        "tests/fixtures/imports/package/program.py": "b0b1f15f2bfea46039555f8ccb5fd73f32b1f94705b004b083ecc466e4aac0c6",
+        "tests/imports.py": "b3f38a06a5cd40b8f7f1b233739240aad7262868425c49c23a8fbffec67b127a",
+        "tests/io.py": "631d08df643102928d7851a20080baa6bc3eefb75a2f634e00f061ff9defc6bb",
+        "tests/lto.py": "b49156b14c746a6fc34a512eb7263ad25f23d5aecb87ce352b084bb0ff0d5a3f",
+        "tests/programs/borrowed_operands.py": "b11f660bf7be77819c6ce8837b78cda087cfd6f00ab74715ccfea88022cb8b1c",
+        "tests/programs/constant_division.py": "9625893a535b7fbe7421acecce65cee6e9ea06f050b9e59473199d6b1fb38f19",
+        "tests/programs/control_flow.py": "0ab7519f7a2013b611e9c946f95edc48ea254c41514ef331eef10c02178d6b31",
+        "tests/programs/decimal_input.py": "540380824cecc0c073942118144c17d2185c2c9cb92d0d6ee7eb171a55bf8264",
+        "tests/programs/integer_matrix.py": "36d33ac4564ce1a810cfcda04caf67d4775e9e01fdf56cca4eafc08efa8caf3c",
+        "tests/programs/ownership.py": "b581438ef1fdb00edc399f550112c5c153c152f15d4d5cbfd7c33357b9d84d29",
+        "tests/programs/short_strings.py": "c35fc3f77c55f5d5cc70fa3b46312c290180207c5224d0aaee2bf7476688eed0"
+      },
+      "results": {
+        "classes": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/classes.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326264.5456767,
+          "finished_at_unix": 1792326268.9260488,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/classes.stdout",
+            "sha256": "17b5e0bb55bf9b355d570c75aeb14d06b943d145fd3c750ef0318eb2452fd116"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/classes.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "exceptions": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/exceptions.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326268.9275136,
+          "finished_at_unix": 1792326281.5789716,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/exceptions.stdout",
+            "sha256": "2acc8d882974554d58247a8f2b8a536de2882591a83438ca391f35802fa7cf15"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/exceptions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "differential": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/differential.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326281.5801594,
+          "finished_at_unix": 1792326313.6179597,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/differential.stdout",
+            "sha256": "bd6213d537870f3ce12fc4012cb254b21ddf4ecd47aea1515c035139a7d6c75e"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/differential.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "imports": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/imports.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326313.6194155,
+          "finished_at_unix": 1792326318.3160524,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/imports.stdout",
+            "sha256": "29d9fdaf4f4e6d33d6e79f22dbf01c96bae4db4e8b3d1e2fae090b4b6890d835"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/imports.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "io": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/io.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326318.3176239,
+          "finished_at_unix": 1792326322.8233826,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/io.stdout",
+            "sha256": "ff6b20527ed1fc9c431c42fafb7f1f6b7f32182e53ec07ab1cf5d5241f1c23e3"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/io.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "containers": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/containers.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326264.5451827,
+          "finished_at_unix": 1792326326.486322,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/containers.stdout",
+            "sha256": "e23c058452d927e1ef68e1b5845318ca9d9e62203ce62ba845571bf3b699a162"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/containers.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "files": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/files.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326322.8244278,
+          "finished_at_unix": 1792326340.8248518,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/files.stdout",
+            "sha256": "02385ad9110fb1bbfd100a632c0eacb94f5eb55b52d33e80a5cb18074772c290"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/files.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "finished_at_unix": 1792326340.827143,
+      "passed": true
+    },
+    "thinlto": {
+      "schema": "relar-layout-native-validation-v1",
+      "mode": "thinlto",
+      "started_at_unix": 1792326264.271974,
+      "repository": "/home/dev-user/code/oss/relar",
+      "head": "6d0db50ab7851f4321704e6f97b79a2d92d58606",
+      "compiler": {
+        "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+        "sha256": "5fc88efd11118c5bb49430be7c87c79c14edb6651f3490797e82c3722ff2e6d1"
+      },
+      "runtime": {
+        "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+        "sha256": "cf4f3b157fd4e836e8a1b641bf845fb963aa104ec115f3a6396ca927887a5ebc"
+      },
+      "python": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+      "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin",
+      "runner": {
+        "path": "/tmp/relar-layout-validation-v2.py",
+        "sha256": "b6f32f808d31449c09e2d0199493b6c343007701c104b0d1db1832849bd3539b"
+      },
+      "test_sources": {
+        "tests/classes.py": "c4b409a3b5d7fb08d22c737b20aa96ab4e6cd76026a86d227ad9d497ced8a49c",
+        "tests/containers.py": "16dfcdf29ecb8a6eaba9fee44c10a94ef38c836957067bead6bf0d81aefc4ff6",
+        "tests/differential.py": "6f28393b1b78d967065d080d4aec45836213b2609cd205299d358a4803695ffc",
+        "tests/exceptions.py": "29de31304fa700d21bbafe7d9a63a08642e4c3371e2af3efcc1044e4746deec3",
+        "tests/files.py": "d977f5be7efba189fe4fbf7772cba3756def3dc671778bf218a03da3a393533c",
+        "tests/fixtures/classes/imported/facade.py": "1fc491f43b749999d1afd898230328773a6f0e24113589a3b4f4c36cd8f271df",
+        "tests/fixtures/classes/imported/main.py": "2ee9d22808a2bbff00171e34dceeee35da2b5b7211ddafd056fab7e3a1d19470",
+        "tests/fixtures/classes/imported/models/__init__.py": "cc9368b60161036bb8d4904bd2fccb1ab462fc7490daec4bd15713714d4c4af1",
+        "tests/fixtures/classes/imported/models/records.py": "873d83fdac64010579e753dd2b22acd098ff9824e2ee21f1f9e89255f5e608df",
+        "tests/fixtures/classes/ownership.py": "01a0a4e9b35c26ae99fa00564d947aea82c612e615792afd272785c35520a7bb",
+        "tests/fixtures/containers/contextual.py": "2cb63da3dfb77ebe72f0cc758a51af9fc3dcaeba5f275ffc186d3d5ab46bc083",
+        "tests/fixtures/containers/dictionaries.py": "f8603f41a2bac9a8209557538b06314d62b2d5888c6b06af13ee86510ea97f3b",
+        "tests/fixtures/containers/index_proofs.py": "c5246e43c65bb66781fa16ce4ea9daa39474569ec03af470d5a35fde11062e6a",
+        "tests/fixtures/containers/iteration.py": "1a32951ce1db29274156067b099169b1bea9633a3462e29cde409a4a0adc6afc",
+        "tests/fixtures/containers/lists.py": "958067d313b7ca0015b49532a32efc1369b24738c012becf6465b52d07d8f961",
+        "tests/fixtures/containers/objects.py": "86c25e805beccb666b331c10351f674a9d7dc7493a1311e388bd3df65adf4e89",
+        "tests/fixtures/containers/optional.py": "f091b226523e2def53faea8692ea6cedfbf1527fd57245a7f9b71d55eaa4b18e",
+        "tests/fixtures/containers/optional_effects.py": "c48d7757e1b20d1fa042aa221b7c4162b62ce50bb941078cd8651728ec0b4f77",
+        "tests/fixtures/containers/optional_flow.py": "b214eaf2cd9016f6d881491b44fcbe5fa5a8bf90ee286fa9a241adbf413c03d5",
+        "tests/fixtures/containers/representation_cleanup.py": "1bba523c14e49a219581fcfac3ec3cf0c56e35a30a27f1250529f9781f276f1a",
+        "tests/fixtures/containers/representation_niches.py": "8cddfe6474b1ec03502aaca243224761a7577a63df7defc6d4e5e3e161a2efb1",
+        "tests/fixtures/containers/sets.py": "dca2b038827e77a9cea25b1034aca14adc4eb1e9f4c6844b7c74a7ea3a92aedd",
+        "tests/fixtures/containers/strings.py": "d1d2aeb83b6906ccfba1242a23c3be7756915bd2cc86cfcb8ac28703a4b78c51",
+        "tests/fixtures/containers/tuples.py": "be3b2819fc7e8aefd2e14621e67dace0b7a8afc030721fcde6b1fecfe52a592d",
+        "tests/fixtures/imports/arithmetic.py": "61e3f1d26734cf56315c4fccf666e0570cd3b25182e105e4596faaaf5ce93c80",
+        "tests/fixtures/imports/entry.py": "1d573fb62ea858a814cfde55c439dcfa9c66838bac553db5b47b8cb18dd4d5ee",
+        "tests/fixtures/imports/package/__init__.py": "82efee395ef7da7d89ecf588a2459bb975ec94b3d2ac48b358c9e3b735597e25",
+        "tests/fixtures/imports/package/__main__.py": "4f217f1612640f31fe685e70a73f662438dc42eafd8a81e782f8539fce46e6d5",
+        "tests/fixtures/imports/package/nested/__init__.py": "3976178a3891d14d6abd358ff4d68f3a721adabbd76d10f34e5a8bb1de07ed04",
+        "tests/fixtures/imports/package/nested/labels.py": "802c90cda3d7cd7c61080a5e8c065a71597a29f0646981e156e126b074e4b514",
+        "tests/fixtures/imports/package/operations.py": "eacb80ef165efbe1225bced68a8e5387ce45af270a5152622a949469b0d4e029",
+        "tests/fixtures/imports/package/program.py": "b0b1f15f2bfea46039555f8ccb5fd73f32b1f94705b004b083ecc466e4aac0c6",
+        "tests/imports.py": "b3f38a06a5cd40b8f7f1b233739240aad7262868425c49c23a8fbffec67b127a",
+        "tests/io.py": "631d08df643102928d7851a20080baa6bc3eefb75a2f634e00f061ff9defc6bb",
+        "tests/lto.py": "b49156b14c746a6fc34a512eb7263ad25f23d5aecb87ce352b084bb0ff0d5a3f",
+        "tests/programs/borrowed_operands.py": "b11f660bf7be77819c6ce8837b78cda087cfd6f00ab74715ccfea88022cb8b1c",
+        "tests/programs/constant_division.py": "9625893a535b7fbe7421acecce65cee6e9ea06f050b9e59473199d6b1fb38f19",
+        "tests/programs/control_flow.py": "0ab7519f7a2013b611e9c946f95edc48ea254c41514ef331eef10c02178d6b31",
+        "tests/programs/decimal_input.py": "540380824cecc0c073942118144c17d2185c2c9cb92d0d6ee7eb171a55bf8264",
+        "tests/programs/integer_matrix.py": "36d33ac4564ce1a810cfcda04caf67d4775e9e01fdf56cca4eafc08efa8caf3c",
+        "tests/programs/ownership.py": "b581438ef1fdb00edc399f550112c5c153c152f15d4d5cbfd7c33357b9d84d29",
+        "tests/programs/short_strings.py": "c35fc3f77c55f5d5cc70fa3b46312c290180207c5224d0aaee2bf7476688eed0"
+      },
+      "results": {
+        "classes": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/classes.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326264.5458357,
+          "finished_at_unix": 1792326269.578285,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/classes.stdout",
+            "sha256": "724d8cc23455331074e5b350ef4a08ea8a4ace147e236f59b60bd8b511eae8f3"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/classes.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "exceptions": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/exceptions.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326269.5794635,
+          "finished_at_unix": 1792326285.7165446,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/exceptions.stdout",
+            "sha256": "4be6f9ad9a05c34549de276fa89593d1ea332cc66be7ccb7b0216027cb0ea3f3"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/exceptions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "differential": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/differential.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326285.71757,
+          "finished_at_unix": 1792326329.371292,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/differential.stdout",
+            "sha256": "b190ebd6e7203c28c17ec7faa0c0f5d8c6decd1e773be99ae0c98e060f7b79ad"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/differential.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "imports": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/imports.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326329.3721733,
+          "finished_at_unix": 1792326335.476132,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/imports.stdout",
+            "sha256": "f83498e79d485a45cf5d880badfac061b59ec07ac7f8ea00dd9723e7ac0d2cd0"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/imports.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "io": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/io.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326335.4772096,
+          "finished_at_unix": 1792326340.2113981,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/io.stdout",
+            "sha256": "8db850d1783de29fdc0dc48daec150b64f1b10efdcfa1ee0ed8e7bd2dc5e0fc7"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/io.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "containers": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/containers.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326264.5451329,
+          "finished_at_unix": 1792326350.599205,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/containers.stdout",
+            "sha256": "4345d7928633ae1675b86ccbec3e4990653cd1d9570e0ea33dd9bd55e7a0952b"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/containers.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "files": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/files.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326340.2122257,
+          "finished_at_unix": 1792326358.964636,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/files.stdout",
+            "sha256": "4c604bc1ddd600c76379a883e749cf1b84424046db06dcc8a184a02b53accca6"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/files.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "finished_at_unix": 1792326358.966939,
+      "passed": true
+    },
+    "asan": {
+      "schema": "relar-layout-native-validation-v1",
+      "mode": "asan",
+      "started_at_unix": 1792326279.625469,
+      "repository": "/home/dev-user/code/oss/relar",
+      "head": "6d0db50ab7851f4321704e6f97b79a2d92d58606",
+      "compiler": {
+        "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+        "sha256": "5fc88efd11118c5bb49430be7c87c79c14edb6651f3490797e82c3722ff2e6d1"
+      },
+      "runtime": {
+        "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+        "sha256": "1ae81c87bf9e9cccb16813da21dfe534158ab72a7fbc6960ee88d22e9f6d3e32"
+      },
+      "python": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+      "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin",
+      "runner": {
+        "path": "/tmp/relar-layout-validation-v2.py",
+        "sha256": "b6f32f808d31449c09e2d0199493b6c343007701c104b0d1db1832849bd3539b"
+      },
+      "test_sources": {
+        "tests/classes.py": "c4b409a3b5d7fb08d22c737b20aa96ab4e6cd76026a86d227ad9d497ced8a49c",
+        "tests/containers.py": "16dfcdf29ecb8a6eaba9fee44c10a94ef38c836957067bead6bf0d81aefc4ff6",
+        "tests/differential.py": "6f28393b1b78d967065d080d4aec45836213b2609cd205299d358a4803695ffc",
+        "tests/exceptions.py": "29de31304fa700d21bbafe7d9a63a08642e4c3371e2af3efcc1044e4746deec3",
+        "tests/files.py": "d977f5be7efba189fe4fbf7772cba3756def3dc671778bf218a03da3a393533c",
+        "tests/fixtures/classes/imported/facade.py": "1fc491f43b749999d1afd898230328773a6f0e24113589a3b4f4c36cd8f271df",
+        "tests/fixtures/classes/imported/main.py": "2ee9d22808a2bbff00171e34dceeee35da2b5b7211ddafd056fab7e3a1d19470",
+        "tests/fixtures/classes/imported/models/__init__.py": "cc9368b60161036bb8d4904bd2fccb1ab462fc7490daec4bd15713714d4c4af1",
+        "tests/fixtures/classes/imported/models/records.py": "873d83fdac64010579e753dd2b22acd098ff9824e2ee21f1f9e89255f5e608df",
+        "tests/fixtures/classes/ownership.py": "01a0a4e9b35c26ae99fa00564d947aea82c612e615792afd272785c35520a7bb",
+        "tests/fixtures/containers/contextual.py": "2cb63da3dfb77ebe72f0cc758a51af9fc3dcaeba5f275ffc186d3d5ab46bc083",
+        "tests/fixtures/containers/dictionaries.py": "f8603f41a2bac9a8209557538b06314d62b2d5888c6b06af13ee86510ea97f3b",
+        "tests/fixtures/containers/index_proofs.py": "c5246e43c65bb66781fa16ce4ea9daa39474569ec03af470d5a35fde11062e6a",
+        "tests/fixtures/containers/iteration.py": "1a32951ce1db29274156067b099169b1bea9633a3462e29cde409a4a0adc6afc",
+        "tests/fixtures/containers/lists.py": "958067d313b7ca0015b49532a32efc1369b24738c012becf6465b52d07d8f961",
+        "tests/fixtures/containers/objects.py": "86c25e805beccb666b331c10351f674a9d7dc7493a1311e388bd3df65adf4e89",
+        "tests/fixtures/containers/optional.py": "f091b226523e2def53faea8692ea6cedfbf1527fd57245a7f9b71d55eaa4b18e",
+        "tests/fixtures/containers/optional_effects.py": "c48d7757e1b20d1fa042aa221b7c4162b62ce50bb941078cd8651728ec0b4f77",
+        "tests/fixtures/containers/optional_flow.py": "b214eaf2cd9016f6d881491b44fcbe5fa5a8bf90ee286fa9a241adbf413c03d5",
+        "tests/fixtures/containers/representation_cleanup.py": "1bba523c14e49a219581fcfac3ec3cf0c56e35a30a27f1250529f9781f276f1a",
+        "tests/fixtures/containers/representation_niches.py": "8cddfe6474b1ec03502aaca243224761a7577a63df7defc6d4e5e3e161a2efb1",
+        "tests/fixtures/containers/sets.py": "dca2b038827e77a9cea25b1034aca14adc4eb1e9f4c6844b7c74a7ea3a92aedd",
+        "tests/fixtures/containers/strings.py": "d1d2aeb83b6906ccfba1242a23c3be7756915bd2cc86cfcb8ac28703a4b78c51",
+        "tests/fixtures/containers/tuples.py": "be3b2819fc7e8aefd2e14621e67dace0b7a8afc030721fcde6b1fecfe52a592d",
+        "tests/fixtures/imports/arithmetic.py": "61e3f1d26734cf56315c4fccf666e0570cd3b25182e105e4596faaaf5ce93c80",
+        "tests/fixtures/imports/entry.py": "1d573fb62ea858a814cfde55c439dcfa9c66838bac553db5b47b8cb18dd4d5ee",
+        "tests/fixtures/imports/package/__init__.py": "82efee395ef7da7d89ecf588a2459bb975ec94b3d2ac48b358c9e3b735597e25",
+        "tests/fixtures/imports/package/__main__.py": "4f217f1612640f31fe685e70a73f662438dc42eafd8a81e782f8539fce46e6d5",
+        "tests/fixtures/imports/package/nested/__init__.py": "3976178a3891d14d6abd358ff4d68f3a721adabbd76d10f34e5a8bb1de07ed04",
+        "tests/fixtures/imports/package/nested/labels.py": "802c90cda3d7cd7c61080a5e8c065a71597a29f0646981e156e126b074e4b514",
+        "tests/fixtures/imports/package/operations.py": "eacb80ef165efbe1225bced68a8e5387ce45af270a5152622a949469b0d4e029",
+        "tests/fixtures/imports/package/program.py": "b0b1f15f2bfea46039555f8ccb5fd73f32b1f94705b004b083ecc466e4aac0c6",
+        "tests/imports.py": "b3f38a06a5cd40b8f7f1b233739240aad7262868425c49c23a8fbffec67b127a",
+        "tests/io.py": "631d08df643102928d7851a20080baa6bc3eefb75a2f634e00f061ff9defc6bb",
+        "tests/lto.py": "b49156b14c746a6fc34a512eb7263ad25f23d5aecb87ce352b084bb0ff0d5a3f",
+        "tests/programs/borrowed_operands.py": "b11f660bf7be77819c6ce8837b78cda087cfd6f00ab74715ccfea88022cb8b1c",
+        "tests/programs/constant_division.py": "9625893a535b7fbe7421acecce65cee6e9ea06f050b9e59473199d6b1fb38f19",
+        "tests/programs/control_flow.py": "0ab7519f7a2013b611e9c946f95edc48ea254c41514ef331eef10c02178d6b31",
+        "tests/programs/decimal_input.py": "540380824cecc0c073942118144c17d2185c2c9cb92d0d6ee7eb171a55bf8264",
+        "tests/programs/integer_matrix.py": "36d33ac4564ce1a810cfcda04caf67d4775e9e01fdf56cca4eafc08efa8caf3c",
+        "tests/programs/ownership.py": "b581438ef1fdb00edc399f550112c5c153c152f15d4d5cbfd7c33357b9d84d29",
+        "tests/programs/short_strings.py": "c35fc3f77c55f5d5cc70fa3b46312c290180207c5224d0aaee2bf7476688eed0"
+      },
+      "results": {
+        "classes": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/classes.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "1",
+            "--sanitize"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326279.903679,
+          "finished_at_unix": 1792326283.9928656,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/classes.stdout",
+            "sha256": "a26de98482d5a15d93e729d42fb28bbcc488e3229801530c07894ac08617f363"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/classes.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "exceptions": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/exceptions.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "1",
+            "--sanitize"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326283.9943755,
+          "finished_at_unix": 1792326294.1138153,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/exceptions.stdout",
+            "sha256": "91a9949084dff395322b8fe7245ac8d9a85d7cca29884fa43cea75b8e619732a"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/exceptions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "differential": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/differential.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "1",
+            "--sanitize"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326294.1147847,
+          "finished_at_unix": 1792326320.102439,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/differential.stdout",
+            "sha256": "6f0eb6f0c26454a86531ba69d7249778e547066993ecc9dbf879c6f205206211"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/differential.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "imports": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/imports.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "1",
+            "--sanitize"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326320.1036065,
+          "finished_at_unix": 1792326323.5980072,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/imports.stdout",
+            "sha256": "f83498e79d485a45cf5d880badfac061b59ec07ac7f8ea00dd9723e7ac0d2cd0"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/imports.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "io": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/io.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "1",
+            "--sanitize"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326323.598863,
+          "finished_at_unix": 1792326327.034248,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/io.stdout",
+            "sha256": "d9f2f6ec07767e258532afcea56a032598491ddbb3d44867d018ac241e36d6a7"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/io.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "containers": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/containers.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "1",
+            "--sanitize"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326279.90318,
+          "finished_at_unix": 1792326330.3046274,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/containers.stdout",
+            "sha256": "8e4b76864aa5f172cf5df2cab68617684d5a2a55631b7d185adffce60a7cf7f7"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/containers.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "files": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/files.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "1",
+            "--sanitize"
+          ],
+          "returncode": 0,
+          "started_at_unix": 1792326327.0354316,
+          "finished_at_unix": 1792326341.0276306,
+          "stdout": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/files.stdout",
+            "sha256": "2d2eee205ed3d94ae0833325e22ae5a515f65b73c5c8f5fe275013efa59930f6"
+          },
+          "stderr": {
+            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/files.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "finished_at_unix": 1792326341.029273,
+      "passed": true
+    },
+    "lto-cli": {
+      "command": [
+        "/home/dev-user/.local/bin/python3.14",
+        "-I",
+        "/home/dev-user/code/oss/relar/tests/lto.py",
+        "--compiler",
+        "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+        "--runtime",
+        "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+        "--clang",
+        "/usr/bin/clang-18",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--rust-lld",
+        "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld",
+        "--python",
+        "/home/dev-user/.local/bin/python3.14"
+      ],
+      "returncode": 0,
+      "started_at_unix": 1792326282.4053488,
+      "finished_at_unix": 1792326283.8764956,
+      "test_sha256": "b49156b14c746a6fc34a512eb7263ad25f23d5aecb87ce352b084bb0ff0d5a3f",
+      "compiler_sha256": "5fc88efd11118c5bb49430be7c87c79c14edb6651f3490797e82c3722ff2e6d1",
+      "runtime_sha256": "cf4f3b157fd4e836e8a1b641bf845fb963aa104ec115f3a6396ca927887a5ebc",
+      "rust_lld_sha256": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+      "stdout_sha256": "76141afddfe9efc9534446f90cdcb05d4245911414b020b93096a4069ab512aa",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "logs": {
+    "benchmarks/local/layout-validation-v2/asan/differential.stderr": "",
+    "benchmarks/local/layout-validation-v2/asan/imports.stderr": "",
+    "benchmarks/local/layout-validation-v2/asan/files.stderr": "",
+    "benchmarks/local/layout-validation-v2/asan/io.stdout": "Passed 10 I/O checks (optimization levels ['1']; ASan=True)\n",
+    "benchmarks/local/layout-validation-v2/asan/io.stderr": "",
+    "benchmarks/local/layout-validation-v2/asan/classes.stdout": "Passed 56 class checks (54 rejections; optimization levels ['1']; ASan=True)\n",
+    "benchmarks/local/layout-validation-v2/asan/files.stdout": "Passed 51 file/argument checks (optimization levels ['1']; ASan=True)\n",
+    "benchmarks/local/layout-validation-v2/asan/containers.stderr": "",
+    "benchmarks/local/layout-validation-v2/asan/imports.stdout": "47 import checks passed\n",
+    "benchmarks/local/layout-validation-v2/asan/exceptions.stderr": "",
+    "benchmarks/local/layout-validation-v2/asan/differential.stdout": "Passed 72 checks (32 rejected programs; 260 integer pairs; optimization levels ['1']; ASan=True)\n",
+    "benchmarks/local/layout-validation-v2/asan/containers.stdout": "Passed 211 container checks (142 rejected programs; optimization levels ['1']; ASan=True)\n",
+    "benchmarks/local/layout-validation-v2/asan/classes.stderr": "",
+    "benchmarks/local/layout-validation-v2/asan/exceptions.stdout": "Passed 32 exception checks (16 rejected programs; optimization levels ['1']; ASan=True)\n",
+    "benchmarks/local/layout-validation-v2/ordinary/differential.stderr": "",
+    "benchmarks/local/layout-validation-v2/ordinary/imports.stderr": "",
+    "benchmarks/local/layout-validation-v2/ordinary/files.stderr": "",
+    "benchmarks/local/layout-validation-v2/ordinary/io.stdout": "Passed 20 I/O checks (optimization levels ['0', '3']; ASan=False)\n",
+    "benchmarks/local/layout-validation-v2/ordinary/io.stderr": "",
+    "benchmarks/local/layout-validation-v2/ordinary/classes.stdout": "Passed 58 class checks (54 rejections; optimization levels ['0', '3']; ASan=False)\n",
+    "benchmarks/local/layout-validation-v2/ordinary/files.stdout": "Passed 72 file/argument checks (optimization levels ['0', '3']; ASan=False)\n",
+    "benchmarks/local/layout-validation-v2/ordinary/containers.stderr": "",
+    "benchmarks/local/layout-validation-v2/ordinary/imports.stdout": "51 import checks passed\n",
+    "benchmarks/local/layout-validation-v2/ordinary/exceptions.stderr": "",
+    "benchmarks/local/layout-validation-v2/ordinary/differential.stdout": "Passed 112 checks (32 rejected programs; 260 integer pairs; optimization levels ['0', '3']; ASan=False)\n",
+    "benchmarks/local/layout-validation-v2/ordinary/containers.stdout": "Passed 280 container checks (142 rejected programs; optimization levels ['0', '3']; ASan=False)\n",
+    "benchmarks/local/layout-validation-v2/ordinary/classes.stderr": "",
+    "benchmarks/local/layout-validation-v2/ordinary/exceptions.stdout": "Passed 48 exception checks (16 rejected programs; optimization levels ['0', '3']; ASan=False)\n",
+    "benchmarks/local/layout-validation-v2/thinlto/differential.stderr": "",
+    "benchmarks/local/layout-validation-v2/thinlto/imports.stderr": "",
+    "benchmarks/local/layout-validation-v2/thinlto/files.stderr": "",
+    "benchmarks/local/layout-validation-v2/thinlto/io.stdout": "Passed 10 I/O checks (optimization levels ['3']; ASan=False)\n",
+    "benchmarks/local/layout-validation-v2/thinlto/io.stderr": "",
+    "benchmarks/local/layout-validation-v2/thinlto/classes.stdout": "Passed 56 class checks (54 rejections; optimization levels ['3']; ASan=False)\n",
+    "benchmarks/local/layout-validation-v2/thinlto/files.stdout": "Passed 51 file/argument checks (optimization levels ['3']; ASan=False)\n",
+    "benchmarks/local/layout-validation-v2/thinlto/containers.stderr": "",
+    "benchmarks/local/layout-validation-v2/thinlto/imports.stdout": "47 import checks passed\n",
+    "benchmarks/local/layout-validation-v2/thinlto/exceptions.stderr": "",
+    "benchmarks/local/layout-validation-v2/thinlto/differential.stdout": "Passed 72 checks (32 rejected programs; 260 integer pairs; optimization levels ['3']; ASan=False)\n",
+    "benchmarks/local/layout-validation-v2/thinlto/containers.stdout": "Passed 211 container checks (142 rejected programs; optimization levels ['3']; ASan=False)\n",
+    "benchmarks/local/layout-validation-v2/thinlto/classes.stderr": "",
+    "benchmarks/local/layout-validation-v2/thinlto/exceptions.stdout": "Passed 32 exception checks (16 rejected programs; optimization levels ['3']; ASan=False)\n"
+  },
+  "runtime_unit_checks": {
+    "command": "sh /tmp/relar-cargo.sh test -p relar-runtime --locked",
+    "passed": 36,
+    "log": "Captured from the unified exec tool for session 60503; no tests were rerun to create this log.\nWorking directory: /home/dev-user/code/oss/relar\nCommands, in order:\nsh /tmp/relar-cargo.sh fmt -p relar-runtime\nsh /tmp/relar-cargo.sh test -p relar-runtime --locked\nsh /tmp/relar-cargo.sh clippy -p relar-runtime --all-targets --locked -- -D warnings\n\n   Compiling relar-runtime v0.1.0 (/home/dev-user/code/oss/relar/crates/relar-runtime)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.29s\n     Running unittests src/lib.rs (/home/dev-user/.cache/ohm/shared-build/debug/deps/relar_runtime-c3e381ebf08fcd07)\n\nrunning 36 tests\nRuntimeError: reported test error\ntest objects::args::tests::invalid_argv_never_publishes_partial_data_and_retries_cleanly ... ok\ntest objects::args::tests::argv_aliases_share_mutation_and_outlive_the_runtime_root ... ok\ntest objects::exceptions::tests::builtin_hierarchy_and_keyerror_string_arguments_match_python ... ok\ntest objects::exceptions::tests::failed_sequence_updates_release_staged_values_after_access ... ok\ntest objects::exceptions::tests::caught_arithmetic_and_list_failures_preserve_owners_and_allow_recovery ... ok\ntest objects::exceptions::tests::mapping_errors_preserve_outputs_and_scalar_key_messages ... ok\ntest objects::exceptions::tests::pending_and_active_errors_transfer_independent_owned_references ... ok\ntest objects::exceptions::tests::replacing_clearing_and_reporting_pending_errors_allow_later_recovery ... ok\ntest objects::files::tests::failed_close_closes_aliases_and_final_drop_preserves_pending ... ok\ntest objects::files::tests::open_reports_paths_before_publishing_a_resource ... ok\ntest objects::mappings::tests::active_iterator_positions_survive_deletion_reinsertion_and_compaction ... ok\ntest objects::mappings::tests::keys_use_scalar_equality_across_allocations_and_unicode_forms ... ok\ntest objects::files::tests::text_writes_count_characters_and_last_container_owner_flushes ... ok\ntest objects::mappings::tests::items_return_owned_snapshots_and_observe_later_value_updates ... ok\ntest objects::mappings::tests::iterator_mutation_errors_and_permanent_exhaustion_are_distinct ... ok\ntest objects::mappings::tests::optional_and_scalar_out_words_distinguish_missing_from_none ... ok\ntest objects::mappings::tests::replacement_acquires_sole_owners_and_reclaims_deleted_keys ... ok\ntest objects::mappings::tests::set_iteration_checks_size_but_ignores_duplicate_adds_and_missing_discards ... ok\ntest objects::mappings::tests::sets_deduplicate_integer_values_and_own_yielded_snapshots ... ok\ntest objects::mappings::tests::sets_keep_exact_string_keys_and_reclaim_owner_after_iteration ... ok\ntest objects::records::tests::compact_records_reclaim_partial_fields_without_disturbing_pending ... ok\ntest objects::records::tests::record_aliases_and_sole_owner_replacement_preserve_snapshots ... ok\ntest objects::tests::optional_bigint_sequence_replacement_releases_only_displaced_owners ... ok\ntest objects::tests::repeated_record_sequences_share_mutations_and_transfer_pop_owners ... ok\ntest objects::tests::sequence_words_preserve_niches_and_owned_snapshots ... ok\ntest objects::tests::splitlines_distinguishes_every_python_boundary_and_retains_interior_empty_lines ... ok\ntest objects::tests::splitting_owns_strings_and_matches_python_whitespace_boundaries ... ok\ntest objects::files::tests::text_reads_decode_normalize_recover_and_share_closed_state ... ok\ntest tests::borrowed_indices_and_list_copy_preserve_bigint_owners ... ok\ntest tests::container_ownership_survives_replacement_and_release ... ok\ntest tests::decimal_input_preserves_signs_separators_and_tag_boundaries ... ok\ntest tests::decoded_indices_acquire_before_replacing_the_only_stored_owner ... ok\ntest tests::integers_promote_and_demote_without_losing_values ... ok\ntest tests::floor_division_and_remainder_match_python_signs ... ok\ntest tests::scalar_strings_preserve_integer_boundaries_and_python_spellings ... ok\ntest tests::list_error_words_distinguish_numeric_zero_and_allow_recovery ... ok\n\ntest result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n\n   Doc-tests relar_runtime\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n    Checking relar-runtime v0.1.0 (/home/dev-user/code/oss/relar/crates/relar-runtime)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.49s\n\n"
+  },
+  "compiler_unit_checks": {
+    "command": "sh /tmp/relar-cargo.sh test -p relar-compiler --locked",
+    "passed": 19,
+    "evidence": "The local tool output recorded success; no standalone stdout log was preserved. The implementation PR CI also runs cargo test --workspace --locked."
+  },
+  "github_actions": {
+    "recorded_by": "gh-auto run view 39127175500 --json status,conclusion,jobs,url,headSha,headBranch,event,startedAt,updatedAt",
+    "run": {
+      "conclusion": "success",
+      "event": "pull_request",
+      "headBranch": "charlie/concrete-layouts",
+      "headSha": "6d0db50ab7851f4321704e6f97b79a2d92d58606",
+      "jobs": [
+        {
+          "completedAt": "2026-10-18T12:42:55Z",
+          "conclusion": "success",
+          "databaseId": 117674644104,
+          "name": "check",
+          "startedAt": "2026-10-18T12:24:59Z",
+          "status": "completed",
+          "steps": [
+            {
+              "completedAt": "2026-10-18T12:25:01Z",
+              "conclusion": "success",
+              "name": "Set up job",
+              "number": 1,
+              "startedAt": "2026-10-18T12:25:00Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:25:04Z",
+              "conclusion": "success",
+              "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "number": 2,
+              "startedAt": "2026-10-18T12:25:01Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:25:14Z",
+              "conclusion": "success",
+              "name": "Install the pinned Rust toolchain",
+              "number": 3,
+              "startedAt": "2026-10-18T12:25:04Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:25:23Z",
+              "conclusion": "success",
+              "name": "Install LLVM 18",
+              "number": 4,
+              "startedAt": "2026-10-18T12:25:14Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:25:23Z",
+              "conclusion": "success",
+              "name": "Run cargo fmt --all --check",
+              "number": 5,
+              "startedAt": "2026-10-18T12:25:23Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:26:27Z",
+              "conclusion": "success",
+              "name": "Run cargo clippy --workspace --all-targets --locked -- -D warnings",
+              "number": 6,
+              "startedAt": "2026-10-18T12:25:23Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:28:22Z",
+              "conclusion": "success",
+              "name": "Run cargo test --workspace --locked",
+              "number": 7,
+              "startedAt": "2026-10-18T12:26:27Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:33:28Z",
+              "conclusion": "success",
+              "name": "Run cargo build --workspace --release --locked",
+              "number": 8,
+              "startedAt": "2026-10-18T12:28:22Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:33:49Z",
+              "conclusion": "success",
+              "name": "Compare generated programs with CPython",
+              "number": 9,
+              "startedAt": "2026-10-18T12:33:28Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:33:52Z",
+              "conclusion": "success",
+              "name": "Compare static module graphs with CPython",
+              "number": 10,
+              "startedAt": "2026-10-18T12:33:49Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:33:54Z",
+              "conclusion": "success",
+              "name": "Compare fixed classes with CPython",
+              "number": 11,
+              "startedAt": "2026-10-18T12:33:52Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:34:32Z",
+              "conclusion": "success",
+              "name": "Compare typed containers with CPython",
+              "number": 12,
+              "startedAt": "2026-10-18T12:33:54Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:34:40Z",
+              "conclusion": "success",
+              "name": "Compare exception propagation and cleanup with CPython",
+              "number": 13,
+              "startedAt": "2026-10-18T12:34:32Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:34:42Z",
+              "conclusion": "success",
+              "name": "Compare output and interactive I/O with CPython",
+              "number": 14,
+              "startedAt": "2026-10-18T12:34:40Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:34:52Z",
+              "conclusion": "success",
+              "name": "Compare UTF-8 files and context cleanup with CPython",
+              "number": 15,
+              "startedAt": "2026-10-18T12:34:42Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:35:21Z",
+              "conclusion": "success",
+              "name": "Build the bitcode runtime for ThinLTO",
+              "number": 16,
+              "startedAt": "2026-10-18T12:34:52Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:40:38Z",
+              "conclusion": "success",
+              "name": "Check ThinLTO linking and native semantics",
+              "number": 17,
+              "startedAt": "2026-10-18T12:35:21Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:41:16Z",
+              "conclusion": "success",
+              "name": "Build the runtime with AddressSanitizer",
+              "number": 18,
+              "startedAt": "2026-10-18T12:40:38Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:42:19Z",
+              "conclusion": "success",
+              "name": "Check generated code and runtime with AddressSanitizer",
+              "number": 19,
+              "startedAt": "2026-10-18T12:41:16Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:42:20Z",
+              "conclusion": "success",
+              "name": "Validate the route planner against an independent oracle",
+              "number": 20,
+              "startedAt": "2026-10-18T12:42:19Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:42:23Z",
+              "conclusion": "success",
+              "name": "Validate the dependency planner against an independent oracle",
+              "number": 21,
+              "startedAt": "2026-10-18T12:42:20Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:42:30Z",
+              "conclusion": "success",
+              "name": "Validate the Rust planner references and integer boundaries",
+              "number": 22,
+              "startedAt": "2026-10-18T12:42:23Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:42:39Z",
+              "conclusion": "success",
+              "name": "Validate the incremental planner and numeric reference boundaries",
+              "number": 23,
+              "startedAt": "2026-10-18T12:42:30Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:42:44Z",
+              "conclusion": "success",
+              "name": "Validate framed batches and recovery against CPython and Rust",
+              "number": 24,
+              "startedAt": "2026-10-18T12:42:39Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:42:51Z",
+              "conclusion": "success",
+              "name": "Validate file manifests and complete reports against CPython and Rust",
+              "number": 25,
+              "startedAt": "2026-10-18T12:42:44Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:42:52Z",
+              "conclusion": "success",
+              "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+              "number": 50,
+              "startedAt": "2026-10-18T12:42:51Z",
+              "status": "completed"
+            },
+            {
+              "completedAt": "2026-10-18T12:42:52Z",
+              "conclusion": "success",
+              "name": "Complete job",
+              "number": 51,
+              "startedAt": "2026-10-18T12:42:52Z",
+              "status": "completed"
+            }
+          ],
+          "url": "https://github.com/viarius-experiments/relar/actions/runs/39127175500/job/117674644104"
+        }
+      ],
+      "startedAt": "2026-10-18T12:24:55Z",
+      "status": "completed",
+      "updatedAt": "2026-10-18T12:42:56Z",
+      "url": "https://github.com/viarius-experiments/relar/actions/runs/39127175500"
+    }
+  }
+}
