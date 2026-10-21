@@ -106,3 +106,8 @@ jobs:
           target/release/relar build examples/record_pipeline/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/record-pipeline
           python3 benchmarks/reference/record_pipeline/build.py --artifact-dir /tmp/relar-record-reference
           python3 benchmarks/record_validate.py --python python3 --binary /tmp/record-pipeline --rust /tmp/relar-record-reference/record-reference
+      - name: Validate memory report comparison against CPython and Rust
+        run: |
+          target/release/relar build examples/memory_report/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/memory-report
+          python3 benchmarks/reference/memory_report/build.py --artifact-dir /tmp/relar-memory-reference
+          python3 benchmarks/memory_validate.py --python python3 --binary /tmp/memory-report --rust /tmp/relar-memory-reference/memory-report-reference

@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/astral-sh/ruff",
+  "revision": "3e4fffb05a2b143fafbf31d891c79c878fe3bcd3",
+  "source": "scripts/memory_report.py",
+  "files": {
+    "memory_report.py": "102cd577ea1409bb567ca3ea9a8863ca74878f0eaecdc8d92af71de61d8ed5f7",
+    "LICENSE": "2597d854122b77ddc71971564ca2350a37608575ce324adc5650a2b2051c8f18"
+  }
+}

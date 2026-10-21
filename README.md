@@ -120,6 +120,12 @@ The [record pipeline](examples/record_pipeline/README.md) selects eligible
 transactions with configured callbacks, transforms gross or net payouts, and
 aggregates a report through lazy `map` and `filter`.
 
+The [memory-report comparator](examples/memory_report/README.md) ports ty's real
+report-comparison script: it decodes JSON into typed records, ranks changes, and
+writes a Markdown report. Its guide includes captured ty reports and comparisons
+with the original CPython script, the typed Python port, and an independent Rust
+implementation.
+
 ## License
 
 Relar is licensed under either of

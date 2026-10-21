@@ -1,0 +1,69 @@
+# Compare ty memory reports
+
+This is a typed port of Ruff's real
+[`scripts/memory_report.py`](https://github.com/astral-sh/ruff/blob/3e4fffb05a2b143fafbf31d891c79c878fe3bcd3/scripts/memory_report.py)
+two-file comparison mode. It reads two `TY_MEMORY_REPORT=json` captures and
+produces the same Markdown summary and largest-change tables. The retained
+upstream source and license are in [upstream/](upstream/).
+
+From the repository root, after building Relar:
+
+```sh
+target/release/relar build examples/memory_report/__main__.py \
+  --module-root examples --clang clang-18 -o /tmp/memory-report
+/tmp/memory-report \
+  --old examples/memory_report/sample/ruff-scripts-old.json \
+  --new examples/memory_report/sample/ruff-scripts.json \
+  --output /tmp/memory-report.md
+cat /tmp/memory-report.md
+```
+
+Omit `--output` to print the report. The project name comes from the new file's
+stem. The sample compares ty 0.0.89 and 0.0.90 checking Ruff's actual `scripts`
+tree: reported memory falls from 44,380,774 to 44,342,862 bytes. A second genuine
+capture pair covers this repository's inventory reconciler. Exact captures,
+producer versions, commands, binary/source hashes, and producer warning logs are
+retained in [sample/](sample/provenance.json).
+
+Run the same typed source on CPython with the compatibility library:
+
+```sh
+PYTHONPATH=stdlib:examples python3 -m memory_report \
+  --old examples/memory_report/sample/ruff-scripts-old.json \
+  --new examples/memory_report/sample/ruff-scripts.json
+```
+
+`load.py` calls `relar.json.decode(text, MemoryReport)`. The compiler generates a
+decoder for explicit record fields; there is no exposed dynamic JSON object.
+The CPython implementation in `stdlib/relar/json.py` enforces the same boundary.
+Integers retain arbitrary precision. Required fields must be present, item byte
+counts default to zero, and absent report lists become fresh empty lists.
+Explicit `null` does not satisfy an exact integer, string, or list field.
+Duplicate known fields are rejected; unknown fields are syntax-checked and
+ignored. JSON nesting is limited to 128 object/array levels.
+
+The port preserves the upstream 10,000-byte significance threshold, binary size
+units, percentage formatting, last-value-wins duplicate item names, space removal
+in displayed item names, and the largest 15 changed items. Upstream builds a set
+before sorting, so equal-change order and selection can vary with the Python
+hash seed. This port uses stable first appearance: old items first, then new-only
+items. The independent validator permits only that upstream tie ambiguity.
+
+This example implements two-file comparison, with optional `compare` before the
+flags. Upstream's directory comparison, project checkout, and ty execution modes
+remain outside its scope. Successful file output is quiet; the upstream script
+also echoes the completed report to stderr. Parsing and formatting finish before
+the output file opens, preserving an existing report on those failures.
+
+Validate reports, strict typed failures, and complete filesystem effects:
+
+```sh
+python3 benchmarks/reference/memory_report/build.py \
+  --artifact-dir /tmp/memory-rust
+python3 benchmarks/memory_validate.py --binary /tmp/memory-report \
+  --rust /tmp/memory-rust/memory-report-reference
+```
+
+The [benchmark guide](../../benchmarks/reference/memory_report/README.md) compares
+the unchanged upstream script, typed CPython port, Relar, and independent Rust on
+real captures and clearly labeled larger copies.
