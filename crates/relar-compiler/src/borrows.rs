@@ -812,9 +812,18 @@ def total(rows: list[Row], fail: bool) -> int:
         ));
         let body = emitted_body(&module, 0);
         // Each sibling preheader owns a view; its nested loop reuses that view.
-        assert_eq!(body.matches("call ptr @relar_seq_data_readonly").count(), 2, "{body}");
+        assert_eq!(
+            body.matches("call ptr @relar_seq_data_readonly").count(),
+            2,
+            "{body}"
+        );
         // The read after the branches cannot reuse either branch's SSA pointer.
-        assert_eq!(body.matches("call i64 @relar_seq_borrow_index_proven").count(), 1, "{body}");
+        assert_eq!(
+            body.matches("call i64 @relar_seq_borrow_index_proven")
+                .count(),
+            1,
+            "{body}"
+        );
         assert!(!body.contains("icmp eq ptr"), "{body}");
     }
 
@@ -892,10 +901,16 @@ def total(rows: list[Row], fail: bool) -> int:
             let merged = body[guard..].find("phi i64").unwrap();
             assert!(fallback < merged, "{body}");
             assert!(body[guard..guard + fallback].contains("br i1"), "{body}");
-            assert_eq!(body.matches("call ptr @relar_seq_data_readonly").count(), 1, "{body}");
+            assert_eq!(
+                body.matches("call ptr @relar_seq_data_readonly").count(),
+                1,
+                "{body}"
+            );
             let (_, read_guard) = body.rsplit_once("icmp eq ptr").unwrap();
             let cached = read_guard.find("getelementptr inbounds i64").unwrap();
-            let fallback = read_guard.find("call i64 @relar_seq_borrow_index_proven").unwrap();
+            let fallback = read_guard
+                .find("call i64 @relar_seq_borrow_index_proven")
+                .unwrap();
             let merged = read_guard.find("phi i64").unwrap();
             assert!(cached < fallback && fallback < merged, "{body}");
             assert!(read_guard[..cached].contains("br i1"), "{body}");
@@ -911,8 +926,14 @@ def total(rows: list[Row], fail: bool) -> int:
         assert!(facts[1].rooted[0]);
         assert!(facts[1].length_roots.iter().all(Option::is_none));
         let body = emitted_body(&module, 1);
-        assert!(!body.contains("call ptr @relar_seq_data_readonly"), "{body}");
-        assert!(body.contains("call i64 @relar_seq_borrow_index_proven"), "{body}");
+        assert!(
+            !body.contains("call ptr @relar_seq_data_readonly"),
+            "{body}"
+        );
+        assert!(
+            body.contains("call i64 @relar_seq_borrow_index_proven"),
+            "{body}"
+        );
     }
 
     #[test]

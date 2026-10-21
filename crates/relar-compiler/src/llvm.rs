@@ -664,8 +664,10 @@ impl Emitter<'_, '_> {
         let previous = self.length_snapshots.clone();
         let mut roots = vec![(false, false); self.locals.len()];
         crate::ir::walk_expressions(std::slice::from_ref(statement), &mut |expression| {
-            if let ExprKind::Builtin(operation @ (Builtin::Len | Builtin::SequenceGetInBounds), args) =
-                &expression.kind
+            if let ExprKind::Builtin(
+                operation @ (Builtin::Len | Builtin::SequenceGetInBounds),
+                args,
+            ) = &expression.kind
                 && let ExprKind::Local(slot) = args[0].kind
                 && let Some(root) = self.length_roots[slot]
             {
