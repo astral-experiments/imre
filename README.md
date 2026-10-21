@@ -30,6 +30,21 @@ But not:
 - Generator functions or async code
 - Arbitrary decorators
 
+## Benchmark
+
+We ran the same [inventory reconciliation program](examples/inventory_reconciliation/)
+with Relar and CPython, using 16,384 positive requests per workload:
+
+| Workload | Relar | CPython 3.14.5 | Speedup |
+| --- | ---: | ---: | ---: |
+| Dense | 26.69 ms | 77.66 ms | 2.91× |
+| Sparse | 52.24 ms | 112.35 ms | 2.15× |
+
+These are median end-to-end times from 48 runs per implementation on Linux in
+October 2026, including startup and file I/O. The native build uses Clang 18
+without ThinLTO. See the [benchmark report](benchmarks/results/2026-10-19-assignment-unpacking-expansion.md)
+for details.
+
 ## Installation
 
 On 64-bit Linux, install the [Rust toolchain](rust-toolchain.toml) and Clang 18,
