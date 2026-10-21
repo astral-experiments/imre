@@ -77,11 +77,12 @@ struct Operand {
     ownership: Ownership,
 }
 
-/// List lengths fit tagged-small integers and need no independent owner.
+/// Loop-private views of unchanged incoming lists; no field owns a reference.
 #[derive(Clone)]
 struct LengthSnapshot {
     receiver: Value,
     length: Value,
+    data: Option<String>,
 }
 
 /// Finally routing chooses the eventual transfer before it reaches either
@@ -526,12 +527,15 @@ impl Emitter<'_, '_> {
                 self.field_value(&pointer, expression.ty)
             }
             ExprKind::Builtin(Builtin::SequenceGetInBounds, args) => {
+                let ExprKind::Local(receiver_slot) = args[0].kind else {
+                    unreachable!("proven sequence receivers are private locals")
+                };
                 let receiver = self.borrow_projection(&args[0]);
                 let ExprKind::Local(slot) = args[1].kind else {
                     unreachable!("proven sequence cursors are private locals")
                 };
                 let index = self.borrow_slot(slot);
-                self.borrow_sequence_element(&receiver, &index, expression.ty)
+                self.borrow_sequence_element(receiver_slot, &receiver, &index, expression.ty)
             }
             ExprKind::Present(inner) => {
                 let value = self.borrow_projection(inner);
@@ -571,17 +575,64 @@ impl Emitter<'_, '_> {
 
     /// The adjacent live-length guard already checked this private cursor.
     /// Callers either retain immediately or prove the enclosing root stable.
-    fn borrow_sequence_element(&mut self, receiver: &Value, index: &Value, ty: Type) -> Value {
+    fn borrow_sequence_element(
+        &mut self,
+        slot: usize,
+        receiver: &Value,
+        index: &Value,
+        ty: Type,
+    ) -> Value {
         debug_assert!(matches!(receiver.ty, Type::List(_)));
         debug_assert_eq!(self.module.types.element(receiver.ty), Some(ty));
         let mut index = index.clone();
         index.small_integer = true;
         let index = self.index_word(&index, true);
-        let word = self.instruction(format!(
+        let word = self.proven_sequence_word(slot, receiver, &index);
+        self.decode_word(word, ty)
+    }
+
+    /// A frozen view is usable only for its current receiver identity. Clear or
+    /// Move can reset identity-only aliases, so unequal values keep the ordinary
+    /// proven read. The adjacent bounds proof dominates either element load.
+    fn proven_sequence_word(&mut self, slot: usize, receiver: &Value, index: &str) -> String {
+        let snapshot = self.length_roots[slot]
+            .and_then(|root| self.length_snapshots[root].clone().map(|view| (root, view)))
+            .filter(|(_, view)| view.data.is_some());
+        let Some((root, view)) = snapshot else {
+            return self.instruction(format!(
+                "call i64 @relar_seq_borrow_index_proven(ptr {}, i64 {index})",
+                receiver.operand
+            ));
+        };
+        let data = view.data.unwrap();
+        if root == slot {
+            let element = self.instruction(format!(
+                "getelementptr inbounds i64, ptr {data}, i64 {index}"
+            ));
+            return self.instruction(format!("load i64, ptr {element}"));
+        }
+        let same = self.instruction(format!(
+            "icmp eq ptr {}, {}",
+            receiver.operand, view.receiver.operand
+        ));
+        let (cached, fallback, end) = (self.label(), self.label(), self.label());
+        self.branch(&same, &cached, &fallback);
+        self.start(&cached);
+        let element = self.instruction(format!(
+            "getelementptr inbounds i64, ptr {data}, i64 {index}"
+        ));
+        let word = self.instruction(format!("load i64, ptr {element}"));
+        self.jump(&end);
+        self.start(&fallback);
+        let ordinary = self.instruction(format!(
             "call i64 @relar_seq_borrow_index_proven(ptr {}, i64 {index})",
             receiver.operand
         ));
-        self.decode_word(word, ty)
+        self.jump(&end);
+        self.start(&end);
+        self.instruction(format!(
+            "phi i64 [{word}, %{cached}], [{ordinary}, %{fallback}]"
+        ))
     }
 
     /// A borrowed slot has no independent owner to release or transfer.
@@ -605,25 +656,43 @@ impl Emitter<'_, '_> {
         ));
     }
 
-    /// Hoists only nonallocating lengths of unchanged incoming lists in a
-    /// transitively readonly function. Nested loops share dominating snapshots;
-    /// the caller restores the previous cache after emitting this loop.
+    /// Hoists nonallocating lengths and required generic-sequence buffer views
+    /// of unchanged incoming lists in a transitively readonly function. Nested
+    /// loops share dominating snapshots; the caller restores the previous cache
+    /// after emitting this loop. Data pointers never enter language values.
     fn snapshot_loop_lengths(&mut self, statement: &Statement) -> Vec<Option<LengthSnapshot>> {
         let previous = self.length_snapshots.clone();
-        let mut roots = vec![false; self.locals.len()];
+        let mut roots = vec![(false, false); self.locals.len()];
         crate::ir::walk_expressions(std::slice::from_ref(statement), &mut |expression| {
-            if let ExprKind::Builtin(Builtin::Len, args) = &expression.kind
+            if let ExprKind::Builtin(operation @ (Builtin::Len | Builtin::SequenceGetInBounds), args) =
+                &expression.kind
                 && let ExprKind::Local(slot) = args[0].kind
                 && let Some(root) = self.length_roots[slot]
             {
-                roots[root] = true;
+                roots[root].0 = true;
+                roots[root].1 |= matches!(operation, Builtin::SequenceGetInBounds);
             }
         });
-        for (root, needed) in roots.into_iter().enumerate() {
+        for (root, (needed, data_needed)) in roots.into_iter().enumerate() {
             if needed && self.length_snapshots[root].is_none() {
                 let receiver = self.borrow_slot(root);
                 let length = self.list_length(&receiver);
-                self.length_snapshots[root] = Some(LengthSnapshot { receiver, length });
+                self.length_snapshots[root] = Some(LengthSnapshot {
+                    receiver,
+                    length,
+                    data: None,
+                });
+            }
+            if data_needed {
+                let snapshot = self.length_snapshots[root].as_ref().unwrap();
+                if snapshot.data.is_none() {
+                    debug_assert!(matches!(snapshot.receiver.ty, Type::List(_)));
+                    let data = self.instruction(format!(
+                        "call ptr @relar_seq_data_readonly(ptr {})",
+                        snapshot.receiver.operand
+                    ));
+                    self.length_snapshots[root].as_mut().unwrap().data = Some(data);
+                }
             }
         }
         previous
@@ -2793,7 +2862,11 @@ impl Emitter<'_, '_> {
                         .iter()
                         .all(|arg| matches!(arg.kind, ExprKind::Local(_)))
                 );
-                let value = self.borrow_sequence_element(&args[0].value, &args[1].value, returns);
+                let ExprKind::Local(slot) = expressions[0].kind else {
+                    unreachable!("proven sequence receivers are private locals")
+                };
+                let value =
+                    self.borrow_sequence_element(slot, &args[0].value, &args[1].value, returns);
                 // Acquire before argument cleanup, target replacement, or the
                 // next iterator pull can remove the source element's owner.
                 self.retain(&value);
@@ -3893,6 +3966,7 @@ declare i64 @relar_seq_get(ptr, i64)
 declare void @relar_seq_set(ptr, i64, i64, i32)
 declare i64 @relar_seq_get_index(ptr, i64)
 declare i64 @relar_seq_borrow_index_proven(ptr, i64) nounwind memory(argmem: read)
+declare ptr @relar_seq_data_readonly(ptr) nounwind memory(argmem: read)
 declare void @relar_seq_set_index(ptr, i64, i64, i32)
 declare void @relar_seq_append(ptr, i64, i32)
 declare i64 @relar_seq_pop(ptr)

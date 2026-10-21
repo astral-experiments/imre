@@ -631,6 +631,7 @@ def scan(left: list[Row], right: list[Row]) -> int:
                 .any(|(slot, ty)| { matches!(ty, Type::Class(_)) && facts[id].locals[slot] })
         );
         let body = emitted_body(&module, id);
+        assert!(body.contains("call ptr @relar_seq_data_readonly"), "{body}");
         assert!(body.contains("call i64 @relar_seq_borrow_index_proven"));
         assert!(!body.contains("call void @relar_record_retain"), "{body}");
         assert!(!body.contains("call void @relar_record_release"), "{body}");
@@ -769,6 +770,54 @@ def total(rows: list[Row], fail: bool) -> int:
         }
     }
 
+    fn sequence_read(slot: usize, cursor: usize, ty: Type) -> Expr {
+        Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(
+                Builtin::SequenceGetInBounds,
+                vec![local(slot, ty), local(cursor, Type::Int)],
+            ),
+        }
+    }
+
+    #[test]
+    fn readonly_sequence_views_share_nested_loops_but_not_sibling_branches() {
+        let mut module = module(Vec::new());
+        let ty = module.types.list(Type::Str);
+        let read = Statement::Expr(sequence_read(0, 2, ty));
+        let inner = Statement::While(
+            local(1, Type::Bool),
+            vec![read.clone(), Statement::Break],
+            Vec::new(),
+        );
+        let outer = Statement::While(
+            local(1, Type::Bool),
+            vec![read.clone(), inner, Statement::Break],
+            Vec::new(),
+        );
+        module.functions.push(function(
+            vec![0, 1],
+            vec![ty, Type::Bool, Type::Int],
+            vec![
+                Statement::Assign(
+                    2,
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Int("0".into()),
+                    },
+                ),
+                Statement::If(local(1, Type::Bool), vec![outer.clone()], vec![outer]),
+                read,
+            ],
+        ));
+        let body = emitted_body(&module, 0);
+        // Each sibling preheader owns a view; its nested loop reuses that view.
+        assert_eq!(body.matches("call ptr @relar_seq_data_readonly").count(), 2, "{body}");
+        // The read after the branches cannot reuse either branch's SSA pointer.
+        assert_eq!(body.matches("call i64 @relar_seq_borrow_index_proven").count(), 1, "{body}");
+        assert!(!body.contains("icmp eq ptr"), "{body}");
+    }
+
     #[test]
     fn list_length_snapshots_are_shared_only_by_dominated_nested_loops() {
         let read = Statement::Expr(length(0, Type::ListInt));
@@ -808,15 +857,27 @@ def total(rows: list[Row], fail: bool) -> int:
             let ty = module.types.list(Type::Str);
             module.functions.push(function(
                 vec![0],
-                vec![ty; 3],
+                vec![ty, ty, ty, Type::Int],
                 vec![
                     Statement::Assign(1, local(0, ty)),
+                    Statement::Assign(
+                        3,
+                        Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Int("0".into()),
+                        },
+                    ),
                     Statement::While(
                         Expr {
                             ty: Type::Bool,
                             kind: ExprKind::Bool(true),
                         },
-                        vec![reset, Statement::Expr(length(1, ty)), Statement::Break],
+                        vec![
+                            reset,
+                            Statement::Expr(length(1, ty)),
+                            Statement::Expr(sequence_read(1, 3, ty)),
+                            Statement::Break,
+                        ],
                         Vec::new(),
                     ),
                 ],
@@ -831,7 +892,27 @@ def total(rows: list[Row], fail: bool) -> int:
             let merged = body[guard..].find("phi i64").unwrap();
             assert!(fallback < merged, "{body}");
             assert!(body[guard..guard + fallback].contains("br i1"), "{body}");
+            assert_eq!(body.matches("call ptr @relar_seq_data_readonly").count(), 1, "{body}");
+            let (_, read_guard) = body.rsplit_once("icmp eq ptr").unwrap();
+            let cached = read_guard.find("getelementptr inbounds i64").unwrap();
+            let fallback = read_guard.find("call i64 @relar_seq_borrow_index_proven").unwrap();
+            let merged = read_guard.find("phi i64").unwrap();
+            assert!(cached < fallback && fallback < merged, "{body}");
+            assert!(read_guard[..cached].contains("br i1"), "{body}");
         }
+    }
+
+    #[test]
+    fn transitive_generator_append_keeps_live_sequence_reads() {
+        let module = lower(
+            "def grow(values: list[str]) -> bool:\n    values.append('added')\n    return True\n\ndef scan(values: list[str]) -> bool:\n    return any(value for value in values if grow(values))\n",
+        );
+        let facts = analyze(&module);
+        assert!(facts[1].rooted[0]);
+        assert!(facts[1].length_roots.iter().all(Option::is_none));
+        let body = emitted_body(&module, 1);
+        assert!(!body.contains("call ptr @relar_seq_data_readonly"), "{body}");
+        assert!(body.contains("call i64 @relar_seq_borrow_index_proven"), "{body}");
     }
 
     #[test]
