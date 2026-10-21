@@ -104,6 +104,9 @@ def normalize_arch(text: str) -> Arch:
         text = "powerpc64"
     elif text == "ppc64le":
         text = "powerpc64le"
+    first = text.find("_")
+    if first == -1 or text.find("_", first + 1) == -1:
+        return Arch(text, None)
     pieces = text.split("_")
     family = "_".join(pieces[:2])
     variant = pieces[2] if len(pieces) > 2 else None

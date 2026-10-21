@@ -198,6 +198,15 @@ impl Arch {
             "ppc64le" => "powerpc64le",
             _ => text,
         };
+        if mapped
+            .find('_')
+            .is_none_or(|first| !mapped[first + 1..].contains('_'))
+        {
+            return Ok(Self {
+                family: mapped.to_owned(),
+                variant: None,
+            });
+        }
         let pieces = mapped.split('_').collect::<Vec<_>>();
         let family = pieces[..pieces.len().min(2)].join("_");
         let variant = pieces.get(2).map(|value| (*value).to_owned());
