@@ -18,6 +18,8 @@ use super::records::{RecordDescriptor, relar_record_new};
 use super::words::{OwnedWord, WordKind, Words};
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish};
 
+mod encode;
+
 const INTEGER: u32 = 1;
 const STRING: u32 = 2;
 const BOOLEAN: u32 = 3;
@@ -26,6 +28,7 @@ const NONE: u32 = 5;
 const LIST: u32 = 6;
 const RECORD: u32 = 7;
 const OPTIONAL: u32 = 8;
+const DICTIONARY: u32 = 9;
 const MAX_DEPTH: usize = 128;
 
 /// Compiler-owned metadata. `kind` selects JSON syntax; `word_kind` selects the
@@ -165,7 +168,7 @@ impl<'de> DeserializeSeed<'de> for Seed<'_> {
                     });
                 value.into_raw()
             }
-            STRING => Rc::into_raw(Rc::new(Str::from(String::deserialize(deserializer)?))) as usize,
+            STRING => return deserializer.deserialize_str(self),
             BOOLEAN => usize::from(bool::deserialize(deserializer)?),
             FLOAT => {
                 let raw = <&RawValue>::deserialize(deserializer)?.get();
@@ -187,7 +190,7 @@ impl<'de> DeserializeSeed<'de> for Seed<'_> {
                 0
             }
             LIST => return deserializer.deserialize_seq(self),
-            RECORD => return deserializer.deserialize_map(self),
+            RECORD | DICTIONARY => return deserializer.deserialize_map(self),
             OPTIONAL => return deserializer.deserialize_option(self),
             _ => unreachable!("compiler emitted an invalid JSON schema"),
         };
@@ -201,10 +204,19 @@ impl<'de> Visitor<'de> for Seed<'_> {
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self.0.kind {
+            STRING => "a string",
             LIST => "an array",
-            RECORD => "an object",
+            RECORD | DICTIONARY => "an object",
             _ => "a nullable value",
         })
+    }
+
+    fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        // Compact strings store short values inline, without a temporary String
+        // allocation. The new owner copies any borrowed deserializer scratch.
+        let word = Rc::into_raw(Rc::new(Str::new(value))) as usize;
+        // SAFETY: deserialize_str is used only for the checked string schema.
+        Ok(unsafe { OwnedWord::from_owned(word, self.0.storage()) })
     }
 
     fn visit_none<E: serde::de::Error>(self) -> Result<OwnedWord, E> {
@@ -251,6 +263,24 @@ impl<'de> Visitor<'de> for Seed<'_> {
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<OwnedWord, A::Error> {
+        if self.0.kind == DICTIONARY {
+            let child = self.0.child();
+            let mut mapping = super::mappings::Mapping::new(3, child.word_kind);
+            while let Some(key) = map.next_key_seed(Key)? {
+                let value = map.next_value_seed(Seed(child))?;
+                let pointer = Rc::into_raw(Rc::new(Str::from(key.as_ref()))) as usize;
+                // SAFETY: this temporary transfers one newly allocated string owner.
+                let key = unsafe { OwnedWord::from_owned(pointer, WordKind::new(3)) };
+                if !mapping.insert_unique(key, value) {
+                    return Err(A::Error::custom("duplicate JSON dictionary key"));
+                }
+            }
+            let pointer = Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
+                Box::new(mapping),
+            ))))) as usize;
+            // SAFETY: the new dictionary owns every successfully decoded entry.
+            return Ok(unsafe { OwnedWord::from_owned(pointer, self.0.storage()) });
+        }
         let fields = self.0.fields();
         // SAFETY: emitted record metadata outlives every decoded record.
         let pointer = unsafe { relar_record_new(self.0.record) };
@@ -395,7 +425,8 @@ fn decode(text: &str, schema: &Schema) -> Result<OwnedWord, serde_json::Error> {
 /// # Safety
 /// `text` is a rooted string. `schema` and all transitive metadata are immutable,
 /// valid for this ABI, acyclic, and live for the lifetime of every returned value.
-/// Success transfers one record owner; failure returns null with ValueError set.
+/// Success transfers one record, list, or dictionary owner; failure returns null
+/// with ValueError set. Root schemas always use a reference representation.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_json_decode(
     text: *const Str,

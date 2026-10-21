@@ -170,13 +170,13 @@ impl Checker<'_> {
     }
 
     fn sortable_key(&self, ty: Type, node: &impl Ranged) -> Result<(), String> {
-        if matches!(ty, Type::Int | Type::Bool | Type::Str | Type::Bytes) {
+        if self.types.ordered_key(ty) {
             Ok(())
         } else {
             Err(error(
                 self.source,
                 node,
-                "sorted keys require exactly int, bool, str, or bytes",
+                "sorted keys require int, bool, str, bytes, or fixed tuples of ordered scalar fields",
             ))
         }
     }

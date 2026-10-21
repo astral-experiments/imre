@@ -25,7 +25,14 @@ REJECTED = {
     "extra_argument": IMPORT + ITEM + 'item = decode("{}", Item, False)\n',
     "keyword_schema": IMPORT + ITEM + 'item = decode("{}", schema=Item)\n',
     "instance_schema": IMPORT + ITEM + 'item = decode("{}", Item(1))\n',
-    "container_schema": IMPORT + ITEM + 'item = decode("[]", list[Item])\n',
+    "quoted_schema": IMPORT + ITEM + 'item = decode("{}", "Item")\n',
+    "shadowed_builtin_schema": IMPORT + 'from typing import Union as list\nitems = decode("[1]", list[int])\n',
+    "quoted_element_schema": IMPORT + ITEM + 'items = decode("[]", list["Item"])\n',
+    "quoted_key_schema": IMPORT + ITEM + 'items = decode("{}", dict["str", Item])\n',
+    "shadowed_typing_schema": IMPORT + 'import typing as cls\n' + ITEM + '    @classmethod\n    def parse(cls, text: str) -> None:\n        decode(text, list[cls.Union[int, None]])\n',
+    "scalar_schema": IMPORT + 'item = decode("1", int)\n',
+    "non_string_dictionary": IMPORT + 'item = decode("{}", dict[int, int])\n',
+    "bytes_list_schema": IMPORT + 'item = decode("[]", list[bytes])\n',
     "computed_constructor": IMPORT + ITEM.replace("self.value = value", "self.value = value + 1") + 'item = decode("{}", Item)\n',
     "calling_constructor": IMPORT + ITEM.replace("self.value = value", "self.value = int(value)") + 'item = decode("{}", Item)\n',
     "renamed_parameter": IMPORT + ITEM.replace("value: int) ->", "argument: int) ->").replace("self.value = value", "self.value = argument") + 'item = decode("{}", Item)\n',
@@ -39,7 +46,6 @@ REJECTED = {
 }
 for name, annotation in [
     ("bytes", "bytes"),
-    ("dictionary", "dict[str, int]"),
     ("tuple", "tuple[int, str]"),
     ("set", "set[int]"),
     ("nested_bytes", "list[bytes]"),
@@ -50,11 +56,28 @@ for name, annotation in [
         + 'item = decode("{}", Item)\n'
     )
 
+for name, expression in {
+    "encode_bytes": 'encode(b"bytes")',
+    "encode_tuple": 'encode((1, "one"))',
+    "encode_set": 'encode({1, 2})',
+    "encode_integer_keys": 'encode({1: "one"})',
+    "encode_indent_type": 'encode(1, indent=1.0)',
+    "encode_ascii_type": 'encode(1, ensure_ascii=1)',
+    "encode_positional_indent": 'encode(1, 2)',
+    "encode_unknown_keyword": 'encode(1, sort_keys=True)',
+    "encode_missing_value": 'encode()',
+}.items():
+    REJECTED[name] = "from relar.json import encode\n" + expression + "\n"
+
 IMPORTED_REJECTIONS = {
     "intrinsic_shadow": {
         "main.py": "from relar.json import decode\n",
         "relar/__init__.py": "",
         "relar/json.py": "def decode(text: str, schema: int) -> int:\n    return schema\n",
+    },
+    "schema_namespace_shadow": {
+        "main.py": IMPORT + 'import models as cls\n' + ITEM + '    @classmethod\n    def parse(cls, text: str) -> cls.Item:\n        return decode(text, cls.Item)\n',
+        "models.py": ITEM,
     },
 }
 

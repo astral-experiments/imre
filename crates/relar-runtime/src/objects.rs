@@ -18,6 +18,7 @@ pub(crate) mod records;
 mod sequences;
 mod stdlib;
 mod tempdirs;
+mod text;
 mod unions;
 mod values;
 mod words;
@@ -806,43 +807,57 @@ pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Objec
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { &*value };
     let mut result = Words::new(3);
-    let mut start = 0;
-    let mut chars = value.char_indices().peekable();
-    while let Some((at, character)) = chars.next() {
-        if matches!(
-            character,
-            '\n' | '\r'
-                | '\x0b'
-                | '\x0c'
-                | '\x1c'
-                | '\x1d'
-                | '\x1e'
-                | '\u{85}'
-                | '\u{2028}'
-                | '\u{2029}'
-        ) {
-            result
-                .values
-                .try_reserve(1)
-                .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
-            result
-                .values
-                .push(Rc::into_raw(Rc::new(Str::new(&value[start..at]))) as usize);
-            start = at + character.len_utf8();
-            if character == '\r' && chars.peek().is_some_and(|(_, next)| *next == '\n') {
-                chars.next();
-                start += 1;
-            }
-        }
-    }
-    if start < value.len() {
+    let mut push = |part: &str| {
         result
             .values
             .try_reserve(1)
             .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
         result
             .values
-            .push(Rc::into_raw(Rc::new(Str::new(&value[start..]))) as usize);
+            .push(Rc::into_raw(Rc::new(Str::new(part))) as usize);
+    };
+    let mut start = 0;
+    let bytes = value.as_bytes();
+    // These vectorized guards exclude every additional Python boundary. The
+    // UTF-8 lead bytes may also select the fallback for ordinary Unicode text.
+    let ordinary = memchr::memchr3(0x0b, 0x0c, 0x1c, bytes).is_none()
+        && memchr::memchr3(0x1d, 0x1e, 0xc2, bytes).is_none()
+        && memchr::memchr(0xe2, bytes).is_none();
+    if ordinary {
+        while let Some(offset) = memchr::memchr2(b'\r', b'\n', &bytes[start..]) {
+            let at = start + offset;
+            push(&value[start..at]);
+            start = at + 1;
+            if bytes[at] == b'\r' && bytes.get(start) == Some(&b'\n') {
+                start += 1;
+            }
+        }
+    } else {
+        let mut chars = value.char_indices().peekable();
+        while let Some((at, character)) = chars.next() {
+            if matches!(
+                character,
+                '\n' | '\r'
+                    | '\x0b'
+                    | '\x0c'
+                    | '\x1c'
+                    | '\x1d'
+                    | '\x1e'
+                    | '\u{85}'
+                    | '\u{2028}'
+                    | '\u{2029}'
+            ) {
+                push(&value[start..at]);
+                start = at + character.len_utf8();
+                if character == '\r' && chars.peek().is_some_and(|(_, next)| *next == '\n') {
+                    chars.next();
+                    start += 1;
+                }
+            }
+        }
+    }
+    if start < value.len() {
+        push(&value[start..]);
     }
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(result)))))
 }

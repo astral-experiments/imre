@@ -1,4 +1,4 @@
-//! Typed int/string/bytes hash tables with insertion-ordered dictionary entries.
+//! Typed immutable-key hash tables with insertion-ordered dictionary entries.
 //!
 //! Keys are monomorphized once per table; values are plain owned words with one
 //! shared descriptor. Sets store no value words. Active iterators keep their
@@ -10,7 +10,7 @@ use std::mem::ManuallyDrop;
 use std::rc::{Rc, Weak};
 
 use super::exceptions::{Error, Kind, string_repr};
-use super::words::{OwnedWord, WordKind};
+use super::words::{NULLABLE, OwnedWord, WordKind};
 use super::{Bytes, Int, List, Object, Storage, StorageCell, Str, acquire_rc, fail, object};
 
 #[derive(Clone)]
@@ -38,7 +38,67 @@ impl Hash for IntKey {
     }
 }
 
-/// Only the table's exact immutable scalar key representation implements this.
+/// An immutable tuple owns its concrete record without copying its fields into
+/// a second allocation. Lookup borrows that owner; hashing cannot call user code.
+struct TupleKey(*const usize);
+
+impl Clone for TupleKey {
+    fn clone(&self) -> Self {
+        // SAFETY: this key roots one immutable, initialized tuple record.
+        unsafe { super::records::relar_record_retain(self.0) };
+        Self(self.0)
+    }
+}
+impl Drop for TupleKey {
+    fn drop(&mut self) {
+        // SAFETY: every nonborrowed key owns one independently acquired record.
+        unsafe { super::records::relar_record_release(self.0) };
+    }
+}
+impl PartialEq for TupleKey {
+    fn eq(&self, other: &Self) -> bool {
+        // SAFETY: both keys root immutable tuples with no float or mutable fields.
+        unsafe { super::values::equal(self.0 as usize, other.0 as usize, WordKind::new(6)) }
+    }
+}
+impl Eq for TupleKey {}
+impl Hash for TupleKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // SAFETY: checked tuple keys contain only immutable scalar/tuple fields.
+        unsafe { hash_tuple(self.0, state) };
+    }
+}
+
+/// # Safety
+/// The rooted tuple has only exact immutable scalar, optional, or tuple fields.
+unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
+    // SAFETY: the owner roots its immutable descriptor and every field.
+    let layout = unsafe { super::records::descriptor(value) };
+    layout.length.hash(state);
+    for index in 0..layout.length {
+        // SAFETY: the static layout covers each initialized concrete field.
+        unsafe {
+            let kind = WordKind::new(*layout.kinds.add(index));
+            let word = kind.read_record_field(value.add(index));
+            let raw = kind.raw();
+            raw.hash(state);
+            if raw & NULLABLE != 0 && word == 0 {
+                0_usize.hash(state);
+                continue;
+            }
+            match raw & !NULLABLE {
+                0 | 1 => word.hash(state),
+                2 => IntKey::borrow(word).hash(state),
+                3 => (&*(word as *const Str)).hash(state),
+                6 => hash_tuple(word as *const usize, state),
+                8 => (&*(word as *const Bytes)).hash(state),
+                _ => unreachable!("the checker excludes mutable and float tuple keys"),
+            }
+        }
+    }
+}
+
+/// Only the table's exact immutable key representation implements this.
 trait ScalarKey: Clone + Eq + Hash {
     const KIND: u32;
     fn word(&self) -> usize;
@@ -93,6 +153,24 @@ impl ScalarKey for Rc<Bytes> {
     }
     fn into_word(self) -> usize {
         Rc::into_raw(self) as usize
+    }
+}
+
+impl ScalarKey for TupleKey {
+    const KIND: u32 = 6;
+    fn word(&self) -> usize {
+        self.0 as usize
+    }
+    unsafe fn borrow(word: usize) -> ManuallyDrop<Self> {
+        ManuallyDrop::new(Self(word as *const usize))
+    }
+    unsafe fn from_owned(word: usize) -> Self {
+        Self(word as *const usize)
+    }
+    fn into_word(self) -> usize {
+        let word = self.word();
+        std::mem::forget(self);
+        word
     }
 }
 
@@ -200,6 +278,7 @@ enum Tables<V> {
     Int(Table<IntKey, V>),
     Str(Table<Rc<Str>, V>),
     Bytes(Table<Rc<Bytes>, V>),
+    Tuple(Table<TupleKey, V>),
 }
 
 macro_rules! table {
@@ -208,6 +287,7 @@ macro_rules! table {
             Tables::Int($table) => $body,
             Tables::Str($table) => $body,
             Tables::Bytes($table) => $body,
+            Tables::Tuple($table) => $body,
         }
     };
 }
@@ -226,10 +306,11 @@ impl<V: Copy> Tables<V> {
         match kind {
             2 => Self::Int(Table::new()),
             3 => Self::Str(Table::new()),
+            6 => Self::Tuple(Table::new()),
             8 => Self::Bytes(Table::new()),
             _ => fail(
                 "SystemError",
-                "mapping keys must be integers, strings, or bytes",
+                "mapping keys must be integers, strings, bytes, or immutable tuples",
             ),
         }
     }
@@ -238,6 +319,7 @@ impl<V: Copy> Tables<V> {
             Self::Int(_) => 2,
             Self::Str(_) => 3,
             Self::Bytes(_) => 8,
+            Self::Tuple(_) => 6,
         }
     }
     fn len(&self) -> usize {
@@ -334,6 +416,33 @@ pub(super) struct Set {
 }
 
 impl Mapping {
+    /// Borrows entries in Python insertion order. The caller must keep the
+    /// enclosing storage borrow live and cannot mutate or invoke user code.
+    pub(super) fn string_entries(&self) -> impl Iterator<Item = (&Str, usize)> {
+        let Tables::Str(table) = &self.tables else {
+            fail("SystemError", "expected a string-key dictionary");
+        };
+        table
+            .entries
+            .iter()
+            .flatten()
+            .map(|entry| (&*entry.key, entry.value))
+    }
+
+    /// Transfers two exact owners only for a new key. Duplicate inputs are
+    /// dropped together, preserving existing entries during strict decoding.
+    pub(super) fn insert_unique(&mut self, key: OwnedWord, value: OwnedWord) -> bool {
+        assert_eq!(key.kind.raw(), self.tables.key_kind());
+        assert_eq!(value.kind, self.value_kind);
+        // SAFETY: the temporary key roots this table's exact immutable key kind.
+        if unsafe { self.tables.lookup(key.word) }.is_some() {
+            return false;
+        }
+        let displaced = self.tables.insert(key, value.into_word());
+        debug_assert!(displaced.is_none());
+        true
+    }
+
     /// Copies exact string entries in insertion order before a process launch.
     /// No borrowed table storage or language owner crosses the fork boundary.
     pub(super) fn string_pairs(&self) -> Vec<(Str, Str)> {
@@ -393,7 +502,7 @@ impl Mapping {
         output.push('}');
     }
 
-    fn new(key_kind: u32, value_kind: u32) -> Self {
+    pub(super) fn new(key_kind: u32, value_kind: u32) -> Self {
         Self {
             tables: Tables::new(key_kind),
             value_kind: WordKind::new(value_kind),
@@ -560,7 +669,7 @@ impl MappingIterator {
 }
 
 impl Storage {
-    fn dictionary(&self) -> &Mapping {
+    pub(super) fn dictionary(&self) -> &Mapping {
         match self {
             Self::Dictionary(value) => value,
             _ => fail("SystemError", "expected a dictionary object"),
@@ -647,15 +756,10 @@ unsafe fn missing_key(value: *const Object, key: usize) -> Error {
     // SAFETY: only copied key-kind metadata leaves storage.
     let kind = unsafe { object(value).0.with(|s| s.dictionary().tables.key_kind()) };
     // SAFETY: the caller roots the exact immutable key kind.
-    let message = unsafe {
-        match kind {
-            2 => Str::from(Int::borrow(key).big().to_string()),
-            3 => string_repr(&*(key as *const Str)),
-            8 => super::bytes::repr(&*(key as *const Bytes)),
-            _ => unreachable!(),
-        }
-    };
-    Error::new(Kind::KeyError, message)
+    let mut message = String::new();
+    // SAFETY: no callback or mutation overlaps formatting this rooted key.
+    unsafe { super::values::write_repr(&mut message, key, WordKind::new(kind)) };
+    Error::new(Kind::KeyError, Str::from(message))
 }
 /// # Safety
 /// Inputs are rooted exact kinds; success transfers a value owner. Check pending

@@ -1,4 +1,4 @@
-"""Schema-directed JSON decoding for CPython execution of Relar programs.
+"""Concrete JSON codecs for CPython execution of Relar programs.
 
 The native compiler recognizes this import and generates a concrete decoder.
 Python's dynamic parse tree stays private to this compatibility implementation.
@@ -8,6 +8,7 @@ import dataclasses
 import inspect
 import json
 import math
+import sys
 import types
 from functools import cache
 from typing import TypeVar, Union, get_args, get_origin, get_type_hints
@@ -92,6 +93,18 @@ def _convert(value, annotation):
         if type(value) is not list or len(arguments) != 1:
             raise ValueError("JSON value does not match schema")
         return [_convert(item, arguments[0]) for item in value]
+    if origin is dict:
+        if len(arguments) != 2 or arguments[0] is not str:
+            raise TypeError("JSON dictionaries require exact str keys")
+        if not isinstance(value, _ObjectPairs):
+            raise ValueError("JSON value does not match schema")
+        converted = {}
+        for name, child in value:
+            _check_string(name)
+            if name in converted:
+                raise ValueError("duplicate JSON dictionary key")
+            converted[name] = _convert(child, arguments[1])
+        return converted
     if not isinstance(annotation, type) or "__init__" not in annotation.__dict__:
         raise TypeError("JSON schemas require concrete annotated record classes")
     if not isinstance(value, _ObjectPairs):
@@ -151,7 +164,7 @@ def _schema(annotation):
 
 
 def decode(text: str, schema: type[T], /) -> T:
-    """Decode strict JSON directly into the requested concrete record schema.
+    """Decode strict JSON into a concrete record, list, or dict[str, T] schema.
 
     Unknown fields are syntax-checked and ignored. Duplicate known fields are
     rejected; duplicates entirely in ignored data have no observable effect.
@@ -170,3 +183,105 @@ def decode(text: str, schema: type[T], /) -> T:
     except json.JSONDecodeError as error:
         raise ValueError("invalid JSON") from error
     return _convert(value, schema)
+
+
+@cache
+def _encoding_fields(record_type):
+    if "__init__" not in record_type.__dict__:
+        raise TypeError("JSON encoding requires fixed annotated record classes")
+    return tuple(get_type_hints(record_type))
+
+
+def _encoding_value(value, active, depth):
+    kind = type(value)
+    if kind in (int, bool, type(None)):
+        return value
+    if kind is str:
+        _check_string(value)
+        return value
+    if kind is float:
+        if not math.isfinite(value):
+            raise ValueError("non-finite floats are not JSON")
+        return value
+    if depth >= 128:
+        raise ValueError("JSON nesting exceeds 128 containers")
+    identity = id(value)
+    if identity in active:
+        raise ValueError("JSON values must be acyclic")
+    active.add(identity)
+    try:
+        if kind is list:
+            return [_encoding_value(child, active, depth + 1) for child in value]
+        if kind is dict:
+            result = {}
+            for key, child in value.items():
+                if type(key) is not str:
+                    raise TypeError("JSON dictionaries require exact str keys")
+                _check_string(key)
+                result[key] = _encoding_value(child, active, depth + 1)
+            return result
+        if kind in (bytes, tuple, set):
+            raise TypeError("unsupported JSON encoding type")
+        return {name: _encoding_value(getattr(value, name), active, depth + 1)
+                for name in _encoding_fields(kind)}
+    finally:
+        active.remove(identity)
+
+
+def _integer_text(value):
+    """Keep native arbitrary precision independent of CPython's decimal limit."""
+    negative = value < 0
+    value = abs(value)
+    chunks = []
+    while value >= 1_000_000_000:
+        value, chunk = divmod(value, 1_000_000_000)
+        chunks.append(f"{chunk:09d}")
+    return ("-" if negative else "") + str(value) + "".join(reversed(chunks))
+
+
+def _dump_unbounded(value, indent, ensure_ascii, depth=0):
+    # The normal path uses the standard encoder. Only integers beyond its
+    # configurable decimal conversion limit need this formatting fallback.
+    if type(value) is int:
+        return _integer_text(value)
+    if type(value) not in (list, dict):
+        return json.dumps(value, ensure_ascii=ensure_ascii, allow_nan=False)
+    if type(value) is list:
+        opening, closing = "[", "]"
+        items = [_dump_unbounded(child, indent, ensure_ascii, depth + 1)
+                 for child in value]
+    else:
+        opening, closing = "{", "}"
+        items = [json.dumps(key, ensure_ascii=ensure_ascii) + ": "
+                 + _dump_unbounded(child, indent, ensure_ascii, depth + 1)
+                 for key, child in value.items()]
+    if not items:
+        return opening + closing
+    if indent is None:
+        return opening + ", ".join(items) + closing
+    width = max(0, indent)
+    prefix = "\n" + " " * (width * (depth + 1))
+    return opening + prefix + ("," + prefix).join(items) + "\n" + " " * (width * depth) + closing
+
+
+def encode(value: object, /, *, indent: int | None = None, ensure_ascii: bool = True) -> str:
+    """Encode concrete values, preserving record field and dictionary order.
+
+    Accepted values are finite scalars, lists, string-key dictionaries, nullable
+    values, and fixed annotated records. Records serialize declared fields;
+    their constructors are not called. Integer indentation has platform-index
+    bounds, Unicode strings contain scalar values, and nesting is limited to
+    128 containers. The native implementation writes directly from typed storage.
+    """
+    if indent is not None:
+        if type(indent) is not int:
+            raise TypeError("JSON indent must be an exact int or None")
+        if not -sys.maxsize - 1 <= indent <= sys.maxsize:
+            raise OverflowError("JSON indent does not fit in a platform index")
+    if type(ensure_ascii) is not bool:
+        raise TypeError("ensure_ascii must be an exact bool")
+    converted = _encoding_value(value, set(), 0)
+    try:
+        return json.dumps(converted, indent=indent, ensure_ascii=ensure_ascii, allow_nan=False)
+    except ValueError:
+        return _dump_unbounded(converted, indent, ensure_ascii)

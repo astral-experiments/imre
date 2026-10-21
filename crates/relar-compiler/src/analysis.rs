@@ -58,7 +58,7 @@ impl Session {
             .fs()
             .write_file_all(
                 intrinsic.join("json.pyi"),
-                "from typing import TypeVar\n_T = TypeVar(\"_T\")\ndef decode(text: str, schema: type[_T], /) -> _T: ...\n",
+                "from typing import TypeVar\n_T = TypeVar(\"_T\")\ndef decode(text: str, schema: type[_T], /) -> _T: ...\ndef encode(value: object, /, *, indent: int | None = None, ensure_ascii: bool = True) -> str: ...\n",
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();

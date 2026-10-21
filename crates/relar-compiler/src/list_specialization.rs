@@ -591,6 +591,7 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
         operation,
         Builtin::GlobalGet(_)
             | Builtin::Path(_)
+            | Builtin::Text(_)
             | Builtin::Process(_)
             | Builtin::Int
             | Builtin::Float
@@ -602,6 +603,7 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
             | Builtin::StringReplace
             | Builtin::FloatFormat { .. }
             | Builtin::JsonDecode(_)
+            | Builtin::JsonEncode(_)
             | Builtin::ListGet
             | Builtin::SequenceGetInBounds
             | Builtin::ListGetI32
