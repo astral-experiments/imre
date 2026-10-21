@@ -26,6 +26,42 @@ pub(super) fn scalar_default(
     types: &Types,
     source: &str,
 ) -> Result<Expr, String> {
+    let mut value = scalar_literal(expression, source)?;
+    let ty = value.ty;
+    let concrete = types.payload(expected).unwrap_or(expected);
+    if types
+        .members(concrete)
+        .is_some_and(|members| members.contains(&ty))
+    {
+        value = Expr {
+            ty: concrete,
+            kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
+        };
+    }
+    if value.ty == expected {
+        return Ok(value);
+    }
+    if let Some(payload) = types.payload(expected) {
+        let kind = if ty == Type::None {
+            Some(ExprKind::Absent(Box::new(value)))
+        } else if value.ty == payload {
+            Some(ExprKind::Present(Box::new(value)))
+        } else {
+            None
+        };
+        if let Some(kind) = kind {
+            return Ok(Expr { ty: expected, kind });
+        }
+    }
+    Err(error(
+        source,
+        expression,
+        &format!("default requires exact type {expected}, got {ty}"),
+    ))
+}
+
+/// A scalar default also supplies an exact type for an unannotated parameter.
+pub(super) fn scalar_literal(expression: &ast::Expr, source: &str) -> Result<Expr, String> {
     let (ty, kind) = match expression {
         ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
             value: ast::Number::Int(value),
@@ -71,37 +107,7 @@ pub(super) fn scalar_default(
             ));
         }
     };
-    let mut value = Expr { ty, kind };
-    let concrete = types.payload(expected).unwrap_or(expected);
-    if types
-        .members(concrete)
-        .is_some_and(|members| members.contains(&ty))
-    {
-        value = Expr {
-            ty: concrete,
-            kind: ExprKind::Builtin(Builtin::UnionInject, vec![value]),
-        };
-    }
-    if value.ty == expected {
-        return Ok(value);
-    }
-    if let Some(payload) = types.payload(expected) {
-        let kind = if ty == Type::None {
-            Some(ExprKind::Absent(Box::new(value)))
-        } else if value.ty == payload {
-            Some(ExprKind::Present(Box::new(value)))
-        } else {
-            None
-        };
-        if let Some(kind) = kind {
-            return Ok(Expr { ty: expected, kind });
-        }
-    }
-    Err(error(
-        source,
-        expression,
-        &format!("default requires exact type {expected}, got {ty}"),
-    ))
+    Ok(Expr { ty, kind })
 }
 
 impl Checker<'_> {
@@ -118,6 +124,20 @@ impl Checker<'_> {
         params: &[Parameter],
         receiver: Option<Expr>,
     ) -> Result<ir::CallArgs, String> {
+        self.arguments_with(call, params, receiver, |checker, index, argument| {
+            checker.expr_expected(argument, params[index].ty)
+        })
+    }
+
+    /// Discovery and final checking share binding, defaults, and evaluation order.
+    /// Only the source of the parameter's concrete type differs between passes.
+    pub(super) fn arguments_with(
+        &mut self,
+        call: &ast::ExprCall,
+        params: &[Parameter],
+        receiver: Option<Expr>,
+        mut check: impl FnMut(&mut Self, usize, &ast::Expr) -> Result<Expr, String>,
+    ) -> Result<ir::CallArgs, String> {
         let offset = usize::from(receiver.is_some());
         let mut values = receiver.into_iter().collect::<Vec<_>>();
         let mut order = vec![usize::MAX; params.len() + offset];
@@ -127,12 +147,12 @@ impl Checker<'_> {
         // Without starred arguments Python requires all positional expressions
         // before keyword expressions, so these two lists retain source order.
         for (index, argument) in call.arguments.args.iter().enumerate() {
-            let parameter = params
+            params
                 .get(index)
                 .filter(|parameter| parameter.kind != ParameterKind::KeywordOnly)
                 .ok_or_else(|| error(self.source, argument, "too many positional arguments"))?;
             order[index + offset] = values.len();
-            values.push(self.expr_expected(argument, parameter.ty)?);
+            values.push(check(self, index, argument)?);
         }
         for keyword in &call.arguments.keywords {
             let name = keyword
@@ -166,7 +186,7 @@ impl Checker<'_> {
                 ));
             }
             order[index + offset] = values.len();
-            values.push(self.expr_expected(&keyword.value, parameter.ty)?);
+            values.push(check(self, index, &keyword.value)?);
         }
         for (index, parameter) in params.iter().enumerate() {
             if order[index + offset] == usize::MAX {

@@ -30,6 +30,7 @@
 //! inputs and allocator exhaustion remain fatal; neither uses Rust unwinding.
 
 mod floats;
+mod integer_text;
 mod objects;
 
 use objects::exceptions::{Error, Kind, Result, finish};
@@ -644,14 +645,26 @@ pub unsafe extern "C" fn relar_str_equal(a: *const Str, b: *const Str) -> u8 {
     u8::from(unsafe { *a == *b })
 }
 
-/// Parses the prototype's explicit ASCII decimal input format.
+/// Parses Python's base-ten text grammar with Unicode 16.0 decimal digits.
 ///
 /// # Safety
 /// The argument must be a live string handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_int_parse(value: *const Str) -> usize {
     // SAFETY: the caller keeps the immutable string alive.
-    let source = unsafe { &*value }.trim();
+    let original = unsafe { &*value };
+    let source = original.trim();
+    let invalid = || {
+        let mut literal = integer_text::literal_repr(original);
+        // CPython's %.200R diagnostic truncates the rendered repr by characters.
+        if let Some((end, _)) = literal.char_indices().nth(200) {
+            literal.truncate(end);
+        }
+        Error::new(
+            Kind::ValueError,
+            compact_str::format_compact!("invalid literal for int() with base 10: {literal}"),
+        )
+    };
     // Rust's signed decimal parser accepts a subset of our grammar. Ordinary
     // small inputs need neither normalization nor temporary BigInt allocations;
     // separators and larger values still take the checked path below.
@@ -660,19 +673,39 @@ pub unsafe extern "C" fn relar_int_parse(value: *const Str) -> usize {
     {
         return value.into_raw();
     }
-    let digits = source.strip_prefix(['+', '-']).unwrap_or(source);
+    let source = if source.is_ascii() {
+        Cow::Borrowed(source)
+    } else {
+        let mut normalized = String::with_capacity(source.len());
+        for character in source.chars() {
+            if character.is_ascii() {
+                normalized.push(character);
+            } else if let Some(digit) = integer_text::decimal_digit(character) {
+                normalized.push(char::from(b'0' + digit));
+            } else {
+                return invalid().returning(1);
+            }
+        }
+        if let Ok(value) = normalized.parse::<i64>()
+            && let Some(value) = Int::small(value)
+        {
+            return value.into_raw();
+        }
+        Cow::Owned(normalized)
+    };
+    let digits = source.strip_prefix(['+', '-']).unwrap_or(&source);
     if digits.is_empty()
         || digits.starts_with('_')
         || digits.ends_with('_')
         || digits.contains("__")
         || !digits.bytes().all(|c| c.is_ascii_digit() || c == b'_')
     {
-        return Error::new(Kind::ValueError, "expected an ASCII decimal integer").returning(1);
+        return invalid().returning(1);
     }
     finish(
         BigInt::parse_bytes(source.replace('_', "").as_bytes(), 10)
             .map(|value| Int::new(value).into_raw())
-            .ok_or_else(|| Error::new(Kind::ValueError, "invalid integer input")),
+            .ok_or_else(invalid),
         1,
     )
 }
@@ -1153,7 +1186,9 @@ pub extern "C" fn relar_range_step_zero() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use objects::exceptions::{relar_error_pending, relar_error_take, relar_exception_matches};
+    use objects::exceptions::{
+        relar_error_pending, relar_error_take, relar_exception_matches, relar_exception_message,
+    };
 
     #[test]
     fn paired_append_preserves_order_and_independent_bigint_owners() {
@@ -1357,6 +1392,12 @@ mod tests {
     fn decimal_input_preserves_signs_separators_and_tag_boundaries() {
         for (source, expected, small) in [
             ("\u{2003}+00017\t", "17", true),
+            ("\u{2003}-١_２_𝟛\u{85}", "-123", true),
+            (
+                "+١٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠٠",
+                "1000000000000000000000000000000",
+                false,
+            ),
             ("-0", "0", true),
             ("-4_611_686_018_427_387_904", "-4611686018427387904", true),
             ("4611686018427387903", "4611686018427387903", true),
@@ -1378,6 +1419,77 @@ mod tests {
             let parsed = Int(unsafe { relar_int_parse(&source) });
             assert_eq!(parsed.big().to_string(), expected);
             assert_eq!(parsed.as_small().is_some(), small);
+        }
+    }
+
+    #[test]
+    fn decimal_input_accepts_decimal_digit_blocks_without_numeric_lookalikes() {
+        for start in [0x30, 0x660, 0x6f0, 0x7c0, 0x966, 0xff10, 0x1d7ce, 0x1d7d8] {
+            for digit in 0..10 {
+                let source = Str::from(char::from_u32(start + digit).unwrap().to_string());
+                // SAFETY: source stays rooted; the returned integer is owned.
+                let parsed = Int(unsafe { relar_int_parse(&source) });
+                assert_eq!(relar_error_pending(), 0);
+                assert_eq!(parsed.as_small(), Some(i64::from(digit)));
+            }
+        }
+    }
+
+    #[test]
+    fn decimal_input_errors_preserve_python_repr_and_original_whitespace() {
+        for (source, literal) in [
+            ("", "''"),
+            ("  +1x\t", "'  +1x\\t'"),
+            ("12__3", "'12__3'"),
+            ("+_1", "'+_1'"),
+            ("1_", "'1_'"),
+            ("²", "'²'"),
+            ("½", "'½'"),
+            ("四", "'四'"),
+            ("\u{301}", "'\u{301}'"),
+            ("\u{e0100}", "'\u{e0100}'"),
+            ("\u{88f}", "'\\u088f'"),
+            ("\u{11de0}", "'\\U00011de0'"),
+            ("\u{33479}", "'\\U00033479'"),
+            ("🐍", "'🐍'"),
+            ("\0", "'\\x00'"),
+            ("\t", "'\\t'"),
+            ("\n", "'\\n'"),
+            ("\u{1c}1", "'\\x1c1'"),
+            ("'", "\"'\""),
+            ("\"", "'\"'"),
+        ] {
+            let source = Str::new(source);
+            // SAFETY: source is rooted; take/message transfer owned handles.
+            unsafe {
+                assert_eq!(relar_int_parse(&source), 1);
+                let error = relar_error_take();
+                assert!(!error.is_null());
+                assert_eq!(relar_exception_matches(error, Kind::ValueError as u32), 1);
+                let message = Rc::from_raw(relar_exception_message(error));
+                assert_eq!(
+                    message.as_str(),
+                    format!("invalid literal for int() with base 10: {literal}")
+                );
+                objects::relar_object_release(error);
+                assert_eq!(relar_error_pending(), 0);
+            }
+        }
+        let source = Str::from("é".repeat(220));
+        // SAFETY: source is rooted; take/message transfer owned handles.
+        unsafe {
+            assert_eq!(relar_int_parse(&source), 1);
+            let error = relar_error_take();
+            assert!(!error.is_null());
+            let message = Rc::from_raw(relar_exception_message(error));
+            assert_eq!(
+                message.as_str(),
+                format!(
+                    "invalid literal for int() with base 10: '{}",
+                    "é".repeat(199)
+                )
+            );
+            objects::relar_object_release(error);
         }
     }
 

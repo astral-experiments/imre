@@ -14,6 +14,7 @@ An ahead-of-time compiler for typed Python, written in Rust.
 - Use binary64 floats, immutable bytes, structural pattern matching, and assignment expressions.
 - Use Python truth tests, operand-returning `and`/`or`, and `for`/`while` `else` suites.
 - Chain assignments, unpack sequences and starred targets, and expand typed lists, sets, and dictionaries.
+- Infer concrete function signatures and consume concrete iterables with `list`, integer `sum`, and `map(int, ...)`.
 - Preserve arbitrary-precision integers, shared mutation, and supported exception behavior.
 - Run compiled programs without a Python installation or a CPython dependency.
 
@@ -76,8 +77,10 @@ target/release/relar build totals.py --clang clang-18 -o /tmp/totals
 ```
 
 The executable prints `Total: 42`. The same source runs with `python3 totals.py`.
-Relar rejects unsupported syntax and type violations during compilation. Functions
-require parameter and return annotations; local types can be inferred.
+Relar rejects unsupported syntax and type violations during compilation. Function
+types can come from annotations or be inferred from concrete direct calls,
+scalar defaults, and checked return expressions. Each function has one exact
+signature; conflicting callers require an explicit supported common type.
 
 To compile and run the inventory reconciler, including its imported modules:
 
@@ -102,6 +105,11 @@ upstream codec and compares it with CPython, including its original tests, error
 causes, and shared module lookup table. Its guide covers building, file-based use,
 the enforced type boundary, and benchmark reproduction.
 
+The [luhn example](examples/luhn_checksum/README.md) compiles the unchanged,
+unannotated checksum library. Its guide covers the original upstream tests,
+Unicode decimal inputs, and comparisons with CPython and an independent Rust
+implementation.
+
 ## License
 
 Relar is licensed under either of
@@ -113,7 +121,8 @@ Relar is licensed under either of
 at your option.
 
 Vendored example code retains its original license; the Base45 codec uses
-[BSD-2-Clause](examples/base45_codec/upstream/LICENSE).
+[BSD-2-Clause](examples/base45_codec/upstream/LICENSE), and the Luhn checksum
+library uses its [upstream license](examples/luhn_checksum/upstream/LICENSE).
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in Relar
 by you, as defined in the Apache-2.0 license, shall be dually licensed as above, without any
