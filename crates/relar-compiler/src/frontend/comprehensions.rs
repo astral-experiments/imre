@@ -359,11 +359,11 @@ impl Checker<'_> {
                 } else {
                     self.expr(expression)?
                 };
-                if is_set && !matches!(value.ty, Type::Int | Type::Str) {
+                if is_set && !matches!(value.ty, Type::Int | Type::Str | Type::Bytes) {
                     return Err(error(
                         self.source,
                         expression,
-                        "set elements must be exactly int or str",
+                        "set elements must be exactly int, str, or bytes",
                     ));
                 }
                 self.locals[result] = if is_set {
@@ -390,11 +390,11 @@ impl Checker<'_> {
                 } else {
                     self.expr(key)?
                 };
-                if !matches!(key_value.ty, Type::Int | Type::Str) {
+                if !matches!(key_value.ty, Type::Int | Type::Str | Type::Bytes) {
                     return Err(error(
                         self.source,
                         key,
-                        "dictionary keys must be exactly int or str",
+                        "dictionary keys must be exactly int, str, or bytes",
                     ));
                 }
                 let captured = self.hidden(key_value.ty);

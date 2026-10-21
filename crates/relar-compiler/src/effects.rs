@@ -101,6 +101,7 @@ fn expression(value: &Expr, functions: &[bool]) -> bool {
         | ExprKind::Float(_)
         | ExprKind::Bool(_)
         | ExprKind::Str(_)
+        | ExprKind::Bytes(_)
         | ExprKind::None
         | ExprKind::Local(_) => false,
         ExprKind::List(values)
@@ -118,7 +119,8 @@ fn expression(value: &Expr, functions: &[bool]) -> bool {
         | ExprKind::Negate(value)
         | ExprKind::Field(value, _) => expression(value, functions),
         ExprKind::Binary(op, left, right) => {
-            binary(*op)
+            (matches!(op, Binary::Concat) && left.ty == Type::Bytes)
+                || binary(*op)
                 || matches!(
                     (left.ty, right.ty),
                     (Type::Int, Type::Float) | (Type::Float, Type::Int)
@@ -163,6 +165,11 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::Input
         | Builtin::ListGet
         | Builtin::StringGet
+        | Builtin::BytesGet
+        | Builtin::Decode
+        | Builtin::BinaryOpen(_)
+        | Builtin::BinaryRead
+        | Builtin::BinaryWrite
         | Builtin::Slice
         | Builtin::Pop
         | Builtin::DictGet
@@ -174,6 +181,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::TextWrite
         | Builtin::TextFlush
         | Builtin::TextClose => true,
+        Builtin::Bytes => args.first().is_none_or(|arg| arg.ty != Type::Bytes),
         Builtin::Int => args
             .first()
             .is_none_or(|arg| !matches!(arg.ty, Type::Int | Type::Bool)),
@@ -196,6 +204,8 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::SetDiscard
         | Builtin::SetIter
         | Builtin::StringIter
+        | Builtin::BytesIter
+        | Builtin::Encode
         | Builtin::ExceptionMessage => false,
     }
 }

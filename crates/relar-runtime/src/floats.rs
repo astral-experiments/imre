@@ -11,7 +11,7 @@ use icu_properties::props::{EnumeratedProperty, GeneralCategory};
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, Signed, ToPrimitive, Zero};
 
-use super::{Error, Int, Kind, Result, Str, finish, output_bytes};
+use super::{Bytes, Error, Int, Kind, Result, Str, finish, output_bytes};
 
 /// Returns a nullable-word owner. Bare float storage never calls this helper.
 #[unsafe(no_mangle)]
@@ -224,6 +224,24 @@ pub unsafe extern "C" fn relar_float_parse(value: *const Str) -> f64 {
     finish(
         parse(unsafe { &*value })
             .ok_or_else(|| Error::new(Kind::ValueError, "could not convert string to float")),
+        0.0,
+    )
+}
+
+/// Parses the ASCII byte grammar without applying Unicode text normalization.
+///
+/// # Safety
+/// `value` is a rooted immutable bytes handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_bytes_float(value: *const Bytes) -> f64 {
+    // SAFETY: the caller keeps this immutable bytes allocation alive.
+    let bytes = unsafe { &*value };
+    let parsed = bytes
+        .is_ascii()
+        .then(|| std::str::from_utf8(bytes).expect("ASCII is valid UTF-8"))
+        .and_then(parse);
+    finish(
+        parsed.ok_or_else(|| Error::new(Kind::ValueError, "could not convert bytes to float")),
         0.0,
     )
 }

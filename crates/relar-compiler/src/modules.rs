@@ -53,6 +53,7 @@ pub(crate) enum IntrinsicModule {
 pub(crate) enum Intrinsic {
     Argv,
     TextIO,
+    BinaryIO,
     UnsupportedOperation,
 }
 
@@ -70,6 +71,7 @@ impl IntrinsicModule {
         let symbol = match (self, name) {
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
+            (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             _ => return None,
         };

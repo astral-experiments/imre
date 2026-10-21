@@ -8,7 +8,7 @@
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 
-use super::{Int, List, Object, Str, fail, records};
+use super::{Bytes, Int, List, Object, Str, fail, records};
 
 pub(super) const NULLABLE: u32 = 256;
 
@@ -17,7 +17,7 @@ pub(super) struct WordKind(u32);
 
 impl WordKind {
     pub(super) fn new(kind: u32) -> Self {
-        if kind & !NULLABLE > 7 {
+        if kind & !NULLABLE > 8 {
             fail("SystemError", "invalid concrete word representation");
         }
         Self(kind)
@@ -40,7 +40,7 @@ impl WordKind {
     /// `field` is an aligned, readable record slot stored using this descriptor's
     /// LLVM representation, or its initial all-zero state.
     pub(super) unsafe fn read_record_field(self, field: *const usize) -> usize {
-        if matches!(self.0, 3..=6) {
+        if matches!(self.0, 3..=6 | 8) {
             // SAFETY: this exact descriptor denotes a pointer-typed field.
             unsafe { field.cast::<*const ()>().read() as usize }
         } else if self.0 == 7 {
@@ -59,7 +59,7 @@ impl WordKind {
         let valid = match self.base() {
             0 => word == 0,
             1 => word <= if nullable { 2 } else { 1 },
-            2..=6 => word != 0 || nullable,
+            2..=6 | 8 => word != 0 || nullable,
             7 => true,
             _ => unreachable!(),
         };
@@ -99,6 +99,7 @@ impl WordKind {
                 6 => records::relar_record_retain(word as *const usize),
                 7 if self.0 & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
                 7 => {}
+                8 => Rc::increment_strong_count(word as *const Bytes),
                 _ => unreachable!(),
             }
         }
@@ -122,6 +123,7 @@ impl WordKind {
                 6 => records::relar_record_release(word as *const usize),
                 7 if self.0 & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
                 7 => {}
+                8 => Rc::decrement_strong_count(word as *const Bytes),
                 _ => unreachable!(),
             }
         }

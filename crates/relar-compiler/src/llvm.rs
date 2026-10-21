@@ -16,6 +16,7 @@ impl Type {
             Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
+            | Self::Bytes
             | Self::ListInt
             | Self::Class(_)
             | Self::List(_)
@@ -24,6 +25,7 @@ impl Type {
             | Self::Iterator
             | Self::Exception
             | Self::TextIO
+            | Self::BinaryIO
             | Self::Tuple(_) => "ptr",
             Self::None => "i8",
         }
@@ -34,6 +36,7 @@ impl Type {
             Self::Int => "1",
             Self::Float => "0.0",
             Self::Str
+            | Self::Bytes
             | Self::ListInt
             | Self::Class(_)
             | Self::List(_)
@@ -42,6 +45,7 @@ impl Type {
             | Self::Iterator
             | Self::Exception
             | Self::TextIO
+            | Self::BinaryIO
             | Self::Tuple(_) => "null",
             Self::Bool | Self::None | Self::Optional(_) => "0",
         }
@@ -328,6 +332,7 @@ impl Emitter<'_, '_> {
         let family = match ty {
             Type::Int => "int",
             Type::Str => "str",
+            Type::Bytes => "bytes",
             Type::ListInt => "list",
             Type::Class(_) | Type::Tuple(_) => "record",
             Type::List(_)
@@ -335,7 +340,8 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::Iterator
             | Type::Exception
-            | Type::TextIO => "object",
+            | Type::TextIO
+            | Type::BinaryIO => "object",
             Type::Float | Type::Bool | Type::None => return,
             Type::Optional(_) => unreachable!("optional types are flattened"),
         };
@@ -1081,12 +1087,18 @@ impl Emitter<'_, '_> {
     }
 
     fn literal(&mut self, contents: &str, ty: Type) -> Value {
+        self.literal_bytes(contents.as_bytes(), ty)
+    }
+
+    /// Emits exact source bytes without routing arbitrary byte values through UTF-8.
+    fn literal_bytes(&mut self, contents: &[u8], ty: Type) -> Value {
         let id = self.strings.len();
-        self.strings.push(contents.as_bytes().to_vec());
-        let function = if ty == Type::Int {
-            "relar_int_literal"
-        } else {
-            "relar_str_literal"
+        self.strings.push(contents.to_vec());
+        let function = match ty {
+            Type::Int => "relar_int_literal",
+            Type::Str => "relar_str_literal",
+            Type::Bytes => "relar_bytes_literal",
+            _ => unreachable!("literal representation was checked"),
         };
         Value {
             ty,
@@ -1128,6 +1140,7 @@ impl Emitter<'_, '_> {
                 small_integer: false,
             },
             ExprKind::Str(value) => self.literal(value, Type::Str),
+            ExprKind::Bytes(value) => self.literal_bytes(value, Type::Bytes),
             ExprKind::None => none(),
             ExprKind::Local(slot) => {
                 let mut value = self.borrow_slot(*slot);
@@ -1237,7 +1250,9 @@ impl Emitter<'_, '_> {
                 };
                 self.decode_word(word, expression.ty)
             }
-            ExprKind::Binary(Binary::Concat, ..) => self.concat(expression),
+            ExprKind::Binary(Binary::Concat, ..) if expression.ty == Type::Str => {
+                self.concat(expression)
+            }
             ExprKind::Binary(op, left, right) => {
                 let direct = self.small_binary_proof(expression, left, right, *op);
                 let left_value = self.operand(left);
@@ -1510,19 +1525,30 @@ impl Emitter<'_, '_> {
         }
         match op {
             Binary::Repeat => {
-                let (list, count) = if matches!(left.ty, Type::ListInt | Type::List(_)) {
-                    (left, right)
-                } else {
-                    (right, left)
-                };
-                let name = if list.ty == Type::ListInt {
+                let (list, count) =
+                    if matches!(left.ty, Type::ListInt | Type::List(_) | Type::Bytes) {
+                        (left, right)
+                    } else {
+                        (right, left)
+                    };
+                let name = if list.ty == Type::Bytes {
+                    "relar_bytes_repeat"
+                } else if list.ty == Type::ListInt {
                     "relar_list_repeat"
                 } else {
                     "relar_seq_repeat"
                 };
                 self.call(name, list.ty, &[list, count])
             }
-            Binary::Concat => self.call("relar_str_concat", Type::Str, &[left, right]),
+            Binary::Concat => self.call(
+                if left.ty == Type::Bytes {
+                    "relar_bytes_concat"
+                } else {
+                    "relar_str_concat"
+                },
+                left.ty,
+                &[left, right],
+            ),
             Binary::Add => self.call("int_add", Type::Int, &[left, right]),
             Binary::Subtract => self.call("int_sub", Type::Int, &[left, right]),
             Binary::Multiply => self.call("int_mul", Type::Int, &[left, right]),
@@ -1705,13 +1731,24 @@ impl Emitter<'_, '_> {
                 };
                 self.instruction(format!("icmp {predicate} i8 {equal}, 0"))
             }
-            Type::Bool | Type::None | Type::Class(_) | Type::Exception | Type::TextIO => self
-                .instruction(format!(
-                    "icmp {predicate} {} {}, {}",
-                    left.ty.llvm(),
-                    left.operand,
-                    right.operand
-                )),
+            Type::Bytes => {
+                let order = self.instruction(format!(
+                    "call i32 @relar_bytes_compare(ptr {}, ptr {})",
+                    left.operand, right.operand
+                ));
+                self.instruction(format!("icmp {predicate} i32 {order}, 0"))
+            }
+            Type::Bool
+            | Type::None
+            | Type::Class(_)
+            | Type::Exception
+            | Type::TextIO
+            | Type::BinaryIO => self.instruction(format!(
+                "icmp {predicate} {} {}, {}",
+                left.ty.llvm(),
+                left.operand,
+                right.operand
+            )),
             Type::ListInt
             | Type::List(_)
             | Type::Dict(_)
@@ -1878,6 +1915,28 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::BinaryOpen(mode) => Value {
+                ty: Type::BinaryIO,
+                operand: self.checked_instruction(format!(
+                    "call ptr @relar_binary_open(ptr {}, i32 {mode})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::BinaryRead => self.call("relar_binary_read", Type::Bytes, &[&args[0].value]),
+            Builtin::BinaryWrite => self.call(
+                "relar_binary_write",
+                Type::Int,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::Bytes => match args[0].value.ty {
+                Type::Bytes => return self.own_operand(args.into_iter().next().unwrap()),
+                Type::Int => self.call("relar_bytes_count", Type::Bytes, &[&args[0].value]),
+                Type::ListInt => self.call("relar_bytes_list", Type::Bytes, &[&args[0].value]),
+                _ => unreachable!("bytes conversion was checked"),
+            },
+            Builtin::Encode => self.call("relar_str_encode", Type::Bytes, &[&args[0].value]),
+            Builtin::Decode => self.call("relar_bytes_decode", Type::Str, &[&args[0].value]),
             Builtin::TextRead => self.call("relar_text_read", Type::Str, &[&args[0].value]),
             Builtin::TextWrite => self.call(
                 "relar_text_write",
@@ -1912,6 +1971,7 @@ impl Emitter<'_, '_> {
                 Type::Str => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Int => self.call("relar_int_str", Type::Str, &[&args[0].value]),
                 Type::Float => self.call("relar_float_str", Type::Str, &[&args[0].value]),
+                Type::Bytes => self.call("relar_bytes_str", Type::Str, &[&args[0].value]),
                 Type::Bool => {
                     let byte = self.instruction(format!("zext i1 {} to i8", args[0].value.operand));
                     Value {
@@ -1946,6 +2006,7 @@ impl Emitter<'_, '_> {
                 Type::Float => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Int => self.call("relar_int_float", Type::Float, &[&args[0].value]),
                 Type::Str => self.call("relar_float_parse", Type::Float, &[&args[0].value]),
+                Type::Bytes => self.call("relar_bytes_float", Type::Float, &[&args[0].value]),
                 Type::Bool => Value {
                     ty: Type::Float,
                     operand: self
@@ -1960,6 +2021,7 @@ impl Emitter<'_, '_> {
             Builtin::Len => self.call(
                 match args[0].value.ty {
                     Type::Str => "relar_str_len",
+                    Type::Bytes => "relar_bytes_len",
                     Type::ListInt => "relar_list_len",
                     Type::List(_) => "relar_seq_len",
                     Type::Dict(_) => "relar_dict_len",
@@ -1980,10 +2042,17 @@ impl Emitter<'_, '_> {
                 Type::Str,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::BytesGet => self.call(
+                "relar_bytes_get",
+                Type::Int,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::BytesIter => self.call("relar_bytes_iter", Type::Iterator, &[&args[0].value]),
             Builtin::StringIter => self.call("relar_str_iter", Type::Iterator, &[&args[0].value]),
             Builtin::Slice => self.call(
                 match returns {
                     Type::Str => "relar_str_slice",
+                    Type::Bytes => "relar_bytes_slice",
                     Type::ListInt => "relar_list_slice",
                     Type::List(_) => "relar_seq_slice",
                     _ => unreachable!("slice receiver was checked"),
@@ -2082,6 +2151,7 @@ impl Emitter<'_, '_> {
                     Type::Int => self.void_call("relar_print_int", &[&args[0].value]),
                     Type::Float => self.void_call("relar_print_float", &[&args[0].value]),
                     Type::Str => self.void_call("relar_print_str", &[&args[0].value]),
+                    Type::Bytes => self.void_call("relar_print_bytes", &[&args[0].value]),
                     Type::Bool => {
                         let byte =
                             self.instruction(format!("zext i1 {} to i8", args[0].value.operand));
@@ -2096,6 +2166,7 @@ impl Emitter<'_, '_> {
                     | Type::Iterator
                     | Type::Exception
                     | Type::TextIO
+                    | Type::BinaryIO
                     | Type::Tuple(_)
                     | Type::Optional(_) => {
                         unreachable!("container printing is rejected")
@@ -2214,6 +2285,7 @@ impl Emitter<'_, '_> {
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::Bytes
             | Type::ListInt
             | Type::Class(_)
             | Type::List(_)
@@ -2222,6 +2294,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::Exception
             | Type::TextIO
+            | Type::BinaryIO
             | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
         }
     }
@@ -2241,6 +2314,7 @@ impl Emitter<'_, '_> {
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::Bytes
             | Type::ListInt
             | Type::Class(_)
             | Type::List(_)
@@ -2249,6 +2323,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::Exception
             | Type::TextIO
+            | Type::BinaryIO
             | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
         Value {
@@ -2364,12 +2439,12 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// Passes a rooted canonical int/str key without index decoding. The runtime
+    /// Passes a rooted canonical int/str/bytes key without index decoding. The runtime
     /// acquires a newly stored element and drops removed owners before returning;
     /// the caller keeps both operands rooted throughout either operation.
     fn set_member(&mut self, set: &Value, value: &Value, insert: bool) {
         debug_assert!(matches!(set.ty, Type::Set(_)));
-        debug_assert!(matches!(value.ty, Type::Int | Type::Str));
+        debug_assert!(matches!(value.ty, Type::Int | Type::Str | Type::Bytes));
         let word = self.word(value);
         let operation = if insert { "add" } else { "discard" };
         self.line(format!(
@@ -2570,6 +2645,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Int => 2,
         Type::Float => 7,
         Type::Str => 3,
+        Type::Bytes => 8,
         Type::ListInt => 4,
         Type::Class(_) | Type::Tuple(_) => 6,
         Type::List(_)
@@ -2577,7 +2653,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Set(_)
         | Type::Iterator
         | Type::Exception
-        | Type::TextIO => 5,
+        | Type::TextIO
+        | Type::BinaryIO => 5,
         Type::Optional(_) => 256 | representation_kind(types.payload(ty).unwrap(), types),
     }
 }
@@ -2730,6 +2807,17 @@ fn fallible(name: &str) -> bool {
                 | "relar_print_int"
                 | "relar_print_float"
                 | "relar_print_str"
+                | "relar_print_bytes"
+                | "relar_bytes_count"
+                | "relar_bytes_list"
+                | "relar_bytes_get"
+                | "relar_bytes_slice"
+                | "relar_bytes_concat"
+                | "relar_bytes_repeat"
+                | "relar_bytes_decode"
+                | "relar_binary_open"
+                | "relar_binary_read"
+                | "relar_binary_write"
                 | "relar_print_bool"
                 | "relar_print_none"
                 | "relar_input"
@@ -2744,6 +2832,7 @@ fn fallible(name: &str) -> bool {
                 | "relar_int_float"
                 | "relar_float_int"
                 | "relar_float_parse"
+                | "relar_bytes_float"
                 | "relar_int_true_divide"
                 | "relar_assert_fail"
                 | "relar_range_step_zero"
@@ -2783,9 +2872,30 @@ declare void @relar_print_float(double)
 declare double @relar_int_float(i64)
 declare i64 @relar_float_int(double)
 declare double @relar_float_parse(ptr)
+declare double @relar_bytes_float(ptr)
 declare double @relar_float_divide(double, double, i32)
 declare i32 @relar_int_float_compare(i64, double)
 declare double @relar_int_true_divide(i64, i64)
+declare ptr @relar_bytes_literal(ptr, i64)
+declare void @relar_bytes_retain(ptr)
+declare void @relar_bytes_release(ptr)
+declare ptr @relar_bytes_str(ptr)
+declare void @relar_print_bytes(ptr)
+declare i64 @relar_bytes_len(ptr)
+declare i32 @relar_bytes_compare(ptr, ptr)
+declare i64 @relar_bytes_get(ptr, i64)
+declare ptr @relar_bytes_slice(ptr, i64, i64, i64)
+declare ptr @relar_bytes_count(i64)
+declare ptr @relar_bytes_list(ptr)
+declare ptr @relar_bytes_concat(ptr, ptr)
+declare ptr @relar_bytes_repeat(ptr, i64)
+declare ptr @relar_bytes_iter(ptr)
+declare ptr @relar_str_encode(ptr)
+declare ptr @relar_bytes_decode(ptr)
+declare ptr @relar_binary_open(ptr, i32)
+declare ptr @relar_binary_read(ptr)
+declare i64 @relar_binary_write(ptr, ptr)
+
 declare i8 @relar_error_pending()
 declare ptr @relar_error_take()
 declare void @relar_error_set(ptr)

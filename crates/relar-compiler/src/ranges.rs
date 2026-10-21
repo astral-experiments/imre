@@ -711,12 +711,13 @@ impl Analyzer {
                         | Type::Dict(_)
                         | Type::Set(_)
                         | Type::Tuple(_) => Interval::bounded(0, MAX_LIST_LEN),
-                        Type::Str => Interval {
+                        Type::Str | Type::Bytes => Interval {
                             min: Some(0),
                             max: None,
                         },
                         _ => Interval::UNKNOWN,
                     },
+                    Builtin::BytesGet => Interval::bounded(0, 255),
                     Builtin::Int if args[0].ty == Type::Int => values[0],
                     Builtin::Int if args[0].ty == Type::Bool => Interval::bounded(0, 1),
                     _ => Interval::UNKNOWN,
@@ -755,7 +756,9 @@ impl Analyzer {
                 }
                 Interval::UNKNOWN
             }
-            ExprKind::Float(_) | ExprKind::Str(_) | ExprKind::None => Interval::UNKNOWN,
+            ExprKind::Float(_) | ExprKind::Str(_) | ExprKind::Bytes(_) | ExprKind::None => {
+                Interval::UNKNOWN
+            }
         };
         if record && expression.ty == Type::Int {
             self.intervals
@@ -1109,6 +1112,7 @@ mod tests {
                 | ExprKind::Float(_)
                 | ExprKind::Bool(_)
                 | ExprKind::Str(_)
+                | ExprKind::Bytes(_)
                 | ExprKind::None
                 | ExprKind::Local(_) => {}
             }

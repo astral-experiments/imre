@@ -59,12 +59,15 @@ pub(super) fn scalar_default(
             check_string(value, source)?;
             (Type::Str, ExprKind::Str(value.value.to_string()))
         }
+        ast::Expr::BytesLiteral(value) => {
+            (Type::Bytes, ExprKind::Bytes(value.value.bytes().collect()))
+        }
         ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
         _ => {
             return Err(error(
                 source,
                 expression,
-                "defaults must be int, float, bool, str, or None literals; numbers may have one sign",
+                "defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign",
             ));
         }
     };

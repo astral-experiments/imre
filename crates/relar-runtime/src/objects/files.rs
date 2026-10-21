@@ -1,4 +1,4 @@
-//! Sealed UTF-8 text streams. Explicit operations report language errors;
+//! Sealed UTF-8 text and byte streams. Explicit operations report language errors;
 //! final ownership cleanup only closes resources and never changes error state.
 
 use std::fs::{File, OpenOptions};
@@ -7,10 +7,21 @@ use std::os::fd::IntoRawFd;
 use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
-use super::{Int, Object, Storage, StorageCell, Str, StringPart, concat_parts, fail, object};
+use super::{
+    Bytes, Int, Object, Storage, StorageCell, Str, StringPart, concat_parts, fail, object,
+};
 
-pub(super) struct TextFile {
+pub(super) struct FileState {
     stream: Option<Stream>,
+    // Preserve access mode after close: binary wrong-direction errors take precedence.
+    kind: FileKind,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FileKind {
+    Text,
+    BinaryRead,
+    BinaryWrite,
 }
 
 enum Stream {
@@ -43,7 +54,7 @@ impl Stream {
     }
 }
 
-impl Drop for TextFile {
+impl Drop for FileState {
     fn drop(&mut self) {
         if let Some(stream) = self.stream.take() {
             // Final release must remain infallible even during error cleanup.
@@ -52,7 +63,7 @@ impl Drop for TextFile {
     }
 }
 
-impl TextFile {
+impl FileState {
     fn stream(&mut self) -> Result<&mut Stream> {
         self.stream
             .as_mut()
@@ -60,11 +71,7 @@ impl TextFile {
     }
 
     fn read(&mut self) -> Result<Str> {
-        let Stream::Read(file) = self.stream()? else {
-            return Err(Error::new(Kind::UnsupportedOperation, "not readable"));
-        };
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).map_err(os_error)?;
+        let bytes = self.read_bytes()?;
         let text = String::from_utf8(bytes).map_err(|error| {
             Error::new(
                 Kind::UnicodeDecodeError,
@@ -89,14 +96,54 @@ impl TextFile {
         Ok(normalized)
     }
 
-    fn write(&mut self, text: &str) -> Result<()> {
-        let Stream::Write(writer) = self.stream()? else {
+    fn read_bytes(&mut self) -> Result<Bytes> {
+        if self.kind == FileKind::BinaryWrite {
+            return Err(Error::new(Kind::UnsupportedOperation, "read"));
+        }
+        let closed = if self.kind != FileKind::Text {
+            "read of closed file"
+        } else {
+            "I/O operation on closed file."
+        };
+        let stream = self
+            .stream
+            .as_mut()
+            .ok_or_else(|| Error::new(Kind::ValueError, closed))?;
+        let Stream::Read(file) = stream else {
+            return Err(Error::new(Kind::UnsupportedOperation, "not readable"));
+        };
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).map_err(os_error)?;
+        Ok(bytes)
+    }
+
+    fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        if self.kind == FileKind::BinaryRead {
+            return Err(Error::new(Kind::UnsupportedOperation, "write"));
+        }
+        let closed = if self.kind != FileKind::Text {
+            "write to closed file"
+        } else {
+            "I/O operation on closed file."
+        };
+        let stream = self
+            .stream
+            .as_mut()
+            .ok_or_else(|| Error::new(Kind::ValueError, closed))?;
+        let Stream::Write(writer) = stream else {
             return Err(Error::new(Kind::UnsupportedOperation, "not writable"));
         };
-        writer.write_all(text.as_bytes()).map_err(os_error)
+        writer.write_all(bytes).map_err(os_error)
+    }
+
+    fn write(&mut self, text: &str) -> Result<()> {
+        self.write_bytes(text.as_bytes())
     }
 
     fn flush(&mut self) -> Result<()> {
+        if self.kind == FileKind::BinaryWrite && self.stream.is_none() {
+            return Err(Error::new(Kind::ValueError, "flush of closed file"));
+        }
         match self.stream()? {
             Stream::Read(_) => Ok(()),
             Stream::Write(writer) => writer.flush().map_err(os_error),
@@ -105,23 +152,24 @@ impl TextFile {
 }
 
 impl Storage {
-    fn text_file(&self) -> &TextFile {
+    fn file(&self) -> &FileState {
         match self {
-            Self::TextIO(file) => file,
-            _ => fail("SystemError", "expected a text file object"),
+            Self::File(file) => file,
+            _ => fail("SystemError", "expected a file stream object"),
         }
     }
 
-    fn text_file_mut(&mut self) -> &mut TextFile {
+    fn file_mut(&mut self) -> &mut FileState {
         match self {
-            Self::TextIO(file) => file,
-            _ => fail("SystemError", "expected a text file object"),
+            Self::File(file) => file,
+            _ => fail("SystemError", "expected a file stream object"),
         }
     }
 }
 
 fn os_error(error: io::Error) -> Error {
     let kind = match error.kind() {
+        io::ErrorKind::AlreadyExists => Kind::FileExistsError,
         io::ErrorKind::NotFound => Kind::FileNotFoundError,
         io::ErrorKind::PermissionDenied => Kind::PermissionError,
         io::ErrorKind::IsADirectory => Kind::IsADirectoryError,
@@ -139,50 +187,106 @@ fn os_error(error: io::Error) -> Error {
 /// Like other fallible entries, pending state must be clear on entry.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_text_open(path: *const Str, mode: u32) -> *const Object {
-    super::super::initialize_io();
-    // SAFETY: the caller roots this immutable string for the entire open.
-    let path = unsafe { &*path };
-    if path.contains('\0') {
-        return Error::new(Kind::ValueError, "embedded null byte").returning(std::ptr::null());
+    if mode > 1 {
+        fail("SystemError", "invalid text file mode");
     }
-    let result = (|| {
-        let file = match mode {
-            0 => OpenOptions::new().read(true).open(path.as_str()),
-            1 => OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(path.as_str()),
-            _ => fail("SystemError", "invalid text file mode"),
-        }
-        .map_err(os_error)?;
-        if file.metadata().map_err(os_error)?.is_dir() {
-            return Err(Error::new(Kind::IsADirectoryError, "is a directory"));
-        }
-        let stream = match mode {
-            0 => Stream::Read(file),
-            _ => Stream::Write(BufWriter::with_capacity(8192, file)),
-        };
-        Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
-            Storage::TextIO(Box::new(TextFile {
-                stream: Some(stream),
-            })),
-        )))))
-    })();
-    finish(result, std::ptr::null())
+    // SAFETY: the caller roots the immutable path throughout opening the stream.
+    finish(open(unsafe { &*path }, mode, false), std::ptr::null())
+}
+
+/// Opens an immutable-byte stream in rb, wb, ab, or xb mode (0 through 3).
+///
+/// # Safety
+/// Root the UTF-8 path; the compiler validates the mode and clear pending state.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_binary_open(path: *const Str, mode: u32) -> *const Object {
+    // SAFETY: the caller roots the immutable path throughout opening the stream.
+    finish(open(unsafe { &*path }, mode, true), std::ptr::null())
+}
+
+/// Shares descriptor ownership and buffering while preserving text/binary access errors.
+fn open(path: &str, mode: u32, binary: bool) -> Result<*const Object> {
+    super::super::initialize_io();
+    if path.contains('\0') {
+        return Err(Error::new(Kind::ValueError, "embedded null byte"));
+    }
+    let file = match mode {
+        0 => OpenOptions::new().read(true).open(path),
+        1 => OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path),
+        2 => OpenOptions::new().append(true).create(true).open(path),
+        3 => OpenOptions::new().write(true).create_new(true).open(path),
+        _ => fail("SystemError", "invalid file mode"),
+    }
+    .map_err(os_error)?;
+    if file.metadata().map_err(os_error)?.is_dir() {
+        return Err(Error::new(Kind::IsADirectoryError, "is a directory"));
+    }
+    let stream = match mode {
+        0 => Stream::Read(file),
+        _ => Stream::Write(BufWriter::with_capacity(8192, file)),
+    };
+    Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
+        Storage::File(Box::new(FileState {
+            stream: Some(stream),
+            kind: match (binary, mode) {
+                (false, _) => FileKind::Text,
+                (true, 0) => FileKind::BinaryRead,
+                (true, _) => FileKind::BinaryWrite,
+            },
+        })),
+    )))))
+}
+
+/// Reads raw bytes through EOF without decoding or newline conversion.
+///
+/// # Safety
+/// Root an exact BinaryIO object; clear pending error state before the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_binary_read(value: *const Object) -> *const Bytes {
+    // SAFETY: file I/O has no callbacks and the result owns its bytes before returning.
+    let result = unsafe {
+        object(value)
+            .0
+            .with_mut(|storage| storage.file_mut().read_bytes())
+    };
+    finish(
+        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        std::ptr::null(),
+    )
+}
+
+/// Writes exact raw bytes and returns their count as a canonical integer.
+///
+/// # Safety
+/// Root an exact BinaryIO object and immutable bytes; pending state must be clear.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_binary_write(value: *const Object, bytes: *const Bytes) -> usize {
+    // SAFETY: both inputs remain rooted and file I/O cannot reenter language code.
+    let result = unsafe {
+        let bytes = &*bytes;
+        object(value)
+            .0
+            .with_mut(|storage| storage.file_mut().write_bytes(bytes))
+            .map(|()| Int::from_usize(bytes.len()).into_raw())
+    };
+    finish(result, 0)
 }
 
 /// Checks an already rooted context manager without acquiring another owner.
 ///
 /// # Safety
-/// `value` must be a rooted TextIO object and pending state must be clear.
+/// `value` must be rooted TextIO or BinaryIO and pending state must be clear.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_text_enter(value: *const Object) -> u8 {
     // SAFETY: the rooted storage is accessed without callbacks or escaping references.
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.text_file_mut().stream().map(|_| 1))
+            .with_mut(|storage| storage.file_mut().stream().map(|_| 1))
     };
     finish(result, 0)
 }
@@ -198,7 +302,7 @@ pub unsafe extern "C" fn relar_text_read(value: *const Object) -> *const Str {
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.text_file_mut().read())
+            .with_mut(|storage| storage.file_mut().read())
     };
     finish(
         result.map(|text| Rc::into_raw(Rc::new(text))),
@@ -219,7 +323,7 @@ pub unsafe extern "C" fn relar_text_write(value: *const Object, text: *const Str
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.text_file_mut().write(text))
+            .with_mut(|storage| storage.file_mut().write(text))
     };
     finish(
         result.map(|()| Int::from_usize(text.chars().count()).into_raw()),
@@ -239,7 +343,7 @@ pub unsafe extern "C" fn relar_text_write_discard(value: *const Object, text: *c
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.text_file_mut().write(&*text))
+            .with_mut(|storage| storage.file_mut().write(&*text))
     };
     finish(result.map(|()| 1), 0)
 }
@@ -265,13 +369,13 @@ pub unsafe extern "C" fn relar_text_write_parts(
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.text_file_mut().write(&text))
+            .with_mut(|storage| storage.file_mut().write(&text))
     };
     finish(result.map(|()| 1), 0)
 }
 
 /// # Safety
-/// `value` must be rooted TextIO and pending state clear. Returns 1 on success,
+/// `value` must be rooted TextIO or BinaryIO and pending state clear. Returns 1 on success,
 /// or 0 with a pending error. Flushing an open read stream is a no-op.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_text_flush(value: *const Object) -> u8 {
@@ -279,7 +383,7 @@ pub unsafe extern "C" fn relar_text_flush(value: *const Object) -> u8 {
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.text_file_mut().flush())
+            .with_mut(|storage| storage.file_mut().flush())
     };
     finish(result.map(|()| 1), 0)
 }
@@ -287,7 +391,7 @@ pub unsafe extern "C" fn relar_text_flush(value: *const Object) -> u8 {
 /// Detaches the stream before closing, so all aliases become closed even on error.
 ///
 /// # Safety
-/// `value` must be rooted TextIO and pending state clear. Returns 1 on success
+/// `value` must be rooted TextIO or BinaryIO and pending state clear. Returns 1 on success
 /// (including repeated close), or 0 with a pending error after releasing the fd.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_text_close(value: *const Object) -> u8 {
@@ -295,14 +399,14 @@ pub unsafe extern "C" fn relar_text_close(value: *const Object) -> u8 {
     let stream = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.text_file_mut().stream.take())
+            .with_mut(|storage| storage.file_mut().stream.take())
     };
     let result = stream.map_or(Ok(()), Stream::close).map_err(os_error);
     finish(result.map(|()| 1), 0)
 }
 
 /// # Safety
-/// `value` must be a rooted TextIO object. This infallible query is valid while
+/// `value` must be rooted TextIO or BinaryIO. This infallible query is valid while
 /// an error is pending and never changes pending state.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_text_closed(value: *const Object) -> u8 {
@@ -310,7 +414,7 @@ pub unsafe extern "C" fn relar_text_closed(value: *const Object) -> u8 {
     unsafe {
         object(value)
             .0
-            .with(|storage| u8::from(storage.text_file().stream.is_none()))
+            .with(|storage| u8::from(storage.file().stream.is_none()))
     }
 }
 

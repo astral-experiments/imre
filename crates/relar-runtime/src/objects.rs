@@ -6,6 +6,7 @@
 //! displaced owners are dropped only after mutable storage access ends.
 
 mod args;
+mod bytes;
 pub(crate) mod exceptions;
 mod files;
 mod mappings;
@@ -14,7 +15,8 @@ mod sequences;
 mod words;
 
 use super::{
-    Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish, index,
+    Bytes, Error, Int, Kind, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, finish,
+    index,
 };
 use num_traits::ToPrimitive;
 use std::rc::Rc;
@@ -29,8 +31,9 @@ enum Storage {
     Set(Box<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
+    BytesIterator(bytes::BytesIterator),
     Exception(exceptions::Exception),
-    TextIO(Box<files::TextFile>),
+    File(Box<files::FileState>),
 }
 
 /// Acquires a reference without consuming the caller's live Rc handle.

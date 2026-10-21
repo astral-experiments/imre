@@ -104,6 +104,7 @@ const RESERVED: &[&str] = &[
     "float",
     "bool",
     "str",
+    "bytes",
     "list",
     "tuple",
     "dict",
@@ -148,6 +149,7 @@ fn exception_kind(name: &str) -> Option<u32> {
         "PermissionError",
         "IsADirectoryError",
         "NotADirectoryError",
+        "FileExistsError",
     ]
     .iter()
     .position(|candidate| !candidate.is_empty() && *candidate == name)
@@ -507,6 +509,7 @@ fn annotation_at(
             }
         }
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
+        Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
         _ => {}
     }
     let nested =
@@ -517,6 +520,7 @@ fn annotation_at(
             "float" => Ok(Type::Float),
             "bool" => Ok(Type::Bool),
             "str" => Ok(Type::Str),
+            "bytes" => Ok(Type::Bytes),
             "Exception" => Ok(Type::Exception),
             _ => Err(error(
                 source,
@@ -529,11 +533,11 @@ fn annotation_at(
             ast::Expr::Name(name) if name.id == "list" => Ok(types.list(nested(&value.slice)?)),
             ast::Expr::Name(name) if name.id == "set" => {
                 let element = nested(&value.slice)?;
-                if !matches!(element, Type::Int | Type::Str) {
+                if !matches!(element, Type::Int | Type::Str | Type::Bytes) {
                     return Err(error(
                         source,
                         &*value.slice,
-                        "set elements must be exactly int or str",
+                        "set elements must be exactly int, str, or bytes",
                     ));
                 }
                 Ok(types.set(element))
@@ -554,11 +558,11 @@ fn annotation_at(
                     ));
                 };
                 let key_type = nested(key)?;
-                if !matches!(key_type, Type::Int | Type::Str) {
+                if !matches!(key_type, Type::Int | Type::Str | Type::Bytes) {
                     return Err(error(
                         source,
                         key,
-                        "dictionary keys must be exactly int or str",
+                        "dictionary keys must be exactly int, str, or bytes",
                     ));
                 }
                 Ok(types.dict(key_type, nested(value)?))
@@ -825,7 +829,8 @@ impl<'a> Checker<'a> {
             ast::Expr::If(value) => return self.conditional(value, Some(expected)),
             ast::Expr::Subscript(subscript)
                 if matches!(&*subscript.slice, ast::Expr::Slice(_))
-                    && (concrete == Type::Str || self.types.element(concrete).is_some()) =>
+                    && (matches!(concrete, Type::Str | Type::Bytes)
+                        || self.types.element(concrete).is_some()) =>
             {
                 let receiver = self.expr_expected(&subscript.value, concrete)?;
                 let ast::Expr::Slice(slice) = &*subscript.slice else {
@@ -987,11 +992,13 @@ impl<'a> Checker<'a> {
     /// Captures the receiver before ordered bounds. Nullable integer operands
     /// preserve omitted bounds without allocating a general slice object.
     fn slice(&mut self, receiver: Expr, slice: &ast::ExprSlice) -> Result<Expr, String> {
-        if receiver.ty != Type::Str && self.types.element(receiver.ty).is_none() {
+        if !matches!(receiver.ty, Type::Str | Type::Bytes)
+            && self.types.element(receiver.ty).is_none()
+        {
             return Err(error(
                 self.source,
                 slice,
-                "slicing requires a concrete list or string",
+                "slicing requires a concrete list, string, or bytes",
             ));
         }
         let ty = receiver.ty;
@@ -1066,11 +1073,11 @@ impl<'a> Checker<'a> {
                 )
             } else {
                 let key_value = self.expr(key)?;
-                if !matches!(key_value.ty, Type::Int | Type::Str) {
+                if !matches!(key_value.ty, Type::Int | Type::Str | Type::Bytes) {
                     return Err(error(
                         self.source,
                         key,
-                        "dictionary keys must be exactly int or str",
+                        "dictionary keys must be exactly int, str, or bytes",
                     ));
                 }
                 let value = self.expr(&item.value)?;
@@ -1106,11 +1113,11 @@ impl<'a> Checker<'a> {
             } else {
                 self.expr(value)?
             };
-            if !matches!(checked.ty, Type::Int | Type::Str) {
+            if !matches!(checked.ty, Type::Int | Type::Str | Type::Bytes) {
                 return Err(error(
                     self.source,
                     value,
-                    "set elements must be exactly int or str",
+                    "set elements must be exactly int, str, or bytes",
                 ));
             }
             element = Some(checked.ty);
@@ -1362,11 +1369,13 @@ impl<'a> Checker<'a> {
         let mapping = self.types.mapping(iterable.ty);
         let set_element = self.types.set_element(iterable.ty);
         let string = iterable.ty == Type::Str;
+        let bytes = iterable.ty == Type::Bytes;
         let element = self
             .types
             .element(iterable.ty)
             .or(set_element)
             .or(string.then_some(Type::Str))
+            .or(bytes.then_some(Type::Int))
             .or_else(|| {
                 mapping.map(|(key, value)| {
                     if items {
@@ -1380,11 +1389,11 @@ impl<'a> Checker<'a> {
                 error(
                     self.source,
                     target,
-                    "iteration requires a concrete list, dictionary, set, string, or range",
+                    "iteration requires a concrete list, dictionary, set, string, bytes, or range",
                 )
             })?;
         let captured = self.hidden(iterable.ty);
-        let cursor = if mapping.is_none() && set_element.is_none() && !string {
+        let cursor = if mapping.is_none() && set_element.is_none() && !string && !bytes {
             Some(self.hidden(Type::Int))
         } else {
             None
@@ -1441,6 +1450,8 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(
                         if string {
                             Builtin::StringIter
+                        } else if bytes {
+                            Builtin::BytesIter
                         } else if set_element.is_some() {
                             Builtin::SetIter
                         } else {
@@ -1818,8 +1829,15 @@ impl<'a> Checker<'a> {
         let Some((item, remaining)) = items.split_first() else {
             return self.block(body);
         };
-        let manager = self.expr_expected(&item.context_expr, Type::TextIO)?;
-        let captured = self.hidden(Type::TextIO);
+        let manager = self.expr(&item.context_expr)?;
+        if !matches!(manager.ty, Type::TextIO | Type::BinaryIO) {
+            return Err(error(
+                self.source,
+                &item.context_expr,
+                "with requires a sealed text or binary file",
+            ));
+        }
+        let captured = self.hidden(manager.ty);
         let mut protected = Vec::new();
         if let Some(target) = &item.optional_vars {
             if !matches!(&**target, ast::Expr::Name(_)) {
@@ -2083,15 +2101,15 @@ impl<'a> Checker<'a> {
         node: &impl Ranged,
     ) -> Result<(Binary, Type), String> {
         if op == ast::Operator::Mult {
-            if self.types.element(left).is_some() && right == Type::Int {
+            if (self.types.element(left).is_some() || left == Type::Bytes) && right == Type::Int {
                 return Ok((Binary::Repeat, left));
             }
-            if left == Type::Int && self.types.element(right).is_some() {
+            if left == Type::Int && (self.types.element(right).is_some() || right == Type::Bytes) {
                 return Ok((Binary::Repeat, right));
             }
         }
-        if op == ast::Operator::Add && left == Type::Str && right == Type::Str {
-            return Ok((Binary::Concat, Type::Str));
+        if op == ast::Operator::Add && matches!(left, Type::Str | Type::Bytes) && right == left {
+            return Ok((Binary::Concat, left));
         }
         if !matches!(left, Type::Int | Type::Float) || !matches!(right, Type::Int | Type::Float) {
             return Err(error(
@@ -2143,6 +2161,9 @@ impl<'a> Checker<'a> {
             ast::Expr::StringLiteral(value) => {
                 check_string(value, self.source)?;
                 (Type::Str, ExprKind::Str(value.value.to_string()))
+            }
+            ast::Expr::BytesLiteral(value) => {
+                (Type::Bytes, ExprKind::Bytes(value.value.bytes().collect()))
             }
             ast::Expr::FString(value) => return self.fstring(value),
             ast::Expr::If(value) => return self.conditional(value, None),
@@ -2334,10 +2355,10 @@ impl<'a> Checker<'a> {
                     let op = match op {
                         ast::CmpOp::Eq => Compare::Equal,
                         ast::CmpOp::NotEq => Compare::NotEqual,
-                        ast::CmpOp::Lt if numeric => Compare::Less,
-                        ast::CmpOp::LtE if numeric => Compare::LessEqual,
-                        ast::CmpOp::Gt if numeric => Compare::Greater,
-                        ast::CmpOp::GtE if numeric => Compare::GreaterEqual,
+                        ast::CmpOp::Lt if numeric || ty == Type::Bytes => Compare::Less,
+                        ast::CmpOp::LtE if numeric || ty == Type::Bytes => Compare::LessEqual,
+                        ast::CmpOp::Gt if numeric || ty == Type::Bytes => Compare::Greater,
+                        ast::CmpOp::GtE if numeric || ty == Type::Bytes => Compare::GreaterEqual,
                         _ => {
                             return Err(error(
                                 self.source,
@@ -2370,11 +2391,16 @@ impl<'a> Checker<'a> {
                 if let ast::Expr::Slice(slice) = &*subscript.slice {
                     return self.slice(list, slice);
                 }
-                if list.ty == Type::Str {
+                if matches!(list.ty, Type::Str | Type::Bytes) {
                     let index = self.expr_expected(&subscript.slice, Type::Int)?;
+                    let (ty, builtin) = if list.ty == Type::Str {
+                        (Type::Str, Builtin::StringGet)
+                    } else {
+                        (Type::Int, Builtin::BytesGet)
+                    };
                     return Ok(Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Builtin(Builtin::StringGet, vec![list, index]),
+                        ty,
+                        kind: ExprKind::Builtin(builtin, vec![list, index]),
                     });
                 }
                 if let Some((key, value)) = self.types.mapping(list.ty) {
@@ -2444,7 +2470,9 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Attribute(attribute) => {
                 let receiver = self.expr(&attribute.value)?;
-                if receiver.ty == Type::TextIO && attribute.attr.as_str() == "closed" {
+                if matches!(receiver.ty, Type::TextIO | Type::BinaryIO)
+                    && attribute.attr.as_str() == "closed"
+                {
                     return Ok(Expr {
                         ty: Type::Bool,
                         kind: ExprKind::Builtin(Builtin::TextClosed, vec![receiver]),
@@ -2529,13 +2557,14 @@ impl<'a> Checker<'a> {
                                         | Type::Float
                                         | Type::Bool
                                         | Type::Str
+                                        | Type::Bytes
                                         | Type::None
                                         | Type::Exception
                                 ) {
                                     return Err(error(
                                         self.source,
                                         field,
-                                        "f-string fields require exactly int, float, bool, str, None, or Exception",
+                                        "f-string fields require exactly int, float, bool, str, bytes, None, or Exception",
                                     ));
                                 }
                                 if expression.ty == Type::Str {
@@ -2665,28 +2694,57 @@ impl<'a> Checker<'a> {
                 });
             }
             self.reject_builtin_keywords(call)?;
-            if receiver.ty == Type::TextIO {
+            if matches!(receiver.ty, Type::TextIO | Type::BinaryIO) {
+                let binary = receiver.ty == Type::BinaryIO;
+                let data_type = if binary { Type::Bytes } else { Type::Str };
                 let (builtin, ty) = match (attribute.attr.as_str(), call.arguments.args.len()) {
-                    ("read", 0) => (Builtin::TextRead, Type::Str),
-                    ("write", 1) => (Builtin::TextWrite, Type::Int),
+                    ("read", 0) => (
+                        if binary {
+                            Builtin::BinaryRead
+                        } else {
+                            Builtin::TextRead
+                        },
+                        data_type,
+                    ),
+                    ("write", 1) => (
+                        if binary {
+                            Builtin::BinaryWrite
+                        } else {
+                            Builtin::TextWrite
+                        },
+                        Type::Int,
+                    ),
                     ("flush", 0) => (Builtin::TextFlush, Type::None),
                     ("close", 0) => (Builtin::TextClose, Type::None),
                     _ => {
                         return Err(error(
                             self.source,
                             call,
-                            "supported text-file methods are read(), write(str), flush(), and close()",
+                            "supported file methods are read(), write(data), flush(), and close()",
                         ));
                     }
                 };
                 let mut args = vec![receiver];
                 if let Some(value) = call.arguments.args.first() {
-                    args.push(self.expr_expected(value, Type::Str)?);
+                    args.push(self.expr_expected(value, data_type)?);
                 }
                 return Ok(Expr {
                     ty,
                     kind: ExprKind::Builtin(builtin, args),
                 });
+            }
+            if call.arguments.args.is_empty() {
+                let conversion = match (receiver.ty, attribute.attr.as_str()) {
+                    (Type::Str, "encode") => Some((Builtin::Encode, Type::Bytes)),
+                    (Type::Bytes, "decode") => Some((Builtin::Decode, Type::Str)),
+                    _ => None,
+                };
+                if let Some((builtin, ty)) = conversion {
+                    return Ok(Expr {
+                        ty,
+                        kind: ExprKind::Builtin(builtin, vec![receiver]),
+                    });
+                }
             }
             if receiver.ty == Type::Str
                 && matches!(attribute.attr.as_str(), "split" | "splitlines")
@@ -2789,6 +2847,38 @@ impl<'a> Checker<'a> {
             ));
         };
         self.reject_builtin_keywords(call)?;
+        if name.id == "bytes" {
+            let value = match call.arguments.args.as_ref() {
+                [] => {
+                    return Ok(Expr {
+                        ty: Type::Bytes,
+                        kind: ExprKind::Bytes(Vec::new()),
+                    });
+                }
+                [value @ (ast::Expr::List(_) | ast::Expr::ListComp(_))] => {
+                    self.expr_expected(value, Type::ListInt)?
+                }
+                [value] => self.expr(value)?,
+                _ => {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "bytes accepts zero arguments or one int, list[int], or bytes argument",
+                    ));
+                }
+            };
+            if !matches!(value.ty, Type::Int | Type::ListInt | Type::Bytes) {
+                return Err(error(
+                    self.source,
+                    call,
+                    "bytes accepts exactly int, list[int], or bytes",
+                ));
+            }
+            return Ok(Expr {
+                ty: Type::Bytes,
+                kind: ExprKind::Builtin(Builtin::Bytes, vec![value]),
+            });
+        }
         let args = call
             .arguments
             .args
@@ -2823,6 +2913,7 @@ impl<'a> Checker<'a> {
                             | Type::Float
                             | Type::Bool
                             | Type::Str
+                            | Type::Bytes
                             | Type::None
                             | Type::Exception
                     ) =>
@@ -2843,7 +2934,10 @@ impl<'a> Checker<'a> {
             }
             "float"
                 if args.len() == 1
-                    && matches!(args[0].ty, Type::Int | Type::Float | Type::Bool | Type::Str) =>
+                    && matches!(
+                        args[0].ty,
+                        Type::Int | Type::Float | Type::Bool | Type::Str | Type::Bytes
+                    ) =>
             {
                 (Builtin::Float, Type::Float)
             }
@@ -2852,6 +2946,7 @@ impl<'a> Checker<'a> {
                     && matches!(
                         args[0].ty,
                         Type::Str
+                            | Type::Bytes
                             | Type::ListInt
                             | Type::List(_)
                             | Type::Dict(_)
@@ -2865,7 +2960,7 @@ impl<'a> Checker<'a> {
                 if args.len() == 1
                     && matches!(
                         args[0].ty,
-                        Type::Int | Type::Float | Type::Bool | Type::Str | Type::None
+                        Type::Int | Type::Float | Type::Bool | Type::Str | Type::Bytes | Type::None
                     ) =>
             {
                 (Builtin::Print, Type::None)
@@ -2891,10 +2986,26 @@ impl<'a> Checker<'a> {
             return Err(error(
                 self.source,
                 call,
-                "open requires a path and literal mode 'r' or 'w'",
+                "open requires a path and a literal supported text or binary mode",
             ));
         };
         check_string(mode, self.source)?;
+        if let Some(mode) = match mode.value.to_str() {
+            "rb" => Some(0),
+            "wb" => Some(1),
+            "ab" => Some(2),
+            "xb" => Some(3),
+            _ => None,
+        } {
+            self.reject_builtin_keywords(call)?;
+            return Ok(Expr {
+                ty: Type::BinaryIO,
+                kind: ExprKind::Builtin(
+                    Builtin::BinaryOpen(mode),
+                    vec![self.expr_expected(path, Type::Str)?],
+                ),
+            });
+        }
         let mode = match mode.value.to_str() {
             "r" => 0,
             "w" => 1,
@@ -2902,7 +3013,7 @@ impl<'a> Checker<'a> {
                 return Err(error(
                     self.source,
                     call,
-                    "open supports only literal 'r' or 'w' mode",
+                    "open supports literal 'r', 'w', 'rb', 'wb', 'ab', or 'xb' mode",
                 ));
             }
         };
