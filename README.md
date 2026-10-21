@@ -33,7 +33,7 @@ But not:
 ## Benchmark
 
 Running the same [inventory reconciliation program](examples/inventory_reconciliation/)
-with Relar, CPython, and Rust:
+with Relar and CPython, and comparing it with a Rust implementation:
 
 | Workload | CPython 3.14.5 (ms) | Relar (ms) | Rust (ms) | Relar speedup vs. CPython |
 | --- | ---: | ---: | ---: | ---: |
