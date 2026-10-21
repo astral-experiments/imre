@@ -76,6 +76,13 @@ struct Operand {
     ownership: Ownership,
 }
 
+/// List lengths fit tagged-small integers and need no independent owner.
+#[derive(Clone)]
+struct LengthSnapshot {
+    receiver: Value,
+    length: Value,
+}
+
 /// Finally routing chooses the eventual transfer before it reaches either
 /// the break exit or the distinct normal-exhaustion/else entry.
 #[derive(Clone)]
@@ -127,6 +134,8 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         borrowed_params: Vec::new(),
         borrowed_locals: Vec::new(),
         rooted_locals: Vec::new(),
+        length_roots: Vec::new(),
+        length_snapshots: Vec::new(),
         expression_rebound: Vec::new(),
         small_locals: Vec::new(),
         temporaries: Vec::new(),
@@ -189,6 +198,8 @@ struct Emitter<'a, 'module> {
     borrowed_params: Vec<bool>,
     borrowed_locals: Vec<bool>,
     rooted_locals: Vec<bool>,
+    length_roots: Vec<Option<usize>>,
+    length_snapshots: Vec<Option<LengthSnapshot>>,
     expression_rebound: Vec<bool>,
     small_locals: Vec<bool>,
     temporaries: Vec<Value>,
@@ -591,6 +602,75 @@ impl Emitter<'_, '_> {
         ));
     }
 
+    /// Hoists only nonallocating lengths of unchanged incoming lists in a
+    /// transitively readonly function. Nested loops share dominating snapshots;
+    /// the caller restores the previous cache after emitting this loop.
+    fn snapshot_loop_lengths(&mut self, statement: &Statement) -> Vec<Option<LengthSnapshot>> {
+        let previous = self.length_snapshots.clone();
+        let mut roots = vec![false; self.locals.len()];
+        crate::ir::walk_expressions(std::slice::from_ref(statement), &mut |expression| {
+            if let ExprKind::Builtin(Builtin::Len, args) = &expression.kind
+                && let ExprKind::Local(slot) = args[0].kind
+                && let Some(root) = self.length_roots[slot]
+            {
+                roots[root] = true;
+            }
+        });
+        for (root, needed) in roots.into_iter().enumerate() {
+            if needed && self.length_snapshots[root].is_none() {
+                let receiver = self.borrow_slot(root);
+                let length = self.list_length(&receiver);
+                self.length_snapshots[root] = Some(LengthSnapshot { receiver, length });
+            }
+        }
+        previous
+    }
+
+    /// Exact list storage bounds its length below the tagged-small maximum.
+    /// Unlike bytes or strings, this read cannot allocate a BigInt owner.
+    fn list_length(&mut self, receiver: &Value) -> Value {
+        let helper = match receiver.ty {
+            Type::ListInt => "relar_list_len",
+            Type::List(_) => "relar_seq_len",
+            _ => unreachable!("only exact lists have nonallocating snapshots"),
+        };
+        Value {
+            ty: Type::Int,
+            operand: self.instruction(format!("call i64 @{helper}(ptr {})", receiver.operand)),
+            small_integer: true,
+        }
+    }
+
+    /// Identity-only definitions do not exclude Clear/Move resets. A current
+    /// pointer guard preserves the original length read on every unequal value,
+    /// including a cleared alias; no hidden-slot liveness assumption is needed.
+    fn snapshot_length(&mut self, slot: usize, receiver: &Value) -> Option<Value> {
+        let root = self.length_roots[slot]?;
+        let snapshot = self.length_snapshots[root].clone()?;
+        if slot == root {
+            return Some(snapshot.length);
+        }
+        let same = self.instruction(format!(
+            "icmp eq ptr {}, {}",
+            receiver.operand, snapshot.receiver.operand
+        ));
+        let (fallback, end) = (self.label(), self.label());
+        let before = self.current.clone();
+        self.branch(&same, &end, &fallback);
+        self.start(&fallback);
+        let ordinary = self.list_length(receiver);
+        self.jump(&end);
+        self.start(&end);
+        Some(Value {
+            ty: Type::Int,
+            operand: self.instruction(format!(
+                "phi i64 [{}, %{before}], [{}, %{fallback}]",
+                snapshot.length.operand, ordinary.operand
+            )),
+            small_integer: true,
+        })
+    }
+
     /// Transfers a local's ownership to the returned value and leaves a valid
     /// empty/immediate value behind for subsequent reassignment or cleanup.
     fn take_slot(&mut self, slot: usize) -> Value {
@@ -881,6 +961,8 @@ impl Emitter<'_, '_> {
         self.locals = function.locals.clone();
         self.borrowed_locals = borrows.locals.clone();
         self.rooted_locals = borrows.rooted.clone();
+        self.length_roots = borrows.length_roots.clone();
+        self.length_snapshots = vec![None; self.locals.len()];
         self.small_locals = self.ranges.small_locals(function);
         self.expression_rebound = function.expression_rebound();
         let rebound = borrows::written(function);
@@ -1254,6 +1336,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Statement::While(test, body, orelse) => {
+                let previous_lengths = self.snapshot_loop_lengths(statement);
                 let (condition, body_label, end) = (self.label(), self.label(), self.label());
                 let exhausted = if orelse.is_empty() {
                     end.clone()
@@ -1284,6 +1367,7 @@ impl Emitter<'_, '_> {
                     }
                 }
                 self.start(&end);
+                self.length_snapshots = previous_lengths;
             }
             Statement::For {
                 target,
@@ -2667,19 +2751,27 @@ impl Emitter<'_, '_> {
             Builtin::Len if matches!(args[0].value.ty, Type::Tuple(_)) => {
                 small(self.module.types.fields(args[0].value.ty).unwrap().len() as i64)
             }
-            Builtin::Len => self.call(
-                match args[0].value.ty {
-                    Type::Str => "relar_str_len",
-                    Type::Bytes => "relar_bytes_len",
-                    Type::ListInt => "relar_list_len",
-                    Type::List(_) => "relar_seq_len",
-                    Type::Dict(_) => "relar_dict_len",
-                    Type::Set(_) => "relar_set_len",
-                    _ => unreachable!("len input was checked"),
-                },
-                Type::Int,
-                &[&args[0].value],
-            ),
+            Builtin::Len => {
+                if let ExprKind::Local(slot) = expressions[0].kind
+                    && let Some(length) = self.snapshot_length(slot, &args[0].value)
+                {
+                    length
+                } else {
+                    self.call(
+                        match args[0].value.ty {
+                            Type::Str => "relar_str_len",
+                            Type::Bytes => "relar_bytes_len",
+                            Type::ListInt => "relar_list_len",
+                            Type::List(_) => "relar_seq_len",
+                            Type::Dict(_) => "relar_dict_len",
+                            Type::Set(_) => "relar_set_len",
+                            _ => unreachable!("len input was checked"),
+                        },
+                        Type::Int,
+                        &[&args[0].value],
+                    )
+                }
+            }
             Builtin::ListGet => self.get_item(
                 &args[0].value,
                 &args[1].value,

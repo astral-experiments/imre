@@ -10,11 +10,41 @@ pub(crate) struct FunctionBorrows {
     pub rooted: Vec<bool>,
     /// These local slots carry borrowed words, never independent owners.
     pub locals: Vec<bool>,
+    /// Identity-only aliases of unchanged list parameters in readonly functions.
+    /// Clear/Move can reset an alias, so reads must still compare current identity.
+    pub length_roots: Vec<Option<usize>>,
 }
 
 /// Computes closed-callgraph edge preservation before deriving local roots.
 /// The separate initializer summary applies only to a newly allocated receiver.
 pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
+    let (preserves, initializes) = summaries(module, true);
+    let (readonly, readonly_initializes) = summaries(module, false);
+    module
+        .functions
+        .iter()
+        .chain([&module.entry])
+        .map(|function| {
+            let mut facts = if preserves_edges(function, &preserves, &initializes, false, true) {
+                local_roots(function, &module.types)
+            } else {
+                FunctionBorrows {
+                    rooted: vec![false; function.locals.len()],
+                    locals: vec![false; function.locals.len()],
+                    length_roots: vec![None; function.locals.len()],
+                }
+            };
+            if preserves_edges(function, &readonly, &readonly_initializes, false, false) {
+                facts.length_roots = length_roots(function, &facts);
+            }
+            facts
+        })
+        .collect()
+}
+
+/// Edge preservation permits append; length/buffer invariance additionally
+/// excludes it and reserve, including through every ordinary or fresh call.
+fn summaries(module: &Module, append: bool) -> (Vec<bool>, Vec<bool>) {
     // Unknown callees and unexpected recursive cycles retain ordinary owners.
     // The checked call graph is acyclic, so proving upward loses no precision.
     let mut preserves = vec![false; module.functions.len()];
@@ -22,8 +52,8 @@ pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
     loop {
         let mut changed = false;
         for (id, function) in module.functions.iter().enumerate() {
-            let safe = preserves_edges(function, &preserves, &initializes, false);
-            let fresh = preserves_edges(function, &preserves, &initializes, true);
+            let safe = preserves_edges(function, &preserves, &initializes, false, append);
+            let fresh = preserves_edges(function, &preserves, &initializes, true, append);
             changed |= preserves[id] != safe || initializes[id] != fresh;
             preserves[id] = safe;
             initializes[id] = fresh;
@@ -32,21 +62,7 @@ pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
             break;
         }
     }
-    module
-        .functions
-        .iter()
-        .chain([&module.entry])
-        .map(|function| {
-            if preserves_edges(function, &preserves, &initializes, false) {
-                local_roots(function, &module.types)
-            } else {
-                FunctionBorrows {
-                    rooted: vec![false; function.locals.len()],
-                    locals: vec![false; function.locals.len()],
-                }
-            }
-        })
-        .collect()
+    (preserves, initializes)
 }
 
 /// Visits statement nodes once, including statements nested inside expressions.
@@ -149,6 +165,7 @@ fn preserves_edges(
     calls: &[bool],
     constructors: &[bool],
     fresh: bool,
+    append: bool,
 ) -> bool {
     let written = written(function);
     let receiver = function
@@ -176,7 +193,7 @@ fn preserves_edges(
             }
             ExprKind::Builtin(operation, _) => {
                 readonly_builtin(operation)
-                    || matches!(operation, Builtin::Append | Builtin::ListReserveRange)
+                    || (append && matches!(operation, Builtin::Append | Builtin::ListReserveRange))
             }
             // A binding can replace an earlier borrowed operand during evaluation.
             ExprKind::Bind(..) => false,
@@ -319,7 +336,57 @@ fn local_roots(function: &Function, types: &Types) -> FunctionBorrows {
     FunctionBorrows {
         rooted: roots,
         locals: candidates,
+        length_roots: vec![None; function.locals.len()],
     }
+}
+
+/// Keeps only exact list identities. A field projection or a new allocation
+/// cannot reuse its enclosing parameter's length. Resets remain guarded at use.
+fn length_roots(function: &Function, facts: &FunctionBorrows) -> Vec<Option<usize>> {
+    let mut roots = vec![None; function.locals.len()];
+    for &slot in &function.params {
+        if facts.rooted[slot] && matches!(function.locals[slot], Type::ListInt | Type::List(_)) {
+            roots[slot] = Some(slot);
+        }
+    }
+    let mut dependencies = vec![Vec::new(); function.locals.len()];
+    let mut eligible = facts.locals.clone();
+    for (slot, eligible) in eligible.iter_mut().enumerate() {
+        *eligible &= matches!(function.locals[slot], Type::ListInt | Type::List(_));
+    }
+    statements(&function.body, &mut |statement| match statement {
+        Statement::Assign(slot, value) => {
+            if let ExprKind::Local(source) = value.kind {
+                dependencies[*slot].push(source);
+            } else {
+                eligible[*slot] = false;
+            }
+        }
+        Statement::Move(target, source) => dependencies[*target].push(*source),
+        _ => {}
+    });
+    loop {
+        let mut changed = false;
+        for slot in 0..roots.len() {
+            if !eligible[slot] || roots[slot].is_some() {
+                continue;
+            }
+            let Some(root) = dependencies[slot].first().and_then(|&source| roots[source]) else {
+                continue;
+            };
+            if dependencies[slot]
+                .iter()
+                .all(|&source| roots[source] == Some(root))
+            {
+                roots[slot] = Some(root);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    roots
 }
 
 #[cfg(test)]
@@ -693,5 +760,140 @@ def total(rows: list[Row], fail: bool) -> int:
             let facts = analyze(&module(vec![function]));
             assert!(!facts[0].rooted.iter().any(|&rooted| rooted));
         }
+    }
+
+    fn length(slot: usize, ty: Type) -> Expr {
+        Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::Len, vec![local(slot, ty)]),
+        }
+    }
+
+    #[test]
+    fn list_length_snapshots_are_shared_only_by_dominated_nested_loops() {
+        let read = Statement::Expr(length(0, Type::ListInt));
+        let inner = Statement::While(
+            local(1, Type::Bool),
+            vec![read.clone(), Statement::Break],
+            Vec::new(),
+        );
+        let outer = Statement::While(
+            local(1, Type::Bool),
+            vec![read.clone(), inner, Statement::Break],
+            Vec::new(),
+        );
+        let function = function(
+            vec![0, 1],
+            vec![Type::ListInt, Type::Bool],
+            vec![
+                Statement::If(local(1, Type::Bool), vec![outer.clone()], vec![outer]),
+                // This read is outside the conditional snapshot's dominance.
+                read,
+            ],
+        );
+        let module = module(vec![function]);
+        let body = emitted_body(&module, 0);
+        assert_eq!(
+            body.matches("call i64 @relar_list_len").count(),
+            3,
+            "{body}"
+        );
+        assert!(!body.contains("icmp eq ptr"));
+    }
+
+    #[test]
+    fn cleared_and_moved_alias_lengths_keep_identity_guards_and_original_fallbacks() {
+        for reset in [Statement::Clear(1), Statement::Move(2, 1)] {
+            let mut module = module(Vec::new());
+            let ty = module.types.list(Type::Str);
+            module.functions.push(function(
+                vec![0],
+                vec![ty; 3],
+                vec![
+                    Statement::Assign(1, local(0, ty)),
+                    Statement::While(
+                        Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Bool(true),
+                        },
+                        vec![reset, Statement::Expr(length(1, ty)), Statement::Break],
+                        Vec::new(),
+                    ),
+                ],
+            ));
+            let facts = analyze(&module);
+            assert_eq!(facts[0].length_roots[1], Some(0));
+            let body = emitted_body(&module, 0);
+            // One preheader snapshot and one original read of the current alias.
+            assert_eq!(body.matches("call i64 @relar_seq_len").count(), 2, "{body}");
+            let guard = body.find("icmp eq ptr").unwrap();
+            let fallback = body[guard..].find("call i64 @relar_seq_len").unwrap();
+            let merged = body[guard..].find("phi i64").unwrap();
+            assert!(fallback < merged, "{body}");
+            assert!(body[guard..guard + fallback].contains("br i1"), "{body}");
+        }
+    }
+
+    #[test]
+    fn transitive_append_keeps_borrowing_but_disables_length_snapshots() {
+        let append = function(
+            vec![0],
+            vec![Type::ListInt],
+            vec![Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(
+                    Builtin::Append,
+                    vec![
+                        local(0, Type::ListInt),
+                        Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Int("1".into()),
+                        },
+                    ],
+                ),
+            })],
+        );
+        let caller = function(
+            vec![0],
+            vec![Type::ListInt; 2],
+            vec![
+                Statement::Assign(1, local(0, Type::ListInt)),
+                Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Scope {
+                        body: vec![Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Call(
+                                0,
+                                CallArgs::positional(vec![local(1, Type::ListInt)]),
+                            ),
+                        })],
+                        value: Box::new(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::None,
+                        }),
+                        clear: Vec::new(),
+                    },
+                }),
+            ],
+        );
+        let facts = analyze(&module(vec![append, caller]));
+        assert!(facts[1].locals[1]);
+        assert_eq!(facts[1].length_roots, [None, None]);
+    }
+
+    #[test]
+    fn different_parameter_aliases_and_bytes_lengths_are_not_snapshotted() {
+        let function = function(
+            vec![0, 1, 2],
+            vec![Type::ListInt, Type::ListInt, Type::Bytes, Type::ListInt],
+            vec![
+                Statement::Assign(3, local(0, Type::ListInt)),
+                Statement::Assign(3, local(1, Type::ListInt)),
+            ],
+        );
+        let facts = analyze(&module(vec![function]));
+        assert!(facts[0].locals[3]);
+        assert_eq!(facts[0].length_roots, [Some(0), Some(1), None, None]);
     }
 }
