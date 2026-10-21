@@ -8,7 +8,7 @@ use ruff_db::files::{File, Files, system_path_to_file};
 use ruff_db::parsed::ParsedModuleRef;
 use ruff_db::system::{InMemorySystem, System, SystemPathBuf};
 use ruff_db::vendored::VendoredFileSystem;
-use ruff_python_ast::token::{TokenAt, TokenKind, Tokens};
+use ruff_python_ast::token::{TokenKind, Tokens};
 use ruff_text_size::{Ranged, TextSize};
 use ty_python_core::program::ProgramSettings;
 use ty_python_core::{Program, ProgramFile};
@@ -126,8 +126,10 @@ fn check_indentation(source: &str, tokens: &Tokens) -> Result<(), String> {
             if character != ' ' {
                 let position = TextSize::try_from(offset + index)
                     .map_err(|_| "source exceeds the supported size")?;
-                let in_string = matches!(tokens.at_offset(position), TokenAt::Single(token)
-                    if token.kind() == TokenKind::String && token.range().contains(position));
+                let in_string = tokens.at_offset(position).any(|token| {
+                    matches!(token.kind(), TokenKind::String | TokenKind::FStringMiddle)
+                        && token.range().contains(position)
+                });
                 if !in_string {
                     return Err(format!(
                         "line {}: indentation must use spaces, not tabs or form feeds",

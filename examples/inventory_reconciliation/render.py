@@ -4,7 +4,7 @@ from .model import Fulfillment, Report
 
 
 def line(output: TextIO, value: str) -> None:
-    output.write(value + "\n")
+    output.write(f"{value}\n")
 
 
 def show(report: Report, output: TextIO) -> None:
@@ -24,54 +24,37 @@ def show(report: Report, output: TextIO) -> None:
         filled_total += result.filled
         shortage_total += result.shortage
     line(output, "INVENTORY")
-    line(output, "STOCK_ROWS " + str(report.stock_rows))
-    line(output, "STOCK_SKUS " + str(len(report.remaining)))
-    line(output, "BATCHES " + str(report.batches))
-    line(output, "REQUEST_ROWS " + str(report.request_rows))
-    line(output, "POSITIVE_REQUESTS " + str(len(report.results)))
-    line(output, "REQUESTED_SKUS " + str(len(report.requested_skus)))
-    line(output, "TOTAL_REQUESTED " + str(requested_total))
-    line(output, "TOTAL_FILLED " + str(filled_total))
-    line(output, "TOTAL_SHORTAGE " + str(shortage_total))
-    line(output, "FULFILLMENTS " + str(len(report.results)))
+    line(output, f"STOCK_ROWS {report.stock_rows}")
+    line(output, f"STOCK_SKUS {len(report.remaining)}")
+    line(output, f"BATCHES {report.batches}")
+    line(output, f"REQUEST_ROWS {report.request_rows}")
+    line(output, f"POSITIVE_REQUESTS {len(report.results)}")
+    line(output, f"REQUESTED_SKUS {len(report.requested_skus)}")
+    line(output, f"TOTAL_REQUESTED {requested_total}")
+    line(output, f"TOTAL_FILLED {filled_total}")
+    line(output, f"TOTAL_SHORTAGE {shortage_total}")
+    line(output, f"FULFILLMENTS {len(report.results)}")
     for result in report.results:
         request = result.request
         line(
             output,
-            "FULFILL "
-            + str(request.batch)
-            + " "
-            + str(request.row)
-            + " "
-            + request.sku
-            + " "
-            + str(request.quantity)
-            + " "
-            + str(result.filled)
-            + " "
-            + str(result.shortage),
+            f"FULFILL {request.batch} {request.row} {request.sku} "
+            f"{request.quantity} {result.filled} {result.shortage}",
         )
-    line(output, "SHORTAGES " + str(len(shortages)))
+    line(output, f"SHORTAGES {len(shortages)}")
     for result in shortages:
         request = result.request
         line(
             output,
-            "SHORTAGE "
-            + str(request.batch)
-            + " "
-            + str(request.row)
-            + " "
-            + request.sku
-            + " "
-            + str(result.shortage),
+            f"SHORTAGE {request.batch} {request.row} {request.sku} {result.shortage}",
         )
-    line(output, "REQUESTED " + str(len(report.requested)))
+    line(output, f"REQUESTED {len(report.requested)}")
     for sku, quantity in report.requested.items():
-        line(output, "REQUEST " + sku + " " + str(quantity))
-    line(output, "REMAINING " + str(len(report.remaining)))
+        line(output, f"REQUEST {sku} {quantity}")
+    line(output, f"REMAINING {len(report.remaining)}")
     for sku, quantity in report.remaining.items():
-        line(output, "STOCK " + sku + " " + str(quantity))
-    line(output, "UNTOUCHED " + str(len(untouched)))
+        line(output, f"STOCK {sku} {quantity}")
+    line(output, f"UNTOUCHED {len(untouched)}")
     for sku, quantity in untouched:
-        line(output, "STOCK " + sku + " " + str(quantity))
+        line(output, f"STOCK {sku} {quantity}")
     line(output, "END")

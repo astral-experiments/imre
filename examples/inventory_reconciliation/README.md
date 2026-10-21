@@ -53,6 +53,8 @@ Malformed input is terminal and leaves an existing report untouched. Report open
 
 Nested eager list comprehensions read batches with effectful inner bounds, flatten/filter positive requests, and fulfill requests through shared mutable inventory. Dict comprehensions implement last-wins stock and ordered requested totals. Set comprehensions track requested SKUs. Filtered comprehensions derive shortages and untouched `(SKU, quantity)` tuples. These are whole-program uses of the new syntax, not replacement benchmark kernels.
 
+The renderer uses scalar f-strings for report fields and the newline passed to `write`. Fields retain their existing left-to-right evaluation and conversion order, and the report format is unchanged. Adjacent f-strings keep longer rows readable without adding intermediate strings. Relar lowers these fields through the same typed conversions and ordered string construction used by explicit concatenation.
+
 The independent [oracle](../../benchmarks/inventory_validate.py) never imports this package. It computes each fulfillment from initial stock minus cumulative earlier demand, checks conservation, and models file contents/hard-link aliases. It compares the entire filesystem, report bytes, stdout, stderr category/message, and status for every implementation. The corpus includes deterministic random inventories, empty/duplicate/ignored/unknown requests, Unicode/NUL SKUs, line boundaries, malformed counts/rows, huge quantities/counts, input/output aliases, and terminal errors. A separate Linux `/dev/full` check verifies the application's output-error boundary.
 
 ```sh
@@ -71,7 +73,7 @@ The [Rust reference](../../benchmarks/reference/inventory_reconciliation/README.
 
 `benchmarks/inventory_benchmark.py` defaults to empty and 128-request boundary cases, plus dense-repeat and sparse/unknown-SKU cases with 2,048 and 16,384 positive requests. Nonpositive rows and empty batches are retained. Each workload uses 30 measured rounds covering all six CPython/Relar/Rust orders five times, two warmups, a pinned CPU, and fresh processes/directories. Positions and within-round predecessors are balanced; cross-round predecessors are not. Complete output and directory snapshots are checked for every run, with no discarded samples.
 
-The timer includes startup/imports, file operations, parsing, eager allocations, reconciliation, complete rendering, flush/close, and exit. Build/oracle work, fixture creation, hashing/comparison, and fixture deletion are excluded. Input pages are warm; writes are not fsynced. These are whole-program results on a shared machine, not isolated comprehension costs or cold-storage throughput.
+The timer includes startup/imports, file operations, parsing, eager allocations, reconciliation, complete rendering, flush/close, and exit. Build/oracle work, fixture creation, hashing/comparison, and fixture deletion are excluded. Inputs are created before timing, OS caches are not deliberately flushed, and writes are not fsynced. These are whole-program results on a shared machine, not isolated comprehension costs or cold-storage throughput.
 
 ```sh
 python3 benchmarks/inventory_benchmark.py \

@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use ruff_python_ast as ast;
-use ruff_text_size::Ranged;
+use ruff_text_size::{Ranged, TextRange};
 
 use crate::classes::Classes;
 use crate::ir::{self, Binary, Builtin, Compare, Expr, ExprKind, Statement, Type};
@@ -590,39 +590,50 @@ fn annotation_at(
 /// source literals rather than silently compiling a different Python value.
 fn check_string(value: &ast::ExprStringLiteral, source: &str) -> Result<(), String> {
     for part in value.value.iter() {
-        if matches!(
-            part.flags.prefix(),
-            ast::str_prefix::StringLiteralPrefix::Raw { .. }
-        ) {
+        check_string_literal(part, source)?;
+    }
+    Ok(())
+}
+
+/// Checks each adjacent literal with its own raw prefix and content range.
+fn check_string_literal(value: &ast::StringLiteral, source: &str) -> Result<(), String> {
+    if matches!(
+        value.flags.prefix(),
+        ast::str_prefix::StringLiteralPrefix::Raw { .. }
+    ) {
+        Ok(())
+    } else {
+        check_string_escapes(value.content_range(), source)
+    }
+}
+
+/// Scans only literal bytes; f-string field expressions have independent prefixes.
+fn check_string_escapes(range: TextRange, source: &str) -> Result<(), String> {
+    let bytes = &source.as_bytes()[usize::from(range.start())..usize::from(range.end())];
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] != b'\\' {
+            i += 1;
             continue;
         }
-        let range = part.content_range();
-        let bytes = &source.as_bytes()[usize::from(range.start())..usize::from(range.end())];
-        let mut i = 0;
-        while i + 1 < bytes.len() {
-            if bytes[i] != b'\\' {
-                i += 1;
-                continue;
-            }
-            let width = match bytes[i + 1] {
-                b'u' => 4,
-                b'U' => 8,
-                _ => 0,
-            };
-            if width != 0
-                && let Some(hex) = bytes.get(i + 2..i + 2 + width)
-                && let Ok(hex) = std::str::from_utf8(hex)
-                && let Ok(codepoint) = u32::from_str_radix(hex, 16)
-                && (0xd800..=0xdfff).contains(&codepoint)
-            {
-                return Err(error(
-                    source,
-                    value,
-                    "surrogate string escapes are unsupported; strings must be valid UTF-8",
-                ));
-            }
-            i += 2 + width;
+        let width = match bytes[i + 1] {
+            b'u' => 4,
+            b'U' => 8,
+            _ => 0,
+        };
+        if width != 0
+            && let Some(hex) = bytes.get(i + 2..i + 2 + width)
+            && let Ok(hex) = std::str::from_utf8(hex)
+            && let Ok(codepoint) = u32::from_str_radix(hex, 16)
+            && (0xd800..=0xdfff).contains(&codepoint)
+        {
+            return Err(error(
+                source,
+                &range,
+                "surrogate string escapes are unsupported; strings must be valid UTF-8",
+            ));
         }
+        i += 2 + width;
     }
     Ok(())
 }
@@ -2008,6 +2019,7 @@ impl<'a> Checker<'a> {
                 check_string(value, self.source)?;
                 (Type::Str, ExprKind::Str(value.value.to_string()))
             }
+            ast::Expr::FString(value) => return self.fstring(value),
             ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
             ast::Expr::Name(name) if name.id == "__name__" => {
                 let name = if self.module == self.graph.entry {
@@ -2305,6 +2317,105 @@ impl<'a> Checker<'a> {
             }
         };
         Ok(Expr { ty, kind })
+    }
+
+    /// Preserves the complete adjacent-part sequence and converts each field
+    /// before evaluating the next. Sealed conversions never resolve a local `str`.
+    fn fstring(&mut self, value: &ast::ExprFString) -> Result<Expr, String> {
+        let mut parts = Vec::new();
+        for part in value.value.iter() {
+            match part {
+                ast::FStringPartRef::Literal(literal) => {
+                    check_string_literal(literal, self.source)?;
+                    parts.push(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str(literal.value.to_string()),
+                    });
+                }
+                ast::FStringPartRef::FString(fstring) => {
+                    for element in &fstring.elements {
+                        let part = match element {
+                            ast::InterpolatedStringElement::Literal(literal) => {
+                                if !matches!(
+                                    fstring.flags.prefix(),
+                                    ast::str_prefix::FStringPrefix::Raw { .. }
+                                ) {
+                                    check_string_escapes(literal.range(), self.source)?;
+                                }
+                                Expr {
+                                    ty: Type::Str,
+                                    kind: ExprKind::Str(literal.value.to_string()),
+                                }
+                            }
+                            ast::InterpolatedStringElement::Interpolation(field) => {
+                                if field.debug_text.is_some() {
+                                    return Err(error(
+                                        self.source,
+                                        field,
+                                        "debug f-string fields are unsupported",
+                                    ));
+                                }
+                                if !matches!(
+                                    field.conversion,
+                                    ast::ConversionFlag::None | ast::ConversionFlag::Str
+                                ) {
+                                    return Err(error(
+                                        self.source,
+                                        field,
+                                        "f-string conversions support only !s",
+                                    ));
+                                }
+                                if field
+                                    .format_spec
+                                    .as_ref()
+                                    .is_some_and(|spec| !spec.elements.is_empty())
+                                {
+                                    return Err(error(
+                                        self.source,
+                                        field,
+                                        "f-string format specifications must be empty",
+                                    ));
+                                }
+                                let expression = self.expr(&field.expression)?;
+                                if !matches!(
+                                    expression.ty,
+                                    Type::Int
+                                        | Type::Bool
+                                        | Type::Str
+                                        | Type::None
+                                        | Type::Exception
+                                ) {
+                                    return Err(error(
+                                        self.source,
+                                        field,
+                                        "f-string fields require exactly int, bool, str, None, or Exception",
+                                    ));
+                                }
+                                if expression.ty == Type::Str {
+                                    expression
+                                } else {
+                                    Expr {
+                                        ty: Type::Str,
+                                        kind: ExprKind::Builtin(Builtin::Str, vec![expression]),
+                                    }
+                                }
+                            }
+                        };
+                        parts.push(part);
+                    }
+                }
+            }
+        }
+        Ok(parts
+            .into_iter()
+            .reduce(|left, right| Expr {
+                ty: Type::Str,
+                kind: ExprKind::Binary(Binary::Concat, Box::new(left), Box::new(right)),
+            })
+            .unwrap_or_else(|| Expr {
+                ty: Type::Str,
+                kind: ExprKind::Str(String::new()),
+            }))
     }
 
     fn call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
