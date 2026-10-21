@@ -16,6 +16,7 @@ An ahead-of-time compiler for typed Python, written in Rust.
 - Chain assignments, unpack sequences and starred targets, and expand typed lists, sets, and dictionaries.
 - Infer concrete function signatures and consume concrete iterables with `list`, integer `sum`, and `map(int, ...)`.
 - Compose generator expressions, `zip(strict=True)`, and `reversed`, with short-circuiting `any` and `all`.
+- Pass typed function values and bound methods, use noncapturing lambdas, and compose lazy `map`/`filter` pipelines.
 - Preserve arbitrary-precision integers, shared mutation, and supported exception behavior.
 - Run compiled programs without a Python installation or a CPython dependency.
 
@@ -114,6 +115,10 @@ implementation.
 The [telemetry example](examples/telemetry_comparison/README.md) aligns two sample
 recordings, calculates integer error metrics, and searches for threshold
 violations with lazy forward and reverse iteration.
+
+The [record pipeline](examples/record_pipeline/README.md) selects eligible
+transactions with configured callbacks, transforms gross or net payouts, and
+aggregates a report through lazy `map` and `filter`.
 
 ## License
 

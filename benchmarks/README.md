@@ -162,6 +162,20 @@ The [truthiness and loop-else milestone](results/2026-10-19-truthiness-loop-else
 
 The [assignment, unpacking, and expansion milestone](results/2026-10-19-assignment-unpacking-expansion.md) adopts chained assignment, starred `sys.argv` unpacking, row unpacking, and dictionary-key expansion in the inventory reconciler. ThinLTO runs the large cases 2.71–3.63× faster than CPython and takes 1.9–9.7% more time than Rust BigInt. Four families compare the updated application and unchanged previous source under ordinary and ThinLTO linking, retaining all 4,608 measured executions. The report includes the preserved-Relar comparisons, sample spreads, independently audited provenance, 2,417 semantic checks, 92 Rust tests, and inventory ASan/LSan validation. These measurements assess the compatibility milestone; they do not establish an isolated syntax cost or a native speedup.
 
+## Callback record pipeline
+
+The [payout example](../examples/record_pipeline/README.md) selects records with
+bound policy methods, returns a gross or net transform as a typed callable, and
+composes lazy `map`/`filter` with a noncapturing lambda. `record_validate.py`
+checks complete output and filesystem effects against an independent arithmetic
+oracle, CPython, and the [checked-i64/BigInt Rust reference](reference/record_pipeline/README.md).
+
+`record_benchmark.py` separates compilation/oracle preparation from timing. It
+compares gross/net and full/selective filtering at 32 and 4,096 records, with
+balanced three-engine orders, repeated queries, and an empty-input control.
+The reference guide gives reproduction commands, timing boundaries, storage
+differences and matched ordinary/ThinLTO settings.
+
 ## Telemetry comparison
 
 The [telemetry comparator](../examples/telemetry_comparison/README.md) aligns two recordings, computes signed/absolute/squared integer error, and answers threshold queries with generator expressions, strict `zip`, `reversed`, `any`, and `all`. `telemetry_validate.py` compares complete output and filesystem effects against an independent indexed oracle, CPython, and an independent Rust implementation with checked native arithmetic and a BigInt fallback.
