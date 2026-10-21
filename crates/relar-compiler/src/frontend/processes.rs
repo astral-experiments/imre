@@ -58,7 +58,7 @@ impl Checker<'_> {
         .collect::<Vec<_>>();
         let supplied = self.arguments_with(call, &params, None, |checker, index, argument| {
             match index {
-                1 => checker.process_directory(argument),
+                1 => checker.optional_path_argument(argument),
                 4 | 6 => {
                     if !matches!(argument, ast::Expr::BooleanLiteral(value) if value.value) {
                         return Err(error(checker.source, argument, "process capture_output and text require literal True"));
@@ -108,7 +108,10 @@ impl Checker<'_> {
     }
 
     /// Path conversion is sealed and pure; optional paths retain their absence.
-    fn process_directory(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+    pub(super) fn optional_path_argument(
+        &mut self,
+        expression: &ast::Expr,
+    ) -> Result<Expr, String> {
         let value = self.expr(expression)?;
         let expected = self.types.optional(Type::Str);
         if value.ty == Type::Path {

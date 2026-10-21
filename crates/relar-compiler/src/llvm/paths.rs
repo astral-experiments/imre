@@ -11,6 +11,46 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            PathOperation::Mkdir => {
+                let parents = self.instruction(format!("zext i1 {} to i8", args[2].value.operand));
+                let exist_ok = self.instruction(format!("zext i1 {} to i8", args[3].value.operand));
+                self.checked_line(format!(
+                    "call void @relar_path_mkdir(ptr {}, i64 {}, i8 {parents}, i8 {exist_ok})",
+                    args[0].value.operand, args[1].value.operand,
+                ));
+                none()
+            }
+            PathOperation::Unlink => {
+                let missing_ok =
+                    self.instruction(format!("zext i1 {} to i8", args[1].value.operand));
+                self.checked_line(format!(
+                    "call void @relar_path_unlink(ptr {}, i8 {missing_ok})",
+                    args[0].value.operand,
+                ));
+                none()
+            }
+            PathOperation::Rmdir | PathOperation::CleanupTemporaryDirectory => {
+                let name = if matches!(operation, PathOperation::Rmdir) {
+                    "relar_path_rmdir"
+                } else {
+                    "relar_tempdir_cleanup"
+                };
+                self.checked_line(format!("call void @{name}(ptr {})", args[0].value.operand));
+                none()
+            }
+            PathOperation::TemporaryDirectory => {
+                let directory =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[0].value.operand));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @relar_tempdir_new(ptr {directory}, ptr {}, ptr {})",
+                    args[1].value.operand, args[2].value.operand,
+                ));
+                self.owned(Value {
+                    ty: Type::Str,
+                    operand,
+                    small_integer: false,
+                })
+            }
             PathOperation::Exists | PathOperation::IsFile | PathOperation::IsDir => {
                 let name = match operation {
                     PathOperation::Exists => "exists",
@@ -69,6 +109,7 @@ impl Emitter<'_, '_> {
                     PathOperation::Parent => "relar_path_parent",
                     PathOperation::ReadText => "relar_path_read_text",
                     PathOperation::WriteText => "relar_path_write_text",
+                    PathOperation::Replace => "relar_path_replace",
                     _ => unreachable!("special path ABIs were handled above"),
                 };
                 self.call(

@@ -2246,9 +2246,9 @@ impl<'a> Checker<'a> {
         Ok((result.into_iter().collect(), true))
     }
 
-    /// Only sealed file managers are accepted. Enter precedes installation of
-    /// its own finally, while already-entered outer managers protect later
-    /// expressions. Cleanup uses an independent root if the user rebinds `as`.
+    /// Sealed files and direct temporary-directory scopes share normal finally
+    /// transfers. An independent root keeps cleanup tied to the entered resource
+    /// when the visible target is rebound or a later manager fails to enter.
     fn with_items(
         &mut self,
         items: &[ast::WithItem],
@@ -2257,12 +2257,25 @@ impl<'a> Checker<'a> {
         let Some((item, remaining)) = items.split_first() else {
             return self.block(body);
         };
-        let manager = self.expr(&item.context_expr)?;
-        if !matches!(manager.ty, Type::TextIO | Type::BinaryIO) {
+        let temporary = if let ast::Expr::Call(call) = &item.context_expr
+            && matches!(
+                self.resolve(&call.func),
+                Some(Binding::Intrinsic(Intrinsic::TemporaryDirectory))
+            ) {
+            Some(call)
+        } else {
+            None
+        };
+        let manager = if let Some(call) = temporary {
+            self.temporary_directory(call)?
+        } else {
+            self.expr(&item.context_expr)?
+        };
+        if temporary.is_none() && !matches!(manager.ty, Type::TextIO | Type::BinaryIO) {
             return Err(error(
                 self.source,
                 &item.context_expr,
-                "with requires a sealed text or binary file",
+                "with requires a sealed file or a direct TemporaryDirectory call",
             ));
         }
         let captured = self.hidden(manager.ty);
@@ -2279,24 +2292,30 @@ impl<'a> Checker<'a> {
         }
         let (nested, falls) = self.with_items(remaining, body)?;
         protected.extend(nested);
+        let mut statements = vec![Statement::Assign(captured, manager)];
+        if temporary.is_none() {
+            statements.push(Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(Builtin::TextEnter, vec![self.local(captured)]),
+            }));
+        }
+        let cleanup = if temporary.is_some() {
+            Builtin::Path(ir::PathOperation::CleanupTemporaryDirectory)
+        } else {
+            Builtin::TextClose
+        };
+        statements.push(Statement::Try {
+            body: protected,
+            handlers: Vec::new(),
+            orelse: Vec::new(),
+            finalbody: vec![Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(cleanup, vec![self.local(captured)]),
+            })],
+        });
         Ok((
             vec![Statement::Scope {
-                body: vec![
-                    Statement::Assign(captured, manager),
-                    Statement::Expr(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::Builtin(Builtin::TextEnter, vec![self.local(captured)]),
-                    }),
-                    Statement::Try {
-                        body: protected,
-                        handlers: Vec::new(),
-                        orelse: Vec::new(),
-                        finalbody: vec![Statement::Expr(Expr {
-                            ty: Type::None,
-                            kind: ExprKind::Builtin(Builtin::TextClose, vec![self.local(captured)]),
-                        })],
-                    },
-                ],
+                body: statements,
                 clear: vec![captured],
             }],
             falls,
@@ -3130,6 +3149,16 @@ impl<'a> Checker<'a> {
 
     fn call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
+        if matches!(
+            self.resolve(&call.func),
+            Some(Binding::Intrinsic(Intrinsic::TemporaryDirectory))
+        ) {
+            return Err(error(
+                self.source,
+                call,
+                "TemporaryDirectory must be constructed directly in a with statement",
+            ));
+        }
         if matches!(
             self.resolve(&call.func),
             Some(Binding::Intrinsic(Intrinsic::SubprocessRun))

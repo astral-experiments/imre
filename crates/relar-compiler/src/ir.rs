@@ -437,6 +437,13 @@ pub(crate) enum PathOperation {
     IsDir,
     ReadText,
     WriteText,
+    Mkdir,
+    Unlink,
+    Rmdir,
+    Replace,
+    /// Scoped creation returns a hidden owned pathname, not an escaping manager.
+    TemporaryDirectory,
+    CleanupTemporaryDirectory,
     Iterdir,
     Glob,
     Next,
