@@ -21,7 +21,7 @@ Relar supports:
 - Common control flow, comprehensions, and immediately consumed iterator pipelines
 - Selected file and path operations
 
-Relar does not support:
+But not:
 
 - Dynamically typed storage (`Any` or unrestricted unions)
 - Recursive calls or closures that capture variables
