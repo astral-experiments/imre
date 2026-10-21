@@ -9,7 +9,8 @@ This is a deliberately restricted Python dialect for closed first-party programs
 | Modules | Closed first-party UTF-8 source graph; definitions and imports precede executable entry statements; optional module/function docstrings |
 | Imports | Absolute, `from`, and package-relative imports; aliases and package re-exports; fixed module and definition bindings; no import cycles |
 | Functions | Required parameter and return annotations; positional calls; direct, fixed bindings; no recursive call cycles |
-| Types | `int`, `bool`, `str`, `None`, `list[int]`; locals have one inferred or declared type |
+| Types | `int`, `bool`, `str`, `None`, `list[int]`, and fixed nominal classes; locals have one inferred or declared type |
+| Classes | Declared fields, an explicit initializer, typed instance methods, alias-visible field mutation, and integer field augmented assignment |
 | Statements | Single-target assignment, annotated assignment, integer augmented assignment, `if`/`elif`/`else`, `while`, `for name in range(...)`, `break`, `continue`, `return`, `pass`, `assert condition` |
 | Conditions | Explicit `bool`; `and`, `or`, `not`; short-circuit evaluation |
 | Integers | Arbitrary precision; `+`, `-`, `*`, `//`, `%`; unary `+`/`-`; all six value comparisons, including chains |
@@ -21,7 +22,7 @@ Booleans have a separate exact type: use `int(flag)` to store one in an integer 
 
 Indentation must use spaces; tabs and form feeds remain valid inside string data. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
 
-Mutable global values, first-class functions, closures, classes, decorators, reflection, arbitrary value attributes, generators, async, comprehensions, slicing, unpacking, keyword/default arguments, loop `else`, mutable-list augmented assignment, and identity comparisons are currently rejected. Conditions cannot rely on implicit truthiness. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion; a future recursion feature needs an explicit stack policy.
+Mutable global values, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generators, async, comprehensions, slicing, unpacking, keyword/default arguments, loop `else`, mutable-list augmented assignment, and the `is`/`is not` operators are currently rejected. Conditions cannot rely on implicit truthiness. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods or constructors; a future recursion feature needs an explicit stack policy.
 
 ## First-party module graphs
 
@@ -35,13 +36,35 @@ Imports are resolved statically from `.py` files and packages with `__init__.py`
 
 The I/O surface is intentionally small. `input()` reads a UTF-8 line and strips its LF or CRLF terminator. `int(str)` accepts signed ASCII decimal digits with optional separators between digits and surrounding whitespace. Other bases and Unicode decimal digits in input strings are outside this prototype's input format. Surrogate escapes in non-raw string literals are rejected: Ruff's analysis AST substitutes replacement characters for them, which is unsuitable for executable semantics. String methods, formatting, concatenation, and arbitrary codecs are not implemented. CPython's configurable integer conversion digit limit is not reproduced.
 
+## Fixed classes
+
+A class has one nominal identity and a fixed set of declared fields. Import aliases and package re-exports preserve that identity; another class with identical fields remains a different type. Fields may store any supported scalar, an integer list, or another fixed class. Class names, module-qualified class names, and quoted class names are accepted in annotations. Quote forward references when the class is not yet defined, including a method's reference to its own class.
+
+```python
+class Counter:
+    value: int
+
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+    def add(self, amount: int) -> int:
+        self.value += amount
+        return self.value
+```
+
+Class bodies contain field annotations without defaults, instance methods, and optional docstrings. Every method's first positional parameter is named `self`; its exact class type is inferred, or an explicit annotation must name that class. Other parameters and every return value require annotations. Method calls use the receiver's exact class and a fixed implementation. Passing or returning an instance preserves its identity, and aliases observe field replacement. `==` and `!=` between instances of the same class compare object identity.
+
+Every class requires `__init__(...) -> None`, including classes with no fields. Its body contains only straight-line `self.field = expression` assignments, docstrings, and `pass`. Every declared field must be assigned exactly once. Assignment values may use constructor arguments and checked expressions, but cannot read or pass `self`; a partially initialized object never escapes construction. Local assignments, conditionals, loops, explicit returns, and direct later calls to `__init__` are rejected.
+
+Inheritance, metaclasses, class variables, field defaults, properties, static/class methods, dynamically added fields, and special methods other than `__init__` are unsupported. Field and method names beginning with `__` are reserved, except the initializer. Class-field ownership types must form an acyclic graph: direct or indirect self-containing class fields are rejected even when unused. Methods may accept or return their own class. Lists still contain only integers; optional references and richer containers are separate language features.
+
 ## Ownership and errors
 
-Assignment and return expressions produce owned references when their type needs one. Operator and call operands may borrow a direct local: expressions cannot rebind a caller's slot in this closed subset. Parameter bindings that are never reassigned borrow their caller's root; other local slots own their values and release them on exit. A return acquires or transfers ownership even when returning a borrowed parameter. List-element reads, pops, and computed results remain owned across later evaluation, so mutation cannot invalidate an intermediate value. An assignment publishes the replacement before dropping the old value. Ordinary subscript assignment evaluates the RHS first; augmented assignment instead captures the target and old item before evaluating its RHS.
+Assignment and return expressions produce owned references when their type needs one. Operator and call operands may borrow a direct local: expressions cannot rebind a caller's slot in this closed subset. Parameter bindings that are never reassigned borrow their caller's root; other local slots own their values and release them on exit. A return acquires or transfers ownership even when returning a borrowed parameter. List-element reads, field reads, pops, and computed results remain owned across later evaluation, so mutation cannot invalidate an intermediate value. This also keeps a method receiver alive if later arguments replace its original field. An assignment publishes the replacement before dropping the old value. Ordinary subscript and field assignment evaluate the RHS first; augmented assignment instead captures the target and old value before evaluating its RHS.
 
 Small signed 63-bit integers use tagged machine words. Checked arithmetic promotes to `num-bigint` when needed and can demote back to an immediate value. No integer-overflow assumption is handed to LLVM. Bounds and division-by-zero checks remain active at every optimization level. List storage never escapes the Rust runtime, and a read acquires an owned element reference before a later mutation can remove it.
 
-Heap objects are nonmoving reference-counted allocations. Integer-only lists cannot form cycles. There are no finalizers or user callbacks under runtime borrows. This is not yet a general garbage collector, extension ABI, sandbox, or proof of memory safety; those claims would require additional design and evidence.
+Heap objects are nonmoving reference-counted allocations. Fixed objects own their stored field values; writes acquire the replacement before releasing the displaced value, and field reads acquire ownership before the receiver can be released. Mutable storage borrows end before displaced owners are dropped. Integer-only lists and the acyclic class-field type graph cannot form reference cycles. There are no finalizers or user callbacks under runtime borrows. This is not yet a general garbage collector, extension ABI, sandbox, or proof of memory safety; those claims would require additional design and evidence.
 
 Runtime errors print an exception category and exit with status 1. There are no catchable exceptions or Python tracebacks yet. Normal return paths release references; fatal process-exit paths rely on process teardown. Allocation failures may terminate the process. `assert` is always enabled, independent of LLVM optimization.
 
@@ -56,6 +79,7 @@ target/release/relar build tests/programs/ownership.py -o /tmp/ownership --emit-
 /tmp/ownership
 python3 tests/differential.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/imports.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+python3 tests/classes.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 ```
 
 `--runtime` selects a static library explicitly; otherwise it is found beside the compiler executable. `--clang` selects the Clang driver and `--opt-level` selects 0 through 3 (default 3). Every input module, executable, runtime, and saved LLVM output must have a distinct file identity; symlinks and hard links cannot bypass the input overwrite check.
@@ -65,3 +89,5 @@ python3 tests/imports.py --compiler target/release/relar --runtime target/releas
 The differential suite compares full stdout with CPython at `-O0` and `-O3`, covering 260 integer pairs, aliases, ownership across calls and replacement, evaluation order, short-circuiting, loops, and runtime errors. Separate rejection cases cover type violations, ignored errors, unsupported dynamic operations, and recursive calls. These are correctness checks, not performance measurements.
 
 The imports suite compares multi-file programs with CPython at `-O0` and `-O3`, including package entry points, aliases, re-exports, relative imports, late function-global lookup, and mutation across module boundaries. It also checks invalid imports, unused invalid code, source diagnostics, and protection of imported files from output writes.
+
+The classes suite checks nominal types, imported class aliases, field replacement, temporary receivers, returns, method argument evaluation, and normal-exit ownership at `-O0` and `-O3`. Rejection cases cover incomplete construction, escaping `self`, invalid writes, dynamic class features, recursive calls, and cyclic field types. All three suites also run generated-code AddressSanitizer checks at `-O1` in CI.

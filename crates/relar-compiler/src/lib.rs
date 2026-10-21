@@ -1,4 +1,5 @@
 mod analysis;
+mod classes;
 mod frontend;
 mod ir;
 mod llvm;

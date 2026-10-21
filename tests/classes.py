@@ -1,0 +1,179 @@
+"""Compare fixed-class programs with CPython and reject unsafe class shapes."""
+
+import argparse
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "classes"
+CELL = """class Cell:
+    value: int
+
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+    def add(self, amount: int) -> int:
+        self.value += amount
+        return self.value
+
+"""
+
+
+REJECTED = {
+    "wrong_field_type": CELL + 'value = Cell(1)\nvalue.value = "wrong"\n',
+    "wrong_alias_type": CELL + "value = Cell(1)\nalias = value\nalias.value = True\n",
+    "ignored_field_type": CELL + 'value = Cell(1)\nvalue.value = "wrong"  # type: ignore\n',
+    "wrong_constructor_type": CELL + 'Cell("wrong")\n',
+    "wrong_constructor_arity": CELL + "Cell()\n",
+    "wrong_method_type": CELL + 'value = Cell(1)\nvalue.add("wrong")\n',
+    "wrong_method_arity": CELL + "value = Cell(1)\nvalue.add()\n",
+    "explicit_initializer_call": CELL + "value = Cell(1)\nvalue.__init__(2)\n",
+    "missing_method_annotation": CELL.replace("amount: int", "amount"),
+    "missing_method_return": CELL.replace("def add(self, amount: int) -> int:", "def add(self, amount: int):"),
+    "wrong_method_return": CELL.replace("return self.value", 'return "wrong"'),
+    "wrong_self_name": CELL.replace("def __init__(self,", "def __init__(other,").replace("self.value = value", "other.value = value"),
+    "wrong_self_annotation": CELL.replace("def __init__(self,", "def __init__(self: int,"),
+    "missing_self": CELL.replace("def add(self, amount: int)", "def add(amount: int)"),
+    "method_default": CELL.replace("amount: int)", "amount: int = 1)"),
+    "method_keyword_call": CELL + "Cell(1).add(amount=2)\n",
+    "recursive_method": CELL.replace("return self.value", "return self.add(amount)"),
+    "mutual_method_recursion": CELL.replace("return self.value", "return self.other(amount)")
+        + "    def other(self, amount: int) -> int:\n        return self.add(amount)\n",
+    "constructor_factory_recursion": CELL.replace("self.value = value", "self.value = construct_value(value)")
+        + "def construct_value(value: int) -> int:\n    return Cell(value).value\n",
+    "first_class_method": CELL + "value = Cell(1)\nmethod = value.add\n",
+    "unbound_method_call": CELL + "Cell.add(Cell(1), 2)\n",
+    "untyped_constructor": CELL.replace("def __init__(self, value: int)", "def __init__(self, value)"),
+    "dynamic_attribute": CELL + "value = Cell(1)\nvalue.extra = 2\n",
+    "dynamic_lookup": CELL + 'print(getattr(Cell(1), "value"))\n',
+    "instance_dictionary": CELL + "print(Cell(1).__dict__)\n",
+    "field_default": CELL.replace("    value: int\n", "    value: int = 0\n", 1),
+    "duplicate_field": CELL.replace("    value: int\n", "    value: int\n    value: int\n", 1),
+    "field_method_collision": CELL.replace("def add(", "def value("),
+    "missing_initializer": "class Cell:\n    value: int\n",
+    "missing_field": CELL.replace("self.value = value", "pass"),
+    "duplicate_initialization": CELL.replace("self.value = value", "self.value = value\n        self.value = value"),
+    "undeclared_initialization": CELL.replace("self.value = value", "self.other = value"),
+    "constructor_self_read": CELL.replace("self.value = value", "self.value = self.add(value)"),
+    "constructor_self_escape": CELL.replace("self.value = value", "self.value = escape(self)")
+        + "def escape(value: Cell) -> int:\n    return 0\n",
+    "constructor_control_flow": CELL.replace("self.value = value", "if value > 0:\n            self.value = value\n        else:\n            self.value = 0"),
+    "constructor_side_effect": CELL.replace("self.value = value", "print(value)\n        self.value = value"),
+    "constructor_local": CELL.replace("self.value = value", "temporary = value\n        self.value = temporary"),
+    "constructor_return": CELL.replace("self.value = value", "self.value = value\n        return"),
+    "inheritance": CELL + "class Child(Cell):\n    def __init__(self, value: int) -> None:\n        self.value = value\n",
+    "metaclass": CELL.replace("class Cell:", "class Cell(metaclass=type):"),
+    "magic_method": CELL + '    def __str__(self) -> str:\n        return "Cell"\n',
+    "finalizer": CELL + "    def __del__(self) -> None:\n        pass\n",
+    "private_mangling": CELL.replace("value", "__value"),
+    "class_surrogate_docstring": CELL.replace("class Cell:\n", 'class Cell:\n    "\\ud800"\n'),
+    "staticmethod": CELL.replace("    def add(", "    @staticmethod\n    def add("),
+    "classmethod": CELL.replace("    def add(", "    @classmethod\n    def add("),
+    "property": CELL.replace("    def add(", "    @property\n    def add("),
+    "unused_dynamic_method": CELL.replace("return self.value", 'if False:\n            eval("1")\n        return self.value'),
+    "same_shape_different_nominal_type": CELL
+        + CELL.replace("Cell", "Other")
+        + "def consume(value: Cell) -> int:\n    return value.value\nconsume(Other(1))\n",
+    "direct_field_cycle": 'class Node:\n    next: "Node"\n    def __init__(self, next: "Node") -> None:\n        self.next = next\n',
+    "mutual_field_cycle": 'class Left:\n    right: "Right"\n    def __init__(self, right: "Right") -> None:\n        self.right = right\n\nclass Right:\n    left: Left\n    def __init__(self, left: Left) -> None:\n        self.left = left\n',
+}
+
+
+IMPORTED_REJECTIONS = {
+    "imported_nominal_mismatch": {
+        "main.py": "from first import Cell as First\nfrom second import Cell as Second\ndef consume(value: First) -> int:\n    return value.value\nconsume(Second(1))\n",
+        "first.py": CELL,
+        "second.py": CELL,
+    },
+    "imported_wrong_field": {
+        "main.py": 'from model import Cell\nvalue = Cell(1)\nvalue.value = "wrong"\n',
+        "model.py": CELL,
+    },
+    "unused_imported_bad_class": {
+        "main.py": "import model\nprint(1)\n",
+        "model.py": CELL.replace("self.value = value", "self.value = escape(self)")
+            + "def escape(value: Cell) -> int:\n    return 0\n",
+    },
+}
+
+
+def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        cwd=cwd,
+        input="",
+        text=True,
+        capture_output=True,
+        timeout=60,
+        env={**os.environ, "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1"},
+    )
+
+
+def write_files(root: Path, files: dict[str, str]) -> None:
+    for name, source in files.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+
+
+def require_success(result: subprocess.CompletedProcess[str]) -> None:
+    assert result.returncode == 0 and not result.stderr, (result.args, result.stdout, result.stderr)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--compiler", required=True, type=Path)
+    parser.add_argument("--runtime", required=True, type=Path)
+    parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--clang", default="clang")
+    parser.add_argument("--opt-levels", nargs="+", choices=["0", "1", "2", "3"], default=["0", "3"])
+    parser.add_argument("--sanitize", action="store_true")
+    args = parser.parse_args()
+    compiler = str(args.compiler.resolve())
+    runtime = str(args.runtime.resolve())
+    python = str(Path(args.python).resolve()) if "/" in args.python else args.python
+    clang = str(Path(args.clang).resolve()) if "/" in args.clang else args.clang
+    checks = 0
+    with tempfile.TemporaryDirectory(prefix="relar-classes-") as directory:
+        temporary = Path(directory)
+        project = temporary / "project"
+        shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
+        for relative in ["ownership.py", "imported/main.py"]:
+            source = project / relative
+            reference = run([python, "-E", str(source)], temporary)
+            require_success(reference)
+            require_success(run([compiler, "check", str(source)], temporary))
+            for level in args.opt_levels:
+                executable = temporary / f"{source.parent.name}-{source.stem}-O{level}"
+                command = [compiler, "build", str(source), "-o", str(executable),
+                           "--runtime", runtime, "--clang", clang, "--opt-level", level]
+                if args.sanitize:
+                    command.append("--sanitize")
+                require_success(run(command, temporary))
+                actual = run([str(executable)], temporary)
+                require_success(actual)
+                assert actual.stdout == reference.stdout, (relative, level, actual.stdout, reference.stdout)
+                checks += 1
+
+        rejected = {name: {"main.py": source} for name, source in REJECTED.items()}
+        rejected.update(IMPORTED_REJECTIONS)
+        for name, files in rejected.items():
+            case = temporary / name
+            write_files(case, files)
+            result = run([compiler, "check", str(case / "main.py")], temporary)
+            assert result.returncode > 0 and result.stderr, (name, result.stdout, result.stderr)
+            assert "panicked" not in result.stderr and "AddressSanitizer" not in result.stderr, (name, result.stderr)
+            if name in {"direct_field_cycle", "mutual_field_cycle"}:
+                assert "cyclic heap types are unsupported" in result.stderr, (name, result.stderr)
+            if name in {"recursive_method", "mutual_method_recursion", "constructor_factory_recursion"}:
+                assert "recursive calls are unsupported" in result.stderr, (name, result.stderr)
+            checks += 1
+    print(f"Passed {checks} class checks ({len(REJECTED) + len(IMPORTED_REJECTIONS)} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})")
+
+
+if __name__ == "__main__":
+    main()

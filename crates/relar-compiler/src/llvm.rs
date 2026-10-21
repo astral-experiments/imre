@@ -9,7 +9,7 @@ impl Type {
         match self {
             Self::Int => "i64",
             Self::Bool => "i1",
-            Self::Str | Self::ListInt => "ptr",
+            Self::Str | Self::ListInt | Self::Class(_) => "ptr",
             Self::None => "i8",
         }
     }
@@ -17,7 +17,7 @@ impl Type {
     fn initial(self) -> &'static str {
         match self {
             Self::Int => "1",
-            Self::Str | Self::ListInt => "null",
+            Self::Str | Self::ListInt | Self::Class(_) => "null",
             Self::Bool | Self::None => "0",
         }
     }
@@ -151,6 +151,7 @@ impl Emitter {
             Type::Int => "retain_int",
             Type::Str => "relar_str_retain",
             Type::ListInt => "relar_list_retain",
+            Type::Class(_) => "relar_object_retain",
             Type::Bool | Type::None => return,
         };
         self.void_call(name, &[value]);
@@ -161,6 +162,7 @@ impl Emitter {
             Type::Int => "release_int",
             Type::Str => "relar_str_release",
             Type::ListInt => "relar_list_release",
+            Type::Class(_) => "relar_object_release",
             Type::Bool | Type::None => return,
         };
         self.void_call(name, &[value]);
@@ -340,6 +342,24 @@ impl Emitter {
                 self.release(&old);
                 self.release_operand(&index);
                 self.release_operand(&list);
+            }
+            Statement::SetField(receiver, field, expression) => {
+                let value = self.operand(expression);
+                let receiver = self.operand(receiver);
+                self.set_field(&receiver.value, *field, &value.value);
+                self.release_operand(&receiver);
+                self.release_operand(&value);
+            }
+            Statement::AugmentField(receiver, field, op, expression) => {
+                let receiver = self.operand(receiver);
+                let old = self.get_field(&receiver.value, *field, Type::Int);
+                let right = self.operand(expression);
+                let value = self.binary(*op, &old, &right.value);
+                self.set_field(&receiver.value, *field, &value);
+                self.release(&value);
+                self.release_operand(&right);
+                self.release(&old);
+                self.release_operand(&receiver);
             }
             Statement::Expr(expression) => {
                 let value = self.expr(expression);
@@ -542,6 +562,31 @@ impl Emitter {
                 }
                 result
             }
+            ExprKind::Construct {
+                initializer,
+                fields,
+                args,
+            } => {
+                // Arguments are evaluated and rooted before __init__ starts.
+                let args = args.iter().map(|arg| self.operand(arg)).collect::<Vec<_>>();
+                let object = Value {
+                    ty: expression.ty,
+                    operand: self.instruction(format!("call ptr @relar_object_new(i64 {fields})")),
+                };
+                let mut inputs = vec![&object];
+                inputs.extend(args.iter().map(|arg| &arg.value));
+                self.call(&format!("fn_{initializer}"), Type::None, &inputs);
+                for arg in &args {
+                    self.release_operand(arg);
+                }
+                object
+            }
+            ExprKind::Field(receiver, field) => {
+                let receiver = self.operand(receiver);
+                let value = self.get_field(&receiver.value, *field, expression.ty);
+                self.release_operand(&receiver);
+                value
+            }
             ExprKind::Builtin(builtin, args) => self.builtin(builtin, args),
         }
     }
@@ -593,7 +638,7 @@ impl Emitter {
                 };
                 self.instruction(format!("icmp {predicate} i8 {equal}, 0"))
             }
-            Type::Bool | Type::None => self.instruction(format!(
+            Type::Bool | Type::None | Type::Class(_) => self.instruction(format!(
                 "icmp {predicate} {} {}, {}",
                 left.ty.llvm(),
                 left.operand,
@@ -713,7 +758,9 @@ impl Emitter {
                         self.line(format!("call void @relar_print_bool(i8 {byte})"));
                     }
                     Type::None => self.void_call("relar_print_none", &[]),
-                    Type::ListInt => unreachable!("list printing is rejected"),
+                    Type::ListInt | Type::Class(_) => {
+                        unreachable!("container printing is rejected")
+                    }
                 }
                 none()
             }
@@ -722,6 +769,63 @@ impl Emitter {
             self.release_operand(arg);
         }
         result
+    }
+
+    /// Converts a typed value to the runtime's word representation without
+    /// changing ownership. The slot's representation tag controls reclamation.
+    fn word(&mut self, value: &Value) -> String {
+        match value.ty {
+            Type::Int => value.operand.clone(),
+            Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
+            Type::None => "0".to_owned(),
+            Type::Str | Type::ListInt | Type::Class(_) => {
+                self.instruction(format!("ptrtoint ptr {} to i64", value.operand))
+            }
+        }
+    }
+
+    /// Reconstitutes the exact type established by the contract checker. Runtime
+    /// getters transfer an owned reference before releasing their container borrow.
+    fn unpack_word(&mut self, word: String, ty: Type) -> Value {
+        let operand = match ty {
+            Type::Int => word,
+            Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
+            Type::None => "0".to_owned(),
+            Type::Str | Type::ListInt | Type::Class(_) => {
+                self.instruction(format!("inttoptr i64 {word} to ptr"))
+            }
+        };
+        Value { ty, operand }
+    }
+
+    fn get_field(&mut self, receiver: &Value, field: usize, ty: Type) -> Value {
+        let word = self.instruction(format!(
+            "call i64 @relar_object_get(ptr {}, i64 {field})",
+            receiver.operand
+        ));
+        self.unpack_word(word, ty)
+    }
+
+    /// The runtime acquires the replacement before releasing the old field.
+    fn set_field(&mut self, receiver: &Value, field: usize, value: &Value) {
+        let word = self.word(value);
+        self.line(format!(
+            "call void @relar_object_set(ptr {}, i64 {field}, i64 {word}, i32 {})",
+            receiver.operand,
+            representation_kind(value.ty)
+        ));
+    }
+}
+
+/// Must match the owned-slot representation tags in the runtime's objects module.
+fn representation_kind(ty: Type) -> u32 {
+    match ty {
+        Type::None => 0,
+        Type::Bool => 1,
+        Type::Int => 2,
+        Type::Str => 3,
+        Type::ListInt => 4,
+        Type::Class(_) => 5,
     }
 }
 
@@ -742,6 +846,8 @@ fn mark_rebound(statements: &[Statement], rebound: &mut [bool]) {
             }
             Statement::SetItem(..)
             | Statement::AugmentItem(..)
+            | Statement::SetField(..)
+            | Statement::AugmentField(..)
             | Statement::Expr(_)
             | Statement::Return(_)
             | Statement::Break
@@ -766,6 +872,11 @@ fn none() -> Value {
 }
 
 const DECLARATIONS: &str = r#"
+declare ptr @relar_object_new(i64)
+declare i64 @relar_object_get(ptr, i64)
+declare void @relar_object_set(ptr, i64, i64, i32)
+declare void @relar_object_retain(ptr)
+declare void @relar_object_release(ptr)
 declare void @relar_int_retain(i64)
 declare void @relar_int_release(i64)
 declare i64 @relar_int_literal(ptr, i64)

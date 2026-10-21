@@ -7,17 +7,22 @@ pub(crate) enum Type {
     Bool,
     Str,
     ListInt,
+    Class(usize),
     None,
 }
 
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Self::Class(id) = self {
+            return write!(f, "class#{id}");
+        }
         f.write_str(match self {
             Self::Int => "int",
             Self::Bool => "bool",
             Self::Str => "str",
             Self::ListInt => "list[int]",
             Self::None => "None",
+            Self::Class(_) => unreachable!(),
         })
     }
 }
@@ -52,6 +57,12 @@ pub(crate) enum ExprKind {
     Not(Box<Expr>),
     Negate(Box<Expr>),
     Call(usize, Vec<Expr>),
+    Construct {
+        initializer: usize,
+        fields: usize,
+        args: Vec<Expr>,
+    },
+    Field(Box<Expr>, usize),
     Builtin(Builtin, Vec<Expr>),
 }
 
@@ -89,6 +100,8 @@ pub(crate) enum Statement {
     Assign(usize, Expr),
     SetItem(Expr, Expr, Expr),
     AugmentItem(Expr, Expr, Binary, Expr),
+    SetField(Expr, usize, Expr),
+    AugmentField(Expr, usize, Binary, Expr),
     Expr(Expr),
     If(Expr, Vec<Statement>, Vec<Statement>),
     While(Expr, Vec<Statement>),

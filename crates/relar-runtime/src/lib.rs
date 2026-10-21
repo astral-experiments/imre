@@ -7,6 +7,8 @@
 //! must never forge, confuse, or reuse released handles. There are no callbacks
 //! or finalizers in this runtime, so a container borrow cannot reenter user code.
 
+mod objects;
+
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
 use std::borrow::Cow;
