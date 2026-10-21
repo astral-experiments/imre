@@ -42,14 +42,14 @@ def subtotal(values: list[Node]) -> int:
 
 
 def first(values: list[Node]) -> Node:
-    for value in values:
+    for value in (item for item in values):
         alias = value
         return alias
     raise ValueError("empty")
 
 
 def wrapped(values: list[Node]) -> Envelope:
-    for value in values:
+    for value in (item for item in values):
         return Envelope(value)
     raise ValueError("empty")
 
@@ -62,7 +62,7 @@ def collected(values: list[Node]) -> list[Node]:
 
 
 def saved_fields(values: list[Node]) -> tuple[int, str, float | None]:
-    for value in values:
+    for value in (item for item in values):
         return value.number, value.text, value.weight
     raise ValueError("empty")
 
@@ -70,7 +70,7 @@ def saved_fields(values: list[Node]) -> tuple[int, str, float | None]:
 def mixed_owners(values: list[Node]) -> tuple[Node, Node]:
     left = make_node(80)
     right = make_node(81)
-    for value in values:
+    for value in (item for item in values):
         # Scalarized tuple components can be borrowed, but these destinations
         # also own fresh records and must acquire both transferred references.
         left, right = value, value
@@ -79,7 +79,7 @@ def mixed_owners(values: list[Node]) -> tuple[Node, Node]:
 
 
 def append_while_selected(values: list[Node]) -> str:
-    for value in values:
+    for value in (item for item in values):
         for index in range(64):
             values.append(make_node(index + 100))
         return value.text
@@ -102,7 +102,7 @@ def delegated_drop(values: list[Node]) -> int:
 
 
 def after_pop(values: list[Node]) -> str:
-    for value in values:
+    for value in (item for item in values):
         delegated_drop(values)
         return value.text
     raise ValueError("empty")
@@ -114,14 +114,14 @@ def replace(values: list[Node]) -> int:
 
 
 def after_replace(values: list[Node]) -> int:
-    for value in values:
+    for value in (item for item in values):
         replace(values)
         return value.number
     raise ValueError("empty")
 
 
 def after_reset(values: list[Node]) -> tuple[int, str, float | None]:
-    for value in values:
+    for value in (item for item in values):
         number, text, weight = value.number, value.text, value.weight
         # Ordinary methods can replace the fields that root earlier projections.
         value.reset()
@@ -131,14 +131,14 @@ def after_reset(values: list[Node]) -> tuple[int, str, float | None]:
 
 def rebound_parameter(values: list[Node]) -> str:
     values = [make_node(21)]
-    for value in values:
+    for value in (item for item in values):
         print(sum(len(values := []) for index in range(1)))
         return value.text
     raise ValueError("empty")
 
 
 def scoped_pop(values: list[Node]) -> str:
-    for value in values:
+    for value in (item for item in values):
         text = value.text
         print(sum(delegated_drop(values) for index in range(1)))
         return text
@@ -146,14 +146,14 @@ def scoped_pop(values: list[Node]) -> str:
 
 
 def store_existing(values: list[Node], destination: Envelope) -> str:
-    for value in values:
+    for value in (item for item in values):
         destination.node = value
         return value.text
     raise ValueError("empty")
 
 
 def fail_after_projection(values: list[Node]) -> None:
-    for value in values:
+    for value in (item for item in values):
         alias = value
         try:
             assert alias.number > 0
@@ -169,13 +169,13 @@ def writer(path: str) -> TextIO:
 
 
 def first_stream(values: list[Handle]) -> TextIO:
-    for value in values:
+    for value in (item for item in values):
         return value.stream
     raise ValueError("empty")
 
 
 def fail_with_stream(values: list[Handle]) -> None:
-    for value in values:
+    for value in (item for item in values):
         stream = value.stream
         assert bool(stream)
         raise ValueError("file borrow failed")
