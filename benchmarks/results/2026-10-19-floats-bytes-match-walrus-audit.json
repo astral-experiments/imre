@@ -1,0 +1,1724 @@
+{
+  "passed": true,
+  "source_commit": "97cb1000565035162c31e6e455d207cf65b54993",
+  "baseline_source_commit": "006e24367b87ecc331f31605640a7e53d3bdeaa6",
+  "started_at_utc": "2026-10-19T03:43:10.182212+00:00",
+  "completed_at_utc": "2026-10-19T03:43:13.817937+00:00",
+  "checks": 158530,
+  "scope": "saved evidence; no timing, compiler, or native workload reruns",
+  "statistical_method": "Exact Fraction interpolation on integer nanoseconds at p*(n-1), inclusive Q1/median/Q3; ratios of per-engine medians. IQR overlap is descriptive, not a significance test.",
+  "reused_generic_helper_sha256": "7adb295db7fd4a739ab84ab783763d8e00bf299856df303c5bcf0f73f8a84ee7",
+  "audit_script_sha256": "ff001415dca986218ccf6f26cb3fb7a4ba027e7e32bc551a4602b4795df02d72",
+  "source_control_run": null,
+  "source_control_note": "All six application files are unchanged from sequence baseline, so no source-migration control is applicable.",
+  "totals": {
+    "measured_process_runs": 2304,
+    "warmup_process_runs": 96,
+    "inventory_gate_runs": 48,
+    "oracle_process_results": 1632,
+    "device_process_results": 8
+  },
+  "bytecode": {
+    "source_and_cache_files": 6,
+    "before_after_identical": true,
+    "timestamp_headers_match_sources": true,
+    "python_version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+    "cache_magic": "2b0e0d0a",
+    "runner_source_sha256": "31f1636fdb1756458abff8ed136d4de288baf8d573e82c89e829f1827e88d183"
+  },
+  "final_tool_provenance": {
+    "final_compiled_input_files": 33,
+    "runtime_input_files": 15,
+    "ordinary_runtime_matches_final_live_build": true,
+    "runtime_before_after_captures_match_final_commit": true,
+    "compiler_provenance_scope": "Final parent-reported workspace build on the clean committed source; every compiled Rust/Cargo input rechecked against HEAD before and after freeze. No pre-build capture is claimed here.",
+    "build_environment_scope": "Explicit wrapper settings and parent-reported ordinary command; observed ambient flags at freeze are recorded separately, not claimed as a historical environment capture.",
+    "build_record_sha256": "71fa1c0c7ea27640a98bc9a6c71dda009803090d88b18b1ba01a6b2f2def6ef0"
+  },
+  "modes": {
+    "normal": {
+      "mode": "normal",
+      "record_sha256": "cd1998f95f409fa704d609f289e725d07829c80da1ee26a6fc1ce63156aade5c",
+      "measured_process_runs": 1152,
+      "warmup_process_runs": 48,
+      "inventory_gate_runs": 24,
+      "validation_process_results": {
+        "inventory": 816,
+        "inventory_device": 4
+      },
+      "source_commit": "97cb1000565035162c31e6e455d207cf65b54993",
+      "baseline_source_commit": "006e24367b87ecc331f31605640a7e53d3bdeaa6",
+      "unchanged_inventory_source_files": 6,
+      "generated_ir": {
+        "baseline_sha256": "bd983e6459dea1c69a1b157fa06fc5afa316693f851867ee34986fc9ec8de2dd",
+        "current_sha256": "c342f100fe81d7803316a2b7b66f646e8a38f577dca52baa4c356be9206f4699",
+        "byte_identical": false
+      },
+      "ordering": {
+        "inventory/empty": {
+          "positions": {
+            "baseline@0": 12,
+            "baseline@1": 12,
+            "baseline@2": 12,
+            "baseline@3": 12,
+            "cpython@0": 12,
+            "cpython@1": 12,
+            "cpython@2": 12,
+            "cpython@3": 12,
+            "relar@0": 12,
+            "relar@1": 12,
+            "relar@2": 12,
+            "relar@3": 12,
+            "rust_bigint@0": 12,
+            "rust_bigint@1": 12,
+            "rust_bigint@2": 12,
+            "rust_bigint@3": 12
+          },
+          "within_round_predecessors": {
+            "baseline->cpython": 12,
+            "baseline->relar": 12,
+            "baseline->rust_bigint": 12,
+            "cpython->baseline": 12,
+            "cpython->relar": 12,
+            "cpython->rust_bigint": 12,
+            "relar->baseline": 12,
+            "relar->cpython": 12,
+            "relar->rust_bigint": 12,
+            "rust_bigint->baseline": 12,
+            "rust_bigint->cpython": 12,
+            "rust_bigint->relar": 12
+          },
+          "each_permutation_count": 2
+        },
+        "inventory/boundary-128": {
+          "positions": {
+            "baseline@0": 12,
+            "baseline@1": 12,
+            "baseline@2": 12,
+            "baseline@3": 12,
+            "cpython@0": 12,
+            "cpython@1": 12,
+            "cpython@2": 12,
+            "cpython@3": 12,
+            "relar@0": 12,
+            "relar@1": 12,
+            "relar@2": 12,
+            "relar@3": 12,
+            "rust_bigint@0": 12,
+            "rust_bigint@1": 12,
+            "rust_bigint@2": 12,
+            "rust_bigint@3": 12
+          },
+          "within_round_predecessors": {
+            "baseline->cpython": 12,
+            "baseline->relar": 12,
+            "baseline->rust_bigint": 12,
+            "cpython->baseline": 12,
+            "cpython->relar": 12,
+            "cpython->rust_bigint": 12,
+            "relar->baseline": 12,
+            "relar->cpython": 12,
+            "relar->rust_bigint": 12,
+            "rust_bigint->baseline": 12,
+            "rust_bigint->cpython": 12,
+            "rust_bigint->relar": 12
+          },
+          "each_permutation_count": 2
+        },
+        "inventory/dense-2048": {
+          "positions": {
+            "baseline@0": 12,
+            "baseline@1": 12,
+            "baseline@2": 12,
+            "baseline@3": 12,
+            "cpython@0": 12,
+            "cpython@1": 12,
+            "cpython@2": 12,
+            "cpython@3": 12,
+            "relar@0": 12,
+            "relar@1": 12,
+            "relar@2": 12,
+            "relar@3": 12,
+            "rust_bigint@0": 12,
+            "rust_bigint@1": 12,
+            "rust_bigint@2": 12,
+            "rust_bigint@3": 12
+          },
+          "within_round_predecessors": {
+            "baseline->cpython": 12,
+            "baseline->relar": 12,
+            "baseline->rust_bigint": 12,
+            "cpython->baseline": 12,
+            "cpython->relar": 12,
+            "cpython->rust_bigint": 12,
+            "relar->baseline": 12,
+            "relar->cpython": 12,
+            "relar->rust_bigint": 12,
+            "rust_bigint->baseline": 12,
+            "rust_bigint->cpython": 12,
+            "rust_bigint->relar": 12
+          },
+          "each_permutation_count": 2
+        },
+        "inventory/sparse-2048": {
+          "positions": {
+            "baseline@0": 12,
+            "baseline@1": 12,
+            "baseline@2": 12,
+            "baseline@3": 12,
+            "cpython@0": 12,
+            "cpython@1": 12,
+            "cpython@2": 12,
+            "cpython@3": 12,
+            "relar@0": 12,
+            "relar@1": 12,
+            "relar@2": 12,
+            "relar@3": 12,
+            "rust_bigint@0": 12,
+            "rust_bigint@1": 12,
+            "rust_bigint@2": 12,
+            "rust_bigint@3": 12
+          },
+          "within_round_predecessors": {
+            "baseline->cpython": 12,
+            "baseline->relar": 12,
+            "baseline->rust_bigint": 12,
+            "cpython->baseline": 12,
+            "cpython->relar": 12,
+            "cpython->rust_bigint": 12,
+            "relar->baseline": 12,
+            "relar->cpython": 12,
+            "relar->rust_bigint": 12,
+            "rust_bigint->baseline": 12,
+            "rust_bigint->cpython": 12,
+            "rust_bigint->relar": 12
+          },
+          "each_permutation_count": 2
+        },
+        "inventory/dense-16384": {
+          "positions": {
+            "baseline@0": 12,
+            "baseline@1": 12,
+            "baseline@2": 12,
+            "baseline@3": 12,
+            "cpython@0": 12,
+            "cpython@1": 12,
+            "cpython@2": 12,
+            "cpython@3": 12,
+            "relar@0": 12,
+            "relar@1": 12,
+            "relar@2": 12,
+            "relar@3": 12,
+            "rust_bigint@0": 12,
+            "rust_bigint@1": 12,
+            "rust_bigint@2": 12,
+            "rust_bigint@3": 12
+          },
+          "within_round_predecessors": {
+            "baseline->cpython": 12,
+            "baseline->relar": 12,
+            "baseline->rust_bigint": 12,
+            "cpython->baseline": 12,
+            "cpython->relar": 12,
+            "cpython->rust_bigint": 12,
+            "relar->baseline": 12,
+            "relar->cpython": 12,
+            "relar->rust_bigint": 12,
+            "rust_bigint->baseline": 12,
+            "rust_bigint->cpython": 12,
+            "rust_bigint->relar": 12
+          },
+          "each_permutation_count": 2
+        },
+        "inventory/sparse-16384": {
+          "positions": {
+            "baseline@0": 12,
+            "baseline@1": 12,
+            "baseline@2": 12,
+            "baseline@3": 12,
+            "cpython@0": 12,
+            "cpython@1": 12,
+            "cpython@2": 12,
+            "cpython@3": 12,
+            "relar@0": 12,
+            "relar@1": 12,
+            "relar@2": 12,
+            "relar@3": 12,
+            "rust_bigint@0": 12,
+            "rust_bigint@1": 12,
+            "rust_bigint@2": 12,
+            "rust_bigint@3": 12
+          },
+          "within_round_predecessors": {
+            "baseline->cpython": 12,
+            "baseline->relar": 12,
+            "baseline->rust_bigint": 12,
+            "cpython->baseline": 12,
+            "cpython->relar": 12,
+            "cpython->rust_bigint": 12,
+            "relar->baseline": 12,
+            "relar->cpython": 12,
+            "relar->rust_bigint": 12,
+            "rust_bigint->baseline": 12,
+            "rust_bigint->cpython": 12,
+            "rust_bigint->relar": 12
+          },
+          "each_permutation_count": 2
+        }
+      },
+      "rows": [
+        {
+          "group": "inventory",
+          "workload": "empty",
+          "statistics": {
+            "cpython": {
+              "median_ns": 27101965.0,
+              "min_ns": 26362362,
+              "max_ns": 28561440,
+              "p25_ns": 26960961.75,
+              "p75_ns": 27438672.25
+            },
+            "relar": {
+              "median_ns": 2202750.0,
+              "min_ns": 2063065,
+              "max_ns": 3705735,
+              "p25_ns": 2122322.5,
+              "p75_ns": 2327641.25
+            },
+            "rust_bigint": {
+              "median_ns": 2247458.5,
+              "min_ns": 2082739,
+              "max_ns": 4444942,
+              "p25_ns": 2164311.5,
+              "p75_ns": 2433474.5
+            },
+            "baseline": {
+              "median_ns": 2214586.5,
+              "min_ns": 2048898,
+              "max_ns": 3181628,
+              "p25_ns": 2135862.5,
+              "p75_ns": 2325410.25
+            }
+          },
+          "median_ms": {
+            "cpython": 27.101965,
+            "relar": 2.20275,
+            "rust_bigint": 2.2474585,
+            "baseline": 2.2145865
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 12.303695380774032,
+            "cpython_over_rust_bigint": 12.05893901934118,
+            "cpython_over_baseline": 12.237934711513866,
+            "relar_over_cpython": 0.08127639453449224,
+            "relar_over_rust_bigint": 0.9801070854033567,
+            "relar_over_baseline": 0.9946552099003584,
+            "rust_bigint_over_cpython": 0.08292603506793696,
+            "rust_bigint_over_relar": 1.0202966746112814,
+            "rust_bigint_over_baseline": 1.0148434030461218,
+            "baseline_over_cpython": 0.08171313408455808,
+            "baseline_over_relar": 1.0053735103847463,
+            "baseline_over_rust_bigint": 0.9853737010049352
+          },
+          "new_vs_baseline_time_change_percent": -0.5344790099641616,
+          "cpython_speedup": 12.303695380774032,
+          "rust_gap_percent": -1.989291459664333,
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": true
+        },
+        {
+          "group": "inventory",
+          "workload": "boundary-128",
+          "statistics": {
+            "cpython": {
+              "median_ns": 28301539.5,
+              "min_ns": 27175146,
+              "max_ns": 223089445,
+              "p25_ns": 28092164.5,
+              "p75_ns": 28663291.5
+            },
+            "relar": {
+              "median_ns": 2853187.0,
+              "min_ns": 2692947,
+              "max_ns": 13512749,
+              "p25_ns": 2800324.5,
+              "p75_ns": 3074783.75
+            },
+            "rust_bigint": {
+              "median_ns": 2657792.0,
+              "min_ns": 2488948,
+              "max_ns": 7187042,
+              "p25_ns": 2575542.25,
+              "p75_ns": 2733634.5
+            },
+            "baseline": {
+              "median_ns": 2876350.0,
+              "min_ns": 2720880,
+              "max_ns": 10931789,
+              "p25_ns": 2786942.75,
+              "p75_ns": 2947481.75
+            }
+          },
+          "median_ms": {
+            "cpython": 28.3015395,
+            "relar": 2.853187,
+            "rust_bigint": 2.657792,
+            "baseline": 2.87635
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 9.919272553814384,
+            "cpython_over_rust_bigint": 10.648515572324696,
+            "cpython_over_baseline": 9.839393502181585,
+            "relar_over_cpython": 0.10081384442001821,
+            "relar_over_rust_bigint": 1.0735177922124832,
+            "relar_over_baseline": 0.9919470857162723,
+            "rust_bigint_over_cpython": 0.09390980303385969,
+            "rust_bigint_over_relar": 0.9315169317678792,
+            "rust_bigint_over_baseline": 0.9240155057625116,
+            "baseline_over_cpython": 0.1016322804630469,
+            "baseline_over_relar": 1.008118290178667,
+            "baseline_over_rust_bigint": 1.082232921161626
+          },
+          "new_vs_baseline_time_change_percent": -0.8052914283727675,
+          "cpython_speedup": 9.919272553814384,
+          "rust_gap_percent": 7.351779221248322,
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        },
+        {
+          "group": "inventory",
+          "workload": "dense-2048",
+          "statistics": {
+            "cpython": {
+              "median_ns": 33540490.0,
+              "min_ns": 32921084,
+              "max_ns": 41156798,
+              "p25_ns": 33371521.25,
+              "p75_ns": 34002682.5
+            },
+            "relar": {
+              "median_ns": 6542860.5,
+              "min_ns": 5429958,
+              "max_ns": 7032494,
+              "p25_ns": 6431622.25,
+              "p75_ns": 6747542.75
+            },
+            "rust_bigint": {
+              "median_ns": 6023408.5,
+              "min_ns": 5790770,
+              "max_ns": 6772128,
+              "p25_ns": 5914318.25,
+              "p75_ns": 6172280.75
+            },
+            "baseline": {
+              "median_ns": 6541865.0,
+              "min_ns": 6262900,
+              "max_ns": 7494293,
+              "p25_ns": 6366720.75,
+              "p75_ns": 6740182.0
+            }
+          },
+          "median_ms": {
+            "cpython": 33.54049,
+            "relar": 6.5428605,
+            "rust_bigint": 6.0234085,
+            "baseline": 6.541865
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 5.126273133899156,
+            "cpython_over_rust_bigint": 5.5683571851386136,
+            "cpython_over_baseline": 5.127053218004346,
+            "relar_over_cpython": 0.19507349177069266,
+            "relar_over_rust_bigint": 1.0862388795314148,
+            "relar_over_baseline": 1.000152173730274,
+            "rust_bigint_over_cpython": 0.1795861807624158,
+            "rust_bigint_over_relar": 0.9206078136619297,
+            "rust_bigint_over_baseline": 0.9207479059870541,
+            "baseline_over_cpython": 0.19504381122637146,
+            "baseline_over_relar": 0.9998478494230467,
+            "baseline_over_rust_bigint": 1.086073607659185
+          },
+          "new_vs_baseline_time_change_percent": 0.015217373027409664,
+          "cpython_speedup": 5.126273133899156,
+          "rust_gap_percent": 8.623887953141484,
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        },
+        {
+          "group": "inventory",
+          "workload": "sparse-2048",
+          "statistics": {
+            "cpython": {
+              "median_ns": 37483524.0,
+              "min_ns": 36802193,
+              "max_ns": 39873500,
+              "p25_ns": 37190422.25,
+              "p75_ns": 37876004.25
+            },
+            "relar": {
+              "median_ns": 9310503.0,
+              "min_ns": 8945919,
+              "max_ns": 9812232,
+              "p25_ns": 9203609.0,
+              "p75_ns": 9433457.25
+            },
+            "rust_bigint": {
+              "median_ns": 8434631.5,
+              "min_ns": 8191493,
+              "max_ns": 9022913,
+              "p25_ns": 8368155.25,
+              "p75_ns": 8556529.0
+            },
+            "baseline": {
+              "median_ns": 9164751.5,
+              "min_ns": 8939677,
+              "max_ns": 9569991,
+              "p25_ns": 9081969.25,
+              "p75_ns": 9281656.0
+            }
+          },
+          "median_ms": {
+            "cpython": 37.483524,
+            "relar": 9.310503,
+            "rust_bigint": 8.4346315,
+            "baseline": 9.1647515
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 4.025939737090466,
+            "cpython_over_rust_bigint": 4.444002562530444,
+            "cpython_over_baseline": 4.089966214577667,
+            "relar_over_cpython": 0.24838921228430924,
+            "relar_over_rust_bigint": 1.1038422958963885,
+            "relar_over_baseline": 1.015903486308385,
+            "rust_bigint_over_cpython": 0.22502237249624663,
+            "rust_bigint_over_relar": 0.9059265111670122,
+            "rust_bigint_over_baseline": 0.9203339010337597,
+            "baseline_over_cpython": 0.2445007972035927,
+            "baseline_over_relar": 0.9843454752122415,
+            "baseline_over_rust_bigint": 1.0865621693135024
+          },
+          "new_vs_baseline_time_change_percent": 1.5903486308384895,
+          "cpython_speedup": 4.025939737090466,
+          "rust_gap_percent": 10.38422958963885,
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        },
+        {
+          "group": "inventory",
+          "workload": "dense-16384",
+          "statistics": {
+            "cpython": {
+              "median_ns": 76914574.5,
+              "min_ns": 75585407,
+              "max_ns": 322020406,
+              "p25_ns": 76526619.0,
+              "p75_ns": 77726760.0
+            },
+            "relar": {
+              "median_ns": 27287659.5,
+              "min_ns": 26920480,
+              "max_ns": 37498239,
+              "p25_ns": 27125949.0,
+              "p75_ns": 27568961.0
+            },
+            "rust_bigint": {
+              "median_ns": 23049007.5,
+              "min_ns": 22671021,
+              "max_ns": 27237211,
+              "p25_ns": 22931385.25,
+              "p75_ns": 23461644.0
+            },
+            "baseline": {
+              "median_ns": 26897959.0,
+              "min_ns": 26248498,
+              "max_ns": 32119528,
+              "p25_ns": 26702662.5,
+              "p75_ns": 27132586.5
+            }
+          },
+          "median_ms": {
+            "cpython": 76.9145745,
+            "relar": 27.2876595,
+            "rust_bigint": 23.0490075,
+            "baseline": 26.897959
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 2.8186578075704882,
+            "cpython_over_rust_bigint": 3.3370015823891768,
+            "cpython_over_baseline": 2.859494822636915,
+            "relar_over_cpython": 0.3547787877315762,
+            "relar_over_rust_bigint": 1.1838973760583835,
+            "relar_over_baseline": 1.014488106699843,
+            "rust_bigint_over_cpython": 0.29967022049897707,
+            "rust_bigint_over_relar": 0.8446678067058114,
+            "rust_bigint_over_baseline": 0.8569054440152876,
+            "baseline_over_cpython": 0.349712121205325,
+            "baseline_over_relar": 0.9857188008374261,
+            "baseline_over_rust_bigint": 1.1669899018428451
+          },
+          "new_vs_baseline_time_change_percent": 1.4488106699843017,
+          "cpython_speedup": 2.8186578075704882,
+          "rust_gap_percent": 18.389737605838352,
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        },
+        {
+          "group": "inventory",
+          "workload": "sparse-16384",
+          "statistics": {
+            "cpython": {
+              "median_ns": 111204683.0,
+              "min_ns": 109511280,
+              "max_ns": 114950995,
+              "p25_ns": 110781590.75,
+              "p75_ns": 112110084.25
+            },
+            "relar": {
+              "median_ns": 51264895.5,
+              "min_ns": 49744047,
+              "max_ns": 55972501,
+              "p25_ns": 50855729.5,
+              "p75_ns": 51999819.5
+            },
+            "rust_bigint": {
+              "median_ns": 42579236.5,
+              "min_ns": 41637702,
+              "max_ns": 44448611,
+              "p25_ns": 42302957.0,
+              "p75_ns": 43061337.5
+            },
+            "baseline": {
+              "median_ns": 50603388.0,
+              "min_ns": 49542312,
+              "max_ns": 73212994,
+              "p25_ns": 50154580.5,
+              "p75_ns": 51211724.0
+            }
+          },
+          "median_ms": {
+            "cpython": 111.204683,
+            "relar": 51.2648955,
+            "rust_bigint": 42.5792365,
+            "baseline": 50.603388
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 2.1692170034756044,
+            "cpython_over_rust_bigint": 2.611711532215943,
+            "cpython_over_baseline": 2.197573866002806,
+            "relar_over_cpython": 0.46099583324202276,
+            "relar_over_rust_bigint": 1.2039881339816885,
+            "relar_over_baseline": 1.0130723954688567,
+            "rust_bigint_over_cpython": 0.38289067826397205,
+            "rust_bigint_over_relar": 0.8305729697625152,
+            "rust_bigint_over_baseline": 0.8414305480889935,
+            "baseline_over_cpython": 0.45504727530224603,
+            "baseline_over_relar": 0.9870962869708766,
+            "baseline_over_rust_bigint": 1.188452216610319
+          },
+          "new_vs_baseline_time_change_percent": 1.3072395468856746,
+          "cpython_speedup": 2.1692170034756044,
+          "rust_gap_percent": 20.398813398168848,
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        }
+      ]
+    },
+    "lto": {
+      "mode": "lto",
+      "record_sha256": "d182335e16c44138ad9d0f072fb2cac5a87c5bacc51e489c06651235cc42749a",
+      "measured_process_runs": 1152,
+      "warmup_process_runs": 48,
+      "inventory_gate_runs": 24,
+      "validation_process_results": {
+        "inventory": 816,
+        "inventory_device": 4
+      },
+      "source_commit": "97cb1000565035162c31e6e455d207cf65b54993",
+      "baseline_source_commit": "006e24367b87ecc331f31605640a7e53d3bdeaa6",
+      "unchanged_inventory_source_files": 6,
+      "generated_ir": {
+        "baseline_sha256": "bd983e6459dea1c69a1b157fa06fc5afa316693f851867ee34986fc9ec8de2dd",
+        "current_sha256": "c342f100fe81d7803316a2b7b66f646e8a38f577dca52baa4c356be9206f4699",
+        "byte_identical": false
+      },
+      "ordering": {
+        "inventory/empty": {
+          "positions": {
+            "baseline@0": 12,
+            "baseline@1": 12,
+            "baseline@2": 12,
+            "baseline@3": 12,
+            "cpython@0": 12,
+            "cpython@1": 12,
+            "cpython@2": 12,
+            "cpython@3": 12,
+            "relar@0": 12,
+            "relar@1": 12,
+            "relar@2": 12,
+            "relar@3": 12,
+            "rust_bigint@0": 12,
+            "rust_bigint@1": 12,
+            "rust_bigint@2": 12,
+            "rust_bigint@3": 12
+          },
+          "within_round_predecessors": {
+            "baseline->cpython": 12,
+            "baseline->relar": 12,
+            "baseline->rust_bigint": 12,
+            "cpython->baseline": 12,
+            "cpython->relar": 12,
+            "cpython->rust_bigint": 12,
+            "relar->baseline": 12,
+            "relar->cpython": 12,
+            "relar->rust_bigint": 12,
+            "rust_bigint->baseline": 12,
+            "rust_bigint->cpython": 12,
+            "rust_bigint->relar": 12
+          },
+          "each_permutation_count": 2
+        },
+        "inventory/boundary-128": {
+          "positions": {
+            "baseline@0": 12,
+            "baseline@1": 12,
+            "baseline@2": 12,
+            "baseline@3": 12,
+            "cpython@0": 12,
+            "cpython@1": 12,
+            "cpython@2": 12,
+            "cpython@3": 12,
+            "relar@0": 12,
+            "relar@1": 12,
+            "relar@2": 12,
+            "relar@3": 12,
+            "rust_bigint@0": 12,
+            "rust_bigint@1": 12,
+            "rust_bigint@2": 12,
+            "rust_bigint@3": 12
+          },
+          "within_round_predecessors": {
+            "baseline->cpython": 12,
+            "baseline->relar": 12,
+            "baseline->rust_bigint": 12,
+            "cpython->baseline": 12,
+            "cpython->relar": 12,
+            "cpython->rust_bigint": 12,
+            "relar->baseline": 12,
+            "relar->cpython": 12,
+            "relar->rust_bigint": 12,
+            "rust_bigint->baseline": 12,
+            "rust_bigint->cpython": 12,
+            "rust_bigint->relar": 12
+          },
+          "each_permutation_count": 2
+        },
+        "inventory/dense-2048": {
+          "positions": {
+            "baseline@0": 12,
+            "baseline@1": 12,
+            "baseline@2": 12,
+            "baseline@3": 12,
+            "cpython@0": 12,
+            "cpython@1": 12,
+            "cpython@2": 12,
+            "cpython@3": 12,
+            "relar@0": 12,
+            "relar@1": 12,
+            "relar@2": 12,
+            "relar@3": 12,
+            "rust_bigint@0": 12,
+            "rust_bigint@1": 12,
+            "rust_bigint@2": 12,
+            "rust_bigint@3": 12
+          },
+          "within_round_predecessors": {
+            "baseline->cpython": 12,
+            "baseline->relar": 12,
+            "baseline->rust_bigint": 12,
+            "cpython->baseline": 12,
+            "cpython->relar": 12,
+            "cpython->rust_bigint": 12,
+            "relar->baseline": 12,
+            "relar->cpython": 12,
+            "relar->rust_bigint": 12,
+            "rust_bigint->baseline": 12,
+            "rust_bigint->cpython": 12,
+            "rust_bigint->relar": 12
+          },
+          "each_permutation_count": 2
+        },
+        "inventory/sparse-2048": {
+          "positions": {
+            "baseline@0": 12,
+            "baseline@1": 12,
+            "baseline@2": 12,
+            "baseline@3": 12,
+            "cpython@0": 12,
+            "cpython@1": 12,
+            "cpython@2": 12,
+            "cpython@3": 12,
+            "relar@0": 12,
+            "relar@1": 12,
+            "relar@2": 12,
+            "relar@3": 12,
+            "rust_bigint@0": 12,
+            "rust_bigint@1": 12,
+            "rust_bigint@2": 12,
+            "rust_bigint@3": 12
+          },
+          "within_round_predecessors": {
+            "baseline->cpython": 12,
+            "baseline->relar": 12,
+            "baseline->rust_bigint": 12,
+            "cpython->baseline": 12,
+            "cpython->relar": 12,
+            "cpython->rust_bigint": 12,
+            "relar->baseline": 12,
+            "relar->cpython": 12,
+            "relar->rust_bigint": 12,
+            "rust_bigint->baseline": 12,
+            "rust_bigint->cpython": 12,
+            "rust_bigint->relar": 12
+          },
+          "each_permutation_count": 2
+        },
+        "inventory/dense-16384": {
+          "positions": {
+            "baseline@0": 12,
+            "baseline@1": 12,
+            "baseline@2": 12,
+            "baseline@3": 12,
+            "cpython@0": 12,
+            "cpython@1": 12,
+            "cpython@2": 12,
+            "cpython@3": 12,
+            "relar@0": 12,
+            "relar@1": 12,
+            "relar@2": 12,
+            "relar@3": 12,
+            "rust_bigint@0": 12,
+            "rust_bigint@1": 12,
+            "rust_bigint@2": 12,
+            "rust_bigint@3": 12
+          },
+          "within_round_predecessors": {
+            "baseline->cpython": 12,
+            "baseline->relar": 12,
+            "baseline->rust_bigint": 12,
+            "cpython->baseline": 12,
+            "cpython->relar": 12,
+            "cpython->rust_bigint": 12,
+            "relar->baseline": 12,
+            "relar->cpython": 12,
+            "relar->rust_bigint": 12,
+            "rust_bigint->baseline": 12,
+            "rust_bigint->cpython": 12,
+            "rust_bigint->relar": 12
+          },
+          "each_permutation_count": 2
+        },
+        "inventory/sparse-16384": {
+          "positions": {
+            "baseline@0": 12,
+            "baseline@1": 12,
+            "baseline@2": 12,
+            "baseline@3": 12,
+            "cpython@0": 12,
+            "cpython@1": 12,
+            "cpython@2": 12,
+            "cpython@3": 12,
+            "relar@0": 12,
+            "relar@1": 12,
+            "relar@2": 12,
+            "relar@3": 12,
+            "rust_bigint@0": 12,
+            "rust_bigint@1": 12,
+            "rust_bigint@2": 12,
+            "rust_bigint@3": 12
+          },
+          "within_round_predecessors": {
+            "baseline->cpython": 12,
+            "baseline->relar": 12,
+            "baseline->rust_bigint": 12,
+            "cpython->baseline": 12,
+            "cpython->relar": 12,
+            "cpython->rust_bigint": 12,
+            "relar->baseline": 12,
+            "relar->cpython": 12,
+            "relar->rust_bigint": 12,
+            "rust_bigint->baseline": 12,
+            "rust_bigint->cpython": 12,
+            "rust_bigint->relar": 12
+          },
+          "each_permutation_count": 2
+        }
+      },
+      "rows": [
+        {
+          "group": "inventory",
+          "workload": "empty",
+          "statistics": {
+            "cpython": {
+              "median_ns": 27373748.0,
+              "min_ns": 26538406,
+              "max_ns": 29592448,
+              "p25_ns": 27054175.0,
+              "p75_ns": 27713581.25
+            },
+            "relar": {
+              "median_ns": 2231417.0,
+              "min_ns": 2056611,
+              "max_ns": 2801219,
+              "p25_ns": 2165323.75,
+              "p75_ns": 2309486.5
+            },
+            "rust_bigint": {
+              "median_ns": 2239727.5,
+              "min_ns": 2088070,
+              "max_ns": 2756776,
+              "p25_ns": 2153225.0,
+              "p75_ns": 2323045.5
+            },
+            "baseline": {
+              "median_ns": 2236657.5,
+              "min_ns": 2052134,
+              "max_ns": 2751568,
+              "p25_ns": 2171100.25,
+              "p75_ns": 2314280.25
+            }
+          },
+          "median_ms": {
+            "cpython": 27.373748,
+            "relar": 2.231417,
+            "rust_bigint": 2.2397275,
+            "baseline": 2.2366575
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 12.267428275396307,
+            "cpython_over_rust_bigint": 12.221910031465882,
+            "cpython_over_baseline": 12.23868562799624,
+            "relar_over_cpython": 0.08151667794998332,
+            "relar_over_rust_bigint": 0.9962895039686748,
+            "relar_over_baseline": 0.9976569948684588,
+            "rust_bigint_over_cpython": 0.08182027174356979,
+            "rust_bigint_over_relar": 1.0037243150876776,
+            "rust_bigint_over_baseline": 1.0013725838667744,
+            "baseline_over_cpython": 0.08170812049559308,
+            "baseline_over_relar": 1.002348507697127,
+            "baseline_over_rust_bigint": 0.998629297537312
+          },
+          "new_vs_baseline_time_change_percent": -0.2343005131541176,
+          "cpython_speedup": 12.267428275396307,
+          "rust_gap_percent": -0.3710496031325228,
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": true
+        },
+        {
+          "group": "inventory",
+          "workload": "boundary-128",
+          "statistics": {
+            "cpython": {
+              "median_ns": 28306758.0,
+              "min_ns": 26793332,
+              "max_ns": 32808408,
+              "p25_ns": 27842851.75,
+              "p75_ns": 28859334.0
+            },
+            "relar": {
+              "median_ns": 2837562.5,
+              "min_ns": 2576561,
+              "max_ns": 4025250,
+              "p25_ns": 2723964.5,
+              "p75_ns": 2970837.5
+            },
+            "rust_bigint": {
+              "median_ns": 2682282.5,
+              "min_ns": 2461456,
+              "max_ns": 4670883,
+              "p25_ns": 2606593.25,
+              "p75_ns": 2812652.0
+            },
+            "baseline": {
+              "median_ns": 2774689.5,
+              "min_ns": 2633208,
+              "max_ns": 3989643,
+              "p25_ns": 2705073.5,
+              "p75_ns": 2928303.75
+            }
+          },
+          "median_ms": {
+            "cpython": 28.306758,
+            "relar": 2.8375625,
+            "rust_bigint": 2.6822825,
+            "baseline": 2.7746895
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 9.97573022620647,
+            "cpython_over_rust_bigint": 10.553235164454154,
+            "cpython_over_baseline": 10.201775009419974,
+            "relar_over_cpython": 0.10024328819287606,
+            "relar_over_rust_bigint": 1.0578909939575716,
+            "relar_over_baseline": 1.0226594723481672,
+            "rust_bigint_over_cpython": 0.09475767235513159,
+            "rust_bigint_over_relar": 0.9452769762780555,
+            "rust_bigint_over_baseline": 0.9666964537833873,
+            "baseline_over_cpython": 0.09802215781828495,
+            "baseline_over_relar": 0.9778426025858461,
+            "baseline_over_rust_bigint": 1.0344508827835994
+          },
+          "new_vs_baseline_time_change_percent": 2.265947234816723,
+          "cpython_speedup": 9.97573022620647,
+          "rust_gap_percent": 5.789099395757158,
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": true
+        },
+        {
+          "group": "inventory",
+          "workload": "dense-2048",
+          "statistics": {
+            "cpython": {
+              "median_ns": 33490019.5,
+              "min_ns": 32966373,
+              "max_ns": 35991694,
+              "p25_ns": 33316815.75,
+              "p75_ns": 33846190.25
+            },
+            "relar": {
+              "median_ns": 5725804.0,
+              "min_ns": 4767913,
+              "max_ns": 6046164,
+              "p25_ns": 5677681.25,
+              "p75_ns": 5786475.0
+            },
+            "rust_bigint": {
+              "median_ns": 5572141.5,
+              "min_ns": 5405280,
+              "max_ns": 6493709,
+              "p25_ns": 5522744.75,
+              "p75_ns": 5634938.25
+            },
+            "baseline": {
+              "median_ns": 5682718.0,
+              "min_ns": 5563666,
+              "max_ns": 6106688,
+              "p25_ns": 5650372.0,
+              "p75_ns": 5758406.75
+            }
+          },
+          "median_ms": {
+            "cpython": 33.4900195,
+            "relar": 5.725804,
+            "rust_bigint": 5.5721415,
+            "baseline": 5.682718
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 5.848963656457678,
+            "cpython_over_rust_bigint": 6.01026005890195,
+            "cpython_over_baseline": 5.893310120262874,
+            "relar_over_cpython": 0.17097045882580034,
+            "relar_over_rust_bigint": 1.0275769199328482,
+            "relar_over_baseline": 1.007581935264076,
+            "rust_bigint_over_cpython": 0.1663821515541369,
+            "rust_bigint_over_relar": 0.9731631575233801,
+            "rust_bigint_over_baseline": 0.9805416175851063,
+            "baseline_over_cpython": 0.16968392628138063,
+            "baseline_over_relar": 0.9924751179048392,
+            "baseline_over_rust_bigint": 1.019844524766645
+          },
+          "new_vs_baseline_time_change_percent": 0.7581935264076023,
+          "cpython_speedup": 5.848963656457678,
+          "rust_gap_percent": 2.7576919932848165,
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        },
+        {
+          "group": "inventory",
+          "workload": "sparse-2048",
+          "statistics": {
+            "cpython": {
+              "median_ns": 37304891.0,
+              "min_ns": 36789568,
+              "max_ns": 40464573,
+              "p25_ns": 37093831.25,
+              "p75_ns": 37812064.25
+            },
+            "relar": {
+              "median_ns": 7975399.5,
+              "min_ns": 7846410,
+              "max_ns": 10486549,
+              "p25_ns": 7919428.0,
+              "p75_ns": 8056643.75
+            },
+            "rust_bigint": {
+              "median_ns": 7704960.5,
+              "min_ns": 7547282,
+              "max_ns": 10587446,
+              "p25_ns": 7642736.5,
+              "p75_ns": 7836495.25
+            },
+            "baseline": {
+              "median_ns": 7925682.5,
+              "min_ns": 7734101,
+              "max_ns": 9207044,
+              "p25_ns": 7874922.75,
+              "p75_ns": 8024995.5
+            }
+          },
+          "median_ms": {
+            "cpython": 37.304891,
+            "relar": 7.9753995,
+            "rust_bigint": 7.7049605,
+            "baseline": 7.9256825
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 4.677494964358838,
+            "cpython_over_rust_bigint": 4.84167193329544,
+            "cpython_over_baseline": 4.706836414403428,
+            "relar_over_cpython": 0.21378964758267222,
+            "relar_over_rust_bigint": 1.0350993363301473,
+            "relar_over_baseline": 1.0062728982645974,
+            "rust_bigint_over_cpython": 0.20654022283565981,
+            "rust_bigint_over_relar": 0.9660908522513512,
+            "rust_bigint_over_baseline": 0.9721510418818821,
+            "baseline_over_cpython": 0.21245692689465304,
+            "baseline_over_relar": 0.9937662056928935,
+            "baseline_over_rust_bigint": 1.0286467399800427
+          },
+          "new_vs_baseline_time_change_percent": 0.6272898264597426,
+          "cpython_speedup": 4.677494964358838,
+          "rust_gap_percent": 3.509933633014728,
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        },
+        {
+          "group": "inventory",
+          "workload": "dense-16384",
+          "statistics": {
+            "cpython": {
+              "median_ns": 76863462.0,
+              "min_ns": 76001204,
+              "max_ns": 83250192,
+              "p25_ns": 76441232.25,
+              "p75_ns": 77368733.5
+            },
+            "relar": {
+              "median_ns": 21583054.0,
+              "min_ns": 21254392,
+              "max_ns": 22759055,
+              "p25_ns": 21496472.75,
+              "p75_ns": 21748078.0
+            },
+            "rust_bigint": {
+              "median_ns": 20348558.0,
+              "min_ns": 20077769,
+              "max_ns": 21417034,
+              "p25_ns": 20248764.75,
+              "p75_ns": 20486164.75
+            },
+            "baseline": {
+              "median_ns": 21373417.5,
+              "min_ns": 21040012,
+              "max_ns": 23296677,
+              "p25_ns": 21242476.75,
+              "p75_ns": 21566346.75
+            }
+          },
+          "median_ms": {
+            "cpython": 76.863462,
+            "relar": 21.583054,
+            "rust_bigint": 20.348558,
+            "baseline": 21.3734175
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 3.561287573111757,
+            "cpython_over_rust_bigint": 3.7773419620201096,
+            "cpython_over_baseline": 3.5962176848882494,
+            "relar_over_cpython": 0.28079731823684967,
+            "relar_over_rust_bigint": 1.0606674929987667,
+            "relar_over_baseline": 1.0098082817125524,
+            "rust_bigint_over_cpython": 0.26473642313951457,
+            "rust_bigint_over_relar": 0.9428025338768091,
+            "rust_bigint_over_baseline": 0.9520498067283811,
+            "baseline_over_cpython": 0.27806993002735164,
+            "baseline_over_relar": 0.9902869862624631,
+            "baseline_over_rust_bigint": 1.050365215068311
+          },
+          "new_vs_baseline_time_change_percent": 0.9808281712552436,
+          "cpython_speedup": 3.561287573111757,
+          "rust_gap_percent": 6.0667492998766726,
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        },
+        {
+          "group": "inventory",
+          "workload": "sparse-16384",
+          "statistics": {
+            "cpython": {
+              "median_ns": 111025480.5,
+              "min_ns": 109816177,
+              "max_ns": 114198001,
+              "p25_ns": 110588501.25,
+              "p75_ns": 111370465.25
+            },
+            "relar": {
+              "median_ns": 41158640.5,
+              "min_ns": 40422675,
+              "max_ns": 43699429,
+              "p25_ns": 40847643.0,
+              "p75_ns": 41373478.5
+            },
+            "rust_bigint": {
+              "median_ns": 37385175.0,
+              "min_ns": 36802861,
+              "max_ns": 42423022,
+              "p25_ns": 37097534.75,
+              "p75_ns": 37712380.0
+            },
+            "baseline": {
+              "median_ns": 40856216.5,
+              "min_ns": 40129870,
+              "max_ns": 42221066,
+              "p25_ns": 40578377.0,
+              "p75_ns": 41273056.25
+            }
+          },
+          "median_ms": {
+            "cpython": 111.0254805,
+            "relar": 41.1586405,
+            "rust_bigint": 37.385175,
+            "baseline": 40.8562165
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 2.697501160175589,
+            "cpython_over_rust_bigint": 2.9697729246954174,
+            "cpython_over_baseline": 2.7174684787564702,
+            "relar_over_cpython": 0.3707134642844441,
+            "relar_over_rust_bigint": 1.100934809051984,
+            "relar_over_baseline": 1.0074021538435896,
+            "rust_bigint_over_cpython": 0.33672608154125483,
+            "rust_bigint_over_relar": 0.908318995618915,
+            "rust_bigint_over_baseline": 0.915042512563541,
+            "baseline_over_cpython": 0.3679895490296932,
+            "baseline_over_relar": 0.9926522354400894,
+            "baseline_over_rust_bigint": 1.0928453992792597
+          },
+          "new_vs_baseline_time_change_percent": 0.7402153843589554,
+          "cpython_speedup": 2.697501160175589,
+          "rust_gap_percent": 10.093480905198394,
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        }
+      ]
+    }
+  },
+  "inputs": {
+    "/home/dev-user/.cache/relar/target/relar-integrated/librelar_runtime.a": {
+      "sha256": "4e55a2e65cd85379975a4d72bd6a878e6de556685e03d28c2007200f01a0e859",
+      "bytes": 38470732
+    },
+    "/home/dev-user/.cache/relar/target/relar-integrated/relar": {
+      "sha256": "44bde4d0cf6b2056aff1f29643d84d285c56654a91470f941b31f99fb6db2e77",
+      "bytes": 139535000
+    },
+    "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/cargo": {
+      "sha256": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e",
+      "bytes": 37027376
+    },
+    "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/rustc": {
+      "sha256": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba",
+      "bytes": 171720
+    },
+    "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld": {
+      "sha256": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+      "bytes": 11593976
+    },
+    "/home/dev-user/code/oss/relar/Cargo.lock": {
+      "sha256": "1e4053a4eb89af2554a43b30dac6e6f81d56097907d65bf48953a69e318e55ae",
+      "bytes": 53753
+    },
+    "/home/dev-user/code/oss/relar/Cargo.toml": {
+      "sha256": "7a9d1c188ccc5a930c600ad503438d9ef4f590cdaf5f2a6488cb65e741f79c29",
+      "bytes": 848
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/batch_benchmark.py": {
+      "sha256": "8d7b1d17a73baae1a691cc9efad15f29063b4f2a9d090354d5f81a173b67ba19",
+      "bytes": 23596
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/batch_validate.py": {
+      "sha256": "d9ceda6746224421ac5c6c8ca555b8d5beed4d8aec93487674269bb5b765f941",
+      "bytes": 10937
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/benchmark.py": {
+      "sha256": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+      "bytes": 12777
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/compare.py": {
+      "sha256": "d878c49d30863b2b47bc3e453003611752b7fda34b9250754a4b580887599724",
+      "bytes": 10330
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/dependency_benchmark.py": {
+      "sha256": "ddf4c986e24d5ea66dad3d492121ebe464a11e5bb7e0b5f075e3f3bc7989930d",
+      "bytes": 15928
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/dependency_compare.py": {
+      "sha256": "f496e1e7659e15a2446427794f6184e173691b2e22c83439966c47b1cc7c0fc5",
+      "bytes": 19925
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/dependency_profile.py": {
+      "sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30",
+      "bytes": 19807
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/dependency_validate.py": {
+      "sha256": "493bd16ecfc938c902b98f78adecc5f8dce2204c163fd05c64a1701e4996be2e",
+      "bytes": 13429
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/exception_benchmark.py": {
+      "sha256": "7eb93f08f84fa1ca98d94bb2c6c2fde341726fa69e185cf6d45434602d7aeb85",
+      "bytes": 22792
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/incremental_benchmark.py": {
+      "sha256": "362a99c6a015840d2f36428a61d31e2ba81ebb221b761ca54669b584ad577d9a",
+      "bytes": 19310
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/incremental_validate.py": {
+      "sha256": "f384d2807c07006572a5dec0146abd026511ed59f2ae1d0a674dd9c60e95782b",
+      "bytes": 21198
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/inventory_benchmark.py": {
+      "sha256": "2aeb2c8440f3c8ca4a560c4dee2ff840dd186e13e2bf96a1aecd2d5e8799290c",
+      "bytes": 30611
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/inventory_profile.py": {
+      "sha256": "f07dc7a9d6a4033828d6b59a96273a1affe87a45b0b23911c1c0bcffed3e9a39",
+      "bytes": 20529
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/inventory_validate.py": {
+      "sha256": "b4e824402bb37e70a68c7c72561336dfbc4b01f914ec0afb756b77d52f7d30d0",
+      "bytes": 20905
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/layout_benchmark.py": {
+      "sha256": "c01bf35a42b805ba8627e01585ccab432cd00bbd1122060d87bf7257bc3abc25",
+      "bytes": 29984
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/layout_profile.py": {
+      "sha256": "a46a2483b4375e87a7a058b237ba3a2ee186ac711208b04a6207af5c86912ea1",
+      "bytes": 15769
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto/inventory_reconciliation": {
+      "sha256": "eaada21d508398ce68367dfd3962bf2371e7d8ca598230e04f0d50d18c2ca069",
+      "bytes": 3544232
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto/inventory_reconciliation.ll": {
+      "sha256": "c342f100fe81d7803316a2b7b66f646e8a38f577dca52baa4c356be9206f4699",
+      "bytes": 210754
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto.json": {
+      "sha256": "d182335e16c44138ad9d0f072fb2cac5a87c5bacc51e489c06651235cc42749a",
+      "bytes": 6781701
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto.log": {
+      "sha256": "f83ed3ef73112b1ebe1bd0f840170089058802c31881f060773310c8247c3da4",
+      "bytes": 595
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal/inventory_reconciliation": {
+      "sha256": "e58b30bc7ddb1640d4066a71350e71719fef8fe56b31b88fdd4893b96a32f04b",
+      "bytes": 3886568
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal/inventory_reconciliation.ll": {
+      "sha256": "c342f100fe81d7803316a2b7b66f646e8a38f577dca52baa4c356be9206f4699",
+      "bytes": 210754
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal.json": {
+      "sha256": "cd1998f95f409fa704d609f289e725d07829c80da1ee26a6fc1ce63156aade5c",
+      "bytes": 6781031
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal.log": {
+      "sha256": "cd8d439ca675f3471acd263409504c0685d417ccf819c7f6f571bbbc297ab99e",
+      "bytes": 598
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/session.json": {
+      "sha256": "aeee00e73d30bd06985b35cebf90cbc7343c7c924226940961b22b724c9cf5c4",
+      "bytes": 27701
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/asan.log": {
+      "sha256": "e963e4d0906123d94140a8ff7f3d3701528eb23c027bf1915e1d05f971d0d042",
+      "bytes": 1937
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/build-record.json": {
+      "sha256": "71fa1c0c7ea27640a98bc9a6c71dda009803090d88b18b1ba01a6b2f2def6ef0",
+      "bytes": 865688
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/copies.json": {
+      "sha256": "266f263c923ee6a9254b3ae2342f775345b7a4b7bed9589f264bde02c9ac1fdf",
+      "bytes": 1646
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/librelar_runtime.a": {
+      "sha256": "4e55a2e65cd85379975a4d72bd6a878e6de556685e03d28c2007200f01a0e859",
+      "bytes": 38470732
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/librelar_runtime_asan.a": {
+      "sha256": "5ad0c13ab1932fea92984dfc9fce2ff1cc14f97eaa0bd735f66ab9bbafcfd8c9",
+      "bytes": 39468966
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/librelar_runtime_lto.a": {
+      "sha256": "8e7126ca8bf47941a46771d3a176e9afc02cf5a5907b59fb1cdccbaff3ea4297",
+      "bytes": 25463306
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/relar": {
+      "sha256": "44bde4d0cf6b2056aff1f29643d84d285c56654a91470f941b31f99fb6db2e77",
+      "bytes": 139535000
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/ordinary.log": {
+      "sha256": "3cf4722772fe0d95ed0521c555d7a531fa34847e1b052b2b001b26d3dfe15754",
+      "bytes": 168
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/provenance/cargo-asan.sh": {
+      "sha256": "32d80780dc4fd3629cdc26c9bc62bd237e9337139e520df69cddd4fb05ae9765",
+      "bytes": 617
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/provenance/cargo-lto.sh": {
+      "sha256": "ad1e9623997cf4cc245e51be447918147d36438aa5a2945496f65e9858c3b2e4",
+      "bytes": 584
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/provenance/combined-runtime-build.json": {
+      "sha256": "722c639e8d92ae2c38060fa7cabd4b554a3f8ad55e2ed4c1e4ebab3c59c56fa4",
+      "bytes": 339312
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/provenance/ordinary-cargo.sh": {
+      "sha256": "74f3f3596cf89fdecf9458d74fc47cfcf09533b8c10f3b569470f74ddbc80fd8",
+      "bytes": 326
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/provenance/ordinary-origin-build.json": {
+      "sha256": "f329e1b0d1c152dd465307aa78d3866d573901c43e85a423699fa5b6d80388e9",
+      "bytes": 3943
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/provenance/runtime-build.py": {
+      "sha256": "324e07ea213d9bb23b426cac63b6a970973c65503f1e90e3dc9e2a9e711ae295",
+      "bytes": 3610
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/thinlto.log": {
+      "sha256": "d52208d3f2b1cba6ac0ff70e8bdafb86cca96bed275e881d885dff348b2b6299",
+      "bytes": 1936
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json": {
+      "sha256": "001a121e8c549548ded1b976e9b2c099cbc07226b0678714fe39cb1707f97fce",
+      "bytes": 26484
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint": {
+      "sha256": "00d4086b398ffe41a3346a9e24d14659002d763b1d25a058a353a3e5fd108270",
+      "bytes": 1772384
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json": {
+      "sha256": "b43013232af09bdc8c1ce5d0c3d095cc48941fe9301b2f7e5fef0019ce65e8fb",
+      "bytes": 26370
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint": {
+      "sha256": "dae07835587c65d3b1d82558e5eebb9f2cc11fc549f7ab5876570132c932f2f5",
+      "bytes": 1562488
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-final-launch.py": {
+      "sha256": "8aaacc03b3c40fb5b505518827d5d8afdf577745bda9a09326e0190a327ca508",
+      "bytes": 15943
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-lto-final/inventory_reconciliation": {
+      "sha256": "256719b474cbb3da4abc5d16a4aef195eea2e3713dea924d69df42e83aabcac9",
+      "bytes": 3308640
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-lto-final/inventory_reconciliation.ll": {
+      "sha256": "bd983e6459dea1c69a1b157fa06fc5afa316693f851867ee34986fc9ec8de2dd",
+      "bytes": 209502
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-lto-final.json": {
+      "sha256": "fdcb3ee06100bc0dc2d5c0cc68b4aa178f4b25cee2f6d71d071a27eb91a0535a",
+      "bytes": 6783326
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-normal-final/inventory_reconciliation": {
+      "sha256": "c18740726793fd4067fd9456e259674dc885775f56d31aeb67cd7a8aece8c74f",
+      "bytes": 3615896
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-normal-final/inventory_reconciliation.ll": {
+      "sha256": "bd983e6459dea1c69a1b157fa06fc5afa316693f851867ee34986fc9ec8de2dd",
+      "bytes": 209502
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-normal-final.json": {
+      "sha256": "3ba131c91d2089d4891aa802e1e8def5604b35642392a3e7c23b6e908f063265",
+      "bytes": 6782777
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-tools-final/asan.log": {
+      "sha256": "0acb0a2bff112598410ca24f63b4158caab27357f014792e2fc332a5208bbbe4",
+      "bytes": 74
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-tools-final/build-record.json": {
+      "sha256": "c757ec816038bdc1686fcdca7d3cca178d92af9dcbf1820dc47344b583f3e7d8",
+      "bytes": 727888
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-tools-final/librelar_runtime.a": {
+      "sha256": "c7e6aff0d855570d482dc890c687e7e7cefbbf68b871ddedeb8866fadca8db70",
+      "bytes": 37521464
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-tools-final/librelar_runtime_asan.a": {
+      "sha256": "f1259a3686b0469c5309d6b6e46315ce470894dfcedaa96a9df1a8ae2121b1e5",
+      "bytes": 38430072
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-tools-final/librelar_runtime_lto.a": {
+      "sha256": "c348c15dfc570728657c5b9b2b2d95884fb171f6b1518845c7fc4a0927779955",
+      "bytes": 24831538
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-tools-final/relar": {
+      "sha256": "7c5d8673a49365324f42e0de706786576726d9e9ee6e9c923bbafbef9491fb6a",
+      "bytes": 138325000
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-tools-final/ordinary.log": {
+      "sha256": "0a3dec432a758deafe592da6d84d12809616b1609246de849848939ba54ad381",
+      "bytes": 74
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-tools-final/thinlto.log": {
+      "sha256": "627173b593a8305d438e0a2971572f0e98decd47ac500d414a7406aa529c7979",
+      "bytes": 74
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/manifest_benchmark.py": {
+      "sha256": "4833c5d3ad0f0ed542cb8e12e0f5b787b143e300979747f3e278d5fad08eb773",
+      "bytes": 24725
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/manifest_validate.py": {
+      "sha256": "2ba1a0e0062583add10cc7e5fd347b67ad82769a74dfc761266cc604685d738d",
+      "bytes": 19931
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/reference/dependency_planner/check_boundaries.py": {
+      "sha256": "e0e83d31483c2983b1228c6403cb6ca43fc305b1300c78294e33d0f74edc1ac4",
+      "bytes": 9712
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/Cargo.lock": {
+      "sha256": "5fc2164c7d5d646f2dffefb4ae6bfe004cb211c240cbd1f591971e2e75ead1e0",
+      "bytes": 1108
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/Cargo.toml": {
+      "sha256": "1bca622581e0122a40193f41c63ffef865c2e02b3e34853aaa2ab04fc096c839",
+      "bytes": 326
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/build.py": {
+      "sha256": "6ad52ac86852824666a0386323b33fa1ff5b86797de69fbbacf72d5c329850e2",
+      "bytes": 8195
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/src/main.rs": {
+      "sha256": "e21c4a4aa25aa1509398afa76feb64d644535ff4b1707317037630e811db6617",
+      "bytes": 12795
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/results/2026-10-18-sequence-access-lto.json.gz": {
+      "sha256": "6cbc62e82284d0687662c4b25d5fd6cb0c66a21510408fc7640b32cfbf375899",
+      "bytes": 925964
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/results/2026-10-18-sequence-access-normal.json.gz": {
+      "sha256": "41bcf2a7d55b989ca4c38782bba385aa8ace6e50894ba8bb82eb5fa9ac5bc6a6",
+      "bytes": 926085
+    },
+    "/home/dev-user/code/oss/relar/benchmarks/validate.py": {
+      "sha256": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+      "bytes": 3251
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/Cargo.toml": {
+      "sha256": "e6936e9d0c4e64f21889cfe158385a0c49067bb19672bc3d2df8dc1c7c1f173e",
+      "bytes": 617
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/analysis.rs": {
+      "sha256": "9d7e36d7f1f1ca55a0815128316b979f647aa1fef4c58ee10baa474ceaa0885c",
+      "bytes": 8191
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/classes.rs": {
+      "sha256": "8a57bbf41463e5384d86fc7d70be62fb8c26ef95b89bbcf7b575ea13be373785",
+      "bytes": 9633
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/effects.rs": {
+      "sha256": "8b8b947fdc523a4aa75ca4f71510f822511842af116c151fe58639f05c00d54f",
+      "bytes": 14432
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/assignments.rs": {
+      "sha256": "266deea8a734593d691c17a3f8fd8942d34b5d5caf52101cec1bd1a2a0136c68",
+      "bytes": 4603
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/calls.rs": {
+      "sha256": "7daa10bbc1fbfd47747370231ae50b71c371d7bb0f27dcf917ce752ca0ede7fd",
+      "bytes": 6951
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/comprehensions.rs": {
+      "sha256": "fcb049c100844701e096b1fc1ecd06ec058f4295f4c278c4ed13ad7146a48f04",
+      "bytes": 22319
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend/matching.rs": {
+      "sha256": "bd723e90497810ba2591187c878e961a2ca24d3f53d2d27379e4601aa8ddcb1e",
+      "bytes": 38502
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/frontend.rs": {
+      "sha256": "f5ab1b608e9693a0178da283bad033956cec19b201522e8770b4d3d575cc13bc",
+      "bytes": 122275
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/ir.rs": {
+      "sha256": "43c35c1cebe89d60711e9d94d68e3835527572ef511ff419a035d0b8f4b6627a",
+      "bytes": 13553
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/lib.rs": {
+      "sha256": "1d597d66d79ab5b246cd3af3986fd181e4e1dbaff0a4bcfc0d486278c8b6f6fa",
+      "bytes": 5109
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/llvm.rs": {
+      "sha256": "58685d107f40167ec1f34d69b98983deefb17c417175a492bafbd7a950dee008",
+      "bytes": 123762
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/main.rs": {
+      "sha256": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+      "bytes": 7777
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/modules.rs": {
+      "sha256": "bab4f6960e73bbbe8702c839994d635f151cc45614ef32eea744fadc4dd0a723",
+      "bytes": 22121
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/narrowing.rs": {
+      "sha256": "6ae1f17e47c9f7b5fd3b7c8766866625a6474a21a74812b72200c14d162ece5f",
+      "bytes": 8835
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/ranges.rs": {
+      "sha256": "514fe5bc56d79435272cbf8b051dac686f7c360fcb68c31748b3ddc923f2440c",
+      "bytes": 61929
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/tuples.rs": {
+      "sha256": "261e238f5d3dd060f10ca034a4208562d8c143319c4e2fc1396fa554d7db523e",
+      "bytes": 23566
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-compiler/src/types.rs": {
+      "sha256": "6ec28df90874d39206cfd36f025964e6e4fd1026bbfff9eba868e7a944d2cbbe",
+      "bytes": 5866
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-runtime/Cargo.toml": {
+      "sha256": "147e0977af4370fc833c67726f1be51f72fe0b413efcaa7f8f35fdb6c82ac919",
+      "bytes": 441
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/floats.rs": {
+      "sha256": "99882a45e8d7d3e4f3d88221303d09f32c3c811f25f1b3e709646b0a59ace76e",
+      "bytes": 18780
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/lib.rs": {
+      "sha256": "ada00422bbe986a51d89f2ecc997745a2dd0f67011c39eb9c216682aaeb2f7fe",
+      "bytes": 42102
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/args.rs": {
+      "sha256": "0f7c2543368bc69da08613471c17dc7ac0981967e7840e3c30ef85dc6a044099",
+      "bytes": 6684
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/bytes.rs": {
+      "sha256": "802098dbd3b32c19798a26d4c08f0b2fdf26fba15d930df7643733ac22a03a05",
+      "bytes": 11928
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/exceptions.rs": {
+      "sha256": "bfb4a6e2c65a7454b47965945a0a286cfae9ffecee9315e66a770ac365690512",
+      "bytes": 27529
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/files.rs": {
+      "sha256": "aeef4b559a3b712569e2de219832228c20e416814bc7e502604e22253170341d",
+      "bytes": 26635
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/mappings.rs": {
+      "sha256": "abb515dc980648a857f2acf3505198b8b195d4ef7ab55024d9b4764960bf1c00",
+      "bytes": 43827
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/records.rs": {
+      "sha256": "9e8061a02eca605d6587da87dedb0ca7b2b868d98bef9abb5159bd4b7ceff75d",
+      "bytes": 10110
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/sequences.rs": {
+      "sha256": "35db7ebce64ae2fc9cc0a2efb40e5cb9ceb43adc9ff5327df000b3b5d90ba079",
+      "bytes": 22931
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects/words.rs": {
+      "sha256": "47f3fc0bbc6b6976420ba6754eef826a3aebc70da6055cf76179ae489443f390",
+      "bytes": 7905
+    },
+    "/home/dev-user/code/oss/relar/crates/relar-runtime/src/objects.rs": {
+      "sha256": "5312213a08d83a6e97d3d32e6a4f4418e7b3f303ce4cd29059f87a02c75211ea",
+      "bytes": 35010
+    },
+    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__init__.py": {
+      "sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+      "bytes": 75
+    },
+    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py": {
+      "sha256": "48c3015dcbac52a08f48b800197398076ac26f37ca480a4ee1ebab2b72c9349c",
+      "bytes": 798
+    },
+    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc": {
+      "sha256": "363df6ba1b6d8875d50e03f1f83983871c49843a872dfa796596b9b6a532d9b5",
+      "bytes": 256
+    },
+    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc": {
+      "sha256": "539832a30f44267b7e44eb2e6217a4e90feb03b9ee4e665d7371397737f3e379",
+      "bytes": 1628
+    },
+    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc": {
+      "sha256": "621e9f8b2b42bc99dd0d5151aeb3444c8a2593cd838d978ac79068edf25018a8",
+      "bytes": 8469
+    },
+    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc": {
+      "sha256": "736e3da875859f41e443ec769f7029112e284fb5cf275fbc87c9348fd4e3cb39",
+      "bytes": 4993
+    },
+    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc": {
+      "sha256": "661eafc1f3213b1af2eb77a7dc207f8e66b72a6d28323f6394f69223774550f7",
+      "bytes": 2667
+    },
+    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc": {
+      "sha256": "3822e62c133024818ce91ad2d84777d326cce361cd22c676deef1da923c0d247",
+      "bytes": 4264
+    },
+    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/load.py": {
+      "sha256": "a4fcffcd2431dc96833cb5aa05a8a436c350b0469ceb635ef1a788da6eabc863",
+      "bytes": 3516
+    },
+    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/model.py": {
+      "sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
+      "bytes": 1544
+    },
+    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/reconcile.py": {
+      "sha256": "a1c7122171f4a92b62e57811bce52e6d522cb2231536b770e5d92785b1bfe618",
+      "bytes": 1704
+    },
+    "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/render.py": {
+      "sha256": "c6319e84f2acbb15ddf142e9135c54635d47e1dc67b6d590ba0f0c44697ed200",
+      "bytes": 2246
+    },
+    "/home/dev-user/code/oss/relar/rust-toolchain.toml": {
+      "sha256": "7553618f800829444096beea3dce84c3d07585efda504c19adb6787369bbd9e8",
+      "bytes": 86
+    },
+    "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": {
+      "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+      "bytes": 32359056
+    },
+    "/tmp/relar-bytes-integrated-validation/librelar_runtime.a": {
+      "sha256": "4e55a2e65cd85379975a4d72bd6a878e6de556685e03d28c2007200f01a0e859",
+      "bytes": 38470732
+    },
+    "/tmp/relar-four-feature-inventory/launch.py": {
+      "sha256": "31f1636fdb1756458abff8ed136d4de288baf8d573e82c89e829f1827e88d183",
+      "bytes": 7903
+    },
+    "/tmp/relar-four-feature-inventory/prepared-manifest.json": {
+      "sha256": "9347db18ab3c8bdc37a00a4738345376c083bab74c30008b199ced3e5fadad98",
+      "bytes": 7676
+    },
+    "/tmp/relar-four-feature-inventory/summary.json": {
+      "sha256": "9514de3e1e8f9c45b797557d4e346a52dd2882855759da179b55f39af1797f0d",
+      "bytes": 10647
+    },
+    "/tmp/relar-integrated-runtimes/librelar_runtime_asan.a": {
+      "sha256": "5ad0c13ab1932fea92984dfc9fce2ff1cc14f97eaa0bd735f66ab9bbafcfd8c9",
+      "bytes": 39468966
+    },
+    "/tmp/relar-integrated-runtimes/librelar_runtime_lto.a": {
+      "sha256": "8e7126ca8bf47941a46771d3a176e9afc02cf5a5907b59fb1cdccbaff3ea4297",
+      "bytes": 25463306
+    },
+    "/usr/lib/llvm-18/bin/clang": {
+      "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+      "bytes": 140592
+    }
+  }
+}

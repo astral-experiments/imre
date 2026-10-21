@@ -1,0 +1,1193 @@
+{
+  "schema_version": 1,
+  "source_commit": "97cb1000565035162c31e6e455d207cf65b54993",
+  "started_at_utc": "2026-10-19T03:30:00.180702+00:00",
+  "completed_at_utc": "2026-10-19T03:31:45.882024+00:00",
+  "method": {
+    "samples_per_workload": 48,
+    "warmup_rounds_per_workload": 2,
+    "engines": [
+      "cpython",
+      "relar",
+      "rust_bigint",
+      "baseline"
+    ],
+    "engine_permutations_per_cycle": 24,
+    "cycles": 2,
+    "cpu": 0,
+    "workloads": 6,
+    "inventory_source_files": 6,
+    "source_unchanged_from_sequence_milestone": true,
+    "ratios": "Ratios of independently calculated per-engine medians, not medians of per-round ratios."
+  },
+  "session": {
+    "path": "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/session.json",
+    "sha256": "aeee00e73d30bd06985b35cebf90cbc7343c7c924226940961b22b724c9cf5c4"
+  },
+  "modes": {
+    "normal": {
+      "record": {
+        "path": "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal.json",
+        "sha256": "cd1998f95f409fa704d609f289e725d07829c80da1ee26a6fc1ce63156aade5c"
+      },
+      "started_at_utc": "2026-10-19T03:30:02.875157+00:00",
+      "completed_at_utc": "2026-10-19T03:30:49.369667+00:00",
+      "source_commit": "97cb1000565035162c31e6e455d207cf65b54993",
+      "dirty": false,
+      "host": {
+        "os": "Linux",
+        "kernel_release": "6.8.0-146-generic",
+        "architecture": "x86_64",
+        "cpu": {
+          "model": "AMD EPYC-Milan Processor",
+          "allowed_cpus_before_pinning": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31
+          ],
+          "affinity": [
+            0
+          ]
+        }
+      },
+      "execution_tracer_pids": {
+        "before": 0,
+        "before_samples": 0,
+        "after": 0
+      },
+      "oracle": {
+        "cases": 204,
+        "successful": 139,
+        "terminal_errors": 65,
+        "engines": [
+          "cpython",
+          "relar",
+          "rust_bigint",
+          "baseline"
+        ],
+        "device_error_check": true
+      },
+      "relar_change_percent_range": [
+        -0.8052914283727675,
+        1.5903486308384895
+      ],
+      "rows": [
+        {
+          "workload": "empty",
+          "median_ms": {
+            "cpython": 27.101965,
+            "relar": 2.20275,
+            "rust_bigint": 2.2474585,
+            "baseline": 2.2145865
+          },
+          "cpython_over_relar": 12.303695380774032,
+          "relar_over_rust": 0.9801070854033567,
+          "relar_over_previous": 0.9946552099003584,
+          "relar_change_percent": -0.5344790099641616,
+          "statistics_ns": {
+            "cpython": {
+              "median_ns": 27101965.0,
+              "min_ns": 26362362,
+              "max_ns": 28561440,
+              "p25_ns": 26960961.75,
+              "p75_ns": 27438672.25
+            },
+            "relar": {
+              "median_ns": 2202750.0,
+              "min_ns": 2063065,
+              "max_ns": 3705735,
+              "p25_ns": 2122322.5,
+              "p75_ns": 2327641.25
+            },
+            "rust_bigint": {
+              "median_ns": 2247458.5,
+              "min_ns": 2082739,
+              "max_ns": 4444942,
+              "p25_ns": 2164311.5,
+              "p75_ns": 2433474.5
+            },
+            "baseline": {
+              "median_ns": 2214586.5,
+              "min_ns": 2048898,
+              "max_ns": 3181628,
+              "p25_ns": 2135862.5,
+              "p75_ns": 2325410.25
+            }
+          },
+          "quartiles_ms": {
+            "cpython": {
+              "q1": 26.96096175,
+              "median": 27.101965,
+              "q3": 27.43867225
+            },
+            "relar": {
+              "q1": 2.1223225,
+              "median": 2.20275,
+              "q3": 2.32764125
+            },
+            "rust_bigint": {
+              "q1": 2.1643115,
+              "median": 2.2474585,
+              "q3": 2.4334745
+            },
+            "baseline": {
+              "q1": 2.1358625,
+              "median": 2.2145865,
+              "q3": 2.32541025
+            }
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 12.303695380774032,
+            "cpython_over_rust_bigint": 12.05893901934118,
+            "cpython_over_baseline": 12.237934711513866,
+            "relar_over_cpython": 0.08127639453449224,
+            "relar_over_rust_bigint": 0.9801070854033567,
+            "relar_over_baseline": 0.9946552099003584,
+            "rust_bigint_over_cpython": 0.08292603506793696,
+            "rust_bigint_over_relar": 1.0202966746112814,
+            "rust_bigint_over_baseline": 1.0148434030461218,
+            "baseline_over_cpython": 0.08171313408455808,
+            "baseline_over_relar": 1.0053735103847463,
+            "baseline_over_rust_bigint": 0.9853737010049352
+          },
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": true
+        },
+        {
+          "workload": "boundary-128",
+          "median_ms": {
+            "cpython": 28.3015395,
+            "relar": 2.853187,
+            "rust_bigint": 2.657792,
+            "baseline": 2.87635
+          },
+          "cpython_over_relar": 9.919272553814384,
+          "relar_over_rust": 1.0735177922124832,
+          "relar_over_previous": 0.9919470857162723,
+          "relar_change_percent": -0.8052914283727675,
+          "statistics_ns": {
+            "cpython": {
+              "median_ns": 28301539.5,
+              "min_ns": 27175146,
+              "max_ns": 223089445,
+              "p25_ns": 28092164.5,
+              "p75_ns": 28663291.5
+            },
+            "relar": {
+              "median_ns": 2853187.0,
+              "min_ns": 2692947,
+              "max_ns": 13512749,
+              "p25_ns": 2800324.5,
+              "p75_ns": 3074783.75
+            },
+            "rust_bigint": {
+              "median_ns": 2657792.0,
+              "min_ns": 2488948,
+              "max_ns": 7187042,
+              "p25_ns": 2575542.25,
+              "p75_ns": 2733634.5
+            },
+            "baseline": {
+              "median_ns": 2876350.0,
+              "min_ns": 2720880,
+              "max_ns": 10931789,
+              "p25_ns": 2786942.75,
+              "p75_ns": 2947481.75
+            }
+          },
+          "quartiles_ms": {
+            "cpython": {
+              "q1": 28.0921645,
+              "median": 28.3015395,
+              "q3": 28.6632915
+            },
+            "relar": {
+              "q1": 2.8003245,
+              "median": 2.853187,
+              "q3": 3.07478375
+            },
+            "rust_bigint": {
+              "q1": 2.57554225,
+              "median": 2.657792,
+              "q3": 2.7336345
+            },
+            "baseline": {
+              "q1": 2.78694275,
+              "median": 2.87635,
+              "q3": 2.94748175
+            }
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 9.919272553814384,
+            "cpython_over_rust_bigint": 10.648515572324696,
+            "cpython_over_baseline": 9.839393502181585,
+            "relar_over_cpython": 0.10081384442001821,
+            "relar_over_rust_bigint": 1.0735177922124832,
+            "relar_over_baseline": 0.9919470857162723,
+            "rust_bigint_over_cpython": 0.09390980303385969,
+            "rust_bigint_over_relar": 0.9315169317678792,
+            "rust_bigint_over_baseline": 0.9240155057625116,
+            "baseline_over_cpython": 0.1016322804630469,
+            "baseline_over_relar": 1.008118290178667,
+            "baseline_over_rust_bigint": 1.082232921161626
+          },
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        },
+        {
+          "workload": "dense-2048",
+          "median_ms": {
+            "cpython": 33.54049,
+            "relar": 6.5428605,
+            "rust_bigint": 6.0234085,
+            "baseline": 6.541865
+          },
+          "cpython_over_relar": 5.126273133899156,
+          "relar_over_rust": 1.0862388795314148,
+          "relar_over_previous": 1.000152173730274,
+          "relar_change_percent": 0.015217373027409664,
+          "statistics_ns": {
+            "cpython": {
+              "median_ns": 33540490.0,
+              "min_ns": 32921084,
+              "max_ns": 41156798,
+              "p25_ns": 33371521.25,
+              "p75_ns": 34002682.5
+            },
+            "relar": {
+              "median_ns": 6542860.5,
+              "min_ns": 5429958,
+              "max_ns": 7032494,
+              "p25_ns": 6431622.25,
+              "p75_ns": 6747542.75
+            },
+            "rust_bigint": {
+              "median_ns": 6023408.5,
+              "min_ns": 5790770,
+              "max_ns": 6772128,
+              "p25_ns": 5914318.25,
+              "p75_ns": 6172280.75
+            },
+            "baseline": {
+              "median_ns": 6541865.0,
+              "min_ns": 6262900,
+              "max_ns": 7494293,
+              "p25_ns": 6366720.75,
+              "p75_ns": 6740182.0
+            }
+          },
+          "quartiles_ms": {
+            "cpython": {
+              "q1": 33.37152125,
+              "median": 33.54049,
+              "q3": 34.0026825
+            },
+            "relar": {
+              "q1": 6.43162225,
+              "median": 6.5428605,
+              "q3": 6.74754275
+            },
+            "rust_bigint": {
+              "q1": 5.91431825,
+              "median": 6.0234085,
+              "q3": 6.17228075
+            },
+            "baseline": {
+              "q1": 6.36672075,
+              "median": 6.541865,
+              "q3": 6.740182
+            }
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 5.126273133899156,
+            "cpython_over_rust_bigint": 5.5683571851386136,
+            "cpython_over_baseline": 5.127053218004346,
+            "relar_over_cpython": 0.19507349177069266,
+            "relar_over_rust_bigint": 1.0862388795314148,
+            "relar_over_baseline": 1.000152173730274,
+            "rust_bigint_over_cpython": 0.1795861807624158,
+            "rust_bigint_over_relar": 0.9206078136619297,
+            "rust_bigint_over_baseline": 0.9207479059870541,
+            "baseline_over_cpython": 0.19504381122637146,
+            "baseline_over_relar": 0.9998478494230467,
+            "baseline_over_rust_bigint": 1.086073607659185
+          },
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        },
+        {
+          "workload": "sparse-2048",
+          "median_ms": {
+            "cpython": 37.483524,
+            "relar": 9.310503,
+            "rust_bigint": 8.4346315,
+            "baseline": 9.1647515
+          },
+          "cpython_over_relar": 4.025939737090466,
+          "relar_over_rust": 1.1038422958963885,
+          "relar_over_previous": 1.015903486308385,
+          "relar_change_percent": 1.5903486308384895,
+          "statistics_ns": {
+            "cpython": {
+              "median_ns": 37483524.0,
+              "min_ns": 36802193,
+              "max_ns": 39873500,
+              "p25_ns": 37190422.25,
+              "p75_ns": 37876004.25
+            },
+            "relar": {
+              "median_ns": 9310503.0,
+              "min_ns": 8945919,
+              "max_ns": 9812232,
+              "p25_ns": 9203609.0,
+              "p75_ns": 9433457.25
+            },
+            "rust_bigint": {
+              "median_ns": 8434631.5,
+              "min_ns": 8191493,
+              "max_ns": 9022913,
+              "p25_ns": 8368155.25,
+              "p75_ns": 8556529.0
+            },
+            "baseline": {
+              "median_ns": 9164751.5,
+              "min_ns": 8939677,
+              "max_ns": 9569991,
+              "p25_ns": 9081969.25,
+              "p75_ns": 9281656.0
+            }
+          },
+          "quartiles_ms": {
+            "cpython": {
+              "q1": 37.19042225,
+              "median": 37.483524,
+              "q3": 37.87600425
+            },
+            "relar": {
+              "q1": 9.203609,
+              "median": 9.310503,
+              "q3": 9.43345725
+            },
+            "rust_bigint": {
+              "q1": 8.36815525,
+              "median": 8.4346315,
+              "q3": 8.556529
+            },
+            "baseline": {
+              "q1": 9.08196925,
+              "median": 9.1647515,
+              "q3": 9.281656
+            }
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 4.025939737090466,
+            "cpython_over_rust_bigint": 4.444002562530444,
+            "cpython_over_baseline": 4.089966214577667,
+            "relar_over_cpython": 0.24838921228430924,
+            "relar_over_rust_bigint": 1.1038422958963885,
+            "relar_over_baseline": 1.015903486308385,
+            "rust_bigint_over_cpython": 0.22502237249624663,
+            "rust_bigint_over_relar": 0.9059265111670122,
+            "rust_bigint_over_baseline": 0.9203339010337597,
+            "baseline_over_cpython": 0.2445007972035927,
+            "baseline_over_relar": 0.9843454752122415,
+            "baseline_over_rust_bigint": 1.0865621693135024
+          },
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        },
+        {
+          "workload": "dense-16384",
+          "median_ms": {
+            "cpython": 76.9145745,
+            "relar": 27.2876595,
+            "rust_bigint": 23.0490075,
+            "baseline": 26.897959
+          },
+          "cpython_over_relar": 2.8186578075704882,
+          "relar_over_rust": 1.1838973760583835,
+          "relar_over_previous": 1.014488106699843,
+          "relar_change_percent": 1.4488106699843017,
+          "statistics_ns": {
+            "cpython": {
+              "median_ns": 76914574.5,
+              "min_ns": 75585407,
+              "max_ns": 322020406,
+              "p25_ns": 76526619.0,
+              "p75_ns": 77726760.0
+            },
+            "relar": {
+              "median_ns": 27287659.5,
+              "min_ns": 26920480,
+              "max_ns": 37498239,
+              "p25_ns": 27125949.0,
+              "p75_ns": 27568961.0
+            },
+            "rust_bigint": {
+              "median_ns": 23049007.5,
+              "min_ns": 22671021,
+              "max_ns": 27237211,
+              "p25_ns": 22931385.25,
+              "p75_ns": 23461644.0
+            },
+            "baseline": {
+              "median_ns": 26897959.0,
+              "min_ns": 26248498,
+              "max_ns": 32119528,
+              "p25_ns": 26702662.5,
+              "p75_ns": 27132586.5
+            }
+          },
+          "quartiles_ms": {
+            "cpython": {
+              "q1": 76.526619,
+              "median": 76.9145745,
+              "q3": 77.72676
+            },
+            "relar": {
+              "q1": 27.125949,
+              "median": 27.2876595,
+              "q3": 27.568961
+            },
+            "rust_bigint": {
+              "q1": 22.93138525,
+              "median": 23.0490075,
+              "q3": 23.461644
+            },
+            "baseline": {
+              "q1": 26.7026625,
+              "median": 26.897959,
+              "q3": 27.1325865
+            }
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 2.8186578075704882,
+            "cpython_over_rust_bigint": 3.3370015823891768,
+            "cpython_over_baseline": 2.859494822636915,
+            "relar_over_cpython": 0.3547787877315762,
+            "relar_over_rust_bigint": 1.1838973760583835,
+            "relar_over_baseline": 1.014488106699843,
+            "rust_bigint_over_cpython": 0.29967022049897707,
+            "rust_bigint_over_relar": 0.8446678067058114,
+            "rust_bigint_over_baseline": 0.8569054440152876,
+            "baseline_over_cpython": 0.349712121205325,
+            "baseline_over_relar": 0.9857188008374261,
+            "baseline_over_rust_bigint": 1.1669899018428451
+          },
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        },
+        {
+          "workload": "sparse-16384",
+          "median_ms": {
+            "cpython": 111.204683,
+            "relar": 51.2648955,
+            "rust_bigint": 42.5792365,
+            "baseline": 50.603388
+          },
+          "cpython_over_relar": 2.1692170034756044,
+          "relar_over_rust": 1.2039881339816885,
+          "relar_over_previous": 1.0130723954688567,
+          "relar_change_percent": 1.3072395468856746,
+          "statistics_ns": {
+            "cpython": {
+              "median_ns": 111204683.0,
+              "min_ns": 109511280,
+              "max_ns": 114950995,
+              "p25_ns": 110781590.75,
+              "p75_ns": 112110084.25
+            },
+            "relar": {
+              "median_ns": 51264895.5,
+              "min_ns": 49744047,
+              "max_ns": 55972501,
+              "p25_ns": 50855729.5,
+              "p75_ns": 51999819.5
+            },
+            "rust_bigint": {
+              "median_ns": 42579236.5,
+              "min_ns": 41637702,
+              "max_ns": 44448611,
+              "p25_ns": 42302957.0,
+              "p75_ns": 43061337.5
+            },
+            "baseline": {
+              "median_ns": 50603388.0,
+              "min_ns": 49542312,
+              "max_ns": 73212994,
+              "p25_ns": 50154580.5,
+              "p75_ns": 51211724.0
+            }
+          },
+          "quartiles_ms": {
+            "cpython": {
+              "q1": 110.78159075,
+              "median": 111.204683,
+              "q3": 112.11008425
+            },
+            "relar": {
+              "q1": 50.8557295,
+              "median": 51.2648955,
+              "q3": 51.9998195
+            },
+            "rust_bigint": {
+              "q1": 42.302957,
+              "median": 42.5792365,
+              "q3": 43.0613375
+            },
+            "baseline": {
+              "q1": 50.1545805,
+              "median": 50.603388,
+              "q3": 51.211724
+            }
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 2.1692170034756044,
+            "cpython_over_rust_bigint": 2.611711532215943,
+            "cpython_over_baseline": 2.197573866002806,
+            "relar_over_cpython": 0.46099583324202276,
+            "relar_over_rust_bigint": 1.2039881339816885,
+            "relar_over_baseline": 1.0130723954688567,
+            "rust_bigint_over_cpython": 0.38289067826397205,
+            "rust_bigint_over_relar": 0.8305729697625152,
+            "rust_bigint_over_baseline": 0.8414305480889935,
+            "baseline_over_cpython": 0.45504727530224603,
+            "baseline_over_relar": 0.9870962869708766,
+            "baseline_over_rust_bigint": 1.188452216610319
+          },
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        }
+      ],
+      "generated_ir": {
+        "baseline_sha256": "bd983e6459dea1c69a1b157fa06fc5afa316693f851867ee34986fc9ec8de2dd",
+        "current_sha256": "c342f100fe81d7803316a2b7b66f646e8a38f577dca52baa4c356be9206f4699",
+        "byte_identical": false
+      }
+    },
+    "lto": {
+      "record": {
+        "path": "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto.json",
+        "sha256": "d182335e16c44138ad9d0f072fb2cac5a87c5bacc51e489c06651235cc42749a"
+      },
+      "started_at_utc": "2026-10-19T03:30:52.602268+00:00",
+      "completed_at_utc": "2026-10-19T03:31:44.323414+00:00",
+      "source_commit": "97cb1000565035162c31e6e455d207cf65b54993",
+      "dirty": false,
+      "host": {
+        "os": "Linux",
+        "kernel_release": "6.8.0-146-generic",
+        "architecture": "x86_64",
+        "cpu": {
+          "model": "AMD EPYC-Milan Processor",
+          "allowed_cpus_before_pinning": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31
+          ],
+          "affinity": [
+            0
+          ]
+        }
+      },
+      "execution_tracer_pids": {
+        "before": 0,
+        "before_samples": 0,
+        "after": 0
+      },
+      "oracle": {
+        "cases": 204,
+        "successful": 139,
+        "terminal_errors": 65,
+        "engines": [
+          "cpython",
+          "relar",
+          "rust_bigint",
+          "baseline"
+        ],
+        "device_error_check": true
+      },
+      "relar_change_percent_range": [
+        -0.2343005131541176,
+        2.265947234816723
+      ],
+      "rows": [
+        {
+          "workload": "empty",
+          "median_ms": {
+            "cpython": 27.373748,
+            "relar": 2.231417,
+            "rust_bigint": 2.2397275,
+            "baseline": 2.2366575
+          },
+          "cpython_over_relar": 12.267428275396307,
+          "relar_over_rust": 0.9962895039686748,
+          "relar_over_previous": 0.9976569948684588,
+          "relar_change_percent": -0.2343005131541176,
+          "statistics_ns": {
+            "cpython": {
+              "median_ns": 27373748.0,
+              "min_ns": 26538406,
+              "max_ns": 29592448,
+              "p25_ns": 27054175.0,
+              "p75_ns": 27713581.25
+            },
+            "relar": {
+              "median_ns": 2231417.0,
+              "min_ns": 2056611,
+              "max_ns": 2801219,
+              "p25_ns": 2165323.75,
+              "p75_ns": 2309486.5
+            },
+            "rust_bigint": {
+              "median_ns": 2239727.5,
+              "min_ns": 2088070,
+              "max_ns": 2756776,
+              "p25_ns": 2153225.0,
+              "p75_ns": 2323045.5
+            },
+            "baseline": {
+              "median_ns": 2236657.5,
+              "min_ns": 2052134,
+              "max_ns": 2751568,
+              "p25_ns": 2171100.25,
+              "p75_ns": 2314280.25
+            }
+          },
+          "quartiles_ms": {
+            "cpython": {
+              "q1": 27.054175,
+              "median": 27.373748,
+              "q3": 27.71358125
+            },
+            "relar": {
+              "q1": 2.16532375,
+              "median": 2.231417,
+              "q3": 2.3094865
+            },
+            "rust_bigint": {
+              "q1": 2.153225,
+              "median": 2.2397275,
+              "q3": 2.3230455
+            },
+            "baseline": {
+              "q1": 2.17110025,
+              "median": 2.2366575,
+              "q3": 2.31428025
+            }
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 12.267428275396307,
+            "cpython_over_rust_bigint": 12.221910031465882,
+            "cpython_over_baseline": 12.23868562799624,
+            "relar_over_cpython": 0.08151667794998332,
+            "relar_over_rust_bigint": 0.9962895039686748,
+            "relar_over_baseline": 0.9976569948684588,
+            "rust_bigint_over_cpython": 0.08182027174356979,
+            "rust_bigint_over_relar": 1.0037243150876776,
+            "rust_bigint_over_baseline": 1.0013725838667744,
+            "baseline_over_cpython": 0.08170812049559308,
+            "baseline_over_relar": 1.002348507697127,
+            "baseline_over_rust_bigint": 0.998629297537312
+          },
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": true
+        },
+        {
+          "workload": "boundary-128",
+          "median_ms": {
+            "cpython": 28.306758,
+            "relar": 2.8375625,
+            "rust_bigint": 2.6822825,
+            "baseline": 2.7746895
+          },
+          "cpython_over_relar": 9.97573022620647,
+          "relar_over_rust": 1.0578909939575716,
+          "relar_over_previous": 1.0226594723481672,
+          "relar_change_percent": 2.265947234816723,
+          "statistics_ns": {
+            "cpython": {
+              "median_ns": 28306758.0,
+              "min_ns": 26793332,
+              "max_ns": 32808408,
+              "p25_ns": 27842851.75,
+              "p75_ns": 28859334.0
+            },
+            "relar": {
+              "median_ns": 2837562.5,
+              "min_ns": 2576561,
+              "max_ns": 4025250,
+              "p25_ns": 2723964.5,
+              "p75_ns": 2970837.5
+            },
+            "rust_bigint": {
+              "median_ns": 2682282.5,
+              "min_ns": 2461456,
+              "max_ns": 4670883,
+              "p25_ns": 2606593.25,
+              "p75_ns": 2812652.0
+            },
+            "baseline": {
+              "median_ns": 2774689.5,
+              "min_ns": 2633208,
+              "max_ns": 3989643,
+              "p25_ns": 2705073.5,
+              "p75_ns": 2928303.75
+            }
+          },
+          "quartiles_ms": {
+            "cpython": {
+              "q1": 27.84285175,
+              "median": 28.306758,
+              "q3": 28.859334
+            },
+            "relar": {
+              "q1": 2.7239645,
+              "median": 2.8375625,
+              "q3": 2.9708375
+            },
+            "rust_bigint": {
+              "q1": 2.60659325,
+              "median": 2.6822825,
+              "q3": 2.812652
+            },
+            "baseline": {
+              "q1": 2.7050735,
+              "median": 2.7746895,
+              "q3": 2.92830375
+            }
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 9.97573022620647,
+            "cpython_over_rust_bigint": 10.553235164454154,
+            "cpython_over_baseline": 10.201775009419974,
+            "relar_over_cpython": 0.10024328819287606,
+            "relar_over_rust_bigint": 1.0578909939575716,
+            "relar_over_baseline": 1.0226594723481672,
+            "rust_bigint_over_cpython": 0.09475767235513159,
+            "rust_bigint_over_relar": 0.9452769762780555,
+            "rust_bigint_over_baseline": 0.9666964537833873,
+            "baseline_over_cpython": 0.09802215781828495,
+            "baseline_over_relar": 0.9778426025858461,
+            "baseline_over_rust_bigint": 1.0344508827835994
+          },
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": true
+        },
+        {
+          "workload": "dense-2048",
+          "median_ms": {
+            "cpython": 33.4900195,
+            "relar": 5.725804,
+            "rust_bigint": 5.5721415,
+            "baseline": 5.682718
+          },
+          "cpython_over_relar": 5.848963656457678,
+          "relar_over_rust": 1.0275769199328482,
+          "relar_over_previous": 1.007581935264076,
+          "relar_change_percent": 0.7581935264076023,
+          "statistics_ns": {
+            "cpython": {
+              "median_ns": 33490019.5,
+              "min_ns": 32966373,
+              "max_ns": 35991694,
+              "p25_ns": 33316815.75,
+              "p75_ns": 33846190.25
+            },
+            "relar": {
+              "median_ns": 5725804.0,
+              "min_ns": 4767913,
+              "max_ns": 6046164,
+              "p25_ns": 5677681.25,
+              "p75_ns": 5786475.0
+            },
+            "rust_bigint": {
+              "median_ns": 5572141.5,
+              "min_ns": 5405280,
+              "max_ns": 6493709,
+              "p25_ns": 5522744.75,
+              "p75_ns": 5634938.25
+            },
+            "baseline": {
+              "median_ns": 5682718.0,
+              "min_ns": 5563666,
+              "max_ns": 6106688,
+              "p25_ns": 5650372.0,
+              "p75_ns": 5758406.75
+            }
+          },
+          "quartiles_ms": {
+            "cpython": {
+              "q1": 33.31681575,
+              "median": 33.4900195,
+              "q3": 33.84619025
+            },
+            "relar": {
+              "q1": 5.67768125,
+              "median": 5.725804,
+              "q3": 5.786475
+            },
+            "rust_bigint": {
+              "q1": 5.52274475,
+              "median": 5.5721415,
+              "q3": 5.63493825
+            },
+            "baseline": {
+              "q1": 5.650372,
+              "median": 5.682718,
+              "q3": 5.75840675
+            }
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 5.848963656457678,
+            "cpython_over_rust_bigint": 6.01026005890195,
+            "cpython_over_baseline": 5.893310120262874,
+            "relar_over_cpython": 0.17097045882580034,
+            "relar_over_rust_bigint": 1.0275769199328482,
+            "relar_over_baseline": 1.007581935264076,
+            "rust_bigint_over_cpython": 0.1663821515541369,
+            "rust_bigint_over_relar": 0.9731631575233801,
+            "rust_bigint_over_baseline": 0.9805416175851063,
+            "baseline_over_cpython": 0.16968392628138063,
+            "baseline_over_relar": 0.9924751179048392,
+            "baseline_over_rust_bigint": 1.019844524766645
+          },
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        },
+        {
+          "workload": "sparse-2048",
+          "median_ms": {
+            "cpython": 37.304891,
+            "relar": 7.9753995,
+            "rust_bigint": 7.7049605,
+            "baseline": 7.9256825
+          },
+          "cpython_over_relar": 4.677494964358838,
+          "relar_over_rust": 1.0350993363301473,
+          "relar_over_previous": 1.0062728982645974,
+          "relar_change_percent": 0.6272898264597426,
+          "statistics_ns": {
+            "cpython": {
+              "median_ns": 37304891.0,
+              "min_ns": 36789568,
+              "max_ns": 40464573,
+              "p25_ns": 37093831.25,
+              "p75_ns": 37812064.25
+            },
+            "relar": {
+              "median_ns": 7975399.5,
+              "min_ns": 7846410,
+              "max_ns": 10486549,
+              "p25_ns": 7919428.0,
+              "p75_ns": 8056643.75
+            },
+            "rust_bigint": {
+              "median_ns": 7704960.5,
+              "min_ns": 7547282,
+              "max_ns": 10587446,
+              "p25_ns": 7642736.5,
+              "p75_ns": 7836495.25
+            },
+            "baseline": {
+              "median_ns": 7925682.5,
+              "min_ns": 7734101,
+              "max_ns": 9207044,
+              "p25_ns": 7874922.75,
+              "p75_ns": 8024995.5
+            }
+          },
+          "quartiles_ms": {
+            "cpython": {
+              "q1": 37.09383125,
+              "median": 37.304891,
+              "q3": 37.81206425
+            },
+            "relar": {
+              "q1": 7.919428,
+              "median": 7.9753995,
+              "q3": 8.05664375
+            },
+            "rust_bigint": {
+              "q1": 7.6427365,
+              "median": 7.7049605,
+              "q3": 7.83649525
+            },
+            "baseline": {
+              "q1": 7.87492275,
+              "median": 7.9256825,
+              "q3": 8.0249955
+            }
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 4.677494964358838,
+            "cpython_over_rust_bigint": 4.84167193329544,
+            "cpython_over_baseline": 4.706836414403428,
+            "relar_over_cpython": 0.21378964758267222,
+            "relar_over_rust_bigint": 1.0350993363301473,
+            "relar_over_baseline": 1.0062728982645974,
+            "rust_bigint_over_cpython": 0.20654022283565981,
+            "rust_bigint_over_relar": 0.9660908522513512,
+            "rust_bigint_over_baseline": 0.9721510418818821,
+            "baseline_over_cpython": 0.21245692689465304,
+            "baseline_over_relar": 0.9937662056928935,
+            "baseline_over_rust_bigint": 1.0286467399800427
+          },
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        },
+        {
+          "workload": "dense-16384",
+          "median_ms": {
+            "cpython": 76.863462,
+            "relar": 21.583054,
+            "rust_bigint": 20.348558,
+            "baseline": 21.3734175
+          },
+          "cpython_over_relar": 3.561287573111757,
+          "relar_over_rust": 1.0606674929987667,
+          "relar_over_previous": 1.0098082817125524,
+          "relar_change_percent": 0.9808281712552436,
+          "statistics_ns": {
+            "cpython": {
+              "median_ns": 76863462.0,
+              "min_ns": 76001204,
+              "max_ns": 83250192,
+              "p25_ns": 76441232.25,
+              "p75_ns": 77368733.5
+            },
+            "relar": {
+              "median_ns": 21583054.0,
+              "min_ns": 21254392,
+              "max_ns": 22759055,
+              "p25_ns": 21496472.75,
+              "p75_ns": 21748078.0
+            },
+            "rust_bigint": {
+              "median_ns": 20348558.0,
+              "min_ns": 20077769,
+              "max_ns": 21417034,
+              "p25_ns": 20248764.75,
+              "p75_ns": 20486164.75
+            },
+            "baseline": {
+              "median_ns": 21373417.5,
+              "min_ns": 21040012,
+              "max_ns": 23296677,
+              "p25_ns": 21242476.75,
+              "p75_ns": 21566346.75
+            }
+          },
+          "quartiles_ms": {
+            "cpython": {
+              "q1": 76.44123225,
+              "median": 76.863462,
+              "q3": 77.3687335
+            },
+            "relar": {
+              "q1": 21.49647275,
+              "median": 21.583054,
+              "q3": 21.748078
+            },
+            "rust_bigint": {
+              "q1": 20.24876475,
+              "median": 20.348558,
+              "q3": 20.48616475
+            },
+            "baseline": {
+              "q1": 21.24247675,
+              "median": 21.3734175,
+              "q3": 21.56634675
+            }
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 3.561287573111757,
+            "cpython_over_rust_bigint": 3.7773419620201096,
+            "cpython_over_baseline": 3.5962176848882494,
+            "relar_over_cpython": 0.28079731823684967,
+            "relar_over_rust_bigint": 1.0606674929987667,
+            "relar_over_baseline": 1.0098082817125524,
+            "rust_bigint_over_cpython": 0.26473642313951457,
+            "rust_bigint_over_relar": 0.9428025338768091,
+            "rust_bigint_over_baseline": 0.9520498067283811,
+            "baseline_over_cpython": 0.27806993002735164,
+            "baseline_over_relar": 0.9902869862624631,
+            "baseline_over_rust_bigint": 1.050365215068311
+          },
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        },
+        {
+          "workload": "sparse-16384",
+          "median_ms": {
+            "cpython": 111.0254805,
+            "relar": 41.1586405,
+            "rust_bigint": 37.385175,
+            "baseline": 40.8562165
+          },
+          "cpython_over_relar": 2.697501160175589,
+          "relar_over_rust": 1.100934809051984,
+          "relar_over_previous": 1.0074021538435896,
+          "relar_change_percent": 0.7402153843589554,
+          "statistics_ns": {
+            "cpython": {
+              "median_ns": 111025480.5,
+              "min_ns": 109816177,
+              "max_ns": 114198001,
+              "p25_ns": 110588501.25,
+              "p75_ns": 111370465.25
+            },
+            "relar": {
+              "median_ns": 41158640.5,
+              "min_ns": 40422675,
+              "max_ns": 43699429,
+              "p25_ns": 40847643.0,
+              "p75_ns": 41373478.5
+            },
+            "rust_bigint": {
+              "median_ns": 37385175.0,
+              "min_ns": 36802861,
+              "max_ns": 42423022,
+              "p25_ns": 37097534.75,
+              "p75_ns": 37712380.0
+            },
+            "baseline": {
+              "median_ns": 40856216.5,
+              "min_ns": 40129870,
+              "max_ns": 42221066,
+              "p25_ns": 40578377.0,
+              "p75_ns": 41273056.25
+            }
+          },
+          "quartiles_ms": {
+            "cpython": {
+              "q1": 110.58850125,
+              "median": 111.0254805,
+              "q3": 111.37046525
+            },
+            "relar": {
+              "q1": 40.847643,
+              "median": 41.1586405,
+              "q3": 41.3734785
+            },
+            "rust_bigint": {
+              "q1": 37.09753475,
+              "median": 37.385175,
+              "q3": 37.71238
+            },
+            "baseline": {
+              "q1": 40.578377,
+              "median": 40.8562165,
+              "q3": 41.27305625
+            }
+          },
+          "ratios_of_medians": {
+            "cpython_over_relar": 2.697501160175589,
+            "cpython_over_rust_bigint": 2.9697729246954174,
+            "cpython_over_baseline": 2.7174684787564702,
+            "relar_over_cpython": 0.3707134642844441,
+            "relar_over_rust_bigint": 1.100934809051984,
+            "relar_over_baseline": 1.0074021538435896,
+            "rust_bigint_over_cpython": 0.33672608154125483,
+            "rust_bigint_over_relar": 0.908318995618915,
+            "rust_bigint_over_baseline": 0.915042512563541,
+            "baseline_over_cpython": 0.3679895490296932,
+            "baseline_over_relar": 0.9926522354400894,
+            "baseline_over_rust_bigint": 1.0928453992792597
+          },
+          "iqr_overlap_vs_previous": true,
+          "iqr_overlap_vs_rust": false
+        }
+      ],
+      "generated_ir": {
+        "baseline_sha256": "bd983e6459dea1c69a1b157fa06fc5afa316693f851867ee34986fc9ec8de2dd",
+        "current_sha256": "c342f100fe81d7803316a2b7b66f646e8a38f577dca52baa4c356be9206f4699",
+        "byte_identical": false
+      }
+    }
+  },
+  "totals": {
+    "measured_engine_executions": 2304,
+    "warmup_engine_executions": 96,
+    "timing_gate_engine_executions": 48,
+    "oracle_case_engine_checks": 1632,
+    "device_error_engine_checks": 8
+  },
+  "guards": {
+    "sources_unchanged": true,
+    "baseline_unchanged": true,
+    "cpython_bytecode_unchanged": true,
+    "both_returncodes_zero": true,
+    "no_sample_reruns": true
+  },
+  "status": "passed",
+  "statistics_method": "Exact Fraction interpolation on integer nanoseconds at p*(n-1), inclusive Q1/median/Q3; ratios of per-engine medians. IQR overlap is descriptive, not a significance test.",
+  "independent_audit_checks": 158530,
+  "independent_audit_input_summary": {
+    "path": "/tmp/relar-four-feature-inventory/summary-audited-input.json",
+    "sha256": "9514de3e1e8f9c45b797557d4e346a52dd2882855759da179b55f39af1797f0d",
+    "bytes": 10647,
+    "note": "Exact provisional summary verified by the independent audit, retained before publication added its audited quartiles and provenance."
+  },
+  "independent_audit_sha256": "ff56b30e36c8d86b9cdfdb69bbecd841f5907c3ef3bca2af2bf2365194e751a2",
+  "validation_sha256": "48ff2a125dc1e7596d262609e9a2bba1a1cb192b022273e4279b6041573f03c8",
+  "provenance_note": "Measurements use the clean source commit above; report and packaging files were produced afterward and are not claimed to belong to that measured commit."
+}
