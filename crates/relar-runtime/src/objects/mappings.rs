@@ -1,9 +1,10 @@
-//! Ordered dictionaries with immutable scalar keys and owned typed values.
+//! Dictionaries and sets with immutable scalar keys and owned typed values.
 //!
 //! A randomized hash index points into insertion-ordered entries. Deleted entries
 //! become tombstones; active iterators hold a lease that prevents compaction.
 //! Iterators root their owner and retain only an integer cursor between calls,
 //! never a Rust reference or iterator into storage across a Python loop body.
+//! Dictionaries expose insertion order; sets deliberately promise no order.
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -195,17 +196,26 @@ impl Mapping {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum IterationError {
-    SizeChanged,
-    KeysChanged,
+    DictionarySize,
+    DictionaryKeys,
+    SetSize,
 }
 
 impl IterationError {
     fn message(self) -> &'static str {
         match self {
-            Self::SizeChanged => "dictionary changed size during iteration",
-            Self::KeysChanged => "dictionary keys changed during iteration",
+            Self::DictionarySize => "dictionary changed size during iteration",
+            Self::DictionaryKeys => "dictionary keys changed during iteration",
+            Self::SetSize => "Set changed size during iteration",
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IteratorKind {
+    DictionaryKeys,
+    DictionaryItems,
+    Set,
 }
 
 /// The owner and lease are ordinary Rc fields: releasing an iterator never
@@ -216,7 +226,7 @@ pub(super) struct MappingIterator {
     expected_len: usize,
     position: usize,
     remaining: usize,
-    items: bool,
+    kind: IteratorKind,
     exhausted: bool,
 }
 
@@ -227,23 +237,28 @@ impl MappingIterator {
         if self.exhausted {
             return Ok(None);
         }
-        // SAFETY: the rooted owner is a distinct dictionary allocation, and no
+        // SAFETY: the rooted owner is a distinct mapping allocation, and no
         // storage reference escapes. Key/value clones cannot reenter either cell.
         let result = unsafe {
             self.owner.0.with(|storage| {
-                let mapping = storage.dictionary();
+                let mapping = storage.iteration_mapping(self.kind);
                 if mapping.index.len() != self.expected_len {
-                    return Err(IterationError::SizeChanged);
+                    return Err(if self.kind == IteratorKind::Set {
+                        IterationError::SetSize
+                    } else {
+                        IterationError::DictionarySize
+                    });
                 }
                 for (position, entry) in mapping.entries.iter().enumerate().skip(self.position) {
                     if let Some(entry) = entry {
-                        if self.remaining == 0 {
-                            return Err(IterationError::KeysChanged);
+                        if self.kind != IteratorKind::Set && self.remaining == 0 {
+                            return Err(IterationError::DictionaryKeys);
                         }
                         return Ok(Some((
                             position + 1,
                             entry.key.clone(),
-                            self.items.then(|| entry.value.clone()),
+                            (self.kind == IteratorKind::DictionaryItems)
+                                .then(|| entry.value.clone()),
                         )));
                     }
                 }
@@ -252,7 +267,7 @@ impl MappingIterator {
         }?;
         if let Some((position, key, value)) = result {
             self.position = position;
-            self.remaining -= 1;
+            self.remaining = self.remaining.saturating_sub(1);
             Ok(Some((key, value)))
         } else {
             self.exhausted = true;
@@ -273,6 +288,36 @@ impl Storage {
         match self {
             Self::Dictionary(mapping) => mapping,
             _ => fail("SystemError", "expected a dictionary object"),
+        }
+    }
+
+    fn set(&self) -> &Mapping {
+        match self {
+            Self::Set(mapping) => mapping,
+            _ => fail("SystemError", "expected a set object"),
+        }
+    }
+
+    fn set_mut(&mut self) -> &mut Mapping {
+        match self {
+            Self::Set(mapping) => mapping,
+            _ => fail("SystemError", "expected a set object"),
+        }
+    }
+
+    fn iteration_mapping(&self, kind: IteratorKind) -> &Mapping {
+        if kind == IteratorKind::Set {
+            self.set()
+        } else {
+            self.dictionary()
+        }
+    }
+
+    fn iteration_mapping_mut(&mut self, kind: IteratorKind) -> &mut Mapping {
+        if kind == IteratorKind::Set {
+            self.set_mut()
+        } else {
+            self.dictionary_mut()
         }
     }
 
@@ -444,17 +489,23 @@ pub unsafe extern "C" fn relar_dict_delete(value: *const Object, key: usize) {
 /// never be inserted into user containers, which would invalidate acyclicity.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_iter(value: *const Object, mode: u32) -> *const Object {
-    let items = match mode {
-        0 => false,
-        1 => true,
+    let kind = match mode {
+        0 => IteratorKind::DictionaryKeys,
+        1 => IteratorKind::DictionaryItems,
         _ => fail("SystemError", "invalid dictionary iteration mode"),
     };
-    // SAFETY: the caller roots the dictionary; the new iterator acquires its owner.
+    // SAFETY: the caller roots a dictionary and the mode was checked above.
+    unsafe { new_iterator(value, kind) }
+}
+
+/// Acquires a rooted mapping owner and a compaction lease for this exact mode.
+unsafe fn new_iterator(value: *const Object, kind: IteratorKind) -> *const Object {
+    // SAFETY: the caller roots the mapping; the new iterator acquires its owner.
     let owner = unsafe { acquire_rc::<Object>(value as usize) };
     // SAFETY: only the independent lease and copied size escape; no callbacks run.
     let (lease, length) = unsafe {
         owner.0.with_mut(|storage| {
-            let mapping = storage.dictionary_mut();
+            let mapping = storage.iteration_mapping_mut(kind);
             (mapping.iterator_lease(), mapping.index.len())
         })
     };
@@ -464,12 +515,88 @@ pub unsafe extern "C" fn relar_dict_iter(value: *const Object, mode: u32) -> *co
         expected_len: length,
         position: 0,
         remaining: length,
-        items,
+        kind,
         exhausted: false,
     };
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::MappingIterator(
         iterator,
     )))))
+}
+
+/// Creates a typed set; key kinds are exactly 2 (int) and 3 (str).
+/// Its iteration order is unspecified even though the storage is shared with dicts.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_set_new(key_kind: u32) -> *const Object {
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Set(Box::new(
+        Mapping::new(key_kind, 0),
+    ))))))
+}
+
+/// # Safety
+/// `value` must be a rooted set. Returns an owned canonical integer word.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_set_len(value: *const Object) -> usize {
+    // SAFETY: only a copied length escapes this nonreentrant storage access.
+    let length = unsafe { object(value).0.with(|storage| storage.set().index.len()) };
+    Int::from_usize(length).into_raw()
+}
+
+/// # Safety
+/// `value` and `key` must be rooted handles matching the set's exact key kind.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_set_contains(value: *const Object, key: usize) -> u8 {
+    // SAFETY: the immutable key remains rooted; hashing cannot call user code.
+    u8::from(unsafe {
+        object(value).0.with(|storage| {
+            let mapping = storage.set();
+            let key = Key::borrow(key, mapping.key_kind);
+            mapping.index.contains_key(&*key)
+        })
+    })
+}
+
+/// # Safety
+/// The set and exact-kind key must be rooted. Duplicate adds leave size unchanged.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_set_add(value: *const Object, key: usize) {
+    // SAFETY: only immutable kind metadata escapes the rooted storage read.
+    let kind = unsafe { object(value).0.with(|storage| storage.set().key_kind) };
+    // SAFETY: acquire before mutation, including a key rooted only by this set.
+    let key = unsafe { (*Key::borrow(key, kind)).clone() };
+    // SAFETY: insertion cannot reenter, and displaced owners escape the access.
+    let old = unsafe {
+        object(value)
+            .0
+            .with_mut(|storage| storage.set_mut().insert(key, Slot::None))
+    };
+    drop(old);
+}
+
+/// # Safety
+/// The set and exact-kind key must be rooted. A missing key is a no-op;
+/// removed owners are dropped after mutable storage access ends.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_set_discard(value: *const Object, key: usize) {
+    // SAFETY: lookup/removal cannot reenter; removed owners escape the access.
+    let old = unsafe {
+        object(value).0.with_mut(|storage| {
+            let mapping = storage.set_mut();
+            let key = Key::borrow(key, mapping.key_kind);
+            mapping.remove(&key)
+        })
+    };
+    drop(old);
+}
+
+/// Creates an internal iterator yielding owned keys in unspecified order.
+///
+/// # Safety
+/// `value` must be a rooted set. The compiler must release the iterator on every
+/// loop exit and never insert it into user containers, preserving acyclicity.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_set_iter(value: *const Object) -> *const Object {
+    // SAFETY: the caller roots the exact storage shape required by this mode.
+    unsafe { new_iterator(value, IteratorKind::Set) }
 }
 
 /// Writes independently owned key/value words for one step, returning 1, or
@@ -478,7 +605,7 @@ pub unsafe extern "C" fn relar_dict_iter(value: *const Object, mode: u32) -> *co
 /// # Safety
 /// `value` must be a rooted internal mapping iterator. On success `key_out`, and
 /// `value_out` for items mode, must be distinct writable aligned usize slots
-/// outside runtime allocations. Keys-only mode ignores `value_out` and accepts
+/// outside runtime allocations. Keys-only/set modes ignore `value_out` and accept
 /// null. Prior owned outputs must be consumed before the slots are reused.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_mapping_iter_next(
@@ -773,7 +900,7 @@ mod tests {
             let resized = relar_dict_iter(dictionary, 0);
             assert!(step(resized).unwrap().is_some());
             relar_dict_set(dictionary, integer(1), integer(1));
-            assert!(matches!(step(resized), Err(IterationError::SizeChanged)));
+            assert!(matches!(step(resized), Err(IterationError::DictionarySize)));
             relar_object_release(resized);
 
             let changed = relar_dict_iter(dictionary, 0);
@@ -787,9 +914,135 @@ mod tests {
                 Int(step(changed).unwrap().unwrap().0.into_word()).as_small(),
                 Some(1)
             );
-            assert!(matches!(step(changed), Err(IterationError::KeysChanged)));
+            assert!(matches!(step(changed), Err(IterationError::DictionaryKeys)));
             relar_object_release(changed);
             relar_object_release(dictionary);
+        }
+    }
+
+    #[test]
+    fn sets_deduplicate_integer_values_and_own_yielded_snapshots() {
+        let original = Rc::new(BigInt::from(1_u128 << 120));
+        let equal = Rc::new(BigInt::from(1_u128 << 120));
+        let original_weak = Rc::downgrade(&original);
+        let equal_weak = Rc::downgrade(&equal);
+        let set = relar_set_new(2);
+        // SAFETY: all keys are canonical rooted Int words. Every yielded owner
+        // is transferred into Int before its independent output slot is reused.
+        unsafe {
+            relar_set_add(set, Rc::as_ptr(&original) as usize);
+            relar_set_add(set, Rc::as_ptr(&equal) as usize);
+            assert_eq!(Int(relar_set_len(set)).as_small(), Some(1));
+            drop(equal);
+            assert!(equal_weak.upgrade().is_none());
+            drop(original);
+            for key in [crate::MIN_SMALL, -1, 0, crate::MAX_SMALL] {
+                relar_set_add(set, integer(key));
+            }
+            relar_set_discard(set, integer(7));
+            assert_eq!(Int(relar_set_len(set)).as_small(), Some(5));
+            let iterator = relar_set_iter(set);
+            let mut snapshots = Vec::new();
+            let mut word = 0;
+            while relar_mapping_iter_next(iterator, &mut word, std::ptr::null_mut()) != 0 {
+                snapshots.push(Int(word));
+            }
+            relar_object_release(iterator);
+            let expected = Int::new(BigInt::from(1_u128 << 120));
+            assert_eq!(relar_set_contains(set, expected.0), 1);
+            relar_set_discard(set, expected.0);
+            assert_eq!(relar_set_contains(set, expected.0), 0);
+            relar_object_release(set);
+            assert!(original_weak.upgrade().is_some());
+            let mut actual: Vec<_> = snapshots
+                .iter()
+                .map(|value| value.big().as_ref().clone())
+                .collect();
+            actual.sort();
+            assert_eq!(
+                actual,
+                [
+                    BigInt::from(crate::MIN_SMALL),
+                    BigInt::from(-1),
+                    BigInt::from(0),
+                    BigInt::from(crate::MAX_SMALL),
+                    BigInt::from(1_u128 << 120),
+                ]
+            );
+            drop(snapshots);
+        }
+        assert!(original_weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn sets_keep_exact_string_keys_and_reclaim_owner_after_iteration() {
+        // SAFETY: the constructor's owned reference is transferred once to Rc.
+        let set = unsafe { Rc::from_raw(relar_set_new(3)) };
+        let set_weak = Rc::downgrade(&set);
+        let pointer = Rc::as_ptr(&set);
+        let texts = ["é", "e\u{301}", "name\0suffix", "😺"];
+        let mut keys_weak = Vec::new();
+        // SAFETY: each string is rooted through insertion. The iterator roots the
+        // set after its external owner is dropped, and outputs acquire their own Rc.
+        unsafe {
+            for text in texts {
+                let key = Rc::new(Str::from(text));
+                keys_weak.push(Rc::downgrade(&key));
+                relar_set_add(pointer, Rc::as_ptr(&key) as usize);
+                let duplicate = Rc::new(Str::from(text));
+                relar_set_add(pointer, Rc::as_ptr(&duplicate) as usize);
+            }
+            assert_eq!(Int(relar_set_len(pointer)).as_small(), Some(4));
+            let iterator = relar_set_iter(pointer);
+            drop(set);
+            assert!(set_weak.upgrade().is_some());
+            let mut snapshots = Vec::new();
+            let mut word = 0;
+            while relar_mapping_iter_next(iterator, &mut word, std::ptr::null_mut()) != 0 {
+                snapshots.push(Rc::from_raw(word as *const Str));
+            }
+            relar_object_release(iterator);
+            assert!(set_weak.upgrade().is_none());
+            let mut actual: Vec<_> = snapshots.iter().map(|key| key.as_str()).collect();
+            let mut expected = texts.to_vec();
+            actual.sort();
+            expected.sort();
+            assert_eq!(actual, expected);
+            assert!(keys_weak.iter().all(|key| key.upgrade().is_some()));
+            drop(snapshots);
+        }
+        assert!(keys_weak.iter().all(|key| key.upgrade().is_none()));
+    }
+
+    #[test]
+    fn set_iteration_checks_size_but_ignores_duplicate_adds_and_missing_discards() {
+        let set = relar_set_new(2);
+        // SAFETY: the set and iterators remain rooted; all values are immediate
+        // integers and step returns only independent owners or an error.
+        unsafe {
+            let empty = relar_set_iter(set);
+            assert!(step(empty).unwrap().is_none());
+            relar_set_add(set, integer(0));
+            assert!(step(empty).unwrap().is_none());
+            relar_object_release(empty);
+
+            let resized = relar_set_iter(set);
+            relar_set_add(set, integer(0));
+            relar_set_discard(set, integer(1));
+            assert!(step(resized).unwrap().is_some());
+            relar_set_add(set, integer(1));
+            assert!(matches!(step(resized), Err(IterationError::SetSize)));
+            relar_object_release(resized);
+
+            let same_size = relar_set_iter(set);
+            let yielded = step(same_size).unwrap().unwrap().0;
+            relar_set_discard(set, yielded.into_word());
+            relar_set_add(set, integer(2));
+            // Sets have no dictionary-style remaining-key check or ordering
+            // guarantee when deletion/insertion restores the original size.
+            while step(same_size).unwrap().is_some() {}
+            relar_object_release(same_size);
+            relar_object_release(set);
         }
     }
 }

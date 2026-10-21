@@ -365,6 +365,7 @@ fn children(expression: &Expr, mut visit: impl FnMut(&Expr)) {
             }
         }
         ExprKind::List(values)
+        | ExprKind::Set { values, .. }
         | ExprKind::Tuple(values)
         | ExprKind::Compare(values, _)
         | ExprKind::Boolean(_, values)
@@ -402,6 +403,7 @@ fn children_mut(expression: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
             }
         }
         ExprKind::List(values)
+        | ExprKind::Set { values, .. }
         | ExprKind::Tuple(values)
         | ExprKind::Compare(values, _)
         | ExprKind::Boolean(_, values)

@@ -276,6 +276,73 @@ main()
 # Every rejected program must reach the checker. Cycle cases additionally require
 # the ownership-graph diagnostic, rather than an unsupported-annotation rejection.
 REJECTED = {
+    "set_empty_without_context": "values = set()\n",
+    "set_iterable_constructor": "values: set[int] = set([1, 2])\n",
+    "set_copy_constructor": "original = {1, 2}\nvalues: set[int] = set(original)\n",
+    "set_bool_annotation": "values: set[bool] = set()\n",
+    "set_bool_literal": "values = {True, False}\n",
+    "set_bool_int_literal": "values = {1, True}\n",
+    "set_mixed_literal": 'values = {1, "one"}\n',
+    "set_list_elements": "values: set[list[int]] = set()\n",
+    "set_tuple_elements": "values: set[tuple[int, int]] = set()\n",
+    "set_optional_elements": "values: set[int | None] = set()\n",
+    "set_none_elements": "values: set[None] = set()\n",
+    "set_nominal_elements": ITEM + "values: set[Item] = set()\n",
+    "set_recursive_nominal_elements": """
+        class Node:
+            children: set["Node"]
+            def __init__(self, children: set["Node"]) -> None:
+                self.children = children
+    """,
+    "set_wrong_add": 'values = {"one"}\nvalues.add(1)\n',
+    "set_wrong_alias_add": 'values = {"one"}\nalias = values\nalias.add(1)\n',
+    "set_bool_int_add": "values = {1}\nvalues.add(True)\n",
+    "set_wrong_discard": 'values = {"one"}\nvalues.discard(1)\n',
+    "set_bool_int_discard": "values = {1}\nvalues.discard(True)\n",
+    "set_wrong_membership": 'values = {"one"}\nprint(1 in values)\n',
+    "set_bool_int_membership": "values = {1}\nprint(True in values)\n",
+    "set_add_arity": "values = {1}\nvalues.add(2, 3)\n",
+    "set_discard_arity": "values = {1}\nvalues.discard()\n",
+    "set_add_keyword": "values = {1}\nvalues.add(element=2)\n",
+    "set_copy_method": "values = {1}\ncopy = values.copy()\n",
+    "set_pop_method": "values = {1}\nvalues.pop()\n",
+    "set_remove_method": "values = {1}\nvalues.remove(1)\n",
+    "set_union": "left = {1}\nright = {2}\nvalues = left | right\n",
+    "set_equality": "left = {1}\nright = {1}\nprint(left == right)\n",
+    "set_subset_comparison": "left = {1}\nright = {1, 2}\nprint(left < right)\n",
+    "set_index": "values = {1}\nprint(values[0])\n",
+    "set_index_write": "values = {1}\nvalues[0] = 2\n",
+    "set_first_class_iterator": "values = {1}\niterator = iter(values)\n",
+    "set_first_class_enumerate": "values = {1}\niterator = enumerate(values)\n",
+    "set_literal_expansion": "values = {1}\nexpanded = {*values}\n",
+    "set_optional_receiver": "def add(values: set[int] | None) -> None:\n    values.add(1)\n",
+    "set_optional_membership": "def has(values: set[int] | None) -> bool:\n    return 1 in values\n",
+    "set_maybe_unbound_target": """
+        def last(values: set[int]) -> int:
+            for value in values:
+                pass
+            return value
+    """,
+    "set_optional_target_invalidates_fact": """
+        def use(values: set[int] | None, sources: list[set[int] | None]) -> None:
+            if values is not None:
+                for values in sources:
+                    print(len(values))
+    """,
+    "set_optional_loop_backedge": """
+        def use(values: set[int] | None) -> None:
+            if values is not None:
+                for index in {1, 2}:
+                    print(len(values))
+                    values = None
+    """,
+    "set_optional_loop_exit": """
+        def use(values: set[int] | None) -> None:
+            if values is not None:
+                for index in {1}:
+                    values = None
+                print(len(values))
+    """,
     "dict_empty_without_context": "values = {}\n",
     "dict_empty_constructor_without_context": "values = dict()\n",
     "dict_copy_constructor": 'original = {"one": 1}\nvalues: dict[str, int] = dict(original)\n',
@@ -579,6 +646,34 @@ show(Box(Item("x")))
 }
 
 ERRORS = {
+    "set_iteration_insert_size_change": (
+        "values = {1}\nfor value in values:\n    print(value)\n    values.add(2)\n",
+        "RuntimeError",
+    ),
+    "set_iteration_discard_size_change": (
+        'values = {"owned string"}\nalias = values\nfor value in values:\n    alias.discard(value)\n    print(value)\n',
+        "RuntimeError",
+    ),
+    "set_enumerate_size_change": (
+        "values = {3}\nfor index, value in enumerate(values, 10):\n    print(index)\n    print(value)\n    values.add(4)\n",
+        "RuntimeError",
+    ),
+    "set_outer_iterator_size_change": (
+        "values = {1}\nfor outer in values:\n    for inner in values:\n        values.add(2)\n        print(inner)\n        break\n",
+        "RuntimeError",
+    ),
+    "set_membership_element_error_before_receiver": (
+        'def element() -> int:\n    print("element")\n    return 1 // 0\ndef receiver() -> set[int]:\n    print("receiver must not run")\n    return {1}\nprint(element() in receiver())\n',
+        "ZeroDivisionError",
+    ),
+    "set_method_receiver_error_before_argument": (
+        'def receiver() -> set[int]:\n    print("receiver")\n    return {1 // 0}\ndef element() -> int:\n    print("argument must not run")\n    return 1\nreceiver().add(element())\n',
+        "ZeroDivisionError",
+    ),
+    "set_literal_element_order": (
+        "def element(value: int) -> int:\n    print(value)\n    if value == 1:\n        return 1 // 0\n    return value\nvalues = {element(1), element(2)}\n",
+        "ZeroDivisionError",
+    ),
     "dict_missing_index": (
         'values: dict[str, int] = {}\nprint(values["missing"])\n',
         "KeyError",

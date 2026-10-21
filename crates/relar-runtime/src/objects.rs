@@ -37,6 +37,7 @@ enum Storage {
     Fields(Vec<Option<Slot>>),
     Sequence(Vec<Slot>),
     Dictionary(Box<mappings::Mapping>),
+    Set(Box<mappings::Mapping>),
     MappingIterator(mappings::MappingIterator),
 }
 

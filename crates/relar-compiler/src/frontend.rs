@@ -101,6 +101,7 @@ const RESERVED: &[&str] = &[
     "list",
     "tuple",
     "dict",
+    "set",
     "len",
     "input",
     "print",
@@ -443,6 +444,17 @@ fn annotation_at(
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
         ast::Expr::Subscript(value) => match &*value.value {
             ast::Expr::Name(name) if name.id == "list" => Ok(types.list(nested(&value.slice)?)),
+            ast::Expr::Name(name) if name.id == "set" => {
+                let element = nested(&value.slice)?;
+                if !matches!(element, Type::Int | Type::Str) {
+                    return Err(error(
+                        source,
+                        &*value.slice,
+                        "set elements must be exactly int or str",
+                    ));
+                }
+                Ok(types.set(element))
+            }
             ast::Expr::Name(name) if name.id == "dict" => {
                 let ast::Expr::Tuple(arguments) = &*value.slice else {
                     return Err(error(
@@ -483,7 +495,7 @@ fn annotation_at(
             _ => Err(error(
                 source,
                 expression,
-                "only list[T], dict[K, V], and fixed tuple[T, ...] are supported",
+                "only list[T], dict[K, V], set[T], and fixed tuple[T, ...] are supported",
             )),
         },
         ast::Expr::BinOp(union) if union.op == ast::Operator::BitOr => {
@@ -713,6 +725,9 @@ impl<'a> Checker<'a> {
             ast::Expr::Dict(dict) if self.types.mapping(concrete).is_some() => {
                 self.dictionary(dict, self.types.mapping(concrete))?
             }
+            ast::Expr::Set(set) if self.types.set_element(concrete).is_some() => {
+                self.set_literal(set, self.types.set_element(concrete))?
+            }
             ast::Expr::Call(call)
                 if self.types.mapping(concrete).is_some()
                     && matches!(&*call.func, ast::Expr::Name(name) if name.id == "dict")
@@ -726,6 +741,20 @@ impl<'a> Checker<'a> {
                         key,
                         value,
                         entries: Vec::new(),
+                    },
+                }
+            }
+            ast::Expr::Call(call)
+                if self.types.set_element(concrete).is_some()
+                    && matches!(&*call.func, ast::Expr::Name(name) if name.id == "set")
+                    && call.arguments.args.is_empty()
+                    && call.arguments.keywords.is_empty() =>
+            {
+                Expr {
+                    ty: concrete,
+                    kind: ExprKind::Set {
+                        element: self.types.set_element(concrete).unwrap(),
+                        values: Vec::new(),
                     },
                 }
             }
@@ -868,6 +897,39 @@ impl<'a> Checker<'a> {
                 value,
                 entries,
             },
+        })
+    }
+
+    /// Exact scalar elements keep hashing and equality free of user callbacks.
+    fn set_literal(&mut self, set: &ast::ExprSet, expected: Option<Type>) -> Result<Expr, String> {
+        let mut element = expected;
+        let mut values = Vec::with_capacity(set.elts.len());
+        for value in &set.elts {
+            let checked = if let Some(element) = element {
+                self.expr_expected(value, element)?
+            } else {
+                self.expr(value)?
+            };
+            if !matches!(checked.ty, Type::Int | Type::Str) {
+                return Err(error(
+                    self.source,
+                    value,
+                    "set elements must be exactly int or str",
+                ));
+            }
+            element = Some(checked.ty);
+            values.push(checked);
+        }
+        let element = element.ok_or_else(|| {
+            error(
+                self.source,
+                set,
+                "an empty set requires a concrete set[T] context",
+            )
+        })?;
+        Ok(Expr {
+            ty: self.types.set(element),
+            kind: ExprKind::Set { element, values },
         })
     }
 
@@ -1020,9 +1082,11 @@ impl<'a> Checker<'a> {
             (self.iteration_source(&loop_.iter)?, None)
         };
         let mapping = self.types.mapping(iterable.ty);
+        let set_element = self.types.set_element(iterable.ty);
         let element = self
             .types
             .element(iterable.ty)
+            .or(set_element)
             .or_else(|| {
                 mapping.map(|(key, value)| {
                     if items {
@@ -1036,11 +1100,11 @@ impl<'a> Checker<'a> {
                 error(
                     self.source,
                     &*loop_.iter,
-                    "iteration requires a concrete list, dictionary, or range",
+                    "iteration requires a concrete list, dictionary, set, or range",
                 )
             })?;
         let captured = self.hidden(iterable.ty);
-        let cursor = if mapping.is_none() {
+        let cursor = if mapping.is_none() && set_element.is_none() {
             Some(self.hidden(Type::Int))
         } else {
             None
@@ -1086,7 +1150,7 @@ impl<'a> Checker<'a> {
                 },
             )
         } else {
-            let (key_type, value_type) = mapping.unwrap();
+            let (key_type, value_type) = mapping.unwrap_or((element, Type::None));
             let iterator = self.hidden(Type::Iterator);
             // enumerate evaluates its start before obtaining the actual iterator.
             // The earlier capture preserves the receiver through those effects.
@@ -1094,7 +1158,14 @@ impl<'a> Checker<'a> {
                 iterator,
                 Expr {
                     ty: Type::Iterator,
-                    kind: ExprKind::Builtin(Builtin::DictIter(items), vec![self.local(captured)]),
+                    kind: ExprKind::Builtin(
+                        if set_element.is_some() {
+                            Builtin::SetIter
+                        } else {
+                            Builtin::DictIter(items)
+                        },
+                        vec![self.local(captured)],
+                    ),
                 },
             ));
             cleanup.push(iterator);
@@ -1569,6 +1640,7 @@ impl<'a> Checker<'a> {
                 (self.types.list(element), ExprKind::List(values))
             }
             ast::Expr::Dict(dict) => return self.dictionary(dict, None),
+            ast::Expr::Set(set) => return self.set_literal(set, None),
             ast::Expr::Tuple(tuple) => {
                 let values = tuple
                     .elts
@@ -1622,17 +1694,22 @@ impl<'a> Checker<'a> {
                 {
                     let key = self.expr(&compare.operands[0])?;
                     let receiver = self.expr(&compare.operands[1])?;
-                    let (key_type, _) = self.types.mapping(receiver.ty).ok_or_else(|| {
-                        error(
-                            self.source,
-                            expression,
-                            "membership requires a concrete dictionary",
-                        )
-                    })?;
+                    let (key_type, builtin) =
+                        if let Some((key, _)) = self.types.mapping(receiver.ty) {
+                            (key, Builtin::DictContains)
+                        } else if let Some(element) = self.types.set_element(receiver.ty) {
+                            (element, Builtin::SetContains)
+                        } else {
+                            return Err(error(
+                                self.source,
+                                expression,
+                                "membership requires a concrete dictionary or set",
+                            ));
+                        };
                     self.expect(key_type, key.ty, expression)?;
                     let mut result = Expr {
                         ty: Type::Bool,
-                        kind: ExprKind::Builtin(Builtin::DictContains, vec![key, receiver]),
+                        kind: ExprKind::Builtin(builtin, vec![key, receiver]),
                     };
                     if compare.ops[0] == ast::CmpOp::NotIn {
                         result = Expr {
@@ -1698,6 +1775,7 @@ impl<'a> Checker<'a> {
                         Type::ListInt
                             | Type::List(_)
                             | Type::Dict(_)
+                            | Type::Set(_)
                             | Type::Tuple(_)
                             | Type::Optional(_)
                     ) {
@@ -1897,11 +1975,29 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(builtin, args),
                 });
             }
+            if let Some(element) = self.types.set_element(receiver.ty) {
+                let builtin = match attribute.attr.as_str() {
+                    "add" if call.arguments.args.len() == 1 => Builtin::SetAdd,
+                    "discard" if call.arguments.args.len() == 1 => Builtin::SetDiscard,
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "supported set methods are add(value) and discard(value)",
+                        ));
+                    }
+                };
+                let value = self.expr_expected(&call.arguments.args[0], element)?;
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(builtin, vec![receiver, value]),
+                });
+            }
             let element = self.types.element(receiver.ty).ok_or_else(|| {
                 error(
                     self.source,
                     call,
-                    "supported value methods are typed-list append/pop, dict.get, and str.split()",
+                    "supported value methods are typed-list append/pop, dict.get, set.add/discard, and str.split()",
                 )
             })?;
             let mut args = vec![receiver];
@@ -1948,7 +2044,12 @@ impl<'a> Checker<'a> {
                 if args.len() == 1
                     && matches!(
                         args[0].ty,
-                        Type::Str | Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Tuple(_)
+                        Type::Str
+                            | Type::ListInt
+                            | Type::List(_)
+                            | Type::Dict(_)
+                            | Type::Set(_)
+                            | Type::Tuple(_)
                     ) =>
             {
                 (Builtin::Len, Type::Int)
