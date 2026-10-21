@@ -1,0 +1,84 @@
+{
+  "git_head": "347b8d00ac0ce64fc4b4cbbf09e70f2f5f838d2f",
+  "git_status": "",
+  "scope": "The generated LLVM code and Rust runtime are both instrumented with AddressSanitizer; LeakSanitizer is enabled. Execution is outside ptrace.",
+  "runtime_build": [
+    "sh",
+    "/tmp/relar-cargo.sh",
+    "build",
+    "-p",
+    "relar-runtime",
+    "--release",
+    "--locked",
+    "--target",
+    "x86_64-unknown-linux-gnu",
+    "--target-dir",
+    "/home/dev-user/.cache/relar/asan-target"
+  ],
+  "runtime_environment": {
+    "RUSTC_BOOTSTRAP": "1",
+    "RUSTFLAGS": "-Zsanitizer=address -Cforce-frame-pointers=yes"
+  },
+  "compiler_command": [
+    "/home/dev-user/code/oss/relar/benchmarks/local/incremental-tools-final/relar",
+    "build",
+    "examples/incremental_planner/__main__.py",
+    "--module-root",
+    "examples",
+    "--runtime",
+    "/home/dev-user/code/oss/relar/benchmarks/local/incremental-sanitizer-final/librelar_runtime.a",
+    "--clang",
+    "clang-18",
+    "--opt-level",
+    "1",
+    "--sanitize",
+    "-o",
+    "/home/dev-user/code/oss/relar/benchmarks/local/incremental-sanitizer-final/incremental_planner",
+    "--emit-llvm",
+    "/home/dev-user/code/oss/relar/benchmarks/local/incremental-sanitizer-final/incremental_planner.ll"
+  ],
+  "validation_command": [
+    "/home/dev-user/.local/bin/python3.14",
+    "benchmarks/incremental_validate.py",
+    "--binary",
+    "/home/dev-user/code/oss/relar/benchmarks/local/incremental-sanitizer-final/incremental_planner",
+    "--python",
+    "/home/dev-user/.local/bin/python3.14",
+    "--output",
+    "/home/dev-user/code/oss/relar/benchmarks/local/incremental-sanitizer-final/validation.json"
+  ],
+  "validation_environment": {
+    "ASAN_OPTIONS": "detect_leaks=1",
+    "LSAN_OPTIONS": "exitcode=23"
+  },
+  "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8\n",
+  "cargo_wrapper": "#!/bin/sh\nexport CARGO_HOME=/home/dev-user/.cache/relar/cargo-home\nexport CARGO_TARGET_DIR=/home/dev-user/.cache/relar/target\nexport CARGO_BUILD_BUILD_DIR=/home/dev-user/.cache/ohm/shared-build\nexport CARGO_UNSTABLE_OHM_PROC_MACRO_TRUST=all\nexport CARGO_UNSTABLE_OHM_NATIVE_TOOL_TRUST=all\nexec cargo +ohm -Zohm-defaults=no \"$@\"\n",
+  "source_sha256": {
+    "Cargo.toml": "ce49064770ad21744c8ac6cea604da7408be1e5ec474e3f90206fa95f2af614f",
+    "Cargo.lock": "62b84d5f29e184143562b4a022bdb96eed14d9880c922cd36e3b38ce2d3ad2b9",
+    "crates/relar-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
+    "crates/relar-runtime/Cargo.toml": "ca46c91b45fcda42d7b6073c1de9178bf9e93ad7791bbd8b4c0e94caa739fb77",
+    "crates/relar-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
+    "crates/relar-compiler/src/classes.rs": "3d02a3968dcc28bf1c040e7bae4f1b2def6911fa9187813abc213b25a400914c",
+    "crates/relar-compiler/src/frontend.rs": "c325eb14ef277ff0d4f948043dcf6fab216667a44845ab704d86ad091351bbbe",
+    "crates/relar-compiler/src/ir.rs": "46af8b15369b67252013370edd7c574796a3269f7b4076fbae93681b3b1d371e",
+    "crates/relar-compiler/src/lib.rs": "9fafcca2352a05d26904d0202147356a9198fcd5afa95e215d2f4009d1ea133a",
+    "crates/relar-compiler/src/llvm.rs": "d9049cb7b574125aef8e42a140e730d7225bf35aaff51f1a9aafd3f83517572d",
+    "crates/relar-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+    "crates/relar-compiler/src/modules.rs": "7133088ce8840ab6e72237bb55e8d118bfa30ab2962b486d325af6a0186fe7d6",
+    "crates/relar-compiler/src/narrowing.rs": "bd97ee2f328de9b5985473c5d223a0d73f740bf56a8481a74bd1cf10e5f07d30",
+    "crates/relar-compiler/src/ranges.rs": "a9edeb312cc729be2fde67f8fbb7d3aebf2bba4709390317af63bf21a5d38218",
+    "crates/relar-compiler/src/tuples.rs": "349f065811f0af702559b20ae699921658a5ffe928485306117538537d094dad",
+    "crates/relar-compiler/src/types.rs": "fcbf279b4c9cf3d8d283b038d05a9fe7923bc83aabfa9a151e6dd4f2f36767ed",
+    "crates/relar-runtime/src/lib.rs": "4ba7c19ca6e3a6297e4ac49307444451038edfe8879bc8830357e648740100fc",
+    "crates/relar-runtime/src/objects/mappings.rs": "b55767bf73fe7d259562145a301fd59f1095eabd44d379ba6fe9e139832a3b82",
+    "crates/relar-runtime/src/objects.rs": "c9a6389d9ca68cd40eae0e23bda02a7bda1fb7e5a2e7554fa699699c29e3c601"
+  },
+  "sha256": {
+    "/home/dev-user/code/oss/relar/benchmarks/local/incremental-tools-final/relar": "a12492037a9c5d02a261cde12600442b6e30d98f4cc94546af33de912549f376",
+    "/home/dev-user/code/oss/relar/benchmarks/local/incremental-sanitizer-final/librelar_runtime.a": "dbb0397835e0a0ca300dd2b16316ee1c1f595fc270b247b077053fdb3ab45732",
+    "/home/dev-user/code/oss/relar/benchmarks/local/incremental-sanitizer-final/incremental_planner": "2ffb9dd0bbaf428228cc0d72ef72e6456733b7143e9b6d3e9b536db08fbe85b9",
+    "/home/dev-user/code/oss/relar/benchmarks/local/incremental-sanitizer-final/incremental_planner.ll": "6229bf924f12f6f458d94e89a8d3c03e6202e49e5716ec21a0e17ceb6fc7ea6f",
+    "/home/dev-user/code/oss/relar/benchmarks/local/incremental-sanitizer-final/validation.json": "b95c6dccfbf339a193c8269e026b981e415347f1edc4938687a838605893c41c"
+  }
+}
