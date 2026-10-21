@@ -1028,6 +1028,7 @@ dependencies = [
  "icu_properties",
  "itoa",
  "libc",
+ "memchr",
  "num-bigint",
  "num-traits",
  "ruff_python_literal",

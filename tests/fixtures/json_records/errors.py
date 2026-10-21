@@ -66,6 +66,19 @@ for depth in [127, 128]:
     except ValueError:
         print(f"depth rejected {depth}")
 
+# Escaped quotes keep bracket text inside the string; an escaped backslash
+# immediately before its closing quote must still end the quoted span.
+quoted_noise = r'"quote: \" slash-quote: \\\" ' + repeat("[{", 200) + r' closing: ]} tail: \\"'
+for quoted_depth in [127, 128]:
+    text = '{"total":6,"noise":' + quoted_noise + ',"ignored":' + repeat("[", quoted_depth) + quoted_noise + repeat("]", quoted_depth) + ',"after":"done"}'
+    try:
+        result = decode(text, Report)
+        assert quoted_depth == 127
+        print(f"quoted depth accepted {quoted_depth} {result.total}")
+    except ValueError:
+        assert quoted_depth == 128
+        print(f"quoted depth rejected {quoted_depth}")
+
 # Every failure occurs after owning long strings, BigInts, nested records, and lists.
 prefix = '{"total":1267650600228229401496703205376,"items":[{"name":"' + repeat("x", 1024) + '","amount":1267650600228229401496703205376},'
 for attempt in range(25):
