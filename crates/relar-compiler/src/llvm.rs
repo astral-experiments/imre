@@ -5,8 +5,8 @@ use std::fmt::Write;
 use crate::borrows::{self, FunctionBorrows};
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
-    Binary, Builtin, CallArgs, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType, Module,
-    Statement, Type,
+    Binary, Builtin, CallArgs, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType,
+    Module, Statement, Type,
 };
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;

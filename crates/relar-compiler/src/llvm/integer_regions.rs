@@ -69,7 +69,10 @@ fn summarize(function: &Function) -> Option<Summary> {
     for (index, &slot) in function.params.iter().enumerate() {
         locals[slot] = Some(summary.push(
             Operation::Parameter(index),
-            Interval { min: MIN_SMALL, max: MAX_SMALL },
+            Interval {
+                min: MIN_SMALL,
+                max: MAX_SMALL,
+            },
         )?);
     }
     for assignment in assignments {
@@ -95,7 +98,10 @@ impl Summary {
             return None;
         }
         let index = self.nodes.len();
-        self.nodes.push(Node { operation, interval });
+        self.nodes.push(Node {
+            operation,
+            interval,
+        });
         Some(index)
     }
 
@@ -111,7 +117,10 @@ impl Summary {
                 let value = small_literal(text)?;
                 self.push(
                     Operation::Constant(value),
-                    Interval { min: i128::from(value), max: i128::from(value) },
+                    Interval {
+                        min: i128::from(value),
+                        max: i128::from(value),
+                    },
                 )
             }
             ExprKind::Binary(operation @ (Binary::Add | Binary::Subtract), left, right) => {
@@ -122,11 +131,17 @@ impl Summary {
                 let (operation, interval) = match operation {
                     Binary::Add => (
                         Operation::Add(left, right),
-                        Interval { min: a.min.checked_add(b.min)?, max: a.max.checked_add(b.max)? },
+                        Interval {
+                            min: a.min.checked_add(b.min)?,
+                            max: a.max.checked_add(b.max)?,
+                        },
                     ),
                     Binary::Subtract => (
                         Operation::Subtract(left, right),
-                        Interval { min: a.min.checked_sub(b.max)?, max: a.max.checked_sub(b.min)? },
+                        Interval {
+                            min: a.min.checked_sub(b.max)?,
+                            max: a.max.checked_sub(b.min)?,
+                        },
                     ),
                     _ => unreachable!(),
                 };
@@ -137,11 +152,15 @@ impl Summary {
                 let interval = self.nodes[input].interval;
                 self.push(
                     Operation::Negate(input),
-                    Interval { min: interval.max.checked_neg()?, max: interval.min.checked_neg()? },
+                    Interval {
+                        min: interval.max.checked_neg()?,
+                        max: interval.min.checked_neg()?,
+                    },
                 )
             }
             ExprKind::Conditional(test, yes, no) => {
-                let input = self.expression(conditionals::absolute_operand(test, yes, no)?, locals)?;
+                let input =
+                    self.expression(conditionals::absolute_operand(test, yes, no)?, locals)?;
                 let interval = self.nodes[input].interval;
                 let min = if interval.min >= 0 {
                     interval.min
@@ -152,7 +171,10 @@ impl Summary {
                 };
                 self.push(
                     Operation::Absolute(input),
-                    Interval { min, max: interval.min.checked_neg()?.max(interval.max) },
+                    Interval {
+                        min,
+                        max: interval.min.checked_neg()?.max(interval.max),
+                    },
                 )
             }
             _ => None,
@@ -162,7 +184,9 @@ impl Summary {
 
 fn small_literal(text: &str) -> Option<i64> {
     let value = text.parse::<i64>().ok()?;
-    (MIN_SMALL..=MAX_SMALL).contains(&i128::from(value)).then_some(value)
+    (MIN_SMALL..=MAX_SMALL)
+        .contains(&i128::from(value))
+        .then_some(value)
 }
 
 impl Emitter<'_, '_> {
@@ -206,7 +230,9 @@ impl Emitter<'_, '_> {
         let tags = self.instruction(format!("and i64 {tags}, 1"));
         let small = self.instruction(format!("icmp eq i64 {tags}, 1"));
         let (fast, slow, end) = (self.label(), self.label(), self.label());
-        self.line(format!("br i1 {small}, label %{fast}, label %{slow}, !prof !1"));
+        self.line(format!(
+            "br i1 {small}, label %{fast}, label %{slow}, !prof !1"
+        ));
         self.terminated = true;
 
         self.start(&fast);
@@ -214,21 +240,25 @@ impl Emitter<'_, '_> {
         for node in &summary.nodes {
             let value = match node.operation {
                 Operation::Parameter(index) => self.instruction(format!(
-                    "ashr i64 {}, 1", arguments[args.order[index]].value.operand
+                    "ashr i64 {}, 1",
+                    arguments[args.order[index]].value.operand
                 )),
                 Operation::Constant(value) => value.to_string(),
-                Operation::Add(left, right) => self.instruction(format!(
-                    "add nsw i64 {}, {}", values[left], values[right]
-                )),
-                Operation::Subtract(left, right) => self.instruction(format!(
-                    "sub nsw i64 {}, {}", values[left], values[right]
-                )),
-                Operation::Negate(value) => self.instruction(format!("sub nsw i64 0, {}", values[value])),
+                Operation::Add(left, right) => {
+                    self.instruction(format!("add nsw i64 {}, {}", values[left], values[right]))
+                }
+                Operation::Subtract(left, right) => {
+                    self.instruction(format!("sub nsw i64 {}, {}", values[left], values[right]))
+                }
+                Operation::Negate(value) => {
+                    self.instruction(format!("sub nsw i64 0, {}", values[value]))
+                }
                 Operation::Absolute(value) => {
                     let negative = self.instruction(format!("icmp slt i64 {}, 0", values[value]));
                     let negated = self.instruction(format!("sub nsw i64 0, {}", values[value]));
                     self.instruction(format!(
-                        "select i1 {negative}, i64 {negated}, i64 {}", values[value]
+                        "select i1 {negative}, i64 {negated}, i64 {}",
+                        values[value]
                     ))
                 }
             };
@@ -244,7 +274,8 @@ impl Emitter<'_, '_> {
             Compare::GreaterEqual => "sge",
         };
         let fast_value = self.instruction(format!(
-            "icmp {predicate} i64 {}, {right_value}", values[summary.result]
+            "icmp {predicate} i64 {}, {right_value}",
+            values[summary.result]
         ));
         let fast_end = self.current.clone();
         self.jump(&end);
@@ -254,7 +285,11 @@ impl Emitter<'_, '_> {
         let left = self.user_call(
             *function,
             Type::Int,
-            &args.order.iter().map(|&index| &arguments[index].value).collect::<Vec<_>>(),
+            &args
+                .order
+                .iter()
+                .map(|&index| &arguments[index].value)
+                .collect::<Vec<_>>(),
         );
         let slow_value = self.compare(operation, &left, &right.value);
         self.release(&left);
@@ -266,7 +301,8 @@ impl Emitter<'_, '_> {
         let result = Value {
             ty: Type::Bool,
             operand: self.instruction(format!(
-                "phi i1 [ {fast_value}, %{fast_end} ], [ {}, %{slow_end} ]", slow_value.operand
+                "phi i1 [ {fast_value}, %{fast_end} ], [ {}, %{slow_end} ]",
+                slow_value.operand
             )),
             small_integer: false,
         };
@@ -305,24 +341,36 @@ mod tests {
 
     #[test]
     fn intervals_admit_full_width_differences_but_reject_overflowing_nodes() {
-        let difference = summary(
-            "def difference(a: int, b: int) -> int:\n    return a - b\n",
-        ).unwrap();
-        assert_eq!(difference.nodes[difference.result].interval, Interval {
-            min: i128::from(i64::MIN) + 1,
-            max: i128::from(i64::MAX),
-        });
+        let difference =
+            summary("def difference(a: int, b: int) -> int:\n    return a - b\n").unwrap();
+        assert_eq!(
+            difference.nodes[difference.result].interval,
+            Interval {
+                min: i128::from(i64::MIN) + 1,
+                max: i128::from(i64::MAX),
+            }
+        );
         let magnitude = summary(DISTANCE).unwrap();
-        assert_eq!(magnitude.nodes[magnitude.result].interval, Interval {
-            min: 0,
-            max: i128::from(i64::MAX),
-        });
+        assert_eq!(
+            magnitude.nodes[magnitude.result].interval,
+            Interval {
+                min: 0,
+                max: i128::from(i64::MAX),
+            }
+        );
         let addition = summary("def total(a: int, b: int) -> int:\n    return a + b\n").unwrap();
-        assert_eq!(addition.nodes[addition.result].interval.min, i128::from(i64::MIN));
+        assert_eq!(
+            addition.nodes[addition.result].interval.min,
+            i128::from(i64::MIN)
+        );
         for expression in ["-(a + b)", "a + b + a", "a - b - a", "a * b"] {
-            assert!(summary(&format!(
-                "def rejected(a: int, b: int) -> int:\n    return {expression}\n"
-            )).is_none(), "{expression}");
+            assert!(
+                summary(&format!(
+                    "def rejected(a: int, b: int) -> int:\n    return {expression}\n"
+                ))
+                .is_none(),
+                "{expression}"
+            );
         }
         assert!(summary(
             "def rejected(a: int, b: int) -> int:\n    total = a + b\n    return -total if total < 0 else total\n"
@@ -334,7 +382,10 @@ mod tests {
         let value = summary(
             "def versions(a: int, b: int) -> int:\n    x = a - b\n    old = x\n    x = 0\n    return old\n",
         ).unwrap();
-        assert!(matches!(value.nodes[value.result].operation, Operation::Subtract(..)));
+        assert!(matches!(
+            value.nodes[value.result].operation,
+            Operation::Subtract(..)
+        ));
         for body in [
             "    a = a\n    return a\n",
             "    print(a)\n    return a\n",
@@ -346,14 +397,19 @@ mod tests {
             assert!(summary(&format!("def rejected(a: int, b: int) -> int:\n{body}")).is_none());
         }
         let expression = format!("a{}", " + 0".repeat(MAX_NODES));
-        assert!(summary(&format!(
-            "def rejected(a: int) -> int:\n    return {expression}\n"
-        )).is_none());
+        assert!(
+            summary(&format!(
+                "def rejected(a: int) -> int:\n    return {expression}\n"
+            ))
+            .is_none()
+        );
     }
 
     #[test]
     fn guarded_comparison_exposes_only_bool_and_retains_the_original_call() {
-        let source = format!("{DISTANCE}\ndef probe(a: int, b: int, limit: int) -> bool:\n    return distance(a, b) > limit\n");
+        let source = format!(
+            "{DISTANCE}\ndef probe(a: int, b: int, limit: int) -> bool:\n    return distance(a, b) > limit\n"
+        );
         let body = caller_body(&source, 1);
         let decoded = body.find("ashr i64").unwrap();
         assert!(body[..decoded].contains("!prof !1"));
@@ -374,22 +430,30 @@ mod tests {
             "0 < distance(a, b) < limit",
             "distance(a, b) > 1000000000000000000000000000000",
         ] {
-            let body = caller_body(&format!(
-                "{DISTANCE}\ndef probe(a: int, b: int, limit: int) -> bool:\n    return {expression}\n"
-            ), 1);
+            let body = caller_body(
+                &format!(
+                    "{DISTANCE}\ndef probe(a: int, b: int, limit: int) -> bool:\n    return {expression}\n"
+                ),
+                1,
+            );
             assert!(!body.contains("ashr i64"), "{expression}");
         }
     }
 
     #[test]
     fn effectful_arguments_are_captured_once_before_the_guarded_paths() {
-        let source = format!("{DISTANCE}\ndef source(value: int) -> int:\n    print(value)\n    return value\n\ndef probe(limit: int) -> bool:\n    return distance(b=source(2), a=source(1)) > limit\n");
+        let source = format!(
+            "{DISTANCE}\ndef source(value: int) -> int:\n    print(value)\n    return value\n\ndef probe(limit: int) -> bool:\n    return distance(b=source(2), a=source(1)) > limit\n"
+        );
         let body = caller_body(&source, 2);
         let decoded = body.find("ashr i64").unwrap();
         assert_eq!(body[..decoded].matches("call i64 @fn_1(").count(), 2);
         assert_eq!(body.matches("call i64 @fn_1(").count(), 2);
         assert_eq!(body.matches("call i64 @fn_0(").count(), 1);
-        let calls = body.lines().filter(|line| line.contains("call i64 @fn_1(")).collect::<Vec<_>>();
+        let calls = body
+            .lines()
+            .filter(|line| line.contains("call i64 @fn_1("))
+            .collect::<Vec<_>>();
         assert!(calls[0].ends_with("i64 5)"));
         assert!(calls[1].ends_with("i64 3)"));
         let first = calls[0].split_once(" = ").unwrap().0.trim();
