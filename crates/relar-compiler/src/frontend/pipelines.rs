@@ -11,7 +11,7 @@ pub(super) struct Prepared {
     pub evaluate: Vec<Statement>,
     acquire: Vec<Statement>,
     next: Vec<Statement>,
-    value: usize,
+    pub(super) value: usize,
     ready: usize,
     /// An empty tuple has no element type or executable item assignment.
     elementless: bool,
@@ -286,7 +286,7 @@ impl Checker<'_> {
 
     /// Adapts existing concrete iteration without introducing a public iterator
     /// type. Reverse construction supports sequences whose indexing is sealed.
-    fn prepare_iteration(
+    pub(super) fn prepare_iteration(
         &mut self,
         input: Iteration,
         node: &impl Ranged,

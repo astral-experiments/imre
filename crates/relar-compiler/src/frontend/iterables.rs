@@ -240,7 +240,7 @@ impl Checker<'_> {
 
     /// Root source arguments before later consumer arguments can rebind them.
     /// Constructing a range rejects a zero step before `sum` evaluates `start`.
-    fn capture_consumer_input(
+    pub(super) fn capture_consumer_input(
         &mut self,
         input: Iteration,
         body: &mut Vec<Statement>,

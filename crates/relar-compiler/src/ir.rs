@@ -77,10 +77,33 @@ pub(crate) struct Module {
     /// identities refer to this compilation's interned type universe.
     pub types: crate::types::Types,
     pub class_fields: Vec<Vec<Type>>,
+    /// Checked structural constructors used by the explicit typed JSON boundary.
+    pub json_records: Vec<JsonRecordSchema>,
     /// Fixed module bindings own their exact storage until process cleanup.
     pub globals: Vec<Type>,
     pub functions: Vec<Function>,
     pub entry: Function,
+}
+
+pub(crate) struct JsonRecordSchema {
+    pub class: usize,
+    /// Declaration order is also the exact native record field order.
+    pub fields: Vec<JsonField>,
+}
+
+pub(crate) struct JsonField {
+    pub name: String,
+    /// Absence requires a field; defaults apply only when its key is missing.
+    pub default: Option<JsonDefault>,
+}
+
+pub(crate) enum JsonDefault {
+    Int(String),
+    Float(f64),
+    Bool(bool),
+    Str(String),
+    None,
+    EmptyList,
 }
 
 impl Module {
@@ -252,6 +275,15 @@ pub(crate) enum Builtin {
     Bool,
     Str,
     Len,
+    Abs,
+    /// Stable permutation of a private materialized list by precomputed scalar keys.
+    SortByKeys,
+    StringJoin,
+    StringReplace,
+    FloatFormat {
+        precision: u32,
+        percent: bool,
+    },
     ListGet,
     /// An iterator's live-length guard proves this hidden sequence/cursor read
     /// in bounds, with no intervening mutation or user code. Returns an owned
@@ -324,6 +356,8 @@ pub(crate) enum Builtin {
     SplitLines,
     RStrip,
     SysArgv,
+    /// Decodes one string into the checked structural schema of this class.
+    JsonDecode(usize),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
     BinaryOpen(u32),

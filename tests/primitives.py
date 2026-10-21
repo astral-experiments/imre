@@ -35,6 +35,15 @@ REJECTED = {
     "rstrip_bytes": 'print("x".rstrip(b"x"))\n',
     "rstrip_extra": 'print("x".rstrip("x", "y"))\n',
     "rstrip_keyword": 'print("x".rstrip(chars="x"))\n',
+    "sorted_float_key": "values = sorted([1, 2], key=lambda value: float(value))\n",
+    "sorted_optional_key": "def key(value: int) -> int | None:\n    return value\nvalues = sorted([1], key=key)\n",
+    "sorted_composite_key": "values = sorted([1], key=lambda value: (value, value))\n",
+    "sorted_reverse_integer": "values = sorted([1], reverse=1)\n",
+    "sorted_extra_positional": "values = sorted([1], None)\n",
+    "join_wrong_element": 'print(",".join([1]))\n',
+    "join_keyword": 'print(",".join(iterable=["x"]))\n',
+    "replace_wrong_type": 'print("x".replace("x", 1))\n',
+    "replace_count": 'print("x".replace("x", "y", 1))\n',
 }
 
 ERRORS = {

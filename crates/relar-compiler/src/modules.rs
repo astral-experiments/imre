@@ -50,6 +50,8 @@ pub(crate) enum IntrinsicModule {
     Collections,
     CollectionsAbc,
     Io,
+    Relar,
+    RelarJson,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -60,6 +62,7 @@ pub(crate) enum Intrinsic {
     Union,
     Callable,
     UnsupportedOperation,
+    JsonDecode,
 }
 
 impl IntrinsicModule {
@@ -70,6 +73,8 @@ impl IntrinsicModule {
             "collections" => Some(Self::Collections),
             "collections.abc" => Some(Self::CollectionsAbc),
             "io" => Some(Self::Io),
+            "relar" => Some(Self::Relar),
+            "relar.json" => Some(Self::RelarJson),
             _ => None,
         }
     }
@@ -78,6 +83,9 @@ impl IntrinsicModule {
         if self == Self::Collections && name == "abc" {
             return Some(Binding::IntrinsicModule(Self::CollectionsAbc));
         }
+        if self == Self::Relar && name == "json" {
+            return Some(Binding::IntrinsicModule(Self::RelarJson));
+        }
         let symbol = match (self, name) {
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
@@ -85,6 +93,7 @@ impl IntrinsicModule {
             (Self::Typing, "Union") => Intrinsic::Union,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
+            (Self::RelarJson, "decode") => Intrinsic::JsonDecode,
             _ => return None,
         };
         Some(Binding::Intrinsic(symbol))
@@ -377,13 +386,15 @@ impl Loader {
                 for alias in &import.names {
                     let name = alias.name.as_str();
                     if let Some(module) = self.intrinsic_module(name)? {
-                        if name == "collections.abc" && alias.asname.is_none() {
-                            self.bind(
-                                id,
-                                "collections",
-                                Binding::IntrinsicModule(IntrinsicModule::Collections),
-                                alias,
-                            )?;
+                        if matches!(name, "collections.abc" | "relar.json")
+                            && alias.asname.is_none()
+                        {
+                            let (local, namespace) = if name == "collections.abc" {
+                                ("collections", IntrinsicModule::Collections)
+                            } else {
+                                ("relar", IntrinsicModule::Relar)
+                            };
+                            self.bind(id, local, Binding::IntrinsicModule(namespace), alias)?;
                             continue;
                         }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);

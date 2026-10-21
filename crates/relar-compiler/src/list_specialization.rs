@@ -595,6 +595,11 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
             | Builtin::Bool
             | Builtin::Str
             | Builtin::Len
+            | Builtin::Abs
+            | Builtin::StringJoin
+            | Builtin::StringReplace
+            | Builtin::FloatFormat { .. }
+            | Builtin::JsonDecode(_)
             | Builtin::ListGet
             | Builtin::SequenceGetInBounds
             | Builtin::ListGetI32

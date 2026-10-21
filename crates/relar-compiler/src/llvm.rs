@@ -14,6 +14,8 @@ use crate::types::Types;
 mod callables;
 mod conditionals;
 mod integer_regions;
+mod json;
+mod stdlib;
 mod truthiness;
 mod unions;
 
@@ -164,6 +166,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
     );
     output.push_str(DECLARATIONS);
     output.push_str(&record_layouts(module));
+    output.push_str(&json::schemas(module));
     output.push_str(&callables::adapters(module, sanitize));
     output.push_str(&integer_helpers());
     for (slot, ty) in module.globals.iter().enumerate() {
@@ -2664,6 +2667,19 @@ impl Emitter<'_, '_> {
             .map(|arg| self.operand(arg))
             .collect::<Vec<_>>();
         let result = match builtin {
+            Builtin::JsonDecode(class) => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @relar_json_decode(ptr {}, ptr @json_class_{class})",
+                    args[0].value.operand,
+                )),
+                small_integer: false,
+            },
+            Builtin::SortByKeys
+            | Builtin::StringJoin
+            | Builtin::StringReplace
+            | Builtin::FloatFormat { .. }
+            | Builtin::Abs => self.stdlib_builtin(builtin, &args),
             Builtin::TupleCacheNew => return self.record(returns),
             Builtin::TupleCacheResult => {
                 self.call("relar_record_cached_result", returns, &[&args[0].value])
@@ -3993,6 +4009,7 @@ declare void @relar_exception_raise(ptr)
 declare void @relar_exception_reraise()
 declare void @relar_flush_stdout()
 declare ptr @relar_record_new(ptr)
+declare ptr @relar_json_decode(ptr, ptr)
 declare ptr @relar_record_cached_result(ptr)
 declare void @relar_record_retain(ptr)
 declare void @relar_record_release(ptr)
@@ -4036,6 +4053,11 @@ declare ptr @relar_int_str_part(i64, ptr, ptr)
 declare ptr @relar_str_split_whitespace(ptr)
 declare ptr @relar_str_splitlines(ptr)
 declare ptr @relar_str_rstrip(ptr, ptr)
+declare void @relar_sort_by_keys(ptr, i32, ptr, i32, i8)
+declare ptr @relar_str_join(ptr, ptr)
+declare ptr @relar_str_replace(ptr, ptr, ptr)
+declare ptr @relar_float_format(double, i32, i8)
+declare double @llvm.fabs.f64(double)
 declare ptr @relar_int_str(i64)
 declare ptr @relar_bool_str(i8)
 declare ptr @relar_none_str()
