@@ -101,3 +101,8 @@ jobs:
           target/release/relar build examples/telemetry_comparison/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/telemetry-comparison
           python3 benchmarks/reference/telemetry_comparison/build.py --artifact-dir /tmp/relar-telemetry-reference --target-dir target/telemetry-reference
           python3 benchmarks/telemetry_validate.py --python python3 --binary /tmp/telemetry-comparison --rust /tmp/relar-telemetry-reference/telemetry-reference --output /tmp/relar-telemetry-reference/validation.json
+      - name: Validate callable record pipelines against CPython and Rust
+        run: |
+          target/release/relar build examples/record_pipeline/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/record-pipeline
+          python3 benchmarks/reference/record_pipeline/build.py --artifact-dir /tmp/relar-record-reference
+          python3 benchmarks/record_validate.py --python python3 --binary /tmp/record-pipeline --rust /tmp/relar-record-reference/record-reference
