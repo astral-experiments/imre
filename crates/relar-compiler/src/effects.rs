@@ -135,6 +135,9 @@ fn expression(value: &Expr, functions: &[bool]) -> bool {
         ExprKind::Conditional(test, yes, no) => {
             expression(test, functions) || expression(yes, functions) || expression(no, functions)
         }
+        ExprKind::BooleanValue(_, left, right) => {
+            expression(left, functions) || expression(right, functions)
+        }
         ExprKind::Call(id, args) => {
             functions.get(*id).copied().unwrap_or(true)
                 || args.values.iter().any(|arg| expression(arg, functions))
@@ -192,7 +195,8 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         Builtin::Float => args
             .first()
             .is_none_or(|arg| !matches!(arg.ty, Type::Float | Type::Bool)),
-        Builtin::Len
+        Builtin::Bool
+        | Builtin::Len
         | Builtin::Append
         | Builtin::IsNone
         | Builtin::Split

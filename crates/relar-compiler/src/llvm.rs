@@ -9,6 +9,8 @@ use crate::ir::{
 use crate::ranges::RangeFacts;
 use crate::types::Types;
 
+mod truthiness;
+
 impl Type {
     fn llvm(self) -> &'static str {
         match self {
@@ -1326,6 +1328,9 @@ impl Emitter<'_, '_> {
                 }
             }
             ExprKind::Boolean(and, values) => self.boolean(*and, values),
+            ExprKind::BooleanValue(and, left, right) => {
+                self.boolean_value(*and, left, right, expression.ty)
+            }
             ExprKind::Conditional(test, yes, no) => self.conditional(test, yes, no),
             ExprKind::Compare(values, ops) => self.comparisons(values, ops),
             ExprKind::Call(id, args) => {
@@ -1938,6 +1943,7 @@ impl Emitter<'_, '_> {
             .map(|arg| self.operand(arg))
             .collect::<Vec<_>>();
         let result = match builtin {
+            Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("relar_input", Type::Str, &[]),
             Builtin::SysArgv => self.call("relar_sys_argv", returns, &[]),
             Builtin::TextOpen(mode) => Value {
@@ -3007,6 +3013,8 @@ declare void @relar_str_retain(ptr)
 declare void @relar_str_release(ptr)
 declare void @relar_print_str(ptr)
 declare i64 @relar_str_len(ptr)
+declare i8 @relar_str_truthy(ptr)
+declare i8 @relar_bytes_truthy(ptr)
 declare i8 @relar_str_equal(ptr, ptr)
 declare i64 @relar_int_parse(ptr)
 declare ptr @relar_input()

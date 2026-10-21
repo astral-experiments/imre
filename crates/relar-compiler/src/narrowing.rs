@@ -8,8 +8,27 @@ use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr, walk_pat
 /// Returns facts guaranteed when `test` has the requested truth value.
 /// A true fact means non-None. Only local names are eligible: attribute and
 /// subscript values can change through aliases without rebinding the receiver.
-pub(crate) fn facts(test: &ast::Expr, truth: bool) -> HashMap<String, bool> {
+pub(crate) fn facts(
+    test: &ast::Expr,
+    truth: bool,
+    always_truthy: &impl Fn(&str) -> bool,
+) -> HashMap<String, bool> {
     match test {
+        ast::Expr::Name(name) => {
+            if truth || always_truthy(name.id.as_str()) {
+                HashMap::from([(name.id.to_string(), truth)])
+            } else {
+                HashMap::new()
+            }
+        }
+        ast::Expr::Named(named) => facts(&named.target, truth, always_truthy),
+        ast::Expr::Call(call)
+            if matches!(&*call.func, ast::Expr::Name(name) if name.id == "bool")
+                && call.arguments.args.len() == 1
+                && call.arguments.keywords.is_empty() =>
+        {
+            facts(&call.arguments.args[0], truth, always_truthy)
+        }
         ast::Expr::Compare(compare) if compare.ops.len() == 1 => {
             let present = match compare.ops[0] {
                 ast::CmpOp::Is => !truth,
@@ -32,7 +51,9 @@ pub(crate) fn facts(test: &ast::Expr, truth: bool) -> HashMap<String, bool> {
                 HashMap::from([(name.id.to_string(), present)])
             })
         }
-        ast::Expr::UnaryOp(unary) if unary.op == ast::UnaryOp::Not => facts(&unary.operand, !truth),
+        ast::Expr::UnaryOp(unary) if unary.op == ast::UnaryOp::Not => {
+            facts(&unary.operand, !truth, always_truthy)
+        }
         ast::Expr::BoolOp(boolean)
             if (boolean.op == ast::BoolOp::And && truth)
                 || (boolean.op == ast::BoolOp::Or && !truth) =>
@@ -46,7 +67,7 @@ pub(crate) fn facts(test: &ast::Expr, truth: bool) -> HashMap<String, bool> {
                     result.remove(&name);
                     conflicting.remove(&name);
                 }
-                for (name, present) in facts(value, truth) {
+                for (name, present) in facts(value, truth, always_truthy) {
                     if let Some(previous) = result.insert(name.clone(), present)
                         && previous != present
                     {
@@ -89,6 +110,13 @@ pub(crate) fn guaranteed_assignments(
     truth: Option<bool>,
 ) -> HashSet<String> {
     match expression {
+        ast::Expr::Call(call)
+            if matches!(&*call.func, ast::Expr::Name(name) if name.id == "bool")
+                && call.arguments.args.len() == 1
+                && call.arguments.keywords.is_empty() =>
+        {
+            guaranteed_assignments(&call.arguments.args[0], truth)
+        }
         ast::Expr::Named(value) => {
             let mut names = guaranteed_assignments(&value.value, truth);
             if let ast::Expr::Name(name) = &*value.target {

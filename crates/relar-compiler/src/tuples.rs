@@ -458,7 +458,7 @@ fn children(expression: &Expr, mut visit: impl FnMut(&Expr)) {
         | ExprKind::Not(value)
         | ExprKind::Negate(value)
         | ExprKind::Field(value, _) => visit(value),
-        ExprKind::Binary(_, left, right) => {
+        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
             visit(left);
             visit(right);
         }
@@ -513,7 +513,7 @@ fn children_mut(expression: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
         | ExprKind::Not(value)
         | ExprKind::Negate(value)
         | ExprKind::Field(value, _) => visit(value),
-        ExprKind::Binary(_, left, right) => {
+        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
             visit(left);
             visit(right);
         }

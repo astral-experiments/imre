@@ -34,7 +34,6 @@ REJECTED = {
     "encode_codec": 'print("text".encode("ascii"))\n',
     "encode_keyword": 'print("text".encode(encoding="utf-8"))\n',
     "decode_errors": 'print(b"x".decode(errors="replace"))\n',
-    "bytes_truthiness": 'if b"a":\n    print(1)\n',
     "bytes_iterator_escape": 'value = iter(b"abc")\n',
     "bytes_default_wrong_type": 'def bad(value: bytes = "x") -> bytes:\n    return value\n',
     "binary_text_write": 'with open("out", "wb") as stream:\n    stream.write("wrong")\n',

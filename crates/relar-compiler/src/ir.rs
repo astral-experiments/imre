@@ -171,6 +171,9 @@ pub(crate) enum ExprKind {
     Binary(Binary, Box<Expr>, Box<Expr>),
     Compare(Vec<Expr>, Vec<Compare>),
     Boolean(bool, Vec<Expr>),
+    /// Returns the short-circuit operand, narrowed by its selected truth value,
+    /// or the RHS. The operands are evaluated once and retain their identities.
+    BooleanValue(bool, Box<Expr>, Box<Expr>),
     /// Only the selected arm runs; both arms have the expression's storage type.
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
     Not(Box<Expr>),
@@ -217,6 +220,7 @@ pub(crate) enum Builtin {
     Input,
     Int,
     Float,
+    Bool,
     Str,
     Len,
     ListGet,
@@ -360,7 +364,7 @@ pub(crate) fn walk_expressions(body: &[Statement], visit: &mut impl FnMut(&Expr)
                 walk_expressions(body, visit);
                 expression(value, visit);
             }
-            ExprKind::Binary(_, left, right) => {
+            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
                 expression(left, visit);
                 expression(right, visit);
             }

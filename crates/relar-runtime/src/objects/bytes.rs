@@ -103,6 +103,16 @@ pub unsafe extern "C" fn relar_bytes_len(value: *const Bytes) -> usize {
     Int::from_usize(unsafe { &*value }.len()).into_raw()
 }
 
+/// Tests emptiness without constructing a tagged length.
+///
+/// # Safety
+/// The immutable bytes value remains rooted throughout this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_bytes_truthy(value: *const Bytes) -> u8 {
+    // SAFETY: the input's allocation cannot change while rooted.
+    u8::from(!unsafe { &*value }.is_empty())
+}
+
 /// Returns a signed ordering result (-1, 0, 1) for unsigned byte lexicographic order.
 ///
 /// # Safety

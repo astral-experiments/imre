@@ -53,10 +53,14 @@ ERRORS = {
 }
 
 
-def cases(project: Path) -> list[tuple[str, Path, str | None]]:
+def cases(
+    project: Path, errors: dict[str, tuple[str, str]] = ERRORS
+) -> list[tuple[str, Path, str | None]]:
     result = [(path.stem, path, None) for path in sorted(project.glob("*.py"))]
-    result.append(("imported", project / "imported/main.py", None))
-    for name, (source, error) in ERRORS.items():
+    imported = project / "imported/main.py"
+    if imported.is_file():
+        result.append(("imported", imported, None))
+    for name, (source, error) in errors.items():
         path = project / "errors" / name / "main.py"
         write_files(path.parent, {"main.py": source})
         result.append((name, path, error))
@@ -85,8 +89,17 @@ def reference(
     return result
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(
+    *,
+    fixtures: Path = FIXTURES,
+    rejections: dict[str, str] = REJECTED,
+    imported_rejections: dict[str, dict[str, str]] = IMPORTED_REJECTIONS,
+    errors: dict[str, tuple[str, str]] = ERRORS,
+    label: str = "assignment expression",
+    description: str | None = __doc__,
+) -> None:
+    """Run a fixture suite using the shared output, filesystem, and failure oracle."""
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--compiler", required=True, type=Path)
     parser.add_argument("--runtime", required=True, type=Path)
     parser.add_argument("--python", default=sys.executable)
@@ -112,11 +125,11 @@ def main() -> None:
     if args.sanitize:
         flags.append("--sanitize")
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-assignments-") as directory:
+    with tempfile.TemporaryDirectory(prefix=f"relar-{fixtures.name}-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
-        shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
-        for name, source, error in cases(project):
+        shutil.copytree(fixtures, project, ignore=shutil.ignore_patterns("__pycache__"))
+        for name, source, error in cases(project, errors):
             reference_dir = temporary / name / "reference"
             reference_dir.mkdir(parents=True)
             expected = reference(python, source, reference_dir, error)
@@ -166,8 +179,8 @@ def main() -> None:
                     expected_files,
                 )
                 checks += 1
-        rejected = {name: {"main.py": source} for name, source in REJECTED.items()}
-        rejected.update(IMPORTED_REJECTIONS)
+        rejected = {name: {"main.py": source} for name, source in rejections.items()}
+        rejected.update(imported_rejections)
         for name, files in rejected.items():
             case = temporary / "rejected" / name
             write_files(case, files)
@@ -187,7 +200,7 @@ def main() -> None:
                 )
             checks += 1
     print(
-        f"Passed {checks} assignment expression checks ({len(rejected)} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})"
+        f"Passed {checks} {label} checks ({len(rejected)} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})"
     )
 
 

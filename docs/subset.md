@@ -12,24 +12,43 @@ This is a deliberately restricted Python dialect for closed first-party programs
 | Types | `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed `typing.TextIO` and `typing.BinaryIO`, the sealed builtin `Exception` family, fixed nominal classes, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, and `T \| None`; locals have one inferred or declared storage type |
 | Classes | Declared fields, an explicit initializer, typed instance methods, alias-visible field mutation, and numeric field augmented assignment |
 | Statements | Single-target and fixed-tuple unpacking assignment, annotated assignment, numeric augmented assignment, local string/bytes `+=` and bytes `*=`, dictionary entry deletion, `if`/`elif`/`else`, structural `match`/`case`, `while`, `for` over ranges, strings, bytes, or concrete containers, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin-file `with` |
-| Conditions | Explicit `bool`; `and`, `or`, `not`; short-circuit evaluation; conditional expressions `yes if condition else no`; assignment expressions `(name := value)`; `is None`/`is not None` with local flow narrowing |
+| Conditions | Truth tests for every supported concrete type; operand-returning `and`/`or`, boolean `not`, and short-circuit evaluation; conditional expressions `yes if condition else no`; assignment expressions `(name := value)`; local optional narrowing |
 | Integers | Arbitrary precision; `+`, `-`, `*`, `//`, `%`; `/` returns a correctly rounded float; unary `+`/`-`; all six value comparisons, including chains |
 | Floats | Binary64 literals and exact storage; `+`, `-`, `*`, `/`, `//`, `%`; unary signs; all six comparisons; mixed integer arithmetic and exact mixed comparisons; explicit numeric/string conversions |
 | Lists | One exact element type, including nested containers and classes; literals, shallow repetition and slicing, checked negative indexing, indexed assignment, iteration, `append(value)`, `pop()`, `len(...)`; alias-visible mutation |
 | Dictionaries | Exact `int`, `str`, or `bytes` keys and one concrete value type; literals, contextual `dict()`, lookup/write/delete, numeric augmented writes, `in`/`not in`, `get`, `len`, and insertion-ordered key/items iteration |
 | Sets | Exact `int`, `str`, or `bytes` elements; literals, contextual `set()`, `add`, `discard`, `in`/`not in`, `len`, and iteration with unspecified order |
-| Comprehensions | Eager list, dictionary, and set comprehensions; nested `for` clauses and explicit boolean filters over the existing iteration sources; isolated target bindings |
+| Comprehensions | Eager list, dictionary, and set comprehensions; nested `for` clauses and truth-tested filters over the existing iteration sources; isolated target bindings |
 | Tuples | Fixed length and a type per position; literals, bounded literal indexing, unpacking into names, and `len(...)`; immutable slots |
 | Strings | Immutable UTF-8 text, literals, scalar f-strings, concatenation, equality/inequality, Unicode scalar length, indexing, slicing and iteration, no-argument whitespace `split()` and `splitlines()`, input and output |
 | Bytes | Immutable bytes; literals, construction from an integer count or `list[int]`, concatenation/repetition, all value comparisons, indexing/slicing/iteration, `len`, Python byte repr, strict UTF-8 encode/decode |
 | Files and arguments | Explicit UTF-8 text read/write and binary read/write/append/exclusive-create modes; `read`, `write`, `flush`, `close`, `closed`; `with` cleanup; one shared mutable `sys.argv` list |
-| Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `int(int_or_float_or_bool_or_string)`; `float()` or `float(int_or_float_or_bool_or_string_or_bytes)`; `str()` or `str(int_or_float_or_bool_or_string_or_bytes_or_None_or_exception)`; `len(string_or_bytes_or_container)`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments and `enumerate(string_or_bytes_or_container[, start])` at a loop or comprehension boundary |
+| Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `bool()` or `bool(value)`; `int(int_or_float_or_bool_or_string)`; `float()` or `float(int_or_float_or_bool_or_string_or_bytes)`; `str()` or `str(int_or_float_or_bool_or_string_or_bytes_or_None_or_exception)`; `len(string_or_bytes_or_container)`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments and `enumerate(string_or_bytes_or_container[, start])` at a loop or comprehension boundary |
 
 Booleans have a separate exact type: use `int(flag)` to store one in an integer list. An empty list defaults to `list[int]` unless a typed storage, call, or return boundary supplies its element type. No annotation permits `Any`, a general union, an untyped object, or a foreign container to enter native storage. ty checks ordinary Python typing first; Relar additionally enforces exact types, definite assignment, fixed bindings, and every container write. Suppression comments cannot waive Relar's contract.
 
 Indentation must use spaces; tabs and form feeds remain valid inside string data. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
 
-Mutable global values, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generators, async, slice assignment/deletion, starred or variable-length unpacking, variadic parameters, defaults other than scalar literals, loop `else`, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. Conditions cannot rely on implicit truthiness. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+Mutable global values, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generators, async, slice assignment/deletion, starred or variable-length unpacking, variadic parameters, defaults other than scalar literals, loop `else`, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+
+## Truthiness and boolean values
+
+Conditions, comprehension filters, match guards, assertions, `not`, and `bool(value)` use Python's truth rules for the supported exact types. `None`, `False`, numeric zero, and empty strings, bytes, lists, dictionaries, sets, and tuples are false. NaN is true; both floating-point signed zeros are false. Fixed class instances, exceptions, and file handles are true, including closed files. `bool()` returns `False`. User-defined `__bool__` and `__len__` methods remain outside the subset.
+
+`and` and `or` evaluate operands from left to right and return the selected operand without copying it. Skipped operands do not execute, but still must type-check. A stored or returned result must fit one concrete type or its `T | None` form; general unions are unsupported. A truth context can consume differently typed operands directly, as in `if items and len(items):`. Context supplies the element type for empty container operands such as `names: list[str] = [] or ["name"]`.
+
+```python
+def display_name(name: str | None) -> str:
+    return name or "anonymous"
+
+
+def first_or_zero(values: list[int] | None) -> int:
+    if values:
+        return values[0]
+    return 0
+```
+
+A true optional local is narrowed to its payload. A false optional number or container may still be present, so falsity does not prove `None`; use an explicit None check when that distinction matters. Truth testing never changes storage requirements: assigning an integer or container to a `bool` annotation still fails.
 
 ## Assignment expressions
 
@@ -76,11 +95,11 @@ Integer `/` computes the ratio directly and rounds once, including at the subnor
 
 `float(str)` accepts signed decimal notation, optional separators between digits, surrounding whitespace, and case-insensitive `inf`, `infinity`, and `nan`. Decimal parsing is correctly rounded; overflow and underflow produce infinity and signed zero. Unicode decimal digits use the pinned ICU character database, whose Unicode version can be newer than a particular CPython build. `float(bytes)` accepts the same decimal grammar restricted to ASCII bytes; non-ASCII bytes raise `ValueError` without Unicode decoding. Malformed input raises `ValueError`. `print`, `str`, and scalar f-strings use shortest round-trip decimal formatting with Python's decimal tie-breaking, exponent signs, and `.0` for integral values in fixed notation. General format specifications remain unsupported.
 
-`float | None` preserves every binary64 bit pattern by boxing only present optional payloads. None remains the nullable zero word; narrowing loads the double while the box is rooted. This costs an allocation when promoting an ordinary float to optional storage, without reserving a NaN payload or conflating absence with `0.0` or `-0.0`. Float dictionary keys, set elements, complex numbers, exponentiation, float-specific methods, and implicit truthiness remain outside the contract.
+`float | None` preserves every binary64 bit pattern by boxing only present optional payloads. None remains the nullable zero word; narrowing loads the double while the box is rooted. This costs an allocation when promoting an ordinary float to optional storage, without reserving a NaN payload or conflating absence with `0.0` or `-0.0`. Float dictionary keys, set elements, complex numbers, exponentiation, and float-specific methods remain outside the contract.
 
 ## Conditional expressions and sequence access
 
-`yes if condition else no` evaluates its boolean condition once and then evaluates only the selected arm. Both arms are checked, including dead arms, and must have the same concrete type or fit one supported `T | None`. A typed assignment, argument, or return supplies context to both arms, including empty containers. Local optional narrowing applies separately inside each arm and does not leak past the expression. For example, `value if value is not None else 0` has type `int` when `value` is `int | None`.
+`yes if condition else no` tests its condition once and then evaluates only the selected arm. Both arms are checked, including dead arms, and must have the same concrete type or fit one supported `T | None`. A typed assignment, argument, or return supplies context to both arms, including empty containers. Local optional narrowing applies separately inside each arm and does not leak past the expression. For example, `value if value is not None else 0` has type `int` when `value` is `int | None`.
 
 String indexing uses an exact `int` and returns a one-code-point string. Negative indexes count from the end; out-of-range indexes raise `IndexError`. Strings remain valid UTF-8, so indexing, slicing and iteration operate on Unicode scalar values, including combining marks and supplementary characters, rather than bytes or grapheme clusters.
 
@@ -232,7 +251,7 @@ Literal elements receive types from an annotated variable, an existing storage l
 
 `T | None` permits a value of exactly `T` or `None`. Storage, call, and return boundaries explicitly wrap a present value; a bare return or falling off an optional-returning function produces `None`. No other union is supported. Use `value is None` or `value is not None` before accessing an unknown optional payload. Direct checks of local names narrow the relevant branches, short-circuit operands, assertions, and guarded loop bodies; early exits preserve facts on the remaining path. Rebinding updates those facts, and possible stores in a loop invalidate facts that later iterations could contradict.
 
-Narrowing applies to local bindings, not mutable fields or indexed elements. Copy a field or element into a local before checking it; the local owns its value even if an alias later replaces the original slot. Compare an optional payload only after narrowing it. Neither an optional nor a container supplies implicit truthiness.
+Narrowing applies to local bindings, not mutable fields or indexed elements. Copy a field or element into a local before checking it; the local owns its value even if an alias later replaces the original slot. Compare an optional payload only after narrowing it. A truth test also narrows a true optional local to its payload; a false optional container may still be an empty container.
 
 ## Eager comprehensions
 
@@ -252,7 +271,7 @@ The leftmost iterable uses the enclosing scope and is evaluated once. All clause
 
 Clauses nest from left to right. Each inner iterable is evaluated when its enclosing iteration reaches it; filters short-circuit in source order, and the element expression runs only after all filters pass. Dictionary keys are evaluated and owned before their values. Duplicate dictionary keys retain their first insertion position and last value. Set traversal remains unspecified.
 
-Results have exact element/key/value types, inferred from the checked body or supplied by a typed storage, argument, or return boundary. Context also reaches nested literals and comprehensions. Filters can narrow optional local targets before constructing an element. These rules do not convert an existing container to a different element type or permit implicit truthiness.
+Results have exact element/key/value types, inferred from the checked body or supplied by a typed storage, argument, or return boundary. Context also reaches nested literals and comprehensions. Filters can narrow optional local targets before constructing an element. These rules do not convert an existing container to a different element type. Filters use the same truth tests as ordinary conditions.
 
 Capturing an outer local preserves its value and shared object identity; field and indexed reads still occur where written inside the body. Mutations through aliases retain the existing list/dictionary/set iteration behavior. A failure propagates through normal handlers and finally blocks, releasing the partial result and temporary owners without rolling back earlier user-visible mutations. Eager comprehensions do not expose an iterator, closure, callback, or partially built result. Generators, async clauses, and new iteration protocols remain unsupported.
 
@@ -342,9 +361,11 @@ The classes suite checks nominal types, imported class aliases, field replacemen
 
 The containers suite covers nested lists, tuple positions and unpacking, list iteration and `enumerate`, optional ownership and local flow narrowing, contextual literals, shallow repetition, string concatenation, and whitespace splitting. Iteration cases exercise alias mutation, source and target rebinding, temporary roots, control flow, and arbitrary-precision counters. It rejects invalid alias writes, unsafe optional accesses, and class cycles hidden inside containers.
 
-The comprehensions suite checks isolated and nested scopes, contextual result types, ordered filters and dictionary key/value evaluation, optional narrowing, alias-visible mutation, arbitrary-precision ranges, and cleanup after partial construction. It compares complete filesystem effects and rejects unsupported targets, escaped names, implicit truthiness, dynamic operations, and recursion hidden inside helpers.
+The comprehensions suite checks isolated and nested scopes, contextual result types, ordered filters and dictionary key/value evaluation, optional narrowing, alias-visible mutation, arbitrary-precision ranges, and cleanup after partial construction. It compares complete filesystem effects and rejects unsupported targets, escaped names, dynamic operations, and recursion hidden inside helpers.
 
 The f-string suite compares literal decoding, raw and adjacent parts, scalar conversions, nested fields, optional narrowing, and comprehension captures. Side-effecting fields, later failures, mutable owners, and file writes check evaluation order and cleanup. Rejection cases cover unsupported formatting/conversions, debug fields, types, surrogate escapes, and builtin rebinding.
+
+The truthiness suite compares concrete scalar/container truth, optional narrowing, operand identity, short-circuit writes and errors, and temporary ownership at `-O0` and `-O3`. It also checks exact result-type restrictions and unsafe optional/assignment facts, and runs with ThinLTO and AddressSanitizer in CI.
 
 The calls suite compares positional/keyword binding, keyword-only parameters, scalar defaults, imported aliases, contextual container types, and optional values. Reordered arguments, temporary receivers, aliased owners, and later exceptions check evaluation order and cleanup. Rejection cases protect exact types, parameter kinds, required/duplicate names, literal defaults, and the positional builtin surface.
 

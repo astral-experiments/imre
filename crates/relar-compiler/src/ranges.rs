@@ -697,6 +697,15 @@ impl Analyzer {
                 }
                 Interval::bounded(0, 1)
             }
+            ExprKind::BooleanValue(and, left, right) => {
+                let left_range = self.expression(left, state, record);
+                let right_state = self.assume(left, *and, state.clone());
+                if let Some(right_state) = right_state {
+                    left_range.join(self.expression(right, &right_state, record))
+                } else {
+                    left_range
+                }
+            }
             ExprKind::Conditional(test, yes, no) => {
                 self.expression(test, state, record);
                 let yes_state = self.assume(test, true, state.clone());
@@ -793,6 +802,19 @@ impl Analyzer {
         match &test.kind {
             ExprKind::Bool(value) => (*value == truth).then_some(state),
             ExprKind::Not(value) => self.assume(value, !truth, state),
+            ExprKind::Builtin(Builtin::Bool, values) => self.assume(&values[0], truth, state),
+            ExprKind::BooleanValue(and, left, right) => {
+                if *and == truth {
+                    self.assume(left, truth, state)
+                        .and_then(|state| self.assume(right, truth, state))
+                } else {
+                    let stopped = self.assume(left, truth, state.clone());
+                    let continued = self
+                        .assume(left, !truth, state)
+                        .and_then(|state| self.assume(right, truth, state));
+                    merge(stopped, continued)
+                }
+            }
             ExprKind::Boolean(and, values) => {
                 if *and == truth {
                     values
@@ -1119,7 +1141,7 @@ mod tests {
                 | ExprKind::Not(value)
                 | ExprKind::Negate(value)
                 | ExprKind::Field(value, _) => expression(value, output),
-                ExprKind::Binary(_, left, right) => {
+                ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
                     expression(left, output);
                     expression(right, output);
                 }
@@ -1203,6 +1225,27 @@ mod tests {
         let mut output = Vec::new();
         block(&function.body, &mut output);
         output
+    }
+
+    #[test]
+    fn boolean_values_preserve_nested_guard_ranges() {
+        for expression in [
+            "(0 <= index and index < 4) and values[index] == 7",
+            "(index < 0 or index >= 4) or values[index] == 7",
+        ] {
+            let module = module(&format!(
+                "def guarded(values: list[int], index: int) -> bool:\n    return {expression}\n"
+            ));
+            let facts = analyze(&module);
+            let access = expressions(&module.functions[0])
+                .into_iter()
+                .find_map(|expression| match &expression.kind {
+                    ExprKind::Builtin(Builtin::ListGet, args) => Some(&args[1]),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(facts.integer(access), Some(IntRange { min: 0, max: 3 }));
+        }
     }
 
     #[test]
