@@ -35,6 +35,31 @@ BOOTSTRAP = (
     "sys.argv = ['memory_report', *sys.argv[3:]]; "
     "runpy.run_module('memory_report', run_name='__main__', alter_sys=True)"
 )
+ORIGINAL_COMPUTE = """
+import json, runpy, sys
+from pathlib import Path
+source = runpy.run_path(sys.argv[1])
+def decode(text):
+    data = json.loads(text)
+    return source['MemoryReport'](
+        total_bytes=data['total_bytes'], struct_metadata_bytes=data['struct_metadata_bytes'],
+        struct_fields_bytes=data['struct_fields_bytes'], memo_metadata_bytes=data['memo_metadata_bytes'],
+        memo_fields_bytes=data['memo_fields_bytes'], structs=data.get('structs', []), queries=data.get('queries', []),
+    )
+rounds = int(sys.argv[2])
+old_texts = {path.stem: path.read_text(encoding='utf-8') for path in Path(sys.argv[3]).glob('*.json')}
+new_texts = {path.stem: path.read_text(encoding='utf-8') for path in Path(sys.argv[4]).glob('*.json')}
+checksum, rendered = 0, ''
+for _ in range(rounds):
+    old = {name: decode(text) for name, text in old_texts.items()}
+    new = {name: decode(text) for name, text in new_texts.items()}
+    names = sorted(old.keys() & new.keys())
+    projects = [source['ProjectComparison'](name=name, old=old[name], new=new[name]) for name in names]
+    rendered = source['render_summary'](projects)
+    checksum += len(rendered)
+print(checksum)
+print(rendered)
+"""
 
 
 def python_command(python):
@@ -44,6 +69,15 @@ def python_command(python):
 def original_command(python):
     # -I would ignore PYTHONHASHSEED and randomize upstream's equal-change ties.
     return [python, "-B", str(UPSTREAM), "compare"]
+
+
+def compute_python_command(python):
+    code = BOOTSTRAP.replace("run_module('memory_report'", "run_module('memory_report.compute'")
+    return [python, "-I", "-B", "-c", code, str(PACKAGE_ROOT), str(STDLIB)]
+
+
+def compute_original_command(python):
+    return [python, "-B", "-c", ORIGINAL_COMPUTE, str(UPSTREAM)]
 
 
 def environment():
@@ -58,8 +92,12 @@ def report(total=0, structs=None, queries=None):
             "structs": structs or [], "queries": queries or []}
 
 
+def encode_report(value):
+    return value if isinstance(value, bytes) else (json.dumps(value, ensure_ascii=True) + "\n").encode()
+
+
 def case(label, old, new, output="report.md"):
-    encode = lambda value: value if isinstance(value, bytes) else (json.dumps(value, ensure_ascii=True) + "\n").encode()
+    encode = encode_report
     arguments = ("--old", "old.json", "--new", "project.json")
     initial = {"old.json": encode(old), "project.json": encode(new)}
     if output is not None:
@@ -67,6 +105,17 @@ def case(label, old, new, output="report.md"):
         initial[output] = b"replace the complete report"
     return Case(label, initial, arguments)
 
+
+
+def directory_case(label, old, new, output="report.md", extra=None):
+    initial = {**{"old/" + name: encode_report(value) for name, value in old.items()},
+               **{"new/" + name: encode_report(value) for name, value in new.items()},
+               **(extra or {})}
+    arguments = ("--old-dir", "old", "--new-dir", "new")
+    if output is not None:
+        arguments += ("--output", output)
+        initial[output] = b"replace the complete report"
+    return Case(label, initial, arguments, ("old", "new"))
 
 def integer(text):
     negative = text.startswith("-")
@@ -101,38 +150,49 @@ def outcome(old, new):
     return "⏫" if new > old else "⬇️" if new < old else "✅"
 
 
-def expected_report(old, new, name):
-    """Use plain dictionaries and tuple rows, independently of the typed port."""
-    old_total, new_total = old["total_bytes"], new["total_bytes"]
-    if abs(new_total - old_total) <= 10_000:
+def expected_projects(projects):
+    """Rank plain dictionary/tuple inputs independently of the typed port."""
+    projects = sorted(projects, key=lambda project: project[2]["total_bytes"] - project[1]["total_bytes"], reverse=True)
+    if not projects:
+        return "No memory reports to compare.", []
+    if not any(abs(new["total_bytes"] - old["total_bytes"]) > 10_000 for _, old, new in projects):
         return "## Memory usage report\n\nMemory usage unchanged ✅", []
     lines = ["## Memory usage report", "", "### Summary", "",
              "| Project | Old | New | Diff | Outcome |",
-             "|---------|-----|-----|------|---------|",
-             f"| {name} | {format_bytes(old_total)} | {format_bytes(new_total)} | {format_diff(old_total, new_total)} | {outcome(old_total, new_total)} |",
-             "", "### Significant changes", "", "<details>",
-             "<summary>Click to expand detailed breakdown</summary>", ""]
-    old_items = {item["name"]: item.get("metadata_bytes", 0) + item.get("fields_bytes", 0)
-                 for item in old.get("structs", []) + old.get("queries", [])}
-    new_items = {item["name"]: item.get("metadata_bytes", 0) + item.get("fields_bytes", 0)
-                 for item in new.get("structs", []) + new.get("queries", [])}
-    names = dict.fromkeys([*old_items, *new_items])
-    changes = [(name, old_items.get(name, 0), new_items.get(name, 0)) for name in names
-               if old_items.get(name, 0) != new_items.get(name, 0)]
-    changes.sort(key=lambda item: abs(item[2] - item[1]), reverse=True)
-    cutoff = abs(changes[min(14, len(changes) - 1)][2] - changes[min(14, len(changes) - 1)][1]) if changes else 0
-    rows = [(f"| `{name.replace(' ', '')}` | {format_bytes(before)} | {format_bytes(after)} | {format_diff(before, after)} |{outcome(before, after)} |", abs(after - before))
-            for name, before, after in changes if abs(after - before) >= cutoff]
-    if rows:
-        lines.extend([f"### {name}", "", "| Name | Old | New | Diff | Outcome |",
-                      "|------|-----|-----|------|---------|"])
-        lines.extend(row for row, _ in rows[:15])
-        if len(changes) > 15:
-            lines.append(f"| ... | | | *{len(changes) - 15} more* |")
-        lines.append("")
+             "|---------|-----|-----|------|---------|"]
+    for name, old, new in projects:
+        old_total, new_total = old["total_bytes"], new["total_bytes"]
+        lines.append(f"| {name} | {format_bytes(old_total)} | {format_bytes(new_total)} | {format_diff(old_total, new_total)} | {outcome(old_total, new_total)} |")
+    lines.extend(["", "### Significant changes", "", "<details>",
+                  "<summary>Click to expand detailed breakdown</summary>", ""])
+    groups = []
+    for project, old, new in projects:
+        old_items = {item["name"]: item.get("metadata_bytes", 0) + item.get("fields_bytes", 0)
+                     for item in old.get("structs", []) + old.get("queries", [])}
+        new_items = {item["name"]: item.get("metadata_bytes", 0) + item.get("fields_bytes", 0)
+                     for item in new.get("structs", []) + new.get("queries", [])}
+        names = dict.fromkeys([*old_items, *new_items])
+        changes = [(name, old_items.get(name, 0), new_items.get(name, 0)) for name in names
+                   if old_items.get(name, 0) != new_items.get(name, 0)]
+        changes.sort(key=lambda item: abs(item[2] - item[1]), reverse=True)
+        cutoff = abs(changes[min(14, len(changes) - 1)][2] - changes[min(14, len(changes) - 1)][1]) if changes else 0
+        rows = [(f"| `{name.replace(' ', '')}` | {format_bytes(before)} | {format_bytes(after)} | {format_diff(before, after)} |{outcome(before, after)} |", abs(after - before))
+                for name, before, after in changes if abs(after - before) >= cutoff]
+        if rows:
+            groups.append(rows)
+            lines.extend([f"### {project}", "", "| Name | Old | New | Diff | Outcome |",
+                          "|------|-----|-----|------|---------|"])
+            lines.extend(row for row, _ in rows[:15])
+            if len(changes) > 15:
+                lines.append(f"| ... | | | *{len(changes) - 15} more* |")
+            lines.append("")
     lines.extend(["</details>", ""])
-    return "\n".join(lines), rows
+    return "\n".join(lines), groups
 
+
+def expected_report(old, new, name):
+    rendered, groups = expected_projects([(name, old, new)])
+    return rendered, [row for group in groups for row in group]
 
 def options(value):
     arguments = value.arguments[1:] if value.arguments[:1] == ("compare",) else value.arguments
@@ -141,7 +201,7 @@ def options(value):
 
 def project_name(path):
     # Spell out Python 3.14 Path.stem so the oracle also runs on older hosts.
-    name = path.rsplit("/", 1)[-1]
+    name = str(Path(path)).rsplit("/", 1)[-1]
     dot = name.rfind(".")
     return name[:dot] if dot >= 0 and any(char != "." for char in name[:dot]) else name
 
@@ -154,10 +214,21 @@ def oracle(value, error=None):
     if error:
         return expected
     flags = options(value)
-    old = json.loads(value.files[flags["--old"]], parse_int=integer)
-    new = json.loads(value.files[flags["--new"]], parse_int=integer)
-    rendered, rows = expected_report(old, new, project_name(flags["--new"]))
-    expected.update(rendered=rendered, rows=rows, output=flags.get("--output"))
+    if flags.get("--old") and flags.get("--new"):
+        old = json.loads(value.files[str(Path(flags["--old"]))], parse_int=integer)
+        new = json.loads(value.files[str(Path(flags["--new"]))], parse_int=integer)
+        projects = [(project_name(flags["--new"]), old, new)]
+    else:
+        def load(directory):
+            prefix = str(Path(directory)).rstrip("/") + "/"
+            return {project_name(path): json.loads(data, parse_int=integer)
+                    for path, data in value.files.items()
+                    if path.startswith(prefix) and "/" not in path[len(prefix):] and path.endswith(".json")}
+        old, new = load(flags["--old-dir"]), load(flags["--new-dir"])
+        projects = [(name, old[name], new[name]) for name in sorted(old.keys() & new.keys())]
+    rendered, groups = expected_projects(projects)
+    expected.update(rendered=rendered, rows=[row for group in groups for row in group], row_groups=groups,
+                    output=str(Path(flags["--output"])) if "--output" in flags else None)
     return expected
 
 
@@ -178,15 +249,30 @@ def apply_output(value, expected, rendered):
 
 def equivalent_original(rendered, expected):
     """Allow only upstream's set-dependent order/selection among equal changes."""
-    actual_lines = rendered.splitlines(keepends=True)
-    canonical_lines = expected["rendered"].splitlines(keepends=True)
-    is_row = lambda line: line.startswith("| `")
-    assert [line for line in actual_lines if not is_row(line)] == [line for line in canonical_lines if not is_row(line)]
-    actual_rows = [line.rstrip("\n") for line in actual_lines if is_row(line)]
-    available = collections.Counter(row for row, _ in expected["rows"])
-    assert not (collections.Counter(actual_rows) - available)
-    magnitudes = {row: magnitude for row, magnitude in expected["rows"]}
-    assert [magnitudes[row] for row in actual_rows] == [magnitude for _, magnitude in expected["rows"][:15]]
+    def partition(text):
+        skeleton, groups = [], []
+        in_rows = False
+        for line in text.splitlines(keepends=True):
+            if line.startswith("| `"):
+                if not in_rows:
+                    skeleton.append(None)
+                    groups.append([])
+                groups[-1].append(line.rstrip("\n"))
+                in_rows = True
+            else:
+                skeleton.append(line)
+                in_rows = False
+        return skeleton, groups
+
+    actual_skeleton, actual_groups = partition(rendered)
+    canonical_skeleton, _ = partition(expected["rendered"])
+    assert actual_skeleton == canonical_skeleton
+    assert len(actual_groups) == len(expected["row_groups"])
+    for selected, rows in zip(actual_groups, expected["row_groups"], strict=True):
+        available = collections.Counter(row for row, _ in rows)
+        assert not (collections.Counter(selected) - available)
+        magnitudes = {row: magnitude for row, magnitude in rows}
+        assert [magnitudes[row] for row in selected] == [magnitude for _, magnitude in rows[:15]]
 
 
 def check_result(value, expected, process, directory, engine="port"):
@@ -215,6 +301,40 @@ def check_result(value, expected, process, directory, engine="port"):
             assert not stderr and stdout == (rendered + "\n" if expected["output"] is None else ""), (value.label, engine, stdout, stderr)
         expected_files = apply_output(value, expected, rendered)
     assert actual == expected_files and directories == expected["directories"], (value.label, engine, "file effects")
+    return {"returncode": process.returncode, "stdout": stdout, "stderr": stderr,
+            "files": {name: {"sha256": digest(data), "bytes": len(data)} for name, data in sorted(actual.items())},
+            "directories": directories}
+
+
+def compute_case(value, rounds):
+    flags = options(value)
+    return Case(value.label + f"-compute-{rounds}", value.files,
+                (str(rounds), flags["--old-dir"], flags["--new-dir"]), value.directories, value.hardlinks)
+
+
+def compute_oracle(value):
+    rounds, old, new = value.arguments
+    expected = oracle(Case(value.label, value.files, ("--old-dir", old, "--new-dir", new),
+                           value.directories, value.hardlinks))
+    expected["rounds"] = int(rounds)
+    if not int(rounds):
+        expected.update(rendered="", rows=[], row_groups=[])
+    return expected
+
+
+def check_compute_result(value, expected, process, directory, engine="port"):
+    actual, directories = files.snapshot(directory)
+    stdout, stderr = process.stdout.decode(), process.stderr.decode()
+    assert process.returncode == 0 and not stderr, (value.label, engine, process)
+    checksum, rendered = stdout.split("\n", 1)
+    assert rendered.endswith("\n")
+    rendered = rendered[:-1]
+    if engine == "original":
+        equivalent_original(rendered, expected)
+    else:
+        assert rendered == expected["rendered"], (value.label, engine, rendered)
+    assert checksum == str(expected["rounds"] * len(rendered)), (value.label, engine, checksum)
+    assert actual == expected["files"] and directories == expected["directories"], (value.label, engine, "file effects")
     return {"returncode": process.returncode, "stdout": stdout, "stderr": stderr,
             "files": {name: {"sha256": digest(data), "bytes": len(data)} for name, data in sorted(actual.items())},
             "directories": directories}
@@ -275,6 +395,44 @@ def cases():
     add(Case("output-directory", {key: value for key, value in normal.files.items() if key != "report.md"}, normal.arguments, ("report.md",)), "OSError")
     add(Case("output-missing-parent", normal.files, ("--old", "old.json", "--new", "project.json", "--output", "missing/report.md")), "OSError")
     add(Case("unknown-flag", normal.files, (*normal.arguments, "--bad", "x")), "ValueError")
+    add(Case("normalized-file-and-output-paths", normal.files,
+             ("--old", "./old.json/", "--new", "./project.json//", "--output", "./report.md//")))
+    old = {"alpha.json": report(0, [{"name": "same", "fields_bytes": 1}]),
+           "beta.json": report(50000, [{"name": "same", "fields_bytes": 50}]),
+           "old-only.json": report(9)}
+    new = {"alpha.json": report(20000, [{"name": "same", "fields_bytes": 20}]),
+           "beta.json": report(0, [{"name": "same", "fields_bytes": 2}]),
+           "new-only.json": report(8)}
+    add(directory_case("directory-common-projects", old, new))
+    add(directory_case("directory-stdout", old, new, None))
+    add(directory_case("directory-ignored-nested-and-nonjson", old, new,
+                       extra={"old/ignored.txt": b"not JSON", "new/nested/ignored.json": b"not JSON"}))
+    add(directory_case("directory-dotfile-unicode-and-multiple-suffix", {".hidden.json": report(), "α β.tar.json": report()},
+                       {".hidden.json": report(20001), "α β.tar.json": report(20002)}))
+    add(directory_case("directory-stable-project-ties", {"b.json": report(), "a.json": report()},
+                       {"b.json": report(20001), "a.json": report(20001)}))
+    add(directory_case("directory-ignored-schema-fields", {"a.json": {**report(), "extra": {"nested": [1, "x"]}}},
+                       {"a.json": {**report(20001), "extra": True}}))
+    add(directory_case("directory-unchanged", old, old))
+    add(directory_case("directory-empty", {}, {}), "ValueError")
+    add(directory_case("directory-disjoint", {"a.json": report()}, {"b.json": report()}), "ValueError")
+    add(directory_case("directory-invalid-unmatched", {**old, "unmatched.json": b"{"}, new), "ValueError")
+    add(directory_case("directory-invalid-new", old, {**new, "alpha.json": b"{"}), "ValueError")
+    add(directory_case("directory-big-integers", {"wide.json": report(10**100)},
+                       {"wide.json": report(10**100 + 20001)}))
+    add(directory_case("directory-overflow-before-output", {"wide.json": report()},
+                       {"wide.json": suppressed}), "OverflowError")
+    normal_directory = directory_case("directory-normal", old, new)
+    add(Case("normalized-directory-paths", normal_directory.files,
+             ("--old-dir", "./old//", "--new-dir", "./new//", "--output", "./report.md/"), ("old", "new")))
+    add(Case("directory-missing", {"report.md": b"keep"}, normal_directory.arguments), "ValueError")
+    add(Case("directory-file-as-directory", {"old": b"file", "report.md": b"keep"}, normal_directory.arguments, ("new",)), "ValueError")
+    add(Case("directory-matching-subdirectory", normal_directory.files, normal_directory.arguments,
+             ("old", "new", "old/not-a-file.json")), "OSError")
+    add(Case("directory-output-overwrites-input", normal_directory.files,
+             ("--old-dir", "old", "--new-dir", "new", "--output", "old/alpha.json"), ("old", "new")))
+    add(Case("directory-output-missing-parent", normal_directory.files,
+             ("--old-dir", "old", "--new-dir", "new", "--output", "missing/report.md"), ("old", "new")), "OSError")
     assert len({value.label for value, _, _ in result}) == len(result)
     return result
 
@@ -298,9 +456,35 @@ def validate_commands(commands, timeout=30):
             "engines": list(commands), "results": results}
 
 
+def validate_compute_commands(commands, timeout=30):
+    results = []
+    selected = {"directory-common-projects", "directory-dotfile-unicode-and-multiple-suffix",
+                "directory-stable-project-ties", "directory-big-integers", "directory-unchanged",
+                "directory-ignored-schema-fields"}
+    for ordinary, error, original in cases():
+        if ordinary.label not in selected:
+            continue
+        assert error is None and original
+        for rounds in (0, 2):
+            value = compute_case(ordinary, rounds)
+            expected = compute_oracle(value)
+            engines = {}
+            for name, command in commands.items():
+                with tempfile.TemporaryDirectory(prefix="memory-compute-validate-") as temporary:
+                    directory = Path(temporary)
+                    materialize(value, directory)
+                    process = subprocess.run([*command, *value.arguments], input=b"", capture_output=True,
+                                             cwd=directory, env=environment(), timeout=timeout, check=False)
+                    engines[name] = check_compute_result(value, expected, process, directory, name)
+            results.append({"case": case_record(value), "engines": engines})
+    return {"cases": len(results), "engine_executions": sum(len(item["engines"]) for item in results),
+            "engines": list(commands), "results": results}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path)
+    parser.add_argument("--compute-binary", type=Path)
     parser.add_argument("--rust", type=Path)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--output", type=Path)
@@ -311,9 +495,17 @@ def main():
     if args.rust:
         commands["rust"] = [str(args.rust.resolve(strict=True))]
     result = validate_commands(commands)
+    if args.compute_binary:
+        compute_commands = {"original": compute_original_command(args.python), "port": compute_python_command(args.python),
+                            "relar": [str(args.compute_binary.resolve(strict=True))]}
+        if args.rust:
+            compute_commands["rust"] = [str(args.rust.resolve(strict=True)), "compute"]
+        result["compute"] = validate_compute_commands(compute_commands)
     if args.output:
         args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(f"Passed {result['cases']} memory report cases, {result['engine_executions']} engine executions")
+    if "compute" in result:
+        print(f"Passed {result['compute']['cases']} compute cases, {result['compute']['engine_executions']} engine executions")
 
 
 if __name__ == "__main__":

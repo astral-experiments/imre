@@ -1,6 +1,7 @@
 """Compare real ty memory reports on Relar, typed CPython, upstream CPython and Rust."""
 
 import argparse
+import itertools
 import json
 import runpy
 import subprocess
@@ -29,7 +30,7 @@ def scaled(source, copies):
     return result
 
 
-def workloads(copies):
+def workloads(copies, directory_layouts=()):
     result = []
     for name in ("inventory", "ruff-scripts"):
         old = (validator.PACKAGE / f"sample/{name}-old.json").read_bytes()
@@ -44,13 +45,26 @@ def workloads(copies):
             value = validator.case(f"scaled-{mode}-{count}", before, selected)
             recipe = "distinct-name-copies-of-ruff-scripts-" + ("old-to-new" if mode == "full" else "old-to-old")
             result.append((describe(value, count, recipe), value))
+    for projects, copies_per_project in directory_layouts:
+        before, after = scaled(old, copies_per_project), scaled(new, copies_per_project)
+        for mode, selected in (("full", after), ("unchanged", before)):
+            names = [f"project-{index:04}.json" for index in range(projects)]
+            value = validator.directory_case(f"directory-{mode}-{projects}x{copies_per_project}",
+                                             dict.fromkeys(names, before), dict.fromkeys(names, selected))
+            recipe = f"{projects}-projects-with-{copies_per_project}-distinct-name-copies-of-ruff-scripts-" + ("old-to-new" if mode == "full" else "old-to-old")
+            description = describe(value, copies_per_project, recipe)
+            description["projects"] = projects
+            description["mode"] = mode
+            result.append((description, value))
     return result
 
 
 def describe(value, copies, recipe):
     expected = validator.oracle(value)
     counts = {}
-    for key in ("old.json", "project.json"):
+    for key in sorted(value.files):
+        if not key.endswith(".json"):
+            continue
         data = json.loads(value.files[key])
         counts[key] = len(data.get("structs", [])) + len(data.get("queries", []))
     return {"label": value.label, "copies": copies, "recipe": recipe,
@@ -63,6 +77,10 @@ def describe(value, copies, recipe):
 
 def engine_orders(commands):
     names = tuple(commands)
+    if len(names) == 3:
+        # All permutations balance positions and directed within-round neighbors.
+        return tuple(itertools.permutations(names))
+    assert len(names) == 4
     # Four balanced Williams orders: each position and each directed adjacent
     # pair occurs equally often. Cross-round transitions are not balanced.
     return tuple(tuple(names[(index + rotation) % 4] for index in (0, 1, 3, 2))
@@ -74,8 +92,14 @@ def commands_for(prepared, paths):
             "original": validator.original_command(str(paths["python"])), "rust": [str(paths["rust"])]}
 
 
-def measure(workload, value, commands, directory, args):
-    expected = validator.oracle(value)
+def compute_commands_for(prepared, paths):
+    return {"relar": [prepared["compute_binary"]], "port": validator.compute_python_command(str(paths["python"])),
+            "original": validator.compute_original_command(str(paths["python"])), "rust": [str(paths["rust"]), "compute"]}
+
+
+def measure(workload, value, commands, directory, args, compute=False):
+    expected = validator.compute_oracle(value) if compute else validator.oracle(value)
+    check = validator.check_compute_result if compute else validator.check_result
     directories = {name: directory / name for name in commands}
     for path in directories.values():
         path.mkdir(parents=True)
@@ -90,7 +114,7 @@ def measure(workload, value, commands, directory, args):
                                  env=validator.environment(), timeout=args.timeout, check=False)
         elapsed = time.perf_counter_ns() - start
         return {"command": command, "elapsed_ns": elapsed,
-                **validator.check_result(value, expected, process, path, name)}
+                **check(value, expected, process, path, name)}
 
     gates = {name: run(name) for name in commands}
     orders = engine_orders(commands)
@@ -108,9 +132,10 @@ def measure(workload, value, commands, directory, args):
             rounds.append(row)
         phases[phase] = rounds
     summaries = {name: shared.summary(phases["samples"], name) for name in commands}
-    return {**workload, "gates": gates, **phases, "summary": summaries,
+    return {**workload, "engine_orders": orders, "gates": gates, **phases, "summary": summaries,
             **{f"{left}_over_{right}": summaries[left]["median_seconds"] / summaries[right]["median_seconds"]
-               for left, right in (("original", "relar"), ("port", "relar"), ("relar", "rust"), ("original", "rust"), ("port", "rust"))}}
+               for left, right in (("original", "relar"), ("port", "relar"), ("relar", "rust"), ("original", "rust"), ("port", "rust"))
+               if left in summaries and right in summaries}}
 
 
 def source_paths(args):
@@ -154,6 +179,7 @@ def source_paths(args):
 def prepare(args, paths, hashes, rust_record, revision, dirty):
     artifact = args.artifact_dir.resolve()
     binary, llvm = artifact / "memory-report", artifact / "memory-report.ll"
+    compute_binary, compute_llvm = artifact / "memory-compute", artifact / "memory-compute.ll"
     target = args.target or targets.rust_host(rust_record)
     assert target == targets.rust_host(rust_record), "reference must match requested target"
     command = [str(paths["compiler"]), "build", str(validator.ENTRY), "--module-root", str(validator.PACKAGE_ROOT),
@@ -162,16 +188,29 @@ def prepare(args, paths, hashes, rust_record, revision, dirty):
     if args.lto_linker:
         command += ["--lto-linker", str(paths["lto_linker"])]
     targets.run_checked(command)
+    compute_command = list(command)
+    compute_command[2] = str(validator.PACKAGE / "compute.py")
+    compute_command[compute_command.index("-o") + 1] = str(compute_binary)
+    compute_command[compute_command.index("--emit-llvm") + 1] = str(compute_llvm)
+    targets.run_checked(compute_command)
+    assert targets.elf_target(compute_binary) == targets.elf_target(binary)
     assert targets.elf_target(binary) == targets.elf_target(paths["rust"])
     commands = commands_for({"binary": str(binary)}, paths)
     validation = validator.validate_commands(commands, args.timeout)
     validation_path = artifact / "validation.json"
     validation_path.write_text(json.dumps(validation, indent=2) + "\n")
+    compute_validation = validator.validate_compute_commands(compute_commands_for({"compute_binary": str(compute_binary)}, paths), args.timeout)
+    compute_validation_path = artifact / "compute-validation.json"
+    compute_validation_path.write_text(json.dumps(compute_validation, indent=2) + "\n")
     return {"schema": 1, "kind": "memory-preparation", "revision": revision, "dirty": dirty,
-            "compile_command": command, "effective_target": target, "thinlto": bool(args.lto_linker),
+            "compile_command": command, "compute_compile_command": compute_command, "effective_target": target, "thinlto": bool(args.lto_linker),
             "source_and_tool_paths": {name: str(path) for name, path in paths.items()},
             "source_and_tool_sha256": hashes, "rust_build_record": rust_record,
             "binary": str(binary), "binary_sha256": shared.sha256(binary),
+            "compute_binary": str(compute_binary), "compute_binary_sha256": shared.sha256(compute_binary),
+            "compute_llvm": str(compute_llvm), "compute_llvm_sha256": shared.sha256(compute_llvm),
+            "compute_validation": str(compute_validation_path), "compute_validation_sha256": shared.sha256(compute_validation_path),
+            "compute_validation_cases": compute_validation["cases"],
             "llvm": str(llvm), "llvm_sha256": shared.sha256(llvm),
             "validation": str(validation_path), "validation_sha256": shared.sha256(validation_path),
             "validation_cases": validation["cases"], "native_elf": targets.elf_target(binary),
@@ -185,7 +224,7 @@ def verify(prepared, paths, hashes, args, revision, dirty):
     assert prepared["source_and_tool_sha256"] == hashes
     assert prepared["thinlto"] == bool(args.lto_linker)
     assert prepared["effective_target"] == (args.target or targets.rust_host(prepared["rust_build_record"]))
-    for name in ("binary", "llvm", "validation"):
+    for name in ("binary", "llvm", "validation", "compute_binary", "compute_llvm", "compute_validation"):
         assert prepared[name + "_sha256"] == shared.sha256(Path(prepared[name]))
     assert prepared["native_elf"] == targets.elf_target(Path(prepared["binary"])) == targets.elf_target(paths["rust"])
 
@@ -206,11 +245,18 @@ def main():
     parser.add_argument("--samples", type=shared.positive_int, default=12)
     parser.add_argument("--warmups", type=shared.positive_int, default=2)
     parser.add_argument("--copies", nargs="+", type=shared.positive_int, default=[32, 256])
+    parser.add_argument("--directory-layouts", nargs="*", default=["256:1", "4:64"],
+                        help="PROJECTS:COPIES_PER_PROJECT for directory workloads")
+    parser.add_argument("--compute-rounds", type=shared.positive_int, default=8)
     parser.add_argument("--timeout", type=shared.positive_float, default=120)
     parser.add_argument("--cpu", type=int)
     args = parser.parse_args()
     assert args.samples % 4 == 0, "samples must balance all four engine orders"
     assert len(set(args.copies)) == len(args.copies)
+    args.directory_layouts = [tuple(shared.positive_int(value) for value in item.split(":")) for item in args.directory_layouts]
+    assert all(len(item) == 2 for item in args.directory_layouts)
+    assert len(set(args.directory_layouts)) == len(args.directory_layouts)
+    assert not args.directory_layouts or args.samples % 6 == 0, "directory compute samples must balance all six three-engine orders"
     assert not (args.prepare_only and args.prepared_record)
     paths, rust_record = source_paths(args)
     hashes = {name: shared.sha256(path) for name, path in paths.items()}
@@ -228,7 +274,7 @@ def main():
     preparation_hash = shared.sha256(args.prepared_record) if args.prepared_record else None
     prepared = json.loads(args.prepared_record.read_text()) if args.prepared_record else prepare(args, paths, hashes, rust_record, revision, dirty)
     verify(prepared, paths, hashes, args, revision, dirty)
-    for name in ("binary", "llvm", "validation"):
+    for name in ("binary", "llvm", "validation", "compute_binary", "compute_llvm", "compute_validation"):
         path = Path(prepared[name])
         assert args.output.resolve() != path.resolve() and not (args.output.exists() and args.output.samefile(path))
     if args.prepare_only:
@@ -245,18 +291,35 @@ def main():
                   "preparation_record_sha256": preparation_hash, "cpu": cpu,
                   "python": python_info,
                   "samples": args.samples, "warmups": args.warmups, "copies": args.copies,
+                  "directory_layouts": args.directory_layouts, "compute_rounds": args.compute_rounds,
                   "engine_orders": list(engine_orders(commands)), "python_environment": {"PYTHONHASHSEED": "0", "PYTHONPATH": "", "PYTHONHOME": None},
-                  "method": "Whole-process time: startup, two complete file reads and typed JSON parses, comparison, stable ranking, Markdown rendering, and one report write/close. The unchanged upstream CPython script additionally echoes the report to stderr in file mode; its complete stderr is checked. Full output/filesystem validation is outside timing. Four measured Williams orders balance positions and directed within-round neighbors; cross-round transitions and warmups are not balanced. Empty-report controls are reported without subtraction and exclude nonempty parsing/comparison costs.",
-                  "comparison": "Relar and the typed CPython port use concrete report/item objects and typed JSON decoding. The unchanged upstream script uses dataclasses and dynamic JSON dictionaries. Rust deserializes contiguous native i64 item records, checks arithmetic, and retries from retained input with arbitrary-precision integers on overflow; final row formatting preserves exact integer division rounding. Both ports deterministically retain first-appearance order for equal changes; upstream set-order ties are verified as equivalent and PYTHONHASHSEED=0 pins complete output. Scaled workloads are explicit distinct-name copies of captured reports; no engine repeats or skips the application in-process.",
+                  "method": "Whole-process time: startup, directory scanning when selected, all complete report reads and typed JSON parses, comparison, stable ranking, Markdown rendering, and one report write/close. The unchanged upstream CPython script additionally echoes the report to stderr in file mode; its complete stderr is checked. Full output/filesystem validation is outside timing. Four measured Williams orders balance positions and directed within-round neighbors; cross-round transitions and warmups are not balanced. Empty-report controls are reported without subtraction and exclude nonempty parsing/comparison costs.",
+                  "comparison": "Relar and the typed CPython port use concrete report/item objects and typed JSON decoding. The unchanged upstream script uses dataclasses and dynamic JSON dictionaries. Rust deserializes contiguous native i64 item records, checks arithmetic, and retries from retained input with arbitrary-precision integers on overflow; final row formatting preserves exact integer division rounding. Both ports deterministically retain first-appearance order for equal changes; upstream set-order ties are verified as equivalent and PYTHONHASHSEED=0 pins complete output. Scaled workloads are explicit distinct-name copies of captured reports; the application workloads execute exactly once per process. Separately labeled compute workloads repeat the same parse/compare/render pipeline over preloaded text.",
                   "input_guards_passed": False,
-                  "startup_control": measure(control, control_value, commands, artifact / control["label"], args), "workloads": []}
-        for workload, value in workloads(args.copies):
+                  "startup_control": measure(control, control_value, commands, artifact / control["label"], args), "workloads": [], "compute_workloads": [],
+                  "compute_method": "Separate entrypoints preload every named JSON text once, then repeat decoding all reports, matching/ranking projects, comparison, and Markdown rendering. Repeated compute workloads time Relar, upstream CPython, and Rust using all six engine permutations; the typed CPython port is also checked during preparation. Each repetition contributes the complete report's Unicode character count to a checksum; the checksum and full last report are validated outside timing. Rust black-boxes borrowed input and checksum contributions. Upstream CPython uses its unchanged dataclasses/render_summary over JSON decoded from preloaded text. Whole-process time divided by repetitions is an amortized compute estimate including preload/startup/final output, not a pure in-process timer. A zero-repetition preload control is reported without subtraction."}
+        compute_commands = {name: command for name, command in compute_commands_for(prepared, paths).items() if name != "port"}
+        for workload, value in workloads(args.copies, args.directory_layouts):
             measured = measure(workload, value, commands, artifact / workload["label"], args)
             measured["startup_control_fraction"] = {name: record["startup_control"]["summary"][name]["median_seconds"] / summary["median_seconds"]
                                                      for name, summary in measured["summary"].items()}
             record["workloads"].append(measured)
             args.output.write_text(json.dumps(record, indent=2) + "\n")
             print(f"{measured['label']}: original/Relar={measured['original_over_relar']:.3f}, typed/Relar={measured['port_over_relar']:.3f}, Relar/Rust={measured['relar_over_rust']:.3f}", flush=True)
+            if workload.get("mode") == "full":
+                control_value = validator.compute_case(value, 0)
+                control_description = {**workload, "label": control_value.label, "arguments": list(control_value.arguments), "rounds": 0,
+                                       "expected_markdown_sha256": validator.digest(b""), "expected_markdown_bytes": 0}
+                preload = measure(control_description, control_value, compute_commands, artifact / control_value.label, args, compute=True)
+                compute_value = validator.compute_case(value, args.compute_rounds)
+                description = {**workload, "label": compute_value.label, "arguments": list(compute_value.arguments), "rounds": args.compute_rounds}
+                computed = measure(description, compute_value, compute_commands, artifact / compute_value.label, args, compute=True)
+                computed["preload_control"] = preload
+                computed["amortized_seconds"] = {name: summary["median_seconds"] / args.compute_rounds for name, summary in computed["summary"].items()}
+                computed["preload_control_fraction"] = {name: preload["summary"][name]["median_seconds"] / summary["median_seconds"] for name, summary in computed["summary"].items()}
+                record["compute_workloads"].append(computed)
+                args.output.write_text(json.dumps(record, indent=2) + "\n")
+                print(f"{computed['label']}: original/Relar={computed['original_over_relar']:.3f}, Relar/Rust={computed['relar_over_rust']:.3f}", flush=True)
     assert hashes == {name: shared.sha256(path) for name, path in paths.items()}
     verify(prepared, paths, hashes, args, revision, dirty)
     if args.prepared_record:

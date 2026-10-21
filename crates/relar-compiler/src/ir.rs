@@ -27,6 +27,8 @@ pub(crate) enum Type {
     TextIO,
     /// A sealed byte stream; aliases share its open/closed state.
     BinaryIO,
+    /// A sealed, immutable POSIX filesystem path with UTF-8 components.
+    Path,
     None,
 }
 
@@ -57,6 +59,7 @@ impl std::fmt::Display for Type {
             Self::Exception => "Exception",
             Self::TextIO => "typing.TextIO",
             Self::BinaryIO => "typing.BinaryIO",
+            Self::Path => "pathlib.Path",
             Self::Class(_)
             | Self::List(_)
             | Self::Dict(_)
@@ -376,6 +379,7 @@ pub(crate) enum Builtin {
     SysArgv,
     /// Decodes one string into the checked structural schema of this class.
     JsonDecode(usize),
+    Path(PathOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
     BinaryOpen(u32),
@@ -412,6 +416,26 @@ pub(crate) enum Builtin {
     ExceptionWithCause,
     ExceptionCause,
     ExceptionSuppressContext,
+}
+
+/// Native path operations keep their exact result types in the checked IR.
+#[derive(Clone, Copy)]
+pub(crate) enum PathOperation {
+    New,
+    Join,
+    Text,
+    Name,
+    Stem,
+    Suffix,
+    Parent,
+    Exists,
+    IsFile,
+    IsDir,
+    ReadText,
+    WriteText,
+    Iterdir,
+    Glob,
+    Next,
 }
 
 /// Sealed Python runtime categories; parameterized container annotations are

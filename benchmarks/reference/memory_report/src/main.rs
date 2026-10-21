@@ -1,9 +1,11 @@
-//! Independent, schema-directed implementation of the two-file memory report.
+//! Independent, schema-directed implementation of file and directory memory reports.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
+use std::path::Path;
 
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{ToPrimitive, Zero};
@@ -222,10 +224,10 @@ fn depth_check(text: &str) -> Result<(), Failure> {
 }
 
 fn read(path: &str) -> Result<String, Failure> {
-    let bytes = fs::read(path).map_err(|error| Failure("OSError", error.to_string()))?;
+    let bytes =
+        fs::read(normalize_path(path)).map_err(|error| Failure("OSError", error.to_string()))?;
     let text =
         String::from_utf8(bytes).map_err(|error| Failure("ValueError", error.to_string()))?;
-    depth_check(&text)?;
     Ok(text)
 }
 
@@ -387,16 +389,29 @@ fn outcome(old: &Integer, new: &Integer) -> &'static str {
     }
 }
 
-fn render<N: Count>(
-    name: &str,
-    old: &MemoryReport<N>,
-    new: &MemoryReport<N>,
-) -> Result<Option<String>, Failure> {
+struct Project<'a, N> {
+    name: &'a str,
+    old: &'a MemoryReport<N>,
+    new: &'a MemoryReport<N>,
+}
+
+fn render<N: Count>(projects: &[Project<'_, N>]) -> Result<Option<String>, Failure> {
+    if projects.is_empty() {
+        return Ok(Some("No memory reports to compare.".into()));
+    }
+    let mut ranked = Vec::with_capacity(projects.len());
+    for project in projects {
+        let Some(change) = project.new.total_bytes.subtract(&project.old.total_bytes) else {
+            return Ok(None);
+        };
+        ranked.push((project, change));
+    }
+    ranked.sort_by(|left, right| right.1.cmp(&left.1));
     let mut lines = vec!["## Memory usage report".to_owned(), String::new()];
-    let Some(change) = new.total_bytes.subtract(&old.total_bytes) else {
-        return Ok(None);
-    };
-    if change.integer().magnitude() <= Integer::Small(10_000) {
+    if !ranked
+        .iter()
+        .any(|(_, change)| change.integer().magnitude() > Integer::Small(10_000))
+    {
         lines.push("Memory usage unchanged ✅".into());
         return Ok(Some(lines.join("\n")));
     }
@@ -409,13 +424,16 @@ fn render<N: Count>(
         ]
         .map(str::to_owned),
     );
-    lines.push(format!(
-        "| {name} | {} | {} | {} | {} |",
-        format_bytes(&old.total_bytes.integer())?,
-        format_bytes(&new.total_bytes.integer())?,
-        format_diff(&old.total_bytes.integer(), &new.total_bytes.integer())?,
-        outcome(&old.total_bytes.integer(), &new.total_bytes.integer())
-    ));
+    for (project, _) in &ranked {
+        let (name, old, new) = (project.name, project.old, project.new);
+        lines.push(format!(
+            "| {name} | {} | {} | {} | {} |",
+            format_bytes(&old.total_bytes.integer())?,
+            format_bytes(&new.total_bytes.integer())?,
+            format_diff(&old.total_bytes.integer(), &new.total_bytes.integer())?,
+            outcome(&old.total_bytes.integer(), &new.total_bytes.integer())
+        ));
+    }
     lines.extend(
         [
             "",
@@ -427,12 +445,15 @@ fn render<N: Count>(
         ]
         .map(str::to_owned),
     );
-    let Some(differences) = differences(old, new) else {
-        return Ok(None);
-    };
-    if !differences.is_empty() {
+    for (project, _) in &ranked {
+        let Some(differences) = differences(project.old, project.new) else {
+            return Ok(None);
+        };
+        if differences.is_empty() {
+            continue;
+        }
         lines.extend([
-            format!("### {name}"),
+            format!("### {}", project.name),
             String::new(),
             "| Name | Old | New | Diff | Outcome |".into(),
             "|------|-----|-----|------|---------|".into(),
@@ -470,14 +491,211 @@ fn project_name(path: &str) -> &str {
     suffix.map_or(name, |index| &name[..index])
 }
 
+/// POSIX Path removes empty and dot components, but preserves dot-dot and the
+/// special double-slash root without resolving symlinks or touching the disk.
+fn normalize_path(path: &str) -> String {
+    let root = if path.starts_with("//") && !path.starts_with("///") {
+        "//"
+    } else if path.starts_with('/') {
+        "/"
+    } else {
+        ""
+    };
+    let parts: Vec<_> = path
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect();
+    if parts.is_empty() && root.is_empty() {
+        ".".into()
+    } else {
+        format!("{root}{}", parts.join("/"))
+    }
+}
+
+struct Input<'a> {
+    text: Cow<'a, str>,
+    native: Option<MemoryReport<i64>>,
+    big: Option<MemoryReport<Integer>>,
+}
+
+impl<'a> Input<'a> {
+    fn parse(text: impl Into<Cow<'a, str>>) -> Result<Self, Failure> {
+        let text = text.into();
+        depth_check(&text)?;
+        let native = decode::<i64>(&text).ok();
+        let big = if native.is_none() {
+            Some(decode::<Integer>(&text)?)
+        } else {
+            None
+        };
+        Ok(Self { text, native, big })
+    }
+
+    fn into_big(self) -> Result<MemoryReport<Integer>, Failure> {
+        self.big.map_or_else(|| decode::<Integer>(&self.text), Ok)
+    }
+}
+
+/// Glob follows pathlib's nonrecursive *.json selection, including hidden files
+/// and matching directories. Directory scanning errors are suppressed by glob;
+/// errors opening or decoding a selected entry still propagate.
+fn load_directory(path: &str) -> Result<HashMap<String, Input<'static>>, Failure> {
+    let mut reports = HashMap::new();
+    let Ok(entries) =
+        fs::read_dir(path).and_then(|entries| entries.collect::<io::Result<Vec<_>>>())
+    else {
+        return Ok(reports);
+    };
+    for entry in entries {
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| Failure("ValueError", "path is not UTF-8".into()))?;
+        if name.ends_with(".json") {
+            let path = entry.path();
+            let path = path
+                .to_str()
+                .ok_or_else(|| Failure("ValueError", "path is not UTF-8".into()))?;
+            reports.insert(project_name(&name).to_owned(), Input::parse(read(path)?)?);
+        }
+    }
+    Ok(reports)
+}
+
+/// The common path stores only native i64 fields. Retained source text permits
+/// an exact BigInt retry if any parsed field or later arithmetic needs it.
+fn render_inputs(inputs: Vec<(String, Input<'_>, Input<'_>)>) -> Result<String, Failure> {
+    let native: Option<Vec<_>> = inputs
+        .iter()
+        .map(|(name, old, new)| {
+            Some(Project {
+                name,
+                old: old.native.as_ref()?,
+                new: new.native.as_ref()?,
+            })
+        })
+        .collect();
+    if let Some(projects) = native
+        && let Some(rendered) = render(&projects)?
+    {
+        return Ok(rendered);
+    }
+    let mut values = Vec::with_capacity(inputs.len());
+    for (name, old, new) in inputs {
+        values.push((name, old.into_big()?, new.into_big()?));
+    }
+    let projects: Vec<_> = values
+        .iter()
+        .map(|(name, old, new)| Project { name, old, new })
+        .collect();
+    Ok(render(&projects)?.expect("arbitrary-precision arithmetic cannot overflow"))
+}
+
+/// Project names are sorted before stable ranking, exactly as in directory mode.
+fn common_inputs<'a>(
+    mut old: HashMap<String, Input<'a>>,
+    mut new: HashMap<String, Input<'a>>,
+) -> Vec<(String, Input<'a>, Input<'a>)> {
+    let mut names: Vec<_> = old
+        .keys()
+        .filter(|name| new.contains_key(*name))
+        .cloned()
+        .collect();
+    names.sort();
+    names
+        .into_iter()
+        .map(|name| {
+            let before = old.remove(&name).unwrap();
+            let after = new.remove(&name).unwrap();
+            (name, before, after)
+        })
+        .collect()
+}
+
+fn preload(path: &str) -> Result<HashMap<String, String>, Failure> {
+    let mut texts = HashMap::new();
+    let Ok(entries) =
+        fs::read_dir(path).and_then(|entries| entries.collect::<io::Result<Vec<_>>>())
+    else {
+        return Ok(texts);
+    };
+    for entry in entries {
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| Failure("ValueError", "path is not UTF-8".into()))?;
+        if name.ends_with(".json") {
+            let path = entry.path();
+            texts.insert(
+                project_name(&name).to_owned(),
+                read(
+                    path.to_str()
+                        .ok_or_else(|| Failure("ValueError", "path is not UTF-8".into()))?,
+                )?,
+            );
+        }
+    }
+    Ok(texts)
+}
+
+fn parse_preloaded(texts: &HashMap<String, String>) -> Result<HashMap<String, Input<'_>>, Failure> {
+    texts
+        .iter()
+        .map(|(name, text)| {
+            Ok((
+                name.clone(),
+                Input::parse(std::hint::black_box(text.as_str()))?,
+            ))
+        })
+        .collect()
+}
+
+/// Repeats the same parse/compare/render work over immutable preloaded text.
+/// Black boxes prevent the independent native baseline from hoisting a result;
+/// the checksum and complete last report are checked outside the timed process.
+fn compute(rounds: usize, old_directory: &str, new_directory: &str) -> Result<(), Failure> {
+    let old_texts = preload(old_directory)?;
+    let new_texts = preload(new_directory)?;
+    let (mut checksum, mut rendered) = (0_usize, String::new());
+    for _ in 0..rounds {
+        let old = parse_preloaded(&old_texts)?;
+        let new = parse_preloaded(&new_texts)?;
+        rendered = render_inputs(common_inputs(old, new))?;
+        checksum += std::hint::black_box(rendered.chars().count());
+    }
+    let mut output = io::stdout().lock();
+    writeln!(output, "{checksum}\n{rendered}")
+        .map_err(|error| Failure("OSError", error.to_string()))?;
+    output
+        .flush()
+        .map_err(|error| Failure("OSError", error.to_string()))?;
+    Ok(())
+}
+
 fn run() -> Result<(), Failure> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if arguments
+        .first()
+        .is_some_and(|argument| argument == "compute")
+    {
+        if arguments.len() != 4 {
+            return Err(Failure(
+                "ValueError",
+                "compute requires ROUNDS OLD_DIR NEW_DIR".into(),
+            ));
+        }
+        let rounds = arguments[1]
+            .parse::<usize>()
+            .map_err(|_| Failure("ValueError", "rounds must be nonnegative".into()))?;
+        return compute(rounds, &arguments[2], &arguments[3]);
+    }
     let mut index = usize::from(
         arguments
             .first()
             .is_some_and(|argument| argument == "compare"),
     );
-    let (mut old_path, mut new_path, mut output_path) = ("", "", None);
+    let (mut old_path, mut new_path, mut old_directory, mut new_directory, mut output_path) =
+        ("", "", "", "", None);
     while index < arguments.len() {
         let flag = &arguments[index];
         let value = arguments
@@ -486,54 +704,40 @@ fn run() -> Result<(), Failure> {
         match flag.as_str() {
             "--old" => old_path = value,
             "--new" => new_path = value,
+            "--old-dir" => old_directory = value,
+            "--new-dir" => new_directory = value,
             "--output" => output_path = Some(value),
             _ => return Err(Failure("ValueError", format!("unknown argument: {flag}"))),
         }
         index += 2;
     }
-    if old_path.is_empty() || new_path.is_empty() {
+    let inputs = if !old_path.is_empty() && !new_path.is_empty() {
+        vec![(
+            project_name(&normalize_path(new_path)).to_owned(),
+            Input::parse(read(old_path)?)?,
+            Input::parse(read(new_path)?)?,
+        )]
+    } else if !old_directory.is_empty() && !new_directory.is_empty() {
+        common_inputs(
+            load_directory(old_directory)?,
+            load_directory(new_directory)?,
+        )
+    } else {
         return Err(Failure(
             "ValueError",
-            "expected --old OLD.json --new NEW.json [--output REPORT.md]".into(),
+            "expected --old/--new or --old-dir/--new-dir [--output REPORT.md]".into(),
+        ));
+    };
+    if inputs.is_empty() {
+        return Err(Failure(
+            "ValueError",
+            "No common projects found between old and new directories".into(),
         ));
     }
-    // The ordinary path stores only native i64 fields in contiguous records.
-    // Retain input text so parsing or arithmetic overflow can retry with BigInt.
-    let old_text = read(old_path)?;
-    let old_native = decode::<i64>(&old_text).ok();
-    let old_big = if old_native.is_none() {
-        Some(decode::<Integer>(&old_text)?)
-    } else {
-        None
-    };
-    let new_text = read(new_path)?;
-    let new_native = decode::<i64>(&new_text).ok();
-    let new_big = if new_native.is_none() {
-        Some(decode::<Integer>(&new_text)?)
-    } else {
-        None
-    };
-    let name = project_name(new_path);
-    let native_result = if let (Some(old), Some(new)) = (&old_native, &new_native) {
-        render(name, old, new)?
-    } else {
-        None
-    };
-    let rendered = if let Some(rendered) = native_result {
-        rendered
-    } else {
-        let old = match old_big {
-            Some(value) => value,
-            None => decode::<Integer>(&old_text)?,
-        };
-        let new = match new_big {
-            Some(value) => value,
-            None => decode::<Integer>(&new_text)?,
-        };
-        render(name, &old, &new)?.expect("arbitrary-precision arithmetic cannot overflow")
-    };
+    let rendered = render_inputs(inputs)?;
     if let Some(path) = output_path {
-        fs::write(path, rendered).map_err(|error| Failure("OSError", error.to_string()))?;
+        fs::write(Path::new(&normalize_path(path)), rendered)
+            .map_err(|error| Failure("OSError", error.to_string()))?;
     } else {
         let mut output = io::stdout().lock();
         writeln!(output, "{rendered}").map_err(|error| Failure("OSError", error.to_string()))?;

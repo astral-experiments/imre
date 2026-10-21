@@ -15,6 +15,7 @@ mod callables;
 mod conditionals;
 mod integer_regions;
 mod json;
+mod paths;
 mod records;
 mod stdlib;
 mod truthiness;
@@ -36,6 +37,7 @@ impl Type {
             | Self::Set(_)
             | Self::Iterator
             | Self::Exception
+            | Self::Path
             | Self::TextIO
             | Self::BinaryIO
             | Self::Tuple(_) => "ptr",
@@ -57,6 +59,7 @@ impl Type {
             | Self::Set(_)
             | Self::Iterator
             | Self::Exception
+            | Self::Path
             | Self::TextIO
             | Self::BinaryIO
             | Self::Tuple(_) => "null",
@@ -401,6 +404,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::Iterator
             | Type::Exception
+            | Type::Path
             | Type::TextIO
             | Type::BinaryIO => "object",
             Type::Float | Type::Bool | Type::None => return,
@@ -2481,6 +2485,18 @@ impl Emitter<'_, '_> {
                 };
                 self.instruction(format!("icmp {predicate} i8 {equal}, 0"))
             }
+            Type::Path => {
+                let equal = self.instruction(format!(
+                    "call i8 @relar_path_equal(ptr {}, ptr {})",
+                    left.operand, right.operand
+                ));
+                let predicate = if matches!(op, Compare::Equal) {
+                    "ne"
+                } else {
+                    "eq"
+                };
+                self.instruction(format!("icmp {predicate} i8 {equal}, 0"))
+            }
             Type::Bytes => {
                 let order = self.instruction(format!(
                     "call i32 @relar_bytes_compare(ptr {}, ptr {})",
@@ -2686,6 +2702,7 @@ impl Emitter<'_, '_> {
             .map(|arg| self.operand(arg))
             .collect::<Vec<_>>();
         let result = match builtin {
+            Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
             Builtin::JsonDecode(class) => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
@@ -3211,6 +3228,7 @@ impl Emitter<'_, '_> {
                     | Type::Set(_)
                     | Type::Iterator
                     | Type::Exception
+                    | Type::Path
                     | Type::TextIO
                     | Type::BinaryIO
                     | Type::Tuple(_)
@@ -3342,6 +3360,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::Iterator
             | Type::Exception
+            | Type::Path
             | Type::TextIO
             | Type::BinaryIO
             | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
@@ -3372,6 +3391,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::Iterator
             | Type::Exception
+            | Type::Path
             | Type::TextIO
             | Type::BinaryIO
             | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
@@ -3819,6 +3839,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Set(_)
         | Type::Iterator
         | Type::Exception
+        | Type::Path
         | Type::TextIO
         | Type::BinaryIO => 5,
         Type::Optional(_) => 256 | representation_kind(types.payload(ty).unwrap(), types),
@@ -3932,6 +3953,9 @@ fn fallible(name: &str) -> bool {
                 | "relar_print_none"
                 | "relar_input"
                 | "relar_sys_argv"
+                | "relar_path_read_text"
+                | "relar_path_write_text"
+                | "relar_path_next"
                 | "relar_text_open"
                 | "relar_text_enter"
                 | "relar_text_read"
@@ -3977,6 +4001,21 @@ fn fallible(name: &str) -> bool {
 }
 
 const DECLARATIONS: &str = r#"
+declare ptr @relar_path_new(ptr)
+declare ptr @relar_path_join(ptr, ptr)
+declare ptr @relar_path_text(ptr)
+declare ptr @relar_path_name(ptr)
+declare ptr @relar_path_stem(ptr)
+declare ptr @relar_path_suffix(ptr)
+declare ptr @relar_path_parent(ptr)
+declare i8 @relar_path_exists(ptr)
+declare i8 @relar_path_is_file(ptr)
+declare i8 @relar_path_is_dir(ptr)
+declare i8 @relar_path_equal(ptr, ptr)
+declare ptr @relar_path_read_text(ptr)
+declare i64 @relar_path_write_text(ptr, ptr)
+declare ptr @relar_path_iter(ptr, ptr)
+declare ptr @relar_path_next(ptr)
 declare i64 @relar_float_box(double)
 declare double @relar_float_unbox(i64)
 declare void @relar_float_box_retain(i64)

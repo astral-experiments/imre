@@ -12,6 +12,7 @@ pub(crate) mod exceptions;
 mod files;
 mod json;
 mod mappings;
+mod paths;
 pub(crate) mod records;
 mod sequences;
 mod stdlib;
@@ -39,6 +40,8 @@ enum Storage {
     BytesIterator(bytes::BytesIterator),
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
+    Path(Str),
+    PathIterator(Box<paths::PathIterator>),
 }
 
 /// Acquires a reference without consuming the caller's live Rc handle.

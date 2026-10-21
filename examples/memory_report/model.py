@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Self
 
 from relar.json import decode
@@ -22,10 +23,8 @@ class MemoryReport:
     queries: list[MemoryItem] = field(default_factory=list)
 
     @classmethod
-    def from_json(cls, path: str) -> Self:
-        with open(path, "r", encoding="utf-8") as source:
-            text = source.read()
-        return decode(text, cls)
+    def from_json(cls, path: Path) -> Self:
+        return decode(path.read_text(encoding="utf-8"), cls)
 
 
 @dataclass(slots=True, kw_only=True)

@@ -18,6 +18,7 @@ An ahead-of-time compiler for typed Python, written in Rust.
 - Compose generator expressions, `zip(strict=True)`, and `reversed`, with short-circuiting `any` and `all`.
 - Pass typed function values and bound methods, use noncapturing lambdas, and compose lazy `map`/`filter` pipelines.
 - Use read-only properties, class and static methods, and `Self` annotations.
+- Read and write UTF-8 files, join native `pathlib.Path` values, and scan directories with `iterdir` and bounded `glob`.
 - Preserve arbitrary-precision integers, shared mutation, and supported exception behavior.
 - Run compiled programs without a Python installation or a CPython dependency.
 
@@ -52,8 +53,8 @@ cargo build --workspace --release --locked
 This builds `target/release/relar` and `target/release/librelar_runtime.a`. Keep them
 together when compiling programs, or select the runtime with `--runtime`.
 Commands below run from the repository root with Cargo's default target directory.
-CPython 3.12 or later is needed only to run the Python examples and differential
-tests. See the [build guide](docs/subset.md#build-and-validate) for validation,
+CPython is needed only to run the Python examples and differential tests; CI uses
+CPython 3.14.5 as its semantic reference. See the [build guide](docs/subset.md#build-and-validate) for validation,
 sanitizers, and optional cross-language ThinLTO.
 
 ## Getting started
@@ -122,8 +123,9 @@ transactions with configured callbacks, transforms gross or net payouts, and
 aggregates a report through lazy `map` and `filter`.
 
 The [memory-report comparator](examples/memory_report/README.md) ports ty's real
-report-comparison script: it decodes JSON into typed records, ranks changes, and
-writes a Markdown report. Its guide includes captured ty reports and comparisons
+report-comparison script: it compares individual files or directories of projects,
+decodes JSON into typed records, ranks changes, and writes a Markdown report.
+Its guide includes captured ty reports and comparisons
 with the original CPython script, the typed Python port, and an independent Rust
 implementation. The [dataclass comparison](benchmarks/results/2026-10-21-dataclass-records.md)
 runs within 1.16–1.47× Rust's time on the large report inputs, using dataclasses,

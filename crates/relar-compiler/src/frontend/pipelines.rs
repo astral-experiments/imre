@@ -26,7 +26,9 @@ pub(super) fn is_pipeline_expression(expression: &ast::Expr) -> bool {
     matches!(expression, ast::Expr::Generator(_))
         || matches!(expression, ast::Expr::Call(call)
             if matches!(&*call.func, ast::Expr::Name(name)
-                if matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate")))
+                if matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
+            || matches!(&*call.func, ast::Expr::Attribute(attribute)
+                if matches!(attribute.attr.as_str(), "iterdir" | "glob")))
 }
 
 fn integer(value: i64) -> Expr {
@@ -117,6 +119,28 @@ impl Checker<'_> {
         };
         if self.resolve(&call.func).is_some() {
             return Ok(None);
+        }
+        if let ast::Expr::Attribute(attribute) = &*call.func
+            && matches!(attribute.attr.as_str(), "iterdir" | "glob")
+            && self.class_reference(&attribute.value).is_none()
+        {
+            let receiver = self.expr(&attribute.value)?;
+            if receiver.ty == Type::Path {
+                let iterator =
+                    self.path_iterator(receiver, call, attribute.attr.as_str() == "glob")?;
+                return Ok(Some(self.prepare_path_iterator(iterator)));
+            }
+            if let Type::Class(class) = receiver.ty {
+                let iterable = self.class_method_call(call, attribute, class, Some(receiver))?;
+                return self
+                    .prepare_container(iterable, false, call, false)
+                    .map(Some);
+            }
+            return Err(error(
+                self.source,
+                call,
+                "directory iteration requires pathlib.Path",
+            ));
         }
         let ast::Expr::Name(name) = &*call.func else {
             return Ok(None);
@@ -244,6 +268,66 @@ impl Checker<'_> {
                 Ok(Some(input))
             }
             _ => Ok(None),
+        }
+    }
+
+    /// Method evaluation creates the iterator at Python's observable point.
+    /// Runtime iterdir snapshots eagerly; glob waits for the first pull. Private
+    /// nullable results own every yielded path until the consumer acquires it.
+    fn prepare_path_iterator(&mut self, expression: Expr) -> Prepared {
+        let iterator = self.hidden(Type::Iterator);
+        let optional = self.hidden(self.types.optional(Type::Path));
+        let value = self.hidden(Type::Path);
+        let ready = self.hidden(Type::Bool);
+        let done = self.hidden(Type::Bool);
+        let pull = vec![
+            Statement::Assign(
+                optional,
+                paths::operation(
+                    ir::PathOperation::Next,
+                    self.locals[optional],
+                    vec![self.local(iterator)],
+                ),
+            ),
+            Statement::Assign(
+                ready,
+                not(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::IsNone, vec![self.local(optional)]),
+                }),
+            ),
+            Statement::If(
+                self.local(ready),
+                vec![Statement::Assign(
+                    value,
+                    Expr {
+                        ty: Type::Path,
+                        kind: ExprKind::Unwrap(Box::new(self.local(optional))),
+                    },
+                )],
+                vec![
+                    Statement::Assign(done, boolean(true)),
+                    Statement::Clear(iterator),
+                ],
+            ),
+            Statement::Clear(optional),
+        ];
+        Prepared {
+            evaluate: vec![
+                Statement::Assign(iterator, expression),
+                Statement::Assign(done, boolean(false)),
+            ],
+            acquire: Vec::new(),
+            next: vec![
+                Statement::Clear(value),
+                Statement::Assign(ready, boolean(false)),
+                Statement::If(not(self.local(done)), pull, Vec::new()),
+            ],
+            value,
+            ready,
+            elementless: false,
+            writes: HashSet::new(),
+            clear: vec![iterator, optional, value, ready, done],
         }
     }
 

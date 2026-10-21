@@ -2,7 +2,7 @@
 
 This is a typed port of Ruff's real
 [`scripts/memory_report.py`](https://github.com/astral-sh/ruff/blob/3e4fffb05a2b143fafbf31d891c79c878fe3bcd3/scripts/memory_report.py)
-two-file comparison mode. It reads two `TY_MEMORY_REPORT=json` captures and
+file and directory comparison modes. It reads `TY_MEMORY_REPORT=json` captures and
 produces the same Markdown summary and largest-change tables. The retained
 upstream source and license are in [upstream/](upstream/).
 
@@ -25,6 +25,21 @@ capture pair covers this repository's inventory reconciler. Exact captures,
 producer versions, commands, binary/source hashes, and producer warning logs are
 retained in [sample/](sample/provenance.json).
 
+Compare matching project reports in two directories:
+
+```sh
+/tmp/memory-report compare --old-dir old-reports --new-dir new-reports \
+  --output /tmp/memory-report.md
+```
+
+Each directory is scanned once for `*.json`, including dotfiles. The file stem
+identifies a project; only project names present in both directories appear in
+the report. Every selected file is decoded, including unmatched projects, and
+common names are sorted before stable ranking by total change. Nested files and
+other extensions are ignored. A matching directory is an input error. Empty,
+missing, or disjoint report directories produce a clear error and preserve any
+existing output.
+
 Run the same typed source on CPython with the compatibility library:
 
 ```sh
@@ -38,7 +53,8 @@ and `field(default_factory=list)`. `ProjectComparison.total_diff_bytes` is a
 read-only property, and changed-item rows are frozen dataclasses. These compile
 to Relar's fixed-layout records and direct function calls.
 
-`load.py` calls `MemoryReport.from_json(path)`. That class method uses
+`load.py` uses native `pathlib.Path` values, `glob`, and `Path.stem`, then calls
+`MemoryReport.from_json(path)`. That class method reads UTF-8 text and uses
 `relar.json.decode(text, cls)` and returns `Self`. The compiler generates a
 decoder for concrete record fields; there is no exposed dynamic JSON object.
 The CPython implementation in `stdlib/relar/json.py` enforces the same boundary.
@@ -55,11 +71,12 @@ before sorting, so equal-change order and selection can vary with the Python
 hash seed. This port uses stable first appearance: old items first, then new-only
 items. The independent validator permits only that upstream tie ambiguity.
 
-This example implements two-file comparison, with optional `compare` before the
-flags. Upstream's directory comparison, project checkout, and ty execution modes
-remain outside its scope. Successful file output is quiet; the upstream script
+This example implements file and directory comparison, with optional `compare`
+before the flags. Upstream's project checkout and ty execution modes remain
+outside its scope. Successful file output is quiet; the upstream script
 also echoes the completed report to stderr. Parsing and formatting finish before
 the output file opens, preserving an existing report on those failures.
+CLI validation errors use `ValueError`; upstream prints its own diagnostics.
 
 Validate reports, strict typed failures, and complete filesystem effects:
 
