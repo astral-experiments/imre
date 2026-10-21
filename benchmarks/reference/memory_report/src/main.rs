@@ -714,7 +714,10 @@ impl Workspace {
         }
         template.pop();
         let path = PathBuf::from(std::ffi::OsString::from_vec(template));
-        Ok(Self { path, clean_on_drop: true })
+        Ok(Self {
+            path,
+            clean_on_drop: true,
+        })
     }
 
     /// Propagate cleanup failures after either successful or failed work.
@@ -725,6 +728,14 @@ impl Workspace {
 
     /// Recover owner access only after cleanup of this flat workspace is denied.
     fn cleanup(&self) -> io::Result<()> {
+        match fs::symlink_metadata(&self.path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(io::Error::other("Cannot call rmtree on a symlink"));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+            Ok(_) => {}
+        }
         match fs::remove_dir_all(&self.path) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
@@ -775,7 +786,11 @@ fn write_text(path: &Path, text: &str) -> Result<(), Failure> {
 fn publish_report(target: &str, rendered: &str) -> Result<(), Failure> {
     let target = PathBuf::from(normalize_path(target));
     let parent = target.parent().unwrap_or(&target);
-    let parent = if parent.as_os_str().is_empty() { Path::new(".") } else { parent };
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
     with_workspace(parent, ".relar-report-", |workspace| {
         let staged = workspace.join("report.md");
         write_text(&staged, rendered)?;
@@ -795,7 +810,8 @@ fn publish_capture(
     let staged_stderr = workspace.join("stderr.txt");
     write_text(&staged_stdout, stdout)?;
     write_text(&staged_stderr, stderr)?;
-    fs::rename(staged_stdout, directory.join(format!("{role}.stdout.txt"))).map_err(process_error)?;
+    fs::rename(staged_stdout, directory.join(format!("{role}.stdout.txt")))
+        .map_err(process_error)?;
     fs::rename(staged_stderr, directory.join(format!("{role}.stderr.txt"))).map_err(process_error)
 }
 
@@ -937,7 +953,9 @@ fn prepared_inputs(
             if let Some(directory) = &directory {
                 fs::create_dir(directory).map_err(process_error)?;
             }
-            let capture = directory.as_deref().zip(capture.map(|(_, workspace)| workspace));
+            let capture = directory
+                .as_deref()
+                .zip(capture.map(|(_, workspace)| workspace));
             let old = collect_report(&project, old_ty, &environment, capture, "old")?;
             let new = collect_report(&project, new_ty, &environment, capture, "new")?;
             inputs.push((project.name, old, new));
@@ -1013,13 +1031,27 @@ fn run() -> Result<(), Failure> {
                     .into(),
             ));
         }
-        if capture_directory.is_some() && output_path.is_some_and(|path| {
-            Path::new(&normalize_path(path)).file_name().is_some_and(|name| {
-                ["projects.json", "old.stdout.txt", "old.stderr.txt", "new.stdout.txt", "new.stderr.txt"]
-                    .iter().any(|reserved| name == *reserved)
+        if capture_directory.is_some()
+            && output_path.is_some_and(|path| {
+                Path::new(&normalize_path(path))
+                    .file_name()
+                    .is_some_and(|name| {
+                        [
+                            "projects.json",
+                            "old.stdout.txt",
+                            "old.stderr.txt",
+                            "new.stdout.txt",
+                            "new.stderr.txt",
+                        ]
+                        .iter()
+                        .any(|reserved| name == *reserved)
+                    })
             })
-        }) {
-            return Err(Failure("ValueError", "output basename is reserved for captured transcripts".into()));
+        {
+            return Err(Failure(
+                "ValueError",
+                "output basename is reserved for captured transcripts".into(),
+            ));
         }
         prepared_inputs(projects_path, old_ty, new_ty, capture_directory)?
     } else if !old_path.is_empty() && !new_path.is_empty() {

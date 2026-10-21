@@ -56,16 +56,51 @@ Each manifest entry has a unique nonempty `name`, a nonempty `cwd`, and a string
 `argv` list containing `{ty}`. Relative working directories are relative to the
 report program's working directory. Every exact `{ty}` argument is replaced with
 the selected absolute executable path. Arguments are passed directly without a
-shell. The complete manifest is validated before any child starts. Projects run
+shell. Types, nonempty fields, unique names, and placeholders are validated for
+the complete manifest before any child starts or capture directory is created.
+Operating-system checks, such as invalid paths or arguments, happen at launch.
+Projects run
 in manifest order, old then new; the report uses deterministic project-name order.
 Children inherit a copy of the environment with `TY_MEMORY_REPORT=json` and
 `TY_MAX_PARALLELISM=1`. Both output streams are captured as strict UTF-8 text, and
 nonzero child status raises `CalledProcessError`. Only stdout is decoded as a
-memory report; successful diagnostic stderr is captured and discarded.
+memory report; successful diagnostic stderr is discarded unless captures are
+requested.
 
-All child runs, decoding, comparison, and rendering must succeed before the final
-report file opens. A failed child or malformed capture preserves an existing
-report. This does not roll back side effects made by the child programs. Project
+Add `--capture-dir` to retain each child's report and diagnostics:
+
+```sh
+/tmp/memory-report run --projects /tmp/projects.json \
+  --old-ty /absolute/path/to/old/ty --new-ty /absolute/path/to/new/ty \
+  --capture-dir /tmp/memory-captures --output /tmp/memory-report.md
+```
+
+The capture directory must be new and its parent must already exist. It contains
+`projects.json` and a `project-0`, `project-1`, … directory for each started
+project, in manifest order. Each project directory can contain `old.stdout.txt`,
+`old.stderr.txt`, `new.stdout.txt`, and `new.stderr.txt`. Numeric directory names
+keep arbitrary project names out of filesystem paths. The manifest and streams
+are UTF-8 text with universal newlines normalized to `\n`.
+
+Captures intentionally preserve a partial transcript on failure. Each stream is
+staged, closed, and individually replaced before checking the child's exit
+status or decoding its JSON. A failed child or malformed JSON therefore retains
+its decoded streams. A launch or UTF-8 decoding failure produces no transcript
+for that invocation, and no later child runs. The two files are published
+separately: an error replacing stderr can leave stdout published. Existing
+capture directories are never reused. When `--capture-dir` is supplied, the
+output basename may not be `projects.json`, `old.stdout.txt`, `old.stderr.txt`,
+`new.stdout.txt`, or `new.stderr.txt`, even outside the capture directory.
+
+All modes finish decoding, comparison, and rendering before staging the final
+Markdown in a private temporary directory beside the destination. A successful
+write and close is followed by an atomic replacement of the destination; that
+replacement is the commit point. Earlier failures preserve an existing report.
+Cleanup failures propagate, including errors after the new report has already
+been committed. Publication creates a new file entry and inode with permissions
+subject to the process umask. Replacing an output symlink or hardlink leaves its
+previous target's contents unchanged. No fsync or crash-durability guarantee is
+provided. Child side effects and published captures are not rolled back. Project
 checkout, dependency installation, and ty installation remain preparation steps.
 
 Run the same typed source on CPython with the compatibility library:
@@ -102,8 +137,7 @@ items. The independent validator permits only that upstream tie ambiguity.
 File and directory comparison accept optional `compare` before the flags.
 The prepared-project `run` command reuses the same comparison and renderer.
 Successful file output is quiet; the upstream script
-also echoes the completed report to stderr. Parsing and formatting finish before
-the output file opens, preserving an existing report on those failures.
+also echoes the completed report to stderr.
 CLI validation errors use `ValueError`; upstream prints its own diagnostics.
 
 Validate reports, strict typed failures, and complete filesystem effects:
@@ -116,9 +150,11 @@ python3 benchmarks/memory_validate.py --binary /tmp/memory-report \
 ```
 
 The [benchmark guide](../../benchmarks/reference/memory_report/README.md) compares
-the unchanged upstream comparison CLI, a prepared-project adapter using its
-unchanged models and renderer, typed CPython, Relar, and independent Rust on
-real captures, actual ty child runs, and clearly labeled larger copies.
+Relar, independent Rust, typed CPython, and CPython adapters using upstream's
+unchanged models and renderer. The comparison adapter adds atomic output to its
+existing CLI; the prepared-project adapter adds the collection and capture
+workflow. Workloads include real captures, actual ty child runs, and clearly
+labeled larger copies.
 
 The [native-path results](../../benchmarks/results/2026-10-21-native-paths.md)
 take 0.91–1.28× Rust's time for complete directory comparisons and
@@ -131,3 +167,4 @@ The [native-process results](../../benchmarks/results/2026-10-21-native-processe
 cover actual old/new ty launches and synthetic capture workloads with 16,256
 items per side. Complete runs take 1.00–1.61× Rust's time, and repeated
 report computation takes 1.43–1.60×, across ordinary and ThinLTO builds.
+These earlier results predate atomic output and persisted captures.

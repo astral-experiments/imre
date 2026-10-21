@@ -21,7 +21,16 @@ uses name order to break ties between projects with equal total changes.
 Prepared-project mode validates the whole manifest, then launches old and new
 executables sequentially with identical arguments, working directories, and
 environment overrides. It captures both pipes, decodes strict UTF-8 with universal
-newlines before checking exit status, and preserves the final output on failures.
+newlines before checking exit status. Optional `--capture-dir` retains those
+streams, including failed-child diagnostics, in fresh numeric project
+directories. Captures are staged and replaced individually before status or JSON
+validation. Final reports are fully rendered, staged beside their destination,
+closed, and atomically replaced. Failures before replacement preserve the old
+report; cleanup errors after that commit point still propagate. Replacement
+creates a new file subject to umask, leaving prior symlink/hardlink targets
+unchanged. Neither application fsyncs its output. The independent workspace
+helper uses POSIX `mkdtemp`, checked file close, and explicit cleanup, including
+permission recovery and rejection of a workspace root replaced by a symlink.
 The reference uses `std::process::Command`; it does not invoke Python or Relar.
 
 The [native-path results](../../results/2026-10-21-native-paths.md) compare both
@@ -35,6 +44,7 @@ actual ty runs and synthetic capture workloads with 16,256 items per side.
 Complete runs take 1.00–1.61× Rust's time; repeated report computation takes
 1.43–1.60×. The report retains all 48 samples per engine and workload,
 validation records, and portable evidence.
+Those measurements predate atomic output and persisted captures.
 
 Prepare separately from timing:
 
@@ -60,7 +70,7 @@ Compiler, runtime, interpreter, linker, program sources, captures, helpers,
 reference build record, LLVM, and executable hashes are checked before and after
 measurement. `--relar-build-record` optionally binds a separately recorded build.
 
-Four engines are measured separately: unchanged upstream CPython, the typed
+Four engines are measured separately: an upstream CPython atomic-output adapter, the typed
 CPython port including its schema-checking shim, Relar, and Rust. The two genuine
 capture pairs remain unmodified. Default `--copies 32 256` also produces 8,128
 and 65,024 items per file by duplicating the Ruff capture with distinct names and
@@ -71,11 +81,14 @@ These larger files are explicitly synthetic extensions of real captures.
 Default `--directory-layouts 256:1 4:64` adds 256 small projects and four large
 projects, with 65,024 items per side in either layout. Each layout includes full
 and unchanged comparisons. The same report names and bytes are supplied to all
-four engines; the original upstream script runs its existing directory mode.
+four engines. The CPython adapter runs the upstream script's existing directory
+mode and stages its completed output through the same atomic-publication steps.
+The pinned upstream source remains unchanged.
 
 Every application invocation includes startup, imports, directory scanning when
 selected, all complete report reads,
-JSON decoding, comparison, sorting, formatting, output write/close, and exit.
+JSON decoding, comparison, sorting, formatting, temporary workspace creation,
+output write/close/replace, workspace cleanup, and exit.
 The upstream script additionally echoes its report to captured stderr in file
 mode; that output is also checked. All engines' complete output and filesystem
 effects are verified outside timing. Upstream tie choices are checked for valid
@@ -102,7 +115,7 @@ Unicode character counts and its complete last report; the harness validates
 both outside timing. This keeps I/O from dominating the comparison while still
 checking complete application work.
 
-Compute timings compare Relar, unchanged upstream CPython, and Rust, with all six
+Compute timings compare Relar, the upstream CPython compute adapter, and Rust, with all six
 engine permutations balancing positions and directed within-round neighbors.
 The typed CPython port is additionally checked in compute validation and remains
 in every application timing. Twelve measured rounds balance both order designs.
@@ -149,16 +162,40 @@ two large projects, each with 16,256 records per side. A shared native producer
 built alongside the reference emits the corresponding retained capture and a
 proportional diagnostic stream. Its old/new aliases have identical bytes across
 all engines. These synthetic workloads isolate capture/report orchestration from
-ty's own computation. The same reports also run through the existing repeated
-compute entrypoints, including zero-repetition preload controls.
+ty's own computation. Both layouts run with and without persisted captures.
+Fresh capture trees are removed outside each timed invocation; creating them,
+writing the manifest and four streams per project, replacing each file, and
+cleaning private workspaces are included. Both two-child empty-report controls
+are reported separately, with and without capture persistence.
+
+The same reports also run as directory comparisons without any children, and
+through the existing repeated compute entrypoints with zero-repetition preload
+controls. Directory controls include reading reports and atomic final output;
+compute controls preload text and measure repeated decode/compare/render work.
+Default preparation therefore produces 13 timed rows. These separate costs are
+reported directly without subtracting control timings.
 
 Three engines are timed in all six permutations: Relar, Rust, and a CPython
 prepared-project adapter using the unchanged upstream models and renderer. This
-adapter replaces upstream's checkout/setup CLI and is labeled explicitly. The
+adapter replaces upstream's checkout/setup CLI and adds matching capture and
+atomic-output behavior; it is labeled explicitly. The
 typed CPython port is checked on every workload during preparation. A minimal
 explicit environment is shared by all engines; host environment values are not
 copied into benchmark records. `PYTHON_JIT=0` disables the Python baseline's JIT;
 `-P -s` excludes the working directory and user site while preserving the pinned
 hash seed. Preparation validates successful reports, manifest
 errors, large dual-pipe capture, UTF-8/newline handling, child exits and signals,
-spawn failures, strict typed decoding, and preservation of existing reports.
+spawn failures, strict typed decoding, arbitrary project names, reserved output
+names, partial transcript publication, and complete filesystem effects. Focused
+cases force report/stream write failures, failure of the second stream's
+replacement, restrictive-umask cleanup, and a workspace root replaced by a
+symlink. Existing reports are checked at the documented commit boundary.
+
+Actual ty memory values and warning streams can vary between invocations. A
+separate correctness gate runs each engine through a small tee wrapper that
+retains each actual invocation's raw bytes before forwarding them. Persisted
+captures must exactly match UTF-8 decoding and newline conversion of those same
+bytes, and the complete report is independently derived from them. Wrapper and
+actual child commands, source, interpreter, and binary identities are retained.
+This wrapper is never timed: real-ty timings execute the pinned binaries directly,
+and persisted-capture timings use the shared producer's fixed bytes.
