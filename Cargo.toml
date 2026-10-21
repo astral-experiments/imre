@@ -6,6 +6,7 @@ resolver = "3"
 edition = "2024"
 rust-version = "1.98"
 repository = "https://github.com/viarius-experiments/relar"
+license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 ruff_python_ast = "=0.0.14"
