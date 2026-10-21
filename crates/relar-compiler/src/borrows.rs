@@ -579,7 +579,7 @@ class Row:
         self.value = value
 
 def first(rows: list[Row]) -> Row:
-    for row in rows:
+    for row in (item for item in rows):
         return row
     raise ValueError("empty")
 "#,
@@ -610,12 +610,12 @@ class Row:
 def total(rows: list[Row], fail: bool) -> int:
     result = 0
     try:
-        for row in rows:
+        for row in (item for item in rows):
             if fail:
                 raise ValueError("failed")
             result += row.value
     finally:
-        for row in rows:
+        for row in (item for item in rows):
             result += row.value
     return result
 "#,
