@@ -1,0 +1,1204 @@
+{
+  "schema_version": 1,
+  "example": "dependency_planner",
+  "completed_at_utc": "2026-10-17T19:11:12.119003+00:00",
+  "purpose": "Instruction/allocation evidence for selected optimization stages and final Rust ThinLTO references; elapsed-time benchmark results are recorded separately.",
+  "input_record": {
+    "path": "benchmarks/results/2026-10-17-dependency-planner-comparison.json",
+    "sha256": "68dfe3422a1c9b5c762cc82dba08a17358b2a72ea44ea85ae160e9585ed19517",
+    "contains_full_input_and_expected_stdout": true
+  },
+  "source_sha256": {
+    "dependency_planner/__init__.py": "aaf74d2ac584768a494d503c28e988df2ff095ff4b2bf00f8ab69a4fdb72f188",
+    "dependency_planner/__main__.py": "ebdaf69e5f174923d12644c89f580f056be931bcb263929ba26545b615fd997b",
+    "dependency_planner/model.py": "2dcd30aeb5fb9799a480a1ce8bd7d142dbaa4bde7efb055730ef2ef1df4e3c82",
+    "dependency_planner/parse.py": "3e9a6d2443472393c1d9987ac6d39b707b2c37f09af41f7b01ca6a129dfe0e89",
+    "dependency_planner/render.py": "74258c0da07a12cfefcb89103ed68ce70124fba1db32d44c17454d23b3e6fc51",
+    "dependency_planner/schedule.py": "ff4ff0e33b4d14a79c6fd59539d9390e7b58da6e94aa7d81ca3380b20987069b"
+  },
+  "final_comparison": {
+    "path": "benchmarks/local/dependency-final-lto.json",
+    "sha256": "cd3115d1c268c56dc1e2082b90b9609d91ec76cada5bca2f297447bb08a50930",
+    "git": {
+      "revision": "2db836788546b55cf68969aaadd8539010b4358f",
+      "dirty": false
+    },
+    "relar_stage": "final_measured_relar",
+    "rust_bigint_stage": "rust_bigint_matched_thin_lto",
+    "rust_i64_stage": "rust_checked_i64_matched_thin_lto",
+    "binary_input_output_hash_joins_verified": true
+  },
+  "workloads": {
+    "layered-16384": {
+      "shape": "layered",
+      "tasks": 16384,
+      "input_sha256": "4674892ec652a8fb6880df9e383d5de575b95dd01c62d96286eeeea116fb745e",
+      "input_bytes": 433540,
+      "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+      "stdout_bytes": 531728
+    },
+    "wide-16384": {
+      "shape": "wide",
+      "tasks": 16384,
+      "input_sha256": "b592b421eb1d3978d1426bc4bc0b00b84f9cf3aa19fc7f2a89d25006f5387ccc",
+      "input_bytes": 228011,
+      "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+      "stdout_bytes": 395810
+    }
+  },
+  "tooling": {
+    "version": "valgrind-3.22.0",
+    "sha256": {
+      "valgrind": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+      "callgrind": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03",
+      "dhat": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc"
+    },
+    "valgrind_package_sha256": "744e081e5cf3d5c598b499dbb7d2250ea3f2869dde4a4d7b231fe6114f347d7d",
+    "libc_sha256": "3a15d66867d83762c7f2f1e37359cb8f6c5743edb369c65285cb0b1c4f7498bf",
+    "host": {
+      "os": "Linux",
+      "architecture": "x86_64",
+      "kernel": "6.8.0-146-generic",
+      "cpu_model": "AMD EPYC-Milan Processor",
+      "perf_event_paranoid": 4
+    },
+    "cpu_affinity": [
+      0
+    ],
+    "callgrind_options": [
+      "--dump-instr=yes",
+      "--collect-jumps=yes",
+      "--num-callers=24"
+    ],
+    "dhat_mode": "heap (default)",
+    "dhat_options": [
+      "--num-callers=24"
+    ],
+    "harness": "benchmarks/dependency_profile.py",
+    "documentation": "benchmarks/PROFILING.md"
+  },
+  "method_limits": [
+    "Callgrind measures executed machine instructions, not hardware CPU cycles, cache misses, or wall-time fractions. Instructions have different costs; REP/copy counts and uncontended atomic operations particularly must not be treated as elapsed-time shares.",
+    "DHAT replaces allocator routines and reports requested bytes, allocation blocks, peak live allocations, and lifetimes. These are not allocator-reserved bytes or process RSS.",
+    "Profiling runs may overlap independent build work. Instrumented elapsed times are deliberately excluded; clean whole-process timing uses a separate benchmark record.",
+    "Inlining moves work from runtime function entries into callers. Fewer named runtime calls alone does not prove less semantic work.",
+    "The selected Relar stages are cumulative, but the decoded-access stage also enables and tunes cross-language ThinLTO; that stage is not a single-change ablation.",
+    "Rust BigInt preserves arbitrary-precision value semantics; the checked-i64 reference has a narrower integer contract. Both captured workloads fit its range. Rust uses native indices where the algorithm guarantees valid container lengths.",
+    "Every run preserves and verifies complete stdout bytes, empty stderr, successful exit, and binary hashes. Full raw traces, logs, output, and build snapshots remain in ignored local evidence directories; this compact file records their hashes.",
+    "Both default-budget and matched-budget Rust ThinLTO controls are retained. The matched controls explicitly use import-instr-limit=1000 and inline-threshold=1000, matching the tuned Relar stages; inherited encoded flags are unset.",
+    "These two 16,384-task workloads characterize this program and environment, not general Python or Rust performance."
+  ],
+  "stages": [
+    {
+      "id": "buffered_baseline",
+      "description": "Buffered baseline before CPU/allocation optimizations",
+      "thin_lto": false,
+      "llvm_optimization_budgets": null,
+      "binary_path": "benchmarks/local/dependency-planner-buffered/dependency_planner",
+      "artifact_sha256": {
+        "binary": "e50571ef85cec02407e68ee51f854b2f848b0ecfa11c72f5c5ce843c31afd035",
+        "compiler": "836115cca4a8be0529c1ccfc2d9c629842a08714bd1d868bfe0c1d2da08b78e6",
+        "runtime": "a5f9279c7ee28a6e2680932f9cbbdf87bfd74fcb8e392284f0692893325601a5",
+        "llvm_ir": "7aa7197959c0af32a6d43b36799cf2e6bb46779ced2848dee35042f56a03af33",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "build_record": null,
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/baseline",
+        "summary_sha256": "addec361773ecdd78cbab6300711d31818445010b88a1b105225745778331570",
+        "provenance_sha256": "568a64ad2b072a5cc88d960320f72180a3be5318a984bce1cb2520e4a21698fc",
+        "manifest_sha256": "8080e6ed240733da664a33dd509704088fcd0c176704d2a23736cc40f669d421",
+        "harness_sha256": "e32a60a7410adcbfa261ffc84dce8386d15eea407ab4c032f24f6be866972b78"
+      },
+      "workloads": {
+        "layered-16384": {
+          "instructions": 356175765,
+          "allocated_bytes": 55350105,
+          "allocated_blocks": 553880,
+          "peak_live_bytes": 6350602,
+          "peak_live_blocks": 128643,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.relar.callgrind.trace",
+              "sha256": "eb123d65121b1779c611f3976444634a1054fbf78773d444af7f6b40393b6ef1",
+              "log_sha256": "9c629058720b0982ad4afdea9d7637222c8801d600699c974b4d96197944ef5f"
+            },
+            "dhat": {
+              "file": "layered-16384.relar.dhat.trace",
+              "sha256": "aadd50a6281471fdf2fc59e1d0a231789b96926f380e3d68c7a55d39ee5f5783",
+              "log_sha256": "c235ef1b0a8c0e2c793bb6df51a98d97f6eafba332ba7c465ed1e2ee198a8180"
+            }
+          }
+        },
+        "wide-16384": {
+          "instructions": 237559248,
+          "allocated_bytes": 12926081,
+          "allocated_blocks": 311438,
+          "peak_live_bytes": 5425066,
+          "peak_live_blocks": 98334,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.relar.callgrind.trace",
+              "sha256": "26e0d1769b93b3dd549637259a97cd0c8a50562f2f6f0d93fda3f41ae2b01e55",
+              "log_sha256": "0778520f6fce49051989fa17a1d4acb77af9e9df9d35b885fb6fa89d16d2f325"
+            },
+            "dhat": {
+              "file": "wide-16384.relar.dhat.trace",
+              "sha256": "df8d0326885c65cc9b6983dde20bcf20c16faece085d6ff73ea9ef32301da2cd",
+              "log_sha256": "a811c3223f716c758e676af0801459c801ad793b5c43764e9781aab88b84b50a"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "small_decimal_parser",
+      "description": "Baseline plus allocation-free tagged-small decimal parsing",
+      "thin_lto": false,
+      "llvm_optimization_budgets": null,
+      "binary_path": "benchmarks/local/dependency-parse/dependency_planner",
+      "artifact_sha256": {
+        "runtime": "b65d9357e0cc6c212508885c89c97da5cc0efd5dd78934c1dfdfc297c7909328",
+        "llvm_ir": "7aa7197959c0af32a6d43b36799cf2e6bb46779ced2848dee35042f56a03af33",
+        "binary": "1cdd28c4afb43a936f4a2401c23e4b5d844d25d3215a1f05fd3c0ce5adc037f2",
+        "runtime_source": "6d1a56381f5ec5b2beeae5d658340b7a393390ebea68c22cdb04b45d63fdf2a8",
+        "compiler": "836115cca4a8be0529c1ccfc2d9c629842a08714bd1d868bfe0c1d2da08b78e6"
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-parse/build-record.json",
+        "sha256": "f3e41a251c23fc60906563e590db55e6e1057215cfbaf69b8b8cc97e6b7b9014"
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/parse-and-lto",
+        "summary_sha256": "59b1ed8e48894b583cf8657310266cc5d4c1060119d3529128a52e9dcd204d8b",
+        "provenance_sha256": "782371d25c35273070cf8ef99ac1e4f257cead7d00a2abf85a12582045e75de2",
+        "manifest_sha256": "2b658e9a91ae5559aece3503e2569c576bb5e80706ace79ffd38b8341a3ab110",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30"
+      },
+      "workloads": {
+        "layered-16384": {
+          "instructions": 293018048,
+          "allocated_bytes": 54271695,
+          "allocated_blocks": 388859,
+          "peak_live_bytes": 6350602,
+          "peak_live_blocks": 128643,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.parse.callgrind.trace",
+              "sha256": "dabde59e0a89676fef12a6eb01841d49fd459fd637acc869decc22ff81f6493a",
+              "log_sha256": "7b25d3ac1a1c0b7e9288159174008d1f991093c360482184425fc1d9e6c254b4"
+            },
+            "dhat": {
+              "file": "layered-16384.parse.dhat.trace",
+              "sha256": "15fb4f47f08db667156aa40747e13bb0abe3e65c76fd9d569f56496567155678",
+              "log_sha256": "acf97392a53bbc980f81288877e6e11f7130a1afcb02d6967a5fcab12c060d3a"
+            }
+          }
+        },
+        "wide-16384": {
+          "instructions": 219984344,
+          "allocated_bytes": 12632530,
+          "allocated_blocks": 262283,
+          "peak_live_bytes": 5425066,
+          "peak_live_blocks": 98334,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.parse.callgrind.trace",
+              "sha256": "da8a29c151774e43d4ccdc2e34956374b15464609e7124afc275dea182575014",
+              "log_sha256": "7f64b04da6024c73be6c9cb32cf78554306878bd2853e2fdabe219e3807a0a4e"
+            },
+            "dhat": {
+              "file": "wide-16384.parse.dhat.trace",
+              "sha256": "8e4247b439477b320964782efb107031717350459304f9280e0a4581fb8c471a",
+              "log_sha256": "691bbfb2897f80bd3bd314f4a5f6a65c143ae4531058d59424a5c2d743e95d39"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "local_tuple_scalarization",
+      "description": "Parser plus conservative local tuple scalar replacement",
+      "thin_lto": false,
+      "llvm_optimization_budgets": null,
+      "binary_path": "benchmarks/local/dependency-parse-tuples/dependency_planner",
+      "artifact_sha256": {
+        "compiler": "21d38ef09cbfe167b2991cf37ac2378fa58c53fc186b682beb907d1712a56c42",
+        "runtime": "b65d9357e0cc6c212508885c89c97da5cc0efd5dd78934c1dfdfc297c7909328",
+        "llvm_ir": "2b7a18e139036a9b2d64bc971983c3f0813bd1869a3e31bd05f037e353a73217",
+        "binary": "e53be20d2efbae1d1b0f556498e90e9188e396760266b2ea56a5ad8b06b30eed"
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-parse-tuples/build-record.json",
+        "sha256": "ad82ce790cfe7655bacba8053723b598cbd647b56cdc80512afef48beacecdbe"
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/parse-tuples",
+        "summary_sha256": "986e596afcd1bf2273df1bf9c4e0a54e06e745388eb6e93fb56524a9b183c27d",
+        "provenance_sha256": "ade7d014a2310e7b4b9b1be2de4acf24ed3f2514bac0cc11719381d21675abd1",
+        "manifest_sha256": "3437d90fec53bdc2ba39367bf1c9f4d2ad8af16610b6519f02fab97c5ba4e31d",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30"
+      },
+      "workloads": {
+        "layered-16384": {
+          "instructions": 270953648,
+          "allocated_bytes": 51388111,
+          "allocated_blocks": 323323,
+          "peak_live_bytes": 6350602,
+          "peak_live_blocks": 128643,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.parse_tuples.callgrind.trace",
+              "sha256": "932afe5754d4779ab7c2e88b7d10eba64ce06095df69a06c209a0ef35cfe692b",
+              "log_sha256": "b101e8d7c98698dd4b1732de3e32ed424cffd841db6e709370f03dd4a636bb18"
+            },
+            "dhat": {
+              "file": "layered-16384.parse_tuples.dhat.trace",
+              "sha256": "987e5491fdf60d9daf82c6f16f3768f6594286eb2a266ea6df09312e225ce418",
+              "log_sha256": "7ae9f8eae8f01365e62823d2a0bceca29d2f19b1a87581c951dc0a114413398f"
+            }
+          }
+        },
+        "wide-16384": {
+          "instructions": 197921860,
+          "allocated_bytes": 9748946,
+          "allocated_blocks": 196747,
+          "peak_live_bytes": 5425066,
+          "peak_live_blocks": 98334,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.parse_tuples.callgrind.trace",
+              "sha256": "54bf028364f43dbcd44d141b426aa14c7d0d49560da09d2b183a61f661ab50fd",
+              "log_sha256": "9085939c942e316ff97c09a07ff519157a90fc45c53fcc21b148578c52765532"
+            },
+            "dhat": {
+              "file": "wide-16384.parse_tuples.dhat.trace",
+              "sha256": "2e81663e9837646494b3ebd060e2d197f7097aa3353194f3f8d1006a91af698f",
+              "log_sha256": "9717a0d3f790efc378f421c2481dee799e497f80c930f1c049db3e74c1ae653c"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "short_strings",
+      "description": "Tuple stage plus inline short-string storage",
+      "thin_lto": false,
+      "llvm_optimization_budgets": null,
+      "binary_path": "benchmarks/local/dependency-short-strings/dependency_planner",
+      "artifact_sha256": {
+        "runtime": "895783bc89bfd8e74949df3810c355a7535cd7d8d188bbb2384f0f53f6e3c8eb",
+        "llvm_ir": "2b7a18e139036a9b2d64bc971983c3f0813bd1869a3e31bd05f037e353a73217",
+        "binary": "7ab7920563fcd6d9e0a6265e8764f179eb85d91a390dc4eecb22752b5f7a0dda",
+        "compiler": "21d38ef09cbfe167b2991cf37ac2378fa58c53fc186b682beb907d1712a56c42"
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-short-strings/build-record.json",
+        "sha256": "32eb87c3cf148a5373016d3195fa19d4e20712d6dbe007662475e6ab39b9a4a6"
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/short-strings",
+        "summary_sha256": "e99f2374c374385b1193a11866b1a0590825df4f0980b51376891fa58c8a4369",
+        "provenance_sha256": "3b5e7ab106567807f3e07e85cb4a2c92c32472dba638ea1dc2d3fcaadfbad27a",
+        "manifest_sha256": "7b976c49390b8ebfae693f990af38b4a93eb54f84853aaea2a81946fba055344",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30"
+      },
+      "workloads": {
+        "layered-16384": {
+          "instructions": 257919027,
+          "allocated_bytes": 51019331,
+          "allocated_blocks": 250283,
+          "peak_live_bytes": 6186752,
+          "peak_live_blocks": 112258,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.short_strings.callgrind.trace",
+              "sha256": "33fe33ba4b791ece26491c9379c32815d18e0c59bdafb3c0c0fa4b29142adb7c",
+              "log_sha256": "e9f2b636ae4ee7bf86c21131bf02e5dbc790d043fa6f259ee583a4a6ad5c028d"
+            },
+            "dhat": {
+              "file": "layered-16384.short_strings.dhat.trace",
+              "sha256": "fbf32c29508ca6d2d3d90451f34dc83530521187bfcffd2830e411f138f286ca",
+              "log_sha256": "935427f762df983a752e895020f4e2b9fd8cf2f6f163aa99b7b60462648140df"
+            }
+          }
+        },
+        "wide-16384": {
+          "instructions": 190168442,
+          "allocated_bytes": 9553663,
+          "allocated_blocks": 163970,
+          "peak_live_bytes": 5261216,
+          "peak_live_blocks": 81949,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.short_strings.callgrind.trace",
+              "sha256": "4d721c1dd81afb2c17a7a385e098cf289dc9332d8cf7241e9d6ec5f09fbd9999",
+              "log_sha256": "1ded40783afc8fc5e4a0d578c04979e1e75665b7a29affe0730977df85e7f32f"
+            },
+            "dhat": {
+              "file": "wide-16384.short_strings.dhat.trace",
+              "sha256": "6f5548499b86b8e995788ab38d32a3cdd1613c1345cc27efad41f8af4cc6dc64",
+              "log_sha256": "ebbf1ddf1951d3e284409df42724d24a1d7cd8a6e99ef494b378b69892e97811"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "decoded_access_thin_lto",
+      "description": "Short strings plus decoded indices, selective runtime inlining, and tuned cross-language ThinLTO",
+      "thin_lto": true,
+      "llvm_optimization_budgets": {
+        "import_instruction_limit": 1000,
+        "inline_threshold": 1000
+      },
+      "binary_path": "benchmarks/local/dependency-decoded-index-lto/dependency_planner",
+      "artifact_sha256": {
+        "llvm_ir": "2b7a18e139036a9b2d64bc971983c3f0813bd1869a3e31bd05f037e353a73217",
+        "runtime": "499864139d81c7419cd8e559b88347b0c0eba434155118d507d26c037527da99",
+        "binary": "01e227dcc90f121d5f61b64d69ec3c88d4c7d91eccefe521eaa48e264c233e97"
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-decoded-index-lto/build-record.json",
+        "sha256": "51959affed4fe8d195ec7f81fb5634b075757d0f5128c70582c86a5ff5720954"
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/decoded-index-lto",
+        "summary_sha256": "77999e699ea5ada2e0fc2dfa91f8ee03989798a731264a6c7587cb03a8184efa",
+        "provenance_sha256": "554af6e6a0c4788349450ceffba9a2db84507fce64c8a9befbd1e006c89545c1",
+        "manifest_sha256": "c0aa76c12c68d11cb71f8bc781eda7b1a037ca5da7af0e7204630865beb08bce",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30"
+      },
+      "workloads": {
+        "layered-16384": {
+          "instructions": 234279179,
+          "allocated_bytes": 51019331,
+          "allocated_blocks": 250283,
+          "peak_live_bytes": 6186752,
+          "peak_live_blocks": 112258,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.decoded_index_lto.callgrind.trace",
+              "sha256": "3225a6949768dbdd42c609815675b6d1edb1f96c4a57827369aeb451534c15f8",
+              "log_sha256": "08fbc95dbd61c1821d137a2f198fc07dfdc9e0b041aa0c2234b0f9c112dbb8aa"
+            },
+            "dhat": {
+              "file": "layered-16384.decoded_index_lto.dhat.trace",
+              "sha256": "15ecf3de2931e75b4f0ff3518a1ac5afc6ee9165097b228f107cac4577c6eab5",
+              "log_sha256": "b4e4bd1fa1b3668b4469b20d670f0f199e34ade32585f4c24f6d824ad866db6e"
+            }
+          }
+        },
+        "wide-16384": {
+          "instructions": 168161587,
+          "allocated_bytes": 9553663,
+          "allocated_blocks": 163970,
+          "peak_live_bytes": 5261216,
+          "peak_live_blocks": 81949,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.decoded_index_lto.callgrind.trace",
+              "sha256": "e364dc06313ba314670520c4cd1c47dda8dcd2749caabfa462870e43df69e99c",
+              "log_sha256": "0f8158f806bb5f1d97f9158ef50acc3790b11d784e2a0f762bbad28eb4696a60"
+            },
+            "dhat": {
+              "file": "wide-16384.decoded_index_lto.dhat.trace",
+              "sha256": "d419b3cec033c00038bca8fb0dfcbaa2f1cc0904de5c82268210d9c2e505bce9",
+              "log_sha256": "881caccaf794660909c31319792ec662eae6d538dc7569e7ae8df012c8e1bfd2"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "inline_fixed_fields",
+      "description": "Decoded ThinLTO stage plus inline fixed fields for up to four slots",
+      "thin_lto": true,
+      "llvm_optimization_budgets": {
+        "import_instruction_limit": 1000,
+        "inline_threshold": 1000
+      },
+      "binary_path": "benchmarks/local/dependency-inline-fields-lto/dependency_planner",
+      "artifact_sha256": {
+        "compiler": "b4345600bcfaebd3f962edbf8f2027035ca54e3a1e8316a389f671a881b25401",
+        "runtime": "3bf4ef30ad1d52b98feebd01741e3c23b8a11ed3272422b49ec547357f5309c4",
+        "llvm_ir": "2b7a18e139036a9b2d64bc971983c3f0813bd1869a3e31bd05f037e353a73217",
+        "binary": "a2720c4f72483dff6385eca6a4818e30b87464d502fe65c1b461d093066a0131",
+        "linker": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b"
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-inline-fields-lto/build-record.json",
+        "sha256": "f6be646da109d8bd576a030f70d4d9b38a20cb5679238f263c79cc4d7086ab95"
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/inline-fields-lto",
+        "summary_sha256": "d54a0d6d8663634391b505c9385966e1e52522d0dac7d45e1f5ca679c22b86d7",
+        "provenance_sha256": "06712bd1c4f36289e2788baef7093e81252452322c451611988a95a38585aba6",
+        "manifest_sha256": "eae1b52442e12ac884737f74d060a086e8d21dd5afcde02668c7e8f4488ff6b2",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30"
+      },
+      "workloads": {
+        "layered-16384": {
+          "instructions": 224783154,
+          "allocated_bytes": 51543811,
+          "allocated_blocks": 233897,
+          "peak_live_bytes": 6055808,
+          "peak_live_blocks": 95873,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.inline_fields_lto.callgrind.trace",
+              "sha256": "ab9d6b53ada3b0d3232a992d47d0f8ab3fbab67a136f1e9dc9607dd491c76901",
+              "log_sha256": "20c1d5393fe484c8f70a6c43aed7df4ccfc4fa96f9dd31685df754f49c37602e"
+            },
+            "dhat": {
+              "file": "layered-16384.inline_fields_lto.dhat.trace",
+              "sha256": "cd2396a83c76982a1dffd31c275cd9587dd142bd8099386bbbf51731bb4edb53",
+              "log_sha256": "d595de2cd5f65f3452bfd89cfa6178aad35c42288f2260d1a10c7de1f7c576a3"
+            }
+          }
+        },
+        "wide-16384": {
+          "instructions": 163517609,
+          "allocated_bytes": 10078143,
+          "allocated_blocks": 147584,
+          "peak_live_bytes": 5130272,
+          "peak_live_blocks": 65564,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.inline_fields_lto.callgrind.trace",
+              "sha256": "1a42d9d945667b8f0b3a7dfb49c8bb1a00a7219ab8b455c993365fdc2e97a47d",
+              "log_sha256": "35595cff96c6a839ddd54cb2867e61d44a8421ff637f7915e03cf9f6ed0c966c"
+            },
+            "dhat": {
+              "file": "wide-16384.inline_fields_lto.dhat.trace",
+              "sha256": "7dd9a7a50ed149c36ba2a0950d8270de977f3d0d3b94bcb4e098277c73dc2bb7",
+              "log_sha256": "a325ffdd446b1a60569e6505b6eea02e729011803e3151a018f7608b2bd773e7"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "direct_byte_output_ablation",
+      "description": "Inline-field stage plus direct itoa/byte output, retaining the original Mutex; preserved precommit ablation build",
+      "thin_lto": true,
+      "llvm_optimization_budgets": {
+        "import_instruction_limit": 1000,
+        "inline_threshold": 1000
+      },
+      "binary_path": "benchmarks/local/dependency-output-mutex-lto/dependency_planner",
+      "artifact_sha256": {
+        "compiler": "b4345600bcfaebd3f962edbf8f2027035ca54e3a1e8316a389f671a881b25401",
+        "runtime": "17128ff91510a99b56b8f7e109a96e4e4db26943ae8c41e931b727b7a050bfdd",
+        "llvm_ir": "2b7a18e139036a9b2d64bc971983c3f0813bd1869a3e31bd05f037e353a73217",
+        "binary": "427f404828079600674b164adfcf6336b0cc1a749519dcab2a24c44fbf08f625",
+        "linker": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b"
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-output-mutex-lto/build-record.json",
+        "sha256": "3da07369261de50b81ab570438a400ac4182f60b3a2cef9e2760e5370523cd5f"
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/final-output-and-rust-lto",
+        "summary_sha256": "eb86989fcb5a29e66e6b3698784979eb39df251026009c7021c39c676139f5b3",
+        "provenance_sha256": "fc0f4f18d5b9856ea477fe88a56a256e4222f70a2bc8217906488635c6414e68",
+        "manifest_sha256": "d5ba4543ce23b292724e446e71fbfebe8e8b43a4602675a9df5ad55f853d6e8c",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30"
+      },
+      "workloads": {
+        "layered-16384": {
+          "instructions": 205147195,
+          "allocated_bytes": 51543811,
+          "allocated_blocks": 233897,
+          "peak_live_bytes": 6055808,
+          "peak_live_blocks": 95873,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.relar_final.callgrind.trace",
+              "sha256": "9c9a483a139c88cb1fed94f0989e899f575aa849936d746a4abbfb59b472bfba",
+              "log_sha256": "7db377522ddb296db0c8e87676b7fca82b96d813b3ce0190c09ad9860a3d353c"
+            },
+            "dhat": {
+              "file": "layered-16384.relar_final.dhat.trace",
+              "sha256": "f9a96bf3ee95ce98f418d3f39d382aed1f86fd29ebb188cdc6302a3023476237",
+              "log_sha256": "5dce1dd0297638a8a3cfeac83c3c9c346058f2e1559d53da17cd455992462352"
+            }
+          }
+        },
+        "wide-16384": {
+          "instructions": 145225312,
+          "allocated_bytes": 10078143,
+          "allocated_blocks": 147584,
+          "peak_live_bytes": 5130272,
+          "peak_live_blocks": 65564,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.relar_final.callgrind.trace",
+              "sha256": "67312294666ef17c95a7f9621b6156f85c689ef1936ba899a5d348ff886de5e6",
+              "log_sha256": "dc5284bef51c5fa13886f4b6ab98ac2cf6adabd83a73187b621b64d7480ac025"
+            },
+            "dhat": {
+              "file": "wide-16384.relar_final.dhat.trace",
+              "sha256": "8b3b79331b876d2f6ae90dff96b5c7ed4a9cc7fe1993d23a362ed940c4ea89d8",
+              "log_sha256": "15d71de1312981803fbf5c12b3ed58e8af4b4db850e8fda95f03a8500788a65d"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "final_measured_relar",
+      "description": "Exact clean-worktree Relar binary used in the final matched-budget five-way timing comparison",
+      "thin_lto": true,
+      "llvm_optimization_budgets": {
+        "import_instruction_limit": 1000,
+        "inline_threshold": 1000
+      },
+      "binary_path": "benchmarks/local/dependency-final-lto/dependency_planner",
+      "artifact_sha256": {
+        "compiler": "b4345600bcfaebd3f962edbf8f2027035ca54e3a1e8316a389f671a881b25401",
+        "runtime": "1aa6eacab1f2cbab75dc5679a69eba00ee74c11793b19144e1d64021e0b7a9a0",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+        "linker": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+        "binary": "251212b84f7df996b241fa21bd10a507e048ff48f86b117d806ab1e99ecdc0e9",
+        "llvm_ir": "2b7a18e139036a9b2d64bc971983c3f0813bd1869a3e31bd05f037e353a73217"
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-final-lto.json",
+        "sha256": "cd3115d1c268c56dc1e2082b90b9609d91ec76cada5bca2f297447bb08a50930",
+        "kind": "final timing comparison with captured build provenance"
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/final-measured-lto",
+        "summary_sha256": "26fba7cb6e80ae969b09b156acb75e826f59715295beb5fbe70391b0e8d19714",
+        "provenance_sha256": "bedd1b2b21454c9d6d6a54dd1eb3932cd7e19838d86e3d894478370ffd207de6",
+        "manifest_sha256": "6127a361cab6b92729fcd44ad199b91cd901ee1b5c43d23be75353d568ca0962",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30"
+      },
+      "workloads": {
+        "layered-16384": {
+          "instructions": 205147254,
+          "allocated_bytes": 51543811,
+          "allocated_blocks": 233897,
+          "peak_live_bytes": 6055808,
+          "peak_live_blocks": 95873,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.relar_final.callgrind.trace",
+              "sha256": "e30a66c6383c7865ff162e75fc7efcec864977080ff40e9e9299767a8b8ebc5b",
+              "log_sha256": "7e9b202757645a6a3edaa99042591ed50e1f8b5f3b37fd63cbfcaf7fd0ed745b"
+            },
+            "dhat": {
+              "file": "layered-16384.relar_final.dhat.trace",
+              "sha256": "bc676f86b34463f08259532c5ea2fbf356f41f918fa1e6850a2d71fe3ea3fa65",
+              "log_sha256": "cb3f648997cfa3c0a35ee98ce50122d1ab48c78e4a91537f5b8ec1e8f6eb01bc"
+            }
+          }
+        },
+        "wide-16384": {
+          "instructions": 145225371,
+          "allocated_bytes": 10078143,
+          "allocated_blocks": 147584,
+          "peak_live_bytes": 5130272,
+          "peak_live_blocks": 65564,
+          "at_exit_bytes": 17408,
+          "at_exit_blocks": 3,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.relar_final.callgrind.trace",
+              "sha256": "7fa54309145565e8ce1f8cb2d4f119a04a205ef58248dfbcbfbdc1e6c8a00d4d",
+              "log_sha256": "404916c85025fcb5683254be720f99be0c2f1d83e6deca030a7a3f659301dd76"
+            },
+            "dhat": {
+              "file": "wide-16384.relar_final.dhat.trace",
+              "sha256": "9f9a0d76cbcd16b428aedb3bb28d52169e4ac0b632a17c2673e69fb296c0455f",
+              "log_sha256": "46e68f43f3b51fd8b14c94a6deb840f1837ca6b70498ea3293caa058d6778a0c"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "rust_bigint_thin_lto",
+      "description": "Algorithm-matched Rust reference with arbitrary-precision values and ThinLTO",
+      "thin_lto": true,
+      "llvm_optimization_budgets": null,
+      "binary_path": "benchmarks/local/dependency-reference-lto/planner-bigint",
+      "artifact_sha256": {
+        "binary": "8bd18b22cfdc1f38e4cf76bde6a13cc30fd10c1aa40230887a5b690a48f3da80",
+        "tool_rustc": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba",
+        "tool_cargo": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e"
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-reference-lto/build-record.json",
+        "sha256": "993999be9334f328556ef6080325cf67b5d1329265ed4b4139bfd0877f9e89e5",
+        "source_sha256": {
+          "Cargo.toml": "432cd49b7ba3a91d9873c4f3386d4b77998373ae1be5898cd1c8d74917501544",
+          "Cargo.lock": "2fdd2959b414792a85eee5582a6ecf63778ddb4feba3f6c5863934d021e3cf89",
+          "src/main.rs": "f143a11379e87ebca2d5a89969132c0b2ce14e1ebcaad620e7f1829b46d5f9a4"
+        },
+        "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8",
+        "release_lto": "thin",
+        "llvm_budget": null,
+        "rustflags": "",
+        "encoded_rustflags": ""
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/final-output-and-rust-lto",
+        "summary_sha256": "eb86989fcb5a29e66e6b3698784979eb39df251026009c7021c39c676139f5b3",
+        "provenance_sha256": "fc0f4f18d5b9856ea477fe88a56a256e4222f70a2bc8217906488635c6414e68",
+        "manifest_sha256": "d5ba4543ce23b292724e446e71fbfebe8e8b43a4602675a9df5ad55f853d6e8c",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30"
+      },
+      "workloads": {
+        "layered-16384": {
+          "instructions": 214123554,
+          "allocated_bytes": 49318538,
+          "allocated_blocks": 306204,
+          "peak_live_bytes": 6435646,
+          "peak_live_blocks": 101715,
+          "at_exit_bytes": 8736,
+          "at_exit_blocks": 2,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.rust_bigint_lto.callgrind.trace",
+              "sha256": "ff5d70a988cf31c88ed219618903d4d26a19fb9fda6e27cd7d1cb5556af67340",
+              "log_sha256": "35f323aa85b67a0996c09251dd286702f06d0f4c84e0f0e39f1ec89d823762c0"
+            },
+            "dhat": {
+              "file": "layered-16384.rust_bigint_lto.dhat.trace",
+              "sha256": "d6502d6d88e9e70de5a4636a223c8d92730cfb4ddd040b6a04fedaadf710a77b",
+              "log_sha256": "36892ead7cb955371a7c5e94c97031b694add2110d11279a6ce7df404bfa932e"
+            }
+          }
+        },
+        "wide-16384": {
+          "instructions": 92098956,
+          "allocated_bytes": 7219551,
+          "allocated_blocks": 147562,
+          "peak_live_bytes": 3720814,
+          "peak_live_blocks": 32784,
+          "at_exit_bytes": 8736,
+          "at_exit_blocks": 2,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.rust_bigint_lto.callgrind.trace",
+              "sha256": "53e41ca3349d08ca082cdc75aefc07e0d2daebd7ebea0520814c83fea32cf39c",
+              "log_sha256": "509fd48f51768bf23c98d0c552e383430a645cd36c5aecd2c3bf960749ce4bd7"
+            },
+            "dhat": {
+              "file": "wide-16384.rust_bigint_lto.dhat.trace",
+              "sha256": "738903517070c82eecef6b4085f584e3fa183d0e650bd41578cdb4d9b4f0ff27",
+              "log_sha256": "fcffad33a0b41fc7ba4b7d01f0711e8c266f7d313565b25f66426421ac8dabd2"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "rust_checked_i64_thin_lto",
+      "description": "Algorithm-matched Rust reference with checked i64 values and ThinLTO",
+      "thin_lto": true,
+      "llvm_optimization_budgets": null,
+      "binary_path": "benchmarks/local/dependency-reference-lto/planner-i64",
+      "artifact_sha256": {
+        "binary": "83121ecb8bc95dac9b96d9b98d5106cb52e67619bcb77a336be2bd96b1431eb7",
+        "tool_rustc": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba",
+        "tool_cargo": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e"
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-reference-lto/build-record.json",
+        "sha256": "993999be9334f328556ef6080325cf67b5d1329265ed4b4139bfd0877f9e89e5",
+        "source_sha256": {
+          "Cargo.toml": "432cd49b7ba3a91d9873c4f3386d4b77998373ae1be5898cd1c8d74917501544",
+          "Cargo.lock": "2fdd2959b414792a85eee5582a6ecf63778ddb4feba3f6c5863934d021e3cf89",
+          "src/main.rs": "f143a11379e87ebca2d5a89969132c0b2ce14e1ebcaad620e7f1829b46d5f9a4"
+        },
+        "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8",
+        "release_lto": "thin",
+        "llvm_budget": null,
+        "rustflags": "",
+        "encoded_rustflags": ""
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/final-output-and-rust-lto",
+        "summary_sha256": "eb86989fcb5a29e66e6b3698784979eb39df251026009c7021c39c676139f5b3",
+        "provenance_sha256": "fc0f4f18d5b9856ea477fe88a56a256e4222f70a2bc8217906488635c6414e68",
+        "manifest_sha256": "d5ba4543ce23b292724e446e71fbfebe8e8b43a4602675a9df5ad55f853d6e8c",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30"
+      },
+      "workloads": {
+        "layered-16384": {
+          "instructions": 146195420,
+          "allocated_bytes": 45425869,
+          "allocated_blocks": 147036,
+          "peak_live_bytes": 3335630,
+          "peak_live_blocks": 46709,
+          "at_exit_bytes": 8736,
+          "at_exit_blocks": 2,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.rust_i64_lto.callgrind.trace",
+              "sha256": "b5c16bb3449719e7302f1d1a489e881532ab8a8d9dc71e8809c7a6680ed4d1a7",
+              "log_sha256": "c73a3d5b4852da0e2f13dabce8235a266fa8afc9478ec774d17ec7bc41668211"
+            },
+            "dhat": {
+              "file": "layered-16384.rust_i64_lto.dhat.trace",
+              "sha256": "7a48b0bfc782bcb4cd89e6a1d498a750106ab18d8c9e0ff3f0cead81b0088f76",
+              "log_sha256": "590e679c35063258d25af190e9441f18beddf50174c496021226c82a0624817a"
+            }
+          }
+        },
+        "wide-16384": {
+          "instructions": 64267409,
+          "allocated_bytes": 5392751,
+          "allocated_blocks": 65638,
+          "peak_live_bytes": 2410094,
+          "peak_live_blocks": 16400,
+          "at_exit_bytes": 8736,
+          "at_exit_blocks": 2,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.rust_i64_lto.callgrind.trace",
+              "sha256": "c2e1a7a1807fab035d8485201b0338f37dd864af665c751df49beb941e66e6d0",
+              "log_sha256": "efaf838a27e3e292658dcfddbc6850b4b635629cfe0ca90b9d059d215352c710"
+            },
+            "dhat": {
+              "file": "wide-16384.rust_i64_lto.dhat.trace",
+              "sha256": "6b610300dc7e5579cedadc2d02b6f6fb658ca50ec036ed45910cc3c32bab931e",
+              "log_sha256": "6c7e56f38381a8fda01d7f007d1316e0b105e07e4fb9d60e6295df170ae0b794"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "rust_bigint_matched_thin_lto",
+      "description": "Rust BigInt reference with ThinLTO import and inline budgets matched to Relar",
+      "thin_lto": true,
+      "llvm_optimization_budgets": {
+        "import_instruction_limit": 1000,
+        "inline_threshold": 1000
+      },
+      "binary_path": "benchmarks/local/dependency-reference-matched-lto/planner-bigint",
+      "artifact_sha256": {
+        "binary": "100c0f67cccac4178a55ac2a7a45dd986ad46d8c8f61f7d3059fa14d0b5a3ba6",
+        "tool_rustc": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba",
+        "tool_cargo": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e"
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-reference-matched-lto/build-record.json",
+        "sha256": "ae0ffa4c61ef90675cc63756ea977fcf2e6800f84ad44cc3049a3cd98885a099",
+        "source_sha256": {
+          "Cargo.toml": "432cd49b7ba3a91d9873c4f3386d4b77998373ae1be5898cd1c8d74917501544",
+          "Cargo.lock": "2fdd2959b414792a85eee5582a6ecf63778ddb4feba3f6c5863934d021e3cf89",
+          "src/main.rs": "f143a11379e87ebca2d5a89969132c0b2ce14e1ebcaad620e7f1829b46d5f9a4"
+        },
+        "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8",
+        "release_lto": "thin",
+        "llvm_budget": 1000,
+        "rustflags": "-Cllvm-args=-import-instr-limit=1000 -Cllvm-args=-inline-threshold=1000",
+        "encoded_rustflags": null
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/matched-rust-lto",
+        "summary_sha256": "e057e510c04d5d544d4eef71e455ecbdd352f1e3fa2f98f3ea1ed3cecc5e2469",
+        "provenance_sha256": "bb4ef57b9ea6e816851d2e7467e93f9607479ffd98a7fecd00b8322324156cf1",
+        "manifest_sha256": "7b96c874c9d1710c7a090ff1f2377c249c13fe149c65d893b1ceaf4899ae967a",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30"
+      },
+      "workloads": {
+        "layered-16384": {
+          "instructions": 196808173,
+          "allocated_bytes": 49318538,
+          "allocated_blocks": 306204,
+          "peak_live_bytes": 6435646,
+          "peak_live_blocks": 101715,
+          "at_exit_bytes": 8736,
+          "at_exit_blocks": 2,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.rust_bigint_matched_lto.callgrind.trace",
+              "sha256": "1a1c245efa912085b39826a4d0e23036f9b05fbd085311f6f0085edfc978291a",
+              "log_sha256": "28cb513b7666d7d2a6554449edbf1afb6f4884b995d260d6a5fdf909f8c1b320"
+            },
+            "dhat": {
+              "file": "layered-16384.rust_bigint_matched_lto.dhat.trace",
+              "sha256": "77b37c816bfd70e2ee508fd785240e0845f4a6ee61ea672947c06a135542abc6",
+              "log_sha256": "84ceddf4663848b0dfb01057df39bd9c6b629a904a8adf2513881f3fe456a28e"
+            }
+          }
+        },
+        "wide-16384": {
+          "instructions": 81616504,
+          "allocated_bytes": 7219551,
+          "allocated_blocks": 147562,
+          "peak_live_bytes": 3720814,
+          "peak_live_blocks": 32784,
+          "at_exit_bytes": 8736,
+          "at_exit_blocks": 2,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.rust_bigint_matched_lto.callgrind.trace",
+              "sha256": "a1c9ed6abb43d31dea0b04169d01b2052217724b146ced8f001fe935445265fb",
+              "log_sha256": "804d86f751a82fe71fdd7584f1cf9c6eeb5156267a3cae0e45085123d999f88e"
+            },
+            "dhat": {
+              "file": "wide-16384.rust_bigint_matched_lto.dhat.trace",
+              "sha256": "05aea29c0ebf77684ba3c2920ecc7dbc19f1fa80f4b057bb48e17a14721ddcb6",
+              "log_sha256": "3857f180fc0af3d74ee882319bbb1d05d4fae57a1a41860363c29ae383bbb9e3"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "rust_checked_i64_matched_thin_lto",
+      "description": "Rust checked-i64 reference with ThinLTO import and inline budgets matched to Relar",
+      "thin_lto": true,
+      "llvm_optimization_budgets": {
+        "import_instruction_limit": 1000,
+        "inline_threshold": 1000
+      },
+      "binary_path": "benchmarks/local/dependency-reference-matched-lto/planner-i64",
+      "artifact_sha256": {
+        "binary": "ce5a885e6cb140ab2d062771f67789fe779de5c54e1bf7501ef5737ed3105006",
+        "tool_rustc": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba",
+        "tool_cargo": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e"
+      },
+      "build_record": {
+        "path": "benchmarks/local/dependency-reference-matched-lto/build-record.json",
+        "sha256": "ae0ffa4c61ef90675cc63756ea977fcf2e6800f84ad44cc3049a3cd98885a099",
+        "source_sha256": {
+          "Cargo.toml": "432cd49b7ba3a91d9873c4f3386d4b77998373ae1be5898cd1c8d74917501544",
+          "Cargo.lock": "2fdd2959b414792a85eee5582a6ecf63778ddb4feba3f6c5863934d021e3cf89",
+          "src/main.rs": "f143a11379e87ebca2d5a89969132c0b2ce14e1ebcaad620e7f1829b46d5f9a4"
+        },
+        "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8",
+        "release_lto": "thin",
+        "llvm_budget": 1000,
+        "rustflags": "-Cllvm-args=-import-instr-limit=1000 -Cllvm-args=-inline-threshold=1000",
+        "encoded_rustflags": null
+      },
+      "raw_evidence": {
+        "directory": "benchmarks/local/dependency-cpu-profile/matched-rust-lto",
+        "summary_sha256": "e057e510c04d5d544d4eef71e455ecbdd352f1e3fa2f98f3ea1ed3cecc5e2469",
+        "provenance_sha256": "bb4ef57b9ea6e816851d2e7467e93f9607479ffd98a7fecd00b8322324156cf1",
+        "manifest_sha256": "7b96c874c9d1710c7a090ff1f2377c249c13fe149c65d893b1ceaf4899ae967a",
+        "harness_sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30"
+      },
+      "workloads": {
+        "layered-16384": {
+          "instructions": 135349106,
+          "allocated_bytes": 45425869,
+          "allocated_blocks": 147036,
+          "peak_live_bytes": 3335630,
+          "peak_live_blocks": 46709,
+          "at_exit_bytes": 8736,
+          "at_exit_blocks": 2,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "layered-16384.rust_i64_matched_lto.callgrind.trace",
+              "sha256": "ff6af03d619da7c2033a382c0c6c1f1a75293f15754a15446acd50ecba2775ce",
+              "log_sha256": "eca0f2f542e54d8bdaeba451149565c0fb7404c11a0968e847fc45930644d30a"
+            },
+            "dhat": {
+              "file": "layered-16384.rust_i64_matched_lto.dhat.trace",
+              "sha256": "23ffb06a33c185f6d6870e0669b1f122837046e7c0d906d82370c37ae0df202b",
+              "log_sha256": "7a67199e23e0b182862a3cba960c8edd410d35cfd7464578114bd007e043af28"
+            }
+          }
+        },
+        "wide-16384": {
+          "instructions": 56356046,
+          "allocated_bytes": 5392751,
+          "allocated_blocks": 65638,
+          "peak_live_bytes": 2410094,
+          "peak_live_blocks": 16400,
+          "at_exit_bytes": 8736,
+          "at_exit_blocks": 2,
+          "checks": {
+            "full_stdout_matches": true,
+            "stderr_bytes": 0,
+            "exit_status": 0,
+            "binary_sha256_unchanged": true
+          },
+          "traces": {
+            "callgrind": {
+              "file": "wide-16384.rust_i64_matched_lto.callgrind.trace",
+              "sha256": "44146a477ca97651300413cad2d390351e3ed0539f7d42f081bf8448c36ce377",
+              "log_sha256": "5464ec94ccec0663719077bfb70ae2fce023ba385015bda5e46be9be3dd7cf3e"
+            },
+            "dhat": {
+              "file": "wide-16384.rust_i64_matched_lto.dhat.trace",
+              "sha256": "a176b376a496753a9477c0ad75a66af17c359a1a643494f6b1cbf257f7230249",
+              "log_sha256": "8ed26e9b49fd1f3dfe8382373586816109334d09ead52f47002eed6830c1d600"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "final_wide_hotspot_attribution": {
+    "workload": "wide-16384",
+    "binary_sha256": "251212b84f7df996b241fa21bd10a507e048ff48f86b117d806ab1e99ecdc0e9",
+    "callgrind_trace_sha256": "7fa54309145565e8ce1f8cb2d4f119a04a205ef58248dfbcbfbdc1e6c8a00d4d",
+    "whole_program_instructions": 145225371,
+    "scheduler": {
+      "symbol": "fn_6",
+      "self_instructions": 54111356,
+      "inclusive_instructions": 65135246
+    },
+    "pop_ready_normal_region": {
+      "start": "0xfb0a8",
+      "end_exclusive": "0xfbfdb",
+      "instructions": 42689585,
+      "identification": "Inferred from exact binary disassembly: starts at ready[0], includes pop and sift-down, ends before order.append. This is the normal executed region, not all outlined failure/BigInt paths.",
+      "negative_index_normalization_patterns": [
+        {
+          "start": "0xfb481",
+          "normalization_instructions": 756196,
+          "bounds_compare_and_branch_instructions": 378098,
+          "dynamic_accesses": 189049
+        },
+        {
+          "start": "0xfb517",
+          "normalization_instructions": 756196,
+          "bounds_compare_and_branch_instructions": 378098,
+          "dynamic_accesses": 189049
+        },
+        {
+          "start": "0xfbbea",
+          "normalization_instructions": 746596,
+          "bounds_compare_and_branch_instructions": 373298,
+          "dynamic_accesses": 186649
+        },
+        {
+          "start": "0xfbea4",
+          "normalization_instructions": 65532,
+          "bounds_compare_and_branch_instructions": 32766,
+          "dynamic_accesses": 16383
+        }
+      ],
+      "immediate_tag_test_instructions": 4896700,
+      "tag_test_scope": "Counts only executed test/and $1 instructions within the region; other tag checks and their branches are not included."
+    },
+    "other_functions": [
+      {
+        "name": "relar_str_split_whitespace",
+        "self_instructions": 7978154,
+        "inclusive_instructions": 16904713
+      },
+      {
+        "name": "relar_runtime::output_bytes",
+        "self_instructions": 5161959,
+        "inclusive_instructions": 6487784
+      },
+      {
+        "name": "relar_print_int",
+        "self_instructions": 3315242,
+        "inclusive_instructions": 8549919
+      }
+    ],
+    "limitations": [
+      "All counts are machine instructions, not CPU cycles or elapsed-time shares. Inclusive costs overlap and must not be summed.",
+      "The normal heap region repeatedly decodes tags, normalizes signed indices, updates/checks RefCell borrow state, checks bounds, and tests loaded value tags. These checks remain semantically necessary unless the compiler proves stronger facts.",
+      "This supports an optimization direction, not a claim that the entire measured Rust time gap is caused by these operations. Existing local/parameter borrowing is already enabled."
+    ],
+    "supporting_files": [
+      {
+        "path": "benchmarks/local/dependency-cpu-profile/final-measured-lto/wide-hotspots.json",
+        "sha256": "d281a0cd1f10d97deea5f661d1419703b7ab66453503d67b57ed6965f6fbb97a"
+      },
+      {
+        "path": "benchmarks/local/dependency-cpu-profile/final-measured-lto/scheduler.asm",
+        "sha256": "018d1f4ced7793b6c7ee613721b79d85b9057ae09945aca0cad7c9e566e208e9"
+      },
+      {
+        "path": "benchmarks/local/dependency-cpu-profile/final-measured-lto/wide-16384.scheduler-instructions.json",
+        "sha256": "6c12c3120f49279798fc6d9406a5b7c3356e5e68dad7d270bc297cf260e07b42"
+      },
+      {
+        "path": "benchmarks/local/dependency-cpu-profile/final-measured-lto/analyze_scheduler.py",
+        "sha256": "d30f14b65dcacc67d8f2a922d58d352cbd71a471f904061e7c461e4f116d27d8"
+      }
+    ]
+  },
+  "attribution_notes": [
+    "Small decimal parsing removes all observed parser allocation stacks: 165,021 blocks on layered input and 49,155 on wide input.",
+    "Local tuple scalarization removes 65,536 blocks and 2,883,584 requested bytes on each input; whole-tuple escapes retain the boxed fallback.",
+    "Compact strings remove all split-token character-buffer allocations: 71,391 layered and 32,769 wide. Each token retains its Rc owner.",
+    "Decoded indices plus tuned ThinLTO remove separate list get/set/len and fixed-field get/set calls from these traces; sequence get remains for 38,622 layered accesses.",
+    "Inline fixed fields remove 16,386 allocation blocks per workload and lower peak live bytes by 130,944, but increase total requested bytes by 524,480 because shared sequence headers grow from 56 to 96 bytes.",
+    "Direct byte/itoa output retains the Mutex. The exact final measured build uses 19,635,900 fewer layered and 18,292,238 fewer wide instructions than the inline-fields stage. Allocation totals are unchanged. The earlier direct-output ablation is retained separately; its counts differ from the clean final rebuild by only 59 instructions per workload.",
+    "The compiler already borrows unchanged parameters and direct local operands. Those existing optimizations are not counted as new opportunities here."
+  ]
+}

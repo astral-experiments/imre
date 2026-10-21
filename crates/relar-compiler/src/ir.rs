@@ -48,11 +48,13 @@ pub(crate) struct Function {
     pub body: Vec<Statement>,
 }
 
+#[derive(Clone)]
 pub(crate) struct Expr {
     pub ty: Type,
     pub kind: ExprKind,
 }
 
+#[derive(Clone)]
 pub(crate) enum ExprKind {
     Int(String),
     Bool(bool),
@@ -100,6 +102,7 @@ pub(crate) enum Compare {
     GreaterEqual,
 }
 
+#[derive(Clone)]
 pub(crate) enum Builtin {
     Print,
     Input,
@@ -114,6 +117,10 @@ pub(crate) enum Builtin {
 
 pub(crate) enum Statement {
     Assign(usize, Expr),
+    /// Transfers an owned local to another local, resetting its source.
+    Move(usize, usize),
+    /// Releases an owned temporary and restores its cleanup-safe initial value.
+    Clear(usize),
     SetItem(Expr, Expr, Expr),
     AugmentItem(Expr, Expr, Binary, Expr),
     SetField(Expr, usize, Expr),

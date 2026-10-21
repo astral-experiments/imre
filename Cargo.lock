@@ -735,6 +735,8 @@ dependencies = [
 name = "relar-runtime"
 version = "0.1.0"
 dependencies = [
+ "compact_str",
+ "itoa",
  "num-bigint",
  "num-traits",
 ]

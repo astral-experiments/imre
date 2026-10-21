@@ -22,6 +22,8 @@ salsa = "=0.28.2"
 salsa-macro-rules = "=0.28.2"
 num-bigint = "=0.4.8"
 num-traits = "=0.2.19"
+compact_str = "=0.10.0"
+itoa = "=1.0.18"
 
 [profile.release]
 debug = "line-tables-only"

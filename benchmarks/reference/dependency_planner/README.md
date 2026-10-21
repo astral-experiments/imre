@@ -44,13 +44,28 @@ The default artifacts are `benchmarks/local/dependency-reference/planner-bigint`
 allow separate local paths. `--offline` uses cached dependencies. The checked-in
 lockfile is required and never regenerated. The record captures both binaries,
 source hashes and complete source text, commands, versions, and build durations.
-Rust flags are cleared to avoid introducing machine-specific optimization.
+Inherited Rust flags are cleared to avoid introducing machine-specific optimization.
 
 Public and CI builds use normal Cargo. On this devbox, pass `--toolchain ohm`;
 the helper uses `cargo +ohm -Zohm-defaults=no` and `rustc +ohm`, with a separate
 target directory and an optional shared build cache. The manifest uses the
 normal release optimization profile, generic CPU settings, and line-table debug
-information. No PGO or LTO is requested.
+information. No PGO or LTO is requested by default. `CARGO_PROFILE_RELEASE_*`
+overrides, including `CARGO_PROFILE_RELEASE_LTO=thin`, are honored and recorded.
+
+`--llvm-budget N` accepts a positive integer and explicitly sets
+`RUSTFLAGS="-Cllvm-args=-import-instr-limit=N -Cllvm-args=-inline-threshold=N"`.
+The helper unsets `CARGO_ENCODED_RUSTFLAGS` in this case so it cannot override
+those flags; inherited target flags remain cleared. The record preserves the
+requested budget, actual environment, and exact build-helper source. For a
+ThinLTO reference with the same budgets as Relar's optional O3 ThinLTO mode:
+
+```sh
+CARGO_PROFILE_RELEASE_LTO=thin \
+  python3 benchmarks/reference/dependency_planner/build.py --llvm-budget 1000 \
+  --artifact-dir benchmarks/local/dependency-reference-lto-budget \
+  --target-dir benchmarks/local/dependency-reference-lto-budget/target
+```
 
 The five-way comparison uses a saved baseline Relar executable and its benchmark
 record, the current compiler/runtime, unchanged CPython source, and both Rust

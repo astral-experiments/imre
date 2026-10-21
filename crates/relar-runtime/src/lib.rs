@@ -95,6 +95,11 @@ impl Drop for Int {
 /// An opaque, nonmoving list allocation. Its resizable buffer stays inside Rust.
 pub struct List(RefCell<Vec<Int>>);
 
+/// Immutable UTF-8 storage behind an opaque `Rc` handle. Short strings fit inside
+/// that allocation; longer strings own a separate buffer. LLVM never reads this
+/// representation directly.
+pub type Str = compact_str::CompactString;
+
 /// Standard output uses bounded block buffering for pipes and files, while
 /// terminals flush each printed line. LLVM supplies the process entry point, so
 /// input, fatal errors, and normal entry-point return explicitly flush it.
@@ -112,14 +117,30 @@ static OUTPUT: LazyLock<Mutex<Output>> = LazyLock::new(|| {
     })
 });
 
-/// Returns with the writer lock released, including when a write fails.
-fn write_output(value: impl std::fmt::Display) -> io::Result<()> {
+/// Prints one value and a newline, returning with the writer lock released.
+/// Only primitive formatters run here; they cannot call user code.
+fn write_output(
+    write: impl FnOnce(&mut BufWriter<io::Stdout>) -> io::Result<()>,
+) -> io::Result<()> {
     let mut output = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());
-    writeln!(output.writer, "{value}")?;
+    write(&mut output.writer)?;
+    output.writer.write_all(b"\n")?;
     if output.line_buffered {
         output.writer.flush()?;
     }
     Ok(())
+}
+
+/// Handles write failures only after releasing the writer lock.
+fn output(write: impl FnOnce(&mut BufWriter<io::Stdout>) -> io::Result<()>) {
+    if write_output(write).is_err() {
+        fail("OSError", "could not write standard output");
+    }
+}
+
+/// Writes already encoded text without the general formatting machinery.
+fn output_bytes(value: &[u8]) {
+    output(|writer| writer.write_all(value));
 }
 
 /// The caller handles errors only after this function releases the writer lock.
@@ -131,18 +152,15 @@ fn flush_stdout() -> io::Result<()> {
         .flush()
 }
 
+/// Reports a terminal language error outside the normal execution path.
+#[cold]
+#[inline(never)]
 fn fail(kind: &str, message: &str) -> ! {
     // Preserve pending output and the original exception category. A failed
     // best-effort flush must neither recurse through fail nor hold this lock.
     let _ = flush_stdout();
     let _ = writeln!(io::stderr().lock(), "{kind}: {message}");
     std::process::exit(1)
-}
-
-fn output(value: impl std::fmt::Display) {
-    if write_output(value).is_err() {
-        fail("OSError", "could not write standard output");
-    }
 }
 
 /// Flushes pending output before generated code returns from the process entry.
@@ -278,36 +296,37 @@ pub unsafe extern "C" fn relar_print_int(value: usize) {
     // SAFETY: the caller keeps the integer alive while it is formatted.
     let value = unsafe { Int::borrow(value) };
     if let Some(value) = value.as_small() {
-        output(value);
+        let mut digits = itoa::Buffer::new();
+        output_bytes(digits.format(value).as_bytes());
     } else {
-        output(value.big());
+        output(|writer| write!(writer, "{}", value.big()));
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_print_bool(value: u8) {
-    output(if value == 0 { "False" } else { "True" });
+    output_bytes(if value == 0 { b"False" } else { b"True" });
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_print_none() {
-    output("None");
+    output_bytes(b"None");
 }
 
 /// # Safety
 /// The byte span must remain readable for this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_str_literal(data: *const u8, length: usize) -> *const String {
+pub unsafe extern "C" fn relar_str_literal(data: *const u8, length: usize) -> *const Str {
     // SAFETY: the compiler supplies the readable constant span.
-    Rc::into_raw(Rc::new(unsafe { text(data, length) }.to_owned()))
+    Rc::into_raw(Rc::new(Str::new(unsafe { text(data, length) })))
 }
 
 /// # Safety
 /// The argument must be a live string handle or null during slot cleanup.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_str_retain(value: *const String) {
+pub unsafe extern "C" fn relar_str_retain(value: *const Str) {
     if !value.is_null() {
-        // SAFETY: the caller owns a live Rc<String> reference.
+        // SAFETY: the caller owns a live Rc<Str> reference.
         unsafe { Rc::increment_strong_count(value) };
     }
 }
@@ -315,9 +334,9 @@ pub unsafe extern "C" fn relar_str_retain(value: *const String) {
 /// # Safety
 /// Consumes one string reference, or accepts null during slot cleanup.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_str_release(value: *const String) {
+pub unsafe extern "C" fn relar_str_release(value: *const Str) {
     if !value.is_null() {
-        // SAFETY: the caller transfers one live Rc<String> reference.
+        // SAFETY: the caller transfers one live Rc<Str> reference.
         unsafe { Rc::decrement_strong_count(value) };
     }
 }
@@ -325,15 +344,15 @@ pub unsafe extern "C" fn relar_str_release(value: *const String) {
 /// # Safety
 /// The argument must be a live string handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_print_str(value: *const String) {
+pub unsafe extern "C" fn relar_print_str(value: *const Str) {
     // SAFETY: the caller roots this immutable string for the duration of the call.
-    output(unsafe { &*value });
+    output_bytes(unsafe { &*value }.as_bytes());
 }
 
 /// # Safety
 /// The argument must be a live string handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_str_len(value: *const String) -> usize {
+pub unsafe extern "C" fn relar_str_len(value: *const Str) -> usize {
     // SAFETY: the caller roots this immutable string for the duration of the call.
     Int::from_usize(unsafe { &*value }.chars().count()).into_raw()
 }
@@ -341,7 +360,7 @@ pub unsafe extern "C" fn relar_str_len(value: *const String) -> usize {
 /// # Safety
 /// Both arguments must be live string handles.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_str_equal(a: *const String, b: *const String) -> u8 {
+pub unsafe extern "C" fn relar_str_equal(a: *const Str, b: *const Str) -> u8 {
     // SAFETY: both immutable strings are rooted by the caller.
     u8::from(unsafe { *a == *b })
 }
@@ -351,9 +370,17 @@ pub unsafe extern "C" fn relar_str_equal(a: *const String, b: *const String) -> 
 /// # Safety
 /// The argument must be a live string handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_int_parse(value: *const String) -> usize {
+pub unsafe extern "C" fn relar_int_parse(value: *const Str) -> usize {
     // SAFETY: the caller keeps the immutable string alive.
     let source = unsafe { &*value }.trim();
+    // Rust's signed decimal parser accepts a subset of our grammar. Ordinary
+    // small inputs need neither normalization nor temporary BigInt allocations;
+    // separators and larger values still take the checked path below.
+    if let Ok(value) = source.parse::<i64>()
+        && let Some(value) = Int::small(value)
+    {
+        return value.into_raw();
+    }
     let digits = source.strip_prefix(['+', '-']).unwrap_or(source);
     if digits.is_empty()
         || digits.starts_with('_')
@@ -371,7 +398,7 @@ pub unsafe extern "C" fn relar_int_parse(value: *const String) -> usize {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn relar_input() -> *const String {
+pub extern "C" fn relar_input() -> *const Str {
     // A preceding print must be visible before waiting for the next input line.
     relar_flush_stdout();
     let mut line = String::new();
@@ -383,7 +410,7 @@ pub extern "C" fn relar_input() -> *const String {
     if line.ends_with('\n') {
         line.pop();
     }
-    Rc::into_raw(Rc::new(line))
+    Rc::into_raw(Rc::new(Str::from(line)))
 }
 
 #[unsafe(no_mangle)]
@@ -411,15 +438,23 @@ pub unsafe extern "C" fn relar_list_release(value: *const List) {
     }
 }
 
-/// Normalizes a Python index without truncating a large integer to machine size.
-// Expose the bounds check to get/set so LLVM can remove their redundant checks.
+/// Converts an index before a storage borrow, without truncating large integers.
 #[inline]
-fn index(value: &Int, length: usize) -> usize {
-    let raw = value
+fn decode_index(value: &Int) -> isize {
+    if let Some(raw) = value
         .as_small()
         .and_then(|value| isize::try_from(value).ok())
-        .or_else(|| value.big().to_isize())
-        .unwrap_or_else(|| fail("IndexError", "list index out of range"));
+    {
+        raw
+    } else {
+        big_index(&value.big()).unwrap_or_else(|| fail("IndexError", "list index out of range"))
+    }
+}
+
+/// Normalizes negative indices and rejects out-of-bounds accesses.
+// Expose the bounds check to get/set so LLVM can remove their redundant checks.
+#[inline]
+fn index(raw: isize, length: usize) -> usize {
     let normalized = if raw < 0 {
         // An underflow wraps above `length`, so the same bounds check rejects it.
         length.wrapping_add_signed(raw)
@@ -432,23 +467,35 @@ fn index(value: &Int, length: usize) -> usize {
     normalized
 }
 
+/// Keeps arbitrary-precision conversion out of the common indexed-access path.
+#[cold]
+#[inline(never)]
+fn big_index(value: &BigInt) -> Option<isize> {
+    value.to_isize()
+}
+
 /// # Safety
 /// The arguments must be live list and integer handles, respectively.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_list_get(list: *const List, at: usize) -> usize {
+    // SAFETY: the caller roots the index; conversion cannot call user code.
+    let at = unsafe { Int::borrow(at) };
+    let at = decode_index(&at);
     // SAFETY: the caller roots both arguments; this runtime cannot call user code.
-    let (list, at) = unsafe { ((&*list).0.borrow(), Int::borrow(at)) };
-    list[index(&at, list.len())].clone().into_raw()
+    let list = unsafe { (&*list).0.borrow() };
+    list[index(at, list.len())].clone().into_raw()
 }
 
 /// # Safety
 /// The arguments must be live list and integer handles.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_list_set(list: *const List, at: usize, value: usize) {
+    // SAFETY: the caller roots the index; conversion cannot call user code.
+    let at = unsafe { Int::borrow(at) };
+    let at = decode_index(&at);
     // SAFETY: the caller roots all three arguments for the duration of the call.
-    let (mut list, at, value) =
-        unsafe { ((&*list).0.borrow_mut(), Int::borrow(at), Int::borrow(value)) };
-    let at = index(&at, list.len());
+    let (mut list, value) = unsafe { ((&*list).0.borrow_mut(), Int::borrow(value)) };
+    let at = index(at, list.len());
     let old = std::mem::replace(&mut list[at], (*value).clone());
     drop(list);
     drop(old);
@@ -534,6 +581,34 @@ pub extern "C" fn relar_range_step_zero() -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decimal_input_preserves_signs_separators_and_tag_boundaries() {
+        for (source, expected, small) in [
+            ("\u{2003}+00017\t", "17", true),
+            ("-0", "0", true),
+            ("-4_611_686_018_427_387_904", "-4611686018427387904", true),
+            ("4611686018427387903", "4611686018427387903", true),
+            ("-4611686018427387904", "-4611686018427387904", true),
+            ("4611686018427387904", "4611686018427387904", false),
+            ("-4611686018427387905", "-4611686018427387905", false),
+            ("9223372036854775807", "9223372036854775807", false),
+            ("-9223372036854775808", "-9223372036854775808", false),
+            ("9223372036854775808", "9223372036854775808", false),
+            ("-9223372036854775809", "-9223372036854775809", false),
+            (
+                "+100_000_000_000_000_000_000_000_000_000_000",
+                "100000000000000000000000000000000",
+                false,
+            ),
+        ] {
+            let source = Str::new(source);
+            // SAFETY: source remains alive throughout the call; Int owns its result.
+            let parsed = Int(unsafe { relar_int_parse(&source) });
+            assert_eq!(parsed.big().to_string(), expected);
+            assert_eq!(parsed.as_small().is_some(), small);
+        }
+    }
 
     #[test]
     fn integers_promote_and_demote_without_losing_values() {

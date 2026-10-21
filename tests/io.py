@@ -168,10 +168,17 @@ def main() -> None:
     parser.add_argument("--runtime", required=True, type=Path)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--clang", default="clang")
+    parser.add_argument("--lto-linker", type=Path)
+    parser.add_argument("--target")
     parser.add_argument("--opt-levels", nargs="+", default=["0", "3"])
     parser.add_argument("--sanitize", action="store_true")
     parser.add_argument("--timeout", type=float, default=10, help="interactive readiness deadline")
     args = parser.parse_args()
+    build_flags = []
+    if args.lto_linker is not None:
+        build_flags += ["--lto-linker", str(args.lto_linker.absolute())]
+    if args.target is not None:
+        build_flags += ["--target", args.target]
     assert args.timeout > 0
     compiler, runtime = str(args.compiler.resolve()), str(args.runtime.resolve())
     passed = 0
@@ -211,6 +218,7 @@ def main() -> None:
                 ]
                 if args.sanitize:
                     command.append("--sanitize")
+                command += build_flags
                 require_success(run(command), f"build {name} O{level}")
                 binaries[name] = str(binary)
 

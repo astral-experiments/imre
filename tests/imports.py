@@ -75,9 +75,16 @@ def main() -> None:
     parser.add_argument("--runtime", type=Path, required=True)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--clang", default="clang")
+    parser.add_argument("--lto-linker", type=Path)
+    parser.add_argument("--target")
     parser.add_argument("--opt-levels", type=int, nargs="+", default=[0, 3])
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
+    build_flags = []
+    if args.lto_linker is not None:
+        build_flags += ["--lto-linker", str(args.lto_linker.absolute())]
+    if args.target is not None:
+        build_flags += ["--target", args.target]
     compiler, runtime = str(args.compiler.resolve()), str(args.runtime.resolve())
     checks = 0
     with tempfile.TemporaryDirectory(prefix="relar-imports-") as directory:
@@ -93,6 +100,7 @@ def main() -> None:
                 executable = temporary / f"program-{module}-{level}"
                 command = [compiler, "build", str(root / entry), "-o", str(executable), "--runtime", runtime,
                            "--opt-level", str(level), "--clang", args.clang]
+                command += build_flags
                 # Exercise explicit and inferred roots independently of the current directory.
                 if level == args.opt_levels[-1]:
                     command += ["--module-root", str(root)]
@@ -122,6 +130,7 @@ def main() -> None:
             for output_flag in ["-o", "--emit-llvm"]:
                 command = [compiler, "build", str(collision / "main.py"), "--runtime", runtime,
                            "-o", str(temporary / "collision-program"), output_flag, str(alias), "--clang", args.clang]
+                command += build_flags
                 result = run(command, temporary)
                 assert result.returncode != 0 and "distinct paths" in result.stderr, result.stderr
                 assert dependency.read_text() == HELPER
@@ -143,6 +152,7 @@ def main() -> None:
             executable = temporary / f"symlink-program-{level}"
             command = [compiler, "build", str(alias_case / "main.py"), "-o", str(executable),
                        "--runtime", runtime, "--opt-level", str(level), "--clang", args.clang]
+            command += build_flags
             if args.sanitize:
                 command += ["--sanitize"]
             require_success(run(command, temporary))

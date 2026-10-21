@@ -130,9 +130,16 @@ def main() -> None:
     parser.add_argument("--runtime", required=True, type=Path)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--clang", default="clang")
+    parser.add_argument("--lto-linker", type=Path)
+    parser.add_argument("--target")
     parser.add_argument("--opt-levels", nargs="+", choices=["0", "1", "2", "3"], default=["0", "3"])
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
+    build_flags = []
+    if args.lto_linker is not None:
+        build_flags += ["--lto-linker", str(args.lto_linker.absolute())]
+    if args.target is not None:
+        build_flags += ["--target", args.target]
     compiler = str(args.compiler.resolve())
     runtime = str(args.runtime.resolve())
     python = str(Path(args.python).resolve()) if "/" in args.python else args.python
@@ -151,6 +158,7 @@ def main() -> None:
                 executable = temporary / f"{source.parent.name}-{source.stem}-O{level}"
                 command = [compiler, "build", str(source), "-o", str(executable),
                            "--runtime", runtime, "--clang", clang, "--opt-level", level]
+                command += build_flags
                 if args.sanitize:
                     command.append("--sanitize")
                 require_success(run(command, temporary))

@@ -5,6 +5,7 @@ mod ir;
 mod llvm;
 mod modules;
 mod narrowing;
+mod tuples;
 mod types;
 
 use std::borrow::Cow;
@@ -23,7 +24,8 @@ pub fn check(source: &str) -> Result<(), String> {
 
 /// Compiles a checked module to LLVM IR; the resulting executable uses no CPython.
 pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String> {
-    let module = frontend::lower(&modules::SourceGraph::single(source)?)?;
+    let mut module = frontend::lower(&modules::SourceGraph::single(source)?)?;
+    tuples::scalarize(&mut module);
     Ok(llvm::emit(&module, options.address_sanitizer))
 }
 
@@ -45,7 +47,8 @@ pub fn compile_file(
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
     let graph = modules::SourceGraph::load(path, module_root)?;
-    let module = frontend::lower(&graph)?;
+    let mut module = frontend::lower(&graph)?;
+    tuples::scalarize(&mut module);
     Ok(Compilation {
         llvm_ir: llvm::emit(&module, options.address_sanitizer),
         input_paths: graph

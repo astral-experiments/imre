@@ -22,13 +22,21 @@ We embed ty's Salsa database, vendored type definitions, semantic checking, and 
 
 The IR records resolved calls, expression types, variable slots, control flow, and supported runtime operations. The backend only accepts checked IR. Integer operations get a machine-integer fast path and an already-compiled arbitrary-precision fallback. A fallback continues the operation at that point; it does not restart earlier side effects. LLVM overflow flags and alias metadata are emitted only when their preconditions have been established.
 
+Eligible non-escaping tuple locals become separate owned component slots before LLVM emission. This includes calls to single-return tuple producers when every use is a fixed projection or length query. Arguments and elements are evaluated once, in order, and all new components are captured before replacing old ones. Tuples that escape or are used as whole values retain the boxed ABI.
+
 The initial native calling convention uses concrete typed values and borrowed arguments. Returned reference-bearing values are owned. Each expression and local has an explicit lifetime; assignment publishes the new value before releasing the old value. The caller keeps inputs rooted until a call completes. Operator and call inputs can borrow direct locals, and parameter bindings that never change can share the caller's root. This proof depends on expressions being unable to replace caller slots: closures, globals, assignment expressions, and exposed frame addresses are absent. List-element reads remain owned because later evaluation can remove the element. Unchanged bindings do not imply immutable or unaliased objects.
 
 ## Runtime
 
-The runtime provides integers, strings, integer lists, input, output, and checked errors. Heap allocations do not move. Reference counting provides predictable ownership; the first supported types cannot form reference cycles. Introducing recursive containers, closures, or user-defined object graphs requires a cycle-collection design before claiming those graphs are reclaimable.
+The runtime provides integers, strings, fixed fields, typed containers, input, output, and checked errors. Heap allocations do not move. Reference counting provides predictable ownership; the supported heap type graphs cannot form reference cycles. Introducing recursive containers, closures, or cyclic object graphs requires a cycle-collection design before claiming those graphs are reclaimable.
 
 Small integers stay in registers. Larger integers use a shared owned allocation. List storage owns its elements; reads acquire a reference, and writes acquire the replacement before releasing the previous element. String and list aliases share one allocation. The generated program never holds a pointer into resizable list storage.
+
+Ordinary signed decimal input parses directly into a tagged integer; separators and larger values retain the checked arbitrary-precision path. Short strings keep their UTF-8 bytes inside the reference-counted allocation using the already-pinned `compact_str` crate. Longer strings own a separate buffer. These representations remain private to the runtime.
+
+Small fixed-field records embed up to four owned slots in their allocation. Larger records and general sequences use vector storage. Generated code continues to access both through opaque runtime operations, including reference acquisition and checked indexing.
+
+Tagged integers print through an `itoa` stack buffer; strings, booleans, and `None` write their encoded bytes directly. Larger integers use arbitrary-precision formatting. The bounded output buffer flushes each terminal line and before input, fatal errors, or normal process return.
 
 Rust helps protect the runtime implementation, but it does not prove emitted LLVM IR safe. Unsafe handle operations stay in a narrow runtime boundary with documented contracts. Differential tests, ownership tests, and sanitizer runs must cover generated code as well as runtime code.
 
