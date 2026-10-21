@@ -23,6 +23,7 @@ Relar supports:
 
 But not:
 
+- Most of the Python standard library
 - Dynamically typed storage (`Any` or unrestricted unions)
 - Recursive calls or closures that capture variables
 - Reflection or dynamic attributes
