@@ -33,8 +33,14 @@ PYTHONPATH=stdlib:examples python3 -m memory_report \
   --new examples/memory_report/sample/ruff-scripts.json
 ```
 
-`load.py` calls `relar.json.decode(text, MemoryReport)`. The compiler generates a
-decoder for explicit record fields; there is no exposed dynamic JSON object.
+The models use `@dataclass(slots=True)`, scalar defaults, keyword-only fields,
+and `field(default_factory=list)`. `ProjectComparison.total_diff_bytes` is a
+read-only property, and changed-item rows are frozen dataclasses. These compile
+to Relar's fixed-layout records and direct function calls.
+
+`load.py` calls `MemoryReport.from_json(path)`. That class method uses
+`relar.json.decode(text, cls)` and returns `Self`. The compiler generates a
+decoder for concrete record fields; there is no exposed dynamic JSON object.
 The CPython implementation in `stdlib/relar/json.py` enforces the same boundary.
 Integers retain arbitrary precision. Required fields must be present, item byte
 counts default to zero, and absent report lists become fresh empty lists.

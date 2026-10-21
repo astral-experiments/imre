@@ -10,13 +10,14 @@ An ahead-of-time compiler for typed Python, written in Rust.
 ## Highlights
 
 - Compile typed Python programs and selected pure-Python packages into native executables.
-- Use static imports, typed classes, containers, comprehensions, slicing, keyword arguments, and scalar f-strings.
+- Use static imports, typed classes and dataclasses, containers, comprehensions, slicing, keyword arguments, and scalar f-strings.
 - Use binary64 floats, immutable bytes, structural pattern matching, and assignment expressions.
 - Use Python truth tests, operand-returning `and`/`or`, and `for`/`while` `else` suites.
 - Chain assignments, unpack sequences and starred targets, and expand typed lists, sets, and dictionaries.
 - Infer concrete function signatures and consume concrete iterables with `list`, integer `sum`, and `map(int, ...)`.
 - Compose generator expressions, `zip(strict=True)`, and `reversed`, with short-circuiting `any` and `all`.
 - Pass typed function values and bound methods, use noncapturing lambdas, and compose lazy `map`/`filter` pipelines.
+- Use read-only properties, class and static methods, and `Self` annotations.
 - Preserve arbitrary-precision integers, shared mutation, and supported exception behavior.
 - Run compiled programs without a Python installation or a CPython dependency.
 

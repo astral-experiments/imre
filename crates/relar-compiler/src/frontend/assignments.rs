@@ -104,6 +104,9 @@ impl Checker<'_> {
             self.globals,
         );
         probe.returns = self.returns;
+        probe.class = self.class;
+        probe.class_receiver = self.class_receiver.clone();
+        probe.initializing = self.initializing;
         probe.names = self.names.clone();
         probe.locals = self.locals.clone();
         probe.assigned = self.assigned.clone();

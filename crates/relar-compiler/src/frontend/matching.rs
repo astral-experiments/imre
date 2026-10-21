@@ -810,7 +810,7 @@ impl Checker<'_> {
                 "positional class patterns and __match_args__ are unsupported; use declared field keywords",
             ));
         }
-        let id = match self.graph.resolve(self.module, &class.cls) {
+        let id = match self.resolve(&class.cls) {
             Some(Binding::Definition(definition)) => {
                 self.classes.declarations.ids.get(&definition).copied()
             }

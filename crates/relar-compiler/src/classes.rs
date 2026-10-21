@@ -7,6 +7,17 @@ use ruff_python_ast::visitor::{Visitor, walk_expr};
 
 use crate::modules::{DefinitionId, SourceGraph, SourceModule};
 
+mod dataclasses;
+pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MethodKind {
+    Instance,
+    Property,
+    Class,
+    Static,
+}
+
 pub(crate) struct Classes {
     pub(crate) definitions: Vec<Class>,
     pub(crate) ids: HashMap<DefinitionId, usize>,
@@ -18,6 +29,9 @@ pub(crate) struct Class {
     pub(crate) node: ast::StmtClassDef,
     pub(crate) fields: Vec<Field>,
     pub(crate) methods: Vec<ast::StmtFunctionDef>,
+    pub(crate) method_kinds: Vec<MethodKind>,
+    pub(crate) dataclass: Option<DataclassOptions>,
+    pub(crate) generated_initializer: bool,
     /// Index into `methods`, including the initializer itself.
     pub(crate) initializer: usize,
 }
@@ -25,6 +39,10 @@ pub(crate) struct Class {
 pub(crate) struct Field {
     pub(crate) name: String,
     pub(crate) annotation: ast::Expr,
+    pub(crate) default: Option<FieldDefault>,
+    pub(crate) kw_only: bool,
+    pub(crate) repr: bool,
+    pub(crate) compare: bool,
 }
 
 impl Classes {
@@ -39,7 +57,7 @@ impl Classes {
                         module: module_id,
                         statement,
                     };
-                    let class = collect_class(module, definition, node)?;
+                    let class = collect_class(graph, module, definition, node)?;
                     ids.insert(definition, definitions.len());
                     definitions.push(class);
                 }
@@ -50,12 +68,12 @@ impl Classes {
 }
 
 fn collect_class(
+    graph: &SourceGraph,
     module: &SourceModule,
     definition: DefinitionId,
     node: &ast::StmtClassDef,
 ) -> Result<Class, String> {
-    if !node.decorator_list.is_empty()
-        || node.type_params.is_some()
+    if node.type_params.is_some()
         || node
             .arguments
             .as_ref()
@@ -63,16 +81,25 @@ fn collect_class(
     {
         return Err(module.error(
             node,
-            "class inheritance, metaclasses, decorators, and type parameters are unsupported",
+            "class inheritance, metaclasses, and type parameters are unsupported",
         ));
     }
+    let dataclass = dataclasses::options(graph, definition.module, node)?;
     let mut names = HashSet::new();
+    let mut class_bindings = HashSet::new();
     let mut fields = Vec::new();
     let mut methods = Vec::new();
+    let mut method_kinds = Vec::new();
     let mut initializer = None;
     for statement in &node.body {
         match statement {
-            ast::Stmt::AnnAssign(field) if field.value.is_none() => {
+            ast::Stmt::AnnAssign(field) if field.value.is_none() || dataclass.is_some() => {
+                if dataclass.is_some() && !field.simple {
+                    return Err(module.error(
+                        field,
+                        "dataclass fields require an unparenthesized name annotation",
+                    ));
+                }
                 let ast::Expr::Name(name) = &*field.target else {
                     return Err(module.error(field, "a field declaration must annotate one name"));
                 };
@@ -80,22 +107,27 @@ fn collect_class(
                 if name.starts_with("__") {
                     return Err(module.error(field, "field names starting with '__' are reserved"));
                 }
-                if !names.insert(name.to_owned()) {
+                if names.contains(name) {
                     return Err(module.error(field, &format!("duplicate class member {name:?}")));
                 }
-                fields.push(Field {
-                    name: name.to_owned(),
-                    annotation: (*field.annotation).clone(),
-                });
+                fields.push(dataclasses::field(
+                    graph,
+                    definition.module,
+                    field,
+                    name,
+                    dataclass.as_ref(),
+                    &class_bindings,
+                )?);
+                names.insert(name.to_owned());
+                if field.value.is_some() {
+                    class_bindings.insert(name.to_owned());
+                }
             }
             ast::Stmt::FunctionDef(method) => {
-                if method.is_async
-                    || !method.decorator_list.is_empty()
-                    || method.type_params.is_some()
-                {
+                if method.is_async || method.type_params.is_some() {
                     return Err(module.error(
                         method,
-                        "async methods, method decorators, and method type parameters are unsupported",
+                        "async methods and method type parameters are unsupported",
                     ));
                 }
                 let name = method.name.as_str();
@@ -105,6 +137,7 @@ fn collect_class(
                         "method names starting with '__' are reserved except '__init__'",
                     ));
                 }
+                let kind = method_kind(graph, definition.module, method, &class_bindings)?;
                 if !names.insert(name.to_owned()) {
                     return Err(module.error(method, &format!("duplicate class member {name:?}")));
                 }
@@ -113,28 +146,64 @@ fn collect_class(
                     .posonlyargs
                     .first()
                     .or_else(|| method.parameters.args.first());
-                if first.is_none_or(|parameter| parameter.name().as_str() != "self") {
+                let receiver = match kind {
+                    MethodKind::Instance | MethodKind::Property => Some("self"),
+                    MethodKind::Class => Some("cls"),
+                    MethodKind::Static => None,
+                };
+                if let Some(receiver) = receiver
+                    && first.is_none_or(|parameter| parameter.name().as_str() != receiver)
+                {
                     return Err(module.error(
                         method,
-                        "an instance method's first positional parameter must be named 'self'",
+                        &format!(
+                            "this method's first positional parameter must be named {receiver:?}"
+                        ),
                     ));
                 }
+                if kind == MethodKind::Property
+                    && (method.parameters.len() != 1 || first.unwrap().default.is_some())
+                {
+                    return Err(module.error(method, "a property getter must take only self"));
+                }
                 if name == "__init__" {
+                    if kind != MethodKind::Instance {
+                        return Err(module.error(method, "__init__ must be an instance method"));
+                    }
                     initializer = Some(methods.len());
                 }
                 methods.push(method.clone());
+                method_kinds.push(kind);
+                class_bindings.insert(name.to_owned());
             }
             ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_)) => {}
+            ast::Stmt::Pass(_) => {}
             _ => {
                 return Err(module.error(
                     statement,
-                    "class bodies allow only field annotations without defaults, methods, and docstrings",
+                    "class bodies allow only declared fields, methods, pass, and docstrings; field defaults require @dataclass",
                 ));
             }
         }
     }
-    let initializer = initializer
-        .ok_or_else(|| module.error(node, "a fixed class requires an explicit __init__ method"))?;
+    let generated_initializer =
+        initializer.is_none() && dataclass.is_some_and(|options| options.init);
+    let initializer = if generated_initializer {
+        let index = methods.len();
+        methods.push(dataclasses::initializer(module, node, &fields)?);
+        method_kinds.push(MethodKind::Instance);
+        index
+    } else {
+        if dataclass.is_some_and(|options| options.frozen) {
+            return Err(module.error(node, "frozen dataclasses require a generated initializer"));
+        }
+        initializer.ok_or_else(|| {
+            module.error(
+                node,
+                "a fixed class requires an explicit or generated __init__ method",
+            )
+        })?
+    };
     check_initializer(module, &methods[initializer], &fields)?;
     Ok(Class {
         definition,
@@ -142,8 +211,43 @@ fn collect_class(
         node: node.clone(),
         fields,
         methods,
+        method_kinds,
+        dataclass,
+        generated_initializer,
         initializer,
     })
+}
+
+/// Only these sealed descriptors affect binding; arbitrary decorators still cannot run.
+fn method_kind(
+    graph: &SourceGraph,
+    module_id: usize,
+    method: &ast::StmtFunctionDef,
+    class_names: &HashSet<String>,
+) -> Result<MethodKind, String> {
+    let module = &graph.modules[module_id];
+    let [decorator] = method.decorator_list.as_slice() else {
+        return if method.decorator_list.is_empty() {
+            Ok(MethodKind::Instance)
+        } else {
+            Err(module.error(method, "method decorators cannot be stacked"))
+        };
+    };
+    if let ast::Expr::Name(name) = &decorator.expression
+        && graph.resolve(module_id, &decorator.expression).is_none()
+        && !class_names.contains(name.id.as_str())
+    {
+        match name.id.as_str() {
+            "property" => return Ok(MethodKind::Property),
+            "classmethod" => return Ok(MethodKind::Class),
+            "staticmethod" => return Ok(MethodKind::Static),
+            _ => {}
+        }
+    }
+    Err(module.error(
+        decorator,
+        "method decorators must be unshadowed @property, @classmethod, or @staticmethod; properties are read-only",
+    ))
 }
 
 /// Initializes each field once before `self` can be read or passed to another operation.
@@ -153,6 +257,13 @@ fn check_initializer(
     initializer: &ast::StmtFunctionDef,
     fields: &[Field],
 ) -> Result<(), String> {
+    let receiver = initializer
+        .parameters
+        .iter_non_variadic_params()
+        .next()
+        .expect("initializers have a receiver")
+        .name()
+        .as_str();
     let declared = fields
         .iter()
         .map(|field| field.name.as_str())
@@ -180,7 +291,7 @@ fn check_initializer(
             let ast::Expr::Attribute(attribute) = target else {
                 return Err(module.error(target, "__init__ must assign a declared self.field"));
             };
-            if !matches!(&*attribute.value, ast::Expr::Name(name) if name.id == "self") {
+            if !matches!(&*attribute.value, ast::Expr::Name(name) if name.id == receiver) {
                 return Err(module.error(target, "__init__ must assign a declared self.field"));
             }
             let name = attribute.attr.as_str();
@@ -197,9 +308,9 @@ fn check_initializer(
                 ));
             }
         }
-        let mut self_use = SelfUse(None);
+        let mut self_use = SelfUse(receiver, None);
         self_use.visit_expr(&assignment.value);
-        if let Some(expression) = self_use.0 {
+        if let Some(expression) = self_use.1 {
             return Err(module.error(
                 expression,
                 "__init__ assignment values cannot read or expose self before construction finishes",
@@ -242,18 +353,18 @@ fn initializer_targets<'a>(target: &'a ast::Expr, targets: &mut Vec<&'a ast::Exp
     }
 }
 
-struct SelfUse<'a>(Option<&'a ast::Expr>);
+struct SelfUse<'a>(&'a str, Option<&'a ast::Expr>);
 
 impl<'a> Visitor<'a> for SelfUse<'a> {
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
-        if self.0.is_some() {
+        if self.1.is_some() {
             return;
         }
         if let ast::Expr::Lambda(lambda) = expression
             && lambda.parameters.as_ref().is_some_and(|parameters| {
                 parameters
                     .iter_non_variadic_params()
-                    .any(|parameter| parameter.name().as_str() == "self")
+                    .any(|parameter| parameter.name().as_str() == self.0)
             })
         {
             // Defaults are rejected, and this self belongs only to the lambda.
@@ -268,23 +379,29 @@ impl<'a> Visitor<'a> for SelfUse<'a> {
             ast::Expr::Generator(value) => Some(value.generators.as_slice()),
             _ => None,
         };
-        fn binds_self(target: &ast::Expr) -> bool {
+        fn binds_self(target: &ast::Expr, receiver: &str) -> bool {
             match target {
-                ast::Expr::Name(name) => name.id == "self",
-                ast::Expr::Tuple(value) => value.elts.iter().any(binds_self),
-                ast::Expr::List(value) => value.elts.iter().any(binds_self),
-                ast::Expr::Starred(value) => binds_self(&value.value),
+                ast::Expr::Name(name) => name.id == receiver,
+                ast::Expr::Tuple(value) => {
+                    value.elts.iter().any(|target| binds_self(target, receiver))
+                }
+                ast::Expr::List(value) => {
+                    value.elts.iter().any(|target| binds_self(target, receiver))
+                }
+                ast::Expr::Starred(value) => binds_self(&value.value, receiver),
                 _ => false,
             }
         }
         if let Some(clauses) = clauses
-            && clauses.iter().any(|clause| binds_self(&clause.target))
+            && clauses
+                .iter()
+                .any(|clause| binds_self(&clause.target, self.0))
         {
             self.visit_expr(&clauses[0].iter);
             return;
         }
-        if matches!(expression, ast::Expr::Name(name) if name.id == "self") {
-            self.0 = Some(expression);
+        if matches!(expression, ast::Expr::Name(name) if name.id == self.0) {
+            self.1 = Some(expression);
         } else {
             walk_expr(self, expression);
         }

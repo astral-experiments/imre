@@ -331,12 +331,18 @@ unsafe fn store(destination: *mut usize, value: OwnedWord) {
 }
 
 fn empty_list(schema: &Schema) -> OwnedWord {
-    let word = if schema.word_kind == 4 {
+    let list = if schema.kind == OPTIONAL {
+        schema.child()
+    } else {
+        schema
+    };
+    let word = if list.word_kind == 4 {
         crate::new_list(Vec::new()) as usize
     } else {
-        super::relar_seq_new(schema.child().word_kind) as usize
+        super::relar_seq_new(list.child().word_kind) as usize
     };
-    // SAFETY: both branches create the schema's exact, independently owned list.
+    // SAFETY: both branches create the exact list payload. Nullable list storage
+    // uses that same pointer, so the original schema retains the correct owner.
     unsafe { OwnedWord::from_owned(word, schema.storage()) }
 }
 
@@ -406,4 +412,50 @@ pub unsafe extern "C" fn relar_json_decode(
         })
         .map(|value| value.into_word() as *const usize);
     finish(result, std::ptr::null())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_integer_list_factories_preserve_payload_layout_and_fresh_identity() {
+        let integer = Schema {
+            kind: INTEGER,
+            word_kind: 2,
+            element: std::ptr::null(),
+            record: std::ptr::null(),
+            field_count: 0,
+            fields: std::ptr::null(),
+        };
+        let list = Schema {
+            kind: LIST,
+            word_kind: 4,
+            element: &integer,
+            ..integer
+        };
+        let optional = Schema {
+            kind: OPTIONAL,
+            word_kind: 256 | 4,
+            element: &list,
+            ..integer
+        };
+        let first = empty_list(&optional);
+        let second = empty_list(&optional);
+        assert_eq!(first.kind.raw(), 256 | 4);
+        assert_ne!(first.word, second.word);
+        // SAFETY: each factory result owns an exact native integer list. Mutating
+        // one verifies its payload layout and independence from the other result.
+        unsafe {
+            crate::relar_list_append(first.word as *const crate::List, Int::small(7).unwrap().0);
+            assert_eq!(
+                Int::borrow(crate::relar_list_len(first.word as *const crate::List)).as_small(),
+                Some(1)
+            );
+            assert_eq!(
+                Int::borrow(crate::relar_list_len(second.word as *const crate::List)).as_small(),
+                Some(0)
+            );
+        }
+    }
 }

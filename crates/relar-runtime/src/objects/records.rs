@@ -11,6 +11,30 @@ use super::{fail, words::WordKind};
 pub struct RecordDescriptor {
     pub length: usize,
     pub kinds: *const u32,
+    /// Null for internal records without user-visible value operations.
+    pub semantics: *const RecordSemantics,
+}
+
+/// Generated behavior is shared by a class, never carried by individual fields.
+/// `kind` is zero for a class and one for a tuple; flags select generated equality
+/// and representation. All strings are immutable UTF-8 byte slices.
+#[repr(C)]
+pub struct RecordSemantics {
+    pub kind: u32,
+    pub flags: u32,
+    pub name: *const u8,
+    pub name_len: usize,
+    pub qualified_name: *const u8,
+    pub qualified_name_len: usize,
+    pub fields: *const RecordField,
+}
+
+#[repr(C)]
+pub struct RecordField {
+    pub name: *const u8,
+    pub name_len: usize,
+    /// Bit zero includes the field in equality; bit one includes it in repr.
+    pub flags: u32,
 }
 
 #[repr(C)]
@@ -20,6 +44,13 @@ struct Header {
 }
 
 const _: () = assert!(size_of::<Header>() == 16 && align_of::<Header>() == 8);
+
+/// # Safety
+/// `payload` is rooted and was allocated with `relar_record_new`.
+pub(super) unsafe fn descriptor<'a>(payload: *const usize) -> &'a RecordDescriptor {
+    // SAFETY: the immutable descriptor belongs to the live allocation's header.
+    unsafe { &*(*payload.cast::<Header>().sub(1)).descriptor }
+}
 
 fn layout(length: usize) -> Layout {
     let size = length
@@ -180,11 +211,13 @@ mod tests {
         let descriptor = RecordDescriptor {
             length: kinds.len(),
             kinds: kinds.as_ptr(),
+            semantics: std::ptr::null(),
         };
         let child_kinds = [3];
         let child_descriptor = RecordDescriptor {
             length: 1,
             kinds: child_kinds.as_ptr(),
+            semantics: std::ptr::null(),
         };
         assert_eq!(layout(kinds.len()).size(), 16 + kinds.len() * 8);
         let text = Rc::new(Str::from("partial owned field"));
@@ -233,6 +266,7 @@ mod tests {
         let descriptor = RecordDescriptor {
             length: 3,
             kinds: kinds.as_ptr(),
+            semantics: std::ptr::null(),
         };
         let text = Rc::new(Str::from("snapshot"));
         let weak = Rc::downgrade(&text);
@@ -269,6 +303,7 @@ mod tests {
         let descriptor = RecordDescriptor {
             length: kinds.len(),
             kinds: kinds.as_ptr(),
+            semantics: std::ptr::null(),
         };
         let original = Rc::new(Str::from("cached field"));
         let original_weak = Rc::downgrade(&original);

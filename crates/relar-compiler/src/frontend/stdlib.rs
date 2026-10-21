@@ -147,8 +147,7 @@ impl Checker<'_> {
     fn sort_callback(&mut self, expression: &ast::Expr, input: Type) -> Result<Expr, String> {
         let value = if let ast::Expr::Lambda(lambda) = expression {
             self.lambda_value(lambda, Some(vec![input]), None)?
-        } else if let Some(Binding::Definition(definition)) =
-            self.graph.resolve(self.module, expression)
+        } else if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(signature) = self.functions.get(&definition).cloned()
         {
             if signature.params.len() == 1
@@ -305,12 +304,12 @@ impl Checker<'_> {
         }
         if !matches!(
             field.conversion,
-            ast::ConversionFlag::None | ast::ConversionFlag::Str
+            ast::ConversionFlag::None | ast::ConversionFlag::Str | ast::ConversionFlag::Repr
         ) {
             return Err(error(
                 self.source,
                 field,
-                "f-string conversions support only !s",
+                "f-string conversions support only !s and !r",
             ));
         }
         let mut specification = String::new();
@@ -353,6 +352,19 @@ impl Checker<'_> {
             return Ok(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::FloatFormat { precision, percent }, vec![value]),
+            });
+        }
+        if field.conversion == ast::ConversionFlag::Repr || matches!(value.ty, Type::Class(_)) {
+            if !dataclass_values::repr_supported(value.ty, self.types) {
+                return Err(error(
+                    self.source,
+                    field,
+                    "repr does not support resource or callable values",
+                ));
+            }
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::Repr, vec![value]),
             });
         }
         if !matches!(

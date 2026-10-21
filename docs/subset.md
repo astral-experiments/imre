@@ -10,7 +10,7 @@ This is a deliberately restricted Python dialect for closed, statically typed so
 | Imports | Absolute, `from`, and package-relative imports; aliases and package re-exports; fixed module, definition, and exported value bindings; shared mutable values; no import cycles |
 | Functions | Exact signatures declared or inferred from concrete calls, scalar defaults, and checked bodies; direct positional and keyword calls; positional-only and keyword-only parameters; exact callable values, bound methods, and noncapturing lambdas; no recursive call cycles |
 | Types | `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed `typing.TextIO` and `typing.BinaryIO`, the sealed builtin `Exception` family, fixed nominal classes, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, exact `typing.Callable[[T1, T2], R]` signatures, `str \| bytes`, and `T \| None`; locals have one inferred or declared storage type |
-| Classes | Declared fields, an explicit initializer, typed instance methods, alias-visible field mutation, and numeric field augmented assignment |
+| Classes | Fixed fields, explicit or dataclass-generated initialization, typed instance/class/static methods, read-only properties, method-local `typing.Self`, alias-visible mutation, and frozen dataclasses |
 | Statements | Single-target and chained assignment; nested and starred unpacking of fixed tuples, lists, strings, and bytes, annotated assignment, numeric augmented assignment, local string/bytes `+=` and bytes `*=`, dictionary entry deletion, `if`/`elif`/`else`, structural `match`/`case`, `while`, `for` over ranges, strings, bytes, concrete containers, or supported iterator pipelines, loop `else`, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin-file `with` |
 | Conditions | Truth tests for every supported concrete type; operand-returning `and`/`or`, boolean `not`, and short-circuit evaluation; conditional expressions `yes if condition else no`; assignment expressions `(name := value)`; local optional narrowing |
 | Integers | Arbitrary precision; `+`, `-`, `*`, `//`, `%`, `&`, `\|`, `^`, `<<`, `>>`, and `divmod`; `/` returns a correctly rounded float; unary `+`/`-`/`~` and `abs`; all six value comparisons, including chains |
@@ -20,16 +20,16 @@ This is a deliberately restricted Python dialect for closed, statically typed so
 | Sets | Exact `int`, `str`, or `bytes` elements; literals and `*` displays, contextual `set()`, `add`, `discard`, `in`/`not in`, `len`, and iteration with unspecified order |
 | Comprehensions | Eager list, dictionary, and set comprehensions; immediately consumed generator expressions; nested `for` clauses and truth-tested filters; isolated target bindings |
 | Tuples | Fixed length and a type per position; literals, bounded literal indexing, nested/starred unpacking into names, fields, and subscripts, and `len(...)`; immutable slots |
-| Strings | Immutable UTF-8 text, literals, scalar f-strings with bounded fixed/percent numeric formats, concatenation, equality/inequality, Unicode scalar length, indexing, slicing and iteration, no-argument whitespace `split()` and `splitlines()`, `rstrip([chars])`, `join(iterable)`, `replace(old, new)`, input and output |
+| Strings | Immutable UTF-8 text, literals, scalar/record f-strings and `!r`, bounded fixed/percent numeric formats, concatenation, equality/inequality, Unicode scalar length, indexing, slicing and iteration, no-argument whitespace `split()` and `splitlines()`, `rstrip([chars])`, `join(iterable)`, `replace(old, new)`, input and output |
 | Bytes | Immutable bytes; literals, construction from an integer count or `list[int]`, concatenation/repetition, all value comparisons, indexing/slicing/iteration, `len`, Python byte repr, strict UTF-8 encode/decode |
 | Files and arguments | Explicit UTF-8 text read/write and binary read/write/append/exclusive-create modes; `read`, `write`, `flush`, `close`, `closed`; `with` cleanup; one shared mutable `sys.argv` list |
-| Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `bool()` or `bool(value)`; `int(int_or_float_or_bool_or_string)`; `float()` or `float(int_or_float_or_bool_or_string_or_bytes)`; `str()` or `str(int_or_float_or_bool_or_string_or_bytes_or_None_or_exception)`; `abs(int_or_float_or_bool)`; `len(string_or_bytes_or_container)`; `list([iterable])`; `sorted(iterable, key=callback_or_None, reverse=bool)`; integer `sum(iterable[, start])`; `any(iterable)` and `all(iterable)`; immediate `map(callback, iterable)`, `filter(predicate_or_None, iterable)`, `zip(iterable, ..., strict=condition)`, `reversed(sequence)`, and `enumerate(iterable[, start])`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments at an iteration boundary |
+| Builtins | `print(value)` for one scalar, exception, or record; `repr(value)` for supported data values; `input()` without a prompt; `bool()` or `bool(value)`; `int(int_or_float_or_bool_or_string)`; `float()` or `float(int_or_float_or_bool_or_string_or_bytes)`; `str()` or `str(int_or_float_or_bool_or_string_or_bytes_or_None_or_exception_or_record)`; `abs(int_or_float_or_bool)`; `len(string_or_bytes_or_container)`; `list([iterable])`; `sorted(iterable, key=callback_or_None, reverse=bool)`; integer `sum(iterable[, start])`; `any(iterable)` and `all(iterable)`; immediate `map(callback, iterable)`, `filter(predicate_or_None, iterable)`, `zip(iterable, ..., strict=condition)`, `reversed(sequence)`, and `enumerate(iterable[, start])`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments at an iteration boundary |
 
 Booleans have a separate exact type: use `int(flag)` to store one in an integer list. An empty list defaults to `list[int]` unless a typed storage, call, or return boundary supplies its element type. No annotation permits `Any`, an unrestricted union, an untyped object, or a foreign container to enter native storage. ty checks ordinary Python typing first; Relar additionally enforces exact types, definite assignment, fixed bindings, and every container write. Suppression comments cannot waive Relar's contract.
 
 Indentation must use spaces; tabs and form feeds remain valid inside string data. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
 
-Global rebinding, capturing closures, decorators, reflection, dynamic attributes, generator functions, escaping iterator values, async, slice assignment/deletion, tuple display expansion, call argument expansion, variadic parameters, defaults other than scalar literals, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, generator functions, escaping iterator values, async, slice assignment/deletion, tuple display expansion, call argument expansion, variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
 
 ## Inferred function signatures and iterable consumers
 
@@ -55,7 +55,7 @@ An immediate `map(int, source)` converts each item using the ordinary checked `i
 
 ## Callable values and callbacks
 
-`typing.Callable[[int, str], bool]` and `collections.abc.Callable[[int, str], bool]` describe the same exact parameter sequence and return type. Module functions and bound instance methods can be assigned to local variables, passed as arguments, and returned. A bound method owns its receiver, so rebinding the original variable does not invalidate the method, while mutations of that same receiver remain visible. `Callable[[], R]` supports zero arguments. Optional callable locals and parameters require a successful `None` check before invocation.
+`typing.Callable[[int, str], bool]` and `collections.abc.Callable[[int, str], bool]` describe the same exact parameter sequence and return type. Module functions, bound/unbound instance methods, class methods, and static methods can be assigned to local variables, passed as arguments, and returned. A bound method owns its receiver, so rebinding the original variable does not invalidate the method, while mutations of that same receiver remain visible. `Callable[[], R]` supports zero arguments. Optional callable locals and parameters require a successful `None` check before invocation.
 
 ```python
 from typing import Callable
@@ -102,29 +102,25 @@ A generator expression evaluates its leftmost iterable and acquires that iterato
 `from relar.json import decode` exposes an explicit Relar API: `decode(text, Record)` takes a string and a statically resolved class, returning that exact class. Import aliases and first-party re-exports preserve the intrinsic identity. The native decoder constructs existing typed records and lists directly, without exposing dictionaries of unknown values or `Any`.
 
 ```python
+from dataclasses import dataclass, field
 from relar.json import decode
 
+@dataclass(slots=True)
 class Item:
     name: str
-    amount: int
+    amount: int = 0
 
-    def __init__(self, name: str, amount: int = 0) -> None:
-        self.name = name
-        self.amount = amount
-
+@dataclass(slots=True, kw_only=True)
 class Report:
-    items: list[Item]
-
-    def __init__(self, items: list[Item] | None = None) -> None:
-        self.items = [] if items is None else items
+    items: list[Item] = field(default_factory=list)
 
 report = decode('{"items": [{"name": "query"}]}', Report)
 print(report.items[0].amount)
 ```
 
-Field annotations define the JSON schema. Supported fields are `int`, `float`, `bool`, `str`, `None`, nullable forms, exact lists, and nested records with acyclic field types. Each constructor parameter must match one field by name. Its initializer may only assign `self.field = field`, apart from the fresh-list idiom shown above; computed or side-effecting initializers are rejected for decoded classes. Ordinary classes not used by a decode schema retain their existing constructor rules. The decoder applies the proved structural writes directly rather than running arbitrary initialization code.
+Field annotations define the JSON schema. Supported fields are `int`, `float`, `bool`, `str`, `None`, nullable forms, exact lists, and nested records with acyclic field types. Dataclass-generated constructors satisfy the structural initialization requirement, including keyword-only and frozen records. An explicit constructor must match every field by name and assign `self.field = field`; it may also replace a defaulted optional list parameter with `[] if field is None else field`. Computed or side-effecting initializers are rejected for decoded classes. Ordinary classes not used by a decode schema retain their existing constructor rules. The decoder applies the proved writes directly rather than running arbitrary initialization code. Inside a class method, `decode(text, cls)` uses that method's statically bound class.
 
-A field without a parameter default is required. Scalar parameter defaults apply only to missing keys. The fresh-list idiom creates a separate empty list for each missing field; explicit JSON `null` still fails a nonnullable list annotation. Missing optional fields are not automatically optional: they need an explicit default to permit absence. Unknown fields are syntax-checked and ignored. Repeated known fields are rejected, including escaped spellings of the same key; repeated unknown fields and duplicates inside ignored objects are ignored.
+A field without a parameter default is required. Scalar parameter defaults apply only to missing keys. Dataclass `field(default_factory=list)` and the explicit fresh-list idiom create separate empty lists for missing fields; explicit JSON `null` still fails a nonnullable list annotation. An optional list with a factory receives `[]` when missing and `None` for explicit `null`. Explicit initializer defaults remain authoritative even when the dataclass field separately declares a default or factory. Missing optional fields are not automatically optional: they need a default to permit absence. Unknown fields are syntax-checked and ignored. Repeated known fields are rejected, including escaped spellings of the same key; repeated unknown fields and duplicates inside ignored objects are ignored.
 
 Integer fields accept integer tokens of arbitrary precision, excluding booleans, decimal points, and exponents. Float fields accept integer or fractional/exponent tokens, converting to finite binary64; overflow is an error. Integer `-0` converts to positive floating zero, while `-0.0` retains its sign. JSON constants `NaN` and `Infinity`, trailing data, malformed input, schema mismatches, and more than 128 nested object/array levels raise `ValueError`. The nesting limit includes ignored data. Stored strings and decoded record keys must contain Unicode scalar values; ignored values are not materialized. Error wording is not a CPython `json.JSONDecodeError` compatibility promise.
 
@@ -261,7 +257,7 @@ Imported modules, including package `__init__.py` files, run their typed top-lev
 
 An optional `if __name__ == "__main__":` guard without an `else` is supported. Every loaded module is type-checked and lowered for validation, including unused functions and inactive guards. The fixed `__name__` string is `"__main__"` in the entry and the qualified module name in imported code.
 
-Imports are resolved statically from `.py` files and packages with `__init__.py`. Wildcards, dynamic or function-local imports, namespace packages, import cycles, dependencies outside the module root, and general standard-library imports or shadowing are rejected. The compiler recognizes sealed bindings for `typing.TextIO`, `typing.BinaryIO`, `typing.Union`, `typing.Callable`, `collections.abc.Callable`, `sys.argv`, `io.UnsupportedOperation`, and `relar.json.decode`; these do not execute standard-library Python code. Their import aliases and first-party re-exports preserve identity. A package can re-export definitions from its children; reading an unfinished parent's definitions through a circular import is rejected. Symlinks cannot escape the module root or give one source file multiple module identities. The source-string library APIs accept sealed bindings but remain isolated from filesystem imports, which use the path-based APIs.
+Imports are resolved statically from `.py` files and packages with `__init__.py`. Wildcards, dynamic or function-local imports, namespace packages, import cycles, dependencies outside the module root, and general standard-library imports or shadowing are rejected. The compiler recognizes sealed bindings for `typing.TextIO`, `typing.BinaryIO`, `typing.Union`, `typing.Callable`, `typing.Self`, `collections.abc.Callable`, `dataclasses.dataclass`, `dataclasses.field`, `sys.argv`, `io.UnsupportedOperation`, and `relar.json.decode`; these do not execute standard-library Python code. Their import aliases and first-party re-exports preserve identity. A package can re-export definitions from its children; reading an unfinished parent's definitions through a circular import is rejected. Symlinks cannot escape the module root or give one source file multiple module identities. The source-string library APIs accept sealed bindings but remain isolated from filesystem imports, which use the path-based APIs.
 
 The I/O surface is intentionally small. `input()` reads a UTF-8 line and removes its trailing LF. A preceding CR remains part of the value, matching CPython's piped input on the Linux target. `int(str)` accepts signed decimal digits, optional underscores between digits, and surrounding Python numeric whitespace. Decimal classification is pinned to Unicode 16, matching CPython 3.14; mixed decimal digit families are accepted, while superscripts and other numeric lookalikes are rejected. Other bases remain unsupported. Surrogate escapes in non-raw string literals are rejected: Ruff's analysis AST substitutes replacement characters for them, which is unsuitable for executable semantics. Strings support `+` and local `+=`; `text.split()` groups Python whitespace and omits empty fields, returning `list[str]`. `text.splitlines()` recognizes LF, CR, CRLF, vertical tab, form feed, U+001C through U+001E, U+0085, U+2028, and U+2029. It returns no elements for empty input and no extra element for a final line break; U+001F remains ordinary text. Separators, split limits, retained line endings, other string methods, general formatting, and arbitrary codecs are not implemented. CPython's configurable integer conversion digit limit is not reproduced.
 
@@ -283,20 +279,20 @@ The receiver of an instance call evaluates first. Supplied arguments then evalua
 
 Variadic parameters and `*`/`**` argument expansion remain unsupported. Builtins keep their explicit argument conventions: `open` accepts `encoding="utf-8"`, `sum` accepts `start`, `zip` accepts `strict`, and `sorted` accepts `key` and `reverse`. First-party keyword support does not add keywords to `print`, container methods, or file methods.
 
-## Scalar f-strings
+## F-strings and repr
 
-F-strings interpolate exact `int`, `float`, `bool`, `str`, `bytes`, `None`, and sealed builtin exception values. Ordinary, raw, triple-quoted, and adjacent literals are supported, including escaped braces, Unicode, and escaped NULs. Each field expression and its conversion complete before the next field evaluates. Nested f-strings may appear inside field expressions. Optional values require the same local narrowing as other scalar operations.
+F-strings interpolate exact `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed builtin exception values, and fixed records. Ordinary, raw, triple-quoted, and adjacent literals are supported, including escaped braces, Unicode, and escaped NULs. Each field expression and its conversion complete before the next field evaluates. Nested f-strings may appear inside field expressions. Optional values require the same local narrowing as other scalar operations.
 
 ```python
 def describe(name: str, quantity: int) -> str:
     return f"{name}: {quantity} units"
 ```
 
-The default conversion and `!s` use the existing sealed scalar string conversion, selected directly by the compiler. The existing restriction against rebinding builtin names still applies. An absent or explicitly empty format specification, as in `f"{quantity:}"`, is supported.
+The default conversion and `!s` use sealed scalar conversion or record repr, selected directly by the compiler. `!r` and `repr(value)` additionally format supported containers, tuples, unions, and optional data, recursively composing generated dataclass repr. Strings use Python quoting and escaping. Resources, exceptions, and callables have no supported repr. The existing restriction against rebinding builtin names still applies. An absent or explicitly empty format specification, as in `f"{quantity:}"`, is supported.
 
-Numeric fields additionally accept literal `f`, `%`, `.Nf`, and `.N%` specifications, with decimal precision `N` from 0 through 1000; omitted precision is six. Integer and boolean values convert to binary64 using the ordinary checked conversion, so an oversized integer raises `OverflowError` before any later field runs. Fixed-point formatting rounds ties to even and preserves signed zero. Percentage formatting first multiplies the binary64 value by 100 and appends `%`; infinities and NaNs use lowercase spellings. For example, `f"{ratio:.2%}"` and `f"{bytes_used / 1024:.2f}"` are supported. Numeric specifications cannot follow `!s`.
+Numeric fields additionally accept literal `f`, `%`, `.Nf`, and `.N%` specifications, with decimal precision `N` from 0 through 1000; omitted precision is six. Integer and boolean values convert to binary64 using the ordinary checked conversion, so an oversized integer raises `OverflowError` before any later field runs. Fixed-point formatting rounds ties to even and preserves signed zero. Percentage formatting first multiplies the binary64 value by 100 and appends `%`; infinities and NaNs use lowercase spellings. For example, `f"{ratio:.2%}"` and `f"{bytes_used / 1024:.2f}"` are supported. Numeric specifications cannot follow `!s` or `!r`.
 
-Dynamic specifications, width/alignment/sign options, other numeric presentation types, `!r`, `!a`, and debug `=` fields are rejected, including `f"{quantity=!s}"`. General `__format__`, `__str__`, and `__repr__` protocols remain unsupported.
+Dynamic specifications, width/alignment/sign options, other numeric presentation types, `!a`, and debug `=` fields are rejected, including `f"{quantity=!s}"`. General `__format__`, `__str__`, and `__repr__` protocols remain unsupported.
 
 Raw prefixes apply only to their own literal text. Expressions inside a raw f-string still follow their ordinary string rules, and adjacent parts keep their individual prefixes. Surrogate escapes in non-raw literal text or field expressions are rejected consistently with ordinary strings; tabs and form feeds inside literal text remain data.
 
@@ -353,7 +349,7 @@ Numeric literal patterns use exact Python value equality across integers, floats
 
 Mapping literal keys use the dictionary's scalar equality, including `True` and `1.0` matching an integer key `1`. Finite integral float keys are normalized to their exact integer value; fractional and infinite float keys cannot match integer dictionaries and fail the pattern without a conversion error. Ordinary dictionary writes still require the exact declared key type. Repeated equal literal keys are rejected, including numeric aliases, signed zero, bytes, and repeated fractional or infinite floats, even for a dictionary with a different key domain.
 
-Class patterns resolve imported aliases to a fixed nominal identity and inspect declared fields in keyword order. Another declared class does not match even if its fields have the same names. Positional class patterns, `__match_args__`, builtin class patterns, undeclared fields, dynamic value-pattern lookups, inheritance, metaclasses, and descriptors remain unsupported. All case bodies and guards are checked, including unreachable cases.
+Class patterns resolve imported aliases to a fixed nominal identity and inspect declared fields in keyword order. Another declared class does not match even if its fields have the same names. Positional class patterns, `__match_args__`, builtin class patterns, undeclared fields, dynamic value-pattern lookups, inheritance, metaclasses, and property lookups in patterns remain unsupported. All case bodies and guards are checked, including unreachable cases.
 
 ## Fixed classes
 
@@ -371,11 +367,45 @@ class Counter:
         return self.value
 ```
 
-Class bodies contain field annotations without defaults, instance methods, and optional docstrings. Every method's first positional parameter is named `self`; its exact class type is inferred, or an explicit annotation must name that class. Other parameter and return types follow the same inference rules as direct functions; an initializer must return `None`. Method calls use the receiver's exact class and a fixed implementation. Passing or returning an instance preserves its identity, and aliases observe field replacement. `==` and `!=` between instances of the same class compare object identity.
+Ordinary class bodies contain field annotations without defaults, typed methods, and optional docstrings. An instance method's first positional parameter is named `self`; its exact class type is inferred, or an explicit annotation must name that class. Other parameter and return types follow the same inference rules as direct functions; an initializer must return `None`. Method calls use the receiver's exact class and a fixed implementation. Passing or returning an instance preserves its identity, and aliases observe field replacement. Ordinary classes use identity for `==` and `!=`; distinct nominal classes compare unequal.
 
-Every class requires `__init__(...) -> None`, including classes with no fields. Its body contains only straight-line `self.field = expression` assignments, docstrings, and `pass`. Every declared field must be assigned exactly once. Assignment values may use constructor arguments and checked expressions, but cannot read or pass the receiver; a partially initialized object never escapes construction. Local assignments, conditionals, loops, explicit returns, and direct later calls to `__init__` are rejected.
+An ordinary class requires `__init__(...) -> None`, including a class with no fields. Its body contains only straight-line `self.field = expression` assignments, docstrings, and `pass`. Every declared field must be assigned exactly once. Assignment values may use constructor arguments and checked expressions, but cannot read or pass the receiver; a partially initialized object never escapes construction. Local assignments, conditionals, loops, explicit returns, and direct later calls to `__init__` are rejected.
 
-Inheritance, metaclasses, class variables, field defaults, properties, static/class methods, dynamically added fields, and special methods other than `__init__` are unsupported. Field and method names beginning with `__` are reserved, except the initializer. Class-field ownership types must form an acyclic graph, following list elements, dictionary values, tuple positions, and optional payloads. For example, fields `children: list["Node"]`, `named: dict[str, "Node"]`, and `parent: "Node | None"` inside class `Node` are rejected even when unused or initialized empty. Methods may accept or return their own class because those signatures do not create stored references.
+`@property` marks a read-only getter with only `self`. Each access calls it again, preserving mutation, ownership, and exceptions. Setters and deleters are unsupported. `@classmethod` binds a first positional parameter named `cls` to the declaring class; `cls(...)` and `cls.method(...)` resolve statically. `@staticmethod` has no implicit parameter. Class/static methods work through either a class or an instance, and an instance expression still evaluates before arguments. `Class.method(instance, ...)` also supports unbound instance methods. `typing.Self`, including aliases and quoted annotations, means the owning class in method annotations; it is not a runtime type object or a stored class value.
+
+`@dataclass` and `@dataclass(...)` generate structural initialization, equality, and repr using the same fixed layout. Import aliases and reexports of `dataclasses.dataclass` and `dataclasses.field` retain their identity. This is a compile-time facility, not general decorator execution.
+
+```python
+from dataclasses import dataclass, field
+from typing import Self
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class Snapshot:
+    name: str
+    values: list[int] = field(default_factory=list)
+
+    @classmethod
+    def named(cls, name: str) -> Self:
+        return cls(name=name)
+
+    @property
+    def count(self) -> int:
+        return len(self.values)
+
+snapshot = Snapshot.named("sample")
+snapshot.values.append(1)
+print(snapshot.count)
+```
+
+Dataclass fields may use exact scalar literal defaults or `field(default_factory=list)`, `dict`, or `set`. Each omitted factory field gets a fresh container; explicit arguments retain their identity. Optional container factories preserve the distinction between an omitted value and explicit `None`. `kw_only` works at class and field level, including a field override. Fields also accept `compare` and `repr` flags. Flags require literal booleans; custom factories and mutable literal defaults are rejected.
+
+Class options `init`, `eq`, `repr`, `frozen`, `kw_only`, and `slots` are supported. A mutable dataclass may retain an explicit initializer under the ordinary constructor rules; `init=False` requires one. Both values of `slots` keep the language's fixed-layout contract. Frozen records reject field assignments at compile time; their referenced containers remain mutable. Explicit frozen initializers, `__post_init__`, `InitVar`, `ClassVar`, `field(init=False)`, custom metadata, generated ordering, custom hashes, and weak-reference slots are unsupported. `match_args` is accepted without adding positional class patterns or runtime `__match_args__` access. Frozen records do not add class-valued dictionary keys or set members.
+
+Generated equality follows modern CPython: an object equals itself; otherwise instances of the same dataclass compare selected fields in declaration order. `eq=False` preserves identity equality. Distinct records containing the same scalar NaN compare unequal. Compared container fields containing floats are rejected because native unboxed floats cannot preserve Python container NaN identity; use `field(compare=False)` or `@dataclass(eq=False)` for such storage. Nested record fields preserve their own identity and equality behavior.
+
+Generated repr includes field names and values in declaration order, omitting `field(repr=False)`. `repr`, `str(record)`, `print(record)`, and record f-strings use it; `repr=False` retains ordinary object repr, whose address is not stable output. Resource fields require `repr=False` on the field or class. Container and tuple data can be represented recursively, even though direct container value comparisons remain outside the source contract.
+
+Inheritance, metaclasses, class variables, dynamically added fields, and user-written special methods other than `__init__` remain unsupported. Field and method names beginning with `__` are reserved, except the initializer. Class-field ownership types must form an acyclic graph, following list elements, dictionary values, tuple positions, and optional payloads. For example, fields `children: list["Node"]`, `named: dict[str, "Node"]`, and `parent: "Node | None"` inside class `Node` are rejected even when unused or initialized empty. Methods may accept or return their own class because those signatures do not create stored references.
 
 ## Concrete containers and optional values
 
@@ -481,6 +511,7 @@ target/release/relar build tests/programs/ownership.py -o /tmp/ownership --emit-
 python3 tests/differential.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/imports.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/classes.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+python3 tests/dataclass_records.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/containers.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/comprehensions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/unpacking.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
@@ -518,6 +549,8 @@ The differential suite compares full stdout with CPython at `-O0` and `-O3`, cov
 The imports suite compares multi-file programs with CPython at `-O0` and `-O3`, including package entry points, aliases, re-exports, relative imports, late function-global lookup, and mutation across module boundaries. It also checks invalid imports, unused invalid code, source diagnostics, and protection of imported files from output writes.
 
 The classes suite checks nominal types, imported class aliases, field replacement, temporary receivers, returns, method argument evaluation, and normal-exit ownership at `-O0` and `-O3`. Rejection cases cover incomplete construction, escaping `self`, invalid writes, dynamic class features, recursive calls, and cyclic field types.
+
+The dataclass records suite compares generated construction, keyword-only and fresh defaults, equality/repr, frozen writes, properties, class/static methods, `Self`, callbacks, imported decorator aliases, and typed JSON schemas. It checks argument/getter exceptions and receiver ownership. Rejections protect supported decorator options, exact types, and frozen/property mutation. The shared-NaN equality oracle requires CPython 3.13 or later; older hosts skip only that fixture because dataclass equality changed. The suite runs under ordinary optimization, ThinLTO, and ASan/LSan.
 
 The containers suite covers nested lists, tuple positions and unpacking, list iteration and `enumerate`, optional ownership and local flow narrowing, contextual literals, shallow repetition, string concatenation, and whitespace splitting. Iteration cases exercise alias mutation, source and target rebinding, temporary roots, control flow, and arbitrary-precision counters. It rejects invalid alias writes, unsafe optional accesses, and class cycles hidden inside containers.
 

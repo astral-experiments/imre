@@ -282,6 +282,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::SplitLines
         | Builtin::RStrip
         | Builtin::Str
+        | Builtin::Repr
         | Builtin::TextClosed
         | Builtin::DictGetDefault
         | Builtin::DictTryGet(_)
@@ -372,6 +373,7 @@ mod tests {
         let mut module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
+            class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
             functions: vec![
@@ -422,6 +424,7 @@ mod tests {
         let module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
+            class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
             functions: vec![
@@ -477,6 +480,7 @@ def conversion(values: list[str]) -> bool:
         let module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
+            class_metadata: Vec::new(),
             json_records: Vec::new(),
             globals: Vec::new(),
             functions: vec![

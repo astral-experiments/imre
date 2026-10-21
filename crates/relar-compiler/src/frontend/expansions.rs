@@ -127,7 +127,7 @@ impl Checker<'_> {
             return Ok(Iteration::Prepared(input));
         }
         if let ast::Expr::Call(call) = expression {
-            if self.graph.resolve(self.module, &call.func).is_some() {
+            if self.resolve(&call.func).is_some() {
                 return Ok(Iteration::Container {
                     iterable: self.expr(expression)?,
                     items: false,
@@ -140,6 +140,13 @@ impl Checker<'_> {
             if let ast::Expr::Attribute(attribute) = &*call.func
                 && attribute.attr.as_str() == "items"
             {
+                if self.class_reference(&attribute.value).is_some() {
+                    return Ok(Iteration::Container {
+                        iterable: self.call(call)?,
+                        items: false,
+                        start: None,
+                    });
+                }
                 let fields =
                     element.and_then(|ty| self.types.fields(self.types.payload(ty).unwrap_or(ty)));
                 let hint = fields.as_deref().and_then(|fields| match fields {
@@ -150,41 +157,8 @@ impl Checker<'_> {
                 });
                 let iterable = self.boolean_operand(&attribute.value, hint)?;
                 if let Type::Class(class) = iterable.ty {
-                    if call
-                        .arguments
-                        .args
-                        .iter()
-                        .any(|value| matches!(value, ast::Expr::Starred(_)))
-                        || call
-                            .arguments
-                            .keywords
-                            .iter()
-                            .any(|keyword| keyword.arg.is_none())
-                    {
-                        return Err(error(
-                            self.source,
-                            call,
-                            "argument unpacking is unsupported",
-                        ));
-                    }
-                    let signature = self.classes.methods[class]
-                        .get("items")
-                        .ok_or_else(|| error(self.source, call, "unknown instance method"))?
-                        .clone();
-                    let (returns, args) = if self.inference.is_some() {
-                        self.infer_call(call, &signature, Some(iterable), 1)?
-                    } else {
-                        (
-                            signature.returns,
-                            self.arguments(call, &signature.params[1..], Some(iterable))?,
-                        )
-                    };
-                    self.calls.insert(signature.id);
                     return Ok(Iteration::Container {
-                        iterable: Expr {
-                            ty: returns,
-                            kind: ExprKind::Call(signature.id, args),
-                        },
+                        iterable: self.class_method_call(call, attribute, class, Some(iterable))?,
                         items: false,
                         start: None,
                     });

@@ -21,12 +21,12 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "fstrings"
 
 # Literal whitespace is data, while expression/code indentation remains checked.
 ACCEPTED = {
+    "repr_conversion": 'print(f"{1!r}:{True!r}:{None!r}")\n',
     "literal_control_characters": 'value = 7\nprint(f"""first\n\tliteral tab {value}\n\fliteral form feed\nlast""")\n',
     "nested_literal_whitespace": 'print(f"""outer:{"""inner\n\ttext\n\fform feed"""}:end""")\n',
 }
 
 REJECTED = {
-    "repr_conversion": 'print(f"{1!r}")\n',
     "ascii_conversion": 'print(f"{1!a}")\n',
     "debug_field": 'value = 1\nprint(f"{value=}")\n',
     "debug_str_conversion": 'value = 1\nprint(f"{value=!s}")\n',
@@ -44,7 +44,6 @@ REJECTED = {
     "dict_field": 'values = {1: 2}\nprint(f"{values}")\n',
     "set_field": 'values = {1}\nprint(f"{values}")\n',
     "tuple_field": 'print(f"{(1, 2)}")\n',
-    "class_field": 'class Item:\n    def __init__(self) -> None:\n        pass\nprint(f"{Item()}")\n',
     "optional_integer_field": 'def render(value: int | None) -> str:\n    return f"{value}"\nprint(render(1))\n',
     "optional_string_field": 'def render(value: str | None) -> str:\n    return f"{value!s}"\nprint(render(None))\n',
     "builtin_rebinding": 'def render() -> None:\n    str = 101\n    print(f"{str!s}")\nrender()\n',
@@ -81,7 +80,7 @@ def rejection_message(name: str) -> str:
     if name.startswith("debug_"):
         return "debug f-string fields are unsupported"
     if name.endswith("_conversion"):
-        return "f-string conversions support only !s"
+        return "f-string conversions support only !s and !r"
     if name.endswith("_spec"):
         if "dynamic" in name:
             return "f-string format specifications must be literal"
