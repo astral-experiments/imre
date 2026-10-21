@@ -2339,6 +2339,10 @@ impl Emitter<'_, '_> {
             .map(|arg| self.operand(arg))
             .collect::<Vec<_>>();
         let result = match builtin {
+            Builtin::TupleCacheNew => return self.record(returns),
+            Builtin::TupleCacheResult => {
+                self.call("relar_record_cached_result", returns, &[&args[0].value])
+            }
             Builtin::GlobalGet(slot) => {
                 let value = Value {
                     ty: returns,
@@ -2673,6 +2677,9 @@ impl Emitter<'_, '_> {
             }
             Builtin::BytesIter => self.call("relar_bytes_iter", Type::Iterator, &[&args[0].value]),
             Builtin::StringIter => self.call("relar_str_iter", Type::Iterator, &[&args[0].value]),
+            Builtin::StringReverseIter => {
+                self.call("relar_str_reverse_iter", Type::Iterator, &[&args[0].value])
+            }
             Builtin::StringIntList => {
                 self.call("relar_str_int_list", Type::ListInt, &[&args[0].value])
             }
@@ -3689,6 +3696,7 @@ declare void @relar_exception_raise(ptr)
 declare void @relar_exception_reraise()
 declare void @relar_flush_stdout()
 declare ptr @relar_record_new(ptr)
+declare ptr @relar_record_cached_result(ptr)
 declare void @relar_record_retain(ptr)
 declare void @relar_record_release(ptr)
 declare void @relar_object_retain(ptr)
@@ -3756,6 +3764,7 @@ declare ptr @relar_str_literal(ptr, i64)
 declare ptr @relar_str_get(ptr, i64)
 declare ptr @relar_str_slice(ptr, i64, i64, i64)
 declare ptr @relar_str_iter(ptr)
+declare ptr @relar_str_reverse_iter(ptr)
 declare ptr @relar_str_int_list(ptr)
 declare void @relar_str_retain(ptr)
 declare void @relar_str_release(ptr)

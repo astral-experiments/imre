@@ -134,7 +134,25 @@ struct Reads {
 
 impl<'a> Visitor<'a> for Reads {
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
-        if let Some(display) = Display::from_expr(expression) {
+        if let ast::Expr::Generator(generator) = expression {
+            self.visit_expr(&generator.generators[0].iter);
+            let mut targets = HashSet::new();
+            for clause in &generator.generators {
+                target_names(&clause.target, &mut targets);
+            }
+            self.bound.push(targets);
+            for (index, clause) in generator.generators.iter().enumerate() {
+                self.visit_expr(&clause.target);
+                if index != 0 {
+                    self.visit_expr(&clause.iter);
+                }
+                for condition in &clause.ifs {
+                    self.visit_expr(condition);
+                }
+            }
+            self.visit_expr(&generator.elt);
+            self.bound.pop();
+        } else if let Some(display) = Display::from_expr(expression) {
             self.visit_expr(&display.clauses[0].iter);
             let mut targets = HashSet::new();
             for clause in display.clauses {
@@ -227,7 +245,9 @@ impl Checker<'_> {
                 "assignment expressions are forbidden in comprehension iterables",
             ));
         }
-        if !narrowing::expression_assignments(expression).is_empty() {
+        if !narrowing::expression_assignments(expression).is_empty()
+            || pipelines::is_pipeline_expression(&display.clauses[0].iter)
+        {
             return self.inline_comprehension(expression, display, expected);
         }
         let input = self.iteration_input(&display.clauses[0].iter)?;
@@ -297,6 +317,7 @@ impl Checker<'_> {
                 items,
                 start: start.map(|start| parameter(start, &mut helper)),
             },
+            Iteration::Prepared(_) => unreachable!("pipeline comprehensions run inline"),
         };
         for name in captures {
             let Some(&source_slot) = self.names.get(&name) else {

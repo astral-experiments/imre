@@ -311,6 +311,29 @@ impl Checker<'_> {
         target: &ast::Expr,
         value: Expr,
     ) -> Result<Vec<Statement>, String> {
+        self.bind_pattern_with_root(target, value, None)
+    }
+
+    /// An iterator's private fixed tuple cannot be rebound by source targets.
+    /// Reuse that root while snapshotting all fields before user stores, making
+    /// the aggregate projection-only and eligible for scalar replacement.
+    pub(super) fn bind_iterator_pattern(
+        &mut self,
+        target: &ast::Expr,
+        source: usize,
+    ) -> Result<Vec<Statement>, String> {
+        let stable = matches!(self.locals[source], Type::Tuple(_)).then_some(source);
+        self.bind_pattern_with_root(target, self.local(source), stable)
+    }
+
+    /// A supplied root belongs exclusively to compiler iteration state; ordinary
+    /// source assignments retain a separate snapshot through target effects.
+    fn bind_pattern_with_root(
+        &mut self,
+        target: &ast::Expr,
+        value: Expr,
+        stable: Option<usize>,
+    ) -> Result<Vec<Statement>, String> {
         let Some(targets) = pattern_elements(target) else {
             return Ok(vec![self.assign_value(target, value)?]);
         };
@@ -349,8 +372,12 @@ impl Checker<'_> {
                 "unpacking target has the wrong number of fields",
             ));
         }
-        let captured = self.hidden(value.ty);
-        let mut body = vec![Statement::Assign(captured, value)];
+        let (captured, mut body) = if let Some(captured) = stable {
+            (captured, Vec::new())
+        } else {
+            let captured = self.hidden(value.ty);
+            (captured, vec![Statement::Assign(captured, value)])
+        };
         let mut clear = vec![captured];
         if fields.is_none() && (fixed != 0 || star.is_none()) {
             let length = self.hidden(Type::Int);

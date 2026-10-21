@@ -363,12 +363,20 @@ pub unsafe extern "C" fn relar_seq_slice(
 pub(super) struct StringIterator {
     owner: Rc<Str>,
     position: usize,
+    reverse: bool,
 }
 
 impl StringIterator {
     pub(super) fn next(&mut self) -> Option<(OwnedWord, Option<OwnedWord>)> {
-        let character = self.owner[self.position..].chars().next()?;
-        self.position += character.len_utf8();
+        let character = if self.reverse {
+            let character = self.owner[..self.position].chars().next_back()?;
+            self.position -= character.len_utf8();
+            character
+        } else {
+            let character = self.owner[self.position..].chars().next()?;
+            self.position += character.len_utf8();
+            character
+        };
         let mut value = Str::new("");
         value.push(character);
         let word = Rc::into_raw(Rc::new(value)) as usize;
@@ -388,7 +396,29 @@ pub unsafe extern "C" fn relar_str_iter(value: *const Str) -> *const Object {
     // SAFETY: the rooted source acquires an independent owner for the cursor.
     let owner = unsafe { acquire_rc(value as usize) };
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::StringIterator(
-        StringIterator { owner, position: 0 },
+        StringIterator {
+            owner,
+            position: 0,
+            reverse: false,
+        },
+    )))))
+}
+
+/// Creates a reverse Unicode cursor without copying or rescanning the prefix.
+///
+/// # Safety
+/// The source is rooted. Release the returned iterator on every consumer exit.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_reverse_iter(value: *const Str) -> *const Object {
+    // SAFETY: the rooted source acquires an independent owner for this cursor.
+    let owner: Rc<Str> = unsafe { acquire_rc(value as usize) };
+    let position = owner.len();
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::StringIterator(
+        StringIterator {
+            owner,
+            position,
+            reverse: true,
+        },
     )))))
 }
 

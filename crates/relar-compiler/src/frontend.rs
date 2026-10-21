@@ -19,6 +19,7 @@ mod inference;
 mod iterables;
 mod matching;
 mod module_values;
+mod pipelines;
 mod truthiness;
 mod unions;
 mod unpacking;
@@ -129,6 +130,10 @@ const RESERVED: &[&str] = &[
     "enumerate",
     "map",
     "sum",
+    "zip",
+    "reversed",
+    "any",
+    "all",
     "open",
     "None",
     "True",
@@ -770,6 +775,8 @@ enum Iteration {
         items: bool,
         start: Option<Expr>,
     },
+    /// A nonescaping iterator whose local state is resumed by its consumer.
+    Prepared(pipelines::Prepared),
 }
 
 struct Checker<'a> {
@@ -1356,6 +1363,9 @@ impl<'a> Checker<'a> {
 
     /// Checks an iterable in its current lexical scope, before target binding.
     fn iteration_input(&mut self, expression: &ast::Expr) -> Result<Iteration, String> {
+        if let Some(input) = self.pipeline_input(expression, None)? {
+            return Ok(Iteration::Prepared(input));
+        }
         if let ast::Expr::Call(call) = expression
             && matches!(&*call.func, ast::Expr::Name(name) if name.id == "range")
         {
@@ -1375,34 +1385,11 @@ impl<'a> Checker<'a> {
                 .collect::<Result<Vec<_>, _>>()?;
             return Ok(Iteration::Range(args));
         }
-        let ((iterable, items), start) = if let ast::Expr::Call(call) = expression
-            && matches!(&*call.func, ast::Expr::Name(name) if name.id == "enumerate")
-        {
-            if !call.arguments.keywords.is_empty() || !(1..=2).contains(&call.arguments.args.len())
-            {
-                return Err(error(
-                    self.source,
-                    call,
-                    "enumerate requires a concrete container and an optional positional integer start",
-                ));
-            }
-            let iterable = self.iteration_source(&call.arguments.args[0])?;
-            let start = if let Some(start) = call.arguments.args.get(1) {
-                self.expr_expected(start, Type::Int)?
-            } else {
-                Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Int("0".into()),
-                }
-            };
-            (iterable, Some(start))
-        } else {
-            (self.iteration_source(expression)?, None)
-        };
+        let (iterable, items) = self.iteration_source(expression)?;
         Ok(Iteration::Container {
             iterable,
             items,
-            start,
+            start: None,
         })
     }
 
@@ -1443,6 +1430,15 @@ impl<'a> Checker<'a> {
         before_iteration: Vec<Statement>,
         lower_body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
     ) -> Result<(Vec<Statement>, bool), String> {
+        if let Iteration::Prepared(input) = input {
+            return self.lower_prepared_iteration(
+                target,
+                input,
+                orelse,
+                before_iteration,
+                lower_body,
+            );
+        }
         if let Iteration::Range(args) = input {
             let ast::Expr::Name(name) = target else {
                 return Err(error(self.source, target, "range target must be a name"));
@@ -2786,6 +2782,13 @@ impl<'a> Checker<'a> {
                 (ty, ExprKind::Field(Box::new(receiver), field))
             }
             ast::Expr::Call(call) => return self.call(call),
+            ast::Expr::Generator(_) => {
+                return Err(error(
+                    self.source,
+                    expression,
+                    "generator expressions require an immediate for, comprehension, list, sum, any, or all consumer",
+                ));
+            }
             _ => {
                 return Err(error(
                     self.source,
@@ -3196,11 +3199,12 @@ impl<'a> Checker<'a> {
         match name.id.as_str() {
             "list" => return self.list_call(call, None),
             "sum" => return self.sum_call(call),
-            "map" => {
+            "any" | "all" => return self.quantifier_call(call, name.id == "all"),
+            "map" | "zip" | "reversed" | "enumerate" | "range" => {
                 return Err(error(
                     self.source,
                     call,
-                    "map(int, iterable) is supported only directly inside list() or sum()",
+                    "iterator values require an immediate for, comprehension, list, sum, any, or all consumer",
                 ));
             }
             _ => {}

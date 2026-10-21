@@ -84,7 +84,7 @@ pub(crate) fn facts(
     }
 }
 
-/// Finds writes in an expression, including writes escaping eager displays.
+/// Finds possible writes, including writes escaping comprehensions and generators.
 pub(crate) fn expression_assignments(expression: &ast::Expr) -> HashSet<String> {
     struct Writes(HashSet<String>);
     impl<'a> Visitor<'a> for Writes {
@@ -158,6 +158,7 @@ pub(crate) fn guaranteed_assignments(
         ast::Expr::ListComp(value) => guaranteed_assignments(&value.generators[0].iter, None),
         ast::Expr::SetComp(value) => guaranteed_assignments(&value.generators[0].iter, None),
         ast::Expr::DictComp(value) => guaranteed_assignments(&value.generators[0].iter, None),
+        ast::Expr::Generator(value) => guaranteed_assignments(&value.generators[0].iter, None),
         _ => {
             struct Children(HashSet<String>);
             impl<'a> Visitor<'a> for Children {
@@ -200,12 +201,13 @@ impl<'a> Visitor<'a> for Assignments {
     }
 
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
-        // Eager displays own iteration targets, but assignment expressions
+        // Comprehensions and generators own iteration targets, but assignment expressions
         // write in the enclosing non-comprehension scope.
         let clauses = match expression {
             ast::Expr::ListComp(value) => Some(value.generators.as_slice()),
             ast::Expr::SetComp(value) => Some(value.generators.as_slice()),
             ast::Expr::DictComp(value) => Some(value.generators.as_ref()),
+            ast::Expr::Generator(value) => Some(value.generators.as_slice()),
             _ => None,
         };
         if let Some(clauses) = clauses {

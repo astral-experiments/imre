@@ -81,6 +81,29 @@ pub unsafe extern "C" fn relar_record_retain(payload: *const usize) {
     header.references.set(next);
 }
 
+/// Acquires the next private iterator result, reusing its cache only when no
+/// earlier yielded tuple still aliases it. A shared cache remains unchanged;
+/// the returned fresh record starts with cleanup-safe zero fields instead.
+///
+/// # Safety
+/// `payload` is the live, fully rooted cache record on its execution thread.
+/// The caller borrows it without adding a temporary owner before this call.
+/// Before publishing the returned owner, initialize every field to its declared
+/// representation. A reused record may be mutated only through this result.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_record_cached_result(payload: *const usize) -> *mut usize {
+    // SAFETY: the caller roots this cache and its immutable descriptor.
+    let header = unsafe { &*payload.cast::<Header>().sub(1) };
+    if header.references.get() == 1 {
+        header.references.set(2);
+        payload.cast_mut()
+    } else {
+        // SAFETY: a fresh record uses the cache's static descriptor; it does not
+        // expose or mutate any existing tuple's observable field values.
+        unsafe { relar_record_new(header.descriptor) }
+    }
+}
+
 /// Consumes a record owner, releasing initialized fields only on the final drop.
 /// This also handles constructors interrupted after any subset of field writes.
 ///
@@ -238,5 +261,52 @@ mod tests {
             drop(saved);
         }
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn cached_results_reuse_only_exclusive_records_and_release_their_fields() {
+        let kinds = [3, 258];
+        let descriptor = RecordDescriptor {
+            length: kinds.len(),
+            kinds: kinds.as_ptr(),
+        };
+        let original = Rc::new(Str::from("cached field"));
+        let original_weak = Rc::downgrade(&original);
+        let replacement = Rc::new(Str::from("independent field"));
+        let replacement_weak = Rc::downgrade(&replacement);
+        // SAFETY: immutable metadata outlives every record. Each returned owner
+        // is released once, and only a returned result mutates record fields.
+        unsafe {
+            let cache = relar_record_new(&descriptor);
+            let exclusive = relar_record_cached_result(cache);
+            assert_eq!(exclusive, cache);
+            replace(exclusive, 0, Rc::as_ptr(&original) as usize, 3);
+            replace(exclusive, 1, Int::small(7).unwrap().into_raw(), 258);
+            drop(original);
+
+            let shared = relar_record_cached_result(cache);
+            assert_ne!(shared, cache);
+            assert_eq!(shared.read(), 0);
+            assert_eq!(shared.add(1).read(), 0);
+            replace(shared, 0, Rc::as_ptr(&replacement) as usize, 3);
+            replace(shared, 1, Int::small(9).unwrap().into_raw(), 258);
+            drop(replacement);
+            assert_eq!(
+                (&*cache.cast::<*const Str>().read()).as_str(),
+                "cached field"
+            );
+            assert_eq!(cache.add(1).read(), Int::small(7).unwrap().into_raw());
+
+            relar_record_release(exclusive);
+            let reused = relar_record_cached_result(cache);
+            assert_eq!(reused, cache);
+            relar_record_release(cache);
+            assert!(original_weak.upgrade().is_some());
+            relar_record_release(reused);
+            assert!(original_weak.upgrade().is_none());
+            assert!(replacement_weak.upgrade().is_some());
+            relar_record_release(shared);
+        }
+        assert!(replacement_weak.upgrade().is_none());
     }
 }

@@ -255,6 +255,7 @@ impl<'a> Visitor<'a> for SelfUse<'a> {
             ast::Expr::ListComp(value) => Some(value.generators.as_slice()),
             ast::Expr::SetComp(value) => Some(value.generators.as_slice()),
             ast::Expr::DictComp(value) => Some(value.generators.as_ref()),
+            ast::Expr::Generator(value) => Some(value.generators.as_slice()),
             _ => None,
         };
         fn binds_self(target: &ast::Expr) -> bool {
