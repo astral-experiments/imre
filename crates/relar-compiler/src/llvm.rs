@@ -181,7 +181,9 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         output.push_str("\"\n");
     }
     output.push_str(&emitter.code);
+    // Layout hints never replace the representation, overflow, or error guards.
     output.push_str("\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n");
+    output.push_str("!1 = !{!\"branch_weights\", i32 2000, i32 1}\n");
     output
 }
 
@@ -4071,9 +4073,21 @@ declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 /// Operates on tagged integers directly. For E(x) = 2x + 1, addition and
 /// subtraction produce E(x +/- y); multiplication first produces 2xy.
 /// Signed overflow is exactly failure to fit the tagged-small range.
+/// Explicit odd results expose representation facts after helper inlining;
+/// cold ownership boundaries keep heap destructors out of immediate fast paths.
 fn integer_helpers() -> String {
     let mut output = String::new();
     for operation in ["retain", "release"] {
+        writeln!(
+            output,
+            r#"
+define internal void @{operation}_int_heap(i64 %value) cold noinline {{
+entry:
+  call void @relar_int_{operation}(i64 %value)
+  ret void
+}}"#
+        )
+        .unwrap();
         for nonzero in [false, true] {
             let (suffix, presence, immediate) = if nonzero {
                 ("_nonzero", "", "%small")
@@ -4091,9 +4105,9 @@ define internal void @{operation}_int{suffix}(i64 %value) alwaysinline {{
 entry:
   %tag = and i64 %value, 1
   %small = icmp eq i64 %tag, 1
-{presence}  br i1 {immediate}, label %done, label %big
+{presence}  br i1 {immediate}, label %done, label %big, !prof !1
 big:
-  call void @relar_int_{operation}(i64 %value)
+  call void @{operation}_int_heap(i64 %value)
   br label %done
 done:
   ret void
@@ -4103,15 +4117,10 @@ done:
         }
     }
     for (op, intrinsic, number) in [("add", "sadd", 0), ("sub", "ssub", 1), ("mul", "smul", 2)] {
-        let (left, decode, encode, result) = if op == "mul" {
-            (
-                "%x",
-                "  %x = ashr i64 %a, 1\n",
-                "  %encoded = or i64 %result, 1\n",
-                "%encoded",
-            )
+        let (left, decode) = if op == "mul" {
+            ("%x", "  %x = ashr i64 %a, 1\n")
         } else {
-            ("%a", "", "", "%result")
+            ("%a", "")
         };
         writeln!(
             output,
@@ -4121,17 +4130,18 @@ entry:
   %both = and i64 %a, %b
   %tag = and i64 %both, 1
   %small = icmp eq i64 %tag, 1
-  br i1 %small, label %fast, label %big
+  br i1 %small, label %fast, label %big, !prof !1
 fast:
 {decode}  %right = sub i64 %b, 1
   %pair = call {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64 {left}, i64 %right)
   %result = extractvalue {{ i64, i1 }} %pair, 0
   %overflow = extractvalue {{ i64, i1 }} %pair, 1
-  br i1 %overflow, label %big, label %done
+  br i1 %overflow, label %big, label %done, !prof !0
 done:
-{encode}  ret i64 {result}
+  %encoded = or i64 %result, 1
+  ret i64 %encoded
 big:
-  %slow = call i64 @relar_int_binary(i64 %a, i64 %b, i32 {number})
+  %slow = call i64 @relar_int_binary(i64 %a, i64 %b, i32 {number}) cold
   ret i64 %slow
 }}"#
         )
@@ -4147,7 +4157,7 @@ entry:
   %both = and i64 %a, %b
   %tag = and i64 %both, 1
   %small = icmp eq i64 %tag, 1
-  br i1 %small, label %fast, label %big
+  br i1 %small, label %fast, label %big, !prof !1
 fast:
   %less = icmp slt i64 %a, %b
   %equal = icmp eq i64 %a, %b
@@ -4155,7 +4165,7 @@ fast:
   %order = select i1 %less, i32 -1, i32 %nonless
   ret i32 %order
 big:
-  %slow = call i32 @relar_int_compare(i64 %a, i64 %b)
+  %slow = call i32 @relar_int_compare(i64 %a, i64 %b) cold
   ret i32 %slow
 }
 "#,
@@ -4362,6 +4372,40 @@ mod tests {
                 .0;
             assert!(!body.contains("%absent"));
             assert!(body.contains("br i1 %small"));
+            assert!(body.contains(&format!("call void @{operation}_int_heap(i64 %value)")));
+            assert!(helpers.contains(&format!(
+                "define internal void @{operation}_int_heap(i64 %value) cold noinline"
+            )));
+        }
+    }
+
+    #[test]
+    fn integer_fast_results_are_odd_only_after_the_overflow_guard() {
+        let helpers = super::integer_helpers();
+        for (operation, number) in [("add", 0), ("sub", 1), ("mul", 2)] {
+            let body = helpers
+                .split_once(&format!("define internal i64 @int_{operation}("))
+                .unwrap()
+                .1
+                .split_once("\n}")
+                .unwrap()
+                .0;
+            let guard = body
+                .find("br i1 %overflow, label %big, label %done")
+                .unwrap();
+            let encoded = body.find("%encoded = or i64 %result, 1").unwrap();
+            assert!(guard < encoded, "{body}");
+            assert!(body.contains("br i1 %small, label %fast, label %big, !prof !1"));
+            assert!(body.contains("br i1 %overflow, label %big, label %done, !prof !0"));
+            let (_, slow) = body.split_once("big:").unwrap();
+            assert!(slow.contains(&format!(
+                "call i64 @relar_int_binary(i64 %a, i64 %b, i32 {number}) cold"
+            )));
+            assert!(slow.contains("ret i64 %slow"));
+            assert!(
+                !slow.contains("or i64"),
+                "heap/cancelled results must remain unchanged"
+            );
         }
     }
 

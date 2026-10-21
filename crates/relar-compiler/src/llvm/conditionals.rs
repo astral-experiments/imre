@@ -51,23 +51,31 @@ pub(super) fn absolute_operand<'a>(test: &'a Expr, yes: &Expr, no: &Expr) -> Opt
 /// retain their existing owner. The common path uses a select without a sign
 /// branch. For odd small words, checked `2 - value` overflows only at the minimum
 /// representation; all other positive and negative inputs share its exact result.
+/// The cold boundary preserves promotion and ownership without expanding the
+/// heap-integer comparison and destruction paths at each inline call site.
 pub(super) const INTEGER_ABSOLUTE_HELPER: &str = r#"
 define internal i64 @int_abs(i64 %value) alwaysinline {
 entry:
   %tag = and i64 %value, 1
   %small = icmp eq i64 %tag, 1
-  br i1 %small, label %checked, label %slow
+  br i1 %small, label %checked, label %slow, !prof !1
 checked:
   %difference = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 2, i64 %value)
   %negated = extractvalue { i64, i1 } %difference, 0
   %overflow = extractvalue { i64, i1 } %difference, 1
-  br i1 %overflow, label %slow, label %select
+  br i1 %overflow, label %slow, label %select, !prof !0
 select:
   %negative = icmp slt i64 %value, 1
   %result = select i1 %negative, i64 %negated, i64 %value
   %tagged = or i64 %result, 1
   ret i64 %tagged
 slow:
+  %slow_result = call i64 @int_abs_slow(i64 %value)
+  ret i64 %slow_result
+}
+
+define internal i64 @int_abs_slow(i64 %value) cold noinline {
+entry:
   %order = call i32 @compare_int(i64 %value, i64 1)
   %below = icmp slt i32 %order, 0
   br i1 %below, label %negate, label %retain
@@ -106,8 +114,17 @@ mod tests {
         );
         assert!(helper[checked..selected].contains("br i1 %overflow, label %slow, label %select"));
         assert!(helper[selected..].contains("select i1 %negative, i64 %negated, i64 %value"));
-        assert!(helper.contains("call i64 @int_sub(i64 1, i64 %value)"));
-        assert!(helper.contains("call void @retain_int_nonzero(i64 %value)"));
+        assert!(helper.contains("call i64 @int_abs_slow(i64 %value)"));
+        assert!(!helper.contains("call i32 @compare_int("));
+        let slow = output
+            .split_once("define internal i64 @int_abs_slow(i64 %value) cold noinline {")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        assert!(slow.contains("call i64 @int_sub(i64 1, i64 %value)"));
+        assert!(slow.contains("call void @retain_int_nonzero(i64 %value)"));
     }
 
     #[test]
