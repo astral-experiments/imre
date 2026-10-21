@@ -177,9 +177,10 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
                 inspect(yes, candidates, producers);
                 inspect(no, candidates, producers);
             }
-            Statement::While(condition, body) => {
+            Statement::While(condition, body, orelse) => {
                 inspect_expression(condition, candidates);
                 inspect(body, candidates, producers);
+                inspect(orelse, candidates, producers);
             }
             Statement::Scope { body, .. } => inspect(body, candidates, producers),
             Statement::Try {
@@ -201,15 +202,20 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
                 }
             }
             Statement::For {
-                target, args, body, ..
+                target,
+                args,
+                body,
+                orelse,
+                ..
             } => {
                 candidates[*target].eligible = false;
                 for arg in args {
                     inspect_expression(arg, candidates);
                 }
                 inspect(body, candidates, producers);
+                inspect(orelse, candidates, producers);
             }
-            Statement::Break | Statement::Continue => {}
+            Statement::Break | Statement::Continue | Statement::Exhaust => {}
         }
     }
 }
@@ -340,9 +346,10 @@ fn rewrite_block(
                 rewrite_block(yes, locals, components, producers);
                 rewrite_block(no, locals, components, producers);
             }
-            Statement::While(condition, body) => {
+            Statement::While(condition, body, orelse) => {
                 rewrite_expression(condition, components);
                 rewrite_block(body, locals, components, producers);
+                rewrite_block(orelse, locals, components, producers);
             }
             Statement::Scope { body, clear } => {
                 rewrite_block(body, locals, components, producers);
@@ -369,16 +376,20 @@ fn rewrite_block(
                     rewrite_expression(value, components);
                 }
             }
-            Statement::For { args, body, .. } => {
+            Statement::For {
+                args, body, orelse, ..
+            } => {
                 for arg in args {
                     rewrite_expression(arg, components);
                 }
                 rewrite_block(body, locals, components, producers);
+                rewrite_block(orelse, locals, components, producers);
             }
             Statement::Move(..)
             | Statement::IterNext { .. }
             | Statement::Break
-            | Statement::Continue => {}
+            | Statement::Continue
+            | Statement::Exhaust => {}
         }
         output.push(statement);
     }
@@ -646,7 +657,10 @@ print(total([10, 20]))
                         cleared.extend(clear.iter().map(|&slot| locals[slot]));
                         collect_cleared(body, locals, cleared);
                     }
-                    Statement::While(_, body) => collect_cleared(body, locals, cleared),
+                    Statement::While(_, body, orelse) => {
+                        collect_cleared(body, locals, cleared);
+                        collect_cleared(orelse, locals, cleared);
+                    }
                     _ => {}
                 }
             }

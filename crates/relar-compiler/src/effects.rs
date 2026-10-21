@@ -49,7 +49,11 @@ fn block(body: &[Statement], functions: &[bool]) -> bool {
         Statement::Assign(_, value) | Statement::Expr(value) | Statement::Return(value) => {
             expression(value, functions)
         }
-        Statement::Move(..) | Statement::Clear(_) | Statement::Break | Statement::Continue => false,
+        Statement::Move(..)
+        | Statement::Clear(_)
+        | Statement::Break
+        | Statement::Continue
+        | Statement::Exhaust => false,
         Statement::Scope { body, .. } => block(body, functions),
         Statement::SetItem(receiver, index, value) => {
             !matches!(receiver.ty, Type::Dict(_))
@@ -68,13 +72,18 @@ fn block(body: &[Statement], functions: &[bool]) -> bool {
         Statement::If(test, yes, no) => {
             expression(test, functions) || block(yes, functions) || block(no, functions)
         }
-        Statement::While(test, body) => expression(test, functions) || block(body, functions),
-        Statement::For { args, body, .. } => {
+        Statement::While(test, body, orelse) => {
+            expression(test, functions) || block(body, functions) || block(orelse, functions)
+        }
+        Statement::For {
+            args, body, orelse, ..
+        } => {
             // The implicit step is exactly one. An explicit step is kept
             // fallible even when a separate range proof could exclude zero.
             !matches!(args.len(), 1 | 2)
                 || args.iter().any(|arg| expression(arg, functions))
                 || block(body, functions)
+                || block(orelse, functions)
         }
         Statement::IterNext { .. } | Statement::Assert(_) | Statement::Raise(_) => true,
         Statement::Try {
@@ -358,6 +367,7 @@ mod tests {
             step: 3,
             args,
             body: Vec::new(),
+            orelse: Vec::new(),
         };
         assert!(!block(&[range(vec![integer()])], &[]));
         assert!(block(&[range(vec![integer(), integer(), integer()])], &[]));
@@ -396,5 +406,27 @@ def indirect(value: str) -> int:
         assert!(llvm.contains("getelementptr inbounds %class_0"));
         // Parsing, its fallible caller, and the process-entry flush stay checked.
         assert_eq!(llvm.matches("call i8 @relar_error_pending()").count(), 3);
+    }
+
+    #[test]
+    fn loop_else_errors_are_part_of_the_function_summary() {
+        let source = r#"
+def range_error() -> None:
+    for ignored in range(0):
+        pass
+    else:
+        raise ValueError("range exhausted")
+
+def while_error() -> None:
+    while False:
+        pass
+    else:
+        raise ValueError("condition failed")
+"#;
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        let module = crate::frontend::lower(&graph).unwrap();
+        let effects = analyze(&module);
+        assert!(effects.may_raise(0));
+        assert!(effects.may_raise(1));
     }
 }

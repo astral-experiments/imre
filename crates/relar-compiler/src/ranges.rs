@@ -115,7 +115,10 @@ fn inspect_writes(
                 inspect_writes(facts, yes, small, moves);
                 inspect_writes(facts, no, small, moves);
             }
-            Statement::While(_, body) => inspect_writes(facts, body, small, moves),
+            Statement::While(_, body, orelse) => {
+                inspect_writes(facts, body, small, moves);
+                inspect_writes(facts, orelse, small, moves);
+            }
             Statement::Scope { body, .. } => inspect_writes(facts, body, small, moves),
             Statement::Try {
                 body,
@@ -136,6 +139,7 @@ fn inspect_writes(
                 stop,
                 step,
                 body,
+                orelse,
                 ..
             } => {
                 if facts.range_cursor(statement).is_none() {
@@ -144,6 +148,7 @@ fn inspect_writes(
                     }
                 }
                 inspect_writes(facts, body, small, moves);
+                inspect_writes(facts, orelse, small, moves);
             }
             Statement::Clear(_)
             | Statement::SetItem(_, _, _)
@@ -155,6 +160,7 @@ fn inspect_writes(
             | Statement::Raise(_)
             | Statement::Break
             | Statement::Continue
+            | Statement::Exhaust
             | Statement::Assert(_) => {}
         }
     }
@@ -391,6 +397,7 @@ struct Flow {
     next: Option<State>,
     breaks: Option<State>,
     continues: Option<State>,
+    exhausts: Option<State>,
 }
 
 impl Flow {
@@ -406,6 +413,7 @@ impl Flow {
             next: merge(self.next, other.next),
             breaks: merge(self.breaks, other.breaks),
             continues: merge(self.continues, other.continues),
+            exhausts: merge(self.exhausts, other.exhausts),
         }
     }
 }
@@ -438,6 +446,7 @@ impl Analyzer {
             flow.next = current.next;
             flow.breaks = merge(flow.breaks, current.breaks);
             flow.continues = merge(flow.continues, current.continues);
+            flow.exhausts = merge(flow.exhausts, current.exhausts);
         }
         flow
     }
@@ -454,9 +463,14 @@ impl Analyzer {
             Statement::Clear(slot) => state.0[*slot] = Interval::UNKNOWN,
             Statement::Scope { body, clear } => {
                 let mut flow = self.block(body, state, record);
-                for state in [&mut flow.next, &mut flow.breaks, &mut flow.continues]
-                    .into_iter()
-                    .flatten()
+                for state in [
+                    &mut flow.next,
+                    &mut flow.breaks,
+                    &mut flow.continues,
+                    &mut flow.exhausts,
+                ]
+                .into_iter()
+                .flatten()
                 {
                     for &slot in clear {
                         state.0[slot] = Interval::UNKNOWN;
@@ -487,10 +501,16 @@ impl Analyzer {
                     }
                     flow.breaks = merge(flow.breaks, final_flow.breaks);
                     flow.continues = merge(flow.continues, final_flow.continues);
+                    flow.exhausts = merge(flow.exhausts, final_flow.exhausts);
                 }
-                for state in [&mut flow.next, &mut flow.breaks, &mut flow.continues]
-                    .into_iter()
-                    .flatten()
+                for state in [
+                    &mut flow.next,
+                    &mut flow.breaks,
+                    &mut flow.continues,
+                    &mut flow.exhausts,
+                ]
+                .into_iter()
+                .flatten()
                 {
                     *state = unknown.clone();
                 }
@@ -557,9 +577,15 @@ impl Analyzer {
                     .unwrap_or_default();
                 return yes.join(no);
             }
-            Statement::While(test, body) => return self.while_loop(test, body, state, record),
+            Statement::While(test, body, orelse) => {
+                return self.while_loop(test, body, orelse, state, record);
+            }
             Statement::For {
-                target, args, body, ..
+                target,
+                args,
+                body,
+                orelse,
+                ..
             } => {
                 let args = args
                     .iter()
@@ -572,7 +598,7 @@ impl Analyzer {
                         .and_modify(|old| *old = old.join(interval))
                         .or_insert(interval);
                 }
-                return self.for_loop(*target, &args, body, state, record);
+                return self.for_loop(*target, &args, body, orelse, state, record);
             }
             Statement::Break => {
                 return Flow {
@@ -586,6 +612,12 @@ impl Analyzer {
                     ..Flow::default()
                 };
             }
+            Statement::Exhaust => {
+                return Flow {
+                    exhausts: Some(state),
+                    ..Flow::default()
+                };
+            }
         }
         Flow::next(state)
     }
@@ -593,7 +625,14 @@ impl Analyzer {
     /// The entry and every normal/continue backedge must fit the invariant.
     /// A bounded iteration budget falls back to the universal invariant, never
     /// to an unproved partially converged approximation.
-    fn while_loop(&mut self, test: &Expr, body: &[Statement], entry: State, record: bool) -> Flow {
+    fn while_loop(
+        &mut self,
+        test: &Expr,
+        body: &[Statement],
+        orelse: &[Statement],
+        entry: State,
+        record: bool,
+    ) -> Flow {
         let mut header = entry.clone();
         for iteration in 0..64 {
             let body_flow = self
@@ -617,10 +656,12 @@ impl Analyzer {
             .assume(test, true, header.clone())
             .map(|state| self.block(body, state, record))
             .unwrap_or_default();
-        Flow {
-            next: merge(self.assume(test, false, header), body_flow.breaks),
-            ..Flow::default()
-        }
+        let exhausted = merge(self.assume(test, false, header), body_flow.exhausts);
+        let mut flow = exhausted
+            .map(|state| self.block(orelse, state, record))
+            .unwrap_or_default();
+        flow.next = merge(flow.next, body_flow.breaks);
+        flow
     }
 
     /// Range arguments are snapshots evaluated before iteration. The visible
@@ -631,11 +672,12 @@ impl Analyzer {
         target: usize,
         args: &[Interval],
         body: &[Statement],
+        orelse: &[Statement],
         entry: State,
         record: bool,
     ) -> Flow {
         let Some(values) = range_values(args) else {
-            return Flow::next(entry);
+            return self.block(orelse, entry, record);
         };
         let mut header = entry.clone();
         for iteration in 0..64 {
@@ -659,13 +701,17 @@ impl Analyzer {
         }
         header.0[target] = values;
         let body_flow = self.block(body, header, record);
-        Flow {
-            next: merge(
-                Some(entry),
-                merge(body_flow.breaks, merge(body_flow.next, body_flow.continues)),
+        let exhausted = merge(
+            Some(entry),
+            merge(
+                body_flow.exhausts,
+                merge(body_flow.next, body_flow.continues),
             ),
-            ..Flow::default()
-        }
+        )
+        .unwrap();
+        let mut flow = self.block(orelse, exhausted, record);
+        flow.next = merge(flow.next, body_flow.breaks);
+        flow
     }
 
     /// Evaluates children in Python order. Short-circuit successors receive only
@@ -1185,9 +1231,10 @@ mod tests {
                         block(yes, output);
                         block(no, output);
                     }
-                    Statement::While(test, body) => {
+                    Statement::While(test, body, orelse) => {
                         expression(test, output);
                         block(body, output);
+                        block(orelse, output);
                     }
                     Statement::Scope { body, .. } => block(body, output),
                     Statement::Try {
@@ -1208,17 +1255,21 @@ mod tests {
                             expression(value, output);
                         }
                     }
-                    Statement::For { args, body, .. } => {
+                    Statement::For {
+                        args, body, orelse, ..
+                    } => {
                         for arg in args {
                             expression(arg, output);
                         }
                         block(body, output);
+                        block(orelse, output);
                     }
                     Statement::Move(_, _)
                     | Statement::Clear(_)
                     | Statement::IterNext { .. }
                     | Statement::Break
-                    | Statement::Continue => {}
+                    | Statement::Continue
+                    | Statement::Exhaust => {}
                 }
             }
         }
@@ -1746,5 +1797,57 @@ def snapshot(values: list[int]) -> int:
             Interval::UNKNOWN
         );
         assert_eq!(divide(i128::MIN, -1, false), None);
+    }
+
+    #[test]
+    fn loop_else_transfers_join_the_enclosing_loop() {
+        let module = module(
+            r#"
+def nested_break(again: bool, huge: int) -> int:
+    value = 0
+    while again:
+        for ignored in range(0):
+            pass
+        else:
+            value = huge
+            break
+        value = 1
+    return value + 1
+
+def nested_continue(again: bool) -> int:
+    value = 1
+    while again:
+        for ignored in range(0):
+            pass
+        else:
+            value *= 2
+            continue
+        value = 1
+    return value + 1
+
+def exhausted_assignment() -> int:
+    value = 0
+    for ignored in range(0):
+        pass
+    else:
+        value = 1000000000000000000000000000000
+    return value + 1
+"#,
+        );
+        let facts = analyze(&module);
+        for function in &module.functions {
+            let returned = expressions(function)
+                .into_iter()
+                .rfind(|expression| matches!(expression.kind, ExprKind::Binary(Binary::Add, _, _)))
+                .unwrap();
+            assert!(facts.integer(returned).is_none());
+            let ExprKind::Binary(_, value, _) = &returned.kind else {
+                unreachable!()
+            };
+            let ExprKind::Local(slot) = value.kind else {
+                unreachable!()
+            };
+            assert!(!facts.small_locals(function)[slot]);
+        }
     }
 }

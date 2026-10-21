@@ -431,7 +431,7 @@ impl Checker<'_> {
                 self.narrowed.remove(slot);
             }
         }
-        self.lower_iteration(&clause.target, input, |checker| {
+        self.lower_iteration(&clause.target, input, &[], |checker| {
             let mut conditions = Vec::new();
             for condition in &clause.ifs {
                 conditions.push(checker.condition(condition)?);
@@ -447,6 +447,7 @@ impl Checker<'_> {
             }
             Ok(body)
         })
+        .map(|(body, _)| body)
     }
 
     /// A dict display evaluates and roots its key before its value. Ordinary
