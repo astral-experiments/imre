@@ -192,6 +192,9 @@ balanced three-engine orders, repeated queries, and an empty-input control.
 The reference guide gives reproduction commands, timing boundaries, storage
 differences and matched ordinary/ThinLTO settings.
 
+The [callable milestone report](results/2026-10-21-callable-benchmarks.md) records
+the compatibility boundary, validation, and ordinary/ThinLTO measurements.
+
 ## Telemetry comparison
 
 The [telemetry comparator](../examples/telemetry_comparison/README.md) aligns two recordings, computes signed/absolute/squared integer error, and answers threshold queries with generator expressions, strict `zip`, `reversed`, `any`, and `all`. `telemetry_validate.py` compares complete output and filesystem effects against an independent indexed oracle, CPython, and an independent Rust implementation with checked native arithmetic and a BigInt fallback.
