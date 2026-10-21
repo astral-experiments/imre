@@ -29,10 +29,6 @@ Relar does not support:
 - Generator functions or async code
 - Arbitrary decorators
 
-Relar rejects unsupported code during compilation, even in unused functions or
-unreachable branches. It does not fall back to CPython. See the
-[supported-subset guide](docs/subset.md) for details.
-
 ## Installation
 
 On 64-bit Linux, install the [Rust toolchain](rust-toolchain.toml) and Clang 18,
