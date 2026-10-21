@@ -13,10 +13,12 @@
 //! or user-defined finalizers, so a container access cannot reenter user code.
 //! Final resource release may close a file, but never installs a language error.
 //! Handles belong to one execution thread. An operation must finish before
-//! another operation accesses the same mutable storage; no storage reference or
-//! buffer address may escape. Aliased handles are allowed and observe sequential
-//! mutations. Future callback or threaded extension boundaries must uphold these
-//! invariants before entering this ABI.
+//! another operation accesses the same mutable storage; no storage reference may
+//! escape. Buffer addresses stay private except for explicitly documented readonly
+//! loop views whose compiler proof keeps the owner rooted and prevents all storage
+//! mutation. Such views never enter language values or escape the loop. Aliased
+//! handles are allowed and observe sequential mutations. Future callback or threaded
+//! extension boundaries must uphold these invariants before entering this ABI.
 //!
 //! Recoverable calls enter with pending state clear. Language errors install an
 //! owned thread-local exception; generated code checks the entry point's error
@@ -130,7 +132,8 @@ impl Drop for Int {
 /// The higher-ranked closures cannot return references tied to their input.
 /// Access remains unsafe: a closure could otherwise reenter through an aliased
 /// handle while its storage reference is live. Owned elements may escape after
-/// acquisition; storage references and buffer pointers may not.
+/// acquisition; storage references and buffer pointers may not escape these
+/// closures. The sequence readonly-view ABI uses a separate whole-loop proof.
 struct StorageCell<T>(UnsafeCell<T>);
 
 impl<T> StorageCell<T> {

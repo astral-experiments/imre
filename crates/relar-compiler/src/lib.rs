@@ -1,4 +1,5 @@
 mod analysis;
+mod borrows;
 mod classes;
 mod effects;
 mod frontend;

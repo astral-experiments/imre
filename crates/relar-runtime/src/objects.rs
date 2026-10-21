@@ -2,8 +2,9 @@
 //!
 //! Records have separate compact native allocations. Object handles cover sequences,
 //! mappings, iterators, exceptions, and resources. All calls follow the parent's
-//! single-threaded, nonreentrant ownership contract. No growable buffer escapes;
-//! displaced owners are dropped only after mutable storage access ends.
+//! single-threaded, nonreentrant ownership contract. Growable buffers stay private
+//! except for compiler-proven readonly loop views; displaced owners are dropped
+//! only after mutable storage access ends.
 
 mod args;
 mod bytes;
@@ -138,6 +139,55 @@ pub unsafe extern "C" fn relar_seq_get_index(value: *const Object, at: usize) ->
         })
     };
     finish(owned.map(OwnedWord::into_word), 0)
+}
+
+/// Borrows one concrete sequence word after its current bounds were proved.
+/// Zero remains an ordinary scalar or absent value, never an error sentinel.
+///
+/// # Safety
+/// `value` must be a non-null rooted exact sequence, and `at` a decoded native index
+/// strictly below its current length. No mutable storage access may overlap the
+/// call. Consume or acquire the returned word with its exact declared type before
+/// removing or replacing that element. This does not acquire a reference, and
+/// neither a storage reference nor a growable buffer pointer escapes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_seq_borrow_index_proven(value: *const Object, at: usize) -> usize {
+    // SAFETY: SequenceGetInBounds supplies a non-null exact sequence and proves
+    // its current bounds. Its two emission paths either acquire the result
+    // immediately or keep an unchanged caller root. Neither a storage reference
+    // nor a pointer into the movable buffer escapes this nonreentrant read.
+    unsafe {
+        (&*value).0.with(|storage| {
+            let Storage::Sequence(values) = storage else {
+                // Exact kind is part of the same caller proof as the index.
+                std::hint::unreachable_unchecked()
+            };
+            *values.values.get_unchecked(at)
+        })
+    }
+}
+
+/// Exposes an immutable word buffer only for a compiler-proven readonly loop.
+/// Empty sequences may return a dangling, aligned pointer that must not be read.
+///
+/// # Safety
+/// `value` is a non-null rooted exact sequence. Keep that same owner alive and
+/// prohibit every mutation, reserve, and reentrant access to its storage until
+/// the last use of the result. The pointer may exist only as private compiler
+/// state, never as a language value or an escaping return/field/container value.
+/// Every read must prove its native index below the unchanged current length;
+/// consume or acquire each word using the sequence's exact declared element type.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_seq_data_readonly(value: *const Object) -> *const usize {
+    // SAFETY: this stronger, whole-loop contract deliberately bypasses `with`'s
+    // per-call no-buffer-escape rule. Only a raw pointer escapes the short shared
+    // storage borrow; the caller keeps its allocation rooted and immutable.
+    unsafe {
+        let Storage::Sequence(values) = &*(*value).0.0.get() else {
+            std::hint::unreachable_unchecked()
+        };
+        values.values.as_ptr()
+    }
 }
 
 /// Acquires the replacement before any existing container owner can be displaced.
@@ -1440,6 +1490,121 @@ mod tests {
             }
         }
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn proven_sequence_reads_borrow_exact_scalar_and_optional_words() {
+        use num_bigint::BigInt;
+
+        let text = Rc::new(Str::from("borrowed sequence word"));
+        let big = Rc::new(BigInt::from(1_u128 << 100));
+        let float = Rc::new(-0.0_f64);
+        let text_weak = Rc::downgrade(&text);
+        let big_weak = Rc::downgrade(&big);
+        let float_weak = Rc::downgrade(&float);
+        let cases = [
+            (0, vec![0]),
+            (1, vec![0, 1]),
+            (257, vec![0, 1, 2]),
+            (258, vec![0, 1, Rc::as_ptr(&big) as usize]),
+            (259, vec![0, Rc::as_ptr(&text) as usize]),
+            (263, vec![0, Rc::as_ptr(&float) as usize]),
+            (
+                7,
+                vec![
+                    0,
+                    (-0.0_f64).to_bits() as usize,
+                    f64::NAN.to_bits() as usize,
+                ],
+            ),
+        ];
+        for (kind, words) in cases {
+            // SAFETY: each descriptor matches its rooted values. All accesses
+            // are in bounds and their borrowed words expire before mutation.
+            unsafe {
+                let sequence = relar_seq_new(kind);
+                for &word in &words {
+                    relar_seq_append(sequence, word, kind);
+                }
+                let view = relar_seq_data_readonly(sequence);
+                for (index, &word) in words.iter().enumerate() {
+                    assert_eq!(relar_seq_borrow_index_proven(sequence, index), word);
+                    assert_eq!(view.add(index).read(), word);
+                }
+                relar_object_release(sequence);
+            }
+        }
+        assert_eq!(Rc::strong_count(&text), 1);
+        assert_eq!(Rc::strong_count(&big), 1);
+        assert_eq!(Rc::strong_count(&float), 1);
+        drop((text, big, float));
+        assert!(text_weak.upgrade().is_none());
+        assert!(big_weak.upgrade().is_none());
+        assert!(float_weak.upgrade().is_none());
+        assert_eq!(exceptions::relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn readonly_sequence_views_keep_empty_and_owned_element_lifetimes() {
+        let text = Rc::new(Str::from("rooted until the loop finishes"));
+        let weak = Rc::downgrade(&text);
+        // SAFETY: views are never read out of bounds and their last uses precede
+        // any storage mutation or owner release. Acquired words outlive the view.
+        unsafe {
+            let sequence = relar_seq_new(3);
+            let empty = relar_seq_data_readonly(sequence);
+            assert!(!empty.is_null());
+            assert_eq!(empty as usize % std::mem::align_of::<usize>(), 0);
+            assert_eq!(relar_seq_len(sequence), 1); // Tagged zero; no load.
+            relar_seq_append(sequence, Rc::as_ptr(&text) as usize, 3);
+            let view = relar_seq_data_readonly(sequence);
+            assert_eq!(Rc::strong_count(&text), 2);
+            let word = view.read();
+            let saved = acquire_rc::<Str>(word);
+            assert_eq!(Rc::strong_count(&text), 3);
+            relar_object_release(sequence);
+            drop(text);
+            assert_eq!(saved.as_str(), "rooted until the loop finishes");
+            drop(saved);
+        }
+        assert!(weak.upgrade().is_none());
+        assert_eq!(exceptions::relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn proven_sequence_record_is_acquired_before_its_source_owner_is_removed() {
+        use records::{
+            RecordDescriptor, relar_record_new, relar_record_release, relar_record_retain,
+        };
+
+        let kinds = [3];
+        let descriptor = RecordDescriptor {
+            length: 1,
+            kinds: kinds.as_ptr(),
+        };
+        let text = Rc::new(Str::from("retained before mutation"));
+        let weak = Rc::downgrade(&text);
+        // SAFETY: immutable metadata outlives the record. The borrowed read is
+        // immediately acquired, matching compiler lowering, before removing
+        // the source owner. Every independent record owner is released once.
+        unsafe {
+            let record = relar_record_new(&descriptor);
+            record.cast::<*const Str>().write(Rc::into_raw(text));
+            let sequence = relar_seq_new(6);
+            relar_seq_append(sequence, record as usize, 6);
+            relar_record_release(record);
+            let saved = relar_seq_borrow_index_proven(sequence, 0) as *const usize;
+            relar_record_retain(saved);
+            relar_record_release(relar_seq_pop(sequence) as *const usize);
+            relar_object_release(sequence);
+            assert_eq!(
+                (&*saved.cast::<*const Str>().read()).as_str(),
+                "retained before mutation"
+            );
+            relar_record_release(saved);
+        }
+        assert!(weak.upgrade().is_none());
+        assert_eq!(exceptions::relar_error_pending(), 0);
     }
 
     #[test]

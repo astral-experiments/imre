@@ -233,6 +233,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::ListSum
         | Builtin::ListReserveRange
         | Builtin::ListDistinct
+        | Builtin::SequenceGetInBounds
         | Builtin::ListGetBoundedInBounds { .. }
         | Builtin::IntBounded { .. }
         | Builtin::Append
@@ -310,6 +311,28 @@ mod tests {
             analyze(&module).functions,
             [false, false, false, true, true]
         );
+    }
+
+    #[test]
+    fn proven_sequence_pulls_remove_only_their_own_index_errors() {
+        let source = crate::modules::SourceGraph::single(
+            r#"
+def checked(values: list[str], index: int) -> str:
+    return values[index]
+
+def forward(values: list[str]) -> bool:
+    return any(value == "" for value in values)
+
+def backward(values: list[str]) -> bool:
+    return all(value != "" for value in reversed(values))
+
+def conversion(values: list[str]) -> bool:
+    return any(int(value) for value in values)
+"#,
+        )
+        .unwrap();
+        let module = crate::frontend::lower(&source).unwrap();
+        assert_eq!(analyze(&module).functions, [true, false, false, true]);
     }
 
     #[test]
