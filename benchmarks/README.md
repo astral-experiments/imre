@@ -185,6 +185,14 @@ profiles, complete output checks, and a portable evidence audit. Empty controls
 are 1.60–2.75% of the large native medians; small genuine captures are
 startup-heavy.
 
+The [dataclass milestone](results/2026-10-21-dataclass-records.md) replaces handwritten
+record constructors with dataclasses, adds a class method returning `Self`, and
+uses a read-only property and frozen difference records. The large cases take
+1.16–1.47× Rust's time and run 2.39–2.83× faster than the unchanged upstream
+CPython script. Both build modes preserve complete reports and typed JSON
+semantics. The report retains all samples, independent output/provenance checks,
+sanitizer validation, and a portable evidence replay.
+
 ## Callback record pipeline
 
 The [payout example](../examples/record_pipeline/README.md) selects records with

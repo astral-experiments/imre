@@ -125,8 +125,9 @@ The [memory-report comparator](examples/memory_report/README.md) ports ty's real
 report-comparison script: it decodes JSON into typed records, ranks changes, and
 writes a Markdown report. Its guide includes captured ty reports and comparisons
 with the original CPython script, the typed Python port, and an independent Rust
-implementation. The [measured comparison](benchmarks/results/2026-10-21-memory-report.md)
-runs within 1.13–1.46× Rust's time on the large report inputs.
+implementation. The [dataclass comparison](benchmarks/results/2026-10-21-dataclass-records.md)
+runs within 1.16–1.47× Rust's time on the large report inputs, using dataclasses,
+keyword-only fields, a class method, and a read-only property.
 
 ## License
 
