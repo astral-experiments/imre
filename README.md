@@ -64,9 +64,8 @@ Compile and run the program:
 ```console
 relar build totals.py
 ./totals
+# Output: Total: 42
 ```
-
-This prints `Total: 42`. See [examples](examples/) for more programs.
 
 ## License
 
