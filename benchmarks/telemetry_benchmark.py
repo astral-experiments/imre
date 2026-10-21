@@ -100,7 +100,7 @@ def workloads(sizes: list[int], batch_pairs: int, scenarios) -> list[dict]:
                 {
                     "label": value.label,
                     "scenario": scenario,
-                    "samples": size,
+                    "records": size,
                     "inspected_pairs_per_call": visits,
                     "repetitions": repetitions,
                     "case": validator.case_record(value),
@@ -463,7 +463,7 @@ def main() -> None:
     control = {
         "label": "empty-control",
         "scenario": "empty-control",
-        "samples": 0,
+        "records": 0,
         "inspected_pairs_per_call": 0,
         "repetitions": 1,
         "case": validator.case_record(control_case),

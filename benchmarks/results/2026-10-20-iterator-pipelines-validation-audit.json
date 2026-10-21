@@ -1,0 +1,392 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "audited_at_utc": "2026-10-20T19:02:02.231506+00:00",
+  "revision": "547c7252cde4b0e5e4b1eae3f39670c71d902989",
+  "validation_revision": "547c7252cde4b0e5e4b1eae3f39670c71d902989",
+  "validation_tree": "427e99b058435bb236dbd91ded2bbdc1063aae41",
+  "validation_index": "/tmp/relar-iterator-validation-v1/index.json",
+  "validation_index_sha256": "bc0e3cdc9a33fddf3c21825adec31b58f3f2e41ec574bd213f2f97725c94aa8a",
+  "audit_script_sha256": "98782fe88945ff375413fb3d71f8d396b9cbfa05ac981f921771900dfb35818c",
+  "fresh_compilation": {
+    "clippy": {
+      "record_sha256": "a0c07da604a07d026de72592503e4bf5fd5531892e1d2e9c60953cba267cb2d9",
+      "inputs_sha256": "e346071ca786317be80d0185e6be86081e2a9b1e7d6e1ee372441f245ad07fab",
+      "packages": [
+        "relar-compiler",
+        "relar-runtime"
+      ],
+      "unchanged_source_timestamps": 45,
+      "raw_cargo_artifacts_fresh_false": 6,
+      "canonical_verbose_compiler_invocations": 6,
+      "copied_output_sha256_verified": {}
+    },
+    "unit": {
+      "record_sha256": "573873c784fd96c05c0b509ba89827beba22f4b21335c83acf23e30df3c3d62f",
+      "inputs_sha256": "ff36b02c06043afcd3e9af9e7d9714dd750b5b32d3d00270784a43a73dd6b380",
+      "packages": [
+        "relar-compiler",
+        "relar-runtime"
+      ],
+      "unchanged_source_timestamps": 45,
+      "raw_cargo_artifacts_fresh_false": 5,
+      "canonical_verbose_compiler_invocations": 5,
+      "copied_output_sha256_verified": {}
+    },
+    "build-ordinary": {
+      "record_sha256": "3baa7b6b003ecc4bf5a18e3b35b51b5bd21bfc25f81a7b59688dd1e2ecf1da43",
+      "inputs_sha256": "2d35b480a272a720a3f9504f72656b6a028a013c2c1ef3d9232b8cf99c6f3f35",
+      "packages": [
+        "relar-compiler",
+        "relar-runtime"
+      ],
+      "unchanged_source_timestamps": 45,
+      "raw_cargo_artifacts_fresh_false": 3,
+      "canonical_verbose_compiler_invocations": 3,
+      "copied_output_sha256_verified": {
+        "compiler": "acfd940e8ef5447c235913d9a3102022a20ceeec34de00bbe5737edd00fa8726",
+        "ordinary": "43f4839910ed881a41fcd18f856510b85913d417a61a5c4e9d0e5323d26f1a5f"
+      }
+    },
+    "build-thinlto": {
+      "record_sha256": "7876c1765f946a081896553e86e9de3d40bff8ed56947c6783cf5c4dda6966de",
+      "inputs_sha256": "dbcd5d4a3ca37661c1fab5ded418d84a536012440c95e92ae7630d23ef7082ef",
+      "packages": [
+        "relar-runtime"
+      ],
+      "unchanged_source_timestamps": 13,
+      "raw_cargo_artifacts_fresh_false": 1,
+      "canonical_verbose_compiler_invocations": 1,
+      "copied_output_sha256_verified": {
+        "thinlto": "be60a663e11415f045dcce2fc38dc31dda8a4b08535535234aaa47d90d961fff"
+      }
+    },
+    "build-asan": {
+      "record_sha256": "81e1109cb6773efa2ab68ef726b415447f4bc113d521d7474597dc0dc8560fce",
+      "inputs_sha256": "c217a08103e1f1263733ad785e76b4ead00da3209d2481d3a56317c3f6994d8f",
+      "packages": [
+        "relar-runtime"
+      ],
+      "unchanged_source_timestamps": 13,
+      "raw_cargo_artifacts_fresh_false": 1,
+      "canonical_verbose_compiler_invocations": 1,
+      "copied_output_sha256_verified": {
+        "asan": "3117a92c03b03a07e29925cae89ae47a07017c518a6d6daa859f2c6a16715f01"
+      }
+    }
+  },
+  "counts": {
+    "recorded_jobs": 138,
+    "passed_jobs": 138,
+    "failed_jobs": 0,
+    "rust_units": {
+      "compiler": 90,
+      "runtime": 101,
+      "total": 191
+    },
+    "language_suites": 28,
+    "suite_invocations": 84,
+    "optimization_configurations": {
+      "ordinary": [
+        "0",
+        "3"
+      ],
+      "thinlto": [
+        "3"
+      ],
+      "asan": [
+        "0",
+        "1"
+      ]
+    },
+    "generic_suite_count": 26,
+    "generic_checks_by_mode": {
+      "ordinary": 1622,
+      "thinlto": 1220,
+      "asan": 1622
+    },
+    "generic_checks_total": 4464,
+    "iterable_fixtures": [
+      "tests/fixtures/iterables/bulk_mapping.py",
+      "tests/fixtures/iterables/comprehension_sum.py",
+      "tests/fixtures/iterables/comprehension_sum_scope.py",
+      "tests/fixtures/iterables/divmod_sum.py",
+      "tests/fixtures/iterables/effects.py",
+      "tests/fixtures/iterables/empty_contexts.py",
+      "tests/fixtures/iterables/iterator_capture.py",
+      "tests/fixtures/iterables/list_bounds.py",
+      "tests/fixtures/iterables/list_specialization.py",
+      "tests/fixtures/iterables/list_sum.py",
+      "tests/fixtures/iterables/mapping.py",
+      "tests/fixtures/iterables/proven_reads.py",
+      "tests/fixtures/iterables/reduction_bounds.py",
+      "tests/fixtures/iterables/reverse_slice_sum.py",
+      "tests/fixtures/iterables/slice_sum.py",
+      "tests/fixtures/iterables/sources.py",
+      "tests/fixtures/iterables/sums.py"
+    ],
+    "iterable_fixture_count": 17,
+    "iterable_checks_by_mode": {
+      "ordinary": 75,
+      "thinlto": 53,
+      "asan": 75
+    },
+    "iterable_expected_error_cases": 5,
+    "iterable_compile_rejections": 31,
+    "luhn_native": {
+      "configurations": 5,
+      "upstream_calls_per_configuration": 15,
+      "differential_cases_per_configuration": 1144,
+      "upstream_calls_total": 75,
+      "differential_cases_total": 5720,
+      "upstream_tests": 10,
+      "upstream_doctest_examples": 5
+    },
+    "base45_native": {
+      "configurations": 5,
+      "upstream_calls_per_configuration": 323,
+      "differential_cases_per_configuration": 289,
+      "compile_rejections_per_configuration": 2
+    },
+    "application_oracles": [
+      "batch",
+      "dependency",
+      "incremental",
+      "inventory",
+      "manifest",
+      "route",
+      "telemetry"
+    ],
+    "application_details": {
+      "route": {
+        "validation_sha256": "4ab2018f22ceee917cd1217d60ce0ddaa90aa25c66e20a6198489f22c2a4245e",
+        "cases": 22,
+        "routes": 64,
+        "detail": "aggregate only"
+      },
+      "dependency": {
+        "validation_sha256": "fbdf5337c10f5ce0588ac81f2385621cfca938145ad38ab440cb5e96c3878b00",
+        "cases": 135,
+        "detail": "aggregate only",
+        "boundary_cases": 10
+      },
+      "incremental": {
+        "validation_sha256": "9c88038b4d45727208cc716f59557cf06037de557edd91fe4d3dbce957af1613",
+        "cases": 155,
+        "parser_cases": 17,
+        "i64_exclusions_with_explicit_overflow": 17
+      },
+      "batch": {
+        "validation_sha256": "78ce5c4a6c7cb0e4cef870bebcc75655d5465c837d6807ab7f15dd8cec295bf1",
+        "cases": 194,
+        "engines": [
+          "cpython",
+          "relar",
+          "rust_bigint"
+        ]
+      },
+      "manifest": {
+        "validation_sha256": "d91a0e3897e325f41b1ceee1482d78e1682e71e4be781ffac22044385a1207d4",
+        "cases": 196,
+        "engines": [
+          "cpython",
+          "relar",
+          "rust_bigint"
+        ],
+        "output_device_cases": 1
+      },
+      "inventory": {
+        "validation_sha256": "8e0d62dbb9126eecec3a426623210cca85d248649f6cba5b7b699696676bc982",
+        "cases": 204,
+        "engines": [
+          "cpython",
+          "relar",
+          "rust_bigint"
+        ],
+        "output_device_cases": 1
+      },
+      "telemetry": {
+        "validation_sha256": "f0030937a09050b3228bbd68eaed3fca072b2f7df40dfc37f51ea760512cef11",
+        "cases": 258,
+        "output_device_cases": 1,
+        "engines": [
+          "cpython",
+          "relar",
+          "rust"
+        ]
+      }
+    },
+    "iterator_pipelines": {
+      "fixtures": [
+        "tests/fixtures/iterator_pipelines/basics.py",
+        "tests/fixtures/iterator_pipelines/composition.py",
+        "tests/fixtures/iterator_pipelines/construction.py",
+        "tests/fixtures/iterator_pipelines/control_flow.py",
+        "tests/fixtures/iterator_pipelines/ownership.py",
+        "tests/fixtures/iterator_pipelines/reversed.py",
+        "tests/fixtures/iterator_pipelines/scoping.py",
+        "tests/fixtures/iterator_pipelines/short_circuit.py",
+        "tests/fixtures/iterator_pipelines/zip_strict.py"
+      ],
+      "positive_fixtures": 9,
+      "expected_error_cases": 5,
+      "compile_rejections": 47,
+      "checks_by_mode": {
+        "ordinary": 75,
+        "thinlto": 61,
+        "asan": 75
+      }
+    },
+    "reference_build_details": {
+      "dependency": {
+        "source_files": 3,
+        "binaries": 2,
+        "raw_fresh_compilation_proved": false,
+        "build_record_sha256": "74e3d094b4c90ab45ddc9d6fed085892132076083130d2d41eed1540e2d2cc01"
+      },
+      "incremental": {
+        "source_files": 7,
+        "binaries": 2,
+        "raw_fresh_compilation_proved": false,
+        "build_record_sha256": "603ac8e210d542b244be7444f3b8e4f892b675fbbf75e1b50d74bbbbab25a4bb"
+      },
+      "batch": {
+        "source_files": 7,
+        "binaries": 1,
+        "raw_fresh_compilation_proved": false,
+        "build_record_sha256": "9986aa6ac619b0057a3a7b0cd58eff5068f3cd0b6dadb70664e572d7febcdea5"
+      },
+      "manifest": {
+        "source_files": 7,
+        "binaries": 1,
+        "raw_fresh_compilation_proved": false,
+        "build_record_sha256": "5e0fab9fb40db942f4812cb18acfbad7733adda10c56fe90825bb3e69de8fab5"
+      },
+      "inventory": {
+        "source_files": 3,
+        "binaries": 1,
+        "raw_fresh_compilation_proved": false,
+        "build_record_sha256": "cea598ed871dc3fa57b6d3fa4e88611fd576b333c01f2bd8a05c9fb0421799e1"
+      },
+      "base45-normal": {
+        "source_files": 3,
+        "binaries": 1,
+        "raw_fresh_compilation_proved": false,
+        "build_record_sha256": "5c4241740deb01a1d2f0df769f52a8a479b8b5d5e12f43dc8caeba7249c9bd05"
+      },
+      "base45-thinlto": {
+        "source_files": 3,
+        "binaries": 1,
+        "raw_fresh_compilation_proved": false,
+        "build_record_sha256": "064e8f9098850bb01060dd67fe9f44ee5ae6482bd356eff497317a848aed56d1"
+      },
+      "luhn-normal": {
+        "source_files": 5,
+        "binaries": 1,
+        "raw_fresh_compilation_proved": false,
+        "build_record_sha256": "ffad976f88097b3f864478993d0c67674c2f1e92fc79e6215ca8451ab945fc6a"
+      },
+      "luhn-thinlto": {
+        "source_files": 5,
+        "binaries": 1,
+        "raw_fresh_compilation_proved": false,
+        "build_record_sha256": "53cb0db01ff3e22bb1efb152ebcf68565dcd8e720f7ea1d4d367b04f1b0bcea8"
+      },
+      "telemetry-normal": {
+        "source_files": 4,
+        "binaries": 1,
+        "raw_fresh_compilation_proved": true,
+        "build_record_sha256": "cf5eb64a44d3e2731c82239e9a00afe85f38e28d1ff440de87f40d188d3fa771"
+      },
+      "telemetry-thinlto": {
+        "source_files": 4,
+        "binaries": 1,
+        "raw_fresh_compilation_proved": true,
+        "build_record_sha256": "8c3f620a640be0003bce06c98b9af484e4d17552d159f585a7d5975c1ef8f223"
+      }
+    },
+    "dependency_boundary_checks": true,
+    "reference_builds": 11,
+    "reference_oracles": {
+      "luhn-normal": {
+        "differential_cases": 1144,
+        "exact_message_cases": 1144,
+        "upstream_adapter_calls": 15
+      },
+      "luhn-thinlto": {
+        "differential_cases": 1144,
+        "exact_message_cases": 1144,
+        "upstream_adapter_calls": 15
+      },
+      "base45-normal": {
+        "differential_cases": 295,
+        "exact_message_cases": 291,
+        "documented_diagnostic_boundaries": 4
+      },
+      "base45-thinlto": {
+        "differential_cases": 295,
+        "exact_message_cases": 291,
+        "documented_diagnostic_boundaries": 4
+      },
+      "telemetry-normal": {
+        "cases": 258,
+        "output_device_cases": 1,
+        "engines": [
+          "cpython",
+          "rust"
+        ]
+      },
+      "telemetry-thinlto": {
+        "cases": 258,
+        "output_device_cases": 1,
+        "engines": [
+          "cpython",
+          "rust"
+        ]
+      }
+    }
+  },
+  "guard_checks": {
+    "before_after_source_manifests_identical": true,
+    "clean_validation_source": true,
+    "source_files_verified_against_original_git_commit": 425,
+    "source_bytes_verified": 2925535,
+    "build_source_hashes_match_source_manifest": 50,
+    "command_record_and_output_hashes_verified": 414,
+    "runner_build_source_manifest_hashes_verified": true,
+    "reference_build_record_hashes_verified": 11,
+    "complete_expected_job_directory_set_verified": true,
+    "complete_evidence_file_set_verified": true,
+    "unexpected_sanitizer_panic_traceback_markers": 0,
+    "oracle_outputs_rechecked_against_retained_expected_values": true,
+    "artifact_metadata_matches_build_record": true,
+    "fresh_cargo_json_inputs_and_compiler_invocations_independently_reparsed": true,
+    "unit_test_execution_order_bound_to_raw_cargo_artifact_executables": [
+      "relar_compiler",
+      "relar",
+      "relar_runtime"
+    ],
+    "frozen_compiler_and_three_runtime_copies_independently_rehashed": true,
+    "recorded_final_tool_artifact_guards_passed": true,
+    "independent_binary_archive_rehash_performed": true,
+    "evidence_manifest_entries": 484,
+    "evidence_manifest_sha256": "8734ba87b9366af2896fd03d1ec7a3c87744297ad83bd5337295055d9c7bf7ba",
+    "build_record_sha256": "120625e9b161aaff2d66721c01187a7b6e0c46bed23616d79ff18a2279c7cfb2",
+    "source_manifest_sha256": "fba3f06de6e72db69ce5f466068d6f49a99e09e3d8bcf19120741534186d3a93"
+  },
+  "limits": [
+    "This audits validation at 547c7252cde4b0e5e4b1eae3f39670c71d902989; later commits do not inherit a claim that this full matrix ran at their revision.",
+    "138 counts orchestration commands, including tool discovery/builds; it is not a count of independent test cases.",
+    "The 4,464 generic suite checks exclude the separately reported Base45/Luhn corpus checks and application/reference oracles.",
+    "ASan/LSan covers generated programs and the runtime at O0/O1 with leak detection enabled; the compiler and Rust references are not sanitizer-instrumented.",
+    "Luhn comparison covers all four str APIs using CPython 3.14.5 / Unicode 16; no Luhn diagnostic exclusions.",
+    "Native Base45/Luhn per-case JSON lived in temporary suite directories because --output was omitted; retained summaries, exit status, and guarded harness source establish completion. Detailed Rust-reference JSON is retained.",
+    "Ruff checks, if any, are identified only by their retained jobs; earlier exploratory checks are not counted in this matrix.",
+    "All native artifacts were independently rehashed by this audit.",
+    "Historical benchmarks/results paths are excluded from per-file source hashes; the clean committed Git tree identifies those paths.",
+    "Compiler/runtime and telemetry Rust-reference compilation have fresh=false Cargo evidence. Other reference builders reran against frozen source and retained source/binary hashes, but may reuse Cargo artifacts; this audit does not claim fresh native compilation for them.",
+    "Route/dependency application validators retain aggregate summaries only; detailed per-case observations are retained for the other five applications and dependency boundaries.",
+    "Native Base45/Luhn oracle records retain validated outputs and protocol hashes; this audit compares normal/ThinLTO records and provenance, without rerunning their algorithms.",
+    "No builds, tests, profiling, or benchmark workloads were executed by this independent audit."
+  ]
+}

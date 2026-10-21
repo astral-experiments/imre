@@ -1,0 +1,318 @@
+{
+  "schema": 1,
+  "revision": "547c7252cde4b0e5e4b1eae3f39670c71d902989",
+  "source_matches_revision": true,
+  "captured_at_utc": "2026-10-20T18:51:53.349384+00:00",
+  "target": "x86_64-unknown-linux-gnu",
+  "artifacts": {
+    "compiler": {
+      "source": "/home/dev-user/.cache/relar/main-target/release/relar",
+      "path": "/tmp/relar-iterator-validation-v1/artifacts/relar",
+      "sha256": "acfd940e8ef5447c235913d9a3102022a20ceeec34de00bbe5737edd00fa8726",
+      "build_job": "build-ordinary"
+    },
+    "normal_runtime": {
+      "source": "/home/dev-user/.cache/relar/main-target/release/librelar_runtime.a",
+      "path": "/tmp/relar-iterator-validation-v1/artifacts/ordinary-runtime.a",
+      "sha256": "43f4839910ed881a41fcd18f856510b85913d417a61a5c4e9d0e5323d26f1a5f",
+      "build_job": "build-ordinary"
+    },
+    "thinlto_runtime": {
+      "source": "/home/dev-user/.cache/relar/main-target/relar-iterator-validation-lto/librelar_runtime.a",
+      "path": "/tmp/relar-iterator-validation-v1/artifacts/thinlto-runtime.a",
+      "sha256": "be60a663e11415f045dcce2fc38dc31dda8a4b08535535234aaa47d90d961fff",
+      "build_job": "build-thinlto"
+    },
+    "asan_runtime": {
+      "source": "/home/dev-user/.cache/relar/main-target/x86_64-unknown-linux-gnu/relar-iterator-validation-asan/librelar_runtime.a",
+      "path": "/tmp/relar-iterator-validation-v1/artifacts/asan-runtime.a",
+      "sha256": "3117a92c03b03a07e29925cae89ae47a07017c518a6d6daa859f2c6a16715f01",
+      "build_job": "build-asan"
+    }
+  },
+  "sha256": {
+    "compiler": "acfd940e8ef5447c235913d9a3102022a20ceeec34de00bbe5737edd00fa8726",
+    "normal_runtime": "43f4839910ed881a41fcd18f856510b85913d417a61a5c4e9d0e5323d26f1a5f",
+    "thinlto_runtime": "be60a663e11415f045dcce2fc38dc31dda8a4b08535535234aaa47d90d961fff",
+    "asan_runtime": "3117a92c03b03a07e29925cae89ae47a07017c518a6d6daa859f2c6a16715f01"
+  },
+  "source_sha256": {
+    "Cargo.lock": "2b9832b6edec9b6066514222c67ff76ca5e8d1236bb303b793dd1d9747a432ea",
+    "Cargo.toml": "b79be453d2d2bb2c7fe24b6b58c230367fe7ddab7126d77a92667390157a21b6",
+    "crates/relar-compiler/Cargo.toml": "4a6b0b45c3b3a62ac54a7fd173ca140302659763507092ca94c3c285367887db",
+    "crates/relar-compiler/src/analysis.rs": "57968f1065f966e82f6e5246bb4043d1fab33458ed9f809eafffae6a5528281c",
+    "crates/relar-compiler/src/classes.rs": "6a814832cb34bed165e4f146d5b31e1d4e221763ff9a0b5766de8353d0c237c5",
+    "crates/relar-compiler/src/effects.rs": "62b8b740c97754a9cc0b76cac074e14fc09f0e44f765b7d20f5bc3267bf499e9",
+    "crates/relar-compiler/src/frontend.rs": "8513c7db99e8a7359f179db4e2818e60d017b3a0ac2f561c74344551b6da52fd",
+    "crates/relar-compiler/src/frontend/assignments.rs": "a57afd5e332eac11967df5ba970f9531e34c68f9c750544a53998491c932a920",
+    "crates/relar-compiler/src/frontend/calls.rs": "a9feaaef898fb693af8b077b18cfa3131c3339e5277ea27c180568993bd9eb30",
+    "crates/relar-compiler/src/frontend/comprehensions.rs": "73b0de5958e0593398a3a14f09e863f6ff5e322912c5883471b08a8d1038c939",
+    "crates/relar-compiler/src/frontend/comprehensions/slices.rs": "6e6202da04ccfee2c4895a778386b60547da0421be302476ae80747010b5113f",
+    "crates/relar-compiler/src/frontend/expansions.rs": "298b0dddf6dbcfd412fbfdd22a0ed3928d5452e90c73e558baa274f671ff7d2f",
+    "crates/relar-compiler/src/frontend/inference.rs": "a876932206b4aac2dc44001069b724bed048ae82680eefc56a67d95a5d6dd0b0",
+    "crates/relar-compiler/src/frontend/iterables.rs": "f7ecb79bd0c2aa93040c3e718ee305687e2aab6cbefcf9f8ed47f922a1626afb",
+    "crates/relar-compiler/src/frontend/matching.rs": "a773a2ea540e6f02c12e872aa22b605d34e06be7f8c37ac054e8bb3d1e3c926e",
+    "crates/relar-compiler/src/frontend/module_values.rs": "a7d6ef3f5ed4f446a59231290e809f8ce505f1f3bce816bb5ac4520bf9153668",
+    "crates/relar-compiler/src/frontend/pipelines.rs": "6d3e0f588c231acb92e0371ee239493f4f8b07bc73759b5a1d65327601e459cf",
+    "crates/relar-compiler/src/frontend/truthiness.rs": "cfabe32776fd75c3ed0d5f9d73b59f1fcb5e02fce394979d92a31261756a37fe",
+    "crates/relar-compiler/src/frontend/unions.rs": "3b649582a176b5e8b3e11087f4e7673c03e52849dd72ef8eaa4eb4ccff4575d5",
+    "crates/relar-compiler/src/frontend/unpacking.rs": "a99d5a5c34daaeaf24dc15f3eccec808f6e1f023e2976a88dd11522e962cebf1",
+    "crates/relar-compiler/src/ir.rs": "2fbb43fbe180fbd9d03bca4f2528c4c3e14432a7a8ab5c2fdc299f477883007a",
+    "crates/relar-compiler/src/lib.rs": "e514666bed358f9098ae1093746fd79592e5c99913f77b759800fb5e184cdf11",
+    "crates/relar-compiler/src/list_bounds.rs": "a49c4990d935091c57d66cf48d181baac3bc8dab4c6784b425299bbd95826b65",
+    "crates/relar-compiler/src/list_specialization.rs": "e0b3f5fa378bc6a699c6cddfb246f6679ec9c048a42adf6be9192c4450f5dafb",
+    "crates/relar-compiler/src/llvm.rs": "0b938bf968ba9b3c1b3fa2fb22f6be22a262f5d44708168bdadf70e665a9f6d7",
+    "crates/relar-compiler/src/llvm/truthiness.rs": "563aebbc63733b2dea66914fb2954e00bc98bb24036f7f06eca54c070ad36913",
+    "crates/relar-compiler/src/llvm/unions.rs": "7843e286ec562426a413be2bb402d2ce9655cb6a3f5b55c9a7f71bd47dd0bd5c",
+    "crates/relar-compiler/src/main.rs": "ab847928d668c12c534af1bb7efbefeccafa533426bf9123218e9e05df3757dc",
+    "crates/relar-compiler/src/modules.rs": "66c33131f512c16cd1342dd5897043e860539e2809216f92204545948610ab95",
+    "crates/relar-compiler/src/narrowing.rs": "857ddb8b64f6d6bc380305f06581cf77923e3d5f197ea9edb871594d49427298",
+    "crates/relar-compiler/src/range_specialization.rs": "38f56876e1f789bab8681ca00eb359da79e1403b991e091f265419f146d5e49d",
+    "crates/relar-compiler/src/ranges.rs": "abd4ab76f97fc7a14140d3dde7b8c9ddbe38bf92d3b0400ee494f49d0bba7bff",
+    "crates/relar-compiler/src/reductions.rs": "a387438971545405e0dc4c3363bebcfea8c63605c764ef8a48ed4160bc7bf738",
+    "crates/relar-compiler/src/tuples.rs": "2e4dee67aa2a4e6c5af8e2d496bb1cb0ce4b60e3a59f95429d3d55f976f44908",
+    "crates/relar-compiler/src/types.rs": "f83a88a2a6bd0fde9ebf5c92bfb0cc009c373236b209df146031b2a795073b51",
+    "crates/relar-runtime/Cargo.toml": "806bc5245a6f1d6743ef85c06372f19d458029d434e4781dcb5c57b4edbfd5b4",
+    "crates/relar-runtime/src/floats.rs": "63e69d21ce4394fa2721ae7f26c71b924287415bc3eb5f2c8859593fe78944b0",
+    "crates/relar-runtime/src/integer_text.rs": "61483a52ce8c37bfe88e03413c7cd4027e39183d3d88fbf1977720a6c1c2bbdf",
+    "crates/relar-runtime/src/lib.rs": "a75cea3f8a59937322a320bdd678007de17c4becdf73acd36af11238a2f4e976",
+    "crates/relar-runtime/src/objects.rs": "69efa0595bf7a452d9ab552f5a7b91549c5a72ac3d5e4337cbcb43d9cef9fad5",
+    "crates/relar-runtime/src/objects/args.rs": "e2faa1539ab313b526b318632fd18362d0800c68188ec92edfcf14dc9d439bb8",
+    "crates/relar-runtime/src/objects/bytes.rs": "780e25e931911be9168a1617dee1efebbeb9a37a5d7fd758a5ad58af4f7beafa",
+    "crates/relar-runtime/src/objects/exceptions.rs": "d45fbf733e3eda43f8b3f9fe052f8ca5b79c2a46f5aceff3e61fa98acab76ff6",
+    "crates/relar-runtime/src/objects/files.rs": "8ea8ccfa19926e4b0bbfcda7aa6f26c960b73f39f8b75c7368fef9889a351c11",
+    "crates/relar-runtime/src/objects/mappings.rs": "8241b8f2bcedc6318b3c6c9dc8a6d1f6a92e158c2d80ae04891dd06647a44b86",
+    "crates/relar-runtime/src/objects/records.rs": "69052d2d31fb62bcb0522936873243a41e130d984d173e8cdd90cce131853ac4",
+    "crates/relar-runtime/src/objects/sequences.rs": "8a1ca698e765e6d3f428d69f8401439a0d1fa26422a80779ef50985e5a0b8925",
+    "crates/relar-runtime/src/objects/unions.rs": "f9abb7076cf25d629c463e42f1465d6026785ab4d9ea342c0822aa42841ff011",
+    "crates/relar-runtime/src/objects/words.rs": "f66d4e18f93554c3f9445195807d41c354ce32b148719b095480a61319fb2449",
+    "rust-toolchain.toml": "7553618f800829444096beea3dce84c3d07585efda504c19adb6787369bbd9e8"
+  },
+  "source_scope": "Workspace Cargo.toml, Cargo.lock, rust-toolchain.toml and every tracked file under crates; full clean-source manifest retained separately.",
+  "source_manifest": "/tmp/relar-iterator-validation-v1/source-before.json",
+  "source_manifest_sha256": "fba3f06de6e72db69ce5f466068d6f49a99e09e3d8bcf19120741534186d3a93",
+  "tools": {
+    "python": {
+      "path": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+    },
+    "runner_python": {
+      "path": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+    },
+    "clang": {
+      "path": "/usr/bin/clang-18",
+      "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+    },
+    "git": {
+      "path": "/home/dev-user/.openai/bin/git",
+      "sha256": "1013d72903eee1de84614ce65ae5a0842a69f16fb408497aa5a1ddb8b046872f"
+    },
+    "cargo": {
+      "path": "/home/dev-user/.cargo/bin/cargo",
+      "sha256": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71"
+    },
+    "rustc": {
+      "path": "/home/dev-user/.cargo/bin/rustc",
+      "sha256": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71"
+    },
+    "rustup": {
+      "path": "/home/dev-user/.cargo/bin/rustup",
+      "sha256": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71"
+    },
+    "ar": {
+      "path": "/usr/bin/ar",
+      "sha256": "6452af2eea333b8c65e1adb92964fc8f97863ab003fa13f9d12bff5345cd7dbe"
+    },
+    "nm": {
+      "path": "/usr/bin/nm",
+      "sha256": "3708df3d7ce16e2c1dcdcd722784ae382d4d582276a71ab7bbe2d542f5621202"
+    },
+    "ohm-cargo": {
+      "path": "/home/dev-user/.rustup/toolchains/ohm/bin/cargo",
+      "sha256": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e"
+    },
+    "ohm-rustc": {
+      "path": "/home/dev-user/.rustup/toolchains/ohm/bin/rustc",
+      "sha256": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba"
+    },
+    "ohm-rustfmt": {
+      "path": "/home/dev-user/.rustup/toolchains/ohm/bin/rustfmt",
+      "sha256": "7b428b45c3be46629ea04a0fda008ba6894cbc4bdd68faa8f252de5fb1453075"
+    },
+    "ohm-cargo-clippy": {
+      "path": "/home/dev-user/.rustup/toolchains/ohm/bin/cargo-clippy",
+      "sha256": "9f6491666444d5a8500dfc5308614fc80c0c4d02d437da865c5a2e3c9685727b"
+    },
+    "ohm-clippy-driver": {
+      "path": "/home/dev-user/.rustup/toolchains/ohm/bin/clippy-driver",
+      "sha256": "475dd62803b23d7decedfdd2b93d6d43866c3b795dfc1ef51eded33e1547a2eb"
+    },
+    "rust-lld": {
+      "path": "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld",
+      "sha256": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b"
+    },
+    "lto-linker": {
+      "path": "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld",
+      "sha256": "bf1b9bc68d0f70523a95618cb9be2e4d04698564229838cfe29eb913bba7ce67"
+    }
+  },
+  "archive_probes": {
+    "thinlto_bitcode_member": "relar_runtime-90af8b2bd3045305.relar_runtime.43769fdd1cec2d90-cgu.00.rcgu.o",
+    "asan_init": true
+  },
+  "build_jobs": {
+    "build-ordinary": {
+      "name": "build-ordinary",
+      "command": [
+        "/home/dev-user/.cargo/bin/cargo",
+        "+ohm",
+        "-Zohm-defaults=no",
+        "build",
+        "--workspace",
+        "--release",
+        "--locked",
+        "--message-format=json-render-diagnostics",
+        "-v"
+      ],
+      "cwd": "/home/dev-user/code/oss/relar",
+      "environment_overrides": {},
+      "started_at": "2026-10-20T18:51:01.122852+00:00",
+      "stdout": "/tmp/relar-iterator-validation-v1/jobs/build-ordinary/stdout",
+      "stderr": "/tmp/relar-iterator-validation-v1/jobs/build-ordinary/stderr",
+      "exit_code": 0,
+      "completed_at": "2026-10-20T18:51:17.497800+00:00",
+      "elapsed_seconds": 16.374083719972987,
+      "error": null,
+      "stdout_sha256": "77e993b14a0d350e50a1fb107f42f6597258b15c4e68a623b93f0c8e6f63b48b",
+      "stderr_sha256": "e25d08f1f6bd1041f84767e372b77773414fb8c21672062bd8dd517f9edcc44c",
+      "status": "passed",
+      "record": "/tmp/relar-iterator-validation-v1/jobs/build-ordinary/command.json",
+      "record_sha256": "29aca0aac08dde95854cb3bc287bf6a6e59801c6a7182992c5cc365186d69089"
+    },
+    "build-thinlto": {
+      "name": "build-thinlto",
+      "command": [
+        "/home/dev-user/.cargo/bin/cargo",
+        "+ohm",
+        "-Zohm-defaults=no",
+        "build",
+        "-p",
+        "relar-runtime",
+        "--profile",
+        "relar-iterator-validation-lto",
+        "--config",
+        "profile.relar-iterator-validation-lto.inherits=\"release\"",
+        "--locked",
+        "--message-format=json-render-diagnostics",
+        "-v"
+      ],
+      "cwd": "/home/dev-user/code/oss/relar",
+      "environment_overrides": {
+        "RUSTFLAGS": "-Clinker-plugin-lto"
+      },
+      "started_at": "2026-10-20T18:51:21.373902+00:00",
+      "stdout": "/tmp/relar-iterator-validation-v1/jobs/build-thinlto/stdout",
+      "stderr": "/tmp/relar-iterator-validation-v1/jobs/build-thinlto/stderr",
+      "exit_code": 0,
+      "completed_at": "2026-10-20T18:51:32.644754+00:00",
+      "elapsed_seconds": 11.27052481402643,
+      "error": null,
+      "stdout_sha256": "c3aa4f72b29e39ac35d636fcb8849c8eb17b28b656d9422586263c52bc48fe21",
+      "stderr_sha256": "e7bd4fb6e98ba9e353b45929ecc9077a2163b2d63344d1cb20509a4c818d0431",
+      "status": "passed",
+      "record": "/tmp/relar-iterator-validation-v1/jobs/build-thinlto/command.json",
+      "record_sha256": "bf41332accabe07ddf8b8223a56dafd5d9b40b327e78d9d42636d5bdb010a62c"
+    },
+    "build-asan": {
+      "name": "build-asan",
+      "command": [
+        "/home/dev-user/.cargo/bin/cargo",
+        "+ohm",
+        "-Zohm-defaults=no",
+        "build",
+        "-p",
+        "relar-runtime",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--profile",
+        "relar-iterator-validation-asan",
+        "--config",
+        "profile.relar-iterator-validation-asan.inherits=\"release\"",
+        "--locked",
+        "--message-format=json-render-diagnostics",
+        "-v"
+      ],
+      "cwd": "/home/dev-user/code/oss/relar",
+      "environment_overrides": {
+        "RUSTC_BOOTSTRAP": "1",
+        "RUSTFLAGS": "-Zsanitizer=address -Cforce-frame-pointers=yes"
+      },
+      "started_at": "2026-10-20T18:51:35.395952+00:00",
+      "stdout": "/tmp/relar-iterator-validation-v1/jobs/build-asan/stdout",
+      "stderr": "/tmp/relar-iterator-validation-v1/jobs/build-asan/stderr",
+      "exit_code": 0,
+      "completed_at": "2026-10-20T18:51:49.551871+00:00",
+      "elapsed_seconds": 14.155854981043376,
+      "error": null,
+      "stdout_sha256": "7c97c613ca303f70df911fcc8a57193c6e843a857fecaedf1e11d7095a0e99c3",
+      "stderr_sha256": "251b4d12024b75a835fe6bbcd40d884aaca8e9c2f79e06aff14ab8e3daae53b4",
+      "status": "passed",
+      "record": "/tmp/relar-iterator-validation-v1/jobs/build-asan/command.json",
+      "record_sha256": "84fd4b22848fb75ef60fe68f9f030acef1a8400e7eab62da2ea0bc420621a4eb"
+    }
+  },
+  "runner_sha256": "0f16d7081b255b671f83d617d2c6985e432f79c6d46c7a4d60d7a6b782f0b81e",
+  "input_guards_passed": true,
+  "fresh_compilation": {
+    "clippy": {
+      "record": "/tmp/relar-iterator-validation-v1/freshness/clippy.json",
+      "sha256": "a0c07da604a07d026de72592503e4bf5fd5531892e1d2e9c60953cba267cb2d9",
+      "packages": [
+        "relar-compiler",
+        "relar-runtime"
+      ],
+      "source_timestamp_inputs": "/tmp/relar-iterator-validation-v1/freshness/clippy-inputs.json",
+      "source_timestamp_inputs_sha256": "e346071ca786317be80d0185e6be86081e2a9b1e7d6e1ee372441f245ad07fab"
+    },
+    "unit": {
+      "record": "/tmp/relar-iterator-validation-v1/freshness/unit.json",
+      "sha256": "573873c784fd96c05c0b509ba89827beba22f4b21335c83acf23e30df3c3d62f",
+      "packages": [
+        "relar-compiler",
+        "relar-runtime"
+      ],
+      "source_timestamp_inputs": "/tmp/relar-iterator-validation-v1/freshness/unit-inputs.json",
+      "source_timestamp_inputs_sha256": "ff36b02c06043afcd3e9af9e7d9714dd750b5b32d3d00270784a43a73dd6b380"
+    },
+    "build-ordinary": {
+      "record": "/tmp/relar-iterator-validation-v1/freshness/build-ordinary.json",
+      "sha256": "3baa7b6b003ecc4bf5a18e3b35b51b5bd21bfc25f81a7b59688dd1e2ecf1da43",
+      "packages": [
+        "relar-compiler",
+        "relar-runtime"
+      ],
+      "source_timestamp_inputs": "/tmp/relar-iterator-validation-v1/freshness/build-ordinary-inputs.json",
+      "source_timestamp_inputs_sha256": "2d35b480a272a720a3f9504f72656b6a028a013c2c1ef3d9232b8cf99c6f3f35"
+    },
+    "build-thinlto": {
+      "record": "/tmp/relar-iterator-validation-v1/freshness/build-thinlto.json",
+      "sha256": "7876c1765f946a081896553e86e9de3d40bff8ed56947c6783cf5c4dda6966de",
+      "packages": [
+        "relar-runtime"
+      ],
+      "source_timestamp_inputs": "/tmp/relar-iterator-validation-v1/freshness/build-thinlto-inputs.json",
+      "source_timestamp_inputs_sha256": "dbcd5d4a3ca37661c1fab5ded418d84a536012440c95e92ae7630d23ef7082ef"
+    },
+    "build-asan": {
+      "record": "/tmp/relar-iterator-validation-v1/freshness/build-asan.json",
+      "sha256": "81e1109cb6773efa2ab68ef726b415447f4bc113d521d7474597dc0dc8560fce",
+      "packages": [
+        "relar-runtime"
+      ],
+      "source_timestamp_inputs": "/tmp/relar-iterator-validation-v1/freshness/build-asan-inputs.json",
+      "source_timestamp_inputs_sha256": "c217a08103e1f1263733ad785e76b4ead00da3209d2481d3a56317c3f6994d8f"
+    }
+  },
+  "build_note": "Copied only from actual fresh=false Cargo compiler-artifact records after unchanged-byte source timestamp refresh. Canonical manifests, target paths, verbose rustc/clippy invocations, and source/tool hashes are recorded; shared dependencies remain intact. Root is the sole Cargo writer."
+}

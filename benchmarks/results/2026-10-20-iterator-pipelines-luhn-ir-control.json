@@ -1,0 +1,66 @@
+{
+  "before": {
+    "compiler_revision": "8b54eae6572a93926265d78562656dd395ad28b0",
+    "llvm_sha256": "adf7ba8037b872b988ac760a52e65c9d8c75a1617c180a2875f69d0dc3d21618",
+    "compiler_sha256": "89c80803c726e1860ebd1fcd87ac81232b513d4dbb656c85f257a3c15dfdf050",
+    "runtime_sha256": "39c51f20047dde4769de36617f244005df474bf9f89ce55ed8d811504dbc7441",
+    "build_record": "/tmp/relar-luhn-performance-validation-v3/build.json",
+    "build_record_sha256": "7573d96af44ff6062d3eb3213c22e487978863f88ee107b39494f06b7dd0154a",
+    "command": [
+      "/tmp/relar-luhn-performance-validation-v3/artifacts/relar",
+      "build",
+      "examples/luhn_checksum/driver.py",
+      "--module-root",
+      "examples/luhn_checksum",
+      "--runtime",
+      "/tmp/relar-luhn-performance-validation-v3/artifacts/ordinary-runtime.a",
+      "--clang",
+      "clang-18",
+      "--opt-level",
+      "3",
+      "--emit-llvm",
+      "/tmp/relar-iterator-luhn-before.ll",
+      "-o",
+      "/tmp/relar-iterator-luhn-before"
+    ]
+  },
+  "after": {
+    "compiler_revision": "547c7252cde4b0e5e4b1eae3f39670c71d902989",
+    "llvm_sha256": "4c4810139dbc3ff7cff5225da2173e34f5e4c5923718172e94394613cef4740f",
+    "compiler_sha256": "acfd940e8ef5447c235913d9a3102022a20ceeec34de00bbe5737edd00fa8726",
+    "runtime_sha256": "43f4839910ed881a41fcd18f856510b85913d417a61a5c4e9d0e5323d26f1a5f",
+    "build_record": "/tmp/relar-iterator-validation-v1/build.json",
+    "build_record_sha256": "120625e9b161aaff2d66721c01187a7b6e0c46bed23616d79ff18a2279c7cfb2",
+    "command": [
+      "/tmp/relar-iterator-validation-v1/artifacts/relar",
+      "build",
+      "examples/luhn_checksum/driver.py",
+      "--module-root",
+      "examples/luhn_checksum",
+      "--runtime",
+      "/tmp/relar-iterator-validation-v1/artifacts/ordinary-runtime.a",
+      "--clang",
+      "clang-18",
+      "--opt-level",
+      "3",
+      "--emit-llvm",
+      "/tmp/relar-iterator-luhn-after.ll",
+      "-o",
+      "/tmp/relar-iterator-luhn-after"
+    ]
+  },
+  "normalization": "Remove only the two new unused external declarations listed below; every other LLVM byte is unchanged.",
+  "removed_declarations": [
+    "declare ptr @relar_record_cached_result(ptr)",
+    "declare ptr @relar_str_reverse_iter(ptr)"
+  ],
+  "normalized_sha256": "adf7ba8037b872b988ac760a52e65c9d8c75a1617c180a2875f69d0dc3d21618",
+  "identical_after_removing_unused_declarations": true,
+  "cwd": "/home/dev-user/code/oss/relar",
+  "source_files": {
+    "examples/luhn_checksum/luhn.py": "c6e9aadd736116ff52b7e59c0f8e8d753278a85eafcd1ca2b423b2939498ad36",
+    "examples/luhn_checksum/checks.py": "0c98af0c0513ca24f0fc40e6d526966f2cb285b61b053bb51eb34ab8df15c16c",
+    "examples/luhn_checksum/driver.py": "2a78c2c7addeab3b53c3ec468644527c0dee6c0e8c29aebfa1c04434ebb2ad80",
+    "examples/luhn_checksum/upstream/test.py": "e8e9ab6a14fb51cf8e9dc67b5e2921b8ebdc82063b71eb31cdcbde4866fb4c59"
+  }
+}
