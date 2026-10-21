@@ -1,0 +1,2143 @@
+{
+  "schema": 1,
+  "started_at_utc": "2026-10-19T18:03:46.200387+00:00",
+  "complete": true,
+  "guards_passed": true,
+  "method": "Separate whole-process DHAT and Callgrind profiles of the exact timed Relar and Rust ThinLTO binaries. Every process handles 64 KiB of raw data using repeated codec calls, including startup, checksum and file I/O. Full output, checksum, inputs, binaries, records, profiling tools and retained artifacts are verified.",
+  "instruction_measurement": "Instrumented Callgrind guest instruction counts (Ir), not CPU cycles, CPU time, or wall-time performance. Inclusive and exclusive annotations are retained separately.",
+  "allocation_measurement": "DHAT requested heap bytes/blocks over the whole process, including runtime and I/O allocations; not RSS. Global peak uses gb/gbk contributions, not independent allocation-point maxima. Exit-live totals alone are not a leak diagnosis.",
+  "benchmark_record_sha256": "204b8fbab5dfa29845619031909a67b6ce7c1453fa557a7b400064e683edcf4b",
+  "source_revision": "3349b85efc78e5ac09a92d8d367d914264679067",
+  "source_dirty": false,
+  "timed_source_and_tool_sha256": {
+    "compiler": "9d7cf3b1c76e809b4664800d4a312bf47bb41d8a0320a09380457a800dde2314",
+    "runtime": "d806c7b5432751c4ae1cf85eb759b4ee56f1c666c57101edc0d8b985f3e94b70",
+    "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "codec": "a22381be6391bd5b3aa9296fc3a2ba44e31ca19368bedb86f48f4f3bf8b42b9f",
+    "driver": "fd07332cbda4fc3d4b0d839e8ddd6249663112ed71e05bae4ac81c5df5fb74ce",
+    "harness": "ef9e68ed9fa13846afdb1d075b209a95776ac952fe4194719f73bef064782c58",
+    "validator": "833bfef931f314c71f514b63941608ec49e6ff5923745333fa904f2b39a4f78a",
+    "shared_harness": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+    "rust": "3c80e8e21f0752df74dd084d080872a7fe8a845e05c1e8f87370d8e67372c6de",
+    "rust_build_record": "1f4eee99fa3b2c61b5970cbcee518a85f6cc3efcab74fed428533a292f73c366",
+    "rust_build_script": "f4e3abe3527f95f8b27335a99ddd7d9c0888cfa3c42293f599e392408a159a53",
+    "rust_source_Cargo.toml": "9af8cc2f3bd4a948e103487988bde70e542e5aa4ef62f7cecfe21f5a0899ad62",
+    "rust_source_Cargo.lock": "97567f91b11f2286bbcd24f24400fc572076172ac097aea9b712c257c2c8ecd8",
+    "rust_source_src/main.rs": "46b56a22bc714751f425349c0c5ca0cdc374f1da4beca421bf407c0a2b3f50c2",
+    "tracked_rust_source_Cargo.toml": "9af8cc2f3bd4a948e103487988bde70e542e5aa4ef62f7cecfe21f5a0899ad62",
+    "tracked_rust_source_Cargo.lock": "97567f91b11f2286bbcd24f24400fc572076172ac097aea9b712c257c2c8ecd8",
+    "tracked_rust_source_src/main.rs": "46b56a22bc714751f425349c0c5ca0cdc374f1da4beca421bf407c0a2b3f50c2",
+    "tracked_rust_build_script": "f4e3abe3527f95f8b27335a99ddd7d9c0888cfa3c42293f599e392408a159a53",
+    "lto_linker": "bf1b9bc68d0f70523a95618cb9be2e4d04698564229838cfe29eb913bba7ce67",
+    "upstream_manifest": "084dc12323304f56c6a7119527bdd90c627d9e8053a04f31bc7e7cace2ae9c5c",
+    "upstream_0": "a22381be6391bd5b3aa9296fc3a2ba44e31ca19368bedb86f48f4f3bf8b42b9f",
+    "upstream_1": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "upstream_2": "0a6f4da891e538d63ce6852350d2317e9720fb6f18d37704f80c09db97d485b8",
+    "upstream_3": "994a7cd4277317f211dffab8eb9cf1a322d6a2e4f41f375fd226ee5ff25c20b3"
+  },
+  "timed_binary_sha256": {
+    "relar": "9d7619afb8ceb43830dc676b7137947d2222336a44c693c36a2642fa6d3c8a09",
+    "rust": "3c80e8e21f0752df74dd084d080872a7fe8a845e05c1e8f87370d8e67372c6de"
+  },
+  "guarded_inputs": {
+    "benchmark_record": {
+      "path": "/tmp/relar-string-reuse-thinlto.json",
+      "sha256": "204b8fbab5dfa29845619031909a67b6ce7c1453fa557a7b400064e683edcf4b",
+      "bytes": 732550
+    },
+    "rust_build_record": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/build-record.json",
+      "sha256": "1f4eee99fa3b2c61b5970cbcee518a85f6cc3efcab74fed428533a292f73c366",
+      "bytes": 20945
+    },
+    "validation": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/validation.json",
+      "sha256": "f9b634b1035e7a1585724f94851aa1d5ee04b983188cd1fca533a29d11a555dd",
+      "bytes": 336600
+    },
+    "llvm": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45.ll",
+      "sha256": "6663a3e07b32b84bf651d1641f5451994293f0294e524187f2ed329ee3523197",
+      "bytes": 183350
+    },
+    "profiler": {
+      "path": "/tmp/relar-string-reuse-profile.py",
+      "sha256": "7bd082aedd142473b0eb42564c43861dbcb5e9cee0f91110da7ad2cfe55f86db",
+      "bytes": 19692
+    },
+    "binary_relar": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+      "sha256": "9d7619afb8ceb43830dc676b7137947d2222336a44c693c36a2642fa6d3c8a09",
+      "bytes": 3663672
+    },
+    "binary_rust": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
+      "sha256": "3c80e8e21f0752df74dd084d080872a7fe8a845e05c1e8f87370d8e67372c6de",
+      "bytes": 696824
+    },
+    "tool_valgrind_launcher": {
+      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+      "sha256": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+      "bytes": 528
+    },
+    "tool_valgrind_binary": {
+      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind.bin",
+      "sha256": "def5fdcf6ae64a4d3e6af3786b622978d8313e0734ecf3f6cbe71d8be9e274c8",
+      "bytes": 22688
+    },
+    "tool_callgrind_annotate": {
+      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+      "sha256": "e0ac7a2c69db1268d19ff52bd59e65289444f14f09c4daad1adee3ef215b6d4f",
+      "bytes": 44669
+    },
+    "tool_dhat": {
+      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/dhat-amd64-linux",
+      "sha256": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc",
+      "bytes": 2346656
+    },
+    "tool_callgrind": {
+      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/callgrind-amd64-linux",
+      "sha256": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03",
+      "bytes": 2482912
+    },
+    "tool_core_preload": {
+      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_core-amd64-linux.so",
+      "sha256": "87edd6ad90b12bb5fe58f2ea2235db5b6a3d637657488f3e06d07e482354a8c5",
+      "bytes": 14024
+    },
+    "tool_dhat_preload": {
+      "path": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so",
+      "sha256": "1cb4fa3188da5492822b33976fe83a150809e39515cc37fe2e52d605a8197436",
+      "bytes": 96200
+    },
+    "tool_shell": {
+      "path": "/usr/bin/dash",
+      "sha256": "86d31f6fb799e91fa21bad341484564510ca287703a16e9e46c53338776f4f42",
+      "bytes": 129784
+    },
+    "tool_perl": {
+      "path": "/usr/bin/perl",
+      "sha256": "47bdc8a342556c1d140084417ef6cacd79a3362e4b6cc1e4754df55bdf1e3683",
+      "bytes": 4023408
+    },
+    "tool_python": {
+      "path": "/home/dev-user/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/bin/python3.12",
+      "sha256": "021044895e95be79dc2f110367607e684119afbc8ce75f6f0eec94844e0acec7",
+      "bytes": 30905176
+    },
+    "timed_encode-64_relar_input": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-64/relar/input.bin",
+      "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
+      "bytes": 64
+    },
+    "timed_encode-64_relar_output": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-64/relar/output.bin",
+      "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
+      "bytes": 96
+    },
+    "timed_encode-64_rust_input": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-64/rust/input.bin",
+      "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
+      "bytes": 64
+    },
+    "timed_encode-64_rust_output": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-64/rust/output.bin",
+      "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
+      "bytes": 96
+    },
+    "timed_encode-16384_relar_input": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-16384/relar/input.bin",
+      "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "bytes": 16384
+    },
+    "timed_encode-16384_relar_output": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-16384/relar/output.bin",
+      "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "bytes": 24576
+    },
+    "timed_encode-16384_rust_input": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-16384/rust/input.bin",
+      "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "bytes": 16384
+    },
+    "timed_encode-16384_rust_output": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/encode-16384/rust/output.bin",
+      "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "bytes": 24576
+    },
+    "timed_decode-bytes-16384_relar_input": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/decode-bytes-16384/relar/input.bin",
+      "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "bytes": 24576
+    },
+    "timed_decode-bytes-16384_relar_output": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/decode-bytes-16384/relar/output.bin",
+      "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "bytes": 16384
+    },
+    "timed_decode-bytes-16384_rust_input": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/decode-bytes-16384/rust/input.bin",
+      "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "bytes": 24576
+    },
+    "timed_decode-bytes-16384_rust_output": {
+      "path": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/decode-bytes-16384/rust/output.bin",
+      "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "bytes": 16384
+    }
+  },
+  "tool_versions": {
+    "valgrind": {
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--version"
+      ],
+      "returncode": 0,
+      "stdout": "valgrind-3.22.0\n",
+      "stderr": ""
+    },
+    "callgrind_annotate": {
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+        "--version"
+      ],
+      "returncode": 255,
+      "stdout": "",
+      "stderr": "callgrind_annotate-3.22.0\n"
+    },
+    "perl": {
+      "command": [
+        "/usr/bin/perl",
+        "--version"
+      ],
+      "returncode": 0,
+      "stdout": "\nThis is perl 5, version 38, subversion 2 (v5.38.2) built for x86_64-linux-gnu-thread-multi\n(with 67 registered patches, see perl -V for more detail)\n\nCopyright 1987-2023, Larry Wall\n\nPerl may be copied only under the terms of either the Artistic License or the\nGNU General Public License, which may be found in the Perl 5 source kit.\n\nComplete documentation for Perl, including FAQ lists, should be found on\nthis system using \"man perl\" or \"perldoc perl\".  If you have access to the\nInternet, point your browser at https://www.perl.org/, the Perl Home Page.\n\n",
+      "stderr": ""
+    }
+  },
+  "environment": {
+    "VALGRIND_LIB": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind",
+    "VALGRIND_OPTS": "",
+    "LC_ALL": "C"
+  },
+  "python_version": "3.12.13 (main, Aug  7 2026, 02:25:39) [Clang 22.1.3 ]",
+  "platform": "Linux-6.8.0-146-generic-x86_64-with-glibc2.39",
+  "cpu_affinity": [
+    0
+  ],
+  "timed_cpu": {
+    "model": "AMD EPYC-Milan Processor",
+    "allowed_cpus_before_pinning": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31
+    ],
+    "affinity": [
+      0
+    ]
+  },
+  "raw_bytes_per_process": 65536,
+  "profiles": [
+    {
+      "label": "encode-64",
+      "engine": "relar",
+      "tool": "dhat",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=dhat",
+        "--command-line-only=yes",
+        "--num-callers=32",
+        "--error-exitcode=97",
+        "--log-file=/tmp/relar-string-reuse-profile/encode-64-relar-dhat/valgrind.log",
+        "--dhat-out-file=/tmp/relar-string-reuse-profile/encode-64-relar-dhat/profile.json",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+        "encode",
+        "/tmp/relar-string-reuse-profile/encode-64-relar-dhat/input.bin",
+        "/tmp/relar-string-reuse-profile/encode-64-relar-dhat/output.bin",
+        "1024"
+      ],
+      "returncode": 0,
+      "repetitions": 1024,
+      "raw_bytes_per_process": 65536,
+      "input_bytes_per_process": 65536,
+      "input_sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
+      "output_sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
+      "output_bytes": 96,
+      "initial_output_sha256": "b34dfee5c49d18225393fff829431a1a06bf9b26a97626de97e3431cb9ce589c",
+      "stdout": "OK\n250880\n",
+      "stdout_sha256": "87c12b1e467a0331b46d6373e962d4afbe75c2580a129a3c9d9b18e8bb102cf4",
+      "profile_sha256": "3fa3517ce9368d717646cd71f2b67a51dd15285eccc95585f6bb5ea4aac185df",
+      "log_sha256": "bf56800393f568f7d10bcf31445a59b564fd47cbd4a5bc78ae1695b0a0a055c9",
+      "total_allocated_bytes": 503922,
+      "total_allocated_blocks": 7252,
+      "peak_live_bytes": 14414,
+      "peak_live_blocks": 73,
+      "exit_live_bytes": 9216,
+      "exit_live_blocks": 2,
+      "top_allocation_stacks": [
+        {
+          "bytes": 299008,
+          "blocks": 4096,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x241390: alloc (library/alloc/src/alloc.rs:101)",
+            "0x241390: do_alloc (heap.rs:412)",
+            "0x241390: alloc (heap.rs:466)",
+            "0x241390: allocate_ptr (heap.rs:369)",
+            "0x241390: <compact_str::repr::heap::HeapBuffer>::alloc_copy_extra (heap.rs:145)",
+            "0x22473B: with_additional (heap.rs:126)",
+            "0x22473B: reserve (mod.rs:275)",
+            "0x22473B: try_reserve (lib.rs:557)",
+            "0x22473B: relar_runtime::objects::append_utf8_slow (objects.rs:609)",
+            "0x20FDA1: fn_3 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 98304,
+          "blocks": 1024,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x210059: fn_3 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 40960,
+          "blocks": 1024,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x20F59B: fn_3 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 40960,
+          "blocks": 1024,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x210100: fn_3 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 8192,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
+            "0x2289ED: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
+            "0x2289ED: relar_runtime::objects::files::open (files.rs:230)",
+            "0x20D84D: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 8192,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
+            "0x217D59: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
+            "0x217D59: {closure#0} (lib.rs:208)",
+            "0x217D59: <relar_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
+            "0x214873: call_once<fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
+            "0x214873: {closure#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
+            "0x214873: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<relar_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
+            "0x186C68: <std::sys::sync::once::futex::Once>::call (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x21529B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>>> (library/std/src/sync/once.rs:226)",
+            "0x21529B: force<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
+            "0x21529B: deref<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
+            "0x21529B: write_output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:218)",
+            "0x21529B: output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:229)",
+            "0x21529B: relar_runtime::output_bytes (lib.rs:236)",
+            "0x20DC88: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 2188,
+          "blocks": 5,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22E1B5: alloc (library/alloc/src/alloc.rs:101)",
+            "0x22E1B5: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x22E1B5: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x22E1B5: allocate (library/alloc/src/alloc.rs:449)",
+            "0x22E1B5: do_alloc<alloc::alloc::Global> (src/alloc.rs:18)",
+            "0x22E1B5: new_uninitialized<alloc::alloc::Global> (src/raw.rs:1576)",
+            "0x22E1B5: fallible_with_capacity<alloc::alloc::Global> (src/raw.rs:1634)",
+            "0x22E1B5: prepare_resize<alloc::alloc::Global> (src/raw.rs:2696)",
+            "0x22E1B5: resize_inner<alloc::alloc::Global> (src/raw.rs:2898)",
+            "0x22E1B5: reserve_rehash_inner<alloc::alloc::Global> (src/raw.rs:2784)",
+            "0x22E1B5: <hashbrown::raw::RawTable<(alloc::rc::Rc<compact_str::CompactString>, usize)>>::reserve_rehash::<hashbrown::map::make_hasher<alloc::rc::Rc<compact_str::CompactString>, usize, std::hash::random::RandomState>::{closure#0}> (src/raw.rs:962)",
+            "0x223537: try_reserve<(alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize), alloc::alloc::Global, hashbrown::map::make_hasher::{closure_env#0}<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize, std::hash::random::RandomState>> (src/raw.rs:932)",
+            "0x223537: try_reserve<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize, std::hash::random::RandomState, alloc::alloc::Global> (src/map.rs:1133)",
+            "0x223537: try_reserve<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize, std::hash::random::RandomState, alloc::alloc::Global> (library/std/src/collections/hash/map.rs:942)",
+            "0x223537: insert<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize> (mappings.rs:121)",
+            "0x223537: insert<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize> (mappings.rs:247)",
+            "0x223537: insert<usize> (mappings.rs:255)",
+            "0x223537: {closure#1} (mappings.rs:569)",
+            "0x223537: with_mut<relar_runtime::objects::Storage, core::option::Option<(relar_runtime::objects::words::OwnedWord, relar_runtime::objects::words::OwnedWord)>, relar_runtime::objects::mappings::relar_dict_set::{closure_env#1}> (lib.rs:160)",
+            "0x223537: relar_dict_set (mappings.rs:566)",
+            "0x213CC7: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 1984,
+          "blocks": 5,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x230B17: alloc (library/alloc/src/alloc.rs:101)",
+            "0x230B17: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x230B17: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x230B17: allocate (library/alloc/src/alloc.rs:449)",
+            "0x230B17: <alloc::raw_vec::RawVecInner>::finish_grow (library/alloc/src/raw_vec/mod.rs:560)",
+            "0x223388: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:529)",
+            "0x223388: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:694)",
+            "0x223388: try_reserve<core::option::Option<relar_runtime::objects::mappings::Entry<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize>>, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:351)",
+            "0x223388: try_reserve<core::option::Option<relar_runtime::objects::mappings::Entry<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize>>, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1536)",
+            "0x223388: insert<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize> (mappings.rs:124)",
+            "0x223388: insert<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize> (mappings.rs:247)",
+            "0x223388: insert<usize> (mappings.rs:255)",
+            "0x223388: {closure#1} (mappings.rs:569)",
+            "0x223388: with_mut<relar_runtime::objects::Storage, core::option::Option<(relar_runtime::objects::words::OwnedWord, relar_runtime::objects::words::OwnedWord)>, relar_runtime::objects::mappings::relar_dict_set::{closure_env#1}> (lib.rs:160)",
+            "0x223388: relar_dict_set (mappings.rs:566)",
+            "0x213CC7: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        }
+      ],
+      "files": {
+        "encode-64-relar-dhat/command.json": {
+          "sha256": "b68d5d3f32e4725b5c7b2204d77603599f6aa0c9e36e3bbdd2a55061aa3f7226",
+          "bytes": 837
+        },
+        "encode-64-relar-dhat/input.bin": {
+          "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
+          "bytes": 64
+        },
+        "encode-64-relar-dhat/output.bin": {
+          "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
+          "bytes": 96
+        },
+        "encode-64-relar-dhat/process-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-64-relar-dhat/profile.json": {
+          "sha256": "3fa3517ce9368d717646cd71f2b67a51dd15285eccc95585f6bb5ea4aac185df",
+          "bytes": 23258
+        },
+        "encode-64-relar-dhat/stdout.txt": {
+          "sha256": "87c12b1e467a0331b46d6373e962d4afbe75c2580a129a3c9d9b18e8bb102cf4",
+          "bytes": 10
+        },
+        "encode-64-relar-dhat/valgrind.log": {
+          "sha256": "bf56800393f568f7d10bcf31445a59b564fd47cbd4a5bc78ae1695b0a0a055c9",
+          "bytes": 976
+        }
+      }
+    },
+    {
+      "label": "encode-64",
+      "engine": "relar",
+      "tool": "callgrind",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=callgrind",
+        "--command-line-only=yes",
+        "--num-callers=32",
+        "--error-exitcode=97",
+        "--log-file=/tmp/relar-string-reuse-profile/encode-64-relar-callgrind/valgrind.log",
+        "--callgrind-out-file=/tmp/relar-string-reuse-profile/encode-64-relar-callgrind/profile.callgrind",
+        "--dump-instr=yes",
+        "--collect-jumps=yes",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+        "encode",
+        "/tmp/relar-string-reuse-profile/encode-64-relar-callgrind/input.bin",
+        "/tmp/relar-string-reuse-profile/encode-64-relar-callgrind/output.bin",
+        "1024"
+      ],
+      "returncode": 0,
+      "repetitions": 1024,
+      "raw_bytes_per_process": 65536,
+      "input_bytes_per_process": 65536,
+      "input_sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
+      "output_sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
+      "output_bytes": 96,
+      "initial_output_sha256": "b34dfee5c49d18225393fff829431a1a06bf9b26a97626de97e3431cb9ce589c",
+      "stdout": "OK\n250880\n",
+      "stdout_sha256": "87c12b1e467a0331b46d6373e962d4afbe75c2580a129a3c9d9b18e8bb102cf4",
+      "profile_sha256": "52faadc4a14d1ba67f57a7b78911b306dbdac7db2b6f115397b1445ae6a11f51",
+      "log_sha256": "a34d71a285255124abc09c4c3f2748f375557a0a83d65458303d5ecdd29d951d",
+      "instructions": 6136042,
+      "events": {
+        "Ir": 6136042
+      },
+      "annotations": [
+        {
+          "inclusive": "no",
+          "command": [
+            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "--auto=no",
+            "--inclusive=no",
+            "--threshold=100",
+            "/tmp/relar-string-reuse-profile/encode-64-relar-callgrind/profile.callgrind"
+          ],
+          "returncode": 0,
+          "stdout_sha256": "e1f54761e0c016f879ff779ec5ee01ede9c48e5a60bbbfb37a9c1456869ca44e",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "inclusive": "yes",
+          "command": [
+            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "--auto=no",
+            "--inclusive=yes",
+            "--threshold=100",
+            "/tmp/relar-string-reuse-profile/encode-64-relar-callgrind/profile.callgrind"
+          ],
+          "returncode": 0,
+          "stdout_sha256": "cba9b4137004da27c89a64b7a0ed22436fd8061f7df924dd16341497019a3a9c",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "files": {
+        "encode-64-relar-callgrind/command.json": {
+          "sha256": "1b9c42af0b002e583c2db3aba20f11730e2e1f0768264f0012b66535aac6f2e2",
+          "bytes": 928
+        },
+        "encode-64-relar-callgrind/functions-inclusive-no-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-64-relar-callgrind/functions-inclusive-no.txt": {
+          "sha256": "e1f54761e0c016f879ff779ec5ee01ede9c48e5a60bbbfb37a9c1456869ca44e",
+          "bytes": 80941
+        },
+        "encode-64-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-64-relar-callgrind/functions-inclusive-yes.txt": {
+          "sha256": "cba9b4137004da27c89a64b7a0ed22436fd8061f7df924dd16341497019a3a9c",
+          "bytes": 81549
+        },
+        "encode-64-relar-callgrind/input.bin": {
+          "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
+          "bytes": 64
+        },
+        "encode-64-relar-callgrind/output.bin": {
+          "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
+          "bytes": 96
+        },
+        "encode-64-relar-callgrind/process-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-64-relar-callgrind/profile.callgrind": {
+          "sha256": "52faadc4a14d1ba67f57a7b78911b306dbdac7db2b6f115397b1445ae6a11f51",
+          "bytes": 251452
+        },
+        "encode-64-relar-callgrind/stdout.txt": {
+          "sha256": "87c12b1e467a0331b46d6373e962d4afbe75c2580a129a3c9d9b18e8bb102cf4",
+          "bytes": 10
+        },
+        "encode-64-relar-callgrind/valgrind.log": {
+          "sha256": "a34d71a285255124abc09c4c3f2748f375557a0a83d65458303d5ecdd29d951d",
+          "bytes": 635
+        }
+      }
+    },
+    {
+      "label": "encode-64",
+      "engine": "rust",
+      "tool": "dhat",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=dhat",
+        "--command-line-only=yes",
+        "--num-callers=32",
+        "--error-exitcode=97",
+        "--log-file=/tmp/relar-string-reuse-profile/encode-64-rust-dhat/valgrind.log",
+        "--dhat-out-file=/tmp/relar-string-reuse-profile/encode-64-rust-dhat/profile.json",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
+        "encode",
+        "/tmp/relar-string-reuse-profile/encode-64-rust-dhat/input.bin",
+        "/tmp/relar-string-reuse-profile/encode-64-rust-dhat/output.bin",
+        "1024"
+      ],
+      "returncode": 0,
+      "repetitions": 1024,
+      "raw_bytes_per_process": 65536,
+      "input_bytes_per_process": 65536,
+      "input_sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
+      "output_sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
+      "output_bytes": 96,
+      "initial_output_sha256": "b34dfee5c49d18225393fff829431a1a06bf9b26a97626de97e3431cb9ce589c",
+      "stdout": "OK\n250880\n",
+      "stdout_sha256": "87c12b1e467a0331b46d6373e962d4afbe75c2580a129a3c9d9b18e8bb102cf4",
+      "profile_sha256": "fe1242ac916c8d9f4412229d56764edef1358aa23151bc4f7da16b23ba92517e",
+      "log_sha256": "5b6f900dbaab9e29d076ba097456f4559b5990e95283fed01e0c05344f46084a",
+      "total_allocated_bytes": 102474,
+      "total_allocated_blocks": 1042,
+      "peak_live_bytes": 2170,
+      "peak_live_blocks": 12,
+      "exit_live_bytes": 544,
+      "exit_live_blocks": 1,
+      "top_allocation_stacks": [
+        {
+          "bytes": 98304,
+          "blocks": 1024,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x11EC87: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x11EC87: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x11EC87: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x11EC87: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x11EC87: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x11EC87: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x11EC87: with_capacity_in<u8, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x11EC87: with_capacity_in<u8, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x11EC87: with_capacity<u8> (library/alloc/src/vec/mod.rs:522)",
+            "0x11EC87: encode (main.rs:104)",
+            "0x11EC87: {closure#0} (main.rs:181)",
+            "0x11EC87: repeated<base45_reference::transform::{closure_env#0}> (main.rs:166)",
+            "0x11EC87: transform (main.rs:181)",
+            "0x11EC87: base45_reference::main (main.rs:208)",
+            "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
+            "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
+            "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 1024,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4918294: _IO_file_doallocate (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4928603: _IO_doallocbuf (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4925963: _IO_file_underflow (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4919EEF: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 1024,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1442F5: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x120195: base45_reference::main (main.rs:207)",
+            "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
+            "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
+            "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 544,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x177A4D: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x172F39: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 472,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4918F5E: fopen (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4931195: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 360,
+          "blocks": 2,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4919E64: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 222,
+          "blocks": 5,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x11EA1B: base45_reference::main (main.rs:198)",
+            "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
+            "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
+            "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 152,
+          "blocks": 1,
+          "frames": [
+            "0x484D953: calloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x492CF5A: ??? (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x492D29F: pthread_attr_setaffinity_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x49310E7: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        }
+      ],
+      "files": {
+        "encode-64-rust-dhat/command.json": {
+          "sha256": "bff51559ddccbaf7b80856f71ffdcc5c2f74568440f98e6a0e02d389990e4cee",
+          "bytes": 848
+        },
+        "encode-64-rust-dhat/input.bin": {
+          "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
+          "bytes": 64
+        },
+        "encode-64-rust-dhat/output.bin": {
+          "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
+          "bytes": 96
+        },
+        "encode-64-rust-dhat/process-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-64-rust-dhat/profile.json": {
+          "sha256": "fe1242ac916c8d9f4412229d56764edef1358aa23151bc4f7da16b23ba92517e",
+          "bytes": 8987
+        },
+        "encode-64-rust-dhat/stdout.txt": {
+          "sha256": "87c12b1e467a0331b46d6373e962d4afbe75c2580a129a3c9d9b18e8bb102cf4",
+          "bytes": 10
+        },
+        "encode-64-rust-dhat/valgrind.log": {
+          "sha256": "5b6f900dbaab9e29d076ba097456f4559b5990e95283fed01e0c05344f46084a",
+          "bytes": 981
+        }
+      }
+    },
+    {
+      "label": "encode-64",
+      "engine": "rust",
+      "tool": "callgrind",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=callgrind",
+        "--command-line-only=yes",
+        "--num-callers=32",
+        "--error-exitcode=97",
+        "--log-file=/tmp/relar-string-reuse-profile/encode-64-rust-callgrind/valgrind.log",
+        "--callgrind-out-file=/tmp/relar-string-reuse-profile/encode-64-rust-callgrind/profile.callgrind",
+        "--dump-instr=yes",
+        "--collect-jumps=yes",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
+        "encode",
+        "/tmp/relar-string-reuse-profile/encode-64-rust-callgrind/input.bin",
+        "/tmp/relar-string-reuse-profile/encode-64-rust-callgrind/output.bin",
+        "1024"
+      ],
+      "returncode": 0,
+      "repetitions": 1024,
+      "raw_bytes_per_process": 65536,
+      "input_bytes_per_process": 65536,
+      "input_sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
+      "output_sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
+      "output_bytes": 96,
+      "initial_output_sha256": "b34dfee5c49d18225393fff829431a1a06bf9b26a97626de97e3431cb9ce589c",
+      "stdout": "OK\n250880\n",
+      "stdout_sha256": "87c12b1e467a0331b46d6373e962d4afbe75c2580a129a3c9d9b18e8bb102cf4",
+      "profile_sha256": "3d630e6d33d1fde338f28b10088f98eba6b1f163244c77baee65db22fae9d2fb",
+      "log_sha256": "a0e95cd8be25e618a434eb40f67e0aff7cdcfce28f20e73def886006556a1615",
+      "instructions": 2280287,
+      "events": {
+        "Ir": 2280287
+      },
+      "annotations": [
+        {
+          "inclusive": "no",
+          "command": [
+            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "--auto=no",
+            "--inclusive=no",
+            "--threshold=100",
+            "/tmp/relar-string-reuse-profile/encode-64-rust-callgrind/profile.callgrind"
+          ],
+          "returncode": 0,
+          "stdout_sha256": "64c0ca0de8afcfee48fcdea4d7f384c63799082c70cd0a0a1ac5df6151032bbc",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "inclusive": "yes",
+          "command": [
+            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "--auto=no",
+            "--inclusive=yes",
+            "--threshold=100",
+            "/tmp/relar-string-reuse-profile/encode-64-rust-callgrind/profile.callgrind"
+          ],
+          "returncode": 0,
+          "stdout_sha256": "327e57ce398af9c5726622de5e163151fc22d4c11649696c74f3ae8c1ef90057",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "files": {
+        "encode-64-rust-callgrind/command.json": {
+          "sha256": "4dabba4607b154206237675750625d5a07ecd033fa18ecf88c16afc5caa8b697",
+          "bytes": 939
+        },
+        "encode-64-rust-callgrind/functions-inclusive-no-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-64-rust-callgrind/functions-inclusive-no.txt": {
+          "sha256": "64c0ca0de8afcfee48fcdea4d7f384c63799082c70cd0a0a1ac5df6151032bbc",
+          "bytes": 36645
+        },
+        "encode-64-rust-callgrind/functions-inclusive-yes-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-64-rust-callgrind/functions-inclusive-yes.txt": {
+          "sha256": "327e57ce398af9c5726622de5e163151fc22d4c11649696c74f3ae8c1ef90057",
+          "bytes": 37363
+        },
+        "encode-64-rust-callgrind/input.bin": {
+          "sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
+          "bytes": 64
+        },
+        "encode-64-rust-callgrind/output.bin": {
+          "sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
+          "bytes": 96
+        },
+        "encode-64-rust-callgrind/process-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-64-rust-callgrind/profile.callgrind": {
+          "sha256": "3d630e6d33d1fde338f28b10088f98eba6b1f163244c77baee65db22fae9d2fb",
+          "bytes": 213314
+        },
+        "encode-64-rust-callgrind/stdout.txt": {
+          "sha256": "87c12b1e467a0331b46d6373e962d4afbe75c2580a129a3c9d9b18e8bb102cf4",
+          "bytes": 10
+        },
+        "encode-64-rust-callgrind/valgrind.log": {
+          "sha256": "a0e95cd8be25e618a434eb40f67e0aff7cdcfce28f20e73def886006556a1615",
+          "bytes": 646
+        }
+      }
+    },
+    {
+      "label": "encode-16384",
+      "engine": "relar",
+      "tool": "dhat",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=dhat",
+        "--command-line-only=yes",
+        "--num-callers=32",
+        "--error-exitcode=97",
+        "--log-file=/tmp/relar-string-reuse-profile/encode-16384-relar-dhat/valgrind.log",
+        "--dhat-out-file=/tmp/relar-string-reuse-profile/encode-16384-relar-dhat/profile.json",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+        "encode",
+        "/tmp/relar-string-reuse-profile/encode-16384-relar-dhat/input.bin",
+        "/tmp/relar-string-reuse-profile/encode-16384-relar-dhat/output.bin",
+        "4"
+      ],
+      "returncode": 0,
+      "repetitions": 4,
+      "raw_bytes_per_process": 65536,
+      "input_bytes_per_process": 65536,
+      "input_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "output_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "output_bytes": 24576,
+      "initial_output_sha256": "b34dfee5c49d18225393fff829431a1a06bf9b26a97626de97e3431cb9ce589c",
+      "stdout": "OK\n98784\n",
+      "stdout_sha256": "8e8c0127b4f42951ac48cff4324e2ed83f06607d085d370c1570948f6f5e4cdf",
+      "profile_sha256": "72b53fab994c90cf8e23490b6baa79d06ad2c500dba1f945c5837320e2a9950d",
+      "log_sha256": "538ba0f076f2fdff923812270e168f9ab98307849ca257159d6a06e396b06e2c",
+      "total_allocated_bytes": 557892,
+      "total_allocated_blocks": 168,
+      "peak_live_bytes": 105386,
+      "peak_live_blocks": 72,
+      "exit_live_bytes": 9216,
+      "exit_live_blocks": 2,
+      "top_allocation_stacks": [
+        {
+          "bytes": 418252,
+          "blocks": 72,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x241390: alloc (library/alloc/src/alloc.rs:101)",
+            "0x241390: do_alloc (heap.rs:412)",
+            "0x241390: alloc (heap.rs:466)",
+            "0x241390: allocate_ptr (heap.rs:369)",
+            "0x241390: <compact_str::repr::heap::HeapBuffer>::alloc_copy_extra (heap.rs:145)",
+            "0x22473B: with_additional (heap.rs:126)",
+            "0x22473B: reserve (mod.rs:275)",
+            "0x22473B: try_reserve (lib.rs:557)",
+            "0x22473B: relar_runtime::objects::append_utf8_slow (objects.rs:609)",
+            "0x20FDA1: fn_3 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 98304,
+          "blocks": 4,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x210059: fn_3 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20CDFC: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 16384,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x18EE6F: <alloc::raw_vec::RawVecInner>::finish_grow (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x1BDA23: <std::fs::File as std::io::Read>::read_to_end (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x2282B8: <relar_runtime::objects::files::FileState>::read_bytes (files.rs:116)",
+            "0x20B44E: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 8192,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
+            "0x2289ED: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
+            "0x2289ED: relar_runtime::objects::files::open (files.rs:230)",
+            "0x20D84D: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 8192,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
+            "0x217D59: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
+            "0x217D59: {closure#0} (lib.rs:208)",
+            "0x217D59: <relar_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
+            "0x214873: call_once<fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
+            "0x214873: {closure#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
+            "0x214873: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<relar_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
+            "0x186C68: <std::sys::sync::once::futex::Once>::call (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x21529B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>>> (library/std/src/sync/once.rs:226)",
+            "0x21529B: force<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
+            "0x21529B: deref<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
+            "0x21529B: write_output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:218)",
+            "0x21529B: output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:229)",
+            "0x21529B: relar_runtime::output_bytes (lib.rs:236)",
+            "0x20DC88: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 2188,
+          "blocks": 5,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22E1B5: alloc (library/alloc/src/alloc.rs:101)",
+            "0x22E1B5: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x22E1B5: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x22E1B5: allocate (library/alloc/src/alloc.rs:449)",
+            "0x22E1B5: do_alloc<alloc::alloc::Global> (src/alloc.rs:18)",
+            "0x22E1B5: new_uninitialized<alloc::alloc::Global> (src/raw.rs:1576)",
+            "0x22E1B5: fallible_with_capacity<alloc::alloc::Global> (src/raw.rs:1634)",
+            "0x22E1B5: prepare_resize<alloc::alloc::Global> (src/raw.rs:2696)",
+            "0x22E1B5: resize_inner<alloc::alloc::Global> (src/raw.rs:2898)",
+            "0x22E1B5: reserve_rehash_inner<alloc::alloc::Global> (src/raw.rs:2784)",
+            "0x22E1B5: <hashbrown::raw::RawTable<(alloc::rc::Rc<compact_str::CompactString>, usize)>>::reserve_rehash::<hashbrown::map::make_hasher<alloc::rc::Rc<compact_str::CompactString>, usize, std::hash::random::RandomState>::{closure#0}> (src/raw.rs:962)",
+            "0x223537: try_reserve<(alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize), alloc::alloc::Global, hashbrown::map::make_hasher::{closure_env#0}<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize, std::hash::random::RandomState>> (src/raw.rs:932)",
+            "0x223537: try_reserve<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize, std::hash::random::RandomState, alloc::alloc::Global> (src/map.rs:1133)",
+            "0x223537: try_reserve<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize, std::hash::random::RandomState, alloc::alloc::Global> (library/std/src/collections/hash/map.rs:942)",
+            "0x223537: insert<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize> (mappings.rs:121)",
+            "0x223537: insert<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize> (mappings.rs:247)",
+            "0x223537: insert<usize> (mappings.rs:255)",
+            "0x223537: {closure#1} (mappings.rs:569)",
+            "0x223537: with_mut<relar_runtime::objects::Storage, core::option::Option<(relar_runtime::objects::words::OwnedWord, relar_runtime::objects::words::OwnedWord)>, relar_runtime::objects::mappings::relar_dict_set::{closure_env#1}> (lib.rs:160)",
+            "0x223537: relar_dict_set (mappings.rs:566)",
+            "0x213CC7: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 1984,
+          "blocks": 5,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x230B17: alloc (library/alloc/src/alloc.rs:101)",
+            "0x230B17: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x230B17: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x230B17: allocate (library/alloc/src/alloc.rs:449)",
+            "0x230B17: <alloc::raw_vec::RawVecInner>::finish_grow (library/alloc/src/raw_vec/mod.rs:560)",
+            "0x223388: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:529)",
+            "0x223388: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:694)",
+            "0x223388: try_reserve<core::option::Option<relar_runtime::objects::mappings::Entry<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize>>, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:351)",
+            "0x223388: try_reserve<core::option::Option<relar_runtime::objects::mappings::Entry<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize>>, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1536)",
+            "0x223388: insert<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize> (mappings.rs:124)",
+            "0x223388: insert<alloc::rc::Rc<compact_str::CompactString, alloc::alloc::Global>, usize> (mappings.rs:247)",
+            "0x223388: insert<usize> (mappings.rs:255)",
+            "0x223388: {closure#1} (mappings.rs:569)",
+            "0x223388: with_mut<relar_runtime::objects::Storage, core::option::Option<(relar_runtime::objects::words::OwnedWord, relar_runtime::objects::words::OwnedWord)>, relar_runtime::objects::mappings::relar_dict_set::{closure_env#1}> (lib.rs:160)",
+            "0x223388: relar_dict_set (mappings.rs:566)",
+            "0x213CC7: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 1760,
+          "blocks": 44,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x223BB3: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x223BB3: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x223BB3: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x223BB3: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x223BB3: UnknownInlinedFun (library/alloc/src/boxed.rs:248)",
+            "0x223BB3: UnknownInlinedFun (library/alloc/src/boxed.rs:286)",
+            "0x223BB3: UnknownInlinedFun (library/alloc/src/rc.rs:426)",
+            "0x223BB3: UnknownInlinedFun (sequences.rs:307)",
+            "0x223BB3: {closure#0} (mappings.rs:705)",
+            "0x223BB3: with_mut<relar_runtime::objects::Storage, core::result::Result<core::option::Option<(relar_runtime::objects::words::OwnedWord, core::option::Option<relar_runtime::objects::words::OwnedWord>)>, relar_runtime::objects::mappings::IterationError>, relar_runtime::objects::mappings::relar_mapping_iter_next::{closure_env#0}> (lib.rs:160)",
+            "0x223BB3: relar_mapping_iter_next (mappings.rs:704)",
+            "0x213A48: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        }
+      ],
+      "files": {
+        "encode-16384-relar-dhat/command.json": {
+          "sha256": "b35640d6c0b3405e5c843849ad88438910705c1ab97bdaa5c6eec8dc28bc0ff1",
+          "bytes": 849
+        },
+        "encode-16384-relar-dhat/input.bin": {
+          "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+          "bytes": 16384
+        },
+        "encode-16384-relar-dhat/output.bin": {
+          "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+          "bytes": 24576
+        },
+        "encode-16384-relar-dhat/process-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-16384-relar-dhat/profile.json": {
+          "sha256": "72b53fab994c90cf8e23490b6baa79d06ad2c500dba1f945c5837320e2a9950d",
+          "bytes": 23186
+        },
+        "encode-16384-relar-dhat/stdout.txt": {
+          "sha256": "8e8c0127b4f42951ac48cff4324e2ed83f06607d085d370c1570948f6f5e4cdf",
+          "bytes": 9
+        },
+        "encode-16384-relar-dhat/valgrind.log": {
+          "sha256": "538ba0f076f2fdff923812270e168f9ab98307849ca257159d6a06e396b06e2c",
+          "bytes": 981
+        }
+      }
+    },
+    {
+      "label": "encode-16384",
+      "engine": "relar",
+      "tool": "callgrind",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=callgrind",
+        "--command-line-only=yes",
+        "--num-callers=32",
+        "--error-exitcode=97",
+        "--log-file=/tmp/relar-string-reuse-profile/encode-16384-relar-callgrind/valgrind.log",
+        "--callgrind-out-file=/tmp/relar-string-reuse-profile/encode-16384-relar-callgrind/profile.callgrind",
+        "--dump-instr=yes",
+        "--collect-jumps=yes",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+        "encode",
+        "/tmp/relar-string-reuse-profile/encode-16384-relar-callgrind/input.bin",
+        "/tmp/relar-string-reuse-profile/encode-16384-relar-callgrind/output.bin",
+        "4"
+      ],
+      "returncode": 0,
+      "repetitions": 4,
+      "raw_bytes_per_process": 65536,
+      "input_bytes_per_process": 65536,
+      "input_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "output_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "output_bytes": 24576,
+      "initial_output_sha256": "b34dfee5c49d18225393fff829431a1a06bf9b26a97626de97e3431cb9ce589c",
+      "stdout": "OK\n98784\n",
+      "stdout_sha256": "8e8c0127b4f42951ac48cff4324e2ed83f06607d085d370c1570948f6f5e4cdf",
+      "profile_sha256": "f3cc4f458980e5675a941402473641c0bc73359a8b0d7597a55a9c6b0cc9145d",
+      "log_sha256": "cdb08fa81566b45610a2c885291df0918d346b5b1d148adfdd850d38581eac1b",
+      "instructions": 3337720,
+      "events": {
+        "Ir": 3337720
+      },
+      "annotations": [
+        {
+          "inclusive": "no",
+          "command": [
+            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "--auto=no",
+            "--inclusive=no",
+            "--threshold=100",
+            "/tmp/relar-string-reuse-profile/encode-16384-relar-callgrind/profile.callgrind"
+          ],
+          "returncode": 0,
+          "stdout_sha256": "65c2fe7d15067e0e4bc043ebcfc02363e1dd1dcb4d5076d28ca67877fa4026a7",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "inclusive": "yes",
+          "command": [
+            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "--auto=no",
+            "--inclusive=yes",
+            "--threshold=100",
+            "/tmp/relar-string-reuse-profile/encode-16384-relar-callgrind/profile.callgrind"
+          ],
+          "returncode": 0,
+          "stdout_sha256": "3434e59d892af3f9ad03dc52b20c2e0115699959ecf757a33289157c50768671",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "files": {
+        "encode-16384-relar-callgrind/command.json": {
+          "sha256": "b69d6faf1ad030327a9c331f4d11d6ab2468c0d24872671a6055005b2983a7a3",
+          "bytes": 940
+        },
+        "encode-16384-relar-callgrind/functions-inclusive-no-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-16384-relar-callgrind/functions-inclusive-no.txt": {
+          "sha256": "65c2fe7d15067e0e4bc043ebcfc02363e1dd1dcb4d5076d28ca67877fa4026a7",
+          "bytes": 81895
+        },
+        "encode-16384-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-16384-relar-callgrind/functions-inclusive-yes.txt": {
+          "sha256": "3434e59d892af3f9ad03dc52b20c2e0115699959ecf757a33289157c50768671",
+          "bytes": 81895
+        },
+        "encode-16384-relar-callgrind/input.bin": {
+          "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+          "bytes": 16384
+        },
+        "encode-16384-relar-callgrind/output.bin": {
+          "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+          "bytes": 24576
+        },
+        "encode-16384-relar-callgrind/process-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-16384-relar-callgrind/profile.callgrind": {
+          "sha256": "f3cc4f458980e5675a941402473641c0bc73359a8b0d7597a55a9c6b0cc9145d",
+          "bytes": 251826
+        },
+        "encode-16384-relar-callgrind/stdout.txt": {
+          "sha256": "8e8c0127b4f42951ac48cff4324e2ed83f06607d085d370c1570948f6f5e4cdf",
+          "bytes": 9
+        },
+        "encode-16384-relar-callgrind/valgrind.log": {
+          "sha256": "cdb08fa81566b45610a2c885291df0918d346b5b1d148adfdd850d38581eac1b",
+          "bytes": 638
+        }
+      }
+    },
+    {
+      "label": "encode-16384",
+      "engine": "rust",
+      "tool": "dhat",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=dhat",
+        "--command-line-only=yes",
+        "--num-callers=32",
+        "--error-exitcode=97",
+        "--log-file=/tmp/relar-string-reuse-profile/encode-16384-rust-dhat/valgrind.log",
+        "--dhat-out-file=/tmp/relar-string-reuse-profile/encode-16384-rust-dhat/profile.json",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
+        "encode",
+        "/tmp/relar-string-reuse-profile/encode-16384-rust-dhat/input.bin",
+        "/tmp/relar-string-reuse-profile/encode-16384-rust-dhat/output.bin",
+        "4"
+      ],
+      "returncode": 0,
+      "repetitions": 4,
+      "raw_bytes_per_process": 65536,
+      "input_bytes_per_process": 65536,
+      "input_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "output_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "output_bytes": 24576,
+      "initial_output_sha256": "b34dfee5c49d18225393fff829431a1a06bf9b26a97626de97e3431cb9ce589c",
+      "stdout": "OK\n98784\n",
+      "stdout_sha256": "8e8c0127b4f42951ac48cff4324e2ed83f06607d085d370c1570948f6f5e4cdf",
+      "profile_sha256": "f5269af36b31a407ed6b40601e62ecdc430c646644e0f8a3dcf954dbfacd5d59",
+      "log_sha256": "7dcc853b828a9220fae4fa4706f0caf7d65b3074764bf0d2f14ed3574fe63730",
+      "total_allocated_bytes": 118797,
+      "total_allocated_blocks": 22,
+      "peak_live_bytes": 67453,
+      "peak_live_blocks": 12,
+      "exit_live_bytes": 544,
+      "exit_live_blocks": 1,
+      "top_allocation_stacks": [
+        {
+          "bytes": 98304,
+          "blocks": 4,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x11EC87: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x11EC87: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x11EC87: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x11EC87: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x11EC87: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x11EC87: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x11EC87: with_capacity_in<u8, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x11EC87: with_capacity_in<u8, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x11EC87: with_capacity<u8> (library/alloc/src/vec/mod.rs:522)",
+            "0x11EC87: encode (main.rs:104)",
+            "0x11EC87: {closure#0} (main.rs:181)",
+            "0x11EC87: repeated<base45_reference::transform::{closure_env#0}> (main.rs:166)",
+            "0x11EC87: transform (main.rs:181)",
+            "0x11EC87: base45_reference::main (main.rs:208)",
+            "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
+            "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
+            "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 16384,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x17930B: std::fs::read::inner (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x11E890: UnknownInlinedFun (library/std/src/fs.rs:348)",
+            "0x11E890: base45_reference::main (main.rs:206)",
+            "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
+            "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
+            "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 1024,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4918294: _IO_file_doallocate (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4928603: _IO_doallocbuf (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4925963: _IO_file_underflow (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4919EEF: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 1024,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1442F5: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x120195: base45_reference::main (main.rs:207)",
+            "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
+            "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
+            "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 544,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x177A4D: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x172F39: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 472,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4918F5E: fopen (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4931195: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 360,
+          "blocks": 2,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4919E64: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 225,
+          "blocks": 5,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x11EA1B: base45_reference::main (main.rs:198)",
+            "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
+            "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
+            "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        }
+      ],
+      "files": {
+        "encode-16384-rust-dhat/command.json": {
+          "sha256": "c453b3818e37505f141b4b3e1f79c758d41598030dd3a874699ae03fce3b8a12",
+          "bytes": 860
+        },
+        "encode-16384-rust-dhat/input.bin": {
+          "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+          "bytes": 16384
+        },
+        "encode-16384-rust-dhat/output.bin": {
+          "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+          "bytes": 24576
+        },
+        "encode-16384-rust-dhat/process-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-16384-rust-dhat/profile.json": {
+          "sha256": "f5269af36b31a407ed6b40601e62ecdc430c646644e0f8a3dcf954dbfacd5d59",
+          "bytes": 8955
+        },
+        "encode-16384-rust-dhat/stdout.txt": {
+          "sha256": "8e8c0127b4f42951ac48cff4324e2ed83f06607d085d370c1570948f6f5e4cdf",
+          "bytes": 9
+        },
+        "encode-16384-rust-dhat/valgrind.log": {
+          "sha256": "7dcc853b828a9220fae4fa4706f0caf7d65b3074764bf0d2f14ed3574fe63730",
+          "bytes": 986
+        }
+      }
+    },
+    {
+      "label": "encode-16384",
+      "engine": "rust",
+      "tool": "callgrind",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=callgrind",
+        "--command-line-only=yes",
+        "--num-callers=32",
+        "--error-exitcode=97",
+        "--log-file=/tmp/relar-string-reuse-profile/encode-16384-rust-callgrind/valgrind.log",
+        "--callgrind-out-file=/tmp/relar-string-reuse-profile/encode-16384-rust-callgrind/profile.callgrind",
+        "--dump-instr=yes",
+        "--collect-jumps=yes",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
+        "encode",
+        "/tmp/relar-string-reuse-profile/encode-16384-rust-callgrind/input.bin",
+        "/tmp/relar-string-reuse-profile/encode-16384-rust-callgrind/output.bin",
+        "4"
+      ],
+      "returncode": 0,
+      "repetitions": 4,
+      "raw_bytes_per_process": 65536,
+      "input_bytes_per_process": 65536,
+      "input_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "output_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "output_bytes": 24576,
+      "initial_output_sha256": "b34dfee5c49d18225393fff829431a1a06bf9b26a97626de97e3431cb9ce589c",
+      "stdout": "OK\n98784\n",
+      "stdout_sha256": "8e8c0127b4f42951ac48cff4324e2ed83f06607d085d370c1570948f6f5e4cdf",
+      "profile_sha256": "1a5e9e0f5179dc557085444d6d97f91d4e6b8ce1dd3cd74c5f85e2e2cfa85cff",
+      "log_sha256": "1ccd05ea3edf226b1c66a60af620b024f660cd55ddf27b574d2f6d8cefb4daf8",
+      "instructions": 2060679,
+      "events": {
+        "Ir": 2060679
+      },
+      "annotations": [
+        {
+          "inclusive": "no",
+          "command": [
+            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "--auto=no",
+            "--inclusive=no",
+            "--threshold=100",
+            "/tmp/relar-string-reuse-profile/encode-16384-rust-callgrind/profile.callgrind"
+          ],
+          "returncode": 0,
+          "stdout_sha256": "d9816a869468f99420f2ddc93554650000cf24b5da4a2d72e3e9bd43e1bb94f5",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "inclusive": "yes",
+          "command": [
+            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "--auto=no",
+            "--inclusive=yes",
+            "--threshold=100",
+            "/tmp/relar-string-reuse-profile/encode-16384-rust-callgrind/profile.callgrind"
+          ],
+          "returncode": 0,
+          "stdout_sha256": "5455e6dc133f4f657d6046ebdab4a7be71612edb390a4e9dd28e7c3579c3bfe0",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "files": {
+        "encode-16384-rust-callgrind/command.json": {
+          "sha256": "80a8dfa4eb5695cebeb2cd60d522a13deaa5ca385f0099c1805235c1004663b5",
+          "bytes": 951
+        },
+        "encode-16384-rust-callgrind/functions-inclusive-no-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-16384-rust-callgrind/functions-inclusive-no.txt": {
+          "sha256": "d9816a869468f99420f2ddc93554650000cf24b5da4a2d72e3e9bd43e1bb94f5",
+          "bytes": 36831
+        },
+        "encode-16384-rust-callgrind/functions-inclusive-yes-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-16384-rust-callgrind/functions-inclusive-yes.txt": {
+          "sha256": "5455e6dc133f4f657d6046ebdab4a7be71612edb390a4e9dd28e7c3579c3bfe0",
+          "bytes": 37551
+        },
+        "encode-16384-rust-callgrind/input.bin": {
+          "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+          "bytes": 16384
+        },
+        "encode-16384-rust-callgrind/output.bin": {
+          "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+          "bytes": 24576
+        },
+        "encode-16384-rust-callgrind/process-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "encode-16384-rust-callgrind/profile.callgrind": {
+          "sha256": "1a5e9e0f5179dc557085444d6d97f91d4e6b8ce1dd3cd74c5f85e2e2cfa85cff",
+          "bytes": 215205
+        },
+        "encode-16384-rust-callgrind/stdout.txt": {
+          "sha256": "8e8c0127b4f42951ac48cff4324e2ed83f06607d085d370c1570948f6f5e4cdf",
+          "bytes": 9
+        },
+        "encode-16384-rust-callgrind/valgrind.log": {
+          "sha256": "1ccd05ea3edf226b1c66a60af620b024f660cd55ddf27b574d2f6d8cefb4daf8",
+          "bytes": 649
+        }
+      }
+    },
+    {
+      "label": "decode-bytes-16384",
+      "engine": "relar",
+      "tool": "dhat",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=dhat",
+        "--command-line-only=yes",
+        "--num-callers=32",
+        "--error-exitcode=97",
+        "--log-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-dhat/valgrind.log",
+        "--dhat-out-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-dhat/profile.json",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+        "decode-bytes",
+        "/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-dhat/input.bin",
+        "/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-dhat/output.bin",
+        "4"
+      ],
+      "returncode": 0,
+      "repetitions": 4,
+      "raw_bytes_per_process": 65536,
+      "input_bytes_per_process": 98304,
+      "input_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "output_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "output_bytes": 16384,
+      "initial_output_sha256": "b34dfee5c49d18225393fff829431a1a06bf9b26a97626de97e3431cb9ce589c",
+      "stdout": "OK\n67512\n",
+      "stdout_sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d",
+      "profile_sha256": "c0e9179ef5c0a66417230f3432a14d45857b7031c736ba5d10e154f77d105c79",
+      "log_sha256": "310751dbde2f53e025b62208d1a1f746890600a77a7f2933d5f1feae387fc6ce",
+      "total_allocated_bytes": 7291628,
+      "total_allocated_blocks": 98525,
+      "peak_live_bytes": 455592,
+      "peak_live_blocks": 74,
+      "exit_live_bytes": 9216,
+      "exit_live_blocks": 2,
+      "top_allocation_stacks": [
+        {
+          "bytes": 3932000,
+          "blocks": 98300,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x223BB3: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x223BB3: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x223BB3: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x223BB3: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x223BB3: UnknownInlinedFun (library/alloc/src/boxed.rs:248)",
+            "0x223BB3: UnknownInlinedFun (library/alloc/src/boxed.rs:286)",
+            "0x223BB3: UnknownInlinedFun (library/alloc/src/rc.rs:426)",
+            "0x223BB3: UnknownInlinedFun (sequences.rs:307)",
+            "0x223BB3: {closure#0} (mappings.rs:705)",
+            "0x223BB3: with_mut<relar_runtime::objects::Storage, core::result::Result<core::option::Option<(relar_runtime::objects::words::OwnedWord, core::option::Option<relar_runtime::objects::words::OwnedWord>)>, relar_runtime::objects::mappings::IterationError>, relar_runtime::objects::mappings::relar_mapping_iter_next::{closure_env#0}> (lib.rs:160)",
+            "0x223BB3: relar_mapping_iter_next (mappings.rs:704)",
+            "0x210667: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20D24A: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 2097024,
+          "blocks": 56,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x210884: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20D24A: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 1048448,
+          "blocks": 52,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x211B69: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20D24A: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 98304,
+          "blocks": 4,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2412B4: alloc (library/alloc/src/alloc.rs:101)",
+            "0x2412B4: do_alloc (heap.rs:412)",
+            "0x2412B4: alloc (heap.rs:466)",
+            "0x2412B4: allocate_ptr (heap.rs:369)",
+            "0x2412B4: <compact_str::repr::heap::HeapBuffer>::alloc_copy (heap.rs:52)",
+            "0x22CE4B: alloc_copy_panic (heap.rs:87)",
+            "0x22CE4B: new_panic (mod.rs:109)",
+            "0x22CE4B: new<&str> (lib.rs:192)",
+            "0x22CE4B: from (lib.rs:2150)",
+            "0x22CE4B: {closure#0} (bytes.rs:351)",
+            "0x22CE4B: map<&str, core::str::error::Utf8Error, *const compact_str::CompactString, relar_runtime::objects::bytes::relar_bytes_decode::{closure_env#0}> (library/core/src/result.rs:836)",
+            "0x22CE4B: relar_bytes_decode (bytes.rs:351)",
+            "0x2104C5: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20D24A: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 65536,
+          "blocks": 4,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x211D43: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x20D24A: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 24576,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x18EE6F: <alloc::raw_vec::RawVecInner>::finish_grow (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x1BDA23: <std::fs::File as std::io::Read>::read_to_end (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x2282B8: <relar_runtime::objects::files::FileState>::read_bytes (files.rs:116)",
+            "0x20B44E: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 8192,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
+            "0x2289ED: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
+            "0x2289ED: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
+            "0x2289ED: relar_runtime::objects::files::open (files.rs:230)",
+            "0x20D84D: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 8192,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
+            "0x217D59: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
+            "0x217D59: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
+            "0x217D59: {closure#0} (lib.rs:208)",
+            "0x217D59: <relar_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
+            "0x214873: call_once<fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
+            "0x214873: {closure#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
+            "0x214873: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<relar_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
+            "0x186C68: <std::sys::sync::once::futex::Once>::call (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x21529B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>>> (library/std/src/sync/once.rs:226)",
+            "0x21529B: force<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
+            "0x21529B: deref<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
+            "0x21529B: write_output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:218)",
+            "0x21529B: output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:229)",
+            "0x21529B: relar_runtime::output_bytes (lib.rs:236)",
+            "0x20DC88: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)",
+            "0x213E40: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45)"
+          ]
+        }
+      ],
+      "files": {
+        "decode-bytes-16384-relar-dhat/command.json": {
+          "sha256": "ab34b1ca5f53d15dd8b036880b7758dac7ffb77923c7fa954faf5319472d647e",
+          "bytes": 885
+        },
+        "decode-bytes-16384-relar-dhat/input.bin": {
+          "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+          "bytes": 24576
+        },
+        "decode-bytes-16384-relar-dhat/output.bin": {
+          "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+          "bytes": 16384
+        },
+        "decode-bytes-16384-relar-dhat/process-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "decode-bytes-16384-relar-dhat/profile.json": {
+          "sha256": "c0e9179ef5c0a66417230f3432a14d45857b7031c736ba5d10e154f77d105c79",
+          "bytes": 26267
+        },
+        "decode-bytes-16384-relar-dhat/stdout.txt": {
+          "sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d",
+          "bytes": 9
+        },
+        "decode-bytes-16384-relar-dhat/valgrind.log": {
+          "sha256": "310751dbde2f53e025b62208d1a1f746890600a77a7f2933d5f1feae387fc6ce",
+          "bytes": 1014
+        }
+      }
+    },
+    {
+      "label": "decode-bytes-16384",
+      "engine": "relar",
+      "tool": "callgrind",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=callgrind",
+        "--command-line-only=yes",
+        "--num-callers=32",
+        "--error-exitcode=97",
+        "--log-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-callgrind/valgrind.log",
+        "--callgrind-out-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-callgrind/profile.callgrind",
+        "--dump-instr=yes",
+        "--collect-jumps=yes",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+        "decode-bytes",
+        "/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-callgrind/input.bin",
+        "/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-callgrind/output.bin",
+        "4"
+      ],
+      "returncode": 0,
+      "repetitions": 4,
+      "raw_bytes_per_process": 65536,
+      "input_bytes_per_process": 98304,
+      "input_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "output_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "output_bytes": 16384,
+      "initial_output_sha256": "b34dfee5c49d18225393fff829431a1a06bf9b26a97626de97e3431cb9ce589c",
+      "stdout": "OK\n67512\n",
+      "stdout_sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d",
+      "profile_sha256": "de3de264588ccb70a3f2b79ea00fd2c52fd32784a4c2afd10ac9cfd6d249d9db",
+      "log_sha256": "6dbc3af84960e83bf7226aae8b815c084bf8a525b3978df0062d0e584b5fc431",
+      "instructions": 70473196,
+      "events": {
+        "Ir": 70473196
+      },
+      "annotations": [
+        {
+          "inclusive": "no",
+          "command": [
+            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "--auto=no",
+            "--inclusive=no",
+            "--threshold=100",
+            "/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-callgrind/profile.callgrind"
+          ],
+          "returncode": 0,
+          "stdout_sha256": "416d488b10c35b705764bec354300ee3a5b82607c3ea30f00af0118654799701",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "inclusive": "yes",
+          "command": [
+            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "--auto=no",
+            "--inclusive=yes",
+            "--threshold=100",
+            "/tmp/relar-string-reuse-profile/decode-bytes-16384-relar-callgrind/profile.callgrind"
+          ],
+          "returncode": 0,
+          "stdout_sha256": "268826b8c360ecd33e03f779ff73bf9284c15876652b7178dd8939fb7a1dc0d7",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "files": {
+        "decode-bytes-16384-relar-callgrind/command.json": {
+          "sha256": "2fae8d3336018fac0b9505366265d103f4db463d4adb8214503a7a80ab4a2cb0",
+          "bytes": 976
+        },
+        "decode-bytes-16384-relar-callgrind/functions-inclusive-no-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "decode-bytes-16384-relar-callgrind/functions-inclusive-no.txt": {
+          "sha256": "416d488b10c35b705764bec354300ee3a5b82607c3ea30f00af0118654799701",
+          "bytes": 84612
+        },
+        "decode-bytes-16384-relar-callgrind/functions-inclusive-yes-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "decode-bytes-16384-relar-callgrind/functions-inclusive-yes.txt": {
+          "sha256": "268826b8c360ecd33e03f779ff73bf9284c15876652b7178dd8939fb7a1dc0d7",
+          "bytes": 85244
+        },
+        "decode-bytes-16384-relar-callgrind/input.bin": {
+          "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+          "bytes": 24576
+        },
+        "decode-bytes-16384-relar-callgrind/output.bin": {
+          "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+          "bytes": 16384
+        },
+        "decode-bytes-16384-relar-callgrind/process-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "decode-bytes-16384-relar-callgrind/profile.callgrind": {
+          "sha256": "de3de264588ccb70a3f2b79ea00fd2c52fd32784a4c2afd10ac9cfd6d249d9db",
+          "bytes": 264443
+        },
+        "decode-bytes-16384-relar-callgrind/stdout.txt": {
+          "sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d",
+          "bytes": 9
+        },
+        "decode-bytes-16384-relar-callgrind/valgrind.log": {
+          "sha256": "6dbc3af84960e83bf7226aae8b815c084bf8a525b3978df0062d0e584b5fc431",
+          "bytes": 658
+        }
+      }
+    },
+    {
+      "label": "decode-bytes-16384",
+      "engine": "rust",
+      "tool": "dhat",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=dhat",
+        "--command-line-only=yes",
+        "--num-callers=32",
+        "--error-exitcode=97",
+        "--log-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-dhat/valgrind.log",
+        "--dhat-out-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-dhat/profile.json",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
+        "decode-bytes",
+        "/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-dhat/input.bin",
+        "/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-dhat/output.bin",
+        "4"
+      ],
+      "returncode": 0,
+      "repetitions": 4,
+      "raw_bytes_per_process": 65536,
+      "input_bytes_per_process": 98304,
+      "input_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "output_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "output_bytes": 16384,
+      "initial_output_sha256": "b34dfee5c49d18225393fff829431a1a06bf9b26a97626de97e3431cb9ce589c",
+      "stdout": "OK\n67512\n",
+      "stdout_sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d",
+      "profile_sha256": "cf436c2f27ac110417de51f9f31acbb26b98ca73925ec9f250047c29f9da62d5",
+      "log_sha256": "2cb5386fd1e83d9197fa3ad499e0cc196f5ec3e76ea65adb5b9e44b560d05a3f",
+      "total_allocated_bytes": 94239,
+      "total_allocated_blocks": 22,
+      "peak_live_bytes": 59279,
+      "peak_live_blocks": 12,
+      "exit_live_bytes": 544,
+      "exit_live_blocks": 1,
+      "top_allocation_stacks": [
+        {
+          "bytes": 65536,
+          "blocks": 4,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x120741: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x120741: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x120741: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x120741: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x120741: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:466)",
+            "0x120741: with_capacity_in<alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:435)",
+            "0x120741: with_capacity_in<u8, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:177)",
+            "0x120741: with_capacity_in<u8, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:975)",
+            "0x120741: with_capacity<u8> (library/alloc/src/vec/mod.rs:522)",
+            "0x120741: base45_reference::decode (main.rs:123)",
+            "0x11FAD5: call_once<fn(&str) -> core::result::Result<alloc::vec::Vec<u8, alloc::alloc::Global>, base45_reference::Error>, (&str)> (library/core/src/ops/function.rs:250)",
+            "0x11FAD5: and_then<&str, base45_reference::Error, alloc::vec::Vec<u8, alloc::alloc::Global>, fn(&str) -> core::result::Result<alloc::vec::Vec<u8, alloc::alloc::Global>, base45_reference::Error>> (library/core/src/result.rs:1491)",
+            "0x11FAD5: {closure#1} (main.rs:184)",
+            "0x11FAD5: repeated<base45_reference::transform::{closure_env#1}> (main.rs:166)",
+            "0x11FAD5: transform (main.rs:182)",
+            "0x11FAD5: base45_reference::main (main.rs:208)",
+            "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
+            "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
+            "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 24576,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x17930B: std::fs::read::inner (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x11E890: UnknownInlinedFun (library/std/src/fs.rs:348)",
+            "0x11E890: base45_reference::main (main.rs:206)",
+            "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
+            "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
+            "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 1024,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4918294: _IO_file_doallocate (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4928603: _IO_doallocbuf (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4925963: _IO_file_underflow (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4919EEF: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 1024,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x1442F5: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x120195: base45_reference::main (main.rs:207)",
+            "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
+            "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
+            "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 544,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x177A4D: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x172F39: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 472,
+          "blocks": 1,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4918F5E: fopen (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x4931195: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 360,
+          "blocks": 2,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x4919E64: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
+            "0x172D2D: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        },
+        {
+          "bytes": 243,
+          "blocks": 5,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x11EA1B: base45_reference::main (main.rs:198)",
+            "0x1220B2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
+            "0x1220B2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
+            "0x122260: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
+            "0x1730DB: std::rt::lang_start_internal (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)",
+            "0x121C6B: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference)"
+          ]
+        }
+      ],
+      "files": {
+        "decode-bytes-16384-rust-dhat/command.json": {
+          "sha256": "7438c0dc516ccf7add35a01cc29293b121b49602be017a8b51ec648b43de9332",
+          "bytes": 896
+        },
+        "decode-bytes-16384-rust-dhat/input.bin": {
+          "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+          "bytes": 24576
+        },
+        "decode-bytes-16384-rust-dhat/output.bin": {
+          "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+          "bytes": 16384
+        },
+        "decode-bytes-16384-rust-dhat/process-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "decode-bytes-16384-rust-dhat/profile.json": {
+          "sha256": "cf436c2f27ac110417de51f9f31acbb26b98ca73925ec9f250047c29f9da62d5",
+          "bytes": 9404
+        },
+        "decode-bytes-16384-rust-dhat/stdout.txt": {
+          "sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d",
+          "bytes": 9
+        },
+        "decode-bytes-16384-rust-dhat/valgrind.log": {
+          "sha256": "2cb5386fd1e83d9197fa3ad499e0cc196f5ec3e76ea65adb5b9e44b560d05a3f",
+          "bytes": 1009
+        }
+      }
+    },
+    {
+      "label": "decode-bytes-16384",
+      "engine": "rust",
+      "tool": "callgrind",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=callgrind",
+        "--command-line-only=yes",
+        "--num-callers=32",
+        "--error-exitcode=97",
+        "--log-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-callgrind/valgrind.log",
+        "--callgrind-out-file=/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-callgrind/profile.callgrind",
+        "--dump-instr=yes",
+        "--collect-jumps=yes",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-reference-thinlto-dev/base45-reference",
+        "decode-bytes",
+        "/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-callgrind/input.bin",
+        "/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-callgrind/output.bin",
+        "4"
+      ],
+      "returncode": 0,
+      "repetitions": 4,
+      "raw_bytes_per_process": 65536,
+      "input_bytes_per_process": 98304,
+      "input_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "output_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "output_bytes": 16384,
+      "initial_output_sha256": "b34dfee5c49d18225393fff829431a1a06bf9b26a97626de97e3431cb9ce589c",
+      "stdout": "OK\n67512\n",
+      "stdout_sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d",
+      "profile_sha256": "5cf83f980ba73e9015c290c71d245c7c31d3e899fdcb4a36e2c436fd1685a112",
+      "log_sha256": "01d3e53e9113f46ba870bcc2c0889d87e8c7fdae1b756b413c7d9503acd1977f",
+      "instructions": 1618712,
+      "events": {
+        "Ir": 1618712
+      },
+      "annotations": [
+        {
+          "inclusive": "no",
+          "command": [
+            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "--auto=no",
+            "--inclusive=no",
+            "--threshold=100",
+            "/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-callgrind/profile.callgrind"
+          ],
+          "returncode": 0,
+          "stdout_sha256": "e57afd14ef8cc77d945813b5bf0119013b8eadb8291bbef4aec5d1f56f387e1e",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "inclusive": "yes",
+          "command": [
+            "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/callgrind_annotate",
+            "--auto=no",
+            "--inclusive=yes",
+            "--threshold=100",
+            "/tmp/relar-string-reuse-profile/decode-bytes-16384-rust-callgrind/profile.callgrind"
+          ],
+          "returncode": 0,
+          "stdout_sha256": "f16b11c368acd3e8b1c2c7510b9221b9706c3234c99b7d1db513c742a9df71ac",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "files": {
+        "decode-bytes-16384-rust-callgrind/command.json": {
+          "sha256": "4dd9b7fe7f880b8dc4fca8aa28e029ae301f29ecac8c92854c3eb9b023c88f5a",
+          "bytes": 987
+        },
+        "decode-bytes-16384-rust-callgrind/functions-inclusive-no-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "decode-bytes-16384-rust-callgrind/functions-inclusive-no.txt": {
+          "sha256": "e57afd14ef8cc77d945813b5bf0119013b8eadb8291bbef4aec5d1f56f387e1e",
+          "bytes": 37866
+        },
+        "decode-bytes-16384-rust-callgrind/functions-inclusive-yes-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "decode-bytes-16384-rust-callgrind/functions-inclusive-yes.txt": {
+          "sha256": "f16b11c368acd3e8b1c2c7510b9221b9706c3234c99b7d1db513c742a9df71ac",
+          "bytes": 38602
+        },
+        "decode-bytes-16384-rust-callgrind/input.bin": {
+          "sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+          "bytes": 24576
+        },
+        "decode-bytes-16384-rust-callgrind/output.bin": {
+          "sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+          "bytes": 16384
+        },
+        "decode-bytes-16384-rust-callgrind/process-stderr.txt": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "decode-bytes-16384-rust-callgrind/profile.callgrind": {
+          "sha256": "5cf83f980ba73e9015c290c71d245c7c31d3e899fdcb4a36e2c436fd1685a112",
+          "bytes": 215827
+        },
+        "decode-bytes-16384-rust-callgrind/stdout.txt": {
+          "sha256": "6f2f5f23491091da5b8b6269ccb859c85139a8a08e7129ac3e5f50065f1dfb1d",
+          "bytes": 9
+        },
+        "decode-bytes-16384-rust-callgrind/valgrind.log": {
+          "sha256": "01d3e53e9113f46ba870bcc2c0889d87e8c7fdae1b756b413c7d9503acd1977f",
+          "bytes": 667
+        }
+      }
+    }
+  ],
+  "completed_at_utc": "2026-10-19T18:03:52.361380+00:00"
+}

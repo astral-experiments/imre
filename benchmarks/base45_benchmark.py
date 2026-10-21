@@ -1,7 +1,8 @@
-"""Compare the unchanged Base45 codec in balanced native/CPython process batches."""
+"""Compare unchanged Base45 in balanced Relar/CPython/Rust process batches."""
 
 import argparse
 import base64
+import itertools
 import json
 import platform
 import random
@@ -14,6 +15,8 @@ from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
+REFERENCE = HERE / "reference/base45_codec"
+OPERATIONS = ("encode", "decode-bytes", "decode-text")
 shared = SimpleNamespace(**runpy.run_path(str(HERE / "benchmark.py")))
 validator = SimpleNamespace(**runpy.run_path(str(HERE / "base45_validate.py")))
 
@@ -27,14 +30,14 @@ def run_checked(command: list[str], timeout: float = 120) -> str:
     return result.stdout.decode()
 
 
-def workloads(codec, batch_bytes: int) -> list[dict]:
+def workloads(codec, batch_bytes: int, operations=OPERATIONS) -> list[dict]:
     generator = random.Random(9285)
     result = []
     for size in (64, 1024, 16384):
         raw = generator.randbytes(size)
         encoded = codec.b45encode(raw)
         repetitions = max(1, batch_bytes // size)
-        for operation in ("encode", "decode-bytes", "decode-text"):
+        for operation in operations:
             payload = raw if operation == "encode" else encoded
             expected = validator.oracle(codec, operation, payload, repetitions)
             result.append(
@@ -99,26 +102,64 @@ def measure(workload: dict, commands: dict, directory: Path, args) -> dict:
 
     gates = {name: run(name) for name in commands}
     phases = {}
+    orders = tuple(itertools.permutations(commands))
     for phase, count in (("warmups", args.warmups), ("samples", args.samples)):
         samples = []
         for index in range(count):
-            order = ("relar", "cpython") if index % 2 == 0 else ("cpython", "relar")
+            order = orders[index % len(orders)]
             sample = {"index": index, "order": order}
             for name in order:
                 sample[name] = run(name)
             samples.append(sample)
         phases[phase] = samples
     summaries = {name: shared.summary(phases["samples"], name) for name in commands}
-    speedup = (
-        summaries["cpython"]["median_seconds"] / summaries["relar"]["median_seconds"]
-    )
+    ratios = {
+        f"{left}_over_{right}": summaries[left]["median_seconds"]
+        / summaries[right]["median_seconds"]
+        for left, right in (("cpython", "relar"), ("relar", "rust"), ("cpython", "rust"))
+        if left in summaries and right in summaries
+    }
     return {
         **workload,
         "gates": gates,
         **phases,
         "summary": summaries,
-        "cpython_over_relar": speedup,
+        **ratios,
     }
+
+
+def rust_sources(directory: Path) -> dict[str, Path]:
+    return {
+        str(path.relative_to(directory)): path
+        for path in (
+            directory / "Cargo.toml",
+            directory / "Cargo.lock",
+            *sorted((directory / "src").rglob("*.rs")),
+        )
+    }
+
+
+def rust_provenance(
+    record_path: Path, paths: dict[str, Path], binary: Path, build_script: Path
+) -> dict:
+    record = json.loads(record_path.read_text())
+    hashes = {name: shared.sha256(path) for name, path in paths.items()}
+    contents = record.get("source_contents", {})
+    assert record.get("entrypoint") == "base45"
+    assert record.get("sources") == hashes and set(contents) == set(hashes)
+    assert all(
+        validator.digest(contents[name].encode()) == value
+        for name, value in hashes.items()
+    )
+    assert record.get("binaries", {}).get("reference", {}).get(
+        "sha256"
+    ) == shared.sha256(binary)
+    assert record.get("build_script_sha256") == shared.sha256(build_script)
+    assert validator.digest(record.get("build_script", "").encode()) == shared.sha256(
+        build_script
+    )
+    assert record.get("rustc_verbose") and record.get("cargo_version")
+    return record
 
 
 def main() -> None:
@@ -126,13 +167,32 @@ def main() -> None:
     parser.add_argument("--compiler", required=True)
     parser.add_argument("--runtime", type=Path, required=True)
     parser.add_argument("--python", default="python3")
+    parser.add_argument("--rust", type=Path, help="prebuilt independent Rust reference")
+    parser.add_argument(
+        "--rust-build-record",
+        type=Path,
+        help="defaults to build-record.json beside --rust",
+    )
+    parser.add_argument("--rust-source-root", type=Path, default=REFERENCE)
+    parser.add_argument(
+        "--native-only",
+        action="store_true",
+        help="measure Relar/Rust only; still validate against CPython",
+    )
+    parser.add_argument(
+        "--operations",
+        nargs="+",
+        choices=OPERATIONS,
+        default=OPERATIONS,
+        help="codec operations to measure (default: all three)",
+    )
     parser.add_argument("--clang", default="clang-18")
     parser.add_argument("--target")
     parser.add_argument("--lto-linker", type=Path)
     parser.add_argument("--artifact-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--samples", type=shared.positive_int, default=20)
-    parser.add_argument("--warmups", type=shared.positive_int, default=2)
+    parser.add_argument("--samples", type=shared.positive_int, default=24)
+    parser.add_argument("--warmups", type=shared.positive_int, default=6)
     parser.add_argument(
         "--batch-bytes", type=shared.positive_int, default=2 * 1024 * 1024
     )
@@ -140,8 +200,21 @@ def main() -> None:
     parser.add_argument("--cpu", type=int)
     parser.add_argument("--allow-dirty", action="store_true")
     args = parser.parse_args()
-    if args.samples < 4 or args.samples % 2 or args.warmups % 2:
-        parser.error("use an even sample count >= 4 and an even warmup count")
+    if args.native_only and not args.rust:
+        parser.error("--native-only requires --rust")
+    if args.rust_build_record and not args.rust:
+        parser.error("--rust-build-record requires --rust")
+    if len(set(args.operations)) != len(args.operations):
+        parser.error("--operations must not repeat an operation")
+    permutations = 6 if args.rust and not args.native_only else 2
+    if (
+        args.samples < max(4, permutations)
+        or args.samples % permutations
+        or args.warmups % permutations
+    ):
+        parser.error(
+            f"sample count must be >= {max(4, permutations)} and samples/warmups must be multiples of {permutations}"
+        )
     provenance = validator.verify_upstream()
     cpu = shared.pin_cpu(args.cpu)
     compiler = shared.executable(args.compiler)
@@ -169,6 +242,39 @@ def main() -> None:
         "validator": HERE / "base45_validate.py",
         "shared_harness": HERE / "benchmark.py",
     }
+    rust = Path(shared.executable(str(args.rust))) if args.rust else None
+    rust_record = None
+    if rust:
+        source_root = args.rust_source_root.resolve(strict=True)
+        sources = rust_sources(source_root)
+        tracked_sources = rust_sources(REFERENCE)
+        assert {name: shared.sha256(path) for name, path in sources.items()} == {
+            name: shared.sha256(path) for name, path in tracked_sources.items()
+        }, "Rust source snapshot differs from the tracked reference"
+        assert shared.sha256(source_root / "build.py") == shared.sha256(
+            REFERENCE / "build.py"
+        )
+        record_path = (
+            args.rust_build_record or rust.parent / "build-record.json"
+        ).resolve(strict=True)
+        rust_record = rust_provenance(
+            record_path, sources, rust, source_root / "build.py"
+        )
+        inputs.update(
+            {
+                "rust": rust,
+                "rust_build_record": record_path,
+                "rust_build_script": source_root / "build.py",
+            }
+        )
+        inputs.update({f"rust_source_{name}": path for name, path in sources.items()})
+        inputs.update(
+            {
+                f"tracked_rust_source_{name}": path
+                for name, path in tracked_sources.items()
+            }
+        )
+        inputs["tracked_rust_build_script"] = REFERENCE / "build.py"
     if args.lto_linker:
         inputs["lto_linker"] = args.lto_linker.absolute()
     inputs["upstream_manifest"] = validator.PACKAGE / "UPSTREAM.json"
@@ -209,31 +315,37 @@ def main() -> None:
     run_checked(command)
     build_ns = time.perf_counter_ns() - start
     binary_hash = shared.sha256(binary)
-    run_checked(
-        [
-            python,
-            "-I",
-            "-B",
-            str(HERE / "base45_validate.py"),
-            "--binary",
-            str(binary),
-            "--compiler",
-            compiler,
-            "--output",
-            str(validation_path),
-        ],
-        timeout=180,
-    )
+    validation_command = [
+        python,
+        "-I",
+        "-B",
+        str(HERE / "base45_validate.py"),
+        "--binary",
+        str(binary),
+        "--compiler",
+        compiler,
+        "--output",
+        str(validation_path),
+    ]
+    if rust:
+        validation_command += ["--rust", str(rust)]
+    run_checked(validation_command, timeout=240)
     validation = json.loads(validation_path.read_text())
     assert validation["binary_sha256"] == binary_hash == shared.sha256(binary)
     assert validation["compiler_sha256"] == hashes["compiler"]
+    if rust:
+        assert validation["rust"]["binary_sha256"] == hashes["rust"]
     python_info = json.loads(run_checked([python, "-I", "-c", shared.PYTHON_INFO]))
     assert python_info["implementation"] == "cpython"
     python_info.pop("executable")
     codec, _ = validator.load_upstream_tests()
-    commands = {"relar": [str(binary)], "cpython": validator.python_command(python)}
+    commands = {"relar": [str(binary)]}
+    if not args.native_only:
+        commands["cpython"] = validator.python_command(python)
+    if rust:
+        commands["rust"] = [str(rust)]
     record = {
-        "schema": 1,
+        "schema": 2,
         "at": datetime.now(timezone.utc).isoformat(),
         "revision": revision,
         "dirty": dirty,
@@ -258,21 +370,26 @@ def main() -> None:
             None,
         ),
         "validation": validation,
+        "rust_build_record": rust_record,
+        "measured_engines": list(commands),
+        "operations": list(args.operations),
+        "batch_bytes": args.batch_bytes,
+        "engine_orders": list(itertools.permutations(commands)),
         "thinlto": args.lto_linker is not None,
         "samples": args.samples,
         "warmups": args.warmups,
-        "method": "Whole-process wall time including startup, one input read and one output write; identical repeated API calls and checksum in each engine; preparation and output verification excluded; balanced alternating order.",
+        "method": "Whole-process wall time including startup, one input read and one output write; identical repeated codec calls and checksum in each engine; Rust black_box prevents repeated-work elimination; preparation and output verification excluded; all engine permutations balanced across samples and warmups.",
         "workloads": [],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    for workload in workloads(codec, args.batch_bytes):
+    for workload in workloads(codec, args.batch_bytes, args.operations):
         result = measure(workload, commands, artifacts / workload["label"], args)
         record["workloads"].append(result)
         args.output.write_text(json.dumps(record, indent=2) + "\n")
-        print(
-            f"{result['label']}: {result['cpython_over_relar']:.3f}x CPython/Relar",
-            flush=True,
+        ratios = ", ".join(
+            f"{name}={value:.3f}x" for name, value in result.items() if "_over_" in name
         )
+        print(f"{result['label']}: {ratios}", flush=True)
     assert hashes == {name: shared.sha256(path) for name, path in inputs.items()}
     assert record["binary_sha256"] == shared.sha256(binary)
     assert validator.verify_upstream() == provenance

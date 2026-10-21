@@ -1,0 +1,907 @@
+{
+  "schema": 1,
+  "audited_at": "2026-10-19T18:06:17.599021+00:00",
+  "script_sha256": "67f6b6ccc97aef17f0fe04028913b9c9a7e6dafc07ee7b21bed22b0a67d8b282",
+  "audit_python": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+  "build_manifest": {
+    "path": "/tmp/relar-string-reuse-frozen/build.json",
+    "sha256": "abbc5d55d4a1ee85098f7e5d83dc07b07134c3052712d5f1199dda7ca2ee9614",
+    "revision": "31bffb7e1aa929497c89b6de38f8e9efa83302e8"
+  },
+  "upstream_commit": "5f49a519c3884a4fbc4c58c5c8f1fa25d7046020",
+  "records": {
+    "normal": {
+      "passed": true,
+      "revision": "3349b85efc78e5ac09a92d8d367d914264679067",
+      "binary_sha256": "c1d052cb26fe4e8a6202171af0168b753a94bbe0b09b9e6f2d18bec6e7f2d61e",
+      "llvm_sha256": "6663a3e07b32b84bf651d1641f5451994293f0294e524187f2ed329ee3523197",
+      "requested_target": null,
+      "effective_target": "x86_64-<vendor>-linux-gnu",
+      "engines": [
+        "relar",
+        "cpython",
+        "rust"
+      ],
+      "samples": 24,
+      "warmups": 6,
+      "batch_bytes": 2097152,
+      "process_results_checked": 837,
+      "balanced_orders_per_workload": {
+        "warmups": {
+          "relar/cpython/rust": 1,
+          "relar/rust/cpython": 1,
+          "cpython/relar/rust": 1,
+          "cpython/rust/relar": 1,
+          "rust/relar/cpython": 1,
+          "rust/cpython/relar": 1
+        },
+        "samples": {
+          "relar/cpython/rust": 4,
+          "relar/rust/cpython": 4,
+          "cpython/relar/rust": 4,
+          "cpython/rust/relar": 4,
+          "rust/relar/cpython": 4,
+          "rust/cpython/relar": 4
+        }
+      },
+      "correctness": {
+        "relar_upstream_calls": 323,
+        "relar_exact_cases": 289,
+        "compile_rejections": 2,
+        "rust_cases": 295,
+        "rust_exact_cases": 291,
+        "rust_unicode_repr_boundaries": 4
+      },
+      "rust_build": {
+        "binary_sha256": "d21d189ef9753d0ccb7dc6baff27558f4e7b235a3ab828bb4229f2ef2ad9aeed",
+        "source_files": 3,
+        "rustc": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)",
+        "lto": null,
+        "llvm_budget": null
+      },
+      "table": [
+        {
+          "label": "encode-64",
+          "repetitions": 32768,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.0232743275,
+              "min_seconds": 0.022884086,
+              "max_seconds": 0.024328915,
+              "p25_seconds": 0.023116066,
+              "p75_seconds": 0.0237826785
+            },
+            "cpython": {
+              "median_seconds": 0.3285156085,
+              "min_seconds": 0.32476328,
+              "max_seconds": 0.390141191,
+              "p25_seconds": 0.326976196,
+              "p75_seconds": 0.334145554
+            },
+            "rust": {
+              "median_seconds": 0.0094435255,
+              "min_seconds": 0.008967205,
+              "max_seconds": 0.011550872,
+              "p25_seconds": 0.009315432,
+              "p75_seconds": 0.00954968475
+            }
+          },
+          "cpython_over_relar": 14.114934513145439,
+          "relar_over_rust": 2.4645803624928004,
+          "cpython_over_rust": 34.78739041897012
+        },
+        {
+          "label": "decode-bytes-64",
+          "repetitions": 32768,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.2794194965,
+              "min_seconds": 0.275776482,
+              "max_seconds": 0.307176897,
+              "p25_seconds": 0.27815592725,
+              "p75_seconds": 0.2839672535
+            },
+            "cpython": {
+              "median_seconds": 0.3279196535,
+              "min_seconds": 0.32552847,
+              "max_seconds": 0.354509709,
+              "p25_seconds": 0.32618809275,
+              "p75_seconds": 0.3298120955
+            },
+            "rust": {
+              "median_seconds": 0.0069873605,
+              "min_seconds": 0.00670725,
+              "max_seconds": 0.012101926,
+              "p25_seconds": 0.00685842325,
+              "p75_seconds": 0.00704949475
+            }
+          },
+          "cpython_over_relar": 1.1735747061587023,
+          "relar_over_rust": 39.98927728145699,
+          "cpython_over_rust": 46.93040433508476
+        },
+        {
+          "label": "decode-text-64",
+          "repetitions": 32768,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.2786318,
+              "min_seconds": 0.276682305,
+              "max_seconds": 0.284335252,
+              "p25_seconds": 0.27809884675,
+              "p75_seconds": 0.28106588675
+            },
+            "cpython": {
+              "median_seconds": 0.324203092,
+              "min_seconds": 0.319885314,
+              "max_seconds": 0.33593235,
+              "p25_seconds": 0.32240894225,
+              "p75_seconds": 0.3267335025
+            },
+            "rust": {
+              "median_seconds": 0.006507959,
+              "min_seconds": 0.006246653,
+              "max_seconds": 0.008769515,
+              "p25_seconds": 0.00641511525,
+              "p75_seconds": 0.0066337295
+            }
+          },
+          "cpython_over_relar": 1.1635538082874963,
+          "relar_over_rust": 42.81400666476233,
+          "cpython_over_rust": 49.81640050283046
+        },
+        {
+          "label": "encode-1024",
+          "repetitions": 2048,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.0167929445,
+              "min_seconds": 0.016450999,
+              "max_seconds": 0.017402539,
+              "p25_seconds": 0.01661990225,
+              "p75_seconds": 0.01706915375
+            },
+            "cpython": {
+              "median_seconds": 0.338787601,
+              "min_seconds": 0.336636895,
+              "max_seconds": 0.367875797,
+              "p25_seconds": 0.337995358,
+              "p75_seconds": 0.34089707175
+            },
+            "rust": {
+              "median_seconds": 0.0087627585,
+              "min_seconds": 0.008499715,
+              "max_seconds": 0.009363592,
+              "p25_seconds": 0.008636256,
+              "p75_seconds": 0.00887860425
+            }
+          },
+          "cpython_over_relar": 20.174401279060977,
+          "relar_over_rust": 1.9163993279057046,
+          "cpython_over_rust": 38.66220905209244
+        },
+        {
+          "label": "decode-bytes-1024",
+          "repetitions": 2048,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.264623072,
+              "min_seconds": 0.262124751,
+              "max_seconds": 0.270036974,
+              "p25_seconds": 0.263520071,
+              "p75_seconds": 0.26556991525
+            },
+            "cpython": {
+              "median_seconds": 0.316878984,
+              "min_seconds": 0.309534821,
+              "max_seconds": 0.354691091,
+              "p25_seconds": 0.315801255,
+              "p75_seconds": 0.31902016575
+            },
+            "rust": {
+              "median_seconds": 0.006169939,
+              "min_seconds": 0.005871173,
+              "max_seconds": 0.006676813,
+              "p25_seconds": 0.00601195275,
+              "p75_seconds": 0.0063443095
+            }
+          },
+          "cpython_over_relar": 1.197473000389021,
+          "relar_over_rust": 42.889090475610864,
+          "cpython_over_rust": 51.35852785578593
+        },
+        {
+          "label": "decode-text-1024",
+          "repetitions": 2048,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.2649600005,
+              "min_seconds": 0.262559776,
+              "max_seconds": 0.278104374,
+              "p25_seconds": 0.264319944,
+              "p75_seconds": 0.268821004
+            },
+            "cpython": {
+              "median_seconds": 0.3158108095,
+              "min_seconds": 0.310641236,
+              "max_seconds": 0.327563617,
+              "p25_seconds": 0.31365877575,
+              "p75_seconds": 0.317571943
+            },
+            "rust": {
+              "median_seconds": 0.0061365785,
+              "min_seconds": 0.005791134,
+              "max_seconds": 0.007084967,
+              "p25_seconds": 0.00596459025,
+              "p75_seconds": 0.0062126215
+            }
+          },
+          "cpython_over_relar": 1.1919188137984624,
+          "relar_over_rust": 43.177154908064814,
+          "cpython_over_rust": 51.46366326121307
+        },
+        {
+          "label": "encode-16384",
+          "repetitions": 128,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.015768904,
+              "min_seconds": 0.015432083,
+              "max_seconds": 0.017501364,
+              "p25_seconds": 0.015611697,
+              "p75_seconds": 0.015993377
+            },
+            "cpython": {
+              "median_seconds": 0.341659361,
+              "min_seconds": 0.336424419,
+              "max_seconds": 0.352264948,
+              "p25_seconds": 0.34022071675,
+              "p75_seconds": 0.3431595455
+            },
+            "rust": {
+              "median_seconds": 0.0087822345,
+              "min_seconds": 0.008573923,
+              "max_seconds": 0.00941663,
+              "p25_seconds": 0.00869597325,
+              "p75_seconds": 0.0089058375
+            }
+          },
+          "cpython_over_relar": 21.666652355801013,
+          "relar_over_rust": 1.7955457691319905,
+          "cpython_over_rust": 38.903465968712176
+        },
+        {
+          "label": "decode-bytes-16384",
+          "repetitions": 128,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.289577756,
+              "min_seconds": 0.287633013,
+              "max_seconds": 0.298242377,
+              "p25_seconds": 0.2887418365,
+              "p75_seconds": 0.29233800625
+            },
+            "cpython": {
+              "median_seconds": 0.3411138105,
+              "min_seconds": 0.334248026,
+              "max_seconds": 0.358164054,
+              "p25_seconds": 0.33972007525,
+              "p75_seconds": 0.346188156
+            },
+            "rust": {
+              "median_seconds": 0.006298845,
+              "min_seconds": 0.005903375,
+              "max_seconds": 0.007108397,
+              "p25_seconds": 0.006158433,
+              "p75_seconds": 0.006480322
+            }
+          },
+          "cpython_over_relar": 1.1779696590369324,
+          "relar_over_rust": 45.97315158572723,
+          "cpython_over_rust": 54.154977698292306
+        },
+        {
+          "label": "decode-text-16384",
+          "repetitions": 128,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.2663145955,
+              "min_seconds": 0.262506426,
+              "max_seconds": 0.269956757,
+              "p25_seconds": 0.264942816,
+              "p75_seconds": 0.267576281
+            },
+            "cpython": {
+              "median_seconds": 0.338420518,
+              "min_seconds": 0.332935619,
+              "max_seconds": 0.368841457,
+              "p25_seconds": 0.33588277325,
+              "p75_seconds": 0.3411880215
+            },
+            "rust": {
+              "median_seconds": 0.0059475515,
+              "min_seconds": 0.005758464,
+              "max_seconds": 0.006501007,
+              "p25_seconds": 0.00584266325,
+              "p75_seconds": 0.0060974095
+            }
+          },
+          "cpython_over_relar": 1.2707546778073604,
+          "relar_over_rust": 44.77718192099723,
+          "cpython_over_rust": 56.900813385138406
+        }
+      ],
+      "path": "/tmp/relar-string-reuse-normal.json",
+      "sha256": "73f80f4a979bd02e0e846814e93bde907ba2b022458be6fa218b4c9dc3e408b7"
+    },
+    "thinlto": {
+      "passed": true,
+      "revision": "3349b85efc78e5ac09a92d8d367d914264679067",
+      "binary_sha256": "9d7619afb8ceb43830dc676b7137947d2222336a44c693c36a2642fa6d3c8a09",
+      "llvm_sha256": "6663a3e07b32b84bf651d1641f5451994293f0294e524187f2ed329ee3523197",
+      "requested_target": "x86_64-unknown-linux-gnu",
+      "effective_target": "x86_64-<vendor>-linux-gnu",
+      "engines": [
+        "relar",
+        "cpython",
+        "rust"
+      ],
+      "samples": 24,
+      "warmups": 6,
+      "batch_bytes": 2097152,
+      "process_results_checked": 837,
+      "balanced_orders_per_workload": {
+        "warmups": {
+          "relar/cpython/rust": 1,
+          "relar/rust/cpython": 1,
+          "cpython/relar/rust": 1,
+          "cpython/rust/relar": 1,
+          "rust/relar/cpython": 1,
+          "rust/cpython/relar": 1
+        },
+        "samples": {
+          "relar/cpython/rust": 4,
+          "relar/rust/cpython": 4,
+          "cpython/relar/rust": 4,
+          "cpython/rust/relar": 4,
+          "rust/relar/cpython": 4,
+          "rust/cpython/relar": 4
+        }
+      },
+      "correctness": {
+        "relar_upstream_calls": 323,
+        "relar_exact_cases": 289,
+        "compile_rejections": 2,
+        "rust_cases": 295,
+        "rust_exact_cases": 291,
+        "rust_unicode_repr_boundaries": 4
+      },
+      "rust_build": {
+        "binary_sha256": "3c80e8e21f0752df74dd084d080872a7fe8a845e05c1e8f87370d8e67372c6de",
+        "source_files": 3,
+        "rustc": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)",
+        "lto": "thin",
+        "llvm_budget": 1000
+      },
+      "table": [
+        {
+          "label": "encode-64",
+          "repetitions": 32768,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.0181874145,
+              "min_seconds": 0.017643669,
+              "max_seconds": 0.018783769,
+              "p25_seconds": 0.01786080975,
+              "p75_seconds": 0.018245523
+            },
+            "cpython": {
+              "median_seconds": 0.329142658,
+              "min_seconds": 0.322673009,
+              "max_seconds": 0.353942589,
+              "p25_seconds": 0.32661350525,
+              "p75_seconds": 0.3305135825
+            },
+            "rust": {
+              "median_seconds": 0.0094468315,
+              "min_seconds": 0.009136991,
+              "max_seconds": 0.011588581,
+              "p25_seconds": 0.00930904775,
+              "p75_seconds": 0.00964882875
+            }
+          },
+          "cpython_over_relar": 18.0972758937231,
+          "relar_over_rust": 1.925239642519293,
+          "cpython_over_rust": 34.84159297220449
+        },
+        {
+          "label": "decode-bytes-64",
+          "repetitions": 32768,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.179763891,
+              "min_seconds": 0.177167424,
+              "max_seconds": 0.189765556,
+              "p25_seconds": 0.1791477205,
+              "p75_seconds": 0.181140009
+            },
+            "cpython": {
+              "median_seconds": 0.328746171,
+              "min_seconds": 0.324563689,
+              "max_seconds": 0.351588722,
+              "p25_seconds": 0.32718449275,
+              "p75_seconds": 0.332037868
+            },
+            "rust": {
+              "median_seconds": 0.006670721,
+              "min_seconds": 0.006344545,
+              "max_seconds": 0.009111183,
+              "p25_seconds": 0.00649637325,
+              "p75_seconds": 0.00674310925
+            }
+          },
+          "cpython_over_relar": 1.8287664400855674,
+          "relar_over_rust": 26.948195105146805,
+          "cpython_over_rust": 49.28195482917064
+        },
+        {
+          "label": "decode-text-64",
+          "repetitions": 32768,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.177508757,
+              "min_seconds": 0.17565982,
+              "max_seconds": 0.184575642,
+              "p25_seconds": 0.176730332,
+              "p75_seconds": 0.17921682025
+            },
+            "cpython": {
+              "median_seconds": 0.3265612885,
+              "min_seconds": 0.319595567,
+              "max_seconds": 0.340142667,
+              "p25_seconds": 0.32437420975,
+              "p75_seconds": 0.32839787225
+            },
+            "rust": {
+              "median_seconds": 0.006356101,
+              "min_seconds": 0.006030791,
+              "max_seconds": 0.007644804,
+              "p25_seconds": 0.00618969175,
+              "p75_seconds": 0.0064719545
+            }
+          },
+          "cpython_over_relar": 1.8396911454909237,
+          "relar_over_rust": 27.927302759978165,
+          "cpython_over_rust": 51.37761160497607
+        },
+        {
+          "label": "encode-1024",
+          "repetitions": 2048,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.012728794,
+              "min_seconds": 0.012437461,
+              "max_seconds": 0.013324252,
+              "p25_seconds": 0.012611144,
+              "p75_seconds": 0.01287752075
+            },
+            "cpython": {
+              "median_seconds": 0.3410851135,
+              "min_seconds": 0.337300051,
+              "max_seconds": 0.373546178,
+              "p25_seconds": 0.33877039775,
+              "p75_seconds": 0.34258525225
+            },
+            "rust": {
+              "median_seconds": 0.008813123,
+              "min_seconds": 0.008536624,
+              "max_seconds": 0.009125169,
+              "p25_seconds": 0.008695951,
+              "p75_seconds": 0.0089200595
+            }
+          },
+          "cpython_over_relar": 26.7963417036995,
+          "relar_over_rust": 1.444300051185034,
+          "cpython_over_rust": 38.701957694224845
+        },
+        {
+          "label": "decode-bytes-1024",
+          "repetitions": 2048,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.1671406695,
+              "min_seconds": 0.1652091,
+              "max_seconds": 0.176220418,
+              "p25_seconds": 0.16565950525,
+              "p75_seconds": 0.16830236075
+            },
+            "cpython": {
+              "median_seconds": 0.3205607265,
+              "min_seconds": 0.312171998,
+              "max_seconds": 0.337696394,
+              "p25_seconds": 0.31708943575,
+              "p75_seconds": 0.3237479935
+            },
+            "rust": {
+              "median_seconds": 0.005953723,
+              "min_seconds": 0.005683164,
+              "max_seconds": 0.011770562,
+              "p25_seconds": 0.00583734375,
+              "p75_seconds": 0.006200209
+            }
+          },
+          "cpython_over_relar": 1.9179097909500715,
+          "relar_over_rust": 28.073302956822143,
+          "cpython_over_rust": 53.84206260519678
+        },
+        {
+          "label": "decode-text-1024",
+          "repetitions": 2048,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.1647347385,
+              "min_seconds": 0.162744554,
+              "max_seconds": 0.172981693,
+              "p25_seconds": 0.16369423375,
+              "p75_seconds": 0.16576954775
+            },
+            "cpython": {
+              "median_seconds": 0.319390194,
+              "min_seconds": 0.310079958,
+              "max_seconds": 0.331859813,
+              "p25_seconds": 0.3158755155,
+              "p75_seconds": 0.32243767375
+            },
+            "rust": {
+              "median_seconds": 0.0058597885,
+              "min_seconds": 0.005561277,
+              "max_seconds": 0.00641731,
+              "p25_seconds": 0.00570432,
+              "p75_seconds": 0.005956258
+            }
+          },
+          "cpython_over_relar": 1.9388150726933653,
+          "relar_over_rust": 28.112744768859834,
+          "cpython_over_rust": 54.505413292647
+        },
+        {
+          "label": "encode-16384",
+          "repetitions": 128,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.012137168,
+              "min_seconds": 0.011845991,
+              "max_seconds": 0.012577983,
+              "p25_seconds": 0.01194758175,
+              "p75_seconds": 0.01225999925
+            },
+            "cpython": {
+              "median_seconds": 0.3436014445,
+              "min_seconds": 0.336331776,
+              "max_seconds": 0.355419744,
+              "p25_seconds": 0.34029546825,
+              "p75_seconds": 0.34650258375
+            },
+            "rust": {
+              "median_seconds": 0.008890923,
+              "min_seconds": 0.008584272,
+              "max_seconds": 0.00925412,
+              "p25_seconds": 0.00873562975,
+              "p75_seconds": 0.00905440225
+            }
+          },
+          "cpython_over_relar": 28.3098532128747,
+          "relar_over_rust": 1.3651190095786456,
+          "cpython_over_rust": 38.64631877927635
+        },
+        {
+          "label": "decode-bytes-16384",
+          "repetitions": 128,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.1909637895,
+              "min_seconds": 0.189251498,
+              "max_seconds": 0.20323094,
+              "p25_seconds": 0.19062484425,
+              "p75_seconds": 0.192312842
+            },
+            "cpython": {
+              "median_seconds": 0.343737387,
+              "min_seconds": 0.332618088,
+              "max_seconds": 0.357795046,
+              "p25_seconds": 0.33908076675,
+              "p75_seconds": 0.3463448375
+            },
+            "rust": {
+              "median_seconds": 0.006059631,
+              "min_seconds": 0.005689496,
+              "max_seconds": 0.006843083,
+              "p25_seconds": 0.0059051735,
+              "p75_seconds": 0.006197987
+            }
+          },
+          "cpython_over_relar": 1.8000134365787708,
+          "relar_over_rust": 31.514095412740478,
+          "cpython_over_rust": 56.725795184558265
+        },
+        {
+          "label": "decode-text-16384",
+          "repetitions": 128,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.16531456,
+              "min_seconds": 0.163125176,
+              "max_seconds": 0.177189677,
+              "p25_seconds": 0.16432960275,
+              "p75_seconds": 0.1662322325
+            },
+            "cpython": {
+              "median_seconds": 0.3434048425,
+              "min_seconds": 0.331289179,
+              "max_seconds": 0.37863924,
+              "p25_seconds": 0.3391646315,
+              "p75_seconds": 0.3485033565
+            },
+            "rust": {
+              "median_seconds": 0.005998341,
+              "min_seconds": 0.005619956,
+              "max_seconds": 0.006214573,
+              "p25_seconds": 0.0058074255,
+              "p75_seconds": 0.00608253325
+            }
+          },
+          "cpython_over_relar": 2.0772812902868325,
+          "relar_over_rust": 27.560047019667604,
+          "cpython_over_rust": 57.24997003338089
+        }
+      ],
+      "path": "/tmp/relar-string-reuse-thinlto.json",
+      "sha256": "204b8fbab5dfa29845619031909a67b6ce7c1453fa557a7b400064e683edcf4b"
+    },
+    "sustained": {
+      "passed": true,
+      "revision": "3349b85efc78e5ac09a92d8d367d914264679067",
+      "binary_sha256": "2910c1942c27b723c30b1f758570107b928e02ee22ac4a6d3fe791b05a3fae14",
+      "llvm_sha256": "6663a3e07b32b84bf651d1641f5451994293f0294e524187f2ed329ee3523197",
+      "requested_target": "x86_64-unknown-linux-gnu",
+      "effective_target": "x86_64-<vendor>-linux-gnu",
+      "engines": [
+        "relar",
+        "rust"
+      ],
+      "samples": 20,
+      "warmups": 2,
+      "batch_bytes": 67108864,
+      "process_results_checked": 138,
+      "balanced_orders_per_workload": {
+        "warmups": {
+          "relar/rust": 1,
+          "rust/relar": 1
+        },
+        "samples": {
+          "relar/rust": 10,
+          "rust/relar": 10
+        }
+      },
+      "correctness": {
+        "relar_upstream_calls": 323,
+        "relar_exact_cases": 289,
+        "compile_rejections": 2,
+        "rust_cases": 295,
+        "rust_exact_cases": 291,
+        "rust_unicode_repr_boundaries": 4
+      },
+      "rust_build": {
+        "binary_sha256": "3c80e8e21f0752df74dd084d080872a7fe8a845e05c1e8f87370d8e67372c6de",
+        "source_files": 3,
+        "rustc": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)",
+        "lto": "thin",
+        "llvm_budget": 1000
+      },
+      "table": [
+        {
+          "label": "encode-64",
+          "repetitions": 1048576,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.4624375725,
+              "min_seconds": 0.457678236,
+              "max_seconds": 0.470541305,
+              "p25_seconds": 0.46065041225,
+              "p75_seconds": 0.46469545625
+            },
+            "rust": {
+              "median_seconds": 0.192213714,
+              "min_seconds": 0.189772442,
+              "max_seconds": 0.214919132,
+              "p25_seconds": 0.1912876275,
+              "p75_seconds": 0.19317327425
+            }
+          },
+          "relar_over_rust": 2.405851085630654
+        },
+        {
+          "label": "encode-1024",
+          "repetitions": 65536,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.294292504,
+              "min_seconds": 0.292539313,
+              "max_seconds": 0.300159403,
+              "p25_seconds": 0.293460238,
+              "p75_seconds": 0.29667446425
+            },
+            "rust": {
+              "median_seconds": 0.1755576875,
+              "min_seconds": 0.174131168,
+              "max_seconds": 0.18053247,
+              "p25_seconds": 0.174758345,
+              "p75_seconds": 0.176571336
+            }
+          },
+          "relar_over_rust": 1.676329349006719
+        },
+        {
+          "label": "encode-16384",
+          "repetitions": 4096,
+          "summary_seconds": {
+            "relar": {
+              "median_seconds": 0.26850386,
+              "min_seconds": 0.266643369,
+              "max_seconds": 0.273535573,
+              "p25_seconds": 0.267842127,
+              "p75_seconds": 0.269279762
+            },
+            "rust": {
+              "median_seconds": 0.17489314,
+              "min_seconds": 0.172335338,
+              "max_seconds": 0.177589234,
+              "p25_seconds": 0.1739034105,
+              "p75_seconds": 0.17598339775
+            }
+          },
+          "relar_over_rust": 1.535245236033843
+        }
+      ],
+      "path": "/tmp/relar-string-reuse-sustained.json",
+      "sha256": "4fb8bbae1712518c4c5880599cade36160a7e17ea71f5266cd20f958c569785b"
+    }
+  },
+  "rust_unicode_repr_boundaries": [
+    {
+      "label": "unicode-repr-boundary-decode-bytes-0",
+      "cpython": "ERROR\nValueError\nInvalid base45 string\nTrue\nKeyError\n'\u0301'\n",
+      "rust": "ERROR\nValueError\nInvalid base45 string\nTrue\nKeyError\n'\\u0301'\n"
+    },
+    {
+      "label": "unicode-repr-boundary-decode-text-0",
+      "cpython": "ERROR\nValueError\nInvalid base45 string\nTrue\nKeyError\n'\u0301'\n",
+      "rust": "ERROR\nValueError\nInvalid base45 string\nTrue\nKeyError\n'\\u0301'\n"
+    },
+    {
+      "label": "unicode-repr-boundary-decode-bytes-1",
+      "cpython": "ERROR\nValueError\nInvalid base45 string\nTrue\nKeyError\n'\udb40\udd00'\n",
+      "rust": "ERROR\nValueError\nInvalid base45 string\nTrue\nKeyError\n'\\U000e0100'\n"
+    },
+    {
+      "label": "unicode-repr-boundary-decode-text-1",
+      "cpython": "ERROR\nValueError\nInvalid base45 string\nTrue\nKeyError\n'\udb40\udd00'\n",
+      "rust": "ERROR\nValueError\nInvalid base45 string\nTrue\nKeyError\n'\\U000e0100'\n"
+    }
+  ],
+  "before_after": {
+    "passed": true,
+    "path": "/tmp/relar-string-reuse-before-after.json",
+    "sha256": "3d6a00be56a367e322ddf2c11f3aed38f5be7a7fcc8b6d3f0a671c9bbed00357",
+    "process_results_checked": 138,
+    "samples": 20,
+    "warmups": 2,
+    "batch_bytes": 2097152,
+    "previous_revision": "2963aa2a690139c23be23653009096da03c7b94e",
+    "current_revision": "3349b85efc78e5ac09a92d8d367d914264679067",
+    "old_new_codec_driver_python_identical": true,
+    "binary_provenance": {
+      "previous": {
+        "path": "/tmp/relar-base45-thinlto.json",
+        "sha256": "014b5af700ed088e259745969c409bc2648a72b4fcc61c9a5ae048d0ca779475",
+        "revision": "2963aa2a690139c23be23653009096da03c7b94e",
+        "binary": "/home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45",
+        "binary_sha256": "cd6e2cd00b3a35604c891cdb788dfddf72f025e7024cc230ba4f21420a2a3563"
+      },
+      "relar": {
+        "path": "/tmp/relar-string-reuse-thinlto.json",
+        "sha256": "204b8fbab5dfa29845619031909a67b6ce7c1453fa557a7b400064e683edcf4b",
+        "revision": "3349b85efc78e5ac09a92d8d367d914264679067",
+        "binary": "/home/dev-user/code/oss/relar/benchmarks/local/base45-string-reuse-thinlto/base45",
+        "binary_sha256": "9d7619afb8ceb43830dc676b7137947d2222336a44c693c36a2642fa6d3c8a09"
+      }
+    },
+    "table": [
+      {
+        "label": "encode-64",
+        "input_sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
+        "summary_seconds": {
+          "previous": {
+            "median_seconds": 0.2218735335,
+            "min_seconds": 0.217956729,
+            "max_seconds": 0.228184682,
+            "p25_seconds": 0.22044066125,
+            "p75_seconds": 0.22330474725
+          },
+          "relar": {
+            "median_seconds": 0.0182289885,
+            "min_seconds": 0.016642798,
+            "max_seconds": 0.019607034,
+            "p25_seconds": 0.0171727735,
+            "p75_seconds": 0.01869936925
+          }
+        },
+        "previous_over_relar": 12.171467083870287
+      },
+      {
+        "label": "encode-1024",
+        "input_sha256": "4377df51edb5b3df2b388c67ed6fafceaa68540657bff87e2b2d6810a33e3c15",
+        "summary_seconds": {
+          "previous": {
+            "median_seconds": 0.262729106,
+            "min_seconds": 0.260180313,
+            "max_seconds": 0.294528701,
+            "p25_seconds": 0.26184238425,
+            "p75_seconds": 0.26399928275
+          },
+          "relar": {
+            "median_seconds": 0.0130579375,
+            "min_seconds": 0.011539362,
+            "max_seconds": 0.013641553,
+            "p25_seconds": 0.0118504235,
+            "p75_seconds": 0.0133343045
+          }
+        },
+        "previous_over_relar": 20.120260646062977
+      },
+      {
+        "label": "encode-16384",
+        "input_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+        "summary_seconds": {
+          "previous": {
+            "median_seconds": 0.5153827245,
+            "min_seconds": 0.51059643,
+            "max_seconds": 0.548533659,
+            "p25_seconds": 0.51304363225,
+            "p75_seconds": 0.5197101145
+          },
+          "relar": {
+            "median_seconds": 0.011723059,
+            "min_seconds": 0.010781507,
+            "max_seconds": 0.012770062,
+            "p25_seconds": 0.01129302125,
+            "p75_seconds": 0.012349837
+          }
+        },
+        "previous_over_relar": 43.963160511262465
+      }
+    ]
+  },
+  "checks": {
+    "raw_statistics_and_ratios": true,
+    "balanced_orders_and_counts": true,
+    "positive_timings_and_all_run_guards": true,
+    "exact_upstream_files": true,
+    "relar_exact_errors_all_289_cases": true,
+    "rust_291_exact_and_4_explicit_repr_boundaries": true,
+    "rust_build_source_binary_provenance": true,
+    "cross_record_consistency": true,
+    "current_retained_files_verified": true,
+    "before_after_control_verified": true
+  },
+  "verified_file_count": 82,
+  "caveats": [
+    "Ratios compare medians of fresh-process wall time, including startup and one input/output file operation; they are not isolated codec-call timings.",
+    "Normal and ThinLTO each use balanced three-engine 2 MiB batches; sustained encode uses balanced two-engine 64 MiB batches.",
+    "Record validation and retained hashes are audited; binaries are not rebuilt or rerun by this script.",
+    "Two wrong-typed upstream calls are compile-time rejections, not runtime TypeError equivalence.",
+    "Rust deliberately differs at four explicit Unicode repr boundaries; all Relar errors and all other Rust cases are exact.",
+    "File hashes cover recorded artifacts and tools, not every transitive system library."
+  ],
+  "passed": true
+}

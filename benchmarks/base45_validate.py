@@ -1,4 +1,4 @@
-"""Run unchanged Base45 tests and compare native results with the upstream codec."""
+"""Run unchanged Base45 tests and compare native/Rust results with the upstream codec."""
 
 import argparse
 import base64
@@ -147,10 +147,29 @@ def corpus(codec, tests) -> list[tuple[str, str, bytes]]:
         "🦀".encode(),
         b"   ",
         b"  ",
+        b"GGWa",  # A later bad character wins over an earlier range failure.
+        b"0000a",  # Alphabet validation precedes the invalid-length check.
+        b"a\xff",  # Bytes decode completely before alphabet lookup starts.
+        b"BB8\xed\xa0\x80",
+        b"BB8\xf4\x90\x80\x80",
+        b"'",
+        b'"',
+        b"\\",
     ]
     for index, value in enumerate(malformed):
         for operation in ("decode-bytes", "decode-text"):
             cases.append((f"malformed-{operation}-{index}", operation, value))
+    for index, value in enumerate(("\u0301", "\U000e0100")):
+        for operation in ("decode-bytes", "decode-text"):
+            # Relar must preserve CPython's printable combining characters. The
+            # Rust diagnostic adapter deliberately uses Rust's Unicode quoting.
+            cases.append(
+                (
+                    f"unicode-repr-boundary-{operation}-{index}",
+                    operation,
+                    value.encode(),
+                )
+            )
     generator = random.Random(9285)
     for index, size in enumerate(
         [
@@ -282,23 +301,109 @@ def validate(binary: Path, compiler: Path, directory: Path) -> dict:
     }
 
 
+def validate_rust(binary: Path, directory: Path) -> dict:
+    """Check the independent codec through the same typed file protocol and oracle."""
+    directory.mkdir(parents=True)
+    codec, tests = load_upstream_tests()
+    binary_hash = digest(binary.read_bytes())
+    cases = []
+    diagnostic_boundaries = []
+    inputs = [
+        (label, operation, payload, 1)
+        for label, operation, payload in corpus(codec, tests)
+    ]
+    for operation, payload in (
+        ("encode", b""),
+        ("encode", bytes(range(256))),
+        ("decode-bytes", b"BB8"),
+        ("decode-text", b"BB8\n\n"),
+        ("decode-bytes", b"GGWa"),
+        ("decode-text", b"\xff"),
+    ):
+        inputs.append((f"repeated-{operation}-{len(inputs)}", operation, payload, 7))
+    for label, operation, payload, repetitions in inputs:
+        expected = oracle(codec, operation, payload, repetitions)
+        actual = execute([str(binary)], operation, payload, directory, repetitions)
+        if label.startswith("unicode-repr-boundary-"):
+            assert actual["output"] is expected["output"] is None
+            # All metadata except the invalid character's quoted spelling is
+            # shared; this adapter does not embed a Python Unicode repr table.
+            assert (
+                actual["stdout"].splitlines()[:5] == expected["stdout"].splitlines()[:5]
+            ), (label, actual, expected)
+            diagnostic_boundaries.append(
+                {
+                    "label": label,
+                    "cpython": expected["stdout"],
+                    "rust": actual["stdout"],
+                }
+            )
+        else:
+            assert actual == expected, (label, actual, expected)
+        cases.append(
+            {
+                "label": label,
+                "operation": operation,
+                "repetitions": repetitions,
+                "input_base64": base64.b64encode(payload).decode(),
+                "stdout": actual["stdout"],
+                "output_sha256": None
+                if actual["output"] is None
+                else digest(actual["output"]),
+            }
+        )
+    assert digest(binary.read_bytes()) == binary_hash, (
+        "Rust executable changed during validation"
+    )
+    return {
+        "binary_sha256": binary_hash,
+        "differential_cases": cases,
+        "exact_message_cases": len(cases) - len(diagnostic_boundaries),
+        "diagnostic_boundaries": diagnostic_boundaries,
+        "scope": "Same bytes/string file protocol. Exact diagnostic text is checked over the declared corpus except explicitly recorded Unicode repr boundaries, where category/cause/suppression and unchanged output are checked. Wrong-typed Python API calls have no Rust CLI representation.",
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", required=True, type=Path)
-    parser.add_argument("--compiler", required=True, type=Path)
+    parser.add_argument("--binary", type=Path)
+    parser.add_argument("--compiler", type=Path)
+    parser.add_argument("--rust", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
+    if bool(args.binary) != bool(args.compiler):
+        parser.error("--binary and --compiler must be supplied together")
+    if not args.binary and not args.rust:
+        parser.error("provide --binary with --compiler, or --rust")
     with tempfile.TemporaryDirectory(prefix="relar-base45-validation-") as temporary:
-        record = validate(
-            args.binary.resolve(), args.compiler.resolve(), Path(temporary)
-        )
+        if args.binary:
+            record = validate(
+                args.binary.resolve(), args.compiler.resolve(), Path(temporary)
+            )
+        else:
+            _, tests = load_upstream_tests()
+            record = {
+                "upstream": verify_upstream(),
+                "python": sys.version,
+                "implementation": platform.python_implementation(),
+                "upstream_cpython": upstream_suite(tests),
+            }
+        if args.rust:
+            record["rust"] = validate_rust(
+                args.rust.resolve(), Path(temporary) / "rust"
+            )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(record, indent=2) + "\n")
-    print(
-        f"Passed {record['native_adapter_calls']} upstream native calls, "
-        f"{len(record['differential_cases'])} differential cases, and "
-        f"{len(record['wrong_typed_compile_rejections'])} compile-time type rejections"
-    )
+    if args.binary:
+        print(
+            f"Passed {record['native_adapter_calls']} upstream native calls, "
+            f"{len(record['differential_cases'])} differential cases, and "
+            f"{len(record['wrong_typed_compile_rejections'])} compile-time type rejections"
+        )
+    if args.rust:
+        print(
+            f"Passed {len(record['rust']['differential_cases'])} Rust differential checks"
+        )
 
 
 if __name__ == "__main__":
