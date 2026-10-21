@@ -334,6 +334,26 @@ pub(super) struct Set {
 }
 
 impl Mapping {
+    /// Copies exact string entries in insertion order before a process launch.
+    /// No borrowed table storage or language owner crosses the fork boundary.
+    pub(super) fn string_pairs(&self) -> Vec<(Str, Str)> {
+        if self.tables.key_kind() != 3 || self.value_kind.raw() != 3 {
+            fail("SystemError", "expected a string-to-string dictionary");
+        }
+        let mut pairs = Vec::with_capacity(self.tables.len());
+        self.tables.all(|key, value| {
+            // SAFETY: the checked exact dictionary roots both immutable strings.
+            unsafe {
+                pairs.push((
+                    (*(key as *const Str)).clone(),
+                    (*(value as *const Str)).clone(),
+                ));
+            }
+            true
+        });
+        pairs
+    }
+
     /// # Safety
     /// Both tables and all values are rooted and immutable for this traversal.
     pub(super) unsafe fn equal(&self, other: &Self) -> bool {

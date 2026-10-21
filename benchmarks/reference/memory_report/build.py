@@ -100,8 +100,9 @@ def main() -> None:
         artifacts / "memory-report-reference",
         artifacts / "build-record.json",
     )
+    producer_destination = artifacts / "memory-report-producer"
     protected = [*paths.values(), *tools.values()]
-    for path in (destination, output):
+    for path in (destination, producer_destination, output):
         if any(
             path.resolve() == item.resolve()
             or (path.exists() and item.exists() and path.samefile(item))
@@ -143,6 +144,12 @@ def main() -> None:
     assert len(artifacts_found) == 1 and artifacts_found[0]["fresh"] is False
     native_artifact = artifacts_found[0]
     shutil.copy2(Path(native_artifact["executable"]), destination)
+    producer_artifacts = [message for message in messages
+                          if message.get("reason") == "compiler-artifact"
+                          and message["target"]["name"] == "memory-report-producer"
+                          and message.get("executable")]
+    assert len(producer_artifacts) == 1 and producer_artifacts[0]["fresh"] is False
+    shutil.copy2(Path(producer_artifacts[0]["executable"]), producer_destination)
     assert hashes == {name: digest(path) for name, path in paths.items()}
     assert tool_hashes == {name: digest(path) for name, path in tools.items()}
     record = {
@@ -179,6 +186,7 @@ def main() -> None:
         "build_stdout": built.stdout,
         "build_stderr": built.stderr,
         "native_artifact": native_artifact,
+        "producer_artifact": producer_artifacts[0],
         "binary_sha256": digest(destination),
         "binary_bytes": destination.stat().st_size,
         "binaries": {
@@ -186,9 +194,14 @@ def main() -> None:
                 "name": destination.name,
                 "sha256": digest(destination),
                 "bytes": destination.stat().st_size,
-            }
+            },
+            "producer": {
+                "name": producer_destination.name,
+                "sha256": digest(producer_destination),
+                "bytes": producer_destination.stat().st_size,
+            },
         },
-        "comparison_domain": "Schema-directed memory report JSON with arbitrary-precision integer tokens, known-field duplicate rejection, scalar/list defaults, and depth 128. Rust stores native i64 values with checked BigInt fallback, uses stable sorting and exact rational-to-binary64 rounding, and reads either two files or all selected JSON files in two directories before writing the complete multi-project report once per process. A separate compute mode preloads JSON text once and repeats decoding, comparison, and rendering with black-boxed native input and a checked output-length checksum. Complete output and file effects are compared with an independent oracle, the typed CPython port, and the unchanged upstream script on their shared domain.",
+        "comparison_domain": "Schema-directed memory report JSON with arbitrary-precision integers, known-field duplicate rejection, scalar/list defaults, and depth 128. Rust stores native i64 values with checked BigInt fallback, stable sorting, and exact rational-to-binary64 rounding. File and directory modes read selected JSON before writing one complete report. Prepared-project run mode validates a manifest and sequentially launches old/new executables with matching cwd/environment, captures both UTF-8 text streams, and checks status before report decoding. A separate compute mode repeats decode/compare/render over preloaded text with black-boxed input and an output-length checksum. Full output and file effects are checked against an independent oracle, typed CPython, and unchanged upstream models/rendering on the shared domain. The separately built producer emits deterministic captured bytes for every engine's process benchmarks.",
         "input_guards_passed": True,
     }
     output.write_text(json.dumps(record, indent=2) + "\n")

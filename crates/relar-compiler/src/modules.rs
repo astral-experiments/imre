@@ -49,6 +49,8 @@ pub(crate) enum IntrinsicModule {
     Typing,
     Dataclasses,
     Pathlib,
+    Subprocess,
+    Os,
     Collections,
     CollectionsAbc,
     Io,
@@ -69,6 +71,11 @@ pub(crate) enum Intrinsic {
     DataclassField,
     SelfType,
     Path,
+    SubprocessRun,
+    CompletedProcess,
+    SubprocessError,
+    CalledProcessError,
+    Environ,
 }
 
 impl IntrinsicModule {
@@ -78,6 +85,8 @@ impl IntrinsicModule {
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
             "pathlib" => Some(Self::Pathlib),
+            "subprocess" => Some(Self::Subprocess),
+            "os" => Some(Self::Os),
             "collections" => Some(Self::Collections),
             "collections.abc" => Some(Self::CollectionsAbc),
             "io" => Some(Self::Io),
@@ -106,6 +115,11 @@ impl IntrinsicModule {
             (Self::Dataclasses, "dataclass") => Intrinsic::Dataclass,
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
             (Self::Pathlib, "Path") => Intrinsic::Path,
+            (Self::Subprocess, "run") => Intrinsic::SubprocessRun,
+            (Self::Subprocess, "CompletedProcess") => Intrinsic::CompletedProcess,
+            (Self::Subprocess, "SubprocessError") => Intrinsic::SubprocessError,
+            (Self::Subprocess, "CalledProcessError") => Intrinsic::CalledProcessError,
+            (Self::Os, "environ") => Intrinsic::Environ,
             _ => return None,
         };
         Some(Binding::Intrinsic(symbol))

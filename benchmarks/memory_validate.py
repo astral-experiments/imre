@@ -282,7 +282,7 @@ def check_result(value, expected, process, directory, engine="port"):
         assert process.returncode != 0 and not stdout, (value.label, engine, process)
         category = expected["error"]
         allowed = {"OSError": r"(?:OSError|FileNotFoundError|IsADirectoryError|NotADirectoryError)",
-                   "ValueError": r"(?:ValueError|UnicodeDecodeError)"}.get(category, category)
+                   "ValueError": r"(?:ValueError|UnicodeDecodeError|JSONDecodeError)"}.get(category, category)
         assert re.search(allowed + r":", stderr), (value.label, engine, stderr)
         expected_files = expected["files"]
     else:
@@ -295,6 +295,15 @@ def check_result(value, expected, process, directory, engine="port"):
                 prefix = f"Output written to {expected['output']}\n"
                 assert not stdout and stderr.startswith(prefix) and stderr.endswith("\n")
                 rendered = stderr[len(prefix):-1]
+            equivalent_original(rendered, expected)
+        elif engine == "original-prepared":
+            assert not stderr
+            if expected["output"] is None:
+                assert stdout.endswith("\n")
+                rendered = stdout[:-1]
+            else:
+                assert not stdout
+                rendered = actual[os.path.normpath(expected["output"])].decode()
             equivalent_original(rendered, expected)
         else:
             rendered = expected["rendered"]
@@ -495,6 +504,9 @@ def main():
     if args.rust:
         commands["rust"] = [str(args.rust.resolve(strict=True))]
     result = validate_commands(commands)
+    prepared = SimpleNamespace(**runpy.run_path(str(HERE / "memory_process.py")))
+    prepared_commands = {**commands, "original": prepared.original_command(args.python)}
+    result["processes"] = prepared.validate_commands(prepared_commands, args.python)
     if args.compute_binary:
         compute_commands = {"original": compute_original_command(args.python), "port": compute_python_command(args.python),
                             "relar": [str(args.compute_binary.resolve(strict=True))]}
@@ -504,6 +516,7 @@ def main():
     if args.output:
         args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(f"Passed {result['cases']} memory report cases, {result['engine_executions']} engine executions")
+    print(f"Passed {result['processes']['cases']} prepared-project cases, {result['processes']['engine_executions']} engine executions")
     if "compute" in result:
         print(f"Passed {result['compute']['cases']} compute cases, {result['compute']['engine_executions']} engine executions")
 

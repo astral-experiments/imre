@@ -19,6 +19,7 @@ An ahead-of-time compiler for typed Python, written in Rust.
 - Pass typed function values and bound methods, use noncapturing lambdas, and compose lazy `map`/`filter` pipelines.
 - Use read-only properties, class and static methods, and `Self` annotations.
 - Read and write UTF-8 files, join native `pathlib.Path` values, and scan directories with `iterdir` and bounded `glob`.
+- Run native subprocesses with captured UTF-8 output, explicit arguments, working directories, and environment snapshots.
 - Preserve arbitrary-precision integers, shared mutation, and supported exception behavior.
 - Run compiled programs without a Python installation or a CPython dependency.
 

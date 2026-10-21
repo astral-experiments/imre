@@ -1,0 +1,54 @@
+//! Native process calls retain their rooted inputs and return concrete records.
+
+use super::*;
+use crate::ir::ProcessOperation;
+
+impl Emitter<'_, '_> {
+    pub(super) fn process_builtin(
+        &mut self,
+        operation: ProcessOperation,
+        args: &[Operand],
+        returns: Type,
+    ) -> Value {
+        match operation {
+            ProcessOperation::Run => {
+                let cwd =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
+                let environment =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
+                let check = self.instruction(format!("zext i1 {} to i8", args[3].value.operand));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @relar_subprocess_run(ptr {}, ptr {cwd}, ptr {environment}, i8 {check}, ptr @layout_completed_process)",
+                    args[0].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::EnvironCopy => {
+                let operand = self.checked_instruction("call ptr @relar_environ_copy()");
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::CheckReturnCode => {
+                self.checked_line(format!(
+                    "call void @relar_subprocess_check(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
+            ProcessOperation::ErrorField(field) => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @relar_subprocess_error_field(ptr {}, i32 {field})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+        }
+    }
+}

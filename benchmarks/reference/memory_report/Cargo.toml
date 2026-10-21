@@ -18,5 +18,9 @@ serde_json = { version = "=1.0.151", features = ["raw_value", "arbitrary_precisi
 name = "memory-report-reference"
 path = "src/main.rs"
 
+[[bin]]
+name = "memory-report-producer"
+path = "src/producer.rs"
+
 [profile.release]
 debug = "line-tables-only"

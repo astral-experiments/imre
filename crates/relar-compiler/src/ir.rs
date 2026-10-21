@@ -21,7 +21,7 @@ pub(crate) enum Type {
     Union(usize),
     /// An internal container or string cursor, never available in user annotations.
     Iterator,
-    /// A sealed builtin exception with an immutable category and string message.
+    /// A sealed builtin exception with an immutable category and owned payload.
     Exception,
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
     TextIO,
@@ -29,6 +29,8 @@ pub(crate) enum Type {
     BinaryIO,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
     Path,
+    /// A sealed text-process result with four concrete, readonly fields.
+    CompletedProcess,
     None,
 }
 
@@ -60,6 +62,7 @@ impl std::fmt::Display for Type {
             Self::TextIO => "typing.TextIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
+            Self::CompletedProcess => "subprocess.CompletedProcess[str]",
             Self::Class(_)
             | Self::List(_)
             | Self::Dict(_)
@@ -380,6 +383,7 @@ pub(crate) enum Builtin {
     /// Decodes one string into the checked structural schema of this class.
     JsonDecode(usize),
     Path(PathOperation),
+    Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
     BinaryOpen(u32),
@@ -436,6 +440,16 @@ pub(crate) enum PathOperation {
     Iterdir,
     Glob,
     Next,
+}
+
+/// Synchronous process operations cannot invoke language callbacks.
+#[derive(Clone, Copy)]
+pub(crate) enum ProcessOperation {
+    Run,
+    EnvironCopy,
+    CheckReturnCode,
+    /// Fixed guarded exception fields; output has its own alias index.
+    ErrorField(u32),
 }
 
 /// Sealed Python runtime categories; parameterized container annotations are

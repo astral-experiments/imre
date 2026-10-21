@@ -42,6 +42,8 @@ pub(crate) enum Kind {
     IsADirectoryError = 22,
     NotADirectoryError = 23,
     FileExistsError = 24,
+    SubprocessError = 25,
+    CalledProcessError = 26,
 }
 
 impl Kind {
@@ -72,6 +74,8 @@ impl Kind {
             22 => Self::IsADirectoryError,
             23 => Self::NotADirectoryError,
             24 => Self::FileExistsError,
+            25 => Self::SubprocessError,
+            26 => Self::CalledProcessError,
             _ => fail("SystemError", "invalid exception kind"),
         }
     }
@@ -103,6 +107,8 @@ impl Kind {
             Self::IsADirectoryError => "IsADirectoryError",
             Self::NotADirectoryError => "NotADirectoryError",
             Self::FileExistsError => "FileExistsError",
+            Self::SubprocessError => "SubprocessError",
+            Self::CalledProcessError => "CalledProcessError",
         }
     }
 
@@ -125,6 +131,9 @@ impl Kind {
                     | Self::UnsupportedOperation
             ),
             Self::UnicodeError => matches!(self, Self::UnicodeError | Self::UnicodeDecodeError),
+            Self::SubprocessError => {
+                matches!(self, Self::SubprocessError | Self::CalledProcessError)
+            }
             Self::OSError => matches!(
                 self,
                 Self::OSError
@@ -145,6 +154,7 @@ pub(super) struct Exception {
     message: Rc<Str>,
     cause: Option<Rc<Object>>,
     suppress_context: bool,
+    process: Option<Box<super::processes::ProcessError>>,
 }
 
 impl Drop for Exception {
@@ -222,7 +232,22 @@ fn new_exception(kind: Kind, message: Rc<Str>) -> Rc<Object> {
         message,
         cause: None,
         suppress_context: false,
+        process: None,
     }))))
+}
+
+/// Publishes a completed child's rich failure after all input storage borrows end.
+#[cold]
+pub(super) fn raise_process(error: super::processes::ProcessError) {
+    replace_pending(Some(Rc::new(Object(StorageCell::new(Storage::Exception(
+        Exception {
+            kind: Kind::CalledProcessError,
+            message: Rc::new(Str::new("")),
+            cause: None,
+            suppress_context: false,
+            process: Some(Box::new(error)),
+        },
+    ))))));
 }
 
 /// Replaces the pending owner without dropping it during a TLS mutable borrow.
@@ -277,8 +302,47 @@ impl Storage {
     }
 
     fn exception_message(&self) -> Rc<Str> {
-        self.exception().message.clone()
+        let exception = self.exception();
+        exception.process.as_ref().map_or_else(
+            || exception.message.clone(),
+            |process| Rc::new(process.message()),
+        )
     }
+}
+
+/// Acquires one sealed process-error field: cmd, returncode, stdout, or stderr;
+/// field 4 is the output alias of stdout and preserves its attribute error name.
+/// An ordinary exception receiver raises AttributeError instead of exposing storage.
+///
+/// # Safety
+/// `value` is a rooted exception, `field` is 0 through 4, and pending is clear.
+/// Success returns one owned word of kind 5, 2, 3, 3, or 3 respectively. Check pending
+/// before interpreting zero, then release the result using that exact kind.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_subprocess_error_field(value: *const Object, field: u32) -> usize {
+    if field > 4 {
+        fail("SystemError", "invalid process exception field");
+    }
+    // SAFETY: only an acquired word or owned error leaves this rooted storage read.
+    let result = unsafe {
+        object(value).0.with(|storage| {
+            let exception = storage.exception();
+            exception.process.as_ref().map_or_else(
+                || {
+                    let name = ["cmd", "returncode", "stdout", "stderr", "output"][field as usize];
+                    Err(Error::new(
+                        Kind::AttributeError,
+                        format!(
+                            "'{}' object has no attribute '{name}'",
+                            exception.kind.name()
+                        ),
+                    ))
+                },
+                |process| Ok(process.field(field)),
+            )
+        })
+    };
+    finish(result, 0)
 }
 
 #[unsafe(no_mangle)]
@@ -480,7 +544,7 @@ pub extern "C" fn relar_error_unhandled() -> i32 {
                 let exception = storage.exception();
                 (
                     exception.kind,
-                    exception.message.clone(),
+                    storage.exception_message(),
                     exception.cause.clone(),
                 )
             })

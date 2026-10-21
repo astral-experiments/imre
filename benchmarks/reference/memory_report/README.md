@@ -1,6 +1,6 @@
 # Independent memory report reference
 
-This Rust program implements the [typed file and directory memory report](../../../examples/memory_report/README.md).
+This Rust program implements the [typed file, directory, and prepared-project memory report](../../../examples/memory_report/README.md).
 Its ordinary path deserializes directly into contiguous records containing native
 `i64` fields. Addition and subtraction are checked. If input or computation
 exceeds that representation, it retries from retained input text with
@@ -18,6 +18,11 @@ Input is read once per file and retained only for a possible fallback. Each
 application process executes the actual CLI once and writes its full report.
 Directory mode reads all matching JSON reports, intersects project names, and
 uses name order to break ties between projects with equal total changes.
+Prepared-project mode validates the whole manifest, then launches old and new
+executables sequentially with identical arguments, working directories, and
+environment overrides. It captures both pipes, decodes strict UTF-8 with universal
+newlines before checking exit status, and preserves the final output on failures.
+The reference uses `std::process::Command`; it does not invoke Python or Relar.
 
 The [native-path results](../../results/2026-10-21-native-paths.md) compare both
 directory layouts in ordinary and ThinLTO builds. Relar takes 0.91–1.28× Rust's
@@ -107,3 +112,46 @@ measurement. Both use optimization level 3 and the existing 1,000-instruction
 import/inline budget; Rust uses 16 codegen units. Keep each mode's artifacts in a
 fresh directory. Local `build.py --toolchain ohm` uses
 `cargo +ohm -Zohm-defaults=no`; CI uses the repository's normal pinned toolchain.
+
+Prepared-project benchmarks use a separate harness:
+
+```sh
+python3 benchmarks/memory_process_benchmark.py \
+  --compiler target/release/relar --runtime target/release/librelar_runtime.a \
+  --rust /tmp/memory-rust/memory-report-reference --clang clang-18 \
+  --old-ty /absolute/path/to/ty-0.0.89 --new-ty /absolute/path/to/ty-0.0.90 \
+  --ruff-source /path/to/pinned/ruff --prepare-only \
+  --artifact-dir /tmp/process-prepared --output /tmp/process-prepared.json
+python3 benchmarks/memory_process_benchmark.py \
+  --compiler target/release/relar --runtime target/release/librelar_runtime.a \
+  --rust /tmp/memory-rust/memory-report-reference --clang clang-18 \
+  --old-ty /absolute/path/to/ty-0.0.89 --new-ty /absolute/path/to/ty-0.0.90 \
+  --ruff-source /path/to/pinned/ruff --prepared-record /tmp/process-prepared.json \
+  --cpu 0 --artifact-dir /tmp/process-timing --output /tmp/process-timing.json
+```
+
+The ty binaries and retained Ruff/inventory source files must match the hashes in
+the example's sample provenance. Preparation copies those sources, adds an empty
+explicit `ty.toml`, and retains fresh complete stdout/stderr from both ty versions.
+All engines run the same source snapshots and binaries. This measures the entire
+ty check as well as process launch, capture, decode, comparison, and reporting;
+child-dominated results do not establish report-computation performance.
+
+Default `--process-layouts 64:1 2:32` additionally compares 64 small projects and
+two large projects, each with 16,256 records per side. A shared native producer
+built alongside the reference emits the corresponding retained capture and a
+proportional diagnostic stream. Its old/new aliases have identical bytes across
+all engines. These synthetic workloads isolate capture/report orchestration from
+ty's own computation. The same reports also run through the existing repeated
+compute entrypoints, including zero-repetition preload controls.
+
+Three engines are timed in all six permutations: Relar, Rust, and a CPython
+prepared-project adapter using the unchanged upstream models and renderer. This
+adapter replaces upstream's checkout/setup CLI and is labeled explicitly. The
+typed CPython port is checked on every workload during preparation. A minimal
+explicit environment is shared by all engines; host environment values are not
+copied into benchmark records. `PYTHON_JIT=0` disables the Python baseline's JIT;
+`-P -s` excludes the working directory and user site while preserving the pinned
+hash seed. Preparation validates successful reports, manifest
+errors, large dual-pipe capture, UTF-8/newline handling, child exits and signals,
+spawn failures, strict typed decoding, and preservation of existing reports.

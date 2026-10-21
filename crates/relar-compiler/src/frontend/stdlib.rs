@@ -354,7 +354,9 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::FloatFormat { precision, percent }, vec![value]),
             });
         }
-        if field.conversion == ast::ConversionFlag::Repr || matches!(value.ty, Type::Class(_)) {
+        if field.conversion == ast::ConversionFlag::Repr
+            || matches!(value.ty, Type::Class(_) | Type::CompletedProcess)
+        {
             if !dataclass_values::repr_supported(value.ty, self.types) {
                 return Err(error(
                     self.source,
