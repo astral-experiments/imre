@@ -11,6 +11,9 @@ use crate::modules::{Binding, DefinitionId, Intrinsic, ModuleId, SourceGraph};
 use crate::narrowing;
 use crate::types::Types;
 
+mod comprehensions;
+use comprehensions::Helpers;
+
 #[derive(Clone)]
 struct Signature {
     id: usize,
@@ -236,8 +239,10 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
             definitions.push((module_id, method, signature));
         }
     }
+    let helpers = Helpers::new(definitions.len());
     let mut functions = Vec::new();
     let mut call_graph = Vec::new();
+    let mut recursion_errors = Vec::new();
     for (module_id, definition, signature) in &definitions {
         let module = &graph.modules[*module_id];
         let result = (|| {
@@ -247,6 +252,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                 &signatures,
                 &classes,
                 &types,
+                &helpers,
                 signature.returns,
             );
             let mut params = Vec::new();
@@ -289,6 +295,10 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
             result.map_err(|error| format!("{}:{error}", module.path.display()))?;
         functions.push(function);
         call_graph.push(calls);
+        recursion_errors.push(module.error(
+            *definition,
+            "recursive calls are unsupported in this prototype",
+        ));
     }
     fn visit(id: usize, graph: &[HashSet<usize>], states: &mut [u8]) -> bool {
         if states[id] != 0 {
@@ -303,16 +313,17 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
         states[id] = 2;
         true
     }
-    let mut states = vec![0; functions.len()];
-    for (id, (module, node, _)) in definitions.iter().enumerate() {
-        if !visit(id, &call_graph, &mut states) {
-            return Err(graph.modules[*module]
-                .error(*node, "recursive calls are unsupported in this prototype"));
-        }
-    }
     let mut entry = None;
     for (module_id, module) in graph.modules.iter().enumerate() {
-        let mut checker = Checker::new(graph, module_id, &signatures, &classes, &types, Type::None);
+        let mut checker = Checker::new(
+            graph,
+            module_id,
+            &signatures,
+            &classes,
+            &types,
+            &helpers,
+            Type::None,
+        );
         checker.module_scope = true;
         let statements = module
             .executable
@@ -329,6 +340,19 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                 locals: checker.locals,
                 body,
             });
+        }
+    }
+    // Entry code and inactive module guards can create helpers too. Validate the
+    // complete graph only after every source expression has been lowered.
+    for helper in helpers.into_functions() {
+        functions.push(helper.function);
+        call_graph.push(helper.calls);
+        recursion_errors.push(helper.recursion_error);
+    }
+    let mut states = vec![0; functions.len()];
+    for (id, diagnostic) in recursion_errors.into_iter().enumerate() {
+        if !visit(id, &call_graph, &mut states) {
+            return Err(diagnostic);
         }
     }
     Ok(ir::Module {
@@ -603,6 +627,16 @@ fn check_string(value: &ast::ExprStringLiteral, source: &str) -> Result<(), Stri
     Ok(())
 }
 
+/// Captured iteration inputs; no first-class Python iterator value is exposed.
+enum Iteration {
+    Range(Vec<Expr>),
+    Container {
+        iterable: Expr,
+        items: bool,
+        start: Option<Expr>,
+    },
+}
+
 struct Checker<'a> {
     source: &'a str,
     graph: &'a SourceGraph,
@@ -610,6 +644,8 @@ struct Checker<'a> {
     functions: &'a HashMap<DefinitionId, Signature>,
     classes: &'a ClassInfo,
     types: &'a Types,
+    helpers: &'a Helpers,
+    comprehension_targets: HashSet<String>,
     narrowed: HashMap<usize, Type>,
     returns: Type,
     names: HashMap<String, usize>,
@@ -627,6 +663,7 @@ impl<'a> Checker<'a> {
         functions: &'a HashMap<DefinitionId, Signature>,
         classes: &'a ClassInfo,
         types: &'a Types,
+        helpers: &'a Helpers,
         returns: Type,
     ) -> Self {
         Self {
@@ -636,6 +673,8 @@ impl<'a> Checker<'a> {
             functions,
             classes,
             types,
+            helpers,
+            comprehension_targets: HashSet::new(),
             narrowed: HashMap::new(),
             returns,
             names: HashMap::new(),
@@ -776,6 +815,9 @@ impl<'a> Checker<'a> {
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
         let concrete = self.types.payload(expected).unwrap_or(expected);
         let value = match expression {
+            ast::Expr::ListComp(_) | ast::Expr::DictComp(_) | ast::Expr::SetComp(_) => {
+                self.comprehension(expression, Some(concrete))?
+            }
             ast::Expr::Dict(dict) if self.types.mapping(concrete).is_some() => {
                 self.dictionary(dict, self.types.mapping(concrete))?
             }
@@ -1116,9 +1158,28 @@ impl<'a> Checker<'a> {
         Ok((self.expr(expression)?, false))
     }
 
-    /// Keeps the original container rooted and owns each item before user code runs.
-    fn iteration(&mut self, loop_: &ast::StmtFor) -> Result<Vec<Statement>, String> {
-        let ((iterable, items), start) = if let ast::Expr::Call(call) = &*loop_.iter
+    /// Checks an iterable in its current lexical scope, before target binding.
+    fn iteration_input(&mut self, expression: &ast::Expr) -> Result<Iteration, String> {
+        if let ast::Expr::Call(call) = expression
+            && matches!(&*call.func, ast::Expr::Name(name) if name.id == "range")
+        {
+            if !call.arguments.keywords.is_empty() || !(1..=3).contains(&call.arguments.args.len())
+            {
+                return Err(error(
+                    self.source,
+                    expression,
+                    "range requires one to three positional integer arguments",
+                ));
+            }
+            let args = call
+                .arguments
+                .args
+                .iter()
+                .map(|argument| self.expr_expected(argument, Type::Int))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(Iteration::Range(args));
+        }
+        let ((iterable, items), start) = if let ast::Expr::Call(call) = expression
             && matches!(&*call.func, ast::Expr::Name(name) if name.id == "enumerate")
         {
             if !call.arguments.keywords.is_empty() || !(1..=2).contains(&call.arguments.args.len())
@@ -1140,7 +1201,68 @@ impl<'a> Checker<'a> {
             };
             (iterable, Some(start))
         } else {
-            (self.iteration_source(&loop_.iter)?, None)
+            (self.iteration_source(expression)?, None)
+        };
+        Ok(Iteration::Container {
+            iterable,
+            items,
+            start,
+        })
+    }
+
+    /// Keeps the original container rooted and owns each item before user code runs.
+    fn iteration(&mut self, loop_: &ast::StmtFor) -> Result<Vec<Statement>, String> {
+        let input = self.iteration_input(&loop_.iter)?;
+        self.invalidate_loop_facts(&loop_.body);
+        self.lower_iteration(&loop_.target, input, |checker| {
+            Ok(checker.block(&loop_.body)?.0)
+        })
+    }
+
+    /// Shares iteration snapshots and cleanup between statements and eager displays.
+    /// The callback runs with the target definitely assigned for one iteration.
+    fn lower_iteration(
+        &mut self,
+        target: &ast::Expr,
+        input: Iteration,
+        lower_body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
+    ) -> Result<Vec<Statement>, String> {
+        if let Iteration::Range(args) = input {
+            let ast::Expr::Name(name) = target else {
+                return Err(error(self.source, target, "range target must be a name"));
+            };
+            let target = self.declare(name.id.as_str(), Type::Int, target)?;
+            self.narrowed.remove(&target);
+            let facts = self.narrowed.clone();
+            let before = self.assigned.clone();
+            self.assigned.insert(target);
+            self.loop_depth += 1;
+            let body = lower_body(self)?;
+            self.loop_depth -= 1;
+            self.assigned = before;
+            self.narrowed = facts;
+            let cursor = self.hidden(Type::Int);
+            let stop = self.hidden(Type::Int);
+            let step = self.hidden(Type::Int);
+            return Ok(vec![Statement::Scope {
+                body: vec![Statement::For {
+                    target,
+                    cursor,
+                    stop,
+                    step,
+                    args,
+                    body,
+                }],
+                clear: vec![cursor, stop, step],
+            }]);
+        }
+        let Iteration::Container {
+            iterable,
+            items,
+            start,
+        } = input
+        else {
+            unreachable!("range iteration returned above")
         };
         let mapping = self.types.mapping(iterable.ty);
         let set_element = self.types.set_element(iterable.ty);
@@ -1160,7 +1282,7 @@ impl<'a> Checker<'a> {
             .ok_or_else(|| {
                 error(
                     self.source,
-                    &*loop_.iter,
+                    target,
                     "iteration requires a concrete list, dictionary, set, or range",
                 )
             })?;
@@ -1274,10 +1396,9 @@ impl<'a> Checker<'a> {
             item
         };
 
-        self.invalidate_loop_facts(&loop_.body);
         let mut facts = self.narrowed.clone();
         let before = self.assigned.clone();
-        let bindings = self.bind_pattern(&loop_.target, item)?;
+        let bindings = self.bind_pattern(target, item)?;
         fn remove_target_facts(
             target: &ast::Expr,
             names: &HashMap<String, usize>,
@@ -1293,7 +1414,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        remove_target_facts(&loop_.target, &self.names, &mut facts);
+        remove_target_facts(target, &self.names, &mut facts);
         body.extend(bindings);
         cleanup.extend(&owned_items);
         body.extend(owned_items.into_iter().map(Statement::Clear));
@@ -1316,7 +1437,7 @@ impl<'a> Checker<'a> {
             ));
         }
         self.loop_depth += 1;
-        body.extend(self.block(&loop_.body)?.0);
+        body.extend(lower_body(self)?);
         self.loop_depth -= 1;
         self.assigned = before;
         self.narrowed = facts;
@@ -1472,58 +1593,7 @@ impl<'a> Checker<'a> {
                 Some(Statement::While(test, body))
             }
             ast::Stmt::For(loop_) if !loop_.is_async && loop_.orelse.is_empty() => {
-                if !matches!(&*loop_.iter, ast::Expr::Call(call)
-                    if matches!(&*call.func, ast::Expr::Name(name) if name.id == "range"))
-                {
-                    return Ok((self.iteration(loop_)?, true));
-                }
-                let ast::Expr::Call(call) = &*loop_.iter else {
-                    unreachable!("range loops have a call expression")
-                };
-                if !matches!(&*call.func, ast::Expr::Name(name) if name.id == "range")
-                    || !call.arguments.keywords.is_empty()
-                    || !(1..=3).contains(&call.arguments.args.len())
-                {
-                    return Err(error(
-                        self.source,
-                        statement,
-                        "for loops require range with one to three positional integer arguments",
-                    ));
-                }
-                let mut args = Vec::new();
-                for arg in &call.arguments.args {
-                    let value = self.expr(arg)?;
-                    self.expect(Type::Int, value.ty, arg)?;
-                    args.push(value);
-                }
-                let ast::Expr::Name(name) = &*loop_.target else {
-                    return Err(error(self.source, statement, "range target must be a name"));
-                };
-                let target = self.declare(name.id.as_str(), Type::Int, &*loop_.target)?;
-                self.invalidate_loop_facts(&loop_.body);
-                self.narrowed.remove(&target);
-                let facts = self.narrowed.clone();
-                let before = self.assigned.clone();
-                self.assigned.insert(target);
-                self.loop_depth += 1;
-                let (body, _) = self.block(&loop_.body)?;
-                self.loop_depth -= 1;
-                self.assigned = before;
-                self.narrowed = facts;
-                let cursor = self.hidden(Type::Int);
-                let stop = self.hidden(Type::Int);
-                let step = self.hidden(Type::Int);
-                Some(Statement::Scope {
-                    body: vec![Statement::For {
-                        target,
-                        cursor,
-                        stop,
-                        step,
-                        args,
-                        body,
-                    }],
-                    clear: vec![cursor, stop, step],
-                })
+                return Ok((self.iteration(loop_)?, true));
             }
             ast::Stmt::Return(return_) if !self.module_scope => {
                 let value = if let Some(value) = &return_.value {
@@ -1948,6 +2018,15 @@ impl<'a> Checker<'a> {
                 (Type::Str, ExprKind::Str(name.to_owned()))
             }
             ast::Expr::Name(name) => {
+                if self.comprehension_targets.contains(name.id.as_str())
+                    && !self.names.contains_key(name.id.as_str())
+                {
+                    return Err(error(
+                        self.source,
+                        expression,
+                        "comprehension local may be uninitialized on this path",
+                    ));
+                }
                 let slot = self.names.get(name.id.as_str()).copied().ok_or_else(|| error(self.source, expression, "name is not a local value; globals and first-class functions are unsupported"))?;
                 if !self.assigned.contains(&slot) {
                     return Err(error(
@@ -1984,6 +2063,9 @@ impl<'a> Checker<'a> {
                     values.push(item);
                 }
                 (self.types.list(element), ExprKind::List(values))
+            }
+            ast::Expr::ListComp(_) | ast::Expr::DictComp(_) | ast::Expr::SetComp(_) => {
+                return self.comprehension(expression, None);
             }
             ast::Expr::Dict(dict) => return self.dictionary(dict, None),
             ast::Expr::Set(set) => return self.set_literal(set, None),

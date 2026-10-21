@@ -64,6 +64,18 @@ struct Assignments(HashSet<String>);
 
 impl<'a> Visitor<'a> for Assignments {
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
+        // Eager displays own their target bindings. Only the leftmost iterable
+        // executes in this scope; walrus expressions remain unsupported.
+        let clauses = match expression {
+            ast::Expr::ListComp(value) => Some(value.generators.as_slice()),
+            ast::Expr::SetComp(value) => Some(value.generators.as_slice()),
+            ast::Expr::DictComp(value) => Some(value.generators.as_ref()),
+            _ => None,
+        };
+        if let Some(clauses) = clauses {
+            self.visit_expr(&clauses[0].iter);
+            return;
+        }
         if let ast::Expr::Name(name) = expression
             && name.ctx == ast::ExprContext::Store
         {
