@@ -5,6 +5,16 @@ use std::fmt::Display;
 use std::io::{self, BufRead, BufWriter, IsTerminal, Write};
 use std::process::ExitCode;
 
+#[cfg(feature = "batch")]
+#[path = "batch.rs"]
+mod batch;
+
+/// Run the framed-request entrypoint while sharing the original graph algorithm.
+#[cfg(feature = "batch")]
+pub fn batch_main() -> ExitCode {
+    batch::main()
+}
+
 #[cfg(all(feature = "bigint", feature = "checked-i64"))]
 compile_error!("select exactly one numeric mode: bigint or checked-i64");
 #[cfg(not(any(feature = "bigint", feature = "checked-i64")))]

@@ -1,4 +1,4 @@
-"""Build both Rust incremental-planner references and preserve their source/build provenance."""
+"""Build Rust planner references and preserve their source/build provenance."""
 
 import argparse
 import hashlib
@@ -34,11 +34,14 @@ def sources() -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--toolchain", help="rustup toolchain; use ohm on this devbox")
-    parser.add_argument("--artifact-dir", type=Path, default=LOCAL)
+    parser.add_argument(
+        "--batch", action="store_true", help="build the BigInt batch entrypoint"
+    )
+    parser.add_argument("--artifact-dir", type=Path)
     parser.add_argument(
         "--target-dir",
         type=Path,
-        default=Path(os.environ.get("CARGO_TARGET_DIR", LOCAL / "target")),
+        help="default: CARGO_TARGET_DIR or the mode-specific local target directory",
     )
     parser.add_argument(
         "--build-cache", type=Path, help="override CARGO_BUILD_BUILD_DIR"
@@ -53,8 +56,23 @@ def main() -> None:
     args = parser.parse_args()
     if args.llvm_budget is not None and args.llvm_budget <= 0:
         parser.error("--llvm-budget must be a positive integer")
-    target = args.target_dir.resolve()
-    artifacts = args.artifact_dir.resolve()
+    default_artifacts = (
+        ROOT / "benchmarks/local/batch-reference" if args.batch else LOCAL
+    )
+    artifacts = (args.artifact_dir or default_artifacts).resolve()
+    target = (
+        args.target_dir
+        or Path(os.environ.get("CARGO_TARGET_DIR", default_artifacts / "target"))
+    ).resolve()
+    modes = (
+        (("bigint", ["--features", "batch", "--bin", "planner-batch"]),)
+        if args.batch
+        else (
+            ("bigint", []),
+            ("i64", ["--no-default-features", "--features", "checked-i64"]),
+        )
+    )
+    prefix = "planner-batch" if args.batch else "planner"
     environment = os.environ.copy()
     environment.update(
         CARGO_TARGET_DIR=str(target), RUSTFLAGS="", CARGO_ENCODED_RUSTFLAGS=""
@@ -82,10 +100,8 @@ def main() -> None:
     source_contents = {name: (HERE / name).read_text() for name in source_hashes}
     script = Path(__file__).read_text()
     script_hash = digest(Path(__file__))
-    outputs = [
-        artifacts / name
-        for name in ("planner-bigint", "planner-i64", "build-record.json")
-    ]
+    outputs = [artifacts / f"{prefix}-{mode}" for mode, _ in modes]
+    outputs.append(artifacts / "build-record.json")
     protected = {HERE / name for name in source_hashes} | {Path(__file__).resolve()}
 
     def public(text: str) -> str:
@@ -145,10 +161,7 @@ def main() -> None:
     artifacts.mkdir(parents=True, exist_ok=True)
     run(cargo + ["fmt", "--check"])
     binaries = {}
-    for mode, features in (
-        ("bigint", []),
-        ("i64", ["--no-default-features", "--features", "checked-i64"]),
-    ):
+    for mode, features in modes:
         command = cargo + ["build", "--release", "--locked"]
         if args.offline:
             command.append("--offline")
@@ -156,8 +169,9 @@ def main() -> None:
         started = time.perf_counter()
         result = run(command)
         elapsed = time.perf_counter() - started
-        destination = artifacts / f"planner-{mode}"
-        shutil.copy2(target / "release/planner-reference", destination)
+        destination = artifacts / f"{prefix}-{mode}"
+        executable = "planner-batch" if args.batch else "planner-reference"
+        shutil.copy2(target / "release" / executable, destination)
         binaries[mode] = {
             "name": destination.name,
             "sha256": digest(destination),
@@ -176,6 +190,7 @@ def main() -> None:
             raise RuntimeError(f"{name} changed during the build")
     record = {
         "completed_at_utc": datetime.now(timezone.utc).isoformat(),
+        "entrypoint": "batch" if args.batch else "incremental",
         "sources": source_hashes,
         "source_contents": source_contents,
         "binaries": binaries,

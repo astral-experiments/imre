@@ -129,3 +129,34 @@ some variation but do not isolate kernels or establish general language speed.
 Rust ports the algorithm in different source with native indices and different
 representations; checked-i64 has a narrower numerical domain. Compare ordinary
 and ThinLTO records separately, and retain each run's raw spread.
+
+## Batch entrypoint
+
+The optional `batch` feature adds a separate `planner-batch` executable for the
+[framed batch example](../../../examples/batch_planner/README.md). It reuses the
+same `Task`, scheduler, and renderer, and adds bounded payload parsing, explicit
+`Result` recovery, buffer cleanup, and deterministic request/summary output.
+The default `planner-reference` behavior is unchanged.
+
+```sh
+python3 benchmarks/reference/incremental_planner/build.py --batch \
+  --artifact-dir benchmarks/local/batch-reference-normal \
+  --target-dir benchmarks/local/batch-reference-normal/target
+python3 benchmarks/batch_validate.py --python python3.14 \
+  --rust-bigint benchmarks/local/batch-reference-normal/planner-batch-bigint
+```
+
+`--batch` builds the arbitrary-precision binary only and records `entrypoint:
+batch`; the default artifact/target locations are separate from single-request
+reference builds. It supports the same toolchain/cache and explicit LLVM-budget
+options. A matched ThinLTO build uses `CARGO_PROFILE_RELEASE_LTO=thin` and
+`--llvm-budget 1000` with distinct artifact/target directories. Batch measurements
+make no checked-i64 equivalence claim. Unaddressable outer framing counts remain
+outside the reference contract; huge counts inside a bounded payload preserve
+earlier parse errors and eventually report truncation, matching Python.
+
+The [batch benchmark](../../batch_benchmark.py) separates a regression control
+using identical old single-request source/input from comparisons of the new
+valid/mixed batch program. Its three-engine groups use all six execution orders
+over 30 rounds, with full-output checks and source/build provenance. Framing and
+cleanup make batch-versus-single time unsuitable as isolated exception overhead.
