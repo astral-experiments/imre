@@ -1,0 +1,200 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "audited_at_utc": "2026-10-20T10:39:35.614218+00:00",
+  "auditor_sha256": "900f056edbc121f21bc7d1dc30222e55f1ff372498cd1ee7a48b4ed823c81c13",
+  "profile_summary_sha256": "576b520a7ba8b03954b08bd9e69b9b366bf2d77d94164d376cbaeb7950bb0253",
+  "profile_manifest_sha256": "57280e1023b05e70b0e1b864199411afa1679271749ccd92d92578be2696dea1",
+  "profile_manifest_members": 47,
+  "guarded_inputs_verified": 101,
+  "timing_revision": "8b54eae6572a93926265d78562656dd395ad28b0",
+  "build_revision": "8b54eae6572a93926265d78562656dd395ad28b0",
+  "validation_revision": "8b54eae6572a93926265d78562656dd395ad28b0",
+  "benchmark_record_sha256": "9279ec2e8a120885946bd355918869f801cc239483dfeb30ede626f10ff153b5",
+  "timing_status_sha256": "4248951520c721e5d5d219d6dae67e6014b7ec998747ae06d4ea67a793c330ab",
+  "validation_index_sha256": "793c61af6f1ca927c54215d45a5cd30fdeddad5547545a8adb014c0df121bdda",
+  "baseline_provenance": {
+    "record_sha256": "26b3b7ad62cddddae43e659080a533ae41a3079bb143096e098fe2d675c3bf57",
+    "binary_sha256": "14fb73da2b9b539b760b4c98c85573e55a1f03da84a90e4aeb519c47ec7f5fd0",
+    "revision": "6fa8681c1734513cc278511427029dea9dca471c",
+    "requested_target": "x86_64-unknown-linux-gnu",
+    "thinlto": true,
+    "documentation_differences": [
+      {
+        "path": "example:README.md",
+        "baseline_sha256": "77fa9eeae232e21a28aa5b3cca4199b8c184376ea5b3ff35dc29c0e143293c6f",
+        "current_sha256": "452da6d5e07726c795ff62367f4a66326b88555e0e93aa7aa3aea8ed30ebe695"
+      }
+    ],
+    "source_policy": "All recorded example and Rust sources must match except Markdown documentation. The current benchmark harness differs intentionally; its validators, shared measurement helpers, Python, Clang, Rust toolchain, and optional ThinLTO linker must match."
+  },
+  "binary_sha256": {
+    "relar": "de4607551b8c53b616c3acb6249bbcd38abfc8ebdb86c934455e41970c5316f5",
+    "rust": "6ecadfe19c5db5427f79b93d4d74299ed5f481a972465bc1834353dbba47c5bc"
+  },
+  "workload": {
+    "label": "checksum-16",
+    "operation": "checksum",
+    "digits": 16,
+    "repetitions": 65536,
+    "digits_per_process": 1048576,
+    "checksum_per_call": 9,
+    "output_hex": "39",
+    "stdout": "OK\n589824\n"
+  },
+  "profiles": {
+    "relar-callgrind": {
+      "instructions": 69886356,
+      "self_cost_sum": 69886356,
+      "cost_rows": 21753,
+      "call_edges": 591,
+      "function_names": 339,
+      "summary_footer_log_and_annotations_agree": true,
+      "all_function_self_and_call_edge_metrics_agree": true,
+      "top_self_functions": [
+        {
+          "name": "relar_str_int_list",
+          "instructions": 22544393
+        },
+        {
+          "name": "fn_3",
+          "instructions": 15204352
+        },
+        {
+          "name": "relar_list_slice_sum",
+          "instructions": 13172736
+        },
+        {
+          "name": "relar_list_release",
+          "instructions": 11075584
+        },
+        {
+          "name": "<relar_runtime::objects::sequences::SliceIndices>::new",
+          "instructions": 4259840
+        },
+        {
+          "name": "fn_2",
+          "instructions": 2884523
+        },
+        {
+          "name": "<relar_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
+          "instructions": 327690
+        },
+        {
+          "name": "0x000000000000a530",
+          "instructions": 101397
+        },
+        {
+          "name": "0x000000000000f240",
+          "instructions": 78413
+        },
+        {
+          "name": "0x00000000000158b0",
+          "instructions": 63751
+        }
+      ]
+    },
+    "relar-dhat": {
+      "allocated_bytes": 18716,
+      "allocated_blocks": 33,
+      "peak_live_bytes": 10331,
+      "peak_live_blocks": 26,
+      "exit_live_bytes": 9216,
+      "exit_live_blocks": 2,
+      "allocation_sites": 27,
+      "stack_frames": 170,
+      "global_peak_instruction": 70033500,
+      "process_end_instruction": 70041989,
+      "global_peak_uses_gb_gbk_and_matches_log": true,
+      "summary_and_allocation_stacks_agree": true
+    },
+    "rust-callgrind": {
+      "instructions": 23285675,
+      "self_cost_sum": 23285675,
+      "cost_rows": 20955,
+      "call_edges": 562,
+      "function_names": 321,
+      "summary_footer_log_and_annotations_agree": true,
+      "all_function_self_and_call_edge_metrics_agree": true,
+      "top_self_functions": [
+        {
+          "name": "luhn_reference::main",
+          "instructions": 22938045
+        },
+        {
+          "name": "0x00000000000158b0",
+          "instructions": 63751
+        },
+        {
+          "name": "0x000000000000a530",
+          "instructions": 48148
+        },
+        {
+          "name": "0x000000000006b830",
+          "instructions": 43383
+        },
+        {
+          "name": "0x000000000000f240",
+          "instructions": 41201
+        },
+        {
+          "name": "0x000000000000b0d0",
+          "instructions": 30300
+        },
+        {
+          "name": "__strtoul_internal",
+          "instructions": 20636
+        },
+        {
+          "name": "0x00000000000274e0",
+          "instructions": 14124
+        },
+        {
+          "name": "0x000000000000a390",
+          "instructions": 9742
+        },
+        {
+          "name": "0x0000000000015c90",
+          "instructions": 7176
+        }
+      ]
+    },
+    "rust-dhat": {
+      "allocated_bytes": 4114,
+      "allocated_blocks": 19,
+      "peak_live_bytes": 1922,
+      "peak_live_blocks": 11,
+      "exit_live_bytes": 544,
+      "exit_live_blocks": 1,
+      "allocation_sites": 14,
+      "stack_frames": 67,
+      "global_peak_instruction": 23369233,
+      "process_end_instruction": 23376553,
+      "global_peak_uses_gb_gbk_and_matches_log": true,
+      "summary_and_allocation_stacks_agree": true
+    }
+  },
+  "checks": {
+    "four_exact_timed_binary_runs": true,
+    "all_manifests_and_snapshots_verified": true,
+    "all_commands_and_output_verified": true,
+    "profile_started_after_all_timing_completed": true,
+    "callgrind_self_rows_reconcile_with_summary_footer_log_and_annotations": true,
+    "callgrind_function_self_and_incoming_edges_verified": true,
+    "dhat_total_global_peak_exit_fields_reconcile_with_log": true,
+    "dhat_top_allocation_stacks_verified": true,
+    "source_tool_binary_guards_rehashed_before_and_after": true,
+    "preserved_baseline_and_fresh_validation_provenance_verified": true,
+    "one_final_build_validation_and_timing_revision": true
+  },
+  "limits": [
+    "No benchmarks, profilers, compilers, or test programs were executed by this audit.",
+    "Callgrind guest instruction counts are not CPU cycles, wall time, or CPU-time percentages.",
+    "Incoming inclusive call costs overlap across nested calls; only self costs partition process instructions.",
+    "DHAT counts requested heap bytes/blocks, not allocator usable size or RSS.",
+    "Global peak uses summed gb/gbk contributions at t-gmax; summed independent site maxima are not a simultaneous process peak.",
+    "Profiles include process startup, decoding, file I/O, repeated calls, checksum accumulation, and exit.",
+    "Exit-live allocations do not establish leaks; ASan/LSan validation is recorded separately.",
+    "Recorded affinity matches timing; past per-child affinity is not independently observable after process exit."
+  ]
+}

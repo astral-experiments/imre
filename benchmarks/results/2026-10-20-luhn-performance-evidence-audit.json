@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "at_utc": "2026-10-20T11:00:25.340458+00:00",
+  "revision": "8b54eae6572a93926265d78562656dd395ad28b0",
+  "auditor_sha256": "5354a27147b3d3107e03d12748265f7ff188cc209cd67ea095d6f0ca11b1c863",
+  "archive": {
+    "path": "/tmp/2026-10-20-luhn-performance-evidence.tar.gz",
+    "sha256": "87e87c6f90a193305c80901057ee09915126cba06baafc8274ea232bb9941ada",
+    "bytes": 6226777
+  },
+  "manifest": {
+    "path": "/tmp/2026-10-20-luhn-performance-evidence-manifest.json",
+    "sha256": "3171ad05553ab37820f9223891d7211a7c68aa917ea571947474e5edd1a58fc4"
+  },
+  "member_count": 2317,
+  "uncompressed_member_bytes": 66521839,
+  "source_files_verified_against_git_revision": 399,
+  "excluded_native_artifacts": 96,
+  "checks": {
+    "all_member_hashes_sizes_modes_and_names_match": true,
+    "normalized_archive_metadata": true,
+    "no_native_or_bytecode_members": true,
+    "final_build_validation_timing_profiles_report_bound": true,
+    "baseline_archive_linked_not_nested": true,
+    "failed_attempts_retained_as_historical_extras": {
+      "v1": {
+        "passed": 124,
+        "failed": 5
+      },
+      "v2": {
+        "passed": 126,
+        "failed": 3
+      }
+    },
+    "r7_mixed_source_issue_retained": true
+  },
+  "limits": [
+    "No retained workloads were rerun.",
+    "Native artifacts are excluded; this audit verifies retained identities and omission records rather than repackaging binaries.",
+    "Historical exploratory extras are preserved but are not promoted into final validation or performance claims."
+  ]
+}
