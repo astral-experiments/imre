@@ -163,8 +163,10 @@ take 0.91–1.28× Rust's time for complete directory comparisons and
 Complete directory runs are 2.13–2.89× faster than the unchanged upstream
 CPython script. The report includes validation and replayable benchmark evidence.
 
-The [native-process results](../../benchmarks/results/2026-10-21-native-processes.md)
-cover actual old/new ty launches and synthetic capture workloads with 16,256
-items per side. Complete runs take 1.00–1.61× Rust's time, and repeated
-report computation takes 1.43–1.60×, across ordinary and ThinLTO builds.
-These earlier results predate atomic output and persisted captures.
+The [workspace and atomic-output results](../../benchmarks/results/2026-10-21-native-workspaces.md)
+cover actual old/new ty launches and synthetic workloads with 16,256 items per
+side, with and without retained transcripts. Complete process runs take
+1.00–1.57× Rust's time, file-only reports take 1.13–1.26×, and repeated report
+computation takes 1.42–1.57×, across ordinary and ThinLTO builds. All 26 workload
+rows meet the ≤2× target, including controls. The report retains all 3,744
+measured executions and replayable validation evidence.

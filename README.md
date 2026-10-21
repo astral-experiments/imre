@@ -134,9 +134,10 @@ implementation. The [dataclass comparison](benchmarks/results/2026-10-21-datacla
 runs within 1.16–1.47× Rust's time on the large report inputs, using dataclasses,
 keyword-only fields, a class method, and a read-only property.
 
-The [native-process comparison](benchmarks/results/2026-10-21-native-processes.md) takes
-1.00–1.61× Rust's time for complete runs and 1.43–1.60× for repeated
-report computation, across ordinary and ThinLTO builds.
+The [workspace and atomic-output comparison](benchmarks/results/2026-10-21-native-workspaces.md)
+takes 1.00–1.57× Rust's time for complete process runs, 1.13–1.26× for file-only
+reports, and 1.42–1.57× for repeated report computation, across ordinary and
+ThinLTO builds. Every measured workload, including controls, stays below 2× Rust.
 
 ## License
 

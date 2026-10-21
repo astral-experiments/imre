@@ -39,12 +39,13 @@ time for the complete application and 1.38–1.63× for repeated
 parse/compare/render work. The report retains raw samples and a portable replay
 of the output, statistics, and source checks.
 
-The [native-process results](../../results/2026-10-21-native-processes.md) cover
-actual ty runs and synthetic capture workloads with 16,256 items per side.
-Complete runs take 1.00–1.61× Rust's time; repeated report computation takes
-1.43–1.60×. The report retains all 48 samples per engine and workload,
+The [workspace and atomic-output results](../../results/2026-10-21-native-workspaces.md)
+cover actual ty runs, synthetic captures with 16,256 items per side, retained
+transcripts, file-only reports, and repeated computation. Complete process runs
+take 1.00–1.57× Rust's time, file-only reports take 1.13–1.26×, and repeated
+computation takes 1.42–1.57×. Every row meets the ≤2× target in ordinary and
+ThinLTO builds. The report retains all 48 samples per engine and workload,
 validation records, and portable evidence.
-Those measurements predate atomic output and persisted captures.
 
 Prepare separately from timing:
 

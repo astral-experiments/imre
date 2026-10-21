@@ -231,6 +231,13 @@ runs still execute ty directly. See the
 source pinning, and ordinary/ThinLTO commands. No host environment values are
 copied into the process benchmark record.
 
+The [workspace and atomic-output results](results/2026-10-21-native-workspaces.md)
+cover all 13 workloads in ordinary and ThinLTO builds. Complete process runs take
+1.00–1.57× Rust's time, file-only reports take 1.13–1.26×, and repeated computation
+takes 1.42–1.57×. Every row, including controls, meets the ≤2× target. The report
+retains all 3,744 measured executions, exact persisted-output checks, sanitizer
+validation, and a portable replay of the evidence and statistics.
+
 ## Callback record pipeline
 
 The [payout example](../examples/record_pipeline/README.md) selects records with
