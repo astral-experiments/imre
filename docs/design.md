@@ -22,7 +22,7 @@ We embed ty's Salsa database, vendored type definitions, semantic checking, and 
 
 The IR records resolved calls, expression types, variable slots, control flow, and supported runtime operations. The backend only accepts checked IR. Integer operations get a machine-integer fast path and an already-compiled arbitrary-precision fallback. A fallback continues the operation at that point; it does not restart earlier side effects. LLVM overflow flags and alias metadata are emitted only when their preconditions have been established.
 
-The initial native calling convention uses concrete typed values and borrowed arguments. Returned reference-bearing values are owned. Each expression and local has an explicit lifetime; assignment publishes the new value before releasing the old value. An active call owns its inputs until completion. Optimization of reference counts must preserve those rules.
+The initial native calling convention uses concrete typed values and borrowed arguments. Returned reference-bearing values are owned. Each expression and local has an explicit lifetime; assignment publishes the new value before releasing the old value. The caller keeps inputs rooted until a call completes. Operator and call inputs can borrow direct locals, and parameter bindings that never change can share the caller's root. This proof depends on expressions being unable to replace caller slots: closures, globals, assignment expressions, and exposed frame addresses are absent. List-element reads remain owned because later evaluation can remove the element. Unchanged bindings do not imply immutable or unaliased objects.
 
 ## Runtime
 

@@ -363,6 +363,8 @@ pub unsafe extern "C" fn relar_list_release(value: *const List) {
 }
 
 /// Normalizes a Python index without truncating a large integer to machine size.
+// Expose the bounds check to get/set so LLVM can remove their redundant checks.
+#[inline]
 fn index(value: &Int, length: usize) -> usize {
     let raw = value
         .as_small()
@@ -370,13 +372,15 @@ fn index(value: &Int, length: usize) -> usize {
         .or_else(|| value.big().to_isize())
         .unwrap_or_else(|| fail("IndexError", "list index out of range"));
     let normalized = if raw < 0 {
-        length.checked_add_signed(raw)
+        // An underflow wraps above `length`, so the same bounds check rejects it.
+        length.wrapping_add_signed(raw)
     } else {
-        Some(raw as usize)
+        raw as usize
     };
+    if normalized >= length {
+        fail("IndexError", "list index out of range");
+    }
     normalized
-        .filter(|&value| value < length)
-        .unwrap_or_else(|| fail("IndexError", "list index out of range"))
 }
 
 /// # Safety

@@ -4,6 +4,8 @@ The example computes shortest routes across weighted grids using Dijkstra's algo
 
 The [first recorded result](results/2026-10-17-route-planner.md) includes raw samples and environment details: 2.17× faster than CPython 3.14.5 for three routes on 256 × 256 grids, using end-to-end process timings.
 
+The [profiling follow-up](results/2026-10-17-route-planner-optimized.md) records the native bottlenecks and their optimization: 2.60× faster than the preserved original native executable and 5.66× faster than CPython in a direct three-way comparison, with the Python source unchanged.
+
 Build the compiler and runtime once, then run the benchmark from the repository root:
 
 ```sh
@@ -27,3 +29,33 @@ The timer surrounds `subprocess.run` with `time.perf_counter_ns`. Each sample th
 Within each pair, execution order alternates between CPython first and Relar first. The JSON stores every raw duration and output, all warmup pairs, input text, source/input/executable/IR/tool hashes, Git revision and dirty status, tool versions, available CPython JIT/GIL/PGO/LTO configuration information, CPU affinity/model, and OS details. PGO/LTO fields describe recorded configure options and compiler flags rather than proving how an interpreter binary was built. Source and tool hashes are checked again after measurement to reject changes during the run. Hostnames and complete Python configure arguments are not collected.
 
 Results report each implementation's median, minimum, maximum, and interquartile range, plus CPython's median divided by Relar's median. Observed spread is not a confidence interval. CPU affinity and alternating order reduce some noise, but a shared devbox still has scheduling interference, frequency changes, and shared cache/memory contention; stop concurrent builds and other experiments before measuring. This is evidence about this route planner, input sizes, and recorded toolchain. It does not establish a general Python speedup, extension compatibility, or a safety guarantee.
+
+## Comparing native changes
+
+Preserve the baseline executable before rebuilding. `compare.py` runs that executable, an optimized executable, and unchanged CPython in the same session:
+
+```sh
+python3 benchmarks/compare.py \
+  --baseline benchmarks/local/profile-baseline/route_planner \
+  --optimized benchmarks/local/artifacts/route_planner \
+  --baseline-record benchmarks/results/2026-10-17-route-planner.json \
+  --optimized-record benchmarks/local/route-planner.json \
+  --python python3.14 \
+  --output benchmarks/local/comparison.json
+```
+
+The optional build records must match the current source and executable hashes. The comparison does not rebuild either binary. It uses the same correctness oracle, timing boundaries, CPU affinity, and tracing guard as `benchmark.py`. Defaults are two warmup triplets and twelve measured triplets, covering all six execution orders twice. `--samples` accepts other positive counts; a multiple of six keeps every implementation equally represented in each execution position. The JSON records each order and raw duration, hashes, native build provenance when supplied, and both optimized-to-baseline and optimized-to-CPython ratios.
+
+## Profiling the executable
+
+Callgrind can collect instruction and call counts without hardware-counter access. Profile the same prebuilt executables and inputs, keeping instrumented profiling separate from normal timing:
+
+```sh
+printf '256\n3\n42\n' > benchmarks/local/profile-input.txt
+valgrind --tool=callgrind --dump-instr=yes --collect-jumps=yes \
+  --callgrind-out-file=benchmarks/local/callgrind.out \
+  benchmarks/local/artifacts/route_planner < benchmarks/local/profile-input.txt
+callgrind_annotate --auto=no --inclusive=no --threshold=100 benchmarks/local/callgrind.out
+```
+
+Callgrind reports executed instructions, not CPU cycles or elapsed-time shares. Rust inline source locations may split one function across several rows; aggregate them by function when comparing totals. LLVM may inline generated Python functions into their callers, and identical runtime functions can share a symbol address: `relar_list_retain` and `relar_str_retain` currently do so. Inspect symbols and callers before attributing that shared entry to strings.

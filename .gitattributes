@@ -1,0 +1,2 @@
+# Keep raw benchmark records available without crowding the default code review.
+benchmarks/results/*.json linguist-generated=true
