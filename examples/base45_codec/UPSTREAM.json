@@ -1,0 +1,23 @@
+{
+  "repository": "https://github.com/kirei/python-base45",
+  "commit": "5f49a519c3884a4fbc4c58c5c8f1fa25d7046020",
+  "license": "BSD-2-Clause",
+  "files": {
+    "base45/__init__.py": {
+      "upstream": "base45/__init__.py",
+      "sha256": "a22381be6391bd5b3aa9296fc3a2ba44e31ca19368bedb86f48f4f3bf8b42b9f"
+    },
+    "base45/py.typed": {
+      "upstream": "base45/py.typed",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "upstream/LICENSE": {
+      "upstream": "LICENSE",
+      "sha256": "0a6f4da891e538d63ce6852350d2317e9720fb6f18d37704f80c09db97d485b8"
+    },
+    "upstream/test_base45.py": {
+      "upstream": "tests/test_base45.py",
+      "sha256": "994a7cd4277317f211dffab8eb9cf1a322d6a2e4f41f375fd226ee5ff25c20b3"
+    }
+  }
+}

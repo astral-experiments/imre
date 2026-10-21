@@ -1,0 +1,431 @@
+{
+  "method": "Separate instruction and heap-allocation profiles, never wall-time benchmarks. Each process handles 64 KiB of raw data in repeated calls to the exact timed ThinLTO executable. Output, checksum, input, and executable hashes are checked.",
+  "benchmark_record_sha256": "014b5af700ed088e259745969c409bc2648a72b4fcc61c9a5ae048d0ca779475",
+  "binary_sha256": "cd6e2cd00b3a35604c891cdb788dfddf72f025e7024cc230ba4f21420a2a3563",
+  "source_revision": "2963aa2a690139c23be23653009096da03c7b94e",
+  "valgrind_version": "valgrind-3.22.0",
+  "valgrind_sha256": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+  "environment": {
+    "VALGRIND_LIB": "/home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind",
+    "VALGRIND_OPTS": ""
+  },
+  "tools": {
+    "dhat": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc",
+    "callgrind": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03"
+  },
+  "profiles": [
+    {
+      "label": "encode-64",
+      "tool": "dhat",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=dhat",
+        "--num-callers=32",
+        "--log-file=/tmp/relar-base45-profile/encode-64-dhat/stderr.log",
+        "--dhat-out-file=/tmp/relar-base45-profile/encode-64-dhat/profile.json",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45",
+        "encode",
+        "/tmp/relar-base45-profile/encode-64-dhat/input.bin",
+        "/tmp/relar-base45-profile/encode-64-dhat/output.bin",
+        "1024"
+      ],
+      "repetitions": 1024,
+      "raw_bytes_per_process": 65536,
+      "input_sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
+      "output_sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
+      "stdout": "OK\n250880\n",
+      "returncode": 0,
+      "profile_sha256": "e5686700c96f37f0e22b89a9a8b3d24577e09f22db711142adad2a57135088b3",
+      "log_sha256": "7832d3cc20bb662a610b6d66763b8dfaa530a38ed4976c7b72abe30a1e1990ba",
+      "total_allocated_bytes": 7046310,
+      "total_allocated_blocks": 160854,
+      "peak_live_bytes": 14379,
+      "exit_live_bytes": 9216,
+      "top_allocation_stacks": [
+        {
+          "bytes": 1518592,
+          "blocks": 24576,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2401DA: alloc (library/alloc/src/alloc.rs:101)",
+            "0x2401DA: do_alloc (heap.rs:412)",
+            "0x2401DA: alloc (heap.rs:466)",
+            "0x2401DA: allocate_ptr (heap.rs:369)",
+            "0x2401DA: <compact_str::repr::heap::HeapBuffer>::alloc (heap.rs:112)",
+            "0x22D7CA: with_capacity (heap.rs:102)",
+            "0x22D7CA: with_capacity (mod.rs:131)",
+            "0x22D7CA: try_with_capacity (lib.rs:315)",
+            "0x22D7CA: concat_parts (objects.rs:442)",
+            "0x22D7CA: relar_str_concat_parts (objects.rs:421)",
+            "0x20C202: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 1310720,
+          "blocks": 32768,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22F987: alloc (library/alloc/src/alloc.rs:101)",
+            "0x22F987: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x22F987: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x22F987: allocate (library/alloc/src/alloc.rs:449)",
+            "0x22F987: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x22F987: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x22F987: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x22F987: relar_str_get (sequences.rs:161)",
+            "0x20C09F: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 1310720,
+          "blocks": 32768,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22F987: alloc (library/alloc/src/alloc.rs:101)",
+            "0x22F987: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x22F987: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x22F987: allocate (library/alloc/src/alloc.rs:449)",
+            "0x22F987: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x22F987: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x22F987: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x22F987: relar_str_get (sequences.rs:161)",
+            "0x20C11D: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 1310720,
+          "blocks": 32768,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22F987: alloc (library/alloc/src/alloc.rs:101)",
+            "0x22F987: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x22F987: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x22F987: allocate (library/alloc/src/alloc.rs:449)",
+            "0x22F987: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x22F987: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x22F987: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x22F987: relar_str_get (sequences.rs:161)",
+            "0x20C199: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 1310720,
+          "blocks": 32768,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22D75A: alloc (library/alloc/src/alloc.rs:101)",
+            "0x22D75A: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x22D75A: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x22D75A: allocate (library/alloc/src/alloc.rs:449)",
+            "0x22D75A: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x22D75A: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x22D75A: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x22D75A: relar_str_concat_parts (objects.rs:421)",
+            "0x20C202: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "encode-64",
+      "tool": "callgrind",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=callgrind",
+        "--num-callers=32",
+        "--log-file=/tmp/relar-base45-profile/encode-64-callgrind/stderr.log",
+        "--callgrind-out-file=/tmp/relar-base45-profile/encode-64-callgrind/profile.callgrind",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45",
+        "encode",
+        "/tmp/relar-base45-profile/encode-64-callgrind/input.bin",
+        "/tmp/relar-base45-profile/encode-64-callgrind/output.bin",
+        "1024"
+      ],
+      "repetitions": 1024,
+      "raw_bytes_per_process": 65536,
+      "input_sha256": "823d013dd8cb1a48aa43b02e2cc4de25cf35dd2fc4c8a9876b9be4c89e914305",
+      "output_sha256": "2b8cac1e90bf12098a32dec8ff56476633428bbe6d5a00a08c8a754b610327e5",
+      "stdout": "OK\n250880\n",
+      "returncode": 0,
+      "profile_sha256": "d240f78c6d06bd1c722809ff7a8b8609e9786cee2be6b0b2108dfc24eb436a8c",
+      "log_sha256": "a40a383ac8178c710cd04eac9a12511771c9de95917e64bd5b19b57475b9c2e5",
+      "instructions": 66583941
+    },
+    {
+      "label": "encode-16384",
+      "tool": "dhat",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=dhat",
+        "--num-callers=32",
+        "--log-file=/tmp/relar-base45-profile/encode-16384-dhat/stderr.log",
+        "--dhat-out-file=/tmp/relar-base45-profile/encode-16384-dhat/profile.json",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45",
+        "encode",
+        "/tmp/relar-base45-profile/encode-16384-dhat/input.bin",
+        "/tmp/relar-base45-profile/encode-16384-dhat/output.bin",
+        "4"
+      ],
+      "repetitions": 4,
+      "raw_bytes_per_process": 65536,
+      "input_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "output_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "stdout": "OK\n98784\n",
+      "returncode": 0,
+      "profile_sha256": "129eeacb0620f4591d187a5e987a87c4aec1841d3f471a4417077387ceb8becc",
+      "log_sha256": "94f5abc9deba25a5acb328d054df5f855dc83e09dcc73a43e427c73ad8f3be24",
+      "total_allocated_bytes": 408084816,
+      "total_allocated_blocks": 163914,
+      "peak_live_bytes": 95174,
+      "exit_live_bytes": 9216,
+      "top_allocation_stacks": [
+        {
+          "bytes": 402701932,
+          "blocks": 32736,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2401DA: alloc (library/alloc/src/alloc.rs:101)",
+            "0x2401DA: do_alloc (heap.rs:412)",
+            "0x2401DA: alloc (heap.rs:466)",
+            "0x2401DA: allocate_ptr (heap.rs:369)",
+            "0x2401DA: <compact_str::repr::heap::HeapBuffer>::alloc (heap.rs:112)",
+            "0x22D7CA: with_capacity (heap.rs:102)",
+            "0x22D7CA: with_capacity (mod.rs:131)",
+            "0x22D7CA: try_with_capacity (lib.rs:315)",
+            "0x22D7CA: concat_parts (objects.rs:442)",
+            "0x22D7CA: relar_str_concat_parts (objects.rs:421)",
+            "0x20C202: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 1310720,
+          "blocks": 32768,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22F987: alloc (library/alloc/src/alloc.rs:101)",
+            "0x22F987: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x22F987: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x22F987: allocate (library/alloc/src/alloc.rs:449)",
+            "0x22F987: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x22F987: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x22F987: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x22F987: relar_str_get (sequences.rs:161)",
+            "0x20C09F: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 1310720,
+          "blocks": 32768,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22F987: alloc (library/alloc/src/alloc.rs:101)",
+            "0x22F987: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x22F987: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x22F987: allocate (library/alloc/src/alloc.rs:449)",
+            "0x22F987: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x22F987: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x22F987: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x22F987: relar_str_get (sequences.rs:161)",
+            "0x20C11D: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 1310720,
+          "blocks": 32768,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22F987: alloc (library/alloc/src/alloc.rs:101)",
+            "0x22F987: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x22F987: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x22F987: allocate (library/alloc/src/alloc.rs:449)",
+            "0x22F987: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x22F987: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x22F987: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x22F987: relar_str_get (sequences.rs:161)",
+            "0x20C199: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 1310720,
+          "blocks": 32768,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x22D75A: alloc (library/alloc/src/alloc.rs:101)",
+            "0x22D75A: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
+            "0x22D75A: alloc_impl (library/alloc/src/alloc.rs:332)",
+            "0x22D75A: allocate (library/alloc/src/alloc.rs:449)",
+            "0x22D75A: box_new_uninit (library/alloc/src/boxed.rs:248)",
+            "0x22D75A: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
+            "0x22D75A: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
+            "0x22D75A: relar_str_concat_parts (objects.rs:421)",
+            "0x20C202: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "encode-16384",
+      "tool": "callgrind",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=callgrind",
+        "--num-callers=32",
+        "--log-file=/tmp/relar-base45-profile/encode-16384-callgrind/stderr.log",
+        "--callgrind-out-file=/tmp/relar-base45-profile/encode-16384-callgrind/profile.callgrind",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45",
+        "encode",
+        "/tmp/relar-base45-profile/encode-16384-callgrind/input.bin",
+        "/tmp/relar-base45-profile/encode-16384-callgrind/output.bin",
+        "4"
+      ],
+      "repetitions": 4,
+      "raw_bytes_per_process": 65536,
+      "input_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "output_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "stdout": "OK\n98784\n",
+      "returncode": 0,
+      "profile_sha256": "982eee75290f34db8191b2104fa72e4fe6ad1c97803ff207b66309632c41e5c9",
+      "log_sha256": "25b9f3445dc72a1529135c12dd308b842a9c350dbe992194d63c9f694070b359",
+      "instructions": 439795671
+    },
+    {
+      "label": "decode-bytes-16384",
+      "tool": "dhat",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=dhat",
+        "--num-callers=32",
+        "--log-file=/tmp/relar-base45-profile/decode-bytes-16384-dhat/stderr.log",
+        "--dhat-out-file=/tmp/relar-base45-profile/decode-bytes-16384-dhat/profile.json",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45",
+        "decode-bytes",
+        "/tmp/relar-base45-profile/decode-bytes-16384-dhat/input.bin",
+        "/tmp/relar-base45-profile/decode-bytes-16384-dhat/output.bin",
+        "4"
+      ],
+      "repetitions": 4,
+      "raw_bytes_per_process": 65536,
+      "input_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "output_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "stdout": "OK\n67512\n",
+      "returncode": 0,
+      "profile_sha256": "7d4cab4d7be4d369e7b9bf20db230446ec6a30a9162adc131db42133d5e366f9",
+      "log_sha256": "963defd1b3ab1e81d6959befbc92298c65d8402dbbae3cbe8f5f29390b9d063c",
+      "total_allocated_bytes": 7291988,
+      "total_allocated_blocks": 98535,
+      "peak_live_bytes": 455557,
+      "exit_live_bytes": 9216,
+      "top_allocation_stacks": [
+        {
+          "bytes": 3932000,
+          "blocks": 98300,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x223D03: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
+            "0x223D03: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
+            "0x223D03: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
+            "0x223D03: UnknownInlinedFun (library/alloc/src/alloc.rs:449)",
+            "0x223D03: UnknownInlinedFun (library/alloc/src/boxed.rs:248)",
+            "0x223D03: UnknownInlinedFun (library/alloc/src/boxed.rs:286)",
+            "0x223D03: UnknownInlinedFun (library/alloc/src/rc.rs:426)",
+            "0x223D03: UnknownInlinedFun (sequences.rs:305)",
+            "0x223D03: {closure#0} (mappings.rs:705)",
+            "0x223D03: with_mut<relar_runtime::objects::Storage, core::result::Result<core::option::Option<(relar_runtime::objects::words::OwnedWord, core::option::Option<relar_runtime::objects::words::OwnedWord>)>, relar_runtime::objects::mappings::IterationError>, relar_runtime::objects::mappings::relar_mapping_iter_next::{closure_env#0}> (lib.rs:160)",
+            "0x223D03: relar_mapping_iter_next (mappings.rs:704)",
+            "0x210367: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x20D9E3: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 2097024,
+          "blocks": 56,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x2105AE: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x20D9E3: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 1048448,
+          "blocks": 52,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x21195F: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x20D9E3: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 98304,
+          "blocks": 4,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x240054: alloc (library/alloc/src/alloc.rs:101)",
+            "0x240054: do_alloc (heap.rs:412)",
+            "0x240054: alloc (heap.rs:466)",
+            "0x240054: allocate_ptr (heap.rs:369)",
+            "0x240054: <compact_str::repr::heap::HeapBuffer>::alloc_copy (heap.rs:52)",
+            "0x232D9B: alloc_copy_panic (heap.rs:87)",
+            "0x232D9B: new_panic (mod.rs:109)",
+            "0x232D9B: new<&str> (lib.rs:192)",
+            "0x232D9B: from (lib.rs:2150)",
+            "0x232D9B: {closure#0} (bytes.rs:303)",
+            "0x232D9B: map<&str, core::str::error::Utf8Error, *const compact_str::CompactString, relar_runtime::objects::bytes::relar_bytes_decode::{closure_env#0}> (library/core/src/result.rs:836)",
+            "0x232D9B: relar_bytes_decode (bytes.rs:303)",
+            "0x2101C3: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x20D9E3: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        },
+        {
+          "bytes": 65536,
+          "blocks": 4,
+          "frames": [
+            "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+            "0x211B5E: fn_4 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x20D9E3: fn_2 (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)",
+            "0x213E84: main (in /home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45)"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "decode-bytes-16384",
+      "tool": "callgrind",
+      "command": [
+        "/home/dev-user/.cache/relar/profiling-tools/root/usr/bin/valgrind",
+        "--tool=callgrind",
+        "--num-callers=32",
+        "--log-file=/tmp/relar-base45-profile/decode-bytes-16384-callgrind/stderr.log",
+        "--callgrind-out-file=/tmp/relar-base45-profile/decode-bytes-16384-callgrind/profile.callgrind",
+        "/home/dev-user/code/oss/relar/benchmarks/local/base45-thinlto/base45",
+        "decode-bytes",
+        "/tmp/relar-base45-profile/decode-bytes-16384-callgrind/input.bin",
+        "/tmp/relar-base45-profile/decode-bytes-16384-callgrind/output.bin",
+        "4"
+      ],
+      "repetitions": 4,
+      "raw_bytes_per_process": 65536,
+      "input_sha256": "874ad60b622c498144906baaa9e869e68b8f91351390f7b34e671d2f4dcaccb1",
+      "output_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "stdout": "OK\n67512\n",
+      "returncode": 0,
+      "profile_sha256": "a221abc14c935db65dbbc6a584bdaa66e8d6dc891939e7328db9605d4cd0bebe",
+      "log_sha256": "8796f98fda9d91638507699a453904a89340892506e780a335ac24595b3d6492",
+      "instructions": 70934097
+    }
+  ],
+  "guards_passed": true
+}
