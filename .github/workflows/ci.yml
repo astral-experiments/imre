@@ -95,3 +95,8 @@ jobs:
           target/release/relar build examples/manifest_planner/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/manifest-planner
           python3 benchmarks/reference/incremental_planner/build.py --manifest --artifact-dir /tmp/relar-manifest-reference --target-dir target/incremental-reference
           python3 benchmarks/manifest_validate.py --python python3 --binary /tmp/manifest-planner --rust-bigint /tmp/relar-manifest-reference/planner-manifest-bigint --output /tmp/relar-manifest-reference/validation.json
+      - name: Validate inventory reconciliation against CPython and Rust
+        run: |
+          target/release/relar build examples/inventory_reconciliation/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/inventory-reconciliation
+          python3 benchmarks/reference/inventory_reconciliation/build.py --artifact-dir /tmp/relar-inventory-reference --target-dir target/inventory-reference
+          python3 benchmarks/inventory_validate.py --python python3 --binary /tmp/inventory-reconciliation --rust-bigint /tmp/relar-inventory-reference/inventory-bigint --output /tmp/relar-inventory-reference/validation.json
