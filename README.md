@@ -41,11 +41,6 @@ arbitrary-precision integers. Each workload has 16,384 positive requests:
 | Repeated requests (64 products in stock) | 77.66 | 26.69 | 23.34 | 2.91× |
 | Distinct requests (16,384 products in stock) | 112.35 | 52.24 | 43.05 | 2.15× |
 
-These are median end-to-end times from 48 runs per implementation on Linux in
-October 2026, including startup and file I/O. Relar's executable was compiled
-with Clang 18 without ThinLTO. See the [benchmark report](benchmarks/results/2026-10-19-assignment-unpacking-expansion.md)
-for details.
-
 ## Installation
 
 On 64-bit Linux, install the [Rust toolchain](rust-toolchain.toml) and Clang 18,
