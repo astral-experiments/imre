@@ -26,7 +26,7 @@ pub(super) fn is_pipeline_expression(expression: &ast::Expr) -> bool {
     matches!(expression, ast::Expr::Generator(_))
         || matches!(expression, ast::Expr::Call(call)
             if matches!(&*call.func, ast::Expr::Name(name)
-                if matches!(name.id.as_str(), "zip" | "reversed" | "map" | "enumerate")))
+                if matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate")))
 }
 
 fn integer(value: i64) -> Expr {
@@ -137,6 +137,10 @@ impl Checker<'_> {
                 Ok(Some(input))
             }
             "map" => {
+                if !matches!(call.arguments.args.as_ref(), [ast::Expr::Name(name), _] if name.id == "int")
+                {
+                    return self.callback_input(call, element, false).map(Some);
+                }
                 if !call.arguments.keywords.is_empty()
                     || !matches!(call.arguments.args.as_ref(), [ast::Expr::Name(name), _] if name.id == "int")
                 {
@@ -165,6 +169,7 @@ impl Checker<'_> {
                 input.evaluate.append(&mut input.acquire);
                 Ok(Some(input))
             }
+            "filter" => self.callback_input(call, element, true).map(Some),
             "enumerate" => {
                 if !call.arguments.keywords.is_empty()
                     || !(1..=2).contains(&call.arguments.args.len())
@@ -1086,6 +1091,159 @@ impl Checker<'_> {
             writes,
             clear,
         })
+    }
+
+    /// Captures the callable before its source, then invokes it only after each
+    /// pull has independently rooted an item and released runtime storage access.
+    fn callback_input(
+        &mut self,
+        call: &ast::ExprCall,
+        element: Option<Type>,
+        filter: bool,
+    ) -> Result<Prepared, String> {
+        let [callback, source] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "map/filter require a callback and one concrete iterable",
+            ));
+        };
+        if !call.arguments.keywords.is_empty() {
+            return Err(error(
+                self.source,
+                call,
+                "map/filter do not accept keyword arguments",
+            ));
+        }
+        let definition = match self.graph.resolve(self.module, callback) {
+            Some(Binding::Definition(definition)) => self.functions.get(&definition).cloned(),
+            _ => None,
+        };
+        // Fixed function names and noncapturing lambdas have no enclosing-slot
+        // effects. Their input type can therefore be learned from the source;
+        // emitted creation still precedes that source's evaluation.
+        let checked = if definition.is_some() || matches!(callback, ast::Expr::Lambda(_)) {
+            None
+        } else {
+            Some(self.expr(callback)?)
+        };
+        let callback_input = checked
+            .as_ref()
+            .and_then(|value| self.types.signature(value.ty))
+            .and_then(|(params, _)| (params.len() == 1).then(|| params[0]))
+            .or_else(|| {
+                definition.as_ref().and_then(|signature| {
+                    if signature.params.len() != 1 {
+                        return None;
+                    }
+                    self.inference
+                        .map_or(Some(signature.params[0].ty), |inference| {
+                            inference.parameter(signature.id, 0)
+                        })
+                })
+            });
+        let input_hint = callback_input.or(if filter { element } else { None });
+        let source = self.expansion_input(source, input_hint)?;
+        let mut input = self.prepare_iteration(source, call, false)?;
+        let input_type = self.locals[input.value];
+        let callback = if let ast::Expr::Lambda(lambda) = callback {
+            self.lambda_value(
+                lambda,
+                Some(vec![input_type]),
+                if filter { None } else { element },
+            )?
+        } else if let Some(signature) = definition {
+            if signature.params.len() == 1
+                && let Some(inference) = self.inference
+            {
+                inference.learn_parameter(signature.id, 0, input_type);
+            }
+            self.callable_value(&signature, None, None, callback)?
+        } else {
+            checked.expect("ordinary callback was checked before its source")
+        };
+        let callback_slot = self.hidden(callback.ty);
+        let operation = if filter && callback.ty == Type::None {
+            self.local(input.value)
+        } else {
+            let (params, returns) = self.types.signature(callback.ty).ok_or_else(|| {
+                error(
+                    self.source,
+                    call,
+                    "map/filter require an exact Callable; only filter also accepts None",
+                )
+            })?;
+            let [parameter] = params.as_slice() else {
+                return Err(error(
+                    self.source,
+                    call,
+                    "map/filter callbacks require one positional parameter",
+                ));
+            };
+            Expr {
+                ty: returns,
+                kind: ExprKind::Invoke {
+                    callable: Box::new(self.local(callback_slot)),
+                    args: ir::CallArgs::positional(vec![self.coerce(
+                        self.local(input.value),
+                        *parameter,
+                        call,
+                    )?]),
+                },
+            }
+        };
+        input
+            .evaluate
+            .insert(0, Statement::Assign(callback_slot, callback));
+        input.evaluate.append(&mut input.acquire);
+        input.clear.push(callback_slot);
+        if filter {
+            let ready = self.hidden(Type::Bool);
+            let done = self.hidden(Type::Bool);
+            let mut step = std::mem::take(&mut input.next);
+            step.push(Statement::If(
+                self.local(input.ready),
+                vec![Statement::If(
+                    truth(operation),
+                    vec![Statement::Assign(ready, boolean(true))],
+                    vec![Statement::Clear(input.value)],
+                )],
+                vec![Statement::Assign(done, boolean(true))],
+            ));
+            input.evaluate.push(Statement::Assign(done, boolean(false)));
+            input.next = vec![
+                Statement::Clear(input.value),
+                Statement::Assign(ready, boolean(false)),
+                Statement::While(
+                    Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Boolean(
+                            true,
+                            vec![not(self.local(ready)), not(self.local(done))],
+                        ),
+                    },
+                    step,
+                    Vec::new(),
+                ),
+            ];
+            input.ready = ready;
+            input.clear.extend([ready, done]);
+        } else {
+            let value = self.hidden(operation.ty);
+            input.next.push(Statement::If(
+                self.local(input.ready),
+                vec![
+                    Statement::Assign(value, operation),
+                    Statement::Clear(input.value),
+                ],
+                Vec::new(),
+            ));
+            input.next.insert(0, Statement::Clear(value));
+            input.value = value;
+            input.elementless = false;
+            input.clear.push(value);
+        }
+        Ok(input)
     }
 
     /// A source loop owns its complete pipeline across break, return, and error.

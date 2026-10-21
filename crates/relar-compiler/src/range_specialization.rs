@@ -235,6 +235,17 @@ fn rewrite_expression(
                 rewrite_expression(value, locals, plans);
             }
         }
+        ExprKind::Callable { receiver, .. } => {
+            if let Some(receiver) = receiver {
+                rewrite_expression(receiver, locals, plans);
+            }
+        }
+        ExprKind::Invoke { callable, args } => {
+            rewrite_expression(callable, locals, plans);
+            for value in &mut args.values {
+                rewrite_expression(value, locals, plans);
+            }
+        }
         ExprKind::Dict { entries, .. } => {
             for (key, value) in entries {
                 rewrite_expression(key, locals, plans);

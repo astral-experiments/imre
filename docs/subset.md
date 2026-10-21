@@ -8,8 +8,8 @@ This is a deliberately restricted Python dialect for closed, statically typed so
 | --- | --- |
 | Modules | Closed UTF-8 source graph; imports precede initialization; entry definitions precede executable statements; imported initializers run once in dependency/source order; optional docstrings |
 | Imports | Absolute, `from`, and package-relative imports; aliases and package re-exports; fixed module, definition, and exported value bindings; shared mutable values; no import cycles |
-| Functions | Exact signatures declared or inferred from concrete calls, scalar defaults, and checked bodies; positional and keyword calls; positional-only and keyword-only parameters; direct, fixed bindings; no recursive call cycles |
-| Types | `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed `typing.TextIO` and `typing.BinaryIO`, the sealed builtin `Exception` family, fixed nominal classes, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, `str \| bytes`, and `T \| None`; locals have one inferred or declared storage type |
+| Functions | Exact signatures declared or inferred from concrete calls, scalar defaults, and checked bodies; direct positional and keyword calls; positional-only and keyword-only parameters; exact callable values, bound methods, and noncapturing lambdas; no recursive call cycles |
+| Types | `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed `typing.TextIO` and `typing.BinaryIO`, the sealed builtin `Exception` family, fixed nominal classes, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, exact `typing.Callable[[T1, T2], R]` signatures, `str \| bytes`, and `T \| None`; locals have one inferred or declared storage type |
 | Classes | Declared fields, an explicit initializer, typed instance methods, alias-visible field mutation, and numeric field augmented assignment |
 | Statements | Single-target and chained assignment; nested and starred unpacking of fixed tuples, lists, strings, and bytes, annotated assignment, numeric augmented assignment, local string/bytes `+=` and bytes `*=`, dictionary entry deletion, `if`/`elif`/`else`, structural `match`/`case`, `while`, `for` over ranges, strings, bytes, concrete containers, or supported iterator pipelines, loop `else`, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin-file `with` |
 | Conditions | Truth tests for every supported concrete type; operand-returning `and`/`or`, boolean `not`, and short-circuit evaluation; conditional expressions `yes if condition else no`; assignment expressions `(name := value)`; local optional narrowing |
@@ -23,13 +23,13 @@ This is a deliberately restricted Python dialect for closed, statically typed so
 | Strings | Immutable UTF-8 text, literals, scalar f-strings, concatenation, equality/inequality, Unicode scalar length, indexing, slicing and iteration, no-argument whitespace `split()` and `splitlines()`, `rstrip([chars])`, input and output |
 | Bytes | Immutable bytes; literals, construction from an integer count or `list[int]`, concatenation/repetition, all value comparisons, indexing/slicing/iteration, `len`, Python byte repr, strict UTF-8 encode/decode |
 | Files and arguments | Explicit UTF-8 text read/write and binary read/write/append/exclusive-create modes; `read`, `write`, `flush`, `close`, `closed`; `with` cleanup; one shared mutable `sys.argv` list |
-| Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `bool()` or `bool(value)`; `int(int_or_float_or_bool_or_string)`; `float()` or `float(int_or_float_or_bool_or_string_or_bytes)`; `str()` or `str(int_or_float_or_bool_or_string_or_bytes_or_None_or_exception)`; `len(string_or_bytes_or_container)`; `list([iterable])`; integer `sum(iterable[, start])`; `any(iterable)` and `all(iterable)`; immediate `map(int, iterable)`, `zip(iterable, ..., strict=condition)`, `reversed(sequence)`, and `enumerate(iterable[, start])`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments at an iteration boundary |
+| Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `bool()` or `bool(value)`; `int(int_or_float_or_bool_or_string)`; `float()` or `float(int_or_float_or_bool_or_string_or_bytes)`; `str()` or `str(int_or_float_or_bool_or_string_or_bytes_or_None_or_exception)`; `len(string_or_bytes_or_container)`; `list([iterable])`; integer `sum(iterable[, start])`; `any(iterable)` and `all(iterable)`; immediate `map(callback, iterable)`, `filter(predicate_or_None, iterable)`, `zip(iterable, ..., strict=condition)`, `reversed(sequence)`, and `enumerate(iterable[, start])`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments at an iteration boundary |
 
 Booleans have a separate exact type: use `int(flag)` to store one in an integer list. An empty list defaults to `list[int]` unless a typed storage, call, or return boundary supplies its element type. No annotation permits `Any`, an unrestricted union, an untyped object, or a foreign container to enter native storage. ty checks ordinary Python typing first; Relar additionally enforces exact types, definite assignment, fixed bindings, and every container write. Suppression comments cannot waive Relar's contract.
 
 Indentation must use spaces; tabs and form feeds remain valid inside string data. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
 
-Global rebinding, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generator functions, escaping iterator values, async, slice assignment/deletion, tuple display expansion, call argument expansion, variadic parameters, defaults other than scalar literals, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+Global rebinding, capturing closures, decorators, reflection, dynamic attributes, generator functions, escaping iterator values, async, slice assignment/deletion, tuple display expansion, call argument expansion, variadic parameters, defaults other than scalar literals, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
 
 ## Inferred function signatures and iterable consumers
 
@@ -49,11 +49,33 @@ This infers `checksum(str) -> int`. Every function has one exact signature, and 
 
 `sum(source[, start])`, including `start=`, consumes exact integers and defaults to zero. Integer results retain arbitrary precision. Its source can be any supported concrete iterable whose yielded values are integers, including fixed tuples such as `divmod(...)`. Float summation, boolean elements, and generalized addition are not yet supported.
 
-An immediate `map(int, source)` converts each item using the ordinary checked `int` conversion. Inputs may yield exact integers, floats, booleans, or strings. Conversion proceeds lazily as the enclosing consumer iterates; input expressions, iterator creation, the optional sum start, and conversion failures retain Python evaluation order. Mutable sources remain live and keep the existing dictionary/set mutation checks. A map cannot escape into storage, and arbitrary callables or user-defined iteration protocols remain unsupported.
+An immediate `map(int, source)` converts each item using the ordinary checked `int` conversion. Inputs may yield exact integers, floats, booleans, or strings. Conversion proceeds lazily as the enclosing consumer iterates; input expressions, iterator creation, the optional sum start, and conversion failures retain Python evaluation order. Mutable sources remain live and keep the existing dictionary/set mutation checks. User callbacks follow the exact callable contract below. A map cannot escape into storage, and user-defined iteration protocols remain unsupported.
+
+## Callable values and callbacks
+
+`typing.Callable[[int, str], bool]` and `collections.abc.Callable[[int, str], bool]` describe the same exact parameter sequence and return type. Module functions and bound instance methods can be assigned to local variables, passed as arguments, and returned. A bound method owns its receiver, so rebinding the original variable does not invalidate the method, while mutations of that same receiver remain visible. `Callable[[], R]` supports zero arguments. Optional callable locals and parameters require a successful `None` check before invocation.
+
+```python
+from typing import Callable
+
+
+def apply(operation: Callable[[int], int], value: int) -> int:
+    return operation(value)
+
+
+print(apply(lambda value: value * value, 12))
+print(sum(map(lambda value: value + 1, filter(None, [0, 2, 3]))))
+```
+
+Indirect calls evaluate and retain the callable before evaluating arguments from left to right. They accept positional arguments at full arity: parameter names and default omission are available only on direct calls. Parameter and result types must match exactly; callable variance and implicit numeric conversions are not supported. Functions with keyword-only parameters cannot become callable values.
+
+Noncapturing lambdas obtain parameter types from an expected callable annotation, parameter, or return type, or from the single source of `map` or `filter`. Their bodies are checked against that signature. Captured enclosing locals, `nonlocal`, lambda defaults, variadic parameters, and keyword-only lambda parameters are rejected. `Callable[..., R]` is also rejected. Callable values cannot be stored in imported module globals, class fields, containers, or tuples, including through optional or nested storage. These restrictions keep the supported heap graph acyclic; callable values do not add a cycle collector.
+
+`map(callback, source)` accepts one iterable and a one-argument exact callable, in addition to the existing `map(int, source)` conversion. `filter(predicate, source)` truth-tests each callback result and yields the original element; the predicate need not return `bool`. `filter(None, source)` truth-tests the elements themselves and preserves the source element type, including optional types. Both capture their callback and source at construction but invoke callbacks only when pulled. Short-circuit consumers skip later callbacks and failures. Source mutation remains visible under the ordinary list, dictionary, and set iteration rules. Callback errors use the existing exception and cleanup machinery.
 
 ## Lazy iteration pipelines
 
-Generator expressions, `zip`, `reversed`, `enumerate`, and `map(int, ...)` compose at immediate consumption boundaries: `for`, comprehensions, `list`, integer `sum`, `any`, and `all`. The compiler fixes each yielded type and lowers the pipeline into native control flow. These operations do not create a user-visible iterator value; assigning, returning, or passing one to an ordinary function remains unsupported.
+Generator expressions, `zip`, `reversed`, `enumerate`, `map`, and `filter` compose at immediate consumption boundaries: `for`, comprehensions, `list`, integer `sum`, `any`, and `all`. The compiler fixes each yielded type and lowers the pipeline into native control flow. These operations do not create a user-visible iterator value; assigning, returning, or passing one to an ordinary function remains unsupported.
 
 ```python
 def squared_error(expected: list[int], actual: list[int]) -> int:
@@ -469,6 +491,8 @@ The inference and iterable suites cover propagation through imports and methods,
 The iterator-pipeline suite compares lazy generator evaluation, live enclosing bindings, private targets, assignment expressions, strict zip errors and probe order, reverse traversal, short-circuit truth tests, and ownership during mutation or exceptions. It compares full filesystem effects and checks that delayed writes cannot create unsafe definite-assignment or optional facts. The same cases run under ordinary optimization, ThinLTO, and ASan/LSan.
 
 The calls suite compares positional/keyword binding, keyword-only parameters, scalar defaults, imported aliases, contextual container types, and optional values. Reordered arguments, temporary receivers, aliased owners, and later exceptions check evaluation order and cleanup. Rejection cases protect exact types, parameter kinds, required/duplicate names, literal defaults, and the positional builtin surface.
+
+The callable suite compares function references, returned and optional callables, bound receiver ownership, noncapturing lambdas, mixed scalar/reference call signatures, and lazy map/filter composition with CPython. It exercises callback and argument failures, partial results, buffered file cleanup, source mutation, and short-circuiting. Rejections protect exact signatures, noncapturing scope, full positional arity, acyclic storage, and recursion restrictions. It shares the assignment suite's full stdout/filesystem oracle and runs under ordinary optimization, ThinLTO, and ASan/LSan.
 
 The expressions suite compares lazy conditional arms, contextual result types, optional narrowing, Unicode string indexing and iteration, and list/string slices. It checks 1,701 slices apiece for strings and integer lists, including omitted and arbitrary-precision bounds. Aliased shallow copies, operand mutation, later failures, and recovery check ownership and evaluation order. Rejection cases protect exact types, fixed tuple bounds, and read-only slicing.
 

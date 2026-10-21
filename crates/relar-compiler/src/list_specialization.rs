@@ -198,6 +198,17 @@ fn rewrite_expression(expression: &mut Expr, locals: &[Type]) {
                 rewrite_expression(value, locals);
             }
         }
+        ExprKind::Callable { receiver, .. } => {
+            if let Some(receiver) = receiver {
+                rewrite_expression(receiver, locals);
+            }
+        }
+        ExprKind::Invoke { callable, args } => {
+            rewrite_expression(callable, locals);
+            for value in &mut args.values {
+                rewrite_expression(value, locals);
+            }
+        }
         ExprKind::Dict { entries, .. } => {
             for (key, value) in entries {
                 rewrite_expression(key, locals);
@@ -557,7 +568,11 @@ impl Plan<'_> {
                     return false;
                 }
             }
-            ExprKind::Bind(..) | ExprKind::Call(..) | ExprKind::Construct { .. } => return false,
+            ExprKind::Bind(..)
+            | ExprKind::Call(..)
+            | ExprKind::Construct { .. }
+            | ExprKind::Invoke { .. }
+            | ExprKind::Callable { .. } => return false,
             ExprKind::Int(_)
             | ExprKind::Float(_)
             | ExprKind::Bool(_)

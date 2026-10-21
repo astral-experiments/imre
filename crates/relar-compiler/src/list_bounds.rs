@@ -299,6 +299,24 @@ impl Analysis<'_> {
                 state.fill(None);
                 None
             }
+            ExprKind::Callable { function, receiver } => {
+                if let Some(receiver) = receiver {
+                    self.expression(receiver, state);
+                }
+                // A callback may receive inputs absent from direct call sites.
+                let call = &mut self.calls[*function];
+                call.seen = true;
+                call.inputs.fill(None);
+                None
+            }
+            ExprKind::Invoke { callable, args } => {
+                self.expression(callable, state);
+                for argument in &mut args.values {
+                    self.expression(argument, state);
+                }
+                state.fill(None);
+                None
+            }
             ExprKind::Construct { initializer, args } => {
                 for arg in &mut args.values {
                     self.expression(arg, state);
@@ -425,7 +443,8 @@ fn literal(value: &Expr) -> Option<i64> {
 /// heap writes and callbacks can change aliases and are never treated as pure.
 fn readonly(expression: &Expr) -> bool {
     match &expression.kind {
-        ExprKind::Call(..) | ExprKind::Construct { .. } => false,
+        ExprKind::Call(..) | ExprKind::Construct { .. } | ExprKind::Invoke { .. } => false,
+        ExprKind::Callable { receiver, .. } => receiver.as_deref().is_none_or(readonly),
         ExprKind::Builtin(operation, args) => {
             readonly_builtin(operation) && args.iter().all(readonly)
         }
@@ -659,6 +678,29 @@ def caller(text: str, unknown: list[int]) -> int:
         module.functions[0].body.push(Statement::Expr(Expr {
             ty: Type::Int,
             kind: ExprKind::Call(0, CallArgs::positional(vec![argument.clone(), argument])),
+        }));
+        specialize(&mut module);
+        assert!(reads(&module).is_empty());
+    }
+
+    #[test]
+    fn address_taken_functions_cannot_inherit_only_direct_call_bounds() {
+        let mut module = lower(
+            r#"
+def read(values: list[int]) -> int:
+    return values[0]
+
+def caller(text: str) -> int:
+    return read(list(map(int, text)))
+"#,
+        );
+        let ty = module.types.callable(vec![Type::ListInt], Type::Int);
+        module.entry.body.push(Statement::Expr(Expr {
+            ty,
+            kind: ExprKind::Callable {
+                function: 0,
+                receiver: None,
+            },
         }));
         specialize(&mut module);
         assert!(reads(&module).is_empty());

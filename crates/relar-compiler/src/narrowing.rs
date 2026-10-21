@@ -89,6 +89,9 @@ pub(crate) fn expression_assignments(expression: &ast::Expr) -> HashSet<String> 
     struct Writes(HashSet<String>);
     impl<'a> Visitor<'a> for Writes {
         fn visit_expr(&mut self, expression: &'a ast::Expr) {
+            if matches!(expression, ast::Expr::Lambda(_)) {
+                return;
+            }
             if let ast::Expr::Named(value) = expression
                 && let ast::Expr::Name(name) = &*value.target
             {
@@ -110,6 +113,7 @@ pub(crate) fn guaranteed_assignments(
     truth: Option<bool>,
 ) -> HashSet<String> {
     match expression {
+        ast::Expr::Lambda(_) => HashSet::new(),
         ast::Expr::Call(call)
             if matches!(&*call.func, ast::Expr::Name(name) if name.id == "bool")
                 && call.arguments.args.len() == 1
@@ -201,6 +205,9 @@ impl<'a> Visitor<'a> for Assignments {
     }
 
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
+        if matches!(expression, ast::Expr::Lambda(_)) {
+            return;
+        }
         // Comprehensions and generators own iteration targets, but assignment expressions
         // write in the enclosing non-comprehension scope.
         let clauses = match expression {

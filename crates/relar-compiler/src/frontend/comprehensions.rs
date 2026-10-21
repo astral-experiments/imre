@@ -31,14 +31,14 @@ impl Helpers {
         }
     }
 
-    fn reserve(&self) -> usize {
+    pub(super) fn reserve(&self) -> usize {
         let mut functions = self.functions.borrow_mut();
         let id = self.first + functions.len();
         functions.push(None);
         id
     }
 
-    fn finish(&self, id: usize, helper: Helper) {
+    pub(super) fn finish(&self, id: usize, helper: Helper) {
         self.functions.borrow_mut()[id - self.first] = Some(helper);
     }
 
@@ -130,11 +130,39 @@ fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
 struct Reads {
     names: HashSet<String>,
     bound: Vec<HashSet<String>>,
+    nested_lambdas: bool,
+}
+
+/// Finds lexical free reads for capture rejection, including through nested
+/// lambdas. Comprehension targets and each lambda's own locals shadow normally.
+pub(super) fn free_reads(expression: &ast::Expr, bound: HashSet<String>) -> HashSet<String> {
+    let mut reads = Reads {
+        names: HashSet::new(),
+        bound: vec![bound],
+        nested_lambdas: true,
+    };
+    reads.visit_expr(expression);
+    reads.names
 }
 
 impl<'a> Visitor<'a> for Reads {
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
-        if let ast::Expr::Generator(generator) = expression {
+        if let ast::Expr::Lambda(lambda) = expression {
+            if self.nested_lambdas {
+                let mut bound = narrowing::expression_assignments(&lambda.body);
+                if let Some(parameters) = &lambda.parameters {
+                    for parameter in parameters.iter_non_variadic_params() {
+                        if let Some(default) = &parameter.default {
+                            self.visit_expr(default);
+                        }
+                        bound.insert(parameter.name().to_string());
+                    }
+                }
+                self.bound.push(bound);
+                self.visit_expr(&lambda.body);
+                self.bound.pop();
+            }
+        } else if let ast::Expr::Generator(generator) = expression {
             self.visit_expr(&generator.generators[0].iter);
             let mut targets = HashSet::new();
             for clause in &generator.generators {
@@ -258,6 +286,7 @@ impl Checker<'_> {
         let mut reads = Reads {
             names: HashSet::new(),
             bound: vec![targets.clone()],
+            nested_lambdas: false,
         };
         for (index, clause) in display.clauses.iter().enumerate() {
             reads.visit_expr(&clause.target);

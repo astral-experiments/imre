@@ -47,6 +47,8 @@ pub(crate) enum Binding {
 pub(crate) enum IntrinsicModule {
     Sys,
     Typing,
+    Collections,
+    CollectionsAbc,
     Io,
 }
 
@@ -56,6 +58,7 @@ pub(crate) enum Intrinsic {
     TextIO,
     BinaryIO,
     Union,
+    Callable,
     UnsupportedOperation,
 }
 
@@ -64,17 +67,23 @@ impl IntrinsicModule {
         match name {
             "sys" => Some(Self::Sys),
             "typing" => Some(Self::Typing),
+            "collections" => Some(Self::Collections),
+            "collections.abc" => Some(Self::CollectionsAbc),
             "io" => Some(Self::Io),
             _ => None,
         }
     }
 
     fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::Collections && name == "abc" {
+            return Some(Binding::IntrinsicModule(Self::CollectionsAbc));
+        }
         let symbol = match (self, name) {
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
             (Self::Typing, "Union") => Intrinsic::Union,
+            (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             _ => return None,
         };
@@ -368,6 +377,15 @@ impl Loader {
                 for alias in &import.names {
                     let name = alias.name.as_str();
                     if let Some(module) = self.intrinsic_module(name)? {
+                        if name == "collections.abc" && alias.asname.is_none() {
+                            self.bind(
+                                id,
+                                "collections",
+                                Binding::IntrinsicModule(IntrinsicModule::Collections),
+                                alias,
+                            )?;
+                            continue;
+                        }
                         let local = alias.asname.as_ref().unwrap_or(&alias.name);
                         self.bind(id, local.as_str(), Binding::IntrinsicModule(module), alias)?;
                         continue;
@@ -458,8 +476,25 @@ impl Loader {
         let module = IntrinsicModule::named(name);
         if module.is_some()
             && self.allow_imports
-            && (self.root.join(format!("{name}.py")).exists()
-                || self.root.join(name).join("__init__.py").exists())
+            && (self
+                .root
+                .join(format!("{}.py", name.split('.').next().unwrap()))
+                .exists()
+                || self
+                    .root
+                    .join(name.split('.').next().unwrap())
+                    .join("__init__.py")
+                    .exists()
+                || self
+                    .root
+                    .join(name.replace('.', "/"))
+                    .with_extension("py")
+                    .exists()
+                || self
+                    .root
+                    .join(name.replace('.', "/"))
+                    .join("__init__.py")
+                    .exists())
         {
             return Err(format!(
                 "standard-library shadowing is unsupported: {name:?}"

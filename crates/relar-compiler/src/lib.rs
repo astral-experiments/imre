@@ -1,5 +1,6 @@
 mod analysis;
 mod borrows;
+mod callables;
 mod classes;
 mod effects;
 mod frontend;

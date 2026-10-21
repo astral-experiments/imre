@@ -14,6 +14,8 @@ pub(crate) enum Type {
     Dict(usize),
     Set(usize),
     Tuple(usize),
+    /// An exact positional signature carried by an owned callable record.
+    Callable(usize),
     Optional(usize),
     /// A closed str/bytes union with one owned tagged-pointer word.
     Union(usize),
@@ -38,6 +40,7 @@ impl std::fmt::Display for Type {
             Self::Dict(id) => return write!(f, "dict#{id}"),
             Self::Set(id) => return write!(f, "set#{id}"),
             Self::Tuple(id) => return write!(f, "tuple#{id}"),
+            Self::Callable(id) => return write!(f, "callable#{id}"),
             Self::Optional(id) => return write!(f, "optional#{id}"),
             Self::Union(id) => return write!(f, "union#{id}"),
             _ => {}
@@ -59,6 +62,7 @@ impl std::fmt::Display for Type {
             | Self::Dict(_)
             | Self::Set(_)
             | Self::Tuple(_)
+            | Self::Callable(_)
             | Self::Optional(_)
             | Self::Union(_) => {
                 unreachable!()
@@ -185,6 +189,16 @@ pub(crate) enum ExprKind {
     Not(Box<Expr>),
     Negate(Box<Expr>),
     Call(usize, CallArgs),
+    /// Captures a fixed target and, for a bound method, one owned receiver.
+    Callable {
+        function: usize,
+        receiver: Option<Box<Expr>>,
+    },
+    /// Evaluates and roots the callable before its source-ordered arguments.
+    Invoke {
+        callable: Box<Expr>,
+        args: CallArgs,
+    },
     Construct {
         initializer: usize,
         args: CallArgs,
@@ -453,6 +467,17 @@ pub(crate) fn walk_expressions(body: &[Statement], visit: &mut impl FnMut(&Expr)
                 }
             }
             ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+                for value in &args.values {
+                    expression(value, visit);
+                }
+            }
+            ExprKind::Callable { receiver, .. } => {
+                if let Some(receiver) = receiver {
+                    expression(receiver, visit);
+                }
+            }
+            ExprKind::Invoke { callable, args } => {
+                expression(callable, visit);
                 for value in &args.values {
                     expression(value, visit);
                 }

@@ -956,6 +956,19 @@ impl Analyzer {
                 }
                 Interval::UNKNOWN
             }
+            ExprKind::Callable { receiver, .. } => {
+                if let Some(receiver) = receiver {
+                    self.expression(receiver, state, record);
+                }
+                Interval::UNKNOWN
+            }
+            ExprKind::Invoke { callable, args } => {
+                self.expression(callable, state, record);
+                for value in &args.values {
+                    self.expression(value, state, record);
+                }
+                Interval::UNKNOWN
+            }
             ExprKind::Dict { entries, .. } => {
                 for (key, value) in entries {
                     self.expression(key, state, record);
@@ -1140,6 +1153,10 @@ fn contains_scope(expression: &Expr) -> bool {
         | ExprKind::Builtin(_, values) => values.iter().any(contains_scope),
         ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
             args.values.iter().any(contains_scope)
+        }
+        ExprKind::Callable { receiver, .. } => receiver.as_deref().is_some_and(contains_scope),
+        ExprKind::Invoke { callable, args } => {
+            contains_scope(callable) || args.values.iter().any(contains_scope)
         }
         ExprKind::Dict { entries, .. } => entries
             .iter()
@@ -1361,6 +1378,17 @@ mod tests {
                     }
                 }
                 ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+                    for value in &args.values {
+                        expression(value, output);
+                    }
+                }
+                ExprKind::Callable { receiver, .. } => {
+                    if let Some(receiver) = receiver {
+                        expression(receiver, output);
+                    }
+                }
+                ExprKind::Invoke { callable, args } => {
+                    expression(callable, output);
                     for value in &args.values {
                         expression(value, output);
                     }

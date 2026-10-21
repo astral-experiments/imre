@@ -26,56 +26,10 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
       - run: cargo build --workspace --release --locked
-      - name: Compare generated programs with CPython
-        run: python3 tests/differential.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare static module graphs with CPython
-        run: python3 tests/imports.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare fixed classes with CPython
-        run: python3 tests/classes.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare typed containers with CPython
-        run: python3 tests/containers.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare eager comprehensions with CPython
-        run: python3 tests/comprehensions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare scalar f-strings with CPython
-        run: python3 tests/fstrings.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare keyword calls and scalar defaults with CPython
-        run: python3 tests/calls.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare inferred function signatures with CPython
-        run: python3 tests/inference.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare concrete iterable consumers with CPython
-        run: python3 tests/iterables.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare lazy iterator pipelines with CPython
-        run: python3 tests/iterator_pipelines.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare conditional expressions and sequence access with CPython
-        run: python3 tests/expressions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare binary64 floats and numeric conversions with CPython
-        run: python3 tests/floats.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare bytes and binary files with CPython
-        run: python3 tests/bytes.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare structural pattern matching with CPython
-        run: python3 tests/matching.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare assignment expressions and scope with CPython
-        run: python3 tests/assignments.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare truthiness and boolean operand values with CPython
-        run: python3 tests/truthiness.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare loop exhaustion and else cleanup with CPython
-        run: python3 tests/loop_else.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare assignment unpacking and container expansion with CPython
-        run: python3 tests/unpacking.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare integer and codec primitives with CPython
-        run: python3 tests/primitives.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare string buffer reuse and indexed fragments with CPython
-        run: python3 tests/string_reuse.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare decoder lookup and integer loop optimizations with CPython
-        run: python3 tests/decoder_optimizations.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare bounded unions and exact type tests with CPython
-        run: python3 tests/unions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare module values and ordered initialization with CPython
-        run: python3 tests/module_values.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compile unchanged python-base45 and compare its upstream tests with CPython
-        run: python3 tests/base45.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compile unchanged luhn and compare its upstream tests with CPython
-        run: python3 tests/luhn.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
+      - name: Compare native suites with CPython
+        run: |
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-ordinary --suites differential imports classes containers comprehensions fstrings calls inference iterables iterator_pipelines callables expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files \
+            -- --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Validate the independent Rust Base45 reference
         run: |
           python3 benchmarks/reference/base45_codec/build.py --artifact-dir /tmp/relar-base45-reference --target-dir target/base45-reference
@@ -84,12 +38,6 @@ jobs:
         run: |
           python3 benchmarks/reference/luhn_checksum/build.py --artifact-dir /tmp/relar-luhn-reference --target-dir target/luhn-reference
           python3 benchmarks/luhn_validate.py --rust /tmp/relar-luhn-reference/luhn-reference --output /tmp/relar-luhn-reference/validation.json
-      - name: Compare exception propagation and cleanup with CPython
-        run: python3 tests/exceptions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare output and interactive I/O with CPython
-        run: python3 tests/io.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Compare UTF-8 files and context cleanup with CPython
-        run: python3 tests/files.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Build the bitcode runtime for ThinLTO
         env:
           RUSTFLAGS: -Clinker-plugin-lto
@@ -99,9 +47,8 @@ jobs:
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"
           relar_lld_dir="$(rustc --print sysroot)/lib/rustlib/$relar_target/bin"
           python3 tests/lto.py --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --rust-lld "$relar_lld_dir/rust-lld" --python python3
-          for suite in differential imports classes containers comprehensions fstrings calls inference iterables iterator_pipelines expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files; do
-            python3 "tests/$suite.py" --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --lto-linker "$relar_lld_dir/gcc-ld/ld.lld" --opt-levels 3
-          done
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-thinlto --suites differential imports classes containers comprehensions fstrings calls inference iterables iterator_pipelines callables expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files \
+            -- --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --lto-linker "$relar_lld_dir/gcc-ld/ld.lld" --opt-levels 3
       - name: Build the runtime with AddressSanitizer
         env:
           RUSTC_BOOTSTRAP: '1'
@@ -112,12 +59,10 @@ jobs:
       - name: Check generated code and runtime with AddressSanitizer
         run: |
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"
-          for suite in differential imports classes containers comprehensions fstrings calls inference iterables iterator_pipelines expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files; do
-            python3 "tests/$suite.py" --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 1
-          done
-          for suite in containers fstrings calls inference iterables iterator_pipelines expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions files; do
-            python3 "tests/$suite.py" --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 0
-          done
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-asan-o1 --suites differential imports classes containers comprehensions fstrings calls inference iterables iterator_pipelines callables expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files \
+            -- --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 1
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-asan-o0 --suites containers fstrings calls inference iterables iterator_pipelines callables expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions files \
+            -- --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 0
       - name: Validate the route planner against an independent oracle
         run: |
           target/release/relar build examples/route_planner.py -o /tmp/route-planner --clang clang-18

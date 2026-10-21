@@ -249,6 +249,16 @@ impl<'a> Visitor<'a> for SelfUse<'a> {
         if self.0.is_some() {
             return;
         }
+        if let ast::Expr::Lambda(lambda) = expression
+            && lambda.parameters.as_ref().is_some_and(|parameters| {
+                parameters
+                    .iter_non_variadic_params()
+                    .any(|parameter| parameter.name().as_str() == "self")
+            })
+        {
+            // Defaults are rejected, and this self belongs only to the lambda.
+            return;
+        }
         // A comprehension target named self is distinct from the incomplete
         // receiver. Its leftmost iterable still belongs to the enclosing scope.
         let clauses = match expression {
