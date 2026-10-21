@@ -11,23 +11,35 @@ This is a deliberately restricted Python dialect for closed first-party programs
 | Functions | Required parameter and return annotations; positional and keyword calls; positional-only and keyword-only parameters; scalar literal defaults; direct, fixed bindings; no recursive call cycles |
 | Types | `int`, `bool`, `str`, `None`, sealed `typing.TextIO`, the sealed builtin `Exception` family, fixed nominal classes, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, and `T \| None`; locals have one inferred or declared storage type |
 | Classes | Declared fields, an explicit initializer, typed instance methods, alias-visible field mutation, and integer field augmented assignment |
-| Statements | Single-target and fixed-tuple unpacking assignment, annotated assignment, integer augmented assignment, local string `+=`, dictionary entry deletion, `if`/`elif`/`else`, `while`, `for` over ranges or concrete containers, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin-file `with` |
-| Conditions | Explicit `bool`; `and`, `or`, `not`; short-circuit evaluation; `is None`/`is not None` with local flow narrowing |
+| Statements | Single-target and fixed-tuple unpacking assignment, annotated assignment, integer augmented assignment, local string `+=`, dictionary entry deletion, `if`/`elif`/`else`, `while`, `for` over ranges, strings, or concrete containers, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin-file `with` |
+| Conditions | Explicit `bool`; `and`, `or`, `not`; short-circuit evaluation; conditional expressions `yes if condition else no`; `is None`/`is not None` with local flow narrowing |
 | Integers | Arbitrary precision; `+`, `-`, `*`, `//`, `%`; unary `+`/`-`; all six value comparisons, including chains |
-| Lists | One exact element type, including nested containers and classes; literals, shallow repetition, checked negative indexing, indexed assignment, iteration, `append(value)`, `pop()`, `len(...)`; alias-visible mutation |
+| Lists | One exact element type, including nested containers and classes; literals, shallow repetition and slicing, checked negative indexing, indexed assignment, iteration, `append(value)`, `pop()`, `len(...)`; alias-visible mutation |
 | Dictionaries | Exact `int` or `str` keys and one concrete value type; literals, contextual `dict()`, lookup/write/delete, integer augmented writes, `in`/`not in`, `get`, `len`, and insertion-ordered key/items iteration |
 | Sets | Exact `int` or `str` elements; literals, contextual `set()`, `add`, `discard`, `in`/`not in`, `len`, and iteration with unspecified order |
 | Comprehensions | Eager list, dictionary, and set comprehensions; nested `for` clauses and explicit boolean filters over the existing iteration sources; isolated target bindings |
 | Tuples | Fixed length and a type per position; literals, bounded literal indexing, unpacking into names, and `len(...)`; immutable slots |
-| Strings | Immutable UTF-8 text, literals, scalar f-strings, concatenation, equality/inequality, Unicode scalar length, no-argument whitespace `split()` and `splitlines()`, input and output |
+| Strings | Immutable UTF-8 text, literals, scalar f-strings, concatenation, equality/inequality, Unicode scalar length, indexing, slicing and iteration, no-argument whitespace `split()` and `splitlines()`, input and output |
 | Files and arguments | Explicit UTF-8 `open` in read/write mode; `read`, `write`, `flush`, `close`, `closed`; `with` cleanup; one shared mutable `sys.argv` list |
-| Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `int(int_or_bool_or_string)`; `str()` or `str(int_or_bool_or_string_or_None_or_exception)`; `len(string_or_container)`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments and `enumerate(container[, start])` at a loop or comprehension boundary |
+| Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `int(int_or_bool_or_string)`; `str()` or `str(int_or_bool_or_string_or_None_or_exception)`; `len(string_or_container)`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments and `enumerate(string_or_container[, start])` at a loop or comprehension boundary |
 
 Booleans have a separate exact type: use `int(flag)` to store one in an integer list. An empty list defaults to `list[int]` unless a typed storage, call, or return boundary supplies its element type. No annotation permits `Any`, a general union, an untyped object, or a foreign container to enter native storage. ty checks ordinary Python typing first; Relar additionally enforces exact types, definite assignment, fixed bindings, and every container write. Suppression comments cannot waive Relar's contract.
 
 Indentation must use spaces; tabs and form feeds remain valid inside string data. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
 
-Mutable global values, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generators, async, assignment expressions, slicing, starred or variable-length unpacking, variadic parameters, defaults other than scalar literals, loop `else`, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. Conditions cannot rely on implicit truthiness. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+Mutable global values, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generators, async, assignment expressions, slice assignment/deletion, starred or variable-length unpacking, variadic parameters, defaults other than scalar literals, loop `else`, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. Conditions cannot rely on implicit truthiness. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+
+## Conditional expressions and sequence access
+
+`yes if condition else no` evaluates its boolean condition once and then evaluates only the selected arm. Both arms are checked, including dead arms, and must have the same concrete type or fit one supported `T | None`. A typed assignment, argument, or return supplies context to both arms, including empty containers. Local optional narrowing applies separately inside each arm and does not leak past the expression. For example, `value if value is not None else 0` has type `int` when `value` is `int | None`.
+
+String indexing uses an exact `int` and returns a one-code-point string. Negative indexes count from the end; out-of-range indexes raise `IndexError`. Strings remain valid UTF-8, so indexing, slicing and iteration operate on Unicode scalar values, including combining marks and supplementary characters, rather than bytes or grapheme clusters.
+
+`sequence[start:stop:step]` accepts a concrete list or string and returns that same type. Typed boundaries supply context through a slice to literal receivers, so `return [][:]` works in a function returning `list[str]`; an existing list cannot change its element type. Each component may be an `int`, `None`, or `int | None`; omission is equivalent to `None`. Booleans are not integer bounds. Bounds and steps may have arbitrary precision, negative steps reverse traversal, bounds are clipped to the sequence, and a zero step raises `ValueError`. In particular, `values[::-1]` and `values[:-1:-1]` have different meanings. List slices create a separate list with shallow copies of the selected element references, preserving alias-visible mutations of contained objects.
+
+The receiver evaluates first, followed by start, stop and step in source order. All remain owned until the read completes; mutations performed by a bound expression affect the slice's current contents and length. A failed evaluation prevents later expressions and the read itself. Tuple slicing, slice objects as user values, string item assignment, and slice assignment/deletion remain unsupported.
+
+String loops, comprehensions, and loop-head `enumerate` capture the original immutable string once and advance by code point in linear time. Each yielded character has its own owner; replacing the source binding or field cannot invalidate the iterator or an earlier character. Repeated arbitrary string indexing may scan UTF-8, so use iteration when visiting every character.
 
 ## First-party module graphs
 
@@ -122,7 +134,7 @@ Tuple types name each position, for example `tuple[str, int, list[Counter]]`; `t
 
 Fixed tuples can be unpacked into names in assignments and loop targets, including nested tuple or list target syntax: `name, (count, values) = record`. Every source value is evaluated before any target is rebound, so swaps and repeated target names retain Python's assignment order. Targets cannot contain stars, attributes, or subscripts, and a list value cannot be unpacked because its length is not part of its type.
 
-`for value in values` evaluates a concrete list once and retains that original list even if the source name or field is later replaced. It reads the current length and acquires the next element at each step. Appending, removing, or replacing elements through an alias therefore has Python's index-based list-iteration behavior. The current item remains owned if the body removes it from the list. `enumerate(values, start)` captures the list before evaluating its optional integer start and yields fixed `(int, T)` tuples; its counter supports arbitrary precision and is independent of visible target rebinding. Both forms support `break`, `continue`, nested loops, and early returns. A target first introduced by a loop remains potentially uninitialized afterward because the loop may be empty. Iterator values, tuple/string iteration, and user-defined iteration protocols are not supported.
+`for value in values` evaluates a concrete list once and retains that original list even if the source name or field is later replaced. It reads the current length and acquires the next element at each step. Appending, removing, or replacing elements through an alias therefore has Python's index-based list-iteration behavior. The current item remains owned if the body removes it from the list. `enumerate(values, start)` captures the list before evaluating its optional integer start and yields fixed `(int, T)` tuples; its counter supports arbitrary precision and is independent of visible target rebinding. Both forms support `break`, `continue`, nested loops, and early returns. A target first introduced by a loop remains potentially uninitialized afterward because the loop may be empty. Iterator values, tuple iteration, and user-defined iteration protocols are not supported.
 
 `for key in mapping` and `for key, value in mapping.items()` visit insertion order. `enumerate` accepts either form and creates the iterator after evaluating its start argument. Each yielded key/value has its own owner before the body runs. Replacing an existing value is allowed and later iterations see the replacement. A changed size at the next step reports `RuntimeError`, including after the last yielded item. Same-size structural mutation does not provide a portable traversal guarantee; it may report changed keys or skip entries. `items()` is supported only at a loop boundary, including inside loop-head `enumerate`; views and iterators cannot be stored as user values.
 
@@ -134,7 +146,7 @@ Narrowing applies to local bindings, not mutable fields or indexed elements. Cop
 
 ## Eager comprehensions
 
-List, dictionary, and set comprehensions support nested `for` clauses and zero or more explicit boolean filters per clause. Sources are the existing concrete lists, dictionary keys or `.items()`, sets, `range`, and loop-head `enumerate` forms. Targets use the same name-only fixed-tuple unpacking as ordinary loops.
+List, dictionary, and set comprehensions support nested `for` clauses and zero or more explicit boolean filters per clause. Sources are the existing concrete lists, strings, dictionary keys or `.items()`, sets, `range`, and loop-head `enumerate` forms. Targets use the same name-only fixed-tuple unpacking as ordinary loops.
 
 ```python
 def positives(rows: list[list[int]]) -> list[int]:
@@ -208,6 +220,7 @@ python3 tests/containers.py --compiler target/release/relar --runtime target/rel
 python3 tests/comprehensions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/fstrings.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/calls.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+python3 tests/expressions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/exceptions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/files.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/io.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
@@ -227,7 +240,7 @@ target/release/relar build examples/dependency_planner/__main__.py \
   -o /tmp/dependency-planner-lto
 ```
 
-All ten native test harnesses accept the same `--lto-linker` and `--target` options.
+All eleven native test harnesses accept the same `--lto-linker` and `--target` options.
 
 `--sanitize` marks generated functions for AddressSanitizer and links its runtime. This instruments generated code; it does not retroactively instrument a prebuilt Rust static library. Instrumenting Rust runtime code requires a separate sanitizer build of that library. The test suites accept `--sanitize --opt-levels 1` to exercise this configuration, including leak checks on normal exits.
 
@@ -245,8 +258,10 @@ The f-string suite compares literal decoding, raw and adjacent parts, scalar con
 
 The calls suite compares positional/keyword binding, keyword-only parameters, scalar defaults, imported aliases, contextual container types, and optional values. Reordered arguments, temporary receivers, aliased owners, and later exceptions check evaluation order and cleanup. Rejection cases protect exact types, parameter kinds, required/duplicate names, literal defaults, and the positional builtin surface.
 
+The expressions suite compares lazy conditional arms, contextual result types, optional narrowing, Unicode string indexing and iteration, and list/string slices. It checks 1,701 slices apiece for strings and integer lists, including omitted and arbitrary-precision bounds. Aliased shallow copies, operand mutation, later failures, and recovery check ownership and evaluation order. Rejection cases protect exact types, fixed tuple bounds, and read-only slicing.
+
 The exceptions suite compares nested propagation, handler ordering, builtin hierarchy, stored exception values, dynamically scoped re-raising, lazy assertion messages, and all finally exit reasons. Repeated failures during argument evaluation and partial container/class construction exercise ownership cleanup. Rejection cases protect definite assignment, optional facts, and the sealed exception contract.
 
 The I/O suite checks complete output, large and Unicode writes, normal and fatal exit flushing, LF and CRLF pipe input, terminal line visibility, and output failures. Interactive checks use protocol handshakes and readiness deadlines rather than performance expectations.
 
-The files suite compares complete filesystem effects, strict decoding, newline handling, write counts, alias-visible closure, all `with` exit reasons, failed cleanup, argument aliases, and descriptor recovery under a reduced open-file limit. Rejection cases protect the sealed import, file, context-manager, and argument surfaces. All ten suites also run generated-code and runtime AddressSanitizer checks at `-O1` in CI.
+The files suite compares complete filesystem effects, strict decoding, newline handling, write counts, alias-visible closure, all `with` exit reasons, failed cleanup, argument aliases, and descriptor recovery under a reduced open-file limit. Rejection cases protect the sealed import, file, context-manager, and argument surfaces. All eleven suites also run generated-code and runtime AddressSanitizer checks at `-O1` in CI.

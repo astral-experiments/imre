@@ -1,0 +1,580 @@
+//! Checked Unicode sequence access and shallow slices of concrete list storage.
+
+use num_traits::{Signed, ToPrimitive};
+use std::rc::Rc;
+
+use super::exceptions::{Error, Kind, Result, finish};
+use super::words::{OwnedWord, WordKind, Words};
+use super::{Int, List, Object, Storage, StorageCell, Str, acquire_rc, fail, object};
+
+/// Returns a native bound large enough to preserve every possible sequence
+/// position. Unlike indexing, slicing clamps arbitrary-precision integers.
+///
+/// # Safety
+/// Zero denotes an omitted/None component; every other word is a rooted Int.
+unsafe fn slice_component(word: usize) -> Option<isize> {
+    if word == 0 {
+        return None;
+    }
+    // SAFETY: nonzero components borrow canonical integer handles.
+    let value = unsafe { Int::borrow(word) };
+    Some(if let Some(value) = value.as_small() {
+        value as isize
+    } else {
+        let value = value.big();
+        value.to_isize().unwrap_or_else(|| {
+            if value.is_negative() {
+                isize::MIN
+            } else {
+                isize::MAX
+            }
+        })
+    })
+}
+
+/// A finite cursor over valid indices. Keeping a count avoids advancing past
+/// the final item, where an arbitrarily large stride could otherwise overflow.
+struct SliceIndices {
+    at: usize,
+    stride: usize,
+    remaining: usize,
+    reverse: bool,
+}
+
+impl SliceIndices {
+    /// Normalizes against the length at the time of access. Omitted negative
+    /// stops stay at -1; an explicit -1 first counts backward from the length.
+    ///
+    /// ```python
+    /// values[::-1]    # All elements in reverse.
+    /// values[:-1:-1]  # Empty: explicit -1 names the final element.
+    /// ```
+    ///
+    /// # Safety
+    /// Components are omitted/None words or rooted canonical Int handles. The
+    /// sequence length fits isize, as all runtime-owned allocations require.
+    unsafe fn new(length: usize, start: usize, stop: usize, step: usize) -> Result<Self> {
+        debug_assert!(length <= isize::MAX as usize);
+        // SAFETY: all components remain rooted for this normalization.
+        let step = unsafe { slice_component(step) }.unwrap_or(1);
+        if step == 0 {
+            return Err(Error::new(Kind::ValueError, "slice step cannot be zero"));
+        }
+        let reverse = step < 0;
+        let length = length as isize;
+        let (lower, upper) = if reverse {
+            (-1, length - 1)
+        } else {
+            (0, length)
+        };
+        let normalize = |value: isize| {
+            let value = if value < 0 { value + length } else { value };
+            value.clamp(lower, upper)
+        };
+        // SAFETY: each bound remains rooted; conversion cannot call user code.
+        let start = unsafe { slice_component(start) }
+            .map(normalize)
+            .unwrap_or(if reverse { upper } else { lower });
+        // SAFETY: the stop has the same nullable integer representation.
+        let stop = unsafe { slice_component(stop) }
+            .map(normalize)
+            .unwrap_or(if reverse { lower } else { upper });
+        let distance = if reverse { start - stop } else { stop - start };
+        let stride = step.unsigned_abs();
+        let remaining = if distance > 0 {
+            (distance as usize - 1) / stride + 1
+        } else {
+            0
+        };
+        Ok(Self {
+            at: if remaining == 0 { 0 } else { start as usize },
+            stride,
+            remaining,
+            reverse,
+        })
+    }
+}
+
+impl Iterator for SliceIndices {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let at = self.at;
+        self.remaining -= 1;
+        if self.remaining != 0 {
+            self.at = if self.reverse {
+                at - self.stride
+            } else {
+                at + self.stride
+            };
+        }
+        Some(at)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl ExactSizeIterator for SliceIndices {}
+
+/// Returns an independently owned one-code-point string. Negative indices walk
+/// backward through UTF-8, without first scanning the complete input for length.
+///
+/// # Safety
+/// `value` and the exact canonical integer index remain rooted for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_get(value: *const Str, at: usize) -> *const Str {
+    // SAFETY: the caller roots the integer throughout conversion.
+    let at = unsafe { Int::borrow(at) };
+    let at = match crate::decode_index(&at) {
+        Ok(at) => at,
+        Err(_) => {
+            return Error::new(
+                Kind::IndexError,
+                "cannot fit 'int' into an index-sized integer",
+            )
+            .returning(std::ptr::null());
+        }
+    };
+    // SAFETY: the string is immutable and rooted throughout the read.
+    let value = unsafe { &*value };
+    let character = if at < 0 {
+        value.chars().rev().nth(at.unsigned_abs() - 1)
+    } else {
+        value.chars().nth(at as usize)
+    };
+    let Some(character) = character else {
+        return Error::new(Kind::IndexError, "string index out of range")
+            .returning(std::ptr::null());
+    };
+    let mut result = Str::new("");
+    result.push(character);
+    Rc::into_raw(Rc::new(result))
+}
+
+/// Copies selected code points in one forward or backward pass. UTF-8 offsets
+/// never escape, and a large stride is used only when another result exists.
+fn copy_string_slice(
+    mut characters: impl Iterator<Item = char>,
+    mut skip: usize,
+    slice: &SliceIndices,
+    byte_length: usize,
+) -> Str {
+    let capacity = byte_length.min(slice.len().saturating_mul(4));
+    let mut result = Str::try_with_capacity(capacity)
+        .unwrap_or_else(|_| fail("MemoryError", "string allocation failed"));
+    for _ in 0..slice.len() {
+        let character = characters.nth(skip).expect("normalized string slice");
+        result.push(character);
+        skip = slice.stride - 1;
+    }
+    result
+}
+
+/// Slices by Unicode code points, preserving combining marks and embedded NULs
+/// without grapheme grouping or normalization.
+///
+/// # Safety
+/// The string and nonzero component words remain rooted. Zero denotes omitted
+/// or None; other components are canonical Int handles. Returns one owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_slice(
+    value: *const Str,
+    start: usize,
+    stop: usize,
+    step: usize,
+) -> *const Str {
+    // SAFETY: the immutable input remains rooted through all scans.
+    let text = unsafe { &*value };
+    let length = text.chars().count();
+    // SAFETY: all borrowed nullable integer components remain rooted.
+    let slice = match unsafe { SliceIndices::new(length, start, stop, step) } {
+        Ok(slice) => slice,
+        Err(error) => return error.returning(std::ptr::null()),
+    };
+    if !slice.reverse && slice.stride == 1 && slice.len() == length {
+        // SAFETY: a full slice may share immutable storage; acquire its new owner.
+        return Rc::into_raw(unsafe { acquire_rc::<Str>(value as usize) });
+    }
+    let result = if slice.reverse && slice.len() != 0 {
+        copy_string_slice(
+            text.chars().rev(),
+            length - 1 - slice.at,
+            &slice,
+            text.len(),
+        )
+    } else {
+        copy_string_slice(text.chars(), slice.at, &slice, text.len())
+    };
+    Rc::into_raw(Rc::new(result))
+}
+
+/// Copies integer owners into a distinct list, including for a full slice.
+///
+/// # Safety
+/// Root the source list and every nonzero canonical Int component. Zero denotes
+/// an omitted/None component; the returned list owns all selected values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_slice(
+    value: *const List,
+    start: usize,
+    stop: usize,
+    step: usize,
+) -> *const List {
+    // SAFETY: cloning selected Int owners cannot reenter. Only a new owned
+    // vector escapes the source storage borrow; pending is installed afterward.
+    let result = unsafe {
+        (&*value).0.with(|values| {
+            let slice = SliceIndices::new(values.len(), start, stop, step)?;
+            let mut result = Vec::new();
+            result
+                .try_reserve_exact(slice.len())
+                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+            result.extend(slice.map(|at| values[at].clone()));
+            Ok(result)
+        })
+    };
+    finish(
+        result.map(|values| Rc::into_raw(Rc::new(List(StorageCell::new(values))))),
+        std::ptr::null(),
+    )
+}
+
+/// Preserves the source's concrete element descriptor and acquires shallow
+/// copies, so referenced objects retain shared identity after either list drops.
+///
+/// # Safety
+/// Root the source sequence and all nonzero canonical Int component words.
+/// Zero denotes omitted/None; the result transfers one independent list owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_seq_slice(
+    value: *const Object,
+    start: usize,
+    stop: usize,
+    step: usize,
+) -> *const Object {
+    // SAFETY: exact-kind acquisition cannot reenter and only independent owners
+    // leave storage. A normalization failure is raised after the borrow ends.
+    let result = unsafe {
+        object(value).0.with(|storage| {
+            let values = storage.sequence();
+            let slice = SliceIndices::new(values.values.len(), start, stop, step)?;
+            let mut result = Words::new(values.kind.raw());
+            result
+                .values
+                .try_reserve_exact(slice.len())
+                .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
+            for at in slice {
+                result
+                    .values
+                    .push(values.kind.acquire(values.values[at]).into_word());
+            }
+            Ok(result)
+        })
+    };
+    finish(
+        result.map(|values| {
+            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(values)))))
+        }),
+        std::ptr::null(),
+    )
+}
+
+/// Roots the immutable source and advances a UTF-8 byte boundary once per code
+/// point. No character-index lookup or iterator borrow survives a loop body.
+pub(super) struct StringIterator {
+    owner: Rc<Str>,
+    position: usize,
+}
+
+impl StringIterator {
+    pub(super) fn next(&mut self) -> Option<(OwnedWord, Option<OwnedWord>)> {
+        let character = self.owner[self.position..].chars().next()?;
+        self.position += character.len_utf8();
+        let mut value = Str::new("");
+        value.push(character);
+        let word = Rc::into_raw(Rc::new(value)) as usize;
+        // SAFETY: the fresh string transfers one owner of the exact string kind.
+        let value = unsafe { OwnedWord::from_owned(word, WordKind::new(3)) };
+        Some((value, None))
+    }
+}
+
+/// Creates a linear Unicode-code-point cursor for the shared iterator-next ABI.
+/// Each successful step transfers an owned string in key_out; value_out is unused.
+///
+/// # Safety
+/// The source string is rooted. Release the returned Object on every loop exit.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_iter(value: *const Str) -> *const Object {
+    // SAFETY: the rooted source acquires an independent owner for the cursor.
+    let owner = unsafe { acquire_rc(value as usize) };
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::StringIterator(
+        StringIterator { owner, position: 0 },
+    )))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objects::exceptions::{
+        relar_error_pending, relar_error_take, relar_exception_matches, relar_exception_message,
+    };
+    use crate::objects::mappings::relar_mapping_iter_next;
+    use crate::objects::{relar_seq_append, relar_seq_get_index, relar_seq_new};
+    use crate::{
+        relar_list_append, relar_list_get_index, relar_list_len, relar_list_new,
+        relar_list_set_index,
+    };
+    use num_bigint::BigInt;
+
+    fn integer(value: i64) -> usize {
+        Int::small(value).unwrap().into_raw()
+    }
+
+    fn indices(length: usize, components: [Option<BigInt>; 3]) -> Vec<usize> {
+        let components = components.map(|value| value.map(Int::new));
+        let [start, stop, step] = components
+            .each_ref()
+            .map(|value| value.as_ref().map_or(0, |value| value.0));
+        // SAFETY: all component owners remain live while the slice is normalized.
+        unsafe { SliceIndices::new(length, start, stop, step) }
+            .unwrap_or_else(|_| panic!("unexpected slice error"))
+            .collect()
+    }
+
+    fn clear_error(kind: Kind, expected: &str) {
+        assert_eq!(relar_error_pending(), 1);
+        // SAFETY: taking pending transfers one exception owner; reading its
+        // message acquires a separate string owner. Both are consumed by Rc.
+        unsafe {
+            let error = Rc::from_raw(relar_error_take());
+            assert_eq!(relar_exception_matches(Rc::as_ptr(&error), kind as u32), 1);
+            let message = Rc::from_raw(relar_exception_message(Rc::as_ptr(&error)));
+            assert_eq!(message.as_str(), expected);
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn slices_distinguish_omitted_negative_bounds_and_clamp_large_components() {
+        for (components, expected) in [
+            ([None, None, None], vec![0, 1, 2, 3, 4]),
+            ([None, None, Some(-1)], vec![4, 3, 2, 1, 0]),
+            ([None, Some(-1), Some(-1)], vec![]),
+            ([Some(-100), Some(100), Some(2)], vec![0, 2, 4]),
+            ([Some(-1), Some(-6), Some(-2)], vec![4, 2, 0]),
+            ([Some(4), Some(1), Some(-1)], vec![4, 3, 2]),
+            ([Some(1), Some(4), Some(-1)], vec![]),
+            ([Some(100), Some(-100), Some(-2)], vec![4, 2, 0]),
+            ([Some(-100), None, Some(-1)], vec![]),
+            ([None, Some(100), Some(-1)], vec![]),
+        ] {
+            assert_eq!(
+                indices(5, components.map(|value| value.map(BigInt::from))),
+                expected
+            );
+        }
+        let huge = BigInt::from(1_u8) << 400_u32;
+        assert_eq!(
+            indices(5, [Some(-&huge), Some(huge.clone()), None]),
+            vec![0, 1, 2, 3, 4]
+        );
+        assert_eq!(
+            indices(
+                5,
+                [Some(huge.clone()), Some(-&huge), Some(BigInt::from(-1))]
+            ),
+            vec![4, 3, 2, 1, 0]
+        );
+        assert_eq!(indices(5, [None, None, Some(huge.clone())]), vec![0]);
+        assert_eq!(indices(5, [None, None, Some(-&huge)]), vec![4]);
+        assert!(indices(0, [None, None, Some(-&huge)]).is_empty());
+        assert_eq!(
+            indices(isize::MAX as usize, [None, None, Some(huge)]),
+            vec![0]
+        );
+        assert_eq!(
+            indices(
+                isize::MAX as usize,
+                [None, None, Some(BigInt::from(isize::MIN))]
+            ),
+            vec![isize::MAX as usize - 1]
+        );
+    }
+
+    #[test]
+    fn unicode_indexing_and_slicing_use_code_points_and_preserve_error_messages() {
+        let source = Rc::new(Str::new("aé\0e\u{301}🦀"));
+        // SAFETY: every argument stays rooted; each nonnull result transfers one
+        // string owner to Rc and each failing call clears pending before reuse.
+        unsafe {
+            for (position, expected) in ["a", "é", "\0", "e", "\u{301}", "🦀"]
+                .into_iter()
+                .enumerate()
+            {
+                for index in [position as i64, position as i64 - 6] {
+                    let result = Rc::from_raw(relar_str_get(Rc::as_ptr(&source), integer(index)));
+                    assert_eq!(result.as_str(), expected);
+                }
+            }
+            for at in [6, -7] {
+                assert!(relar_str_get(Rc::as_ptr(&source), integer(at)).is_null());
+                clear_error(Kind::IndexError, "string index out of range");
+            }
+            let huge = Int::new(BigInt::from(1_u8) << 400_u32);
+            assert!(relar_str_get(Rc::as_ptr(&source), huge.0).is_null());
+            clear_error(
+                Kind::IndexError,
+                "cannot fit 'int' into an index-sized integer",
+            );
+            for (components, expected) in [
+                ([None, None, None], "aé\0e\u{301}🦀"),
+                ([None, None, Some(-1)], "🦀\u{301}e\0éa"),
+                ([Some(1), Some(5), Some(2)], "ée"),
+                ([None, None, Some(2)], "a\0\u{301}"),
+                ([Some(5), None, Some(-2)], "🦀eé"),
+                ([Some(4), Some(0), Some(-2)], "\u{301}\0"),
+                ([Some(1), Some(5), None], "é\0e\u{301}"),
+                ([None, Some(-1), Some(-1)], ""),
+            ] {
+                let [start, stop, step] = components.map(|value| value.map_or(0, integer));
+                let result = Rc::from_raw(relar_str_slice(Rc::as_ptr(&source), start, stop, step));
+                assert_eq!(result.as_str(), expected);
+            }
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn zero_slice_step_raises_even_for_empty_sequences_and_recovers() {
+        let text = Rc::new(Str::new(""));
+        // SAFETY: constructors transfer one owner to Rc. All calls borrow these
+        // live exact handles, and error pointers are checked before adoption.
+        unsafe {
+            let list = Rc::from_raw(relar_list_new());
+            let sequence = Rc::from_raw(relar_seq_new(3));
+            assert!(relar_str_slice(Rc::as_ptr(&text), 0, 0, integer(0)).is_null());
+            clear_error(Kind::ValueError, "slice step cannot be zero");
+            assert!(relar_list_slice(Rc::as_ptr(&list), 0, 0, integer(0)).is_null());
+            clear_error(Kind::ValueError, "slice step cannot be zero");
+            assert!(relar_seq_slice(Rc::as_ptr(&sequence), 0, 0, integer(0)).is_null());
+            clear_error(Kind::ValueError, "slice step cannot be zero");
+            let empty = Rc::from_raw(relar_str_slice(Rc::as_ptr(&text), 0, 0, integer(-1)));
+            assert_eq!(empty.as_str(), "");
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn integer_list_slices_own_selected_values_after_source_mutation() {
+        let big = Rc::new(BigInt::from(1_u8) << 400_u32);
+        let weak = Rc::downgrade(&big);
+        // SAFETY: source and slice are distinct owned lists. Every selected
+        // BigInt gains an independent reference, as does each successful read.
+        unsafe {
+            let source = Rc::from_raw(relar_list_new());
+            relar_list_append(Rc::as_ptr(&source), Rc::as_ptr(&big) as usize);
+            relar_list_append(Rc::as_ptr(&source), integer(7));
+            let slice = Rc::from_raw(relar_list_slice(Rc::as_ptr(&source), 0, 0, integer(-1)));
+            assert!(!Rc::ptr_eq(&source, &slice));
+            assert_eq!(relar_list_set_index(Rc::as_ptr(&source), 0, integer(9)), 1);
+            drop((source, big));
+            assert_eq!(weak.strong_count(), 1);
+            assert_eq!(
+                Int(relar_list_get_index(Rc::as_ptr(&slice), 0)).as_small(),
+                Some(7)
+            );
+            let saved = Int(relar_list_get_index(Rc::as_ptr(&slice), 1));
+            drop(slice);
+            assert_eq!(saved.big().as_ref(), &(BigInt::from(1_u8) << 400_u32));
+            drop(saved);
+        }
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn generic_slices_preserve_shallow_aliases_and_nullable_scalar_descriptors() {
+        // SAFETY: a kind-4 sequence stores exact List pointers; slice copies own
+        // the same child allocation, while sequence buffers stay independent.
+        unsafe {
+            let child = Rc::from_raw(relar_list_new());
+            let weak = Rc::downgrade(&child);
+            let source = Rc::from_raw(relar_seq_new(4));
+            relar_seq_append(Rc::as_ptr(&source), Rc::as_ptr(&child) as usize, 4);
+            let slice = Rc::from_raw(relar_seq_slice(Rc::as_ptr(&source), 0, 0, 0));
+            assert!(!Rc::ptr_eq(&source, &slice));
+            drop(source);
+            relar_list_append(Rc::as_ptr(&child), integer(17));
+            drop(child);
+            let saved = Rc::from_raw(relar_seq_get_index(Rc::as_ptr(&slice), 0) as *const List);
+            drop(slice);
+            assert_eq!(Int(relar_list_len(Rc::as_ptr(&saved))).as_small(), Some(1));
+            assert_eq!(
+                Int(relar_list_get_index(Rc::as_ptr(&saved), 0)).as_small(),
+                Some(17)
+            );
+            drop(saved);
+            assert!(weak.upgrade().is_none());
+
+            for (kind, values) in [
+                (0, vec![0, 0]),
+                (1, vec![0, 1]),
+                (257, vec![0, 1, 2]),
+                (258, vec![0, integer(9)]),
+            ] {
+                let source = Rc::from_raw(relar_seq_new(kind));
+                for &value in &values {
+                    relar_seq_append(Rc::as_ptr(&source), value, kind);
+                }
+                let slice = Rc::from_raw(relar_seq_slice(Rc::as_ptr(&source), 0, 0, integer(-1)));
+                drop(source);
+                assert_eq!(slice.0.with(|storage| storage.sequence().kind.raw()), kind);
+                for (at, &expected) in values.iter().rev().enumerate() {
+                    assert_eq!(relar_seq_get_index(Rc::as_ptr(&slice), at), expected);
+                }
+            }
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn string_iterator_roots_its_source_and_yields_independent_owned_code_points() {
+        let source = Rc::new(Str::new("aé\0e\u{301}🦀"));
+        let weak = Rc::downgrade(&source);
+        // SAFETY: iterator creation acquires the source; every output is adopted
+        // once before reusing its slot. Exhausted calls must not touch outputs.
+        unsafe {
+            let iterator = Rc::from_raw(relar_str_iter(Rc::as_ptr(&source)));
+            drop(source);
+            assert_eq!(weak.strong_count(), 1);
+            let mut output = 73;
+            let mut unused = 91;
+            let mut values = Vec::new();
+            while relar_mapping_iter_next(Rc::as_ptr(&iterator), &mut output, &mut unused) != 0 {
+                values.push(Rc::from_raw(output as *const Str));
+                assert_eq!(unused, 91);
+            }
+            output = 73;
+            assert_eq!(
+                relar_mapping_iter_next(Rc::as_ptr(&iterator), &mut output, std::ptr::null_mut()),
+                0
+            );
+            assert_eq!(output, 73);
+            drop(iterator);
+            assert!(weak.upgrade().is_none());
+            assert_eq!(
+                values
+                    .iter()
+                    .map(|value| value.as_str())
+                    .collect::<Vec<_>>(),
+                ["a", "é", "\0", "e", "\u{301}", "🦀"]
+            );
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
+}

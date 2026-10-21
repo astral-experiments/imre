@@ -10,6 +10,7 @@ pub(crate) mod exceptions;
 mod files;
 mod mappings;
 pub(crate) mod records;
+mod sequences;
 mod words;
 
 use super::{
@@ -27,6 +28,7 @@ enum Storage {
     Dictionary(Box<mappings::Mapping>),
     Set(Box<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
+    StringIterator(sequences::StringIterator),
     Exception(exceptions::Exception),
     TextIO(Box<files::TextFile>),
 }

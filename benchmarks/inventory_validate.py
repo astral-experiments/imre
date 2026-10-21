@@ -295,6 +295,15 @@ def cases() -> list[Case]:
         ]
         result.append(case(f"random-{index}", stocks, batches))
     valid = inputs([("a", 5)], [[("a", 2)]])
+    for token in ("+0", "-0", "-0_0", "+0_0", "0" * 18, "0" * 19):
+        for kind in ("stock", "orders"):
+            result.append(
+                Case(
+                    f"{kind}-zero-count-{token}",
+                    {**inputs([], []), f"{kind}.txt": (token + "\n").encode()},
+                    ARGUMENTS,
+                )
+            )
     invalid = [
         ("empty", b""),
         ("negative-count", b"-1\n"),
@@ -304,6 +313,14 @@ def cases() -> list[Case]:
         ("truncated", b"1\n"),
         ("huge-count", (str(huge) + "\n").encode()),
         ("bad-underscore", b"1__0\n"),
+        ("leading-underscore", b"_1\n"),
+        ("trailing-underscore", b"-0_\n"),
+        ("sign-plus-only", b"+\n"),
+        ("sign-minus-only", b"-\n"),
+        ("double-sign", b"+-1\n"),
+        ("sign-underscore", b"+_1\n"),
+        ("short-count-boundary", b"999999999999999999\n"),
+        ("long-count-boundary", b"9999999999999999999\n"),
         ("bom", b"\xef\xbb\xbf0\n"),
         ("trailing", b"0\nextra\n"),
         ("trailing-blank", b"0\n\n"),

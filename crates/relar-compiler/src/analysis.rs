@@ -99,7 +99,16 @@ impl Session {
                 self.db
                     .check_file(file)
                     .iter()
-                    .filter(|diagnostic| diagnostic.severity() >= Severity::Error)
+                    .filter(|diagnostic| {
+                        // These are recoverable value errors, including inside
+                        // try/except and unselected conditional arms. The exact
+                        // checker still enforces index types and fixed tuple bounds.
+                        diagnostic.severity() >= Severity::Error
+                            && !matches!(
+                                diagnostic.id().as_str(),
+                                "zero-stepsize-in-slice" | "index-out-of-bounds"
+                            )
+                    })
                     .map(|diagnostic| {
                         diagnostic
                             .display(&self.db, &DisplayDiagnosticConfig::new("relar"))

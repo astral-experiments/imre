@@ -820,6 +820,17 @@ impl<'a> Checker<'a> {
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
         let concrete = self.types.payload(expected).unwrap_or(expected);
         let value = match expression {
+            ast::Expr::If(value) => return self.conditional(value, Some(expected)),
+            ast::Expr::Subscript(subscript)
+                if matches!(&*subscript.slice, ast::Expr::Slice(_))
+                    && (concrete == Type::Str || self.types.element(concrete).is_some()) =>
+            {
+                let receiver = self.expr_expected(&subscript.value, concrete)?;
+                let ast::Expr::Slice(slice) = &*subscript.slice else {
+                    unreachable!("slice guard checked the node");
+                };
+                self.slice(receiver, slice)?
+            }
             ast::Expr::ListComp(_) | ast::Expr::DictComp(_) | ast::Expr::SetComp(_) => {
                 self.comprehension(expression, Some(concrete))?
             }
@@ -915,6 +926,51 @@ impl<'a> Checker<'a> {
         self.coerce(value, expected, expression)
     }
 
+    /// Checks both arms under their own narrowing facts, while contextual types
+    /// reach literals before the branches join. Only optional promotion can
+    /// widen a result; unrelated concrete storage types never share a value.
+    fn conditional(&mut self, value: &ast::ExprIf, expected: Option<Type>) -> Result<Expr, String> {
+        let test = self.condition(&value.test)?;
+        let facts = self.narrowed.clone();
+        self.apply_facts(&value.test, true);
+        let yes = if let Some(expected) = expected {
+            self.expr_expected(&value.body, expected)?
+        } else {
+            self.expr(&value.body)?
+        };
+        self.narrowed = facts.clone();
+        self.apply_facts(&value.test, false);
+        let no = if let Some(expected) = expected {
+            self.expr_expected(&value.orelse, expected)?
+        } else {
+            self.expr(&value.orelse)?
+        };
+        self.narrowed = facts;
+        let ty = if yes.ty == no.ty {
+            yes.ty
+        } else if yes.ty == Type::None {
+            self.types.optional(no.ty)
+        } else if no.ty == Type::None {
+            self.types.optional(yes.ty)
+        } else if self.types.payload(yes.ty) == Some(no.ty) {
+            yes.ty
+        } else if self.types.payload(no.ty) == Some(yes.ty) {
+            no.ty
+        } else {
+            return Err(error(
+                self.source,
+                value,
+                "conditional branches require the same concrete type or its optional form",
+            ));
+        };
+        let yes = self.coerce(yes, ty, &*value.body)?;
+        let no = self.coerce(no, ty, &*value.orelse)?;
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Conditional(Box::new(test), Box::new(yes), Box::new(no)),
+        })
+    }
+
     fn apply_facts(&mut self, test: &ast::Expr, truth: bool) {
         for (name, present) in narrowing::facts(test, truth) {
             if let Some(&slot) = self.names.get(&name)
@@ -924,6 +980,38 @@ impl<'a> Checker<'a> {
                     .insert(slot, if present { payload } else { Type::None });
             }
         }
+    }
+
+    /// Captures the receiver before ordered bounds. Nullable integer operands
+    /// preserve omitted bounds without allocating a general slice object.
+    fn slice(&mut self, receiver: Expr, slice: &ast::ExprSlice) -> Result<Expr, String> {
+        if receiver.ty != Type::Str && self.types.element(receiver.ty).is_none() {
+            return Err(error(
+                self.source,
+                slice,
+                "slicing requires a concrete list or string",
+            ));
+        }
+        let ty = receiver.ty;
+        let mut args = vec![receiver];
+        let index_type = self.types.optional(Type::Int);
+        for bound in [&slice.lower, &slice.upper, &slice.step] {
+            args.push(if let Some(bound) = bound {
+                self.expr_expected(bound, index_type)?
+            } else {
+                Expr {
+                    ty: index_type,
+                    kind: ExprKind::Absent(Box::new(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::None,
+                    })),
+                }
+            });
+        }
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::Slice, args),
+        })
     }
 
     /// Loop backedges can observe stores from a previous iteration.
@@ -1271,10 +1359,12 @@ impl<'a> Checker<'a> {
         };
         let mapping = self.types.mapping(iterable.ty);
         let set_element = self.types.set_element(iterable.ty);
+        let string = iterable.ty == Type::Str;
         let element = self
             .types
             .element(iterable.ty)
             .or(set_element)
+            .or(string.then_some(Type::Str))
             .or_else(|| {
                 mapping.map(|(key, value)| {
                     if items {
@@ -1288,11 +1378,11 @@ impl<'a> Checker<'a> {
                 error(
                     self.source,
                     target,
-                    "iteration requires a concrete list, dictionary, set, or range",
+                    "iteration requires a concrete list, dictionary, set, string, or range",
                 )
             })?;
         let captured = self.hidden(iterable.ty);
-        let cursor = if mapping.is_none() && set_element.is_none() {
+        let cursor = if mapping.is_none() && set_element.is_none() && !string {
             Some(self.hidden(Type::Int))
         } else {
             None
@@ -1347,7 +1437,9 @@ impl<'a> Checker<'a> {
                 Expr {
                     ty: Type::Iterator,
                     kind: ExprKind::Builtin(
-                        if set_element.is_some() {
+                        if string {
+                            Builtin::StringIter
+                        } else if set_element.is_some() {
                             Builtin::SetIter
                         } else {
                             Builtin::DictIter(items)
@@ -2014,6 +2106,7 @@ impl<'a> Checker<'a> {
                 (Type::Str, ExprKind::Str(value.value.to_string()))
             }
             ast::Expr::FString(value) => return self.fstring(value),
+            ast::Expr::If(value) => return self.conditional(value, None),
             ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
             ast::Expr::Name(name) if name.id == "__name__" => {
                 let name = if self.module == self.graph.entry {
@@ -2225,6 +2318,16 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Subscript(subscript) => {
                 let list = self.expr(&subscript.value)?;
+                if let ast::Expr::Slice(slice) = &*subscript.slice {
+                    return self.slice(list, slice);
+                }
+                if list.ty == Type::Str {
+                    let index = self.expr_expected(&subscript.slice, Type::Int)?;
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(Builtin::StringGet, vec![list, index]),
+                    });
+                }
                 if let Some((key, value)) = self.types.mapping(list.ty) {
                     let key = self.expr_expected(&subscript.slice, key)?;
                     return Ok(Expr {

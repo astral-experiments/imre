@@ -1237,6 +1237,7 @@ impl Emitter<'_, '_> {
                 }
             }
             ExprKind::Boolean(and, values) => self.boolean(*and, values),
+            ExprKind::Conditional(test, yes, no) => self.conditional(test, yes, no),
             ExprKind::Compare(values, ops) => self.comparisons(values, ops),
             ExprKind::Call(id, args) => {
                 let values = args
@@ -1671,6 +1672,36 @@ impl Emitter<'_, '_> {
         self.operand(expression)
     }
 
+    /// Each predecessor transfers one result owner into the phi. Removing that
+    /// branch's temporary before emitting the other branch keeps its error
+    /// cleanup from referring to an SSA value that does not dominate it.
+    fn conditional(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> Value {
+        let test = self.expr(test);
+        let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
+        self.branch(&test.operand, &yes_label, &no_label);
+        self.start(&yes_label);
+        let yes = self.expr(yes);
+        self.forget(&yes);
+        let yes_end = self.current.clone();
+        self.jump(&end);
+        self.start(&no_label);
+        let no = self.expr(no);
+        self.forget(&no);
+        let no_end = self.current.clone();
+        self.jump(&end);
+        self.start(&end);
+        Value {
+            ty: yes.ty,
+            operand: self.instruction(format!(
+                "phi {} [ {}, %{yes_end} ], [ {}, %{no_end} ]",
+                yes.ty.llvm(),
+                yes.operand,
+                no.operand
+            )),
+            small_integer: yes.small_integer && no.small_integer,
+        }
+    }
+
     fn boolean(&mut self, and: bool, values: &[Expr]) -> Value {
         let end = self.label();
         let mut incoming = Vec::new();
@@ -1795,6 +1826,22 @@ impl Emitter<'_, '_> {
                 &args[1].value,
                 returns,
                 self.nonnegative_index(&expressions[1]),
+            ),
+            Builtin::StringGet => self.call(
+                "relar_str_get",
+                Type::Str,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::StringIter => self.call("relar_str_iter", Type::Iterator, &[&args[0].value]),
+            Builtin::Slice => self.call(
+                match returns {
+                    Type::Str => "relar_str_slice",
+                    Type::ListInt => "relar_list_slice",
+                    Type::List(_) => "relar_seq_slice",
+                    _ => unreachable!("slice receiver was checked"),
+                },
+                returns,
+                &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
             ),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::DictGetDefault => {
@@ -2536,12 +2583,16 @@ fn fallible(name: &str) -> bool {
                 | "relar_list_copy_index"
                 | "relar_list_pop"
                 | "relar_list_repeat"
+                | "relar_list_slice"
+                | "relar_str_get"
+                | "relar_str_slice"
                 | "relar_seq_get"
                 | "relar_seq_set"
                 | "relar_seq_get_index"
                 | "relar_seq_set_index"
                 | "relar_seq_pop"
                 | "relar_seq_repeat"
+                | "relar_seq_slice"
                 | "relar_dict_get"
                 | "relar_dict_delete"
                 | "relar_mapping_iter_next"
@@ -2622,6 +2673,9 @@ declare void @relar_print_int(i64)
 declare void @relar_print_bool(i8)
 declare void @relar_print_none()
 declare ptr @relar_str_literal(ptr, i64)
+declare ptr @relar_str_get(ptr, i64)
+declare ptr @relar_str_slice(ptr, i64, i64, i64)
+declare ptr @relar_str_iter(ptr)
 declare void @relar_str_retain(ptr)
 declare void @relar_str_release(ptr)
 declare void @relar_print_str(ptr)
@@ -2642,6 +2696,8 @@ declare void @relar_list_append(ptr, i64)
 declare i64 @relar_list_pop(ptr)
 declare i64 @relar_list_len(ptr)
 declare ptr @relar_list_repeat(ptr, i64)
+declare ptr @relar_list_slice(ptr, i64, i64, i64)
+declare ptr @relar_seq_slice(ptr, i64, i64, i64)
 declare void @relar_assert_fail()
 declare void @relar_range_step_zero()
 declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)

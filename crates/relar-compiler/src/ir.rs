@@ -13,7 +13,7 @@ pub(crate) enum Type {
     Set(usize),
     Tuple(usize),
     Optional(usize),
-    /// An internal mapping cursor, never available in user annotations.
+    /// An internal container or string cursor, never available in user annotations.
     Iterator,
     /// A sealed builtin exception with an immutable category and string message.
     Exception,
@@ -92,6 +92,9 @@ impl Module {
                 | ExprKind::Negate(value)
                 | ExprKind::Field(value, _) => expression(value),
                 ExprKind::Binary(_, left, right) => expression(left) || expression(right),
+                ExprKind::Conditional(test, yes, no) => {
+                    expression(test) || expression(yes) || expression(no)
+                }
                 ExprKind::Exception { message, .. } => {
                     message.as_ref().is_some_and(|message| expression(message))
                 }
@@ -200,6 +203,8 @@ pub(crate) enum ExprKind {
     Binary(Binary, Box<Expr>, Box<Expr>),
     Compare(Vec<Expr>, Vec<Compare>),
     Boolean(bool, Vec<Expr>),
+    /// Only the selected arm runs; both arms have the expression's storage type.
+    Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
     Not(Box<Expr>),
     Negate(Box<Expr>),
     Call(usize, CallArgs),
@@ -245,6 +250,10 @@ pub(crate) enum Builtin {
     Str,
     Len,
     ListGet,
+    StringGet,
+    StringIter,
+    /// Receiver followed by three nullable integer words for start, stop, step.
+    Slice,
     Append,
     Pop,
     IsNone,

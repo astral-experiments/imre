@@ -5,9 +5,9 @@ def fulfill(request: Request, *, inventory: Inventory) -> Fulfillment:
     filled = 0
     if request.sku in inventory.remaining:
         available = inventory.remaining[request.sku]
-        filled = request.quantity
-        if available < filled:  # noqa: PLR1730 -- min is outside the native subset.
-            filled = available
+        quantity = request.quantity
+        # min is outside the native subset.
+        filled = available if available < quantity else quantity  # noqa: FURB136
         inventory.remaining[request.sku] = available - filled
     return Fulfillment(request, filled=filled, shortage=request.quantity - filled)
 

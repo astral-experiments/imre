@@ -24,11 +24,32 @@ class Reader:
         except ValueError:
             raise ValueError(self.label + ": invalid integer")
 
+    def count_value(self, token: str) -> int:
+        # Short counts stay within the native small-integer range. Delegate long
+        # tokens to int() so CPython's configured conversion limit still applies.
+        if len(token) == 0 or len(token) > 18:
+            return self.number(token)
+        sign = token[0]
+        digits = token[1:] if sign == "+" or sign == "-" else token
+        value = 0
+        previous_digit = False
+        for character in digits:
+            if character == "_":
+                if not previous_digit:
+                    raise ValueError(self.label + ": invalid integer")
+                previous_digit = False
+            else:
+                value = value * 10 + self.number(character)
+                previous_digit = True
+        if not previous_digit:
+            raise ValueError(self.label + ": invalid integer")
+        return -value if sign == "-" else value
+
     def count(self) -> int:
         fields = self.next()
         if len(fields) != 1:
             raise ValueError(self.label + ": expected count")
-        value = self.number(token=fields[0])
+        value = self.count_value(fields[0])
         if value < 0:
             raise ValueError(self.label + ": negative count")
         return value

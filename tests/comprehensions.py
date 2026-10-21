@@ -45,7 +45,7 @@ REJECTED = {
     "subscript_target": "source = [0]\nvalues = [source[0] for source[0] in range(3)]\n",
     "attribute_target": "class Item:\n    value: int\n    def __init__(self, value: int) -> None:\n        self.value = value\nitem = Item(0)\nvalues = [item.value for item.value in range(3)]\n",
     "shadow_static_call": "def step(value: int) -> int:\n    return value + 1\nvalues = [step(1) for step in range(3)]\n",
-    "unsupported_iterator": 'values = [value for value in "abc"]\n',
+    "unsupported_tuple_iterator": 'values = [value for value in ("abc",)]\n',
     "dynamic_dead_element": 'values = [eval("1") for value in range(0)]\n',
     "unused_dynamic_function": 'def unused() -> list[int]:\n    return [eval("1") for value in range(0)]\nprint(1)\n',
     "direct_helper_recursion": "def recursive(value: int) -> list[int]:\n    return [recursive(value)[0] for item in range(0)]\nrecursive(1)\n",
