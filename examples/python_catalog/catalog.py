@@ -128,12 +128,16 @@ def normalize_triple(text: str) -> Triple | None:
     return Triple(pieces[2], arch, libc)
 
 
-def parse_variant(text: str) -> tuple[str, list[str]]:
+def parse_variant(text: str, options: list[str]) -> str:
+    if text.find("+") == -1:
+        return text
     parts = text.split("+")
     last = parts[-1]
     if last == "full" or last == "install_only" or last == "install_only_stripped":
-        return last, parts[:-1]
-    return text, []
+        for index in range(len(parts) - 1):
+            options.append(parts[index])
+        return last
+    return text
 
 
 def contains(values: list[str], needle: str) -> bool:
@@ -153,13 +157,12 @@ def build_variant(options: list[str]) -> str | None:
 def parse_artifact(version: Version, release: int, artifact: Artifact) -> Download | None:
     filename = unquote(artifact.url.rsplit("/", maxsplit=1)[-1])
     platform = artifact.platform
-    platform_options: list[str] = []
+    options: list[str] = []
     for suffix in ["-debug", "-freethreaded"]:
         if platform.endswith(suffix):
             platform = platform[:-len(suffix)]
-            platform_options.append(suffix.lstrip("-"))
-    flavor, variant_options = parse_variant(artifact.variant)
-    options = [*platform_options, *variant_options]
+            options.append(suffix.lstrip("-"))
+    flavor = parse_variant(artifact.variant, options)
     if contains(options, "static"):
         return None
     triple = normalize_triple(platform)
