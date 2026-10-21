@@ -590,6 +590,7 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
     matches!(
         operation,
         Builtin::GlobalGet(_)
+            | Builtin::Path(_)
             | Builtin::Int
             | Builtin::Float
             | Builtin::Bool

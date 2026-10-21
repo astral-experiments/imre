@@ -144,6 +144,7 @@ unsafe fn object_equal(left: *const Object, right: *const Object) -> bool {
                 }
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => left.equal(right),
                 (Storage::Set(left), Storage::Set(right)) => left.equal(right),
+                (Storage::Path(left), Storage::Path(right)) => left == right,
                 _ => false,
             })
         })
@@ -214,6 +215,11 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                     }
                     Storage::Dictionary(value) => value.write_repr(output),
                     Storage::Set(value) => value.write_repr(output),
+                    Storage::Path(value) => {
+                        output.push_str("PosixPath(");
+                        output.push_str(&super::exceptions::string_repr(value));
+                        output.push(')');
+                    }
                     _ => fail("SystemError", "unsupported resource representation"),
                 }),
             6 => record_repr(output, word as *const usize),

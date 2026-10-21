@@ -48,6 +48,7 @@ pub(crate) enum IntrinsicModule {
     Sys,
     Typing,
     Dataclasses,
+    Pathlib,
     Collections,
     CollectionsAbc,
     Io,
@@ -67,6 +68,7 @@ pub(crate) enum Intrinsic {
     Dataclass,
     DataclassField,
     SelfType,
+    Path,
 }
 
 impl IntrinsicModule {
@@ -75,6 +77,7 @@ impl IntrinsicModule {
             "sys" => Some(Self::Sys),
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
+            "pathlib" => Some(Self::Pathlib),
             "collections" => Some(Self::Collections),
             "collections.abc" => Some(Self::CollectionsAbc),
             "io" => Some(Self::Io),
@@ -102,6 +105,7 @@ impl IntrinsicModule {
             (Self::RelarJson, "decode") => Intrinsic::JsonDecode,
             (Self::Dataclasses, "dataclass") => Intrinsic::Dataclass,
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
+            (Self::Pathlib, "Path") => Intrinsic::Path,
             _ => return None,
         };
         Some(Binding::Intrinsic(symbol))

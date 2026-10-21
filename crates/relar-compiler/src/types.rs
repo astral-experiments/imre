@@ -96,6 +96,7 @@ impl Types {
             | Type::Iterator
             | Type::Exception
             | Type::TextIO
+            | Type::Path
             | Type::BinaryIO => Some(true),
             Type::Optional(_) if self.truthiness(self.payload(ty).unwrap()) == Some(false) => {
                 Some(false)

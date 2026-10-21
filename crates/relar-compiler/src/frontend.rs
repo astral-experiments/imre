@@ -22,6 +22,7 @@ mod iterables;
 mod json;
 mod matching;
 mod module_values;
+mod paths;
 mod pipelines;
 mod records;
 mod stdlib;
@@ -704,6 +705,7 @@ fn annotation_at(
         }
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         _ => {}
     }
     let nested = |expression: &ast::Expr| {
@@ -2745,6 +2747,11 @@ impl<'a> Checker<'a> {
             ast::Expr::BinOp(binary) => {
                 let left = self.expr(&binary.left)?;
                 let right = self.expr(&binary.right)?;
+                if binary.op == ast::Operator::Div
+                    && (left.ty == Type::Path || right.ty == Type::Path)
+                {
+                    return self.path_join(left, right, binary);
+                }
                 let (op, ty) = self.binary_op(binary.op, left.ty, right.ty, expression)?;
                 (ty, ExprKind::Binary(op, Box::new(left), Box::new(right)))
             }
@@ -2987,6 +2994,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::Path {
+                    return self.path_attribute(receiver, attribute);
+                }
                 if receiver.ty == Type::Exception {
                     let (ty, builtin) = match attribute.attr.as_str() {
                         "__cause__" => (
@@ -3098,6 +3108,12 @@ impl<'a> Checker<'a> {
         }
         if matches!(
             self.resolve(&call.func),
+            Some(Binding::Intrinsic(Intrinsic::Path))
+        ) {
+            return self.path_constructor(call);
+        }
+        if matches!(
+            self.resolve(&call.func),
             Some(Binding::Intrinsic(Intrinsic::JsonDecode))
         ) {
             return self.json_decode(call);
@@ -3171,6 +3187,9 @@ impl<'a> Checker<'a> {
             let receiver = self.expr(&attribute.value)?;
             if let Type::Class(class) = receiver.ty {
                 return self.class_method_call(call, attribute, class, Some(receiver));
+            }
+            if receiver.ty == Type::Path {
+                return self.path_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Str {
                 match attribute.attr.as_str() {
@@ -3416,6 +3435,20 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if args.len() == 1
+            && args[0].ty == Type::Path
+            && matches!(name.id.as_str(), "str" | "print")
+        {
+            let text = paths::operation(ir::PathOperation::Text, Type::Str, args);
+            return Ok(if name.id == "str" {
+                text
+            } else {
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::Print, vec![text]),
+                }
+            });
+        }
         if name.id == "divmod" && args.len() == 2 {
             let mut body = Vec::with_capacity(2);
             let mut slots = Vec::with_capacity(2);
@@ -3584,10 +3617,7 @@ impl<'a> Checker<'a> {
             self.reject_builtin_keywords(call)?;
             return Ok(Expr {
                 ty: Type::BinaryIO,
-                kind: ExprKind::Builtin(
-                    Builtin::BinaryOpen(mode),
-                    vec![self.expr_expected(path, Type::Str)?],
-                ),
+                kind: ExprKind::Builtin(Builtin::BinaryOpen(mode), vec![self.path_argument(path)?]),
             });
         }
         let mode = match mode.value.to_str() {
@@ -3636,10 +3666,7 @@ impl<'a> Checker<'a> {
         }
         Ok(Expr {
             ty: Type::TextIO,
-            kind: ExprKind::Builtin(
-                Builtin::TextOpen(mode),
-                vec![self.expr_expected(path, Type::Str)?],
-            ),
+            kind: ExprKind::Builtin(Builtin::TextOpen(mode), vec![self.path_argument(path)?]),
         })
     }
 }

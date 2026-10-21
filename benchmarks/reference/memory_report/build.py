@@ -188,7 +188,7 @@ def main() -> None:
                 "bytes": destination.stat().st_size,
             }
         },
-        "comparison_domain": "Schema-directed memory report JSON with arbitrary-precision integer tokens, known-field duplicate rejection, scalar/list defaults, and depth 128. Rust stores native i64 values with checked BigInt fallback, uses stable sorting and exact rational-to-binary64 rounding, and reads two files and writes the complete report once per process. Complete output and file effects are compared with an independent oracle, the typed CPython port, and the unchanged upstream script on their shared domain.",
+        "comparison_domain": "Schema-directed memory report JSON with arbitrary-precision integer tokens, known-field duplicate rejection, scalar/list defaults, and depth 128. Rust stores native i64 values with checked BigInt fallback, uses stable sorting and exact rational-to-binary64 rounding, and reads either two files or all selected JSON files in two directories before writing the complete multi-project report once per process. A separate compute mode preloads JSON text once and repeats decoding, comparison, and rendering with black-boxed native input and a checked output-length checksum. Complete output and file effects are compared with an independent oracle, the typed CPython port, and the unchanged upstream script on their shared domain.",
         "input_guards_passed": True,
     }
     output.write_text(json.dumps(record, indent=2) + "\n")

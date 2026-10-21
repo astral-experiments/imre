@@ -167,7 +167,7 @@ impl Storage {
     }
 }
 
-fn os_error(error: io::Error) -> Error {
+pub(super) fn os_error(error: io::Error) -> Error {
     let kind = match error.kind() {
         io::ErrorKind::AlreadyExists => Kind::FileExistsError,
         io::ErrorKind::NotFound => Kind::FileNotFoundError,
@@ -206,6 +206,13 @@ pub unsafe extern "C" fn relar_binary_open(path: *const Str, mode: u32) -> *cons
 
 /// Shares descriptor ownership and buffering while preserving text/binary access errors.
 fn open(path: &str, mode: u32, binary: bool) -> Result<*const Object> {
+    let state = open_state(path, mode, binary)?;
+    Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
+        Storage::File(Box::new(state)),
+    )))))
+}
+
+fn open_state(path: &str, mode: u32, binary: bool) -> Result<FileState> {
     super::super::initialize_io();
     if path.contains('\0') {
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
@@ -229,16 +236,34 @@ fn open(path: &str, mode: u32, binary: bool) -> Result<*const Object> {
         0 => Stream::Read(file),
         _ => Stream::Write(BufWriter::with_capacity(8192, file)),
     };
-    Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
-        Storage::File(Box::new(FileState {
-            stream: Some(stream),
-            kind: match (binary, mode) {
-                (false, _) => FileKind::Text,
-                (true, 0) => FileKind::BinaryRead,
-                (true, _) => FileKind::BinaryWrite,
-            },
-        })),
-    )))))
+    Ok(FileState {
+        stream: Some(stream),
+        kind: match (binary, mode) {
+            (false, _) => FileKind::Text,
+            (true, 0) => FileKind::BinaryRead,
+            (true, _) => FileKind::BinaryWrite,
+        },
+    })
+}
+
+/// Uses the same strict UTF-8 and universal-newline rules as an explicit text
+/// stream, closing before returning even if decoding fails. A close failure
+/// replaces an earlier read failure, as a `with` statement's exit would.
+pub(super) fn read_path_text(path: &str) -> Result<Str> {
+    let mut state = open_state(path, 0, false)?;
+    let result = state.read();
+    let closed = state.stream.take().unwrap().close().map_err(os_error);
+    closed.and(result)
+}
+
+/// Completes buffered output and closes the descriptor before returning the
+/// character count, so a final flush error remains a catchable language error.
+pub(super) fn write_path_text(path: &str, text: &str) -> Result<usize> {
+    let mut state = open_state(path, 1, false)?;
+    let result = state.write(text);
+    let closed = state.stream.take().unwrap().close().map_err(os_error);
+    closed.and(result)?;
+    Ok(Int::from_usize(text.chars().count()).into_raw())
 }
 
 /// Reads raw bytes through EOF without decoding or newline conversion.

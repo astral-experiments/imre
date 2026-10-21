@@ -165,17 +165,22 @@ The [assignment, unpacking, and expansion milestone](results/2026-10-19-assignme
 ## ty memory-report comparison
 
 The [memory-report example](../examples/memory_report/README.md) ports the real
-two-file comparator from Ruff's `scripts/memory_report.py`. It decodes captured ty
+file and directory comparator from Ruff's `scripts/memory_report.py`. It decodes captured ty
 JSON into typed records, ranks memory changes, and writes a complete Markdown
 report. `memory_validate.py` checks the unchanged upstream script, typed CPython
 port, Relar, and Rust against an independent oracle, including strict JSON
 failures and filesystem effects. Only upstream's equal-change tie order may vary.
 
-`memory_benchmark.py` measures the full process, including two file reads, JSON
-decoding, comparison, formatting, and report writing. It uses genuine ty captures
-and explicitly labeled larger copies, balanced four-engine orders, and a separate
-empty-report control. Upstream also echoes its report to stderr; that work is
-included and checked. The [Rust reference guide](reference/memory_report/README.md)
+`memory_benchmark.py` measures the full process, including directory scans when
+selected, complete file reads, JSON decoding, comparison, formatting, and report
+writing. It uses genuine ty captures, explicitly labeled larger copies, many-small
+and few-large file layouts, balanced four-engine orders, and an empty-report
+control. Separate compute entrypoints preload JSON text and repeat decoding,
+comparison, and rendering, with complete output checks and a zero-repetition
+preload control. Compute timings compare Relar, upstream CPython, and Rust with
+balanced three-engine orders. Upstream also echoes its report to stderr in the
+ordinary application; that work is included and checked.
+The [Rust reference guide](reference/memory_report/README.md)
 documents reproduction commands and matched ordinary/ThinLTO builds.
 
 The [memory-report results](results/2026-10-21-memory-report.md) meet the ≤2× Rust
