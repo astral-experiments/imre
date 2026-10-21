@@ -1,0 +1,421 @@
+{
+  "schema": 1,
+  "passed": true,
+  "audit_path": "/tmp/relar-decoder-profile-audit.json",
+  "audit_sha256": "479a10da9a9615fd29e69b20e7b3eb67c00ce1622fb14ba6c4162620f0bb164c",
+  "audit_script_sha256": "4d1ff5cae754a64a9547efbd5b3c29b835104d6ea288d67af2bf8a1ff9e13a03",
+  "before_summary_sha256": "c44837250dd1a4562df59bf6f92eb96be0f8422ce8f16c0cd089d670deae927e",
+  "current_summary_sha256": "eb3898f4cde8968218dc013f10ceb51a494031f0e9106435233afd7ef25b5120",
+  "before_manifest_sha256": "00a14c7f5e9be120eaa4d21a37187fdebe76bcf183f1926cff933cc48535d4a7",
+  "current_manifest_sha256": "cf655da99bb6a0d0621c1fc80d749f9f86548af29904f013df5713fd40a7e175",
+  "before_timing_sha256": "204b8fbab5dfa29845619031909a67b6ce7c1453fa557a7b400064e683edcf4b",
+  "current_timing_sha256": "6261ac54da8ae7eaf4b9dc35569e8d6f683889e11403d9320fa248d4d97c89f3",
+  "raw_bytes_per_profiled_process": 65536,
+  "allocation_unit": "DHAT requested heap bytes/blocks; global peak uses allocation-point gb/gbk contributions, not their independent maxima; whole process including startup and I/O, not RSS.",
+  "instruction_unit": "Callgrind executed guest instructions; whole process including startup, validation, checksum and I/O; not wall time or CPU cycles.",
+  "rust_note": "The exact same Rust executable and sources are required. Both raw Rust runs are retained separately: process arguments and profile-directory lengths can change startup instruction/allocation counts.",
+  "comparison": {
+    "decode-bytes-64": {
+      "before": {
+        "instructions": 74633000,
+        "total_allocated_bytes": 7430350,
+        "total_allocated_blocks": 116821,
+        "peak_live_bytes": 14434,
+        "peak_live_blocks": 73,
+        "exit_live_bytes": 9216,
+        "exit_live_blocks": 2
+      },
+      "current": {
+        "instructions": 6328141,
+        "total_allocated_bytes": 215539,
+        "total_allocated_blocks": 4185,
+        "peak_live_bytes": 16775,
+        "peak_live_blocks": 77,
+        "exit_live_bytes": 9216,
+        "exit_live_blocks": 2
+      },
+      "rust": {
+        "before": {
+          "instructions": 1904698,
+          "total_allocated_bytes": 69764,
+          "total_allocated_blocks": 1042,
+          "peak_live_bytes": 2164,
+          "peak_live_blocks": 12,
+          "exit_live_bytes": 544,
+          "exit_live_blocks": 1
+        },
+        "current": {
+          "instructions": 1883230,
+          "total_allocated_bytes": 69758,
+          "total_allocated_blocks": 1042,
+          "peak_live_bytes": 2158,
+          "peak_live_blocks": 12,
+          "exit_live_bytes": 544,
+          "exit_live_blocks": 1
+        }
+      },
+      "current_over_before": {
+        "instructions": 0.0847901196521646,
+        "total_allocated_bytes": 0.02900792021910139,
+        "total_allocated_blocks": 0.03582403848623107,
+        "peak_live_bytes": 1.162186504087571,
+        "peak_live_blocks": 1.0547945205479452,
+        "exit_live_bytes": 1.0,
+        "exit_live_blocks": 1.0
+      },
+      "current_over_rust": {
+        "instructions": 3.3602592354624767,
+        "total_allocated_bytes": 3.089810487686,
+        "total_allocated_blocks": 4.016314779270633,
+        "peak_live_bytes": 7.773401297497683,
+        "peak_live_blocks": 6.416666666666667,
+        "exit_live_bytes": 16.941176470588236,
+        "exit_live_blocks": 2.0
+      },
+      "before_over_rust": {
+        "instructions": 39.18363961110895,
+        "total_allocated_bytes": 106.506937675592,
+        "total_allocated_blocks": 112.11228406909788,
+        "peak_live_bytes": 6.670055452865065,
+        "peak_live_blocks": 6.083333333333333,
+        "exit_live_bytes": 16.941176470588236,
+        "exit_live_blocks": 2.0
+      }
+    },
+    "decode-bytes-1024": {
+      "before": {
+        "instructions": 70908970,
+        "total_allocated_bytes": 7278194,
+        "total_allocated_blocks": 100053,
+        "peak_live_bytes": 33198,
+        "peak_live_blocks": 74,
+        "exit_live_bytes": 9216,
+        "exit_live_blocks": 2
+      },
+      "current": {
+        "instructions": 4846856,
+        "total_allocated_bytes": 120983,
+        "total_allocated_blocks": 345,
+        "peak_live_bytes": 38379,
+        "peak_live_blocks": 77,
+        "exit_live_bytes": 9216,
+        "exit_live_blocks": 2
+      },
+      "rust": {
+        "before": {
+          "instructions": 1648416,
+          "total_allocated_bytes": 71206,
+          "total_allocated_blocks": 82,
+          "peak_live_bytes": 5526,
+          "peak_live_blocks": 12,
+          "exit_live_bytes": 544,
+          "exit_live_blocks": 1
+        },
+        "current": {
+          "instructions": 1626948,
+          "total_allocated_bytes": 71200,
+          "total_allocated_blocks": 82,
+          "peak_live_bytes": 5520,
+          "peak_live_blocks": 12,
+          "exit_live_bytes": 544,
+          "exit_live_blocks": 1
+        }
+      },
+      "current_over_before": {
+        "instructions": 0.06835321398689051,
+        "total_allocated_bytes": 0.016622667656289457,
+        "total_allocated_blocks": 0.0034481724685916466,
+        "peak_live_bytes": 1.1560636182902584,
+        "peak_live_blocks": 1.0405405405405406,
+        "exit_live_bytes": 1.0,
+        "exit_live_blocks": 1.0
+      },
+      "current_over_rust": {
+        "instructions": 2.9791093507598276,
+        "total_allocated_bytes": 1.6991994382022473,
+        "total_allocated_blocks": 4.2073170731707314,
+        "peak_live_bytes": 6.952717391304348,
+        "peak_live_blocks": 6.416666666666667,
+        "exit_live_bytes": 16.941176470588236,
+        "exit_live_blocks": 2.0
+      },
+      "before_over_rust": {
+        "instructions": 43.0164291052744,
+        "total_allocated_bytes": 102.21321236974413,
+        "total_allocated_blocks": 1220.158536585366,
+        "peak_live_bytes": 6.007600434310532,
+        "peak_live_blocks": 6.166666666666667,
+        "exit_live_bytes": 16.941176470588236,
+        "exit_live_blocks": 2.0
+      }
+    },
+    "decode-bytes-16384": {
+      "before": {
+        "instructions": 70614162,
+        "total_allocated_bytes": 7291636,
+        "total_allocated_blocks": 98525,
+        "peak_live_bytes": 455600,
+        "peak_live_blocks": 74,
+        "exit_live_bytes": 9216,
+        "exit_live_blocks": 2
+      },
+      "current": {
+        "instructions": 4768792,
+        "total_allocated_bytes": 444025,
+        "total_allocated_blocks": 105,
+        "peak_live_bytes": 391125,
+        "peak_live_blocks": 76,
+        "exit_live_bytes": 9216,
+        "exit_live_blocks": 2
+      },
+      "rust": {
+        "before": {
+          "instructions": 1633066,
+          "total_allocated_bytes": 94247,
+          "total_allocated_blocks": 22,
+          "peak_live_bytes": 59287,
+          "peak_live_blocks": 12,
+          "exit_live_bytes": 544,
+          "exit_live_blocks": 1
+        },
+        "current": {
+          "instructions": 1611555,
+          "total_allocated_bytes": 94241,
+          "total_allocated_blocks": 22,
+          "peak_live_bytes": 59281,
+          "peak_live_blocks": 12,
+          "exit_live_bytes": 544,
+          "exit_live_blocks": 1
+        }
+      },
+      "current_over_before": {
+        "instructions": 0.06753308210327555,
+        "total_allocated_bytes": 0.06089511325030487,
+        "total_allocated_blocks": 0.0010657193605683837,
+        "peak_live_bytes": 0.8584833187006146,
+        "peak_live_blocks": 1.027027027027027,
+        "exit_live_bytes": 1.0,
+        "exit_live_blocks": 1.0
+      },
+      "current_over_rust": {
+        "instructions": 2.959124572229927,
+        "total_allocated_bytes": 4.711590496705256,
+        "total_allocated_blocks": 4.7727272727272725,
+        "peak_live_bytes": 6.597813802061369,
+        "peak_live_blocks": 6.333333333333333,
+        "exit_live_bytes": 16.941176470588236,
+        "exit_live_blocks": 2.0
+      },
+      "before_over_rust": {
+        "instructions": 43.24023768788279,
+        "total_allocated_bytes": 77.36730081594109,
+        "total_allocated_blocks": 4478.409090909091,
+        "peak_live_bytes": 7.68465262199133,
+        "peak_live_blocks": 6.166666666666667,
+        "exit_live_bytes": 16.941176470588236,
+        "exit_live_blocks": 2.0
+      }
+    },
+    "decode-text-64": {
+      "before": {
+        "instructions": 74731019,
+        "total_allocated_bytes": 7332220,
+        "total_allocated_blocks": 115800,
+        "peak_live_bytes": 14432,
+        "peak_live_blocks": 73,
+        "exit_live_bytes": 9216,
+        "exit_live_blocks": 2
+      },
+      "current": {
+        "instructions": 6566864,
+        "total_allocated_bytes": 256673,
+        "total_allocated_blocks": 5212,
+        "peak_live_bytes": 16773,
+        "peak_live_blocks": 77,
+        "exit_live_bytes": 9216,
+        "exit_live_blocks": 2
+      },
+      "rust": {
+        "before": {
+          "instructions": 1840250,
+          "total_allocated_bytes": 69761,
+          "total_allocated_blocks": 1042,
+          "peak_live_bytes": 2161,
+          "peak_live_blocks": 12,
+          "exit_live_bytes": 544,
+          "exit_live_blocks": 1
+        },
+        "current": {
+          "instructions": 1818746,
+          "total_allocated_bytes": 69755,
+          "total_allocated_blocks": 1042,
+          "peak_live_bytes": 2155,
+          "peak_live_blocks": 12,
+          "exit_live_bytes": 544,
+          "exit_live_blocks": 1
+        }
+      },
+      "current_over_before": {
+        "instructions": 0.08787333677331498,
+        "total_allocated_bytes": 0.035006178210691984,
+        "total_allocated_blocks": 0.04500863557858376,
+        "peak_live_bytes": 1.1622089800443458,
+        "peak_live_blocks": 1.0547945205479452,
+        "exit_live_bytes": 1.0,
+        "exit_live_blocks": 1.0
+      },
+      "current_over_rust": {
+        "instructions": 3.610654813811274,
+        "total_allocated_bytes": 3.679635868396531,
+        "total_allocated_blocks": 5.001919385796545,
+        "peak_live_bytes": 7.783294663573086,
+        "peak_live_blocks": 6.416666666666667,
+        "exit_live_bytes": 16.941176470588236,
+        "exit_live_blocks": 2.0
+      },
+      "before_over_rust": {
+        "instructions": 40.609166689308516,
+        "total_allocated_bytes": 105.1048580152234,
+        "total_allocated_blocks": 111.1324376199616,
+        "peak_live_bytes": 6.678389634428505,
+        "peak_live_blocks": 6.083333333333333,
+        "exit_live_bytes": 16.941176470588236,
+        "exit_live_blocks": 2.0
+      }
+    },
+    "decode-text-1024": {
+      "before": {
+        "instructions": 70658236,
+        "total_allocated_bytes": 7181504,
+        "total_allocated_blocks": 99992,
+        "peak_live_bytes": 34772,
+        "peak_live_blocks": 76,
+        "exit_live_bytes": 9216,
+        "exit_live_blocks": 2
+      },
+      "current": {
+        "instructions": 4823991,
+        "total_allocated_bytes": 125157,
+        "total_allocated_blocks": 412,
+        "peak_live_bytes": 38377,
+        "peak_live_blocks": 77,
+        "exit_live_bytes": 9216,
+        "exit_live_blocks": 2
+      },
+      "rust": {
+        "before": {
+          "instructions": 1598998,
+          "total_allocated_bytes": 71203,
+          "total_allocated_blocks": 82,
+          "peak_live_bytes": 5523,
+          "peak_live_blocks": 12,
+          "exit_live_bytes": 544,
+          "exit_live_blocks": 1
+        },
+        "current": {
+          "instructions": 1577530,
+          "total_allocated_bytes": 71197,
+          "total_allocated_blocks": 82,
+          "peak_live_bytes": 5517,
+          "peak_live_blocks": 12,
+          "exit_live_bytes": 544,
+          "exit_live_blocks": 1
+        }
+      },
+      "current_over_before": {
+        "instructions": 0.06827216858343307,
+        "total_allocated_bytes": 0.01742768645676449,
+        "total_allocated_blocks": 0.004120329626370109,
+        "peak_live_bytes": 1.1036753709881515,
+        "peak_live_blocks": 1.013157894736842,
+        "exit_live_bytes": 1.0,
+        "exit_live_blocks": 1.0
+      },
+      "current_over_rust": {
+        "instructions": 3.057939310187445,
+        "total_allocated_bytes": 1.7578971024060002,
+        "total_allocated_blocks": 5.024390243902439,
+        "peak_live_bytes": 6.956135580931666,
+        "peak_live_blocks": 6.416666666666667,
+        "exit_live_bytes": 16.941176470588236,
+        "exit_live_blocks": 2.0
+      },
+      "before_over_rust": {
+        "instructions": 44.18907090565467,
+        "total_allocated_bytes": 100.85957052371388,
+        "total_allocated_blocks": 1219.4146341463415,
+        "peak_live_bytes": 6.295853702697809,
+        "peak_live_blocks": 6.333333333333333,
+        "exit_live_bytes": 16.941176470588236,
+        "exit_live_blocks": 2.0
+      }
+    },
+    "decode-text-16384": {
+      "before": {
+        "instructions": 70823342,
+        "total_allocated_bytes": 7217986,
+        "total_allocated_blocks": 98524,
+        "peak_live_bytes": 480214,
+        "peak_live_blocks": 76,
+        "exit_live_bytes": 9216,
+        "exit_live_blocks": 2
+      },
+      "current": {
+        "instructions": 4763551,
+        "total_allocated_bytes": 468839,
+        "total_allocated_blocks": 112,
+        "peak_live_bytes": 415739,
+        "peak_live_blocks": 78,
+        "exit_live_bytes": 9216,
+        "exit_live_blocks": 2
+      },
+      "rust": {
+        "before": {
+          "instructions": 1594617,
+          "total_allocated_bytes": 94244,
+          "total_allocated_blocks": 22,
+          "peak_live_bytes": 59284,
+          "peak_live_blocks": 12,
+          "exit_live_bytes": 544,
+          "exit_live_blocks": 1
+        },
+        "current": {
+          "instructions": 1573117,
+          "total_allocated_bytes": 94238,
+          "total_allocated_blocks": 22,
+          "peak_live_bytes": 59278,
+          "peak_live_blocks": 12,
+          "exit_live_bytes": 544,
+          "exit_live_blocks": 1
+        }
+      },
+      "current_over_before": {
+        "instructions": 0.06725961901091874,
+        "total_allocated_bytes": 0.0649542684067273,
+        "total_allocated_blocks": 0.00113677885591328,
+        "peak_live_bytes": 0.8657369422799002,
+        "peak_live_blocks": 1.0263157894736843,
+        "exit_live_bytes": 1.0,
+        "exit_live_blocks": 1.0
+      },
+      "current_over_rust": {
+        "instructions": 3.02809708368799,
+        "total_allocated_bytes": 4.975052526581634,
+        "total_allocated_blocks": 5.090909090909091,
+        "peak_live_bytes": 7.013377644319984,
+        "peak_live_blocks": 6.5,
+        "exit_live_bytes": 16.941176470588236,
+        "exit_live_blocks": 2.0
+      },
+      "before_over_rust": {
+        "instructions": 44.41401414885205,
+        "total_allocated_bytes": 76.58828148211026,
+        "total_allocated_blocks": 4478.363636363636,
+        "peak_live_bytes": 8.100229404223736,
+        "peak_live_blocks": 6.333333333333333,
+        "exit_live_bytes": 16.941176470588236,
+        "exit_live_blocks": 2.0
+      }
+    }
+  }
+}

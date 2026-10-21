@@ -41,7 +41,9 @@ The suite also accepts `--sanitize`, `--target`, `--lto-linker`, and `--opt-leve
 
 ## Benchmark
 
-The [owned string append report](../../benchmarks/results/2026-10-19-base45-string-reuse.md) compares Relar with an independent Rust implementation and CPython. Sustained ThinLTO encoding takes 1.54× Rust's time for 16 KiB inputs, 1.68× for 1 KiB, and 2.41× for 64 bytes. Large encoding is 44× faster than the previous Relar executable in a same-session comparison. ThinLTO decoding still takes 27–32× Rust's time. The report retains all sample spreads, correctness checks, allocation profiles, and independent audits.
+The [decoder optimization report](../../benchmarks/results/2026-10-19-base45-decoder.md) records the latest native comparison. In sustained 64 MiB batches, ThinLTO decoding takes 3.57–4.61× Rust's time. A separate same-session comparison using 2 MiB batches measures a 10.43–15.10× speedup over the previous Relar executable. The upstream codec and Rust reference remain unchanged. Bulk dictionary gathers, guarded integer loops, and bounded list-buffer reuse remove the largest measured allocation and CPU costs; intermediate Python containers still leave a gap with Rust. The report retains all samples, correctness checks, CPU/allocation profiles, and independent audits.
+
+The earlier [owned string append report](../../benchmarks/results/2026-10-19-base45-string-reuse.md) compares Relar with an independent Rust implementation and CPython. Sustained ThinLTO encoding takes 1.54× Rust's time for 16 KiB inputs, 1.68× for 1 KiB, and 2.41× for 64 bytes. Large encoding is 44× faster than the previous Relar executable in a same-session comparison. At that milestone, ThinLTO decoding took 27–32× Rust's time. The report retains all sample spreads, correctness checks, allocation profiles, and independent audits.
 
 The [initial comparison](../../benchmarks/results/2026-10-19-base45.md) preserves historical ordinary and ThinLTO results, raw samples, validation, and allocation profiles. Those measurements predate the owned string append optimization. Relar now reuses uniquely owned string storage with geometric capacity growth for eligible appends, avoiding repeated whole-prefix copies in this codec. Existing aliases retain their previous contents. The upstream Python source remains unchanged.
 
@@ -65,16 +67,17 @@ The harness compares encode, bytes decode, and text decode at 64, 1,024, and 16,
 
 The exact measured executables pass validation before timing. Relar passes the upstream and CPython checks above. The Rust validator runs 295 checks, including four declared Unicode `repr` message boundaries: those four compare error category, cause, suppression, and unchanged output, while permitting different character quoting. Relar matches CPython's exact messages in every case. The reference guide describes this diagnostic boundary; timed decoder inputs use valid ASCII Base45 and do not exercise it. The harness reads `build-record.json` beside the Rust executable unless `--rust-build-record` selects another record.
 
-For sustained encoder comparisons, increase the repeated work and time only the native engines:
+For sustained native comparisons, increase the repeated work and time only the native engines:
 
 ```sh
 python3 benchmarks/base45_benchmark.py \
   --compiler target/release/relar --runtime target/release/librelar_runtime.a \
   --clang clang-18 --python python3.14 \
   --rust benchmarks/local/base45-reference/base45-reference \
-  --native-only --operations encode --batch-bytes 67108864 \
-  --artifact-dir benchmarks/local/base45-native-encode \
-  --output benchmarks/local/base45-native-encode.json
+  --native-only --operations encode decode-bytes decode-text --batch-bytes 67108864 \
+  --samples 20 --warmups 2 \
+  --artifact-dir benchmarks/local/base45-native \
+  --output benchmarks/local/base45-native.json
 ```
 
 This handles 64 MiB of raw data per process at each payload size, alternates Relar and Rust execution order, and retains CPython validation. `--operations` can select any combination of the three codec operations. Larger batches reduce the proportion of process startup in each sample; measurements still include startup, imports where applicable, one input read, codec calls, checksum, and one output write. Fixture preparation and result verification are outside the clock. Every duration, output hash, source/tool identity, CPython build setting, and generated executable/LLVM hash is recorded. Run without tracing and with other builds and profiling stopped.

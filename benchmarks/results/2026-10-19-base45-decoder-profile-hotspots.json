@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "method": "Human-reviewed contiguous semantic regions in the exact timed decoder assembly; counts are recomputed from the independently audited per-instruction Callgrind self costs. No wall-time inference. All regions are disjoint; called helpers are reported separately with inclusive costs.",
+  "label": "decode-bytes-16384",
+  "audit_sha256": "479a10da9a9615fd29e69b20e7b3eb67c00ce1622fb14ba6c4162620f0bb164c",
+  "current_summary_sha256": "eb3898f4cde8968218dc013f10ceb51a494031f0e9106435233afd7ef25b5120",
+  "timed_binary_sha256": "2e74e5ca63eb2ca6aa0d541b403ca7bf5828d11ed75b19c52bf25dd54f813952",
+  "source_function": "b45decode",
+  "llvm_symbol": "fn_4",
+  "decoder_attribution_sha256": "e12948eb189b3c1e87b0021b67c06a8407de2be000704340a1bfd72d8f18c513",
+  "decoder_assembly_sha256": "4d418035b61774675ff1f909ab1499746c56d47a17833a8451ac44880314142e",
+  "total_process_instructions": 4768792,
+  "decoder_exclusive_instructions": 3046625,
+  "regions": [
+    {
+      "region": "native decode loop: checked source reads, arithmetic, paired append, cleanup",
+      "start_inclusive": "0x10a74f",
+      "stop_exclusive": "0x10a919",
+      "exclusive_instructions": 2162692,
+      "fraction_of_process": 0.45350940028418096
+    },
+    {
+      "region": "vectorized i32 list guard",
+      "start_inclusive": "0x109776",
+      "stop_exclusive": "0x10984e",
+      "exclusive_instructions": 417868,
+      "fraction_of_process": 0.08762554542114649
+    },
+    {
+      "region": "list[int] to bytes conversion and result allocation",
+      "start_inclusive": "0x108d2a",
+      "stop_exclusive": "0x109050",
+      "exclusive_instructions": 465100,
+      "fraction_of_process": 0.09752994049646116
+    }
+  ],
+  "native_loop_subregions": [
+    {
+      "region": "checked source loads and three-read branch",
+      "start_inclusive": "0x10a74f",
+      "stop_exclusive": "0x10a7c2",
+      "exclusive_instructions": 819200,
+      "fraction_of_process": 0.17178354602171786
+    },
+    {
+      "region": "integer arithmetic and overflow validation",
+      "start_inclusive": "0x10a7c2",
+      "stop_exclusive": "0x10a7f2",
+      "exclusive_instructions": 393216,
+      "fraction_of_process": 0.08245610209042457
+    },
+    {
+      "region": "receiver retain and paired-append capacity check",
+      "start_inclusive": "0x10a7f2",
+      "stop_exclusive": "0x10a88a",
+      "exclusive_instructions": 327680,
+      "fraction_of_process": 0.06871341840868715
+    },
+    {
+      "region": "divmod, paired stores, and length update",
+      "start_inclusive": "0x10a88a",
+      "stop_exclusive": "0x10a8e4",
+      "exclusive_instructions": 360448,
+      "fraction_of_process": 0.07558476024955586
+    },
+    {
+      "region": "receiver release and loop control",
+      "start_inclusive": "0x10a8e4",
+      "stop_exclusive": "0x10a919",
+      "exclusive_instructions": 262148,
+      "fraction_of_process": 0.05497157351379553
+    }
+  ],
+  "remaining_decoder_exclusive_instructions": 965,
+  "top_called_helpers": [
+    {
+      "address": "0x108702",
+      "callee": "relar_runtime::objects::mappings::gather_str_int",
+      "inclusive_instructions": 908304
+    },
+    {
+      "address": "0x10943b",
+      "callee": "<alloc::rc::Rc<relar_runtime::List>>::drop_slow",
+      "inclusive_instructions": 172748
+    },
+    {
+      "address": "0x10944d",
+      "callee": "<alloc::rc::Rc<relar_runtime::List>>::drop_slow",
+      "inclusive_instructions": 115404
+    },
+    {
+      "address": "0x10868c",
+      "callee": "core::str::converts::from_utf8",
+      "inclusive_instructions": 43164
+    },
+    {
+      "address": "0x108d48",
+      "callee": "__rustc::__rdl_alloc",
+      "inclusive_instructions": 726
+    },
+    {
+      "address": "0x10a3d5",
+      "callee": "<alloc::raw_vec::RawVecInner>::try_reserve_exact",
+      "inclusive_instructions": 387
+    },
+    {
+      "address": "0x108c4d",
+      "callee": "__rustc::__rdl_alloc",
+      "inclusive_instructions": 361
+    },
+    {
+      "address": "0x10900f",
+      "callee": "__rustc::__rdl_alloc",
+      "inclusive_instructions": 361
+    },
+    {
+      "address": "0x1086a9",
+      "callee": "<relar_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
+      "inclusive_instructions": 20
+    },
+    {
+      "address": "0x109417",
+      "callee": "<relar_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
+      "inclusive_instructions": 20
+    }
+  ]
+}
