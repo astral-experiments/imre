@@ -353,9 +353,9 @@ impl Emitter<'_, '_> {
         self.reference(value, "release");
     }
 
-    /// Nullable words share their payload's ownership operation. Every reference
-    /// helper tolerates zero so absent optionals and uninitialized record fields
-    /// need neither a wrapper nor a separate initialization bitmap.
+    /// Canonical exact integers are nonzero, including cleared locals whose
+    /// default is tagged zero. Optional payloads retain their nullable helper;
+    /// replacement cleanup handles uninitialized record words separately.
     fn reference(&mut self, value: &Value, operation: &str) {
         if value.small_integer {
             return;
@@ -384,7 +384,9 @@ impl Emitter<'_, '_> {
             Type::Float | Type::Bool | Type::None => return,
             Type::Optional(_) => unreachable!("optional types are flattened"),
         };
-        let name = if ty == Type::Int {
+        let name = if value.ty == Type::Int {
+            format!("{operation}_int_nonzero")
+        } else if ty == Type::Int {
             format!("{operation}_int")
         } else {
             format!("relar_{family}_{operation}")
@@ -3335,7 +3337,13 @@ impl Emitter<'_, '_> {
             "store {} {operand}, ptr {pointer}",
             storage_type(value.ty)
         ));
-        self.release(&old);
+        if old.ty == Type::Int {
+            // This raw field word can still be the zero initialization sentinel.
+            // It has not been registered as an owned canonical integer.
+            self.void_call("release_int", &[&old]);
+        } else {
+            self.release(&old);
+        }
     }
 
     fn append(&mut self, list: &Value, value: &Value) {
@@ -3990,24 +3998,33 @@ declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 fn integer_helpers() -> String {
     let mut output = String::new();
     for operation in ["retain", "release"] {
-        writeln!(
-            output,
-            r#"
-define internal void @{operation}_int(i64 %value) alwaysinline {{
+        for nonzero in [false, true] {
+            let (suffix, presence, immediate) = if nonzero {
+                ("_nonzero", "", "%small")
+            } else {
+                (
+                    "",
+                    "  %absent = icmp eq i64 %value, 0\n  %immediate = or i1 %small, %absent\n",
+                    "%immediate",
+                )
+            };
+            writeln!(
+                output,
+                r#"
+define internal void @{operation}_int{suffix}(i64 %value) alwaysinline {{
 entry:
   %tag = and i64 %value, 1
   %small = icmp eq i64 %tag, 1
-  %absent = icmp eq i64 %value, 0
-  %immediate = or i1 %small, %absent
-  br i1 %immediate, label %done, label %big
+{presence}  br i1 {immediate}, label %done, label %big
 big:
   call void @relar_int_{operation}(i64 %value)
   br label %done
 done:
   ret void
 }}"#
-        )
-        .unwrap();
+            )
+            .unwrap();
+        }
     }
     for (op, intrinsic, number) in [("add", "sadd", 0), ("sub", "ssub", 1), ("mul", "smul", 2)] {
         let (left, decode, encode, result) = if op == "mul" {
@@ -4221,7 +4238,7 @@ mod tests {
                 lines[0].trim_start().starts_with("store i64 %v")
                     && lines[0].ends_with(&format!(", ptr %local{slot}"))
             })
-            .map(|lines| lines[1].contains("call void @release_int("))
+            .map(|lines| lines[1].contains("call void @release_int"))
             .collect()
     }
 
@@ -4235,6 +4252,41 @@ mod tests {
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn exact_integer_owners_keep_nullable_record_and_optional_cleanup_separate() {
+        let exact =
+            function_body("def keep(value: int) -> int:\n    value = value\n    return value\n");
+        assert!(exact.contains("call void @retain_int_nonzero("));
+        assert!(exact.contains("call void @release_int_nonzero("));
+        assert!(!exact.contains("call void @release_int("));
+
+        let optional = function_body(
+            "def keep(value: int | None) -> int | None:\n    value = value\n    return value\n",
+        );
+        assert!(optional.contains("call void @retain_int("));
+        assert!(optional.contains("call void @release_int("));
+        assert!(!optional.contains("call void @release_int_nonzero("));
+
+        let initializer = function_body(
+            "class Box:\n    value: int\n    def __init__(self, value: int) -> None:\n        self.value = value\n",
+        );
+        assert!(initializer.contains("call void @retain_int_nonzero("));
+        assert!(initializer.contains("call void @release_int("));
+
+        let helpers = super::integer_helpers();
+        for operation in ["retain", "release"] {
+            let body = helpers
+                .split_once(&format!("@{operation}_int_nonzero("))
+                .unwrap()
+                .1
+                .split_once("\n}")
+                .unwrap()
+                .0;
+            assert!(!body.contains("%absent"));
+            assert!(body.contains("br i1 %small"));
+        }
     }
 
     #[test]

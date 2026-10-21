@@ -72,7 +72,7 @@ negate:
   %positive = call i64 @int_sub(i64 1, i64 %value)
   ret i64 %positive
 retain:
-  call void @retain_int(i64 %value)
+  call void @retain_int_nonzero(i64 %value)
   ret i64 %value
 }
 "#;
