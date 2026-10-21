@@ -33,16 +33,17 @@ But not:
 ## Benchmark
 
 We ran the same [inventory reconciliation program](examples/inventory_reconciliation/)
-with Relar and CPython, using 16,384 positive requests per workload:
+with Relar and CPython and compared it with a Rust implementation. Each workload
+has 16,384 positive requests:
 
-| Workload | Relar | CPython 3.14.5 | Speedup |
-| --- | ---: | ---: | ---: |
-| Dense | 26.69 ms | 77.66 ms | 2.91× |
-| Sparse | 52.24 ms | 112.35 ms | 2.15× |
+| Workload | Relar | CPython 3.14.5 | Rust (BigInt) | Relar speedup vs. CPython |
+| --- | ---: | ---: | ---: | ---: |
+| Dense | 26.69 ms | 77.66 ms | 23.34 ms | 2.91× |
+| Sparse | 52.24 ms | 112.35 ms | 43.05 ms | 2.15× |
 
 These are median end-to-end times from 48 runs per implementation on Linux in
-October 2026, including startup and file I/O. The native build uses Clang 18
-without ThinLTO. See the [benchmark report](benchmarks/results/2026-10-19-assignment-unpacking-expansion.md)
+October 2026, including startup and file I/O. Relar's executable was compiled
+with Clang 18 without ThinLTO. See the [benchmark report](benchmarks/results/2026-10-19-assignment-unpacking-expansion.md)
 for details.
 
 ## Installation
