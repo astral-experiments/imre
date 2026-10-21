@@ -1,4 +1,4 @@
-//! Owned slots for fixed records, tuples, optional boxes, and richer lists.
+//! Owned slots for records, tuples, optional boxes, lists, and mappings.
 //!
 //! The compiler supplies each slot's representation kind: 0 = None (word 0),
 //! 1 = bool (word 0 or 1), 2 = tagged Int, 3 = Str pointer, 4 = ListInt
@@ -14,13 +14,15 @@
 //! code. Storage access uses the parent module's single-thread, nonreentrant
 //! contract. Mutable access ends before a displaced owner is dropped.
 
+mod mappings;
+
 use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
 use super::{Int, List, MAX_LIST_LEN, StorageCell, Str, decode_index, fail, index};
 
-/// An opaque allocation for either fixed fields or a resizable sequence.
+/// An opaque allocation whose storage shape is checked by each runtime entry.
 pub struct Object(StorageCell<Storage>);
 
 const INLINE_FIELD_CAPACITY: usize = 4;
@@ -34,6 +36,8 @@ enum Storage {
     },
     Fields(Vec<Option<Slot>>),
     Sequence(Vec<Slot>),
+    Dictionary(Box<mappings::Mapping>),
+    MappingIterator(mappings::MappingIterator),
 }
 
 /// Owns one value independently of the container from which it was acquired.
@@ -116,7 +120,7 @@ impl Storage {
         match self {
             Self::InlineFields { length, fields } => &fields[..*length],
             Self::Fields(fields) => fields,
-            Self::Sequence(_) => fail("SystemError", "expected a fixed-field object"),
+            _ => fail("SystemError", "expected a fixed-field object"),
         }
     }
 
@@ -124,25 +128,21 @@ impl Storage {
         match self {
             Self::InlineFields { length, fields } => &mut fields[..*length],
             Self::Fields(fields) => fields,
-            Self::Sequence(_) => fail("SystemError", "expected a fixed-field object"),
+            _ => fail("SystemError", "expected a fixed-field object"),
         }
     }
 
     fn sequence(&self) -> &[Slot] {
         match self {
             Self::Sequence(values) => values,
-            Self::InlineFields { .. } | Self::Fields(_) => {
-                fail("SystemError", "expected a sequence object")
-            }
+            _ => fail("SystemError", "expected a sequence object"),
         }
     }
 
     fn sequence_mut(&mut self) -> &mut Vec<Slot> {
         match self {
             Self::Sequence(values) => values,
-            Self::InlineFields { .. } | Self::Fields(_) => {
-                fail("SystemError", "expected a sequence object")
-            }
+            _ => fail("SystemError", "expected a sequence object"),
         }
     }
 }

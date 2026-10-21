@@ -100,6 +100,7 @@ const RESERVED: &[&str] = &[
     "str",
     "list",
     "tuple",
+    "dict",
     "len",
     "input",
     "print",
@@ -442,6 +443,31 @@ fn annotation_at(
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
         ast::Expr::Subscript(value) => match &*value.value {
             ast::Expr::Name(name) if name.id == "list" => Ok(types.list(nested(&value.slice)?)),
+            ast::Expr::Name(name) if name.id == "dict" => {
+                let ast::Expr::Tuple(arguments) = &*value.slice else {
+                    return Err(error(
+                        source,
+                        expression,
+                        "dict requires key and value types",
+                    ));
+                };
+                let [key, value] = arguments.elts.as_slice() else {
+                    return Err(error(
+                        source,
+                        expression,
+                        "dict requires key and value types",
+                    ));
+                };
+                let key_type = nested(key)?;
+                if !matches!(key_type, Type::Int | Type::Str) {
+                    return Err(error(
+                        source,
+                        key,
+                        "dictionary keys must be exactly int or str",
+                    ));
+                }
+                Ok(types.dict(key_type, nested(value)?))
+            }
             ast::Expr::Name(name) if name.id == "tuple" => {
                 let fields = if let ast::Expr::Tuple(fields) = &*value.slice {
                     fields
@@ -457,7 +483,7 @@ fn annotation_at(
             _ => Err(error(
                 source,
                 expression,
-                "only list[T] and fixed tuple[T, ...] are supported",
+                "only list[T], dict[K, V], and fixed tuple[T, ...] are supported",
             )),
         },
         ast::Expr::BinOp(union) if union.op == ast::Operator::BitOr => {
@@ -684,6 +710,25 @@ impl<'a> Checker<'a> {
     fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
         let concrete = self.types.payload(expected).unwrap_or(expected);
         let value = match expression {
+            ast::Expr::Dict(dict) if self.types.mapping(concrete).is_some() => {
+                self.dictionary(dict, self.types.mapping(concrete))?
+            }
+            ast::Expr::Call(call)
+                if self.types.mapping(concrete).is_some()
+                    && matches!(&*call.func, ast::Expr::Name(name) if name.id == "dict")
+                    && call.arguments.args.is_empty()
+                    && call.arguments.keywords.is_empty() =>
+            {
+                let (key, value) = self.types.mapping(concrete).unwrap();
+                Expr {
+                    ty: concrete,
+                    kind: ExprKind::Dict {
+                        key,
+                        value,
+                        entries: Vec::new(),
+                    },
+                }
+            }
             ast::Expr::List(list) if self.types.element(concrete).is_some() => {
                 let element = self.types.element(concrete).unwrap();
                 let values = list
@@ -776,6 +821,56 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Dictionary storage has one exact key/value pair of types, even when empty.
+    fn dictionary(
+        &mut self,
+        dict: &ast::ExprDict,
+        expected: Option<(Type, Type)>,
+    ) -> Result<Expr, String> {
+        let mut types = expected;
+        let mut entries = Vec::with_capacity(dict.items.len());
+        for item in &dict.items {
+            let key = item
+                .key
+                .as_ref()
+                .ok_or_else(|| error(self.source, dict, "dictionary expansion is unsupported"))?;
+            let (key, value) = if let Some((key_type, value_type)) = types {
+                (
+                    self.expr_expected(key, key_type)?,
+                    self.expr_expected(&item.value, value_type)?,
+                )
+            } else {
+                let key_value = self.expr(key)?;
+                if !matches!(key_value.ty, Type::Int | Type::Str) {
+                    return Err(error(
+                        self.source,
+                        key,
+                        "dictionary keys must be exactly int or str",
+                    ));
+                }
+                let value = self.expr(&item.value)?;
+                types = Some((key_value.ty, value.ty));
+                (key_value, value)
+            };
+            entries.push((key, value));
+        }
+        let (key, value) = types.ok_or_else(|| {
+            error(
+                self.source,
+                dict,
+                "an empty dictionary requires a concrete dict[K, V] context",
+            )
+        })?;
+        Ok(Expr {
+            ty: self.types.dict(key, value),
+            kind: ExprKind::Dict {
+                key,
+                value,
+                entries,
+            },
+        })
+    }
+
     /// Builds the target once; LLVM lowering still evaluates the RHS before it.
     fn assignment(&mut self, target: &ast::Expr, value: &ast::Expr) -> Result<Statement, String> {
         match target {
@@ -789,14 +884,22 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Subscript(subscript) => {
                 let list = self.expr(&subscript.value)?;
-                let element = self.types.element(list.ty).ok_or_else(|| {
-                    error(
-                        self.source,
-                        target,
-                        "indexed assignment requires a mutable typed list",
-                    )
-                })?;
-                let index = self.expr_expected(&subscript.slice, Type::Int)?;
+                let (key, element) = self
+                    .types
+                    .mapping(list.ty)
+                    .or_else(|| {
+                        self.types
+                            .element(list.ty)
+                            .map(|element| (Type::Int, element))
+                    })
+                    .ok_or_else(|| {
+                        error(
+                            self.source,
+                            target,
+                            "indexed assignment requires a mutable typed list or dictionary",
+                        )
+                    })?;
+                let index = self.expr_expected(&subscript.slice, key)?;
                 let value = self.expr_expected(value, element)?;
                 Ok(Statement::SetItem(list, index, value))
             }
@@ -873,9 +976,26 @@ impl<'a> Checker<'a> {
         Ok(output)
     }
 
-    /// Keeps the original list rooted and acquires each item before user code runs.
+    /// Recognizes items views only at a loop boundary; no view value escapes.
+    fn iteration_source(&mut self, expression: &ast::Expr) -> Result<(Expr, bool), String> {
+        if let ast::Expr::Call(call) = expression
+            && let ast::Expr::Attribute(attribute) = &*call.func
+            && attribute.attr.as_str() == "items"
+        {
+            let receiver = self.expr(&attribute.value)?;
+            if self.types.mapping(receiver.ty).is_some() {
+                if !call.arguments.args.is_empty() || !call.arguments.keywords.is_empty() {
+                    return Err(error(self.source, call, "dict.items() takes no arguments"));
+                }
+                return Ok((receiver, true));
+            }
+        }
+        Ok((self.expr(expression)?, false))
+    }
+
+    /// Keeps the original container rooted and owns each item before user code runs.
     fn iteration(&mut self, loop_: &ast::StmtFor) -> Result<Vec<Statement>, String> {
-        let (iterable, start) = if let ast::Expr::Call(call) = &*loop_.iter
+        let ((iterable, items), start) = if let ast::Expr::Call(call) = &*loop_.iter
             && matches!(&*call.func, ast::Expr::Name(name) if name.id == "enumerate")
         {
             if !call.arguments.keywords.is_empty() || !(1..=2).contains(&call.arguments.args.len())
@@ -883,10 +1003,10 @@ impl<'a> Checker<'a> {
                 return Err(error(
                     self.source,
                     call,
-                    "enumerate requires a list and an optional positional integer start",
+                    "enumerate requires a concrete container and an optional positional integer start",
                 ));
             }
-            let iterable = self.expr(&call.arguments.args[0])?;
+            let iterable = self.iteration_source(&call.arguments.args[0])?;
             let start = if let Some(start) = call.arguments.args.get(1) {
                 self.expr_expected(start, Type::Int)?
             } else {
@@ -897,36 +1017,121 @@ impl<'a> Checker<'a> {
             };
             (iterable, Some(start))
         } else {
-            (self.expr(&loop_.iter)?, None)
+            (self.iteration_source(&loop_.iter)?, None)
         };
-        let element = self.types.element(iterable.ty).ok_or_else(|| {
-            error(
-                self.source,
-                &*loop_.iter,
-                "iteration requires a concrete list or range",
-            )
-        })?;
+        let mapping = self.types.mapping(iterable.ty);
+        let element = self
+            .types
+            .element(iterable.ty)
+            .or_else(|| {
+                mapping.map(|(key, value)| {
+                    if items {
+                        self.types.tuple(vec![key, value])
+                    } else {
+                        key
+                    }
+                })
+            })
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    &*loop_.iter,
+                    "iteration requires a concrete list, dictionary, or range",
+                )
+            })?;
         let captured = self.hidden(iterable.ty);
-        let cursor = self.hidden(Type::Int);
+        let cursor = if mapping.is_none() {
+            Some(self.hidden(Type::Int))
+        } else {
+            None
+        };
         let mut output = vec![Statement::Assign(captured, iterable)];
         let counter = start.map(|start| {
             let slot = self.hidden(Type::Int);
             output.push(Statement::Assign(slot, start));
             slot
         });
-        output.push(Statement::Assign(
-            cursor,
-            Expr {
-                ty: Type::Int,
-                kind: ExprKind::Int("0".into()),
-            },
-        ));
-        let item = Expr {
-            ty: element,
-            kind: ExprKind::Builtin(
-                Builtin::ListGet,
-                vec![self.local(captured), self.local(cursor)],
-            ),
+        let mut body = Vec::new();
+        let mut owned_items = Vec::new();
+        let mut cleanup = vec![captured];
+        let (item, test) = if let Some(cursor) = cursor {
+            output.push(Statement::Assign(
+                cursor,
+                Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Int("0".into()),
+                },
+            ));
+            cleanup.push(cursor);
+            (
+                Expr {
+                    ty: element,
+                    kind: ExprKind::Builtin(
+                        Builtin::ListGet,
+                        vec![self.local(captured), self.local(cursor)],
+                    ),
+                },
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Compare(
+                        vec![
+                            self.local(cursor),
+                            Expr {
+                                ty: Type::Int,
+                                kind: ExprKind::Builtin(Builtin::Len, vec![self.local(captured)]),
+                            },
+                        ],
+                        vec![Compare::Less],
+                    ),
+                },
+            )
+        } else {
+            let (key_type, value_type) = mapping.unwrap();
+            let iterator = self.hidden(Type::Iterator);
+            // enumerate evaluates its start before obtaining the actual iterator.
+            // The earlier capture preserves the receiver through those effects.
+            output.push(Statement::Assign(
+                iterator,
+                Expr {
+                    ty: Type::Iterator,
+                    kind: ExprKind::Builtin(Builtin::DictIter(items), vec![self.local(captured)]),
+                },
+            ));
+            cleanup.push(iterator);
+            let key = self.hidden(key_type);
+            let value = items.then(|| self.hidden(value_type));
+            let ready = self.hidden(Type::Bool);
+            body.push(Statement::IterNext {
+                iterator,
+                key,
+                value,
+                ready,
+            });
+            body.push(Statement::If(
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Not(Box::new(self.local(ready))),
+                },
+                vec![Statement::Break],
+                Vec::new(),
+            ));
+            owned_items.push(key);
+            owned_items.extend(value);
+            let item = if let Some(value) = value {
+                Expr {
+                    ty: element,
+                    kind: ExprKind::Tuple(vec![self.local(key), self.local(value)]),
+                }
+            } else {
+                self.local(key)
+            };
+            (
+                item,
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(true),
+                },
+            )
         };
         let item = if let Some(counter) = counter {
             Expr {
@@ -940,15 +1145,17 @@ impl<'a> Checker<'a> {
         self.invalidate_loop_facts(&loop_.body);
         let mut facts = self.narrowed.clone();
         let before = self.assigned.clone();
-        let mut body = self.bind_pattern(&loop_.target, item)?;
-        for statement in &body {
+        let bindings = self.bind_pattern(&loop_.target, item)?;
+        for statement in &bindings {
             if let Statement::Assign(slot, _) = statement {
                 facts.remove(slot);
             }
         }
+        body.extend(bindings);
+        body.extend(owned_items.into_iter().map(Statement::Clear));
         // Advance before entering the body so continue and target rebinding do
         // not alter progression. Length is read anew on every loop condition.
-        for slot in std::iter::once(cursor).chain(counter) {
+        for slot in cursor.into_iter().chain(counter) {
             body.push(Statement::Assign(
                 slot,
                 Expr {
@@ -969,22 +1176,8 @@ impl<'a> Checker<'a> {
         self.loop_depth -= 1;
         self.assigned = before;
         self.narrowed = facts;
-        let test = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Compare(
-                vec![
-                    self.local(cursor),
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Builtin(Builtin::Len, vec![self.local(captured)]),
-                    },
-                ],
-                vec![Compare::Less],
-            ),
-        };
         output.push(Statement::While(test, body));
-        output.push(Statement::Clear(captured));
-        output.push(Statement::Clear(cursor));
+        output.extend(cleanup.into_iter().map(Statement::Clear));
         output.extend(counter.map(Statement::Clear));
         Ok(output)
     }
@@ -1033,9 +1226,14 @@ impl<'a> Checker<'a> {
             ast::Stmt::AugAssign(assign) => {
                 if let ast::Expr::Subscript(target) = &*assign.target {
                     let list = self.expr(&target.value)?;
-                    let index = self.expr(&target.slice)?;
-                    self.expect(Type::ListInt, list.ty, target)?;
-                    self.expect(Type::Int, index.ty, target)?;
+                    let key = if let Some((key, value)) = self.types.mapping(list.ty) {
+                        self.expect(Type::Int, value, target)?;
+                        key
+                    } else {
+                        self.expect(Type::ListInt, list.ty, target)?;
+                        Type::Int
+                    };
+                    let index = self.expr_expected(&target.slice, key)?;
                     let value = self.expr(&assign.value)?;
                     self.expect(Type::Int, value.ty, statement)?;
                     let op = self
@@ -1076,6 +1274,32 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Stmt::Expr(expression) => Some(Statement::Expr(self.expr(&expression.value)?)),
+            ast::Stmt::Delete(delete) => {
+                let mut statements = Vec::new();
+                for target in &delete.targets {
+                    let ast::Expr::Subscript(target) = target else {
+                        return Err(error(
+                            self.source,
+                            target,
+                            "deletion requires a dictionary subscript",
+                        ));
+                    };
+                    let receiver = self.expr(&target.value)?;
+                    let (key, _) = self.types.mapping(receiver.ty).ok_or_else(|| {
+                        error(
+                            self.source,
+                            target,
+                            "deletion requires a dictionary subscript",
+                        )
+                    })?;
+                    let key = self.expr_expected(&target.slice, key)?;
+                    statements.push(Statement::Expr(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::DictDelete, vec![receiver, key]),
+                    }));
+                }
+                return Ok((statements, true));
+            }
             ast::Stmt::If(branch) => {
                 let (statement, flow) =
                     self.if_chain(&branch.test, &branch.body, &branch.elif_else_clauses)?;
@@ -1344,6 +1568,7 @@ impl<'a> Checker<'a> {
                 }
                 (self.types.list(element), ExprKind::List(values))
             }
+            ast::Expr::Dict(dict) => return self.dictionary(dict, None),
             ast::Expr::Tuple(tuple) => {
                 let values = tuple
                     .elts
@@ -1392,6 +1617,31 @@ impl<'a> Checker<'a> {
                 )
             }
             ast::Expr::Compare(compare) => {
+                if compare.ops.len() == 1
+                    && matches!(compare.ops[0], ast::CmpOp::In | ast::CmpOp::NotIn)
+                {
+                    let key = self.expr(&compare.operands[0])?;
+                    let receiver = self.expr(&compare.operands[1])?;
+                    let (key_type, _) = self.types.mapping(receiver.ty).ok_or_else(|| {
+                        error(
+                            self.source,
+                            expression,
+                            "membership requires a concrete dictionary",
+                        )
+                    })?;
+                    self.expect(key_type, key.ty, expression)?;
+                    let mut result = Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(Builtin::DictContains, vec![key, receiver]),
+                    };
+                    if compare.ops[0] == ast::CmpOp::NotIn {
+                        result = Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Not(Box::new(result)),
+                        };
+                    }
+                    return Ok(result);
+                }
                 if compare.ops.len() == 1
                     && matches!(compare.ops[0], ast::CmpOp::Is | ast::CmpOp::IsNot)
                 {
@@ -1445,7 +1695,11 @@ impl<'a> Checker<'a> {
                     };
                     if matches!(
                         ty,
-                        Type::ListInt | Type::List(_) | Type::Tuple(_) | Type::Optional(_)
+                        Type::ListInt
+                            | Type::List(_)
+                            | Type::Dict(_)
+                            | Type::Tuple(_)
+                            | Type::Optional(_)
                     ) {
                         return Err(error(
                             self.source,
@@ -1459,6 +1713,13 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Subscript(subscript) => {
                 let list = self.expr(&subscript.value)?;
+                if let Some((key, value)) = self.types.mapping(list.ty) {
+                    let key = self.expr_expected(&subscript.slice, key)?;
+                    return Ok(Expr {
+                        ty: value,
+                        kind: ExprKind::Builtin(Builtin::DictGet, vec![list, key]),
+                    });
+                }
                 if let Some(fields) = self.types.fields(list.ty) {
                     let (literal, negative) = if let ast::Expr::UnaryOp(unary) = &*subscript.slice {
                         if unary.op != ast::UnaryOp::USub {
@@ -1604,11 +1865,43 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::Split, vec![receiver]),
                 });
             }
+            if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
+                if attribute.attr.as_str() != "get" || !(1..=2).contains(&call.arguments.args.len())
+                {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "supported dictionary methods are get(key[, default]) and loop-head items()",
+                    ));
+                }
+                let key = self.expr_expected(&call.arguments.args[0], key_type)?;
+                let mut args = vec![receiver, key];
+                let optional = self.types.optional(value_type);
+                let (builtin, ty) = if let Some(default) = call.arguments.args.get(1) {
+                    let default = self.expr_expected(default, optional)?;
+                    if optional == value_type {
+                        args.push(default);
+                        (Builtin::DictGetDefault, value_type)
+                    } else if let ExprKind::Present(default) = default.kind {
+                        args.push(*default);
+                        (Builtin::DictGetDefault, value_type)
+                    } else {
+                        args.push(default);
+                        (Builtin::DictTryGet(value_type), optional)
+                    }
+                } else {
+                    (Builtin::DictTryGet(value_type), optional)
+                };
+                return Ok(Expr {
+                    ty,
+                    kind: ExprKind::Builtin(builtin, args),
+                });
+            }
             let element = self.types.element(receiver.ty).ok_or_else(|| {
                 error(
                     self.source,
                     call,
-                    "supported value methods are typed-list append/pop and str.split()",
+                    "supported value methods are typed-list append/pop, dict.get, and str.split()",
                 )
             })?;
             let mut args = vec![receiver];
@@ -1655,7 +1948,7 @@ impl<'a> Checker<'a> {
                 if args.len() == 1
                     && matches!(
                         args[0].ty,
-                        Type::Str | Type::ListInt | Type::List(_) | Type::Tuple(_)
+                        Type::Str | Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Tuple(_)
                     ) =>
             {
                 (Builtin::Len, Type::Int)

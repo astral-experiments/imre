@@ -9,8 +9,11 @@ pub(crate) enum Type {
     ListInt,
     Class(usize),
     List(usize),
+    Dict(usize),
     Tuple(usize),
     Optional(usize),
+    /// An internal mapping cursor, never available in user annotations.
+    Iterator,
     None,
 }
 
@@ -21,6 +24,7 @@ impl std::fmt::Display for Type {
         }
         match self {
             Self::List(id) => return write!(f, "list#{id}"),
+            Self::Dict(id) => return write!(f, "dict#{id}"),
             Self::Tuple(id) => return write!(f, "tuple#{id}"),
             Self::Optional(id) => return write!(f, "optional#{id}"),
             _ => {}
@@ -31,7 +35,10 @@ impl std::fmt::Display for Type {
             Self::Str => "str",
             Self::ListInt => "list[int]",
             Self::None => "None",
-            Self::Class(_) | Self::List(_) | Self::Tuple(_) | Self::Optional(_) => unreachable!(),
+            Self::Iterator => "iterator",
+            Self::Class(_) | Self::List(_) | Self::Dict(_) | Self::Tuple(_) | Self::Optional(_) => {
+                unreachable!()
+            }
         })
     }
 }
@@ -62,6 +69,11 @@ pub(crate) enum ExprKind {
     None,
     Local(usize),
     List(Vec<Expr>),
+    Dict {
+        key: Type,
+        value: Type,
+        entries: Vec<(Expr, Expr)>,
+    },
     Tuple(Vec<Expr>),
     Present(Box<Expr>),
     Absent(Box<Expr>),
@@ -113,6 +125,16 @@ pub(crate) enum Builtin {
     Pop,
     IsNone,
     Split,
+    DictGet,
+    DictGetDefault,
+    /// The stored value type determines optional promotion on successful lookup.
+    /// A third argument, when present, already has the flattened result type.
+    DictTryGet(Type),
+    /// Arguments are key then dictionary, matching membership evaluation order.
+    DictContains,
+    DictDelete,
+    /// False visits keys; true visits key/value pairs without an intermediate tuple.
+    DictIter(bool),
 }
 
 pub(crate) enum Statement {
@@ -135,6 +157,14 @@ pub(crate) enum Statement {
         step: usize,
         args: Vec<Expr>,
         body: Vec<Statement>,
+    },
+    /// Transfers iterator results into owned output locals only on success.
+    /// `ready` is always written; exhausted cursors preserve both output locals.
+    IterNext {
+        iterator: usize,
+        key: usize,
+        value: Option<usize>,
+        ready: usize,
     },
     Return(Expr),
     Break,

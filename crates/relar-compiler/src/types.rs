@@ -8,6 +8,7 @@ use crate::ir::Type;
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum Shape {
     List(Type),
+    Dict(Type, Type),
     Tuple(Vec<Type>),
     Optional(Type),
 }
@@ -46,6 +47,10 @@ impl Types {
 
     pub(crate) fn tuple(&self, elements: Vec<Type>) -> Type {
         Type::Tuple(self.intern(Shape::Tuple(elements)))
+    }
+
+    pub(crate) fn dict(&self, key: Type, value: Type) -> Type {
+        Type::Dict(self.intern(Shape::Dict(key, value)))
     }
 
     pub(crate) fn optional(&self, element: Type) -> Type {
@@ -87,10 +92,22 @@ impl Types {
         }
     }
 
+    pub(crate) fn mapping(&self, ty: Type) -> Option<(Type, Type)> {
+        let Type::Dict(id) = ty else {
+            return None;
+        };
+        match self.0.borrow().shapes[id] {
+            Shape::Dict(key, value) => Some((key, value)),
+            _ => unreachable!("dictionary type identity has a dictionary shape"),
+        }
+    }
+
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
         if let Some(element) = self.element(ty).or_else(|| self.payload(ty)) {
             vec![element]
+        } else if let Some((key, value)) = self.mapping(ty) {
+            vec![key, value]
         } else {
             self.fields(ty).unwrap_or_default()
         }
@@ -112,6 +129,14 @@ impl Types {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
+            Type::Dict(_) => {
+                let (key, value) = self.mapping(ty).unwrap();
+                format!(
+                    "dict[{}, {}]",
+                    self.describe(key, class_name),
+                    self.describe(value, class_name)
+                )
+            }
             Type::Optional(_) => format!(
                 "{} | None",
                 self.describe(self.payload(ty).unwrap(), class_name)

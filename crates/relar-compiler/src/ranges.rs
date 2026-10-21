@@ -2,9 +2,9 @@
 //!
 //! Facts describe values at their evaluation points, not mutable heap locations.
 //! Calls cannot rebind a caller's integer locals, but every field, list item, and
-//! user-function result starts unknown. List lengths have a storage-size bound;
-//! no relationship to a list's later length is retained. Indexed accesses must
-//! therefore continue checking the current bounds, including after alias mutation.
+//! user-function result starts unknown. Container lengths have a storage-size
+//! bound, but no relationship to a container's later length is retained. Indexed
+//! accesses must keep checking current bounds, including after alias mutation.
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -13,8 +13,9 @@ use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Function, Module, Stat
 
 const MIN_SMALL: i128 = -(1_i128 << 62);
 const MAX_SMALL: i128 = (1_i128 << 62) - 1;
-// The 64-bit runtime asserts that list slots occupy at least eight bytes. Rust
-// allocations cannot exceed isize::MAX bytes, including their Vec buffers.
+// The 64-bit runtime asserts that list slots and mapping entries occupy at least
+// eight bytes. Rust allocations cannot exceed isize::MAX bytes, including their
+// Vec buffers.
 const MAX_LIST_LEN: i128 = (1_i128 << 60) - 1;
 const WIDENING_POINTS: [i128; 7] = [MIN_SMALL, -MAX_LIST_LEN, -1, 0, 1, MAX_LIST_LEN, MAX_SMALL];
 
@@ -95,6 +96,14 @@ fn inspect_writes(
                 }
             }
             Statement::Move(target, source) => moves.push((*source, *target)),
+            Statement::IterNext {
+                key, value, ready, ..
+            } => {
+                // Mapping storage can supply an arbitrary-precision integer.
+                for slot in [Some(*key), *value, Some(*ready)].into_iter().flatten() {
+                    small[slot] = false;
+                }
+            }
             Statement::If(_, yes, no) => {
                 inspect_writes(facts, yes, small, moves);
                 inspect_writes(facts, no, small, moves);
@@ -411,6 +420,17 @@ impl Analyzer {
                 state.0[*source] = Interval::UNKNOWN;
             }
             Statement::Clear(slot) => state.0[*slot] = Interval::UNKNOWN,
+            Statement::IterNext {
+                key, value, ready, ..
+            } => {
+                // An exhausted iterator preserves its outputs, while success
+                // can replace them with any value of the checked storage type.
+                state.0[*key] = Interval::UNKNOWN;
+                if let Some(value) = value {
+                    state.0[*value] = Interval::UNKNOWN;
+                }
+                state.0[*ready] = Interval::bounded(0, 1);
+            }
             Statement::SetItem(list, index, value) => {
                 self.expression(value, &state, record);
                 self.expression(list, &state, record);
@@ -609,7 +629,7 @@ impl Analyzer {
                     .collect::<Vec<_>>();
                 match builtin {
                     Builtin::Len => match args[0].ty {
-                        Type::ListInt | Type::List(_) | Type::Tuple(_) => {
+                        Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Tuple(_) => {
                             Interval::bounded(0, MAX_LIST_LEN)
                         }
                         Type::Str => Interval {
@@ -628,6 +648,13 @@ impl Analyzer {
             | ExprKind::Call(_, values)
             | ExprKind::Construct { args: values, .. } => {
                 for value in values {
+                    self.expression(value, state, record);
+                }
+                Interval::UNKNOWN
+            }
+            ExprKind::Dict { entries, .. } => {
+                for (key, value) in entries {
+                    self.expression(key, state, record);
                     self.expression(value, state, record);
                 }
                 Interval::UNKNOWN
@@ -960,6 +987,12 @@ mod tests {
                         expression(value, output);
                     }
                 }
+                ExprKind::Dict { entries, .. } => {
+                    for (key, value) in entries {
+                        expression(key, output);
+                        expression(value, output);
+                    }
+                }
                 ExprKind::Present(value)
                 | ExprKind::Absent(value)
                 | ExprKind::Unwrap(value)
@@ -1010,6 +1043,7 @@ mod tests {
                     }
                     Statement::Move(_, _)
                     | Statement::Clear(_)
+                    | Statement::IterNext { .. }
                     | Statement::Break
                     | Statement::Continue => {}
                 }
@@ -1352,6 +1386,59 @@ def parameter(unknown: int) -> int:
         };
         assert_eq!(facts.integer(value), None);
         assert_eq!(facts.small_locals(function), [false]);
+    }
+
+    #[test]
+    fn mapping_iteration_invalidates_integer_outputs() {
+        for items in [false, true] {
+            let mut module = module("def output() -> None:\n    pass\n");
+            let function = &mut module.functions[0];
+            function.locals = vec![Type::Iterator, Type::Int, Type::Int, Type::Bool];
+            function.body = vec![
+                Statement::Assign(
+                    1,
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Int("1".into()),
+                    },
+                ),
+                Statement::Assign(
+                    2,
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Int("2".into()),
+                    },
+                ),
+                Statement::IterNext {
+                    iterator: 0,
+                    key: 1,
+                    value: items.then_some(2),
+                    ready: 3,
+                },
+                Statement::Expr(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Local(1),
+                }),
+                Statement::Expr(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Local(2),
+                }),
+            ];
+            let facts = analyze(&module);
+            let function = &module.functions[0];
+            let Statement::Expr(key) = &function.body[3] else {
+                unreachable!()
+            };
+            let Statement::Expr(value) = &function.body[4] else {
+                unreachable!()
+            };
+            assert_eq!(facts.integer(key), None);
+            assert_eq!(
+                facts.integer(value),
+                (!items).then_some(IntRange { min: 2, max: 2 })
+            );
+            assert_eq!(facts.small_locals(function), [false, false, !items, false]);
+        }
     }
 
     #[test]
