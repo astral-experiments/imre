@@ -49,18 +49,21 @@ pub(super) fn absolute_operand<'a>(test: &'a Expr, yes: &Expr, no: &Expr) -> Opt
 /// Returns an owned absolute value. Negating the minimum tagged-small integer
 /// promotes through the ordinary arithmetic helper; positive heap integers
 /// retain their existing owner. The common path uses a select without a sign
-/// branch, and wrapping subtraction is harmless for its unselected operand.
+/// branch. For odd small words, checked `2 - value` overflows only at the minimum
+/// representation; all other positive and negative inputs share its exact result.
 pub(super) const INTEGER_ABSOLUTE_HELPER: &str = r#"
 define internal i64 @int_abs(i64 %value) alwaysinline {
 entry:
   %tag = and i64 %value, 1
   %small = icmp eq i64 %tag, 1
-  %fits = icmp ne i64 %value, -9223372036854775807
-  %fast = and i1 %small, %fits
-  br i1 %fast, label %select, label %slow
+  br i1 %small, label %checked, label %slow
+checked:
+  %difference = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 2, i64 %value)
+  %negated = extractvalue { i64, i1 } %difference, 0
+  %overflow = extractvalue { i64, i1 } %difference, 1
+  br i1 %overflow, label %slow, label %select
 select:
   %negative = icmp slt i64 %value, 1
-  %negated = sub i64 2, %value
   %result = select i1 %negative, i64 %negated, i64 %value
   %tagged = or i64 %result, 1
   ret i64 %tagged
@@ -80,6 +83,32 @@ retain:
 #[cfg(test)]
 mod tests {
     use crate::{CompileOptions, compile};
+
+    #[test]
+    fn checked_absolute_value_guards_heap_words_before_testing_overflow() {
+        let output = compile(
+            "def magnitude(value: int) -> int:\n    return -value if value < 0 else value\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        let helper = output
+            .split_once("define internal i64 @int_abs(")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        let checked = helper.find("checked:").unwrap();
+        assert!(helper[..checked].contains("br i1 %small, label %checked, label %slow"));
+        let selected = helper.find("select:").unwrap();
+        assert!(
+            helper[checked..selected].contains("@llvm.ssub.with.overflow.i64(i64 2, i64 %value)")
+        );
+        assert!(helper[checked..selected].contains("br i1 %overflow, label %slow, label %select"));
+        assert!(helper[selected..].contains("select i1 %negative, i64 %negated, i64 %value"));
+        assert!(helper.contains("call i64 @int_sub(i64 1, i64 %value)"));
+        assert!(helper.contains("call void @retain_int_nonzero(i64 %value)"));
+    }
 
     #[test]
     fn recognizes_only_pure_same_local_integer_absolute_values() {
