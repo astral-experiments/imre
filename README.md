@@ -19,6 +19,7 @@ An ahead-of-time compiler for typed Python, written in Rust.
 - Pass typed function values and bound methods, use noncapturing lambdas, and compose lazy `map`/`filter` pipelines.
 - Use read-only properties, class and static methods, and `Self` annotations.
 - Read and write UTF-8 files, join native `pathlib.Path` values, and scan directories with `iterdir` and bounded `glob`.
+- Create scoped temporary workspaces and atomically replace completed files.
 - Run native subprocesses with captured UTF-8 output, explicit arguments, working directories, and environment snapshots.
 - Preserve arbitrary-precision integers, shared mutation, and supported exception behavior.
 - Run compiled programs without a Python installation or a CPython dependency.
@@ -126,7 +127,7 @@ aggregates a report through lazy `map` and `filter`.
 The [memory-report comparator](examples/memory_report/README.md) ports ty's real
 report-comparison script. It compares report files or directories, or launches
 old and new ty over prepared projects. It decodes JSON into typed records, ranks
-changes, and writes a Markdown report.
+changes, retains optional subprocess transcripts, and publishes its Markdown report atomically.
 Its guide includes captured ty reports and comparisons
 with the original CPython script, the typed Python port, and an independent Rust
 implementation. The [dataclass comparison](benchmarks/results/2026-10-21-dataclass-records.md)

@@ -3,6 +3,7 @@ from sys import argv
 
 from .load import load_directory, load_report
 from .model import ProjectComparison
+from .publish import write_report
 from .render import render_summary
 from .run import run_prepared
 
@@ -16,6 +17,7 @@ def main() -> None:
     projects_path = ""
     old_ty = ""
     new_ty = ""
+    capture_directory: str | None = None
     run_mode = len(argv) > 1 and argv[1] == "run"
     index = 1
     if len(argv) > 1 and (argv[1] == "compare" or run_mode):
@@ -31,6 +33,8 @@ def main() -> None:
             old_ty = value
         elif run_mode and flag == "--new-ty":
             new_ty = value
+        elif run_mode and flag == "--capture-dir":
+            capture_directory = value
         elif not run_mode and flag == "--old":
             old_path = value
         elif not run_mode and flag == "--new":
@@ -47,8 +51,12 @@ def main() -> None:
     comparisons: list[ProjectComparison] = []
     if run_mode:
         if not projects_path or not old_ty or not new_ty:
-            raise ValueError("expected run --projects MANIFEST --old-ty ABS --new-ty ABS [--output REPORT.md]")
-        comparisons = run_prepared(Path(projects_path), old_ty, new_ty)
+            raise ValueError("expected run --projects MANIFEST --old-ty ABS --new-ty ABS [--capture-dir DIR] [--output REPORT.md]")
+        if capture_directory is not None and output_path is not None:
+            reserved = {"projects.json", "old.stdout.txt", "old.stderr.txt", "new.stdout.txt", "new.stderr.txt"}
+            if Path(output_path).name in reserved:
+                raise ValueError("output basename is reserved for captured transcripts")
+        comparisons = run_prepared(Path(projects_path), old_ty, new_ty, capture_directory)
     elif old_path and new_path:
         new_file = Path(new_path)
         comparisons.append(ProjectComparison(
@@ -68,7 +76,7 @@ def main() -> None:
     if output_path is None:
         print(rendered)
     else:
-        Path(output_path).write_text(rendered, encoding="utf-8")
+        write_report(Path(output_path), rendered)
 
 
 main()
