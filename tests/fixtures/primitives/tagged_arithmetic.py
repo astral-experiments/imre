@@ -22,6 +22,22 @@ def transitions(value: int, step: int) -> None:
     print(value)
 
 
+def unwound_integer(value: int) -> int:
+    kept = value + 1
+    try:
+        # The result slot remains unset when strict zip raises. Heap-valued
+        # private targets and the partial sum still need their owners released.
+        unused = sum(
+            item
+            for item, marker in zip([value + 2], [0, 1], strict=True)
+        )
+    except ValueError:
+        value, kept = kept, value
+    else:
+        return unused
+    return value + kept
+
+
 boundary = 1 << 62
 huge = 1 << 150
 # The existing input-driven arithmetic matrix omits right-hand zero so it can
@@ -61,3 +77,6 @@ for left, right in [
 transitions(boundary - 1, 1)
 transitions(-boundary, -1)
 transitions(0, huge)
+
+for value in [-huge, 0, huge]:
+    print(unwound_integer(value))

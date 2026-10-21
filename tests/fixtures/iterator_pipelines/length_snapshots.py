@@ -83,6 +83,34 @@ def construction_order(values: list[int]) -> int:
     )
 
 
+class Entry:
+    number: int
+
+    def __init__(self, number: int) -> None:
+        self.number = number
+
+
+def optional_scan(values: list[Entry | None], repeats: int) -> int:
+    alias = values
+    total = 0
+    while repeats > 0:
+        total += sum(value.number for value in reversed(alias) if value is not None)
+        total += sum(
+            left.number + right.number
+            for left, right in zip(alias, reversed(alias), strict=True)
+            if left is not None and right is not None
+        )
+        repeats -= 1
+    return total + len(alias)
+
+
+def last_present(values: list[int | None]) -> int | None:
+    for value in reversed(values):
+        if value is not None:
+            return value
+    return None
+
+
 for repeats in range(4):
     print(nested([], [], repeats))
     print(nested([1, 2, (1 << 100)], ["a", "two"], repeats))
@@ -93,3 +121,28 @@ print(growing_numbers([1, 2]))
 print(growing_words(["a", "bb"]))
 print(shrinking_words(["a", "bb", "ccc", "dddd"]))
 print(construction_order([1, 2]))
+
+# Empty buffers may be captured, but neither forward nor reverse scans read them.
+huge = 1 << 100
+rows: list[list[Entry | None]] = [
+    [],
+    [None, None],
+    [Entry(huge), None, Entry(-huge + 3)],
+]
+for repeats in range(3):
+    for values in rows:
+        print(optional_scan(values, repeats))
+
+number_cases: list[list[int | None]] = [
+    [],
+    [None, None],
+    [None, 0],
+    [None, huge],
+    [huge, None, -huge],
+]
+for numbers in number_cases:
+    returned = last_present(numbers)
+    if returned is None:
+        print("absent number")
+    else:
+        print(returned)
