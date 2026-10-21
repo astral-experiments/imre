@@ -13,9 +13,10 @@ use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::io::{self, Write};
+use std::io::{self, BufWriter, IsTerminal, Write};
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
+use std::sync::{LazyLock, Mutex};
 
 const MIN_SMALL: i64 = -(1_i64 << 62);
 const MAX_SMALL: i64 = (1_i64 << 62) - 1;
@@ -94,13 +95,60 @@ impl Drop for Int {
 /// An opaque, nonmoving list allocation. Its resizable buffer stays inside Rust.
 pub struct List(RefCell<Vec<Int>>);
 
+/// Standard output uses bounded block buffering for pipes and files, while
+/// terminals flush each printed line. LLVM supplies the process entry point, so
+/// input, fatal errors, and normal entry-point return explicitly flush it.
+struct Output {
+    writer: BufWriter<io::Stdout>,
+    line_buffered: bool,
+}
+
+static OUTPUT: LazyLock<Mutex<Output>> = LazyLock::new(|| {
+    let stdout = io::stdout();
+    let line_buffered = stdout.is_terminal();
+    Mutex::new(Output {
+        writer: BufWriter::with_capacity(8 * 1024, stdout),
+        line_buffered,
+    })
+});
+
+/// Returns with the writer lock released, including when a write fails.
+fn write_output(value: impl std::fmt::Display) -> io::Result<()> {
+    let mut output = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());
+    writeln!(output.writer, "{value}")?;
+    if output.line_buffered {
+        output.writer.flush()?;
+    }
+    Ok(())
+}
+
+/// The caller handles errors only after this function releases the writer lock.
+fn flush_stdout() -> io::Result<()> {
+    OUTPUT
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .writer
+        .flush()
+}
+
 fn fail(kind: &str, message: &str) -> ! {
+    // Preserve pending output and the original exception category. A failed
+    // best-effort flush must neither recurse through fail nor hold this lock.
+    let _ = flush_stdout();
     let _ = writeln!(io::stderr().lock(), "{kind}: {message}");
     std::process::exit(1)
 }
 
 fn output(value: impl std::fmt::Display) {
-    if writeln!(io::stdout().lock(), "{value}").is_err() {
+    if write_output(value).is_err() {
+        fail("OSError", "could not write standard output");
+    }
+}
+
+/// Flushes pending output before generated code returns from the process entry.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_flush_stdout() {
+    if flush_stdout().is_err() {
         fail("OSError", "could not write standard output");
     }
 }
@@ -324,6 +372,8 @@ pub unsafe extern "C" fn relar_int_parse(value: *const String) -> usize {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_input() -> *const String {
+    // A preceding print must be visible before waiting for the next input line.
+    relar_flush_stdout();
     let mut line = String::new();
     match io::stdin().read_line(&mut line) {
         Ok(0) => fail("EOFError", "EOF when reading a line"),
@@ -332,9 +382,6 @@ pub extern "C" fn relar_input() -> *const String {
     }
     if line.ends_with('\n') {
         line.pop();
-        if line.ends_with('\r') {
-            line.pop();
-        }
     }
     Rc::into_raw(Rc::new(line))
 }

@@ -1,0 +1,565 @@
+{
+  "schema_version": 1,
+  "example": "dependency_planner",
+  "purpose": "Diagnose the effect of stdout buffering using syscall counts and separate untraced CPU/context-switch samples.",
+  "timing_scope": "Before/after diagnostic batches were collected at different times. Performance claims use the independently collected balanced three-way benchmark in the comparison record. Traced syscall seconds include instrumentation and are never substituted for benchmark timings.",
+  "host": {
+    "os": "Linux",
+    "kernel_release": "6.8.0-146-generic",
+    "architecture": "x86_64",
+    "cpu": {
+      "model": "AMD EPYC-Milan Processor",
+      "allowed_cpus_before_pinning": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ],
+      "affinity": [
+        0
+      ]
+    }
+  },
+  "tools": {
+    "strace": "6.8",
+    "cpython": {
+      "implementation": "cpython",
+      "version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+      "version_number": "3.14.5",
+      "gil_enabled": true,
+      "free_threaded_build": false,
+      "jit_available": true,
+      "jit_enabled": false,
+      "debug_build": false,
+      "pgo": {
+        "configure_enable_optimizations": true,
+        "profile_use_flag_present": true
+      },
+      "lto": {
+        "configure_option": "--with-lto",
+        "lto_flag_present": true
+      },
+      "executable_name": "python3.14"
+    },
+    "profile_driver_python": "3.12.13 (main, Aug  7 2026, 02:25:39) [Clang 22.1.3 ]"
+  },
+  "sources": {
+    "dependency_planner/__init__.py": "aaf74d2ac584768a494d503c28e988df2ff095ff4b2bf00f8ab69a4fdb72f188",
+    "dependency_planner/__main__.py": "ebdaf69e5f174923d12644c89f580f056be931bcb263929ba26545b615fd997b",
+    "dependency_planner/model.py": "2dcd30aeb5fb9799a480a1ce8bd7d142dbaa4bde7efb055730ef2ef1df4e3c82",
+    "dependency_planner/parse.py": "3e9a6d2443472393c1d9987ac6d39b707b2c37f09af41f7b01ca6a129dfe0e89",
+    "dependency_planner/render.py": "74258c0da07a12cfefcb89103ed68ce70124fba1db32d44c17454d23b3e6fc51",
+    "dependency_planner/schedule.py": "ff4ff0e33b4d14a79c6fd59539d9390e7b58da6e94aa7d81ca3380b20987069b"
+  },
+  "verification": {
+    "source_hashes_verified": true,
+    "measured_binary_hashes_verified": true,
+    "every_output_matches_expected_bytes_and_sha256": true,
+    "all_exit_statuses": 0,
+    "all_stderr_empty": true,
+    "full_inputs_and_expected_stdout": "Each referenced build record retains complete input and expected stdout once per workload. Every profiled output was also retained locally and compared byte-for-byte; this profile links those contents by SHA256."
+  },
+  "methods": {
+    "affinity": "Driver and children inherit affinity to CPU 0.",
+    "io": "Exact captured input is supplied through a stdin pipe; complete stdout is captured through a pipe. Every run compares full output and hashes after measurement.",
+    "untraced": "Three sequential runs per engine/workload; order alternates CPython/Relar, Relar/CPython, CPython/Relar. time.perf_counter_ns measures wall time. Differences in resource.getrusage(RUSAGE_CHILDREN) measure child user/system CPU seconds and voluntary/involuntary context switches.",
+    "strace": "One separate strace -f -c -o <summary-file> run per engine/workload, outside the ptrace sandbox. The entire summary is retained. Syscall times are diagnostic and include tracing effects.",
+    "cpython_command": [
+      "python3.14",
+      "-I",
+      "-c",
+      "import runpy, sys; sys.path.insert(0, sys.argv[1]); sys.argv = ['dependency_planner']; runpy.run_module('dependency_planner', run_name='__main__', alter_sys=True)",
+      "<package-root>"
+    ],
+    "native_commands": {
+      "baseline": [
+        "<baseline-executable>"
+      ],
+      "buffered": [
+        "<buffered-executable>"
+      ]
+    }
+  },
+  "profiles": [
+    {
+      "variant": "baseline",
+      "completed_at_utc": "2026-10-17T17:19:32.953388+00:00",
+      "build_git": {
+        "revision": "81cba9801bf79bd9ff6c2008c96f453c1bd98fbf",
+        "dirty": false
+      },
+      "build_record": "benchmarks/results/2026-10-17-dependency-planner-baseline.json",
+      "build_record_sha256": "ee87ace99b4fc6715aac897b7d2d9f354757e5c74ce9a5b198524f40c82d1568",
+      "artifacts_sha256": {
+        "binary": "31274a01ef79711447e7d4e7b890c0e8d2f9ade66faf6feabcbe197751d47d84",
+        "compiler": "e89f24ab25f98dfef5550f9e2bfd3624fb29758c47b8d168ad176206b2e646fa",
+        "runtime": "57c8733739b5995c0b8a246e0272a746d7d0816962442d9d3220ceae9bb3b5e6",
+        "llvm_ir": "3e0fc9f9a81c026625427e2cfbf090c734dacba959a416c3414034362d8c51b3",
+        "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+      },
+      "affinity": [
+        0
+      ],
+      "workloads": [
+        {
+          "shape": "layered",
+          "tasks": 16384,
+          "input_sha256": "4674892ec652a8fb6880df9e383d5de575b95dd01c62d96286eeeea116fb745e",
+          "expected_stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+          "stdout_bytes": 531728,
+          "stdout_lines": 83573,
+          "untraced": [
+            {
+              "engine": "cpython",
+              "iteration": 0,
+              "wall_ns": 133931838,
+              "user_seconds": 0.102532,
+              "system_seconds": 0.026395000000000002,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 57,
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
+            },
+            {
+              "engine": "relar",
+              "iteration": 0,
+              "wall_ns": 579083322,
+              "user_seconds": 0.085707,
+              "system_seconds": 0.282419,
+              "voluntary_context_switches": 2,
+              "involuntary_context_switches": 20974,
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
+            },
+            {
+              "engine": "relar",
+              "iteration": 1,
+              "wall_ns": 584419460,
+              "user_seconds": 0.08216999999999997,
+              "system_seconds": 0.28760700000000006,
+              "voluntary_context_switches": 2,
+              "involuntary_context_switches": 21175,
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
+            },
+            {
+              "engine": "cpython",
+              "iteration": 1,
+              "wall_ns": 123182096,
+              "user_seconds": 0.09606999999999999,
+              "system_seconds": 0.023776999999999937,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 59,
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
+            },
+            {
+              "engine": "cpython",
+              "iteration": 2,
+              "wall_ns": 124566139,
+              "user_seconds": 0.09264300000000003,
+              "system_seconds": 0.02858700000000003,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 58,
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
+            },
+            {
+              "engine": "relar",
+              "iteration": 2,
+              "wall_ns": 568658093,
+              "user_seconds": 0.078596,
+              "system_seconds": 0.283142,
+              "voluntary_context_switches": 2,
+              "involuntary_context_switches": 21105,
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
+            }
+          ],
+          "strace": {
+            "relar": {
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "summary": "% time     seconds  usecs/call     calls    errors syscall\n------ ----------- ----------- --------- --------- ----------------\n 99.92    0.615155           7     83574           write\n  0.03    0.000194           8        22           mmap\n  0.02    0.000126           2        57           brk\n  0.01    0.000092           1        56           read\n  0.01    0.000050          10         5           mprotect\n  0.00    0.000023           3         7           munmap\n  0.00    0.000005           5         1           getrandom\n  0.00    0.000004           1         4           close\n  0.00    0.000004           4         1           prlimit64\n  0.00    0.000003           3         1           arch_prctl\n  0.00    0.000003           3         1           set_tid_address\n  0.00    0.000003           3         1           set_robust_list\n  0.00    0.000003           3         1           rseq\n  0.00    0.000000           0         4           fstat\n  0.00    0.000000           0         2           pread64\n  0.00    0.000000           0         1         1 access\n  0.00    0.000000           0         2           mremap\n  0.00    0.000000           0         1           execve\n  0.00    0.000000           0         4           openat\n------ ----------- ----------- --------- --------- ----------------\n100.00    0.615665           7     83745         1 total\n",
+              "write_calls": 83574,
+              "write_syscall_seconds_under_trace": 0.615155,
+              "write_share_of_traced_syscall_time_percent": 99.92
+            },
+            "cpython": {
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "summary": "% time     seconds  usecs/call     calls    errors syscall\n------ ----------- ----------- --------- --------- ------------------\n 92.29    0.057638           3     16389     16389 ioctl\n  1.34    0.000839          16        51        15 openat\n  1.25    0.000778           7       100           read\n  1.08    0.000675          14        46           mmap\n  1.00    0.000624          52        12           munmap\n  0.66    0.000410           4        87        24 stat\n  0.45    0.000283           7        38           close\n  0.45    0.000283          17        16           getdents64\n  0.39    0.000245           3        66           rt_sigaction\n  0.28    0.000174          34         5           write\n  0.22    0.000135           8        16           brk\n  0.21    0.000129           3        40           fstat\n  0.14    0.000085          10         8           mprotect\n  0.07    0.000044          22         2           open\n  0.07    0.000041           2        17         3 lseek\n  0.02    0.000014           3         4           fcntl\n  0.02    0.000014           7         2         1 readlink\n  0.02    0.000010           5         2           pread64\n  0.01    0.000007           7         1           sched_getaffinity\n  0.01    0.000007           3         2           prlimit64\n  0.00    0.000003           3         1           arch_prctl\n  0.00    0.000003           3         1           gettid\n  0.00    0.000003           3         1           futex\n  0.00    0.000003           3         1           set_tid_address\n  0.00    0.000003           3         1           set_robust_list\n  0.00    0.000003           3         1           getrandom\n  0.00    0.000003           3         1           rseq\n  0.00    0.000000           0         1         1 access\n  0.00    0.000000           0         1           execve\n  0.00    0.000000           0         3         2 newfstatat\n  0.00    0.000000           0         1           readlinkat\n------ ----------- ----------- --------- --------- ------------------\n100.00    0.062456           3     16917     16435 total\n",
+              "write_calls": 5,
+              "write_syscall_seconds_under_trace": 0.000174,
+              "write_share_of_traced_syscall_time_percent": 0.28
+            }
+          },
+          "untraced_medians": {
+            "relar": {
+              "wall_ns": 579083322,
+              "user_seconds": 0.08216999999999997,
+              "system_seconds": 0.283142,
+              "voluntary_context_switches": 2,
+              "involuntary_context_switches": 21105
+            },
+            "cpython": {
+              "wall_ns": 124566139,
+              "user_seconds": 0.09606999999999999,
+              "system_seconds": 0.026395000000000002,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 58
+            }
+          }
+        },
+        {
+          "shape": "wide",
+          "tasks": 16384,
+          "input_sha256": "b592b421eb1d3978d1426bc4bc0b00b84f9cf3aa19fc7f2a89d25006f5387ccc",
+          "expected_stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+          "stdout_bytes": 395810,
+          "stdout_lines": 81934,
+          "untraced": [
+            {
+              "engine": "cpython",
+              "iteration": 0,
+              "wall_ns": 118496332,
+              "user_seconds": 0.08901100000000017,
+              "system_seconds": 0.02700300000000011,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 31,
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
+            },
+            {
+              "engine": "relar",
+              "iteration": 0,
+              "wall_ns": 524128703,
+              "user_seconds": 0.06336699999999995,
+              "system_seconds": 0.26548099999999986,
+              "voluntary_context_switches": 2,
+              "involuntary_context_switches": 20053,
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
+            },
+            {
+              "engine": "relar",
+              "iteration": 1,
+              "wall_ns": 522816854,
+              "user_seconds": 0.06279499999999993,
+              "system_seconds": 0.2653080000000001,
+              "voluntary_context_switches": 2,
+              "involuntary_context_switches": 20044,
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
+            },
+            {
+              "engine": "cpython",
+              "iteration": 1,
+              "wall_ns": 121192397,
+              "user_seconds": 0.097364,
+              "system_seconds": 0.021079000000000292,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 31,
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
+            },
+            {
+              "engine": "cpython",
+              "iteration": 2,
+              "wall_ns": 120082033,
+              "user_seconds": 0.09459200000000001,
+              "system_seconds": 0.02290100000000006,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 30,
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
+            },
+            {
+              "engine": "relar",
+              "iteration": 2,
+              "wall_ns": 532569462,
+              "user_seconds": 0.05798100000000006,
+              "system_seconds": 0.2754089999999998,
+              "voluntary_context_switches": 2,
+              "involuntary_context_switches": 20164,
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
+            }
+          ],
+          "strace": {
+            "relar": {
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "summary": "% time     seconds  usecs/call     calls    errors syscall\n------ ----------- ----------- --------- --------- ----------------\n 99.74    0.628896           7     81934           write\n  0.09    0.000569         569         1           execve\n  0.06    0.000368          16        22           mmap\n  0.03    0.000180           5        31           read\n  0.03    0.000172          24         7           munmap\n  0.02    0.000144           3        47           brk\n  0.01    0.000067          16         4           openat\n  0.01    0.000059          11         5           mprotect\n  0.00    0.000031          15         2           mremap\n  0.00    0.000021           5         4           fstat\n  0.00    0.000016           4         4           close\n  0.00    0.000011           5         2           pread64\n  0.00    0.000007           7         1         1 access\n  0.00    0.000004           4         1           arch_prctl\n  0.00    0.000004           4         1           set_robust_list\n  0.00    0.000004           4         1           getrandom\n  0.00    0.000003           3         1           set_tid_address\n  0.00    0.000003           3         1           prlimit64\n  0.00    0.000003           3         1           rseq\n------ ----------- ----------- --------- --------- ----------------\n100.00    0.630562           7     82070         1 total\n",
+              "write_calls": 81934,
+              "write_syscall_seconds_under_trace": 0.628896,
+              "write_share_of_traced_syscall_time_percent": 99.74
+            },
+            "cpython": {
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "summary": "% time     seconds  usecs/call     calls    errors syscall\n------ ----------- ----------- --------- --------- ------------------\n 95.63    0.063706           3     16389     16389 ioctl\n  0.80    0.000534          10        51        15 openat\n  0.71    0.000475          11        43           mmap\n  0.69    0.000458         458         1           execve\n  0.68    0.000452           6        75           read\n  0.31    0.000209          23         9           munmap\n  0.21    0.000137           3        38           close\n  0.19    0.000128           1        87        24 stat\n  0.17    0.000115           1        66           rt_sigaction\n  0.14    0.000092           2        40           fstat\n  0.11    0.000075           4        16           brk\n  0.10    0.000067          16         4           write\n  0.05    0.000035          17         2           open\n  0.05    0.000030           1        16           getdents64\n  0.03    0.000022           1        17         3 lseek\n  0.03    0.000021          21         1           readlinkat\n  0.03    0.000017           5         3         2 newfstatat\n  0.02    0.000015           3         4           fcntl\n  0.02    0.000012           6         2           pread64\n  0.01    0.000005           5         1         1 access\n  0.01    0.000004           4         1           sched_getaffinity\n  0.00    0.000003           3         1           futex\n  0.00    0.000003           3         1           getrandom\n  0.00    0.000002           2         1           gettid\n  0.00    0.000002           1         2           prlimit64\n  0.00    0.000000           0         8           mprotect\n  0.00    0.000000           0         2         1 readlink\n  0.00    0.000000           0         1           arch_prctl\n  0.00    0.000000           0         1           set_tid_address\n  0.00    0.000000           0         1           set_robust_list\n  0.00    0.000000           0         1           rseq\n------ ----------- ----------- --------- --------- ------------------\n100.00    0.066619           3     16885     16435 total\n",
+              "write_calls": 4,
+              "write_syscall_seconds_under_trace": 6.7e-05,
+              "write_share_of_traced_syscall_time_percent": 0.1
+            }
+          },
+          "untraced_medians": {
+            "relar": {
+              "wall_ns": 524128703,
+              "user_seconds": 0.06279499999999993,
+              "system_seconds": 0.26548099999999986,
+              "voluntary_context_switches": 2,
+              "involuntary_context_switches": 20053
+            },
+            "cpython": {
+              "wall_ns": 120082033,
+              "user_seconds": 0.09459200000000001,
+              "system_seconds": 0.02290100000000006,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 31
+            }
+          }
+        }
+      ]
+    },
+    {
+      "variant": "buffered",
+      "completed_at_utc": "2026-10-17T17:26:34.466201+00:00",
+      "build_git": {
+        "revision": "bee1ac80c7f3f196711ddb603c3170329557411d",
+        "dirty": false
+      },
+      "build_record": "benchmarks/results/2026-10-17-dependency-planner-comparison.json",
+      "build_record_sha256": "68dfe3422a1c9b5c762cc82dba08a17358b2a72ea44ea85ae160e9585ed19517",
+      "artifacts_sha256": {
+        "binary": "e50571ef85cec02407e68ee51f854b2f848b0ecfa11c72f5c5ce843c31afd035",
+        "compiler": "836115cca4a8be0529c1ccfc2d9c629842a08714bd1d868bfe0c1d2da08b78e6",
+        "runtime": "a5f9279c7ee28a6e2680932f9cbbdf87bfd74fcb8e392284f0692893325601a5",
+        "llvm_ir": "7aa7197959c0af32a6d43b36799cf2e6bb46779ced2848dee35042f56a03af33",
+        "python": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+      },
+      "affinity": [
+        0
+      ],
+      "workloads": [
+        {
+          "shape": "layered",
+          "tasks": 16384,
+          "input_sha256": "4674892ec652a8fb6880df9e383d5de575b95dd01c62d96286eeeea116fb745e",
+          "expected_stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+          "stdout_bytes": 531728,
+          "stdout_lines": 83573,
+          "untraced": [
+            {
+              "engine": "cpython",
+              "iteration": 0,
+              "wall_ns": 130270708,
+              "user_seconds": 0.096957,
+              "system_seconds": 0.02967999999999999,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 58,
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
+            },
+            {
+              "engine": "relar",
+              "iteration": 0,
+              "wall_ns": 52789800,
+              "user_seconds": 0.04102899999999998,
+              "system_seconds": 0.008006,
+              "voluntary_context_switches": 3,
+              "involuntary_context_switches": 113,
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
+            },
+            {
+              "engine": "relar",
+              "iteration": 1,
+              "wall_ns": 51143338,
+              "user_seconds": 0.03595699999999999,
+              "system_seconds": 0.01098700000000001,
+              "voluntary_context_switches": 2,
+              "involuntary_context_switches": 123,
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
+            },
+            {
+              "engine": "cpython",
+              "iteration": 1,
+              "wall_ns": 124520201,
+              "user_seconds": 0.09559500000000001,
+              "system_seconds": 0.025622999999999993,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 60,
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
+            },
+            {
+              "engine": "cpython",
+              "iteration": 2,
+              "wall_ns": 129120580,
+              "user_seconds": 0.10267300000000001,
+              "system_seconds": 0.022931000000000007,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 58,
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
+            },
+            {
+              "engine": "relar",
+              "iteration": 2,
+              "wall_ns": 56877331,
+              "user_seconds": 0.04360299999999995,
+              "system_seconds": 0.01014799999999999,
+              "voluntary_context_switches": 2,
+              "involuntary_context_switches": 113,
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
+            }
+          ],
+          "strace": {
+            "relar": {
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "summary": "% time     seconds  usecs/call     calls    errors syscall\n------ ----------- ----------- --------- --------- ----------------\n 29.93    0.000530         530         1           execve\n 17.50    0.000310          14        22           mmap\n 14.17    0.000251           3        76           write\n  9.77    0.000173          24         7           munmap\n  6.61    0.000117           2        58           brk\n  6.32    0.000112           2        56           read\n  3.95    0.000070          17         4           openat\n  3.50    0.000062          62         1           set_tid_address\n  3.16    0.000056          11         5           mprotect\n  1.24    0.000022          11         2           mremap\n  1.02    0.000018           4         4           fstat\n  0.73    0.000013           3         4           close\n  0.51    0.000009           4         2           pread64\n  0.40    0.000007           7         1         1 access\n  0.28    0.000005           5         1         1 ioctl\n  0.23    0.000004           4         1           getrandom\n  0.17    0.000003           3         1           arch_prctl\n  0.17    0.000003           3         1           set_robust_list\n  0.17    0.000003           3         1           prlimit64\n  0.17    0.000003           3         1           rseq\n------ ----------- ----------- --------- --------- ----------------\n100.00    0.001771           7       249         2 total\n",
+              "write_calls": 76,
+              "write_syscall_seconds_under_trace": 0.000251,
+              "write_share_of_traced_syscall_time_percent": 14.17
+            },
+            "cpython": {
+              "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
+              "summary": "% time     seconds  usecs/call     calls    errors syscall\n------ ----------- ----------- --------- --------- ------------------\n 92.74    0.061697           3     16389     16389 ioctl\n  1.34    0.000891          17        51        15 openat\n  1.30    0.000867           8       100           read\n  1.16    0.000772          64        12           munmap\n  1.04    0.000689          14        46           mmap\n  0.70    0.000464         464         1           execve\n  0.34    0.000224           5        38           close\n  0.32    0.000212           2        87        24 stat\n  0.23    0.000154          30         5           write\n  0.17    0.000115           7        16           getdents64\n  0.17    0.000111           2        40           fstat\n  0.14    0.000090          11         8           mprotect\n  0.08    0.000055           3        16           brk\n  0.07    0.000047          23         2           open\n  0.04    0.000024          24         1           readlinkat\n  0.03    0.000022           1        17         3 lseek\n  0.02    0.000016           8         2         1 readlink\n  0.02    0.000016           5         3         2 newfstatat\n  0.02    0.000010           5         2           pread64\n  0.01    0.000007           3         2           prlimit64\n  0.01    0.000006           6         1         1 access\n  0.01    0.000006           6         1           gettid\n  0.01    0.000005           5         1           futex\n  0.01    0.000005           5         1           sched_getaffinity\n  0.01    0.000004           4         1           arch_prctl\n  0.01    0.000004           4         1           set_robust_list\n  0.00    0.000003           0         4           fcntl\n  0.00    0.000003           3         1           set_tid_address\n  0.00    0.000003           3         1           getrandom\n  0.00    0.000003           3         1           rseq\n  0.00    0.000002           0        66           rt_sigaction\n------ ----------- ----------- --------- --------- ------------------\n100.00    0.066527           3     16917     16435 total\n",
+              "write_calls": 5,
+              "write_syscall_seconds_under_trace": 0.000154,
+              "write_share_of_traced_syscall_time_percent": 0.23
+            }
+          },
+          "untraced_medians": {
+            "relar": {
+              "wall_ns": 52789800,
+              "user_seconds": 0.04102899999999998,
+              "system_seconds": 0.01014799999999999,
+              "voluntary_context_switches": 2,
+              "involuntary_context_switches": 113
+            },
+            "cpython": {
+              "wall_ns": 129120580,
+              "user_seconds": 0.096957,
+              "system_seconds": 0.025622999999999993,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 58
+            }
+          }
+        },
+        {
+          "shape": "wide",
+          "tasks": 16384,
+          "input_sha256": "b592b421eb1d3978d1426bc4bc0b00b84f9cf3aa19fc7f2a89d25006f5387ccc",
+          "expected_stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+          "stdout_bytes": 395810,
+          "stdout_lines": 81934,
+          "untraced": [
+            {
+              "engine": "cpython",
+              "iteration": 0,
+              "wall_ns": 120745737,
+              "user_seconds": 0.10112999999999994,
+              "system_seconds": 0.017022000000000093,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 31,
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
+            },
+            {
+              "engine": "relar",
+              "iteration": 0,
+              "wall_ns": 35522025,
+              "user_seconds": 0.022382000000000013,
+              "system_seconds": 0.010173999999999905,
+              "voluntary_context_switches": 2,
+              "involuntary_context_switches": 77,
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
+            },
+            {
+              "engine": "relar",
+              "iteration": 1,
+              "wall_ns": 34521885,
+              "user_seconds": 0.02279399999999998,
+              "system_seconds": 0.00891900000000001,
+              "voluntary_context_switches": 3,
+              "involuntary_context_switches": 72,
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
+            },
+            {
+              "engine": "cpython",
+              "iteration": 1,
+              "wall_ns": 125067638,
+              "user_seconds": 0.09581400000000007,
+              "system_seconds": 0.026670000000000083,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 31,
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
+            },
+            {
+              "engine": "cpython",
+              "iteration": 2,
+              "wall_ns": 122990334,
+              "user_seconds": 0.10331400000000002,
+              "system_seconds": 0.017051999999999956,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 31,
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
+            },
+            {
+              "engine": "relar",
+              "iteration": 2,
+              "wall_ns": 36037165,
+              "user_seconds": 0.02522000000000002,
+              "system_seconds": 0.007759999999999989,
+              "voluntary_context_switches": 2,
+              "involuntary_context_switches": 73,
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
+            }
+          ],
+          "strace": {
+            "relar": {
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "summary": "% time     seconds  usecs/call     calls    errors syscall\n------ ----------- ----------- --------- --------- ----------------\n 36.04    0.000430          19        22           mmap\n 18.19    0.000217           7        31           read\n 11.65    0.000139           2        47           brk\n  8.55    0.000102           1        61           write\n  7.21    0.000086          21         4           openat\n  6.29    0.000075          15         5           mprotect\n  3.10    0.000037           5         7           munmap\n  2.26    0.000027           6         4           fstat\n  1.51    0.000018           4         4           close\n  1.26    0.000015           7         2           pread64\n  0.75    0.000009           9         1         1 access\n  0.75    0.000009           4         2           mremap\n  0.50    0.000006           6         1           arch_prctl\n  0.42    0.000005           5         1           set_robust_list\n  0.34    0.000004           4         1         1 ioctl\n  0.34    0.000004           4         1           set_tid_address\n  0.34    0.000004           4         1           rseq\n  0.25    0.000003           3         1           prlimit64\n  0.25    0.000003           3         1           getrandom\n  0.00    0.000000           0         1           execve\n------ ----------- ----------- --------- --------- ----------------\n100.00    0.001193           6       198         2 total\n",
+              "write_calls": 61,
+              "write_syscall_seconds_under_trace": 0.000102,
+              "write_share_of_traced_syscall_time_percent": 8.55
+            },
+            "cpython": {
+              "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
+              "summary": "% time     seconds  usecs/call     calls    errors syscall\n------ ----------- ----------- --------- --------- ------------------\n 94.23    0.065141           3     16389     16389 ioctl\n  1.38    0.000956          18        51        15 openat\n  0.85    0.000587           7        75           read\n  0.77    0.000532           6        87        24 stat\n  0.57    0.000397           9        43           mmap\n  0.45    0.000310          34         9           munmap\n  0.39    0.000268           7        38           close\n  0.34    0.000238           3        66           rt_sigaction\n  0.25    0.000175          10        16           getdents64\n  0.20    0.000139           3        40           fstat\n  0.14    0.000095           5        16           brk\n  0.11    0.000075           9         8           mprotect\n  0.09    0.000064          16         4           write\n  0.07    0.000047           2        17         3 lseek\n  0.04    0.000029          14         2           open\n  0.02    0.000015           7         2         1 readlink\n  0.02    0.000014           3         4           fcntl\n  0.02    0.000013           6         2           pread64\n  0.01    0.000005           5         1           arch_prctl\n  0.01    0.000005           5         1           set_robust_list\n  0.01    0.000005           2         2           prlimit64\n  0.01    0.000005           5         1           getrandom\n  0.01    0.000004           4         1           gettid\n  0.01    0.000004           4         1           futex\n  0.00    0.000003           3         1           set_tid_address\n  0.00    0.000003           3         1           rseq\n  0.00    0.000002           2         1           sched_getaffinity\n  0.00    0.000000           0         1         1 access\n  0.00    0.000000           0         1           execve\n  0.00    0.000000           0         3         2 newfstatat\n  0.00    0.000000           0         1           readlinkat\n------ ----------- ----------- --------- --------- ------------------\n100.00    0.069131           4     16885     16435 total\n",
+              "write_calls": 4,
+              "write_syscall_seconds_under_trace": 6.4e-05,
+              "write_share_of_traced_syscall_time_percent": 0.09
+            }
+          },
+          "untraced_medians": {
+            "relar": {
+              "wall_ns": 35522025,
+              "user_seconds": 0.02279399999999998,
+              "system_seconds": 0.00891900000000001,
+              "voluntary_context_switches": 2,
+              "involuntary_context_switches": 73
+            },
+            "cpython": {
+              "wall_ns": 122990334,
+              "user_seconds": 0.10112999999999994,
+              "system_seconds": 0.017051999999999956,
+              "voluntary_context_switches": 1,
+              "involuntary_context_switches": 31
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

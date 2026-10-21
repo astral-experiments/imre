@@ -90,3 +90,20 @@ The harness compiles once at LLVM O3, validates against the oracle and CPython, 
 JSON retains every raw duration, execution order, exit status, and stderr, plus the full input and complete expected output once per workload. Each warmup and sample stores its stdout SHA256 and UTF-8 byte length after an exact comparison with that expected output; hashing and comparison are outside the timed region. This preserves evidence for every execution without repeating a large report in every sample. Records also include hashes of every package source file and relevant tool/artifact, Git revision and dirty status, interpreter/build metadata, and CPU/OS details.
 
 Medians, observed ranges, and quartiles describe these runs rather than providing confidence intervals. Shared-host scheduling, CPU frequency, startup, and report size affect results; the measurements establish behavior for these dependency-planner inputs, not a general Python speedup. The default cases are quick to reproduce; `--sizes 128 2048 16384 --shapes layered wide` additionally exposes scaling across larger graphs.
+
+To compare a new native build with a preserved baseline in the same session, supply both the baseline executable and its original benchmark record:
+
+```sh
+python3.14 benchmarks/dependency_benchmark.py \
+  --compiler target/release/relar \
+  --runtime target/release/librelar_runtime.a \
+  --baseline benchmarks/local/dependency-planner-final/dependency_planner \
+  --baseline-record benchmarks/results/2026-10-17-dependency-planner-baseline.json \
+  --python python3.14 --sizes 128 2048 16384 --shapes layered wide \
+  --artifact-dir benchmarks/local/dependency-planner-comparison \
+  --output benchmarks/local/dependency-planner-comparison.json
+```
+
+The baseline is never rebuilt. Its executable hash and all package source hashes must match the supplied record before compilation or validation proceeds; output paths must not overwrite either baseline input. The result retains the record's hash, revision, source/tool/artifact hashes, tool versions, and compilation provenance. Both native executables independently pass all 135 oracle cases before timing, and every subsequent run must match complete output. Source files, tools, both native executables, and the baseline record are checked again after measurement.
+
+In this mode each warmup or sample is a triplet. The six execution orders repeat in a cycle, with adjacent orders reversing each other; the default twelve measured triplets use every order twice. Use a multiple of six samples to balance every implementation's execution position and immediate predecessor. The default two warmup triplets prime every implementation but do not cover all six orders. Summaries retain the CPython/Relar ratio and add baseline/Relar and CPython/baseline ratios, each computed from medians in the same session. Omitting both baseline arguments retains the two-way paired benchmark.
