@@ -135,30 +135,32 @@ impl ExactSizeIterator for SliceIndices {}
 pub unsafe extern "C" fn relar_str_get(value: *const Str, at: usize) -> *const Str {
     // SAFETY: the caller roots the integer throughout conversion.
     let at = unsafe { Int::borrow(at) };
-    let at = match crate::decode_index(&at) {
-        Ok(at) => at,
-        Err(_) => {
-            return Error::new(
-                Kind::IndexError,
-                "cannot fit 'int' into an index-sized integer",
-            )
-            .returning(std::ptr::null());
-        }
-    };
     // SAFETY: the string is immutable and rooted throughout the read.
     let value = unsafe { &*value };
+    let character = match string_character(value, &at) {
+        Ok(character) => character,
+        Err(error) => return error.returning(std::ptr::null()),
+    };
+    let mut result = Str::new("");
+    result.push(character);
+    Rc::into_raw(Rc::new(result))
+}
+
+/// Shares Unicode indexing and exact failure messages between owned strings and
+/// caller-buffer fragments; negative indices avoid a complete length scan.
+pub(super) fn string_character(value: &str, at: &Int) -> Result<char> {
+    let at = crate::decode_index(at).map_err(|_| {
+        Error::new(
+            Kind::IndexError,
+            "cannot fit 'int' into an index-sized integer",
+        )
+    })?;
     let character = if at < 0 {
         value.chars().rev().nth(at.unsigned_abs() - 1)
     } else {
         value.chars().nth(at as usize)
     };
-    let Some(character) = character else {
-        return Error::new(Kind::IndexError, "string index out of range")
-            .returning(std::ptr::null());
-    };
-    let mut result = Str::new("");
-    result.push(character);
-    Rc::into_raw(Rc::new(result))
+    character.ok_or_else(|| Error::new(Kind::IndexError, "string index out of range"))
 }
 
 /// Copies selected code points in one forward or backward pass. UTF-8 offsets
