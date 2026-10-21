@@ -130,7 +130,9 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
                 candidates[*target].eligible = false;
                 candidates[*source].eligible = false;
             }
-            Statement::Clear(slot) => candidates[*slot].eligible = false,
+            // Clearing the aggregate releases exactly the component owners.
+            // It neither observes tuple identity nor lets the aggregate escape.
+            Statement::Clear(_) => {}
             Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
                 for value in [a, b, c] {
                     inspect_expression(value, candidates);
@@ -259,6 +261,12 @@ fn rewrite_block(
                     continue;
                 }
             }
+            Statement::Clear(slot) => {
+                if let Some(fields) = &components[*slot] {
+                    output.extend(fields.iter().copied().map(Statement::Clear));
+                    continue;
+                }
+            }
             Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
                 for value in [a, b, c] {
                     rewrite_expression(value, components);
@@ -286,7 +294,7 @@ fn rewrite_block(
                 }
                 rewrite_block(body, locals, components, producers);
             }
-            Statement::Move(..) | Statement::Clear(_) | Statement::Break | Statement::Continue => {}
+            Statement::Move(..) | Statement::Break | Statement::Continue => {}
         }
         output.push(statement);
     }
@@ -389,5 +397,49 @@ fn children_mut(expression: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
         | ExprKind::Str(_)
         | ExprKind::None
         | ExprKind::Local(_) => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleared_unpacking_roots_do_not_materialize_tuples() {
+        let source = r#"
+def total(values: list[int]) -> int:
+    number, name, payload = (1000000000000000000000000000000, "snapshot", [1])
+    print(number)
+    print(name)
+    print(payload[0])
+    result = 0
+    for index, value in enumerate(values, 4):
+        result += index + value
+    return result
+
+print(total([10, 20]))
+"#;
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        let mut module = crate::frontend::lower(&graph).unwrap();
+        let before = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        assert_eq!(before.matches("call ptr @relar_object_new(").count(), 2);
+        scalarize(&mut module);
+        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        assert!(!after.contains("call ptr @relar_object_new("));
+        let function = &module.functions[0];
+        let cleared = function
+            .body
+            .iter()
+            .filter_map(|statement| {
+                if let Statement::Clear(slot) = statement {
+                    Some(function.locals[*slot])
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        assert!(cleared.contains(&Type::Int));
+        assert!(cleared.contains(&Type::Str));
+        assert!(cleared.contains(&Type::ListInt));
     }
 }
