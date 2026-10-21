@@ -121,13 +121,13 @@ fn expression(value: &Expr, functions: &[bool]) -> bool {
         }
         ExprKind::Call(id, args) => {
             functions.get(*id).copied().unwrap_or(true)
-                || args.iter().any(|arg| expression(arg, functions))
+                || args.values.iter().any(|arg| expression(arg, functions))
         }
         ExprKind::Construct {
             initializer, args, ..
         } => {
             functions.get(*initializer).copied().unwrap_or(true)
-                || args.iter().any(|arg| expression(arg, functions))
+                || args.values.iter().any(|arg| expression(arg, functions))
         }
         ExprKind::Exception { message, .. } => message
             .as_ref()
@@ -187,7 +187,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{ExceptHandler, Function};
+    use crate::ir::{CallArgs, ExceptHandler, Function};
 
     fn integer() -> Expr {
         Expr {
@@ -208,7 +208,7 @@ mod tests {
     fn call(id: usize, args: Vec<Expr>) -> Expr {
         Expr {
             ty: Type::Int,
-            kind: ExprKind::Call(id, args),
+            kind: ExprKind::Call(id, CallArgs::positional(args)),
         }
     }
 
@@ -240,7 +240,10 @@ mod tests {
         };
         let construct = |initializer, args| Expr {
             ty: Type::Class(0),
-            kind: ExprKind::Construct { initializer, args },
+            kind: ExprKind::Construct {
+                initializer,
+                args: CallArgs::positional(args),
+            },
         };
         let module = Module {
             types: Default::default(),

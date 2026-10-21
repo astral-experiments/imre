@@ -38,8 +38,8 @@ REJECTED = {
     "wrong_self_name": CELL.replace("def __init__(self,", "def __init__(other,").replace("self.value = value", "other.value = value"),
     "wrong_self_annotation": CELL.replace("def __init__(self,", "def __init__(self: int,"),
     "missing_self": CELL.replace("def add(self, amount: int)", "def add(amount: int)"),
-    "method_default": CELL.replace("amount: int)", "amount: int = 1)"),
-    "method_keyword_call": CELL + "Cell(1).add(amount=2)\n",
+    "method_expression_default": CELL.replace("amount: int)", "amount: int = 1 + 1)"),
+    "method_unknown_keyword": CELL + "Cell(1).add(unknown=2)\n",
     "recursive_method": CELL.replace("return self.value", "return self.add(amount)"),
     "mutual_method_recursion": CELL.replace("return self.value", "return self.other(amount)")
         + "    def other(self, amount: int) -> int:\n        return self.add(amount)\n",

@@ -6,7 +6,7 @@ class Reader:
     position: int
     label: str
 
-    def __init__(self, lines: list[str], label: str) -> None:
+    def __init__(self, lines: list[str], *, label: str = "stock") -> None:
         self.lines = lines
         self.position = 0
         self.label = label
@@ -28,7 +28,7 @@ class Reader:
         fields = self.next()
         if len(fields) != 1:
             raise ValueError(self.label + ": expected count")
-        value = self.number(fields[0])
+        value = self.number(token=fields[0])
         if value < 0:
             raise ValueError(self.label + ": negative count")
         return value
@@ -37,14 +37,14 @@ class Reader:
         fields = self.next()
         if len(fields) != 2:
             raise ValueError(self.label + ": expected SKU and quantity")
-        return fields[0], self.number(fields[1])
+        return fields[0], self.number(token=fields[1])
 
     def finish(self) -> None:
         if self.position != len(self.lines):
             raise ValueError(self.label + ": trailing data")
 
 
-def load(path: str, label: str) -> list[str]:
+def load(path: str, *, label: str = "stock") -> list[str]:
     try:
         with open(path, "r", encoding="utf-8") as source:
             return source.read().splitlines()
@@ -57,28 +57,28 @@ def load(path: str, label: str) -> list[str]:
 
 
 def read_stock(lines: list[str]) -> list[Stock]:
-    reader = Reader(lines, "stock")
+    reader = Reader(lines)
     count = reader.count()
     result: list[Stock] = []
     for _ in range(count):
         sku, quantity = reader.item()
         if quantity < 0:
             raise ValueError("stock: negative quantity")
-        result.append(Stock(sku, quantity))
+        result.append(Stock(sku, quantity=quantity))
     reader.finish()
     return result
 
 
-def read_request(reader: Reader, batch: int, row: int) -> Request:
+def read_request(reader: Reader, *, batch: int, row: int) -> Request:
     sku, quantity = reader.item()
-    return Request(batch, row, sku, quantity)
+    return Request(batch=batch, row=row, sku=sku, quantity=quantity)
 
 
 def read_orders(lines: list[str]) -> list[list[Request]]:
-    reader = Reader(lines, "orders")
+    reader = Reader(lines, label="orders")
     count = reader.count()
     result: list[list[Request]] = [
-        [read_request(reader, batch, row) for row in range(reader.count())]
+        [read_request(reader, batch=batch, row=row) for row in range(reader.count())]
         for batch in range(count)
     ]
     reader.finish()

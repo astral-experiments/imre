@@ -1239,25 +1239,37 @@ impl Emitter<'_, '_> {
             ExprKind::Boolean(and, values) => self.boolean(*and, values),
             ExprKind::Compare(values, ops) => self.comparisons(values, ops),
             ExprKind::Call(id, args) => {
-                let args = args.iter().map(|arg| self.operand(arg)).collect::<Vec<_>>();
+                let values = args
+                    .values
+                    .iter()
+                    .map(|arg| self.operand(arg))
+                    .collect::<Vec<_>>();
                 let result = self.user_call(
                     *id,
                     expression.ty,
-                    &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
+                    &args
+                        .order
+                        .iter()
+                        .map(|&index| &values[index].value)
+                        .collect::<Vec<_>>(),
                 );
-                for arg in &args {
+                for arg in &values {
                     self.release_operand(arg);
                 }
                 result
             }
             ExprKind::Construct { initializer, args } => {
                 // Arguments are evaluated and rooted before __init__ starts.
-                let args = args.iter().map(|arg| self.operand(arg)).collect::<Vec<_>>();
+                let values = args
+                    .values
+                    .iter()
+                    .map(|arg| self.operand(arg))
+                    .collect::<Vec<_>>();
                 let object = self.record(expression.ty);
                 let mut inputs = vec![&object];
-                inputs.extend(args.iter().map(|arg| &arg.value));
+                inputs.extend(args.order.iter().map(|&index| &values[index].value));
                 self.user_call(*initializer, Type::None, &inputs);
-                for arg in &args {
+                for arg in &values {
                     self.release_operand(arg);
                 }
                 object

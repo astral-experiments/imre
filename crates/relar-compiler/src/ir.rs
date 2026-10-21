@@ -78,9 +78,10 @@ impl Module {
                 | ExprKind::Set { values, .. }
                 | ExprKind::Compare(values, _)
                 | ExprKind::Boolean(_, values)
-                | ExprKind::Call(_, values)
-                | ExprKind::Construct { args: values, .. }
                 | ExprKind::Builtin(_, values) => values.iter().any(expression),
+                ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+                    args.values.iter().any(expression)
+                }
                 ExprKind::Dict { entries, .. } => entries
                     .iter()
                     .any(|(key, value)| expression(key) || expression(value)),
@@ -155,6 +156,26 @@ pub(crate) struct Expr {
     pub kind: ExprKind,
 }
 
+/// Values are evaluated and rooted in source order. `order` is a permutation of
+/// their indices that supplies the native call's parameter order without
+/// reevaluation. Methods include their receiver first; constructors omit the
+/// implicit receiver, which is allocated only after these values are evaluated.
+#[derive(Clone)]
+pub(crate) struct CallArgs {
+    pub values: Vec<Expr>,
+    pub order: Vec<usize>,
+}
+
+impl CallArgs {
+    /// Uses the existing positional order for calls that need no argument binding.
+    pub(crate) fn positional(values: Vec<Expr>) -> Self {
+        Self {
+            order: (0..values.len()).collect(),
+            values,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum ExprKind {
     Int(String),
@@ -181,10 +202,10 @@ pub(crate) enum ExprKind {
     Boolean(bool, Vec<Expr>),
     Not(Box<Expr>),
     Negate(Box<Expr>),
-    Call(usize, Vec<Expr>),
+    Call(usize, CallArgs),
     Construct {
         initializer: usize,
-        args: Vec<Expr>,
+        args: CallArgs,
     },
     Exception {
         kind: u32,
