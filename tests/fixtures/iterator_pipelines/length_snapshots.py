@@ -7,7 +7,9 @@ def nested(values: list[int], words: list[str], repeats: int) -> int:
     total = len(alias) + len(text_alias)
     while repeats > 0:
         total += sum(
-            sum(left + right for left, right in zip(alias, reversed(alias), strict=True))
+            sum(
+                left + right for left, right in zip(alias, reversed(alias), strict=True)
+            )
             for index in range(2)
         )
         total += sum(len(word) for word in (item for item in text_alias))

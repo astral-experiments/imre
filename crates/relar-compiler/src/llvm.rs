@@ -11,6 +11,7 @@ use crate::ir::{
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
 
+mod conditionals;
 mod truthiness;
 mod unions;
 
@@ -2505,6 +2506,12 @@ impl Emitter<'_, '_> {
     /// branch's temporary before emitting the other branch keeps its error
     /// cleanup from referring to an SSA value that does not dominate it.
     fn conditional(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> Value {
+        if let Some(value) = conditionals::absolute_operand(test, yes, no) {
+            let value = self.operand(value);
+            let result = self.call("int_abs", Type::Int, &[&value.value]);
+            self.release_operand(&value);
+            return result;
+        }
         let test = self.expr(test);
         let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
         self.branch(&test.operand, &yes_label, &no_label);
@@ -4037,6 +4044,7 @@ big:
         )
         .unwrap();
     }
+    output.push_str(conditionals::INTEGER_ABSOLUTE_HELPER);
     output.push_str(&division_helpers());
     output.push_str(&bitwise_helpers());
     output.push_str(
