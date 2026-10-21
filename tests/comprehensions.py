@@ -93,14 +93,16 @@ ERRORS = {
 }
 
 
-def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+def run(
+    command: list[str], cwd: Path, *, timeout: int = 60
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         cwd=cwd,
         input="",
         text=True,
         capture_output=True,
-        timeout=60,
+        timeout=timeout,
         env={
             **os.environ,
             "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",

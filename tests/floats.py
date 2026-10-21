@@ -263,6 +263,8 @@ def main() -> None:
                         *flags,
                     ],
                     temporary,
+                    # Wide-integer fixtures need more ThinLTO time on CI workers.
+                    timeout=300 if args.lto_linker else 60,
                 )
                 assert built.returncode == 0 and not built.stderr, (
                     source.name,
