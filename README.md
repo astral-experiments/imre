@@ -33,13 +33,13 @@ But not:
 ## Benchmark
 
 We ran the same [inventory reconciliation program](examples/inventory_reconciliation/)
-with Relar and CPython and compared it with a Rust implementation. Each workload
-has 16,384 positive requests:
+with Relar and CPython and compared it with a Rust implementation using
+arbitrary-precision integers. Each workload has 16,384 positive requests:
 
-| Workload | Relar | CPython 3.14.5 | Rust (BigInt) | Relar speedup vs. CPython |
+| Workload | CPython 3.14.5 (ms) | Relar (ms) | Rust (ms) | Relar speedup vs. CPython |
 | --- | ---: | ---: | ---: | ---: |
-| Dense | 26.69 ms | 77.66 ms | 23.34 ms | 2.91× |
-| Sparse | 52.24 ms | 112.35 ms | 43.05 ms | 2.15× |
+| Repeated requests (64 products in stock) | 77.66 | 26.69 | 23.34 | 2.91× |
+| Distinct requests (16,384 products in stock) | 112.35 | 52.24 | 43.05 | 2.15× |
 
 These are median end-to-end times from 48 runs per implementation on Linux in
 October 2026, including startup and file I/O. Relar's executable was compiled
