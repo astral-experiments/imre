@@ -145,11 +145,13 @@ def contains(values: list[str], needle: str) -> bool:
 
 
 def build_variant(options: list[str]) -> str | None:
-    if contains(options, "debug") and contains(options, "freethreaded"):
+    debug = contains(options, "debug")
+    freethreaded = contains(options, "freethreaded")
+    if debug and freethreaded:
         return "freethreaded+debug"
-    if contains(options, "debug"):
+    if debug:
         return "debug"
-    if contains(options, "freethreaded"):
+    if freethreaded:
         return "freethreaded"
     return None
 
@@ -158,10 +160,12 @@ def parse_artifact(version: Version, release: int, artifact: Artifact) -> Downlo
     filename = unquote(artifact.url.rsplit("/", maxsplit=1)[-1])
     platform = artifact.platform
     options: list[str] = []
-    for suffix in ["-debug", "-freethreaded"]:
-        if platform.endswith(suffix):
-            platform = platform[:-len(suffix)]
-            options.append(suffix.lstrip("-"))
+    if platform.endswith("-debug"):
+        platform = platform[:-len("-debug")]
+        options.append("debug")
+    if platform.endswith("-freethreaded"):
+        platform = platform[:-len("-freethreaded")]
+        options.append("freethreaded")
     flavor = parse_variant(artifact.variant, options)
     if contains(options, "static"):
         return None

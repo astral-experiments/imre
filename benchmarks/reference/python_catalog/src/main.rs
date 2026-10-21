@@ -284,14 +284,15 @@ fn parse_artifact(
             options.push(&suffix[1..]);
         }
     }
-    let parts = artifact.variant.split('+').collect::<Vec<_>>();
-    let last = parts.last().copied().unwrap_or("");
-    let flavor = if ["full", "install_only", "install_only_stripped"].contains(&last) {
-        options.extend_from_slice(&parts[..parts.len() - 1]);
-        last
-    } else {
-        &artifact.variant
-    };
+    let mut flavor = artifact.variant.as_str();
+    if artifact.variant.contains('+') {
+        let parts = artifact.variant.split('+').collect::<Vec<_>>();
+        let last = parts.last().copied().unwrap_or("");
+        if ["full", "install_only", "install_only_stripped"].contains(&last) {
+            options.extend_from_slice(&parts[..parts.len() - 1]);
+            flavor = last;
+        }
+    }
     if options.contains(&"static") {
         return Ok(None);
     }
