@@ -343,30 +343,33 @@ fn empty_list(schema: &Schema) -> OwnedWord {
 /// Counts containers even in ignored values, where serde's skipping path does
 /// not consume its recursion budget. Syntax validation remains the parser's job.
 fn check_depth(text: &str) -> Result<(), &'static str> {
-    let (mut depth, mut quoted, mut escaped) = (0_usize, false, false);
-    for byte in text.bytes() {
-        if quoted {
-            if escaped {
-                escaped = false;
-            } else if byte == b'\\' {
-                escaped = true;
-            } else if byte == b'"' {
-                quoted = false;
-            }
-        } else {
-            match byte {
-                b'"' => quoted = true,
-                b'[' | b'{' => {
-                    depth += 1;
-                    if depth > MAX_DEPTH {
-                        return Err("JSON nesting exceeds 128 containers");
-                    }
+    let mut depth = 0_usize;
+    let mut remaining = text.as_bytes();
+    while let Some((&byte, rest)) = remaining.split_first() {
+        remaining = rest;
+        match byte {
+            b'"' => loop {
+                // Long names dominate report JSON. Skip ordinary string bytes
+                // in vectorized spans, retaining the early limit on containers.
+                let Some(index) = memchr::memchr2(b'"', b'\\', remaining) else {
+                    // The parser reports unterminated strings and escapes.
+                    return Ok(());
+                };
+                let closed = remaining[index] == b'"';
+                remaining = &remaining[index + 1..];
+                if closed {
+                    break;
                 }
-                b']' | b'}' => {
-                    depth = depth.saturating_sub(1);
+                remaining = remaining.get(1..).unwrap_or(&[]);
+            },
+            b'[' | b'{' => {
+                depth += 1;
+                if depth > MAX_DEPTH {
+                    return Err("JSON nesting exceeds 128 containers");
                 }
-                _ => {}
             }
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
         }
     }
     Ok(())

@@ -15,6 +15,7 @@ num-traits.workspace = true
 compact_str.workspace = true
 itoa.workspace = true
 libc = "=0.2.190"
+memchr = "=2.8.3"
 ruff_python_literal = "=0.0.14"
 icu_properties = "=2.3.0"
 ryu = "=1.0.23"

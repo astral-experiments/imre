@@ -25,8 +25,10 @@ def diff_items(
             names.append(name)
     differences: list[ItemDifference] = []
     for name in names:
-        old_bytes = item_total_bytes(old_by_name[name]) if name in old_by_name else 0
-        new_bytes = item_total_bytes(new_by_name[name]) if name in new_by_name else 0
+        old_item = old_by_name.get(name)
+        new_item = new_by_name.get(name)
+        old_bytes = item_total_bytes(old_item) if old_item is not None else 0
+        new_bytes = item_total_bytes(new_item) if new_item is not None else 0
         if old_bytes != new_bytes:
             differences.append(ItemDifference(name.replace(" ", ""), old_bytes, new_bytes))
     # The original iterates a set union before stable sorting. Equal magnitudes
