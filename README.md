@@ -3,24 +3,28 @@
 An ahead-of-time compiler for typed Python, written in Rust.
 
 > [!WARNING]
-> This project's code, PR summaries, and documentation were authored by AI agents.
-> Relar is experimental and is not yet a production-ready replacement for CPython.
+> This README includes human edits; all code changes, PR summaries, and additional
+> documentation were authored entirely by GPT-6 Astra in [Codex](https://openai.com/codex/).
 > Use at your own risk.
 
-## Highlights
+## Language support
 
-- Compile typed Python programs and selected pure-Python packages into native executables.
-- Use static imports, typed classes and dataclasses, containers, comprehensions, slicing, keyword arguments, and scalar f-strings.
-- Use binary64 floats, immutable bytes, structural pattern matching, and assignment expressions.
-- Use Python truth tests, operand-returning `and`/`or`, and `for`/`while` `else` suites.
-- Chain assignments, unpack sequences and starred targets, and expand typed lists, sets, and dictionaries.
-- Infer concrete function signatures and consume concrete iterables with `list`, integer `sum`, and `map(int, ...)`.
-- Compose generator expressions, `zip(strict=True)`, and `reversed`, with short-circuiting `any` and `all`.
-- Pass typed function values and bound methods, use noncapturing lambdas, and compose lazy `map`/`filter` pipelines.
-- Use read-only properties, class and static methods, and `Self` annotations.
-- Read and write UTF-8 files, join native `pathlib.Path` values, and scan directories with `iterdir` and bounded `glob`.
-- Preserve arbitrary-precision integers, shared mutation, and supported exception behavior.
-- Run compiled programs without a Python installation or a CPython dependency.
+Relar compiles a restricted subset of Python into native executables that run
+without a Python installation.
+
+**Supported:** Statically resolved imports; functions with exact declared or
+inferred signatures; classes and dataclasses with fixed fields; concrete typed
+containers; common control flow, comprehensions, and immediately consumed iterator
+pipelines; and selected file and path operations. Integers retain arbitrary
+precision.
+
+**Unsupported:** Dynamically typed storage (`Any` or unrestricted unions), recursive
+calls, capturing closures, reflection, dynamic attributes, generator functions,
+async, and arbitrary decorators. Relar rejects unsupported operations during
+compilation, even in unused functions or unreachable branches; it does not fall back
+to CPython. See the [supported-subset guide](docs/subset.md) for the full contract.
+
+## Benchmarks
 
 | Workload | Positive requests | Relar | CPython 3.14.5 | Speedup |
 | --- | ---: | ---: | ---: | ---: |
@@ -39,7 +43,7 @@ Relar owns the compiler and runtime; Ruff provides parsing and ty provides Pytho
 semantic analysis. An additional checker enforces exact types and a restricted
 language contract before emitting LLVM IR. Validation combines Rust tests,
 differential checks against CPython, sanitizer checks, and independent application
-oracles; the [supported-subset guide](docs/subset.md) describes remaining gaps.
+oracles.
 
 ## Installation
 
