@@ -1,0 +1,1553 @@
+{
+  "schema": "relar-scalar-fstrings-evidence-v1",
+  "measured_source_commit": "e9c2a879ff258892ffe8d2c6862b5fa7688eea57",
+  "source_snapshot_file_count": 174,
+  "retained_validation_evidence_count": 84,
+  "timing_session_completed_at_utc": "2026-10-18T23:15:58.844589+00:00",
+  "archive": {
+    "file": "2026-10-18-scalar-fstrings-evidence.tar.gz",
+    "sha256": "f357fe2b72234cf84bda9105051c22ba5ea79d9bc5cccd67fb302b10a3055bae",
+    "bytes": 1168367,
+    "member_count": 295
+  },
+  "members": {
+    "README.md": {
+      "sha256": "7b4f1aa41f110d185d4a5ffea73d2daafda531355055c231c4eb992ea7161555",
+      "bytes": 1373,
+      "source": "publication reproduction notes"
+    },
+    "commands/cargo.sh": {
+      "sha256": "74f3f3596cf89fdecf9458d74fc47cfcf09533b8c10f3b569470f74ddbc80fd8",
+      "bytes": 326,
+      "source": "embedded final frozen build record"
+    },
+    "retained/benchmarks/local/inventory-performance-lto-final/inventory_reconciliation.ll": {
+      "sha256": "c61ce8d068da5454c136ae9fc83ad7451f65665b6bc52f99883c8947da9d28f6",
+      "bytes": 195538,
+      "source": "benchmarks/local/inventory-performance-lto-final/inventory_reconciliation.ll"
+    },
+    "retained/benchmarks/local/inventory-performance-normal-final/incremental_planner.ll": {
+      "sha256": "9750c50f6e2d62a55d66c902033df52d42e9f933db5f33fe7ef561645058c2a0",
+      "bytes": 172905,
+      "source": "benchmarks/local/inventory-performance-normal-final/incremental_planner.ll"
+    },
+    "retained/benchmarks/local/inventory-performance-normal-final/inventory_reconciliation.ll": {
+      "sha256": "c61ce8d068da5454c136ae9fc83ad7451f65665b6bc52f99883c8947da9d28f6",
+      "bytes": 195538,
+      "source": "benchmarks/local/inventory-performance-normal-final/inventory_reconciliation.ll"
+    },
+    "retained/benchmarks/local/inventory-performance-tools-final/build-record.json": {
+      "sha256": "f35904503c4c6e0f38255738d5a57bdea275e4e8e0212b3fb4d76d80c91e0476",
+      "bytes": 675910,
+      "source": "benchmarks/local/inventory-performance-tools-final/build-record.json"
+    },
+    "retained/benchmarks/local/inventory-reference-final-lto/build-record.json": {
+      "sha256": "98626e3315034bf7209e39604b781204f900fb669b605502bcc5edd2b3ae5a14",
+      "bytes": 26451,
+      "source": "benchmarks/local/inventory-reference-final-lto/build-record.json"
+    },
+    "retained/benchmarks/local/inventory-reference-final-normal/build-record.json": {
+      "sha256": "42c856ea6f5cf26713bf601daf0e7074b5b010e08ee082eefa1656aa21ba5198",
+      "bytes": 26337,
+      "source": "benchmarks/local/inventory-reference-final-normal/build-record.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-baseline-source/inventory_reconciliation/__init__.py": {
+      "sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+      "bytes": 75,
+      "source": "benchmarks/local/scalar-fstrings-baseline-source/inventory_reconciliation/__init__.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-baseline-source/inventory_reconciliation/__main__.py": {
+      "sha256": "853f4a7ae796ab29edbb9ff098d300969905bfe988ede2c90210e988191369a2",
+      "bytes": 753,
+      "source": "benchmarks/local/scalar-fstrings-baseline-source/inventory_reconciliation/__main__.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-baseline-source/inventory_reconciliation/load.py": {
+      "sha256": "074239fd9df26acc79424aed65e004df89d8b27c2d59fd7e2401ab74abeaad4d",
+      "bytes": 2528,
+      "source": "benchmarks/local/scalar-fstrings-baseline-source/inventory_reconciliation/load.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-baseline-source/inventory_reconciliation/model.py": {
+      "sha256": "c3214a814d98213ff00bcb1dac25f18ac2c5bcafba96e07a8457aa161e3cbcbc",
+      "bytes": 1524,
+      "source": "benchmarks/local/scalar-fstrings-baseline-source/inventory_reconciliation/model.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-baseline-source/inventory_reconciliation/reconcile.py": {
+      "sha256": "6c5aa3a17b5650e7bdad2434fbf80c3a9c08ca691de31d2cf87fdd1d7829125c",
+      "bytes": 1561,
+      "source": "benchmarks/local/scalar-fstrings-baseline-source/inventory_reconciliation/reconcile.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-baseline-source/inventory_reconciliation/render.py": {
+      "sha256": "722a7ce42875d1997ba3dcbd85f17c1afaf14c5445406bb380a268b4681a023f",
+      "bytes": 2634,
+      "source": "benchmarks/local/scalar-fstrings-baseline-source/inventory_reconciliation/render.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-baseline-source/manifest.json": {
+      "sha256": "b550b3970738060505b77f1a61cb4771371de83c1ee877788e9dece81030abc6",
+      "bytes": 1812,
+      "source": "benchmarks/local/scalar-fstrings-baseline-source/manifest.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-build.py": {
+      "sha256": "8ea5aefe5e90036fda94f2a02605820f671715aa5b6641eae22cb8f60791ed8c",
+      "bytes": 4897,
+      "source": "benchmarks/local/scalar-fstrings-build.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-cargo-checks.py": {
+      "sha256": "9a68fa3f4e382a543f29763d355001890f0b4a6dfcd4744852b265f05eba9d1e",
+      "bytes": 1129,
+      "source": "benchmarks/local/scalar-fstrings-cargo-checks.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-cargo-validation/clippy.log": {
+      "sha256": "2da22083e54eeea3b931d863784a3eb0acb6c1c7c688fe1b3176864c0f937bec",
+      "bytes": 242,
+      "source": "benchmarks/local/scalar-fstrings-cargo-validation/clippy.log"
+    },
+    "retained/benchmarks/local/scalar-fstrings-cargo-validation/fmt.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-cargo-validation/fmt.log"
+    },
+    "retained/benchmarks/local/scalar-fstrings-cargo-validation/record.json": {
+      "sha256": "cb325193b19b5b7894161b92cc840a8675e8b414e2613dc5a6829a912f143814",
+      "bytes": 1269,
+      "source": "benchmarks/local/scalar-fstrings-cargo-validation/record.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-cargo-validation/unit.log": {
+      "sha256": "076d0fa1baa85b049af7e92162ba61d3e95712f865407e660018b315e9d1d392",
+      "bytes": 7102,
+      "source": "benchmarks/local/scalar-fstrings-cargo-validation/unit.log"
+    },
+    "retained/benchmarks/local/scalar-fstrings-comparison-summary.json": {
+      "sha256": "b05c74c1cbf3440b80cfa74fc9ac185bc4f6156b048755a84d76b3e844695d17",
+      "bytes": 9860,
+      "source": "benchmarks/local/scalar-fstrings-comparison-summary.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-fill-report.py": {
+      "sha256": "5ec7d76ee7e3adc55df11936422ba8522ec62a77b98411a553f74cf6969d155b",
+      "bytes": 1280,
+      "source": "benchmarks/local/scalar-fstrings-fill-report.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-final-audit.json": {
+      "sha256": "7c5866ea0bdd717e34ecf1c9d5ceaae156acc9d9eae1638111bc63c42c0f7540",
+      "bytes": 94456,
+      "source": "benchmarks/local/scalar-fstrings-final-audit.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-final-audit.md": {
+      "sha256": "b0126fb6873c4385803b6f82b24d46ca90dd31df7e1762f7dec14d8d17174776",
+      "bytes": 1200,
+      "source": "benchmarks/local/scalar-fstrings-final-audit.md"
+    },
+    "retained/benchmarks/local/scalar-fstrings-final-audit.py": {
+      "sha256": "55707910d603d84fb759dcb61c2f9c0baab739c4c1d147edc24106ad30e3e2fd",
+      "bytes": 43396,
+      "source": "benchmarks/local/scalar-fstrings-final-audit.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-final-launch.py": {
+      "sha256": "584ec700f1a13cb65ffcbbca9db79d14ee234d3871418484969cbe056eb9f3da",
+      "bytes": 11050,
+      "source": "benchmarks/local/scalar-fstrings-final-launch.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-final-session.json": {
+      "sha256": "f86f57decc902f35e36e6989cc0dd5f42b1208f54c84cb679f4da0275faef44e",
+      "bytes": 34311,
+      "source": "benchmarks/local/scalar-fstrings-final-session.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-harness-checks.json": {
+      "sha256": "11efd48d0ea7a926351acd7b7d16150cc2526022c1e4e9de3e43ceb1d7251923",
+      "bytes": 1954,
+      "source": "benchmarks/local/scalar-fstrings-harness-checks.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-harness-checks.py": {
+      "sha256": "b768733b9d9a2b71457bfe0bbb847ea16098af3ed934477d27978908bf82e64e",
+      "bytes": 13272,
+      "source": "benchmarks/local/scalar-fstrings-harness-checks.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-inventory-asan.py": {
+      "sha256": "5a164d84389f4aa98d65dee1d59c03cd75dd41c52ad71605e991e0fbbfdc77c2",
+      "bytes": 2510,
+      "source": "benchmarks/local/scalar-fstrings-inventory-asan.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-inventory-asan/build.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-inventory-asan/build.log"
+    },
+    "retained/benchmarks/local/scalar-fstrings-inventory-asan/inventory_reconciliation.ll": {
+      "sha256": "2bfa844602c671a196fbde1627070c5b04d9fcc83ef0a95031f73e709bcf0444",
+      "bytes": 196048,
+      "source": "benchmarks/local/scalar-fstrings-inventory-asan/inventory_reconciliation.ll"
+    },
+    "retained/benchmarks/local/scalar-fstrings-inventory-asan/record.json": {
+      "sha256": "ee2f5338a5b20e4c734382e1c1eafa193366f37de01b59f1241768169db57b81",
+      "bytes": 5529,
+      "source": "benchmarks/local/scalar-fstrings-inventory-asan/record.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-inventory-asan/validate.log": {
+      "sha256": "71f81465f9fbcbb5d3b0403ea94357247a4826cdfdf7887743da9542434af1d3",
+      "bytes": 130,
+      "source": "benchmarks/local/scalar-fstrings-inventory-asan/validate.log"
+    },
+    "retained/benchmarks/local/scalar-fstrings-inventory-asan/validation.json": {
+      "sha256": "0e922427c83627cc46fdea5495e620889a5ae7e027bf54b61388c30917c8971b",
+      "bytes": 1036877,
+      "source": "benchmarks/local/scalar-fstrings-inventory-asan/validation.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-ir-check/incremental_planner.ll": {
+      "sha256": "9750c50f6e2d62a55d66c902033df52d42e9f933db5f33fe7ef561645058c2a0",
+      "bytes": 172905,
+      "source": "benchmarks/local/scalar-fstrings-ir-check/incremental_planner.ll"
+    },
+    "retained/benchmarks/local/scalar-fstrings-ir-check/record.json": {
+      "sha256": "67afc54aaeb0f0dc95752e4c342795438dfb97ac4eb1fde4a14e9f102a863392",
+      "bytes": 3671,
+      "source": "benchmarks/local/scalar-fstrings-ir-check/record.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-lto-final.log": {
+      "sha256": "b3068fd0ef8d6356718a9f1488b2c17aed37008068d534c991e133025b50a19f",
+      "bytes": 583,
+      "source": "benchmarks/local/scalar-fstrings-lto-final.log"
+    },
+    "retained/benchmarks/local/scalar-fstrings-lto-final/inventory_reconciliation.ll": {
+      "sha256": "c61ce8d068da5454c136ae9fc83ad7451f65665b6bc52f99883c8947da9d28f6",
+      "bytes": 195538,
+      "source": "benchmarks/local/scalar-fstrings-lto-final/inventory_reconciliation.ll"
+    },
+    "retained/benchmarks/local/scalar-fstrings-native-text-audit.json": {
+      "sha256": "39bdc1fe26a06d9b30e02d2da341fe206e6b02bf3f4fba49ec7bbff36a238886",
+      "bytes": 8943,
+      "source": "benchmarks/local/scalar-fstrings-native-text-audit.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-native-text-audit.py": {
+      "sha256": "ef7fb5445e352b12b648c01b4a3b191633c0a5b94ea4b43fff2fb77058f8e465",
+      "bytes": 4729,
+      "source": "benchmarks/local/scalar-fstrings-native-text-audit.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-normal-final.log": {
+      "sha256": "6628afebaf769f994eb820ae99fed22c0084f49aa5a52e031215f9a7ca3758fa",
+      "bytes": 586,
+      "source": "benchmarks/local/scalar-fstrings-normal-final.log"
+    },
+    "retained/benchmarks/local/scalar-fstrings-normal-final/inventory_reconciliation.ll": {
+      "sha256": "c61ce8d068da5454c136ae9fc83ad7451f65665b6bc52f99883c8947da9d28f6",
+      "bytes": 195538,
+      "source": "benchmarks/local/scalar-fstrings-normal-final/inventory_reconciliation.ll"
+    },
+    "retained/benchmarks/local/scalar-fstrings-package-evidence.py": {
+      "sha256": "19d3bb1d8041de8868abf76e1f5aee9745eb9bf08be5ab73825f7d0fa69ec434",
+      "bytes": 19469,
+      "source": "benchmarks/local/scalar-fstrings-package-evidence.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-report-template.md": {
+      "sha256": "783b9e759a6a5ba4a97283eb6155f2842d7bc54b854ca89c647fd86e14405e6f",
+      "bytes": 8406,
+      "source": "benchmarks/local/scalar-fstrings-report-template.md"
+    },
+    "retained/benchmarks/local/scalar-fstrings-report.md": {
+      "sha256": "58e03e3d05dee2269fb604c90c5c3f7dc5d87c7dcc4cf821f69802a4d9992c95",
+      "bytes": 9377,
+      "source": "benchmarks/local/scalar-fstrings-report.md"
+    },
+    "retained/benchmarks/local/scalar-fstrings-tools-dev1/asan.log": {
+      "sha256": "4366ebd115916e8c5b9cd0320c369cbb3c35ea18f2bb6429f26eb34b468e2fd6",
+      "bytes": 74,
+      "source": "benchmarks/local/scalar-fstrings-tools-dev1/asan.log"
+    },
+    "retained/benchmarks/local/scalar-fstrings-tools-dev1/build-record.json": {
+      "sha256": "a7c6a2730901f0e86d1a084691e2fdce5feb1a24edb0abbf7e7543ed8df103fa",
+      "bytes": 681523,
+      "source": "benchmarks/local/scalar-fstrings-tools-dev1/build-record.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-tools-dev1/ordinary.log": {
+      "sha256": "873ff9bfea23acbaf3fed93432da4d999955644352d106ecd64ff558f1eebbb9",
+      "bytes": 244,
+      "source": "benchmarks/local/scalar-fstrings-tools-dev1/ordinary.log"
+    },
+    "retained/benchmarks/local/scalar-fstrings-tools-dev1/thinlto.log": {
+      "sha256": "119fcf894a125c83f9e7de93f2fe141b693d23b1dfb47f4b47f652186a218577",
+      "bytes": 158,
+      "source": "benchmarks/local/scalar-fstrings-tools-dev1/thinlto.log"
+    },
+    "retained/benchmarks/local/scalar-fstrings-tools-final/asan.log": {
+      "sha256": "0acb0a2bff112598410ca24f63b4158caab27357f014792e2fc332a5208bbbe4",
+      "bytes": 74,
+      "source": "benchmarks/local/scalar-fstrings-tools-final/asan.log"
+    },
+    "retained/benchmarks/local/scalar-fstrings-tools-final/build-record.json": {
+      "sha256": "eb946a0a4504886180786f61ff8a49baa3ca1b511ef3f809443cb074b82edb7a",
+      "bytes": 681167,
+      "source": "benchmarks/local/scalar-fstrings-tools-final/build-record.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-tools-final/ordinary.log": {
+      "sha256": "570a18d3e6bb6000ece8b454eed6998fa60fead452dfb1f765690aec75f3da4b",
+      "bytes": 74,
+      "source": "benchmarks/local/scalar-fstrings-tools-final/ordinary.log"
+    },
+    "retained/benchmarks/local/scalar-fstrings-tools-final/thinlto.log": {
+      "sha256": "3ca8fcda053f027e1874549d3c67b8d5af55ddd0cbbf24d0750cbb54ae966e20",
+      "bytes": 74,
+      "source": "benchmarks/local/scalar-fstrings-tools-final/thinlto.log"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validate.py": {
+      "sha256": "e0c8689883595d6392fa97ea7b25a332d229dd239faf9bab2cfee1d9dd3f9cc7",
+      "bytes": 4951,
+      "source": "benchmarks/local/scalar-fstrings-validate.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-audit.py": {
+      "sha256": "8c19155f25fdedaffcabc22c9c8c0e5bcc0b7e7fb8b279c9b6e9674436e3e4c3",
+      "bytes": 21736,
+      "source": "benchmarks/local/scalar-fstrings-validation-audit.py"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/classes.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/classes.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/classes.stdout": {
+      "sha256": "e47b9565fcc16d950719c1022a989bc193f1bf95ccab7e1b6fcbf39b1e0209f4",
+      "bytes": 82,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/classes.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/comprehensions.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/comprehensions.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/comprehensions.stdout": {
+      "sha256": "4894fa869b3377f0e30b68e96bb24fa8a02458a07eef6ed0b99fcccb8cfb1dce",
+      "bytes": 90,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/comprehensions.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/containers.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/containers.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/containers.stdout": {
+      "sha256": "520daea6d11faaa8597400848bc9712b09aefc3a8754389695a87b6cb7074490",
+      "bytes": 95,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/containers.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/differential.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/differential.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/differential.stdout": {
+      "sha256": "c4763d7e4a31f958d29de7c58ee3f6d5e7936ec8f731706dea5fea6c4fc6b26d",
+      "bytes": 103,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/differential.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/exceptions.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/exceptions.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/exceptions.stdout": {
+      "sha256": "e8a9330b9803894544e8e925fcf9047317917337fd7631e6f4114094cd3a0944",
+      "bytes": 93,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/exceptions.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/files.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/files.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/files.stdout": {
+      "sha256": "b5a5843eee34f5ac820c8ef3a14789cf687fab67bf5d163e63f879b3f36a1bda",
+      "bytes": 75,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/files.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/fstrings.stderr": {
+      "sha256": "eb124d8fd5f2cbd72e22c1d609980ea9c1cd0175ace94cf7181c8b4076cfc87b",
+      "bytes": 490,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/fstrings.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/fstrings.stdout": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/fstrings.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/imports.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/imports.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/imports.stdout": {
+      "sha256": "29d9fdaf4f4e6d33d6e79f22dbf01c96bae4db4e8b3d1e2fae090b4b6890d835",
+      "bytes": 24,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/imports.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/io.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/io.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/io.stdout": {
+      "sha256": "c7db1ba9ef054c6ebc2489f9b66c30e8c4ff823b6e39dce924f6fdf75ec44444",
+      "bytes": 65,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/io.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/asan/results.json": {
+      "sha256": "2e8952164e9ff7b267b974058a15ced5becf4ba9c01fa899abf1a8f3027cdd54",
+      "bytes": 18916,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/asan/results.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/classes.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/classes.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/classes.stdout": {
+      "sha256": "17b5e0bb55bf9b355d570c75aeb14d06b943d145fd3c750ef0318eb2452fd116",
+      "bytes": 83,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/classes.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/comprehensions.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/comprehensions.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/comprehensions.stdout": {
+      "sha256": "032c0899953819f366ee418fb6fe57c25b4855e7b31a4b8ea7e012f59833fc4b",
+      "bytes": 91,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/comprehensions.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/containers.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/containers.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/containers.stdout": {
+      "sha256": "c004e23b9859c05e252ffeceaadad3a26610e7056bb75f00429df4c2e222b00b",
+      "bytes": 96,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/containers.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/differential.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/differential.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/differential.stdout": {
+      "sha256": "bd6213d537870f3ce12fc4012cb254b21ddf4ecd47aea1515c035139a7d6c75e",
+      "bytes": 104,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/differential.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/exceptions.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/exceptions.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/exceptions.stdout": {
+      "sha256": "2acc8d882974554d58247a8f2b8a536de2882591a83438ca391f35802fa7cf15",
+      "bytes": 94,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/exceptions.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/files.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/files.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/files.stdout": {
+      "sha256": "150a6cd78bf0167d4285eb9f1d0e22bcff040c2064ac466c5ade34975c304a35",
+      "bytes": 76,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/files.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/fstrings.stderr": {
+      "sha256": "a28cf06782f5233c33203b15e12639f68b20b32b134506605574113509b4959b",
+      "bytes": 490,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/fstrings.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/fstrings.stdout": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/fstrings.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/imports.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/imports.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/imports.stdout": {
+      "sha256": "29d9fdaf4f4e6d33d6e79f22dbf01c96bae4db4e8b3d1e2fae090b4b6890d835",
+      "bytes": 24,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/imports.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/io.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/io.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/io.stdout": {
+      "sha256": "ff6b20527ed1fc9c431c42fafb7f1f6b7f32182e53ec07ab1cf5d5241f1c23e3",
+      "bytes": 66,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/io.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/ordinary/results.json": {
+      "sha256": "9ef784e44f3fc67cc35152901cff16198942874dd30e46492fec4bc974ee9843",
+      "bytes": 18743,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/ordinary/results.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/classes.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/classes.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/classes.stdout": {
+      "sha256": "724d8cc23455331074e5b350ef4a08ea8a4ace147e236f59b60bd8b511eae8f3",
+      "bytes": 78,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/classes.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/comprehensions.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/comprehensions.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/comprehensions.stdout": {
+      "sha256": "6ec2c9414b0c8d28da95a5b3431f7075ce585fd94c0d47f93d106b88234142ad",
+      "bytes": 86,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/comprehensions.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/containers.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/containers.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/containers.stdout": {
+      "sha256": "e8e55df202e6fc0c7fcaa0c5ad4fa2d95dd0cb18ab6c637ecc5d3e11e5a8a14e",
+      "bytes": 91,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/containers.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/differential.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/differential.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/differential.stdout": {
+      "sha256": "b190ebd6e7203c28c17ec7faa0c0f5d8c6decd1e773be99ae0c98e060f7b79ad",
+      "bytes": 98,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/differential.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/exceptions.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/exceptions.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/exceptions.stdout": {
+      "sha256": "4be6f9ad9a05c34549de276fa89593d1ea332cc66be7ccb7b0216027cb0ea3f3",
+      "bytes": 89,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/exceptions.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/files.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/files.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/files.stdout": {
+      "sha256": "3dd64d3fc327432c225d6548a6ec9041a05e068128093bc969f1978319f64cc1",
+      "bytes": 71,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/files.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/fstrings.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/fstrings.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/fstrings.stdout": {
+      "sha256": "184c59375e0e29053e2857f5a4564a6b70174a286c91fc28388dce2e2a070ef1",
+      "bytes": 81,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/fstrings.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/imports.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/imports.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/imports.stdout": {
+      "sha256": "f83498e79d485a45cf5d880badfac061b59ec07ac7f8ea00dd9723e7ac0d2cd0",
+      "bytes": 24,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/imports.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/io.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/io.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/io.stdout": {
+      "sha256": "8db850d1783de29fdc0dc48daec150b64f1b10efdcfa1ee0ed8e7bd2dc5e0fc7",
+      "bytes": 61,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/io.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-dev1/thinlto/results.json": {
+      "sha256": "0c00b7c59a5893a3e1dfed9cbb0caac9b664d366fb7d965d27c7529d3488c886",
+      "bytes": 20059,
+      "source": "benchmarks/local/scalar-fstrings-validation-dev1/thinlto/results.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-fstrings/asan/fstrings.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-fstrings/asan/fstrings.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-fstrings/asan/fstrings.stdout": {
+      "sha256": "1e322a7f7ecdde04b465763a3fbda392e722dcac525afa1041cefe21282784f8",
+      "bytes": 85,
+      "source": "benchmarks/local/scalar-fstrings-validation-fstrings/asan/fstrings.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-fstrings/asan/results.json": {
+      "sha256": "96921aed6a31aef8ec9fc67abe4b85cc4b8a45e27c72829310f241d54cb2d43f",
+      "bytes": 9535,
+      "source": "benchmarks/local/scalar-fstrings-validation-fstrings/asan/results.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/fstrings.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/fstrings.stderr"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/fstrings.stdout": {
+      "sha256": "4f06dbdb68207a5293f0c8af4558a08f00dc1ca63d978e25b938a9bead6fd60d",
+      "bytes": 86,
+      "source": "benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/fstrings.stdout"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/results.json": {
+      "sha256": "74211df166c943f344ed3d7e11e87e0f9c7aca0b5277c24705730fef57bd83f0",
+      "bytes": 9516,
+      "source": "benchmarks/local/scalar-fstrings-validation-fstrings/ordinary/results.json"
+    },
+    "retained/benchmarks/local/scalar-fstrings-validation.json": {
+      "sha256": "ee3bb28eb03354ed9bc3fb890e2905612f51b771f869f0e4987b9f3936ee709d",
+      "bytes": 81108,
+      "source": "benchmarks/local/scalar-fstrings-validation.json"
+    },
+    "source/.gitattributes": {
+      "sha256": "d7ea6e881fb290c2d715a9396d731d8300290eb4e1fa75b5959c908801f0cc63",
+      "bytes": 131,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:.gitattributes"
+    },
+    "source/.github/workflows/ci.yml": {
+      "sha256": "c1bd5c997af3b6437670cd982ce41ebe3f263a3362c2fd5cdd53f5192673c2cb",
+      "bytes": 8364,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:.github/workflows/ci.yml"
+    },
+    "source/.gitignore": {
+      "sha256": "ce52b707c14aee75291e36e5a0aee91a5ced1c8765b88871cbbb995b7d6bf1fd",
+      "bytes": 55,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:.gitignore"
+    },
+    "source/Cargo.lock": {
+      "sha256": "94ea6e3c2351ad1dff6764dac5c52ff51993b1f7a3a79164e209a4e7c1b80471",
+      "bytes": 53726,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:Cargo.lock"
+    },
+    "source/Cargo.toml": {
+      "sha256": "ce49064770ad21744c8ac6cea604da7408be1e5ec474e3f90206fa95f2af614f",
+      "bytes": 818,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:Cargo.toml"
+    },
+    "source/README.md": {
+      "sha256": "7243835181a331021f7463b3f62938a55f45bb38436712f9725a2d6f39f3dadf",
+      "bytes": 7401,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:README.md"
+    },
+    "source/benchmarks/LAYOUTS.md": {
+      "sha256": "04d016f8587473151b7a071bcbdcc0ed5149bd6d04c4b3793981c66768987b28",
+      "bytes": 7957,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/LAYOUTS.md"
+    },
+    "source/benchmarks/PROFILING.md": {
+      "sha256": "cfe0ac3d7b11a299ec71208eb7512ab013f4b268db77ade59aee14dc39f73399",
+      "bytes": 3616,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/PROFILING.md"
+    },
+    "source/benchmarks/README.md": {
+      "sha256": "d889da18582a6f56852ae8830a41390b872df92fccfc06ae108546e5ac99503b",
+      "bytes": 21979,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/README.md"
+    },
+    "source/benchmarks/batch_benchmark.py": {
+      "sha256": "8d7b1d17a73baae1a691cc9efad15f29063b4f2a9d090354d5f81a173b67ba19",
+      "bytes": 23596,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/batch_benchmark.py"
+    },
+    "source/benchmarks/batch_validate.py": {
+      "sha256": "d9ceda6746224421ac5c6c8ca555b8d5beed4d8aec93487674269bb5b765f941",
+      "bytes": 10937,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/batch_validate.py"
+    },
+    "source/benchmarks/benchmark.py": {
+      "sha256": "9925ed40ef560256c1ca9d31f5999cab0ac0fb531a840de77f0d8a79890a1145",
+      "bytes": 12777,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/benchmark.py"
+    },
+    "source/benchmarks/compare.py": {
+      "sha256": "d878c49d30863b2b47bc3e453003611752b7fda34b9250754a4b580887599724",
+      "bytes": 10330,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/compare.py"
+    },
+    "source/benchmarks/dependency_benchmark.py": {
+      "sha256": "ddf4c986e24d5ea66dad3d492121ebe464a11e5bb7e0b5f075e3f3bc7989930d",
+      "bytes": 15928,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/dependency_benchmark.py"
+    },
+    "source/benchmarks/dependency_compare.py": {
+      "sha256": "f496e1e7659e15a2446427794f6184e173691b2e22c83439966c47b1cc7c0fc5",
+      "bytes": 19925,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/dependency_compare.py"
+    },
+    "source/benchmarks/dependency_profile.py": {
+      "sha256": "b5f686e4c5ecb3ce37649108d6435b08c9c94b098ee2849876771eac890a0e30",
+      "bytes": 19807,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/dependency_profile.py"
+    },
+    "source/benchmarks/dependency_validate.py": {
+      "sha256": "493bd16ecfc938c902b98f78adecc5f8dce2204c163fd05c64a1701e4996be2e",
+      "bytes": 13429,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/dependency_validate.py"
+    },
+    "source/benchmarks/exception_benchmark.py": {
+      "sha256": "7eb93f08f84fa1ca98d94bb2c6c2fde341726fa69e185cf6d45434602d7aeb85",
+      "bytes": 22792,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/exception_benchmark.py"
+    },
+    "source/benchmarks/fixtures/layout_storage.py": {
+      "sha256": "c6daa1257921f57d204d3d3c8c2d81caf026d696a02de53563035202d7bb59c8",
+      "bytes": 1940,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/fixtures/layout_storage.py"
+    },
+    "source/benchmarks/incremental_benchmark.py": {
+      "sha256": "362a99c6a015840d2f36428a61d31e2ba81ebb221b761ca54669b584ad577d9a",
+      "bytes": 19310,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/incremental_benchmark.py"
+    },
+    "source/benchmarks/incremental_validate.py": {
+      "sha256": "f384d2807c07006572a5dec0146abd026511ed59f2ae1d0a674dd9c60e95782b",
+      "bytes": 21198,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/incremental_validate.py"
+    },
+    "source/benchmarks/inventory_benchmark.py": {
+      "sha256": "2aeb2c8440f3c8ca4a560c4dee2ff840dd186e13e2bf96a1aecd2d5e8799290c",
+      "bytes": 30611,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/inventory_benchmark.py"
+    },
+    "source/benchmarks/inventory_profile.py": {
+      "sha256": "f07dc7a9d6a4033828d6b59a96273a1affe87a45b0b23911c1c0bcffed3e9a39",
+      "bytes": 20529,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/inventory_profile.py"
+    },
+    "source/benchmarks/inventory_validate.py": {
+      "sha256": "ec709364c6726a5f6d042a741e408416a06c3bf37f5882185fcb0173618da40f",
+      "bytes": 20206,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/inventory_validate.py"
+    },
+    "source/benchmarks/layout_benchmark.py": {
+      "sha256": "c01bf35a42b805ba8627e01585ccab432cd00bbd1122060d87bf7257bc3abc25",
+      "bytes": 29984,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/layout_benchmark.py"
+    },
+    "source/benchmarks/layout_profile.py": {
+      "sha256": "a46a2483b4375e87a7a058b237ba3a2ee186ac711208b04a6207af5c86912ea1",
+      "bytes": 15769,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/layout_profile.py"
+    },
+    "source/benchmarks/manifest_benchmark.py": {
+      "sha256": "4833c5d3ad0f0ed542cb8e12e0f5b787b143e300979747f3e278d5fad08eb773",
+      "bytes": 24725,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/manifest_benchmark.py"
+    },
+    "source/benchmarks/manifest_validate.py": {
+      "sha256": "2ba1a0e0062583add10cc7e5fd347b67ad82769a74dfc761266cc604685d738d",
+      "bytes": 19931,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/manifest_validate.py"
+    },
+    "source/benchmarks/reference/dependency_planner/Cargo.lock": {
+      "sha256": "2fdd2959b414792a85eee5582a6ecf63778ddb4feba3f6c5863934d021e3cf89",
+      "bytes": 1106,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/dependency_planner/Cargo.lock"
+    },
+    "source/benchmarks/reference/dependency_planner/Cargo.toml": {
+      "sha256": "432cd49b7ba3a91d9873c4f3386d4b77998373ae1be5898cd1c8d74917501544",
+      "bytes": 450,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/dependency_planner/Cargo.toml"
+    },
+    "source/benchmarks/reference/dependency_planner/README.md": {
+      "sha256": "4a4a835a2f92913d1ec17de94f123ef430b532be7864c2f3281dcfe57ca3ef3f",
+      "bytes": 8595,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/dependency_planner/README.md"
+    },
+    "source/benchmarks/reference/dependency_planner/build.py": {
+      "sha256": "5e9f939cf701baefd6440b36bb676afde7549fc1ddcc53bb05d342f1acfd6e2c",
+      "bytes": 8113,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/dependency_planner/build.py"
+    },
+    "source/benchmarks/reference/dependency_planner/check_boundaries.py": {
+      "sha256": "e0e83d31483c2983b1228c6403cb6ca43fc305b1300c78294e33d0f74edc1ac4",
+      "bytes": 9712,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/dependency_planner/check_boundaries.py"
+    },
+    "source/benchmarks/reference/dependency_planner/src/main.rs": {
+      "sha256": "f143a11379e87ebca2d5a89969132c0b2ce14e1ebcaad620e7f1829b46d5f9a4",
+      "bytes": 14463,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/dependency_planner/src/main.rs"
+    },
+    "source/benchmarks/reference/incremental_planner/Cargo.lock": {
+      "sha256": "a8c3c663967b51d836f3ca4c56aae8077720cc13b3411f51818fd8c6dbeaef16",
+      "bytes": 1110,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/incremental_planner/Cargo.lock"
+    },
+    "source/benchmarks/reference/incremental_planner/Cargo.toml": {
+      "sha256": "3f6182da1e20146debb4e0adbb8e43674c2930c83bb88a39a4c257934b9954d8",
+      "bytes": 673,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/incremental_planner/Cargo.toml"
+    },
+    "source/benchmarks/reference/incremental_planner/README.md": {
+      "sha256": "05301c640ff80c8452c5614b048938c4240278ac1045b2e83cf3f63134d27f32",
+      "bytes": 11853,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/incremental_planner/README.md"
+    },
+    "source/benchmarks/reference/incremental_planner/build.py": {
+      "sha256": "2458ac37ca6fce2aa29cf4ae81f3bde758c9518ac5144ed98da8c3fabcb03a4c",
+      "bytes": 9158,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/incremental_planner/build.py"
+    },
+    "source/benchmarks/reference/incremental_planner/src/batch.rs": {
+      "sha256": "c63d00b1ea6b746efe948e2502228a15497e5b4d7d72b80c03a4c445ee710a7b",
+      "bytes": 4725,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/incremental_planner/src/batch.rs"
+    },
+    "source/benchmarks/reference/incremental_planner/src/batch_main.rs": {
+      "sha256": "8afa1cd12dd63eb6d7c94949905f87da27b4a06ff86fb046ac5ec7161ae758ec",
+      "bytes": 202,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/incremental_planner/src/batch_main.rs"
+    },
+    "source/benchmarks/reference/incremental_planner/src/main.rs": {
+      "sha256": "fdaf9327b2e40dbddf4650678c948e7e1662d87cefca05256b95fe2635e38cd1",
+      "bytes": 15600,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/incremental_planner/src/main.rs"
+    },
+    "source/benchmarks/reference/incremental_planner/src/manifest.rs": {
+      "sha256": "c2e82c328b88667ebb88aff38c28b72daad61618b528ae2c09cfb084b40cf3b9",
+      "bytes": 6065,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/incremental_planner/src/manifest.rs"
+    },
+    "source/benchmarks/reference/incremental_planner/src/manifest_main.rs": {
+      "sha256": "2f370743bca063c4e6d9477f870ca0b5d0803127ccf6718f0cd1a60b2b4cde69",
+      "bytes": 209,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/incremental_planner/src/manifest_main.rs"
+    },
+    "source/benchmarks/reference/inventory_reconciliation/Cargo.lock": {
+      "sha256": "5fc2164c7d5d646f2dffefb4ae6bfe004cb211c240cbd1f591971e2e75ead1e0",
+      "bytes": 1108,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/inventory_reconciliation/Cargo.lock"
+    },
+    "source/benchmarks/reference/inventory_reconciliation/Cargo.toml": {
+      "sha256": "f159d1da897a094b1334346583ee17ca0fe498e0ca500bd025ddef41ef81ae08",
+      "bytes": 296,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/inventory_reconciliation/Cargo.toml"
+    },
+    "source/benchmarks/reference/inventory_reconciliation/README.md": {
+      "sha256": "df203a0cc06be15c7b025c72f0d41696284f7929313b92e55f200755cbc6595a",
+      "bytes": 3887,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/inventory_reconciliation/README.md"
+    },
+    "source/benchmarks/reference/inventory_reconciliation/build.py": {
+      "sha256": "6ad52ac86852824666a0386323b33fa1ff5b86797de69fbbacf72d5c329850e2",
+      "bytes": 8195,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/inventory_reconciliation/build.py"
+    },
+    "source/benchmarks/reference/inventory_reconciliation/src/main.rs": {
+      "sha256": "e21c4a4aa25aa1509398afa76feb64d644535ff4b1707317037630e811db6617",
+      "bytes": 12795,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/reference/inventory_reconciliation/src/main.rs"
+    },
+    "source/benchmarks/validate.py": {
+      "sha256": "7783dbbbdcb71720c62916bc8b63613d01245881cef18fb4a35047cec4bc0f49",
+      "bytes": 3251,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:benchmarks/validate.py"
+    },
+    "source/crates/relar-compiler/Cargo.toml": {
+      "sha256": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
+      "bytes": 592,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/Cargo.toml"
+    },
+    "source/crates/relar-compiler/src/analysis.rs": {
+      "sha256": "142aa0f25cf75d1c7d9462c94c50967e8f6dfa2903a2ad913b6f33bfe5c405d1",
+      "bytes": 7037,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/src/analysis.rs"
+    },
+    "source/crates/relar-compiler/src/classes.rs": {
+      "sha256": "8a57bbf41463e5384d86fc7d70be62fb8c26ef95b89bbcf7b575ea13be373785",
+      "bytes": 9633,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/src/classes.rs"
+    },
+    "source/crates/relar-compiler/src/effects.rs": {
+      "sha256": "58d6d4604c2ec19402a696c6b168c63c924493424feab30f013874f10108f62f",
+      "bytes": 13155,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/src/effects.rs"
+    },
+    "source/crates/relar-compiler/src/frontend.rs": {
+      "sha256": "6dc8f4c870ff1326fe7ed8dd6fa16c91881868e00e3832b7d71a9d1301e76e24",
+      "bytes": 108029,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/src/frontend.rs"
+    },
+    "source/crates/relar-compiler/src/frontend/comprehensions.rs": {
+      "sha256": "d90161413c8957a941deeafa82210aca3ff73d51058760a9362124d4ab20bc02",
+      "bytes": 17966,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/src/frontend/comprehensions.rs"
+    },
+    "source/crates/relar-compiler/src/ir.rs": {
+      "sha256": "a716274199e8cace1a95867148e752e62568cfd59f64aa1bd2c5c344eae3114c",
+      "bytes": 9790,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/src/ir.rs"
+    },
+    "source/crates/relar-compiler/src/lib.rs": {
+      "sha256": "aff038d03eadb6f07481b29100e984e3f6de97c089404a574daf3c0f5653861d",
+      "bytes": 5107,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/src/lib.rs"
+    },
+    "source/crates/relar-compiler/src/llvm.rs": {
+      "sha256": "363ec32948210e7e1662705f2dbbb33ac7e47356c2245ac6d12d96446a039665",
+      "bytes": 107445,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/src/llvm.rs"
+    },
+    "source/crates/relar-compiler/src/main.rs": {
+      "sha256": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+      "bytes": 7777,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/src/main.rs"
+    },
+    "source/crates/relar-compiler/src/modules.rs": {
+      "sha256": "3c597d7ddfe35c2cd12a2189ce7c69cf81c7983e89193c47f00395019210de0a",
+      "bytes": 22044,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/src/modules.rs"
+    },
+    "source/crates/relar-compiler/src/narrowing.rs": {
+      "sha256": "f37bbacad8279aa18aff36edbee90477187d8927ca12b0563b0bfedde791832d",
+      "bytes": 4455,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/src/narrowing.rs"
+    },
+    "source/crates/relar-compiler/src/ranges.rs": {
+      "sha256": "29c217f8ef942187f5e945385279ac2548ab645a13145345c2023befa6303060",
+      "bytes": 58451,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/src/ranges.rs"
+    },
+    "source/crates/relar-compiler/src/tuples.rs": {
+      "sha256": "022bc95c1702a09f6f124754031d13c07ff94b4f721f72f6363bad2ff29211fa",
+      "bytes": 19761,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/src/tuples.rs"
+    },
+    "source/crates/relar-compiler/src/types.rs": {
+      "sha256": "6ec28df90874d39206cfd36f025964e6e4fd1026bbfff9eba868e7a944d2cbbe",
+      "bytes": 5866,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-compiler/src/types.rs"
+    },
+    "source/crates/relar-runtime/Cargo.toml": {
+      "sha256": "504747307550bbb6a62804730b159c158cba5b35e22a533269db00f51f423ba8",
+      "bytes": 374,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-runtime/Cargo.toml"
+    },
+    "source/crates/relar-runtime/src/lib.rs": {
+      "sha256": "4ca207eb054a7a9023b08957058ebe4dae933410ea5cd1ede62550c18dab2988",
+      "bytes": 41980,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-runtime/src/lib.rs"
+    },
+    "source/crates/relar-runtime/src/objects.rs": {
+      "sha256": "345c52b38ea32647cbeb220d853d3f0848906ae275b98a371fb05c021e61ee59",
+      "bytes": 34886,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-runtime/src/objects.rs"
+    },
+    "source/crates/relar-runtime/src/objects/args.rs": {
+      "sha256": "0f7c2543368bc69da08613471c17dc7ac0981967e7840e3c30ef85dc6a044099",
+      "bytes": 6684,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-runtime/src/objects/args.rs"
+    },
+    "source/crates/relar-runtime/src/objects/exceptions.rs": {
+      "sha256": "003d465b3a28ac4cb991d2fa2a9b589add6a35ef714587ad6c705e0667b836af",
+      "bytes": 27362,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-runtime/src/objects/exceptions.rs"
+    },
+    "source/crates/relar-runtime/src/objects/files.rs": {
+      "sha256": "17abf6f1aec89723d6508e00756c53108e5c5ec912979eca0be884c4eb78aebd",
+      "bytes": 23049,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-runtime/src/objects/files.rs"
+    },
+    "source/crates/relar-runtime/src/objects/mappings.rs": {
+      "sha256": "eca128f038aff16c93af24203b7d66fe652d27430b5cac02a25630758a590ec9",
+      "bytes": 42817,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-runtime/src/objects/mappings.rs"
+    },
+    "source/crates/relar-runtime/src/objects/records.rs": {
+      "sha256": "9e8061a02eca605d6587da87dedb0ca7b2b868d98bef9abb5159bd4b7ceff75d",
+      "bytes": 10110,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-runtime/src/objects/records.rs"
+    },
+    "source/crates/relar-runtime/src/objects/words.rs": {
+      "sha256": "251b21899a15b0d40c6de1f8452034d139bf7093aa112c5603c8896427f53ca8",
+      "bytes": 6001,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:crates/relar-runtime/src/objects/words.rs"
+    },
+    "source/docs/design.md": {
+      "sha256": "4e2f6336d600ba0c385f61882406ae0722be4a05aee10e7a986fb0eb3523cb5d",
+      "bytes": 22423,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:docs/design.md"
+    },
+    "source/docs/subset.md": {
+      "sha256": "04d9486b336c0ef742171f0ae612a450d3b00c4187915032c8a58ae3fb0f0b9e",
+      "bytes": 41306,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:docs/subset.md"
+    },
+    "source/examples/batch_planner/README.md": {
+      "sha256": "01fd32adddade6e660e9f3c58c845c25035e31f23bd40bb760d1b2d5dfb4f817",
+      "bytes": 8632,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/batch_planner/README.md"
+    },
+    "source/examples/batch_planner/__init__.py": {
+      "sha256": "7c8b5360f3fbd1855197991c68db6eaf62bb158244ccc30076098b2c9caa2b85",
+      "bytes": 79,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/batch_planner/__init__.py"
+    },
+    "source/examples/batch_planner/__main__.py": {
+      "sha256": "6ed1849a1ae2a386a3572ab43690b557a52f3e4d3b6b02a7cea86335211c084d",
+      "bytes": 1620,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/batch_planner/__main__.py"
+    },
+    "source/examples/batch_planner/parse.py": {
+      "sha256": "e4afe0baff2e7529833753e6a84d80c66a2a60ca9ab28a157c0225c1e3f07585",
+      "bytes": 1261,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/batch_planner/parse.py"
+    },
+    "source/examples/dependency_planner/README.md": {
+      "sha256": "80ce48765f98b9e6324e7a2c256fc50d33e1863a8eee9e9ab99fff1ae28713c7",
+      "bytes": 9175,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/dependency_planner/README.md"
+    },
+    "source/examples/dependency_planner/__init__.py": {
+      "sha256": "aaf74d2ac584768a494d503c28e988df2ff095ff4b2bf00f8ab69a4fdb72f188",
+      "bytes": 79,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/dependency_planner/__init__.py"
+    },
+    "source/examples/dependency_planner/__main__.py": {
+      "sha256": "ebdaf69e5f174923d12644c89f580f056be931bcb263929ba26545b615fd997b",
+      "bytes": 351,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/dependency_planner/__main__.py"
+    },
+    "source/examples/dependency_planner/model.py": {
+      "sha256": "2dcd30aeb5fb9799a480a1ce8bd7d142dbaa4bde7efb055730ef2ef1df4e3c82",
+      "bytes": 1535,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/dependency_planner/model.py"
+    },
+    "source/examples/dependency_planner/parse.py": {
+      "sha256": "3e9a6d2443472393c1d9987ac6d39b707b2c37f09af41f7b01ca6a129dfe0e89",
+      "bytes": 748,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/dependency_planner/parse.py"
+    },
+    "source/examples/dependency_planner/render.py": {
+      "sha256": "74258c0da07a12cfefcb89103ed68ce70124fba1db32d44c17454d23b3e6fc51",
+      "bytes": 1303,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/dependency_planner/render.py"
+    },
+    "source/examples/dependency_planner/schedule.py": {
+      "sha256": "ff4ff0e33b4d14a79c6fd59539d9390e7b58da6e94aa7d81ca3380b20987069b",
+      "bytes": 3640,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/dependency_planner/schedule.py"
+    },
+    "source/examples/incremental_planner/README.md": {
+      "sha256": "c15739041b2f5e26c1f584469f447308f16a4bd8109872f0978375aa44d92610",
+      "bytes": 3741,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/incremental_planner/README.md"
+    },
+    "source/examples/incremental_planner/__init__.py": {
+      "sha256": "4f50561e32c7327e85b44e006e4eb048efce3303ab110fba581e2141a0562052",
+      "bytes": 80,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/incremental_planner/__init__.py"
+    },
+    "source/examples/incremental_planner/__main__.py": {
+      "sha256": "cb0f0aaf0072542d8a345357f6cfb162576b177b4ff3e967833752caf8d70d6a",
+      "bytes": 272,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/incremental_planner/__main__.py"
+    },
+    "source/examples/incremental_planner/model.py": {
+      "sha256": "327a0ed795b767c0782de7de8e599c0e886023e633cd10cc4a5c8656ee4b9b76",
+      "bytes": 1309,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/incremental_planner/model.py"
+    },
+    "source/examples/incremental_planner/parse.py": {
+      "sha256": "2a32787df8694aab27b35918e0fe6bd2f38055942bb2e5632f75927493a58419",
+      "bytes": 809,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/incremental_planner/parse.py"
+    },
+    "source/examples/incremental_planner/render.py": {
+      "sha256": "a272b00d8445183dfcfce5aa489f82e9266ba4ab20db837c6f951c62a0dc1a85",
+      "bytes": 819,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/incremental_planner/render.py"
+    },
+    "source/examples/incremental_planner/schedule.py": {
+      "sha256": "7d753f3d8e77fce35886b59e8b065338725e6350c143d2dc8f93d7518f48ea8c",
+      "bytes": 4858,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/incremental_planner/schedule.py"
+    },
+    "source/examples/inventory_reconciliation/README.md": {
+      "sha256": "71da4b511eedadca7e638a20a15b90e4767598c49e2b1aceddf1f32e77f2abfe",
+      "bytes": 10073,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/inventory_reconciliation/README.md"
+    },
+    "source/examples/inventory_reconciliation/__init__.py": {
+      "sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+      "bytes": 75,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/inventory_reconciliation/__init__.py"
+    },
+    "source/examples/inventory_reconciliation/__main__.py": {
+      "sha256": "853f4a7ae796ab29edbb9ff098d300969905bfe988ede2c90210e988191369a2",
+      "bytes": 753,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/inventory_reconciliation/__main__.py"
+    },
+    "source/examples/inventory_reconciliation/load.py": {
+      "sha256": "074239fd9df26acc79424aed65e004df89d8b27c2d59fd7e2401ab74abeaad4d",
+      "bytes": 2528,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/inventory_reconciliation/load.py"
+    },
+    "source/examples/inventory_reconciliation/model.py": {
+      "sha256": "c3214a814d98213ff00bcb1dac25f18ac2c5bcafba96e07a8457aa161e3cbcbc",
+      "bytes": 1524,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/inventory_reconciliation/model.py"
+    },
+    "source/examples/inventory_reconciliation/reconcile.py": {
+      "sha256": "6c5aa3a17b5650e7bdad2434fbf80c3a9c08ca691de31d2cf87fdd1d7829125c",
+      "bytes": 1561,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/inventory_reconciliation/reconcile.py"
+    },
+    "source/examples/inventory_reconciliation/render.py": {
+      "sha256": "fd5c152f800eb9736411869e9a5e2fc6b2f0e6a5c759f75bae1e7d5a771b2e72",
+      "bytes": 2243,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/inventory_reconciliation/render.py"
+    },
+    "source/examples/inventory_reconciliation/sample/orders.txt": {
+      "sha256": "14fb64b48f23d612fd8509b6109e399375fcf4b7bd00a5154deb22cd1349d036",
+      "bytes": 108,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/inventory_reconciliation/sample/orders.txt"
+    },
+    "source/examples/inventory_reconciliation/sample/stock.txt": {
+      "sha256": "0388adc1fedb8eaf286e2ac683db969a9e5b919ac772a3a88c562cf05394de60",
+      "bytes": 87,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/inventory_reconciliation/sample/stock.txt"
+    },
+    "source/examples/manifest_planner/README.md": {
+      "sha256": "5e786d0486cc671ee7845cb1578d60adefca0857e3e3f6ec6691986b5b5db699",
+      "bytes": 8755,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/manifest_planner/README.md"
+    },
+    "source/examples/manifest_planner/__init__.py": {
+      "sha256": "a59f01e75f32f8c72d844fa8720e43a75acd2e30ec893e6fe1f0884fe57ca377",
+      "bytes": 81,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/manifest_planner/__init__.py"
+    },
+    "source/examples/manifest_planner/__main__.py": {
+      "sha256": "b909fb63615d81553114cc024963b12222e7ae49c76274109241a8cb6c4570ed",
+      "bytes": 2211,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/manifest_planner/__main__.py"
+    },
+    "source/examples/manifest_planner/load.py": {
+      "sha256": "f90df156772a2e6adb635f08838c2dffb084f55fe5d00701609df5b6c5c91fdd",
+      "bytes": 474,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/manifest_planner/load.py"
+    },
+    "source/examples/manifest_planner/render.py": {
+      "sha256": "b5c4a29e2458ed18ea5f39ca09c61f73190063856a328d232af57f3b8f712611",
+      "bytes": 1149,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/manifest_planner/render.py"
+    },
+    "source/examples/manifest_planner/sample/first.txt": {
+      "sha256": "ae779e07a2755e8594c39c51951d1f86c0c2e94a46159b577e75f020797c3582",
+      "bytes": 56,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/manifest_planner/sample/first.txt"
+    },
+    "source/examples/manifest_planner/sample/last.txt": {
+      "sha256": "5b90c69fc2d7438defc7c8c52710079e5a2ee50c7b409880e1409240a334a05a",
+      "bytes": 63,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/manifest_planner/sample/last.txt"
+    },
+    "source/examples/manifest_planner/sample/malformed.txt": {
+      "sha256": "359743003a5fae797df637a5634d3b91a01674fe51ec93ca12fc60ca90b924cf",
+      "bytes": 37,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/manifest_planner/sample/malformed.txt"
+    },
+    "source/examples/manifest_planner/sample/manifest.txt": {
+      "sha256": "d60a596b75fc3eea499f85c6a2b9eeb08da19f6b29715bd9410832b9cfa1184c",
+      "bytes": 132,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/manifest_planner/sample/manifest.txt"
+    },
+    "source/examples/route_planner.py": {
+      "sha256": "220266102bfd11d0854e7cdb9809628e64ac5ddbfc97b17c95bc22798bec5fdb",
+      "bytes": 4391,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:examples/route_planner.py"
+    },
+    "source/rust-toolchain.toml": {
+      "sha256": "7553618f800829444096beea3dce84c3d07585efda504c19adb6787369bbd9e8",
+      "bytes": 86,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:rust-toolchain.toml"
+    },
+    "source/tests/classes.py": {
+      "sha256": "c4b409a3b5d7fb08d22c737b20aa96ab4e6cd76026a86d227ad9d497ced8a49c",
+      "bytes": 10294,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/classes.py"
+    },
+    "source/tests/comprehensions.py": {
+      "sha256": "9937f7cd9b6f96b6f2da2601523f45fc4696d74f5fd6782a31ccaaf4ea82760b",
+      "bytes": 13576,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/comprehensions.py"
+    },
+    "source/tests/containers.py": {
+      "sha256": "16dfcdf29ecb8a6eaba9fee44c10a94ef38c836957067bead6bf0d81aefc4ff6",
+      "bytes": 39197,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/containers.py"
+    },
+    "source/tests/differential.py": {
+      "sha256": "6f28393b1b78d967065d080d4aec45836213b2609cd205299d358a4803695ffc",
+      "bytes": 9209,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/differential.py"
+    },
+    "source/tests/exceptions.py": {
+      "sha256": "29de31304fa700d21bbafe7d9a63a08642e4c3371e2af3efcc1044e4746deec3",
+      "bytes": 19947,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/exceptions.py"
+    },
+    "source/tests/files.py": {
+      "sha256": "a920cc543636110913668e3383fe678e02c86a281edd90a0cda50288753f60ba",
+      "bytes": 24823,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/files.py"
+    },
+    "source/tests/fixtures/classes/imported/facade.py": {
+      "sha256": "1fc491f43b749999d1afd898230328773a6f0e24113589a3b4f4c36cd8f271df",
+      "bytes": 103,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/classes/imported/facade.py"
+    },
+    "source/tests/fixtures/classes/imported/main.py": {
+      "sha256": "2ee9d22808a2bbff00171e34dceeee35da2b5b7211ddafd056fab7e3a1d19470",
+      "bytes": 752,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/classes/imported/main.py"
+    },
+    "source/tests/fixtures/classes/imported/models/__init__.py": {
+      "sha256": "cc9368b60161036bb8d4904bd2fccb1ab462fc7490daec4bd15713714d4c4af1",
+      "bytes": 76,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/classes/imported/models/__init__.py"
+    },
+    "source/tests/fixtures/classes/imported/models/records.py": {
+      "sha256": "873d83fdac64010579e753dd2b22acd098ff9824e2ee21f1f9e89255f5e608df",
+      "bytes": 261,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/classes/imported/models/records.py"
+    },
+    "source/tests/fixtures/classes/ownership.py": {
+      "sha256": "01a0a4e9b35c26ae99fa00564d947aea82c612e615792afd272785c35520a7bb",
+      "bytes": 4637,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/classes/ownership.py"
+    },
+    "source/tests/fixtures/comprehensions/cleanup.py": {
+      "sha256": "7948e8cb76c4bdc54f5dc58cdf71b9f68fdc5bb3009049afe954c587c5a7c26a",
+      "bytes": 3731,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/comprehensions/cleanup.py"
+    },
+    "source/tests/fixtures/comprehensions/containers.py": {
+      "sha256": "eb41b01bf52539ca63d12b3a6dff04e9f7144f9a56b9400bc4ddcdc993f89450",
+      "bytes": 4527,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/comprehensions/containers.py"
+    },
+    "source/tests/fixtures/comprehensions/effects.py": {
+      "sha256": "84ed6a6904d312f45499542271151c9b8e9cdb4fae1f4e420a7db269353ddcc6",
+      "bytes": 2965,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/comprehensions/effects.py"
+    },
+    "source/tests/fixtures/comprehensions/imported/facade.py": {
+      "sha256": "512361b0c69ee74b13171106d7e253c77c71bb4adb5ce97cbba9e6a052f39e5a",
+      "bytes": 151,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/comprehensions/imported/facade.py"
+    },
+    "source/tests/fixtures/comprehensions/imported/helpers.py": {
+      "sha256": "67eee6918df81fcf1ab2fb65673aefe6c7e1b932e03a52fa8996e60463256286",
+      "bytes": 715,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/comprehensions/imported/helpers.py"
+    },
+    "source/tests/fixtures/comprehensions/imported/main.py": {
+      "sha256": "f9294a683edf9df46a04777afee80d3ed08db7ade78b397e71eba5dc39f236ae",
+      "bytes": 574,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/comprehensions/imported/main.py"
+    },
+    "source/tests/fixtures/comprehensions/iteration.py": {
+      "sha256": "3894961fc768597f11506a0c5d07d9c1e7b3c9a294c7eb4a2ccb8d0c9c5738fb",
+      "bytes": 2352,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/comprehensions/iteration.py"
+    },
+    "source/tests/fixtures/comprehensions/ownership.py": {
+      "sha256": "d921fbef3b7c9acd5ec8a61def79d838a4ed17cd3a8bc97de94e18d2241a7cea",
+      "bytes": 3867,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/comprehensions/ownership.py"
+    },
+    "source/tests/fixtures/comprehensions/scoping.py": {
+      "sha256": "137401b5756b0b711db61ad0ed3c500ae6d7981611b0b36bfc86a737765459c3",
+      "bytes": 1685,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/comprehensions/scoping.py"
+    },
+    "source/tests/fixtures/containers/contextual.py": {
+      "sha256": "2cb63da3dfb77ebe72f0cc758a51af9fc3dcaeba5f275ffc186d3d5ab46bc083",
+      "bytes": 1039,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/contextual.py"
+    },
+    "source/tests/fixtures/containers/dictionaries.py": {
+      "sha256": "f8603f41a2bac9a8209557538b06314d62b2d5888c6b06af13ee86510ea97f3b",
+      "bytes": 11591,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/dictionaries.py"
+    },
+    "source/tests/fixtures/containers/index_proofs.py": {
+      "sha256": "c5246e43c65bb66781fa16ce4ea9daa39474569ec03af470d5a35fde11062e6a",
+      "bytes": 9217,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/index_proofs.py"
+    },
+    "source/tests/fixtures/containers/iteration.py": {
+      "sha256": "1a32951ce1db29274156067b099169b1bea9633a3462e29cde409a4a0adc6afc",
+      "bytes": 6119,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/iteration.py"
+    },
+    "source/tests/fixtures/containers/lists.py": {
+      "sha256": "958067d313b7ca0015b49532a32efc1369b24738c012becf6465b52d07d8f961",
+      "bytes": 1087,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/lists.py"
+    },
+    "source/tests/fixtures/containers/objects.py": {
+      "sha256": "86c25e805beccb666b331c10351f674a9d7dc7493a1311e388bd3df65adf4e89",
+      "bytes": 1107,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/objects.py"
+    },
+    "source/tests/fixtures/containers/optional.py": {
+      "sha256": "f091b226523e2def53faea8692ea6cedfbf1527fd57245a7f9b71d55eaa4b18e",
+      "bytes": 1956,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/optional.py"
+    },
+    "source/tests/fixtures/containers/optional_effects.py": {
+      "sha256": "c48d7757e1b20d1fa042aa221b7c4162b62ce50bb941078cd8651728ec0b4f77",
+      "bytes": 1917,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/optional_effects.py"
+    },
+    "source/tests/fixtures/containers/optional_flow.py": {
+      "sha256": "b214eaf2cd9016f6d881491b44fcbe5fa5a8bf90ee286fa9a241adbf413c03d5",
+      "bytes": 3637,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/optional_flow.py"
+    },
+    "source/tests/fixtures/containers/representation_cleanup.py": {
+      "sha256": "1bba523c14e49a219581fcfac3ec3cf0c56e35a30a27f1250529f9781f276f1a",
+      "bytes": 3795,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/representation_cleanup.py"
+    },
+    "source/tests/fixtures/containers/representation_niches.py": {
+      "sha256": "8cddfe6474b1ec03502aaca243224761a7577a63df7defc6d4e5e3e161a2efb1",
+      "bytes": 4954,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/representation_niches.py"
+    },
+    "source/tests/fixtures/containers/sets.py": {
+      "sha256": "dca2b038827e77a9cea25b1034aca14adc4eb1e9f4c6844b7c74a7ea3a92aedd",
+      "bytes": 7505,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/sets.py"
+    },
+    "source/tests/fixtures/containers/string_concat.py": {
+      "sha256": "e23c2e5a0ab749f429983a1b551a8c0d4fdabcb39b6c83ff56f5a24182753fe7",
+      "bytes": 4341,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/string_concat.py"
+    },
+    "source/tests/fixtures/containers/strings.py": {
+      "sha256": "d1d2aeb83b6906ccfba1242a23c3be7756915bd2cc86cfcb8ac28703a4b78c51",
+      "bytes": 884,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/strings.py"
+    },
+    "source/tests/fixtures/containers/tuples.py": {
+      "sha256": "be3b2819fc7e8aefd2e14621e67dace0b7a8afc030721fcde6b1fecfe52a592d",
+      "bytes": 1057,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/containers/tuples.py"
+    },
+    "source/tests/fixtures/fstrings/effects.py": {
+      "sha256": "9d248f7a8c9fe5d216ec930a6aec9c2e4729c39845a331ebcb3680869aeb0a50",
+      "bytes": 1171,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/fstrings/effects.py"
+    },
+    "source/tests/fixtures/fstrings/files.py": {
+      "sha256": "72d78e1a305911991c96569f54b5caa2f368d038e72ebb5069949e0d16f47be9",
+      "bytes": 1701,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/fstrings/files.py"
+    },
+    "source/tests/fixtures/fstrings/imported/helpers.py": {
+      "sha256": "d50a043e559f443e2cf69f40aa6b4e294e102a07d6332d185f27c24f390c8207",
+      "bytes": 60,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/fstrings/imported/helpers.py"
+    },
+    "source/tests/fixtures/fstrings/imported/main.py": {
+      "sha256": "00be4e17afb1b701cafb33dc2b6bc912ecaab03de41defad5d30157ace530402",
+      "bytes": 138,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/fstrings/imported/main.py"
+    },
+    "source/tests/fixtures/fstrings/literals.py": {
+      "sha256": "779c4a9b3f7c94946058a565028326c93244b274690d29a0e4218a990dc2ec4d",
+      "bytes": 973,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/fstrings/literals.py"
+    },
+    "source/tests/fixtures/fstrings/ownership.py": {
+      "sha256": "ea0573a530731dbbfed6079829b7dde432120b13d1a217554fb7cbca3fbd494c",
+      "bytes": 2033,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/fstrings/ownership.py"
+    },
+    "source/tests/fixtures/fstrings/scalars.py": {
+      "sha256": "a3c5ce51ac92665fad1be349c869058dca60432b6626a519b4a80dda6ab13e1f",
+      "bytes": 1180,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/fstrings/scalars.py"
+    },
+    "source/tests/fixtures/imports/arithmetic.py": {
+      "sha256": "61e3f1d26734cf56315c4fccf666e0570cd3b25182e105e4596faaaf5ce93c80",
+      "bytes": 214,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/imports/arithmetic.py"
+    },
+    "source/tests/fixtures/imports/entry.py": {
+      "sha256": "1d573fb62ea858a814cfde55c439dcfa9c66838bac553db5b47b8cb18dd4d5ee",
+      "bytes": 774,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/imports/entry.py"
+    },
+    "source/tests/fixtures/imports/package/__init__.py": {
+      "sha256": "82efee395ef7da7d89ecf588a2459bb975ec94b3d2ac48b358c9e3b735597e25",
+      "bytes": 191,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/imports/package/__init__.py"
+    },
+    "source/tests/fixtures/imports/package/__main__.py": {
+      "sha256": "4f217f1612640f31fe685e70a73f662438dc42eafd8a81e782f8539fce46e6d5",
+      "bytes": 66,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/imports/package/__main__.py"
+    },
+    "source/tests/fixtures/imports/package/nested/__init__.py": {
+      "sha256": "3976178a3891d14d6abd358ff4d68f3a721adabbd76d10f34e5a8bb1de07ed04",
+      "bytes": 26,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/imports/package/nested/__init__.py"
+    },
+    "source/tests/fixtures/imports/package/nested/labels.py": {
+      "sha256": "802c90cda3d7cd7c61080a5e8c065a71597a29f0646981e156e126b074e4b514",
+      "bytes": 135,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/imports/package/nested/labels.py"
+    },
+    "source/tests/fixtures/imports/package/operations.py": {
+      "sha256": "eacb80ef165efbe1225bced68a8e5387ce45af270a5152622a949469b0d4e029",
+      "bytes": 338,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/imports/package/operations.py"
+    },
+    "source/tests/fixtures/imports/package/program.py": {
+      "sha256": "b0b1f15f2bfea46039555f8ccb5fd73f32b1f94705b004b083ecc466e4aac0c6",
+      "bytes": 222,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fixtures/imports/package/program.py"
+    },
+    "source/tests/fstrings.py": {
+      "sha256": "9c5299ed862d58cdd1686a5214de6335b493b7bff569e11a5cd3715c9b8006cd",
+      "bytes": 9244,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/fstrings.py"
+    },
+    "source/tests/imports.py": {
+      "sha256": "b3f38a06a5cd40b8f7f1b233739240aad7262868425c49c23a8fbffec67b127a",
+      "bytes": 10494,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/imports.py"
+    },
+    "source/tests/io.py": {
+      "sha256": "631d08df643102928d7851a20080baa6bc3eefb75a2f634e00f061ff9defc6bb",
+      "bytes": 10980,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/io.py"
+    },
+    "source/tests/lto.py": {
+      "sha256": "b49156b14c746a6fc34a512eb7263ad25f23d5aecb87ce352b084bb0ff0d5a3f",
+      "bytes": 4780,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/lto.py"
+    },
+    "source/tests/programs/borrowed_operands.py": {
+      "sha256": "b11f660bf7be77819c6ce8837b78cda087cfd6f00ab74715ccfea88022cb8b1c",
+      "bytes": 4222,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/programs/borrowed_operands.py"
+    },
+    "source/tests/programs/constant_division.py": {
+      "sha256": "9625893a535b7fbe7421acecce65cee6e9ea06f050b9e59473199d6b1fb38f19",
+      "bytes": 1233,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/programs/constant_division.py"
+    },
+    "source/tests/programs/control_flow.py": {
+      "sha256": "0ab7519f7a2013b611e9c946f95edc48ea254c41514ef331eef10c02178d6b31",
+      "bytes": 1194,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/programs/control_flow.py"
+    },
+    "source/tests/programs/decimal_input.py": {
+      "sha256": "540380824cecc0c073942118144c17d2185c2c9cb92d0d6ee7eb171a55bf8264",
+      "bytes": 513,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/programs/decimal_input.py"
+    },
+    "source/tests/programs/integer_matrix.py": {
+      "sha256": "36d33ac4564ce1a810cfcda04caf67d4775e9e01fdf56cca4eafc08efa8caf3c",
+      "bytes": 388,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/programs/integer_matrix.py"
+    },
+    "source/tests/programs/ownership.py": {
+      "sha256": "b581438ef1fdb00edc399f550112c5c153c152f15d4d5cbfd7c33357b9d84d29",
+      "bytes": 1991,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/programs/ownership.py"
+    },
+    "source/tests/programs/short_strings.py": {
+      "sha256": "c35fc3f77c55f5d5cc70fa3b46312c290180207c5224d0aaee2bf7476688eed0",
+      "bytes": 1747,
+      "source": "git:e9c2a879ff258892ffe8d2c6862b5fa7688eea57:tests/programs/short_strings.py"
+    }
+  },
+  "companion_files": {
+    "2026-10-18-scalar-fstrings-audit.json": {
+      "sha256": "7c5866ea0bdd717e34ecf1c9d5ceaae156acc9d9eae1638111bc63c42c0f7540",
+      "bytes": 94456
+    },
+    "2026-10-18-scalar-fstrings-build.json": {
+      "sha256": "eb946a0a4504886180786f61ff8a49baa3ca1b511ef3f809443cb074b82edb7a",
+      "bytes": 681167
+    },
+    "2026-10-18-scalar-fstrings-lto.json.gz": {
+      "sha256": "127afd321e034c654fe2fc1a1ba58dfcc29dddf9864190eabe5711f2cf79aa71",
+      "bytes": 921938,
+      "decompressed_sha256": "f025d8f8f2422ea915e88af3a10c92fdef3447ad4abd21e6fdaf91ead3d9ce9b"
+    },
+    "2026-10-18-scalar-fstrings-native-text.json": {
+      "sha256": "39bdc1fe26a06d9b30e02d2da341fe206e6b02bf3f4fba49ec7bbff36a238886",
+      "bytes": 8943
+    },
+    "2026-10-18-scalar-fstrings-normal.json.gz": {
+      "sha256": "10f99ea239b728d52279a2885859032e1573f8d94f22b23e477de4ca17e5a6ab",
+      "bytes": 921746,
+      "decompressed_sha256": "05fe60d3fe57e0ddac9e6c9832d193bec8475ca932212a05dd3adfba35440631"
+    },
+    "2026-10-18-scalar-fstrings-session.json": {
+      "sha256": "f86f57decc902f35e36e6989cc0dd5f42b1208f54c84cb679f4da0275faef44e",
+      "bytes": 34311
+    },
+    "2026-10-18-scalar-fstrings-summary.json": {
+      "sha256": "b05c74c1cbf3440b80cfa74fc9ac185bc4f6156b048755a84d76b3e844695d17",
+      "bytes": 9860
+    },
+    "2026-10-18-scalar-fstrings-validation.json": {
+      "sha256": "ee3bb28eb03354ed9bc3fb890e2905612f51b771f869f0e4987b9f3936ee709d",
+      "bytes": 81108
+    },
+    "2026-10-18-scalar-fstrings.md": {
+      "sha256": "58e03e3d05dee2269fb604c90c5c3f7dc5d87c7dcc4cf821f69802a4d9992c95",
+      "bytes": 9377
+    }
+  },
+  "external_baseline_records": {
+    "2026-10-18-inventory-performance-normal.json.gz": {
+      "sha256": "10fa41472e3ac4f13d59176ade4a45e1ef6d8928cc0ff7d2e476050c38133744",
+      "bytes": 1787508,
+      "decompressed_sha256": "8bf441194078ef3221a91c7801b83b070802b9e60f645c3568c8ed32bbd47c43",
+      "role": "Previous optimized inventory executable/source/build provenance, with its original samples."
+    },
+    "2026-10-18-inventory-performance-lto.json.gz": {
+      "sha256": "f10da8cf66f09e46e56372651a7329b5c8fc09919b9a4f1d6eeedadd1e1ddf36",
+      "bytes": 1787388,
+      "decompressed_sha256": "e8551eb4c488a34787a4be9d9dda45a8ff5fdee3d1a1ab8201a41127e3116446",
+      "role": "Previous optimized inventory executable/source/build provenance, with its original samples."
+    }
+  },
+  "scope": [
+    "Only existing observations are packaged; no native build, execution, profiling, or timing is performed.",
+    "The measured source snapshot comes from Git commit e9c2a879ff258892ffe8d2c6862b5fa7688eea57, independently of later documentation edits. Historical results are excluded.",
+    "All 84 retained local evidence paths from the reviewed validation index are included, with source/log hashes and corrected-fixture rationale. Initial uncommitted fixture contents were not retained and are not reconstructed.",
+    "Native executables, runtime archives, interpreters, toolchains, bytecode caches, and native .text dumps are excluded. Their paths/hashes remain in the original records.",
+    "Raw timing JSON is separately gzip-compressed without byte changes. Previous baseline timing records remain separately published and are referenced by exact compressed/decompressed hashes.",
+    "Tar members are sorted regular files with mode 0644, uid/gid/mtime 0, empty owner names, and gzip filename empty/mtime 0. Metadata uses the recorded timing completion time, not packaging time.",
+    "Audits using executable/toolchain files and Git objects need those preserved external artifacts; published JSON, source, logs, and LLVM support independent review and recomputation."
+  ]
+}

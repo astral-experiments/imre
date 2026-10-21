@@ -1,0 +1,89 @@
+{
+  "method": "Read-only ELF64 little-endian section-table parsing with Python struct; no files are modified. Compare complete native .text byte sequences and SHA-256. Also list sections whose type, size or content changed; SHT_NOBITS has no file bytes.",
+  "completed_at_utc": "2026-10-18T23:18:06.147317+00:00",
+  "source_commit": "e9c2a879ff258892ffe8d2c6862b5fa7688eea57",
+  "modes": {
+    "normal": {
+      "record_sha256": "05fe60d3fe57e0ddac9e6c9832d193bec8475ca932212a05dd3adfba35440631",
+      "baseline": {
+        "path": "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-normal-final/inventory_reconciliation",
+        "binary_sha256": "a484cd1482b2dc240cb3c5b1058cc1ab41984f82580b0f7fd2af40a8a6252e7c",
+        "binary_bytes": 3534280,
+        "section_bytes": 1032601,
+        "section_sha256": "639f9045c235eb5e07d7f96d7d93b28bf35bc70ed9705303926a085baf78c414"
+      },
+      "current": {
+        "path": "/home/dev-user/code/oss/relar/benchmarks/local/scalar-fstrings-normal-final/inventory_reconciliation",
+        "binary_sha256": "45c77f45d09d3fd978bad9d888907f5233d26b50c6b255c0f0849dea83856df8",
+        "binary_bytes": 3534280,
+        "section_bytes": 1032601,
+        "section_sha256": "639f9045c235eb5e07d7f96d7d93b28bf35bc70ed9705303926a085baf78c414"
+      },
+      "text_byte_identical": true,
+      "complete_binary_byte_identical": false,
+      "changed_sections": {
+        ".strtab": {
+          "baseline": {
+            "section_type": 3,
+            "size_bytes": 353013,
+            "sha256": "7e04f33d1ad4be3f599e1b5f15e4cf96eb50b50410cfd68fdbb2f9243480d062"
+          },
+          "current": {
+            "section_type": 3,
+            "size_bytes": 353013,
+            "sha256": "8d9537bb7a4cb3d1a5f775b2a19684cd776cb6f34d811e66ff8d401bd31caed2"
+          }
+        }
+      },
+      "input_hashes_unchanged_after_read": true
+    },
+    "lto": {
+      "record_sha256": "f025d8f8f2422ea915e88af3a10c92fdef3447ad4abd21e6fdaf91ead3d9ce9b",
+      "baseline": {
+        "path": "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-lto-final/inventory_reconciliation",
+        "binary_sha256": "820ae27cd6b5e477913f76baf980251a632e5579c42dda5ef706d14adb4a2ef0",
+        "binary_bytes": 3224240,
+        "section_bytes": 1040928,
+        "section_sha256": "00e12609764e786f60a142242d720ab8ccc39955b8fbb3f3610044167915ebed"
+      },
+      "current": {
+        "path": "/home/dev-user/code/oss/relar/benchmarks/local/scalar-fstrings-lto-final/inventory_reconciliation",
+        "binary_sha256": "c8080786326c716725ee0f0e511969f21ec9ceade6579d85a99108611be0d0a1",
+        "binary_bytes": 3224240,
+        "section_bytes": 1040928,
+        "section_sha256": "00e12609764e786f60a142242d720ab8ccc39955b8fbb3f3610044167915ebed"
+      },
+      "text_byte_identical": true,
+      "complete_binary_byte_identical": false,
+      "changed_sections": {
+        ".note.gnu.build-id": {
+          "baseline": {
+            "section_type": 7,
+            "size_bytes": 36,
+            "sha256": "880407a68f853dec193ca54b39a1b1e0090a0611bbf00b59b647fc24d91e2160"
+          },
+          "current": {
+            "section_type": 7,
+            "size_bytes": 36,
+            "sha256": "21c812cfbf43ad82aafdf6bd876583c7c591ad1175c82b1eebd82fa659a4b43f"
+          }
+        },
+        ".strtab": {
+          "baseline": {
+            "section_type": 3,
+            "size_bytes": 329221,
+            "sha256": "fca4d9383ada45e280fd67f3d3c1687ad941bc8764596c9bbd19aa2ee5743104"
+          },
+          "current": {
+            "section_type": 3,
+            "size_bytes": 329221,
+            "sha256": "780c956d265e5d66f7497492658b97415444627ac4f443c248756e976a94f52c"
+          }
+        }
+      },
+      "input_hashes_unchanged_after_read": true
+    }
+  },
+  "audit_script_sha256": "ef7fb5445e352b12b648c01b4a3b191633c0a5b94ea4b43fff2fb77058f8e465",
+  "audit_script_source": "\"\"\"Compare retained ELF code sections without modifying or executing either binary.\"\"\"\n\nimport hashlib\nimport json\nimport struct\nfrom datetime import datetime, timezone\nfrom pathlib import Path\n\nROOT = Path(__file__).resolve().parents[2]\nLOCAL = ROOT / \"benchmarks/local\"\n\n\ndef sha(data):\n    return hashlib.sha256(data).hexdigest()\n\n\ndef sections(path):\n    data = path.read_bytes()\n    header = struct.unpack_from(\"<16sHHIQQQIHHHHHH\", data, 0)\n    assert header[0][:6] == b\"\\x7fELF\\x02\\x01\", \"requires ELF64 little-endian\"\n    offset, entry_size, count, strings_index = (\n        header[6],\n        header[11],\n        header[12],\n        header[13],\n    )\n    assert entry_size == 64 and count > 0 and 0 < strings_index < count\n    table = [\n        struct.unpack_from(\"<IIQQQQIIQQ\", data, offset + index * entry_size)\n        for index in range(count)\n    ]\n    strings = table[strings_index]\n    names = data[strings[4] : strings[4] + strings[5]]\n    found = {}\n    for section in table:\n        end = names.index(0, section[0])\n        name = names[section[0] : end].decode()\n        assert name not in found\n        content = (\n            None if section[1] == 8 else data[section[4] : section[4] + section[5]]\n        )\n        found[name] = {\n            \"section_type\": section[1],\n            \"size_bytes\": section[5],\n            \"sha256\": None if content is None else sha(content),\n            \"content\": content,\n        }\n    assert \".text\" in found and found[\".text\"][\"content\"] is not None\n    return {\n        \"path\": str(path),\n        \"binary_sha256\": sha(data),\n        \"binary_bytes\": len(data),\n    }, found\n\n\nsession = json.loads((LOCAL / \"scalar-fstrings-final-session.json\").read_text())\nassert session[\"source_commit\"] == \"e9c2a879ff258892ffe8d2c6862b5fa7688eea57\"\nresult = {\n    \"method\": \"Read-only ELF64 little-endian section-table parsing with Python struct; no files are modified. Compare complete native .text byte sequences and SHA-256. Also list sections whose type, size or content changed; SHT_NOBITS has no file bytes.\",\n    \"completed_at_utc\": datetime.now(timezone.utc).isoformat(),\n    \"source_commit\": session[\"source_commit\"],\n    \"modes\": {},\n    \"audit_script_sha256\": sha(Path(__file__).read_bytes()),\n    \"audit_script_source\": Path(__file__).read_text(),\n}\nfor mode in (\"normal\", \"lto\"):\n    record_path = LOCAL / f\"scalar-fstrings-{mode}-final.json\"\n    record = json.loads(record_path.read_text())\n    assert record[\"git\"] == {\"revision\": session[\"source_commit\"], \"dirty\": False}\n    assert sha(record_path.read_bytes()) == session[\"runs\"][mode][\"record_sha256\"]\n    commands = record[\"method\"][\"commands\"][\"inventory\"]\n    old, old_sections = sections(Path(commands[\"baseline\"][0]))\n    new, new_sections = sections(Path(commands[\"relar\"][0]))\n    assert old[\"binary_sha256\"] == record[\"sha256\"][\"inventory_baseline\"]\n    assert new[\"binary_sha256\"] == record[\"sha256\"][\"inventory_binary\"]\n    for item, table in ((old, old_sections), (new, new_sections)):\n        item[\"section_bytes\"] = table[\".text\"][\"size_bytes\"]\n        item[\"section_sha256\"] = table[\".text\"][\"sha256\"]\n    changed = {\n        name: {\n            label: {\n                key: value for key, value in table[name].items() if key != \"content\"\n            }\n            if name in table\n            else None\n            for label, table in ((\"baseline\", old_sections), (\"current\", new_sections))\n        }\n        for name in sorted(old_sections.keys() | new_sections.keys())\n        if old_sections.get(name) != new_sections.get(name)\n    }\n    result[\"modes\"][mode] = {\n        \"record_sha256\": sha(record_path.read_bytes()),\n        \"baseline\": old,\n        \"current\": new,\n        \"text_byte_identical\": old_sections[\".text\"][\"content\"]\n        == new_sections[\".text\"][\"content\"],\n        \"complete_binary_byte_identical\": old[\"binary_sha256\"] == new[\"binary_sha256\"],\n        \"changed_sections\": changed,\n    }\n    for item in (old, new):\n        assert sha(Path(item[\"path\"]).read_bytes()) == item[\"binary_sha256\"]\n    result[\"modes\"][mode][\"input_hashes_unchanged_after_read\"] = True\noutput = LOCAL / \"scalar-fstrings-native-text-audit.json\"\noutput.write_text(json.dumps(result, indent=2) + \"\\n\")\nprint(\n    json.dumps(\n        {\n            \"audit_sha256\": sha(output.read_bytes()),\n            \"modes\": {\n                mode: {\n                    key: item[key]\n                    for key in (\n                        \"text_byte_identical\",\n                        \"complete_binary_byte_identical\",\n                        \"changed_sections\",\n                    )\n                }\n                for mode, item in result[\"modes\"].items()\n            },\n        },\n        indent=2,\n    )\n)\n"
+}
