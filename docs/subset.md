@@ -9,25 +9,38 @@ This is a deliberately restricted Python dialect for closed first-party programs
 | Modules | Closed first-party UTF-8 source graph; definitions and imports precede executable entry statements; optional module/function docstrings |
 | Imports | Absolute, `from`, and package-relative imports; aliases and package re-exports; fixed module and definition bindings; no import cycles |
 | Functions | Required parameter and return annotations; positional and keyword calls; positional-only and keyword-only parameters; scalar literal defaults; direct, fixed bindings; no recursive call cycles |
-| Types | `int`, `bool`, `str`, `None`, sealed `typing.TextIO`, the sealed builtin `Exception` family, fixed nominal classes, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, and `T \| None`; locals have one inferred or declared storage type |
-| Classes | Declared fields, an explicit initializer, typed instance methods, alias-visible field mutation, and integer field augmented assignment |
-| Statements | Single-target and fixed-tuple unpacking assignment, annotated assignment, integer augmented assignment, local string `+=`, dictionary entry deletion, `if`/`elif`/`else`, `while`, `for` over ranges, strings, or concrete containers, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin-file `with` |
+| Types | `int`, `float`, `bool`, `str`, `None`, sealed `typing.TextIO`, the sealed builtin `Exception` family, fixed nominal classes, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, and `T \| None`; locals have one inferred or declared storage type |
+| Classes | Declared fields, an explicit initializer, typed instance methods, alias-visible field mutation, and numeric field augmented assignment |
+| Statements | Single-target and fixed-tuple unpacking assignment, annotated assignment, numeric augmented assignment, local string `+=`, dictionary entry deletion, `if`/`elif`/`else`, `while`, `for` over ranges, strings, or concrete containers, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin-file `with` |
 | Conditions | Explicit `bool`; `and`, `or`, `not`; short-circuit evaluation; conditional expressions `yes if condition else no`; `is None`/`is not None` with local flow narrowing |
-| Integers | Arbitrary precision; `+`, `-`, `*`, `//`, `%`; unary `+`/`-`; all six value comparisons, including chains |
+| Integers | Arbitrary precision; `+`, `-`, `*`, `//`, `%`; `/` returns a correctly rounded float; unary `+`/`-`; all six value comparisons, including chains |
+| Floats | Binary64 literals and exact storage; `+`, `-`, `*`, `/`, `//`, `%`; unary signs; all six comparisons; mixed integer arithmetic and exact mixed comparisons; explicit numeric/string conversions |
 | Lists | One exact element type, including nested containers and classes; literals, shallow repetition and slicing, checked negative indexing, indexed assignment, iteration, `append(value)`, `pop()`, `len(...)`; alias-visible mutation |
-| Dictionaries | Exact `int` or `str` keys and one concrete value type; literals, contextual `dict()`, lookup/write/delete, integer augmented writes, `in`/`not in`, `get`, `len`, and insertion-ordered key/items iteration |
+| Dictionaries | Exact `int` or `str` keys and one concrete value type; literals, contextual `dict()`, lookup/write/delete, numeric augmented writes, `in`/`not in`, `get`, `len`, and insertion-ordered key/items iteration |
 | Sets | Exact `int` or `str` elements; literals, contextual `set()`, `add`, `discard`, `in`/`not in`, `len`, and iteration with unspecified order |
 | Comprehensions | Eager list, dictionary, and set comprehensions; nested `for` clauses and explicit boolean filters over the existing iteration sources; isolated target bindings |
 | Tuples | Fixed length and a type per position; literals, bounded literal indexing, unpacking into names, and `len(...)`; immutable slots |
 | Strings | Immutable UTF-8 text, literals, scalar f-strings, concatenation, equality/inequality, Unicode scalar length, indexing, slicing and iteration, no-argument whitespace `split()` and `splitlines()`, input and output |
 | Files and arguments | Explicit UTF-8 `open` in read/write mode; `read`, `write`, `flush`, `close`, `closed`; `with` cleanup; one shared mutable `sys.argv` list |
-| Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `int(int_or_bool_or_string)`; `str()` or `str(int_or_bool_or_string_or_None_or_exception)`; `len(string_or_container)`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments and `enumerate(string_or_container[, start])` at a loop or comprehension boundary |
+| Builtins | `print(value)` for one scalar or exception; `input()` without a prompt; `int(int_or_float_or_bool_or_string)`; `float()` or `float(int_or_float_or_bool_or_string)`; `str()` or `str(int_or_float_or_bool_or_string_or_None_or_exception)`; `len(string_or_container)`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments and `enumerate(string_or_container[, start])` at a loop or comprehension boundary |
 
 Booleans have a separate exact type: use `int(flag)` to store one in an integer list. An empty list defaults to `list[int]` unless a typed storage, call, or return boundary supplies its element type. No annotation permits `Any`, a general union, an untyped object, or a foreign container to enter native storage. ty checks ordinary Python typing first; Relar additionally enforces exact types, definite assignment, fixed bindings, and every container write. Suppression comments cannot waive Relar's contract.
 
 Indentation must use spaces; tabs and form feeds remain valid inside string data. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
 
 Mutable global values, first-class functions or methods, closures, decorators, reflection, dynamic attributes, generators, async, assignment expressions, slice assignment/deletion, starred or variable-length unpacking, variadic parameters, defaults other than scalar literals, loop `else`, mutable-list augmented assignment, and `is`/`is not` comparisons other than None checks are currently rejected. Conditions cannot rely on implicit truthiness. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+
+## Binary64 numbers
+
+`float` is an exact storage type. It uses IEEE 754 binary64 in native arguments, returns, locals, fields, tuples, lists, and dictionary values. An annotation never silently changes a Python value: `value: float = 1` and passing an `int` to a `float` parameter are rejected; write `float(1)` explicitly. Mixed arithmetic itself performs Python's integer-to-float conversion and may raise `OverflowError` for an integer too large to convert. Augmented assignment must leave the target's exact type unchanged, so an integer slot cannot use `/=`.
+
+Native arithmetic uses no fast-math flags. Signed zeros, infinities, NaNs, and ordinary rounding remain observable. Float division by either signed zero raises `ZeroDivisionError`. Floor division and modulo follow Python's corrected remainder convention, including `1.0 // 0.1 == 9.0` and the divisor's sign on a zero remainder. Overflow in ordinary float arithmetic can produce infinity. Comparisons with NaN are false except `!=`; mixed integer/float comparisons compare exact values without rounding the integer to binary64.
+
+Integer `/` computes the ratio directly and rounds once, including at the subnormal boundary. Neither operand needs to fit in a float: two equal 400-digit integers divide to `1.0`. A result too large for binary64 raises `OverflowError`; underflow preserves the result's zero sign. `int(float)` truncates toward zero, raises `ValueError` for NaN, and raises `OverflowError` for infinity.
+
+`float(str)` accepts signed decimal notation, optional separators between digits, surrounding whitespace, and case-insensitive `inf`, `infinity`, and `nan`. Decimal parsing is correctly rounded; overflow and underflow produce infinity and signed zero. Unicode decimal digits use the pinned ICU character database, whose Unicode version can be newer than a particular CPython build. Malformed input raises `ValueError`. `print`, `str`, and scalar f-strings use shortest round-trip decimal formatting with Python's decimal tie-breaking, exponent signs, and `.0` for integral values in fixed notation. General format specifications remain unsupported.
+
+`float | None` preserves every binary64 bit pattern by boxing only present optional payloads. None remains the nullable zero word; narrowing loads the double while the box is rooted. This costs an allocation when promoting an ordinary float to optional storage, without reserving a NaN payload or conflating absence with `0.0` or `-0.0`. Float dictionary keys, set elements, complex numbers, exponentiation, float-specific methods, and implicit truthiness remain outside the contract.
 
 ## Conditional expressions and sequence access
 
@@ -65,7 +78,7 @@ print(adjust(8))
 print(adjust(8, label="orders", offset=2))
 ```
 
-Defaults must be `int`, `bool`, `str`, or `None` literals. An integer may have one unary `+` or `-`, including arbitrary-precision hexadecimal, octal, and binary literals. Ordinary string-literal rules also apply to defaults. Each default must fit its parameter's exact type: `True` is not an `int` default, and `None` requires `None` or an optional annotation. Mutable containers, tuples, names, calls, arithmetic expressions, and f-strings cannot be defaults, even in an unused function. Literal defaults do not require mutable module state or a general function-object representation.
+Defaults must be `int`, `float`, `bool`, `str`, or `None` literals. A number may have one unary `+` or `-`; integers include arbitrary-precision hexadecimal, octal, and binary literals. Ordinary string-literal rules also apply to defaults. Each default must fit its parameter's exact type: `True` is not an `int` default, and `None` requires `None` or an optional annotation. Mutable containers, tuples, names, calls, arithmetic expressions, and f-strings cannot be defaults, even in an unused function. Literal defaults do not require mutable module state or a general function-object representation.
 
 The receiver of an instance call evaluates first. Supplied arguments then evaluate once in source order, independently of parameter order; a failure prevents later arguments and the callee from running. The compiler applies each parameter's exact type context to its argument, including empty containers and optional values, and retains evaluated values across later mutations and failures. Named arguments lower to ordinary positional native calls.
 
@@ -73,7 +86,7 @@ Variadic parameters and `*`/`**` argument expansion remain unsupported. Builtins
 
 ## Scalar f-strings
 
-F-strings interpolate exact `int`, `bool`, `str`, `None`, and sealed builtin exception values. Ordinary, raw, triple-quoted, and adjacent literals are supported, including escaped braces, Unicode, and escaped NULs. Each field expression and its conversion complete before the next field evaluates. Nested f-strings may appear inside field expressions. Optional values require the same local narrowing as other scalar operations.
+F-strings interpolate exact `int`, `float`, `bool`, `str`, `None`, and sealed builtin exception values. Ordinary, raw, triple-quoted, and adjacent literals are supported, including escaped braces, Unicode, and escaped NULs. Each field expression and its conversion complete before the next field evaluates. Nested f-strings may appear inside field expressions. Optional values require the same local narrowing as other scalar operations.
 
 ```python
 def describe(name: str, quantity: int) -> str:
@@ -178,7 +191,7 @@ Old-value and exit ownership checks can be omitted for an integer local only whe
 
 A proved nonnegative small index may use a decoded native-index ABI, but each read or write still checks the container's current bounds. Calls, alias mutation, and resizing cannot invalidate a cached length because no such length proof is used. Negative or arbitrary-precision indices retain their normal normalization and error behavior. Element reads acquire ownership before later evaluation can remove them. The narrow exception is a direct integer-list read in a two-operand integer comparison whose complete operand trees are proved nonmutating; the local keeps the list rooted until the comparison consumes the borrowed handle. Chained comparisons and potentially mutating evaluation retain owned reads. A same-list copy with simple, proved indices can also combine its get and set, checking and acquiring the source before checking and replacing the destination.
 
-Heap objects are nonmoving reference-counted allocations. Classes and tuples use concrete fixed layouts, and homogeneous containers store their representation metadata once per container rather than in each element. Optionals occupy one nullable word without a wrapper allocation: zero means absent, present integers and pointers keep their payload word, and optional booleans encode False/True as one/two. These representations do not change the supported Python values or shared mutation behavior.
+Heap objects are nonmoving reference-counted allocations. Classes and tuples use concrete fixed layouts, and homogeneous containers store their representation metadata once per container rather than in each element. Optionals occupy one nullable word: zero means absent, present integers and pointers keep their payload word, and optional booleans encode False/True as one/two. Present optional floats own a separate immutable binary64 allocation so every float bit pattern remains available; ordinary floats remain unboxed. These representations do not change the supported Python values or shared mutation behavior.
 
 Writes acquire the replacement before releasing the displaced value, and reads acquire ownership before the receiver can be released, apart from the rooted comparison borrow above. Fixed records start with zeroed fields and use a static destruction descriptor, so failed construction safely releases every initialized owner. Generated field accesses are direct; their receiver remains rooted and the checker proves complete initialization before a read. Container storage uses scoped `UnsafeCell` closures on one execution thread: mutable access is exclusive, operations cannot reenter through aliases, and no storage reference or resizable-buffer address may escape. Independently owned values and explicitly constrained borrowed integer handles may escape; displaced owners are dropped after access ends.
 
@@ -240,7 +253,7 @@ target/release/relar build examples/dependency_planner/__main__.py \
   -o /tmp/dependency-planner-lto
 ```
 
-All eleven native test harnesses accept the same `--lto-linker` and `--target` options.
+All native test harnesses accept the same `--lto-linker` and `--target` options.
 
 `--sanitize` marks generated functions for AddressSanitizer and links its runtime. This instruments generated code; it does not retroactively instrument a prebuilt Rust static library. Instrumenting Rust runtime code requires a separate sanitizer build of that library. The test suites accept `--sanitize --opt-levels 1` to exercise this configuration, including leak checks on normal exits.
 
@@ -259,6 +272,8 @@ The f-string suite compares literal decoding, raw and adjacent parts, scalar con
 The calls suite compares positional/keyword binding, keyword-only parameters, scalar defaults, imported aliases, contextual container types, and optional values. Reordered arguments, temporary receivers, aliased owners, and later exceptions check evaluation order and cleanup. Rejection cases protect exact types, parameter kinds, required/duplicate names, literal defaults, and the positional builtin surface.
 
 The expressions suite compares lazy conditional arms, contextual result types, optional narrowing, Unicode string indexing and iteration, and list/string slices. It checks 1,701 slices apiece for strings and integer lists, including omitted and arbitrary-precision bounds. Aliased shallow copies, operand mutation, later failures, and recovery check ownership and evaluation order. Rejection cases protect exact types, fixed tuple bounds, and read-only slicing.
+
+The floats suite compares arithmetic and mixed-number matrices, shortest formatting, strict decimal conversion, exact comparisons, and large rational rounding against CPython. Boundary cases include signed zeros, NaNs/infinities, the subnormal and overflow thresholds, and integers too large to convert individually. Concrete classes, tuples, lists, dictionaries, optional values, defaults, and exception cleanup exercise native storage; rejection cases forbid implicit annotation-driven conversions.
 
 The exceptions suite compares nested propagation, handler ordering, builtin hierarchy, stored exception values, dynamically scoped re-raising, lazy assertion messages, and all finally exit reasons. Repeated failures during argument evaluation and partial container/class construction exercise ownership cleanup. Rejection cases protect definite assignment, optional facts, and the sealed exception contract.
 

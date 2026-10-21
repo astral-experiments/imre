@@ -19,7 +19,7 @@ pub(super) struct Parameter {
 
 /// Defaults have no user-visible effects or mutable identity. Checking them at
 /// definition time also rejects unsupported defaults in never-called functions.
-/// Only one optional sign on an integer literal is accepted as an expression.
+/// Only one optional sign on a numeric literal is accepted as an expression.
 pub(super) fn scalar_default(
     expression: &ast::Expr,
     expected: Type,
@@ -31,27 +31,28 @@ pub(super) fn scalar_default(
             value: ast::Number::Int(value),
             ..
         }) => (Type::Int, ExprKind::Int(value.to_string())),
+        ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
+            value: ast::Number::Float(value),
+            ..
+        }) => (Type::Float, ExprKind::Float(*value)),
         ast::Expr::UnaryOp(unary)
             if matches!(unary.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
-                && matches!(&*unary.operand, ast::Expr::NumberLiteral(value) if matches!(&value.value, ast::Number::Int(_))) =>
+                && matches!(&*unary.operand, ast::Expr::NumberLiteral(value) if matches!(&value.value, ast::Number::Int(_) | ast::Number::Float(_))) =>
         {
-            let ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
-                value: ast::Number::Int(value),
-                ..
-            }) = &*unary.operand
-            else {
+            let ast::Expr::NumberLiteral(value) = &*unary.operand else {
                 unreachable!()
             };
-            let kind = ExprKind::Int(value.to_string());
+            let (ty, kind) = match &value.value {
+                ast::Number::Int(value) => (Type::Int, ExprKind::Int(value.to_string())),
+                ast::Number::Float(value) => (Type::Float, ExprKind::Float(*value)),
+                _ => unreachable!(),
+            };
             let kind = if unary.op == ast::UnaryOp::USub {
-                ExprKind::Negate(Box::new(Expr {
-                    ty: Type::Int,
-                    kind,
-                }))
+                ExprKind::Negate(Box::new(Expr { ty, kind }))
             } else {
                 kind
             };
-            (Type::Int, kind)
+            (ty, kind)
         }
         ast::Expr::BooleanLiteral(value) => (Type::Bool, ExprKind::Bool(value.value)),
         ast::Expr::StringLiteral(value) => {
@@ -63,7 +64,7 @@ pub(super) fn scalar_default(
             return Err(error(
                 source,
                 expression,
-                "defaults must be int, bool, str, or None literals; integers may have one sign",
+                "defaults must be int, float, bool, str, or None literals; numbers may have one sign",
             ));
         }
     };

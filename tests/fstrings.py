@@ -85,7 +85,7 @@ def rejection_message(name: str) -> str:
         return "indentation must use spaces, not tabs or form feeds"
     if name == "unused_dynamic_field":
         return ""
-    return "f-string fields require exactly int, bool, str, None, or Exception"
+    return "f-string fields require exactly int, float, bool, str, None, or Exception"
 
 
 def cases(project: Path) -> list[tuple[str, Path, str | None]]:

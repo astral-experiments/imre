@@ -322,7 +322,7 @@ impl Interval {
                 Some(divisor) if divisor < 0 => Self::bounded(divisor + 1, 0),
                 _ => Self::UNKNOWN,
             },
-            Binary::Repeat | Binary::Concat => Self::UNKNOWN,
+            Binary::Divide | Binary::Repeat | Binary::Concat => Self::UNKNOWN,
         }
     }
 }
@@ -755,7 +755,7 @@ impl Analyzer {
                 }
                 Interval::UNKNOWN
             }
-            ExprKind::Str(_) | ExprKind::None => Interval::UNKNOWN,
+            ExprKind::Float(_) | ExprKind::Str(_) | ExprKind::None => Interval::UNKNOWN,
         };
         if record && expression.ty == Type::Int {
             self.intervals
@@ -1106,6 +1106,7 @@ mod tests {
                     }
                 }
                 ExprKind::Int(_)
+                | ExprKind::Float(_)
                 | ExprKind::Bool(_)
                 | ExprKind::Str(_)
                 | ExprKind::None

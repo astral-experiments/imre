@@ -13,6 +13,7 @@ impl Type {
     fn llvm(self) -> &'static str {
         match self {
             Self::Int | Self::Optional(_) => "i64",
+            Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
             | Self::ListInt
@@ -31,6 +32,7 @@ impl Type {
     fn initial(self) -> &'static str {
         match self {
             Self::Int => "1",
+            Self::Float => "0.0",
             Self::Str
             | Self::ListInt
             | Self::Class(_)
@@ -317,6 +319,12 @@ impl Emitter<'_, '_> {
             return;
         }
         let ty = self.module.types.payload(value.ty).unwrap_or(value.ty);
+        if ty == Type::Float {
+            if value.ty != Type::Float {
+                self.void_call(&format!("relar_float_box_{operation}"), &[value]);
+            }
+            return;
+        }
         let family = match ty {
             Type::Int => "int",
             Type::Str => "str",
@@ -328,7 +336,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::Exception
             | Type::TextIO => "object",
-            Type::Bool | Type::None => return,
+            Type::Float | Type::Bool | Type::None => return,
             Type::Optional(_) => unreachable!("optional types are flattened"),
         };
         let name = if ty == Type::Int {
@@ -347,10 +355,12 @@ impl Emitter<'_, '_> {
     /// Registers one owner only after a call's error check. Fallible universal
     /// word getters may return zero on failure, which is not a valid owned Int.
     fn owned(&mut self, value: Value) -> Value {
-        if !matches!(
-            self.module.types.payload(value.ty).unwrap_or(value.ty),
-            Type::Bool | Type::None
-        ) && !value.small_integer
+        if value.ty != Type::Float
+            && !matches!(
+                self.module.types.payload(value.ty).unwrap_or(value.ty),
+                Type::Bool | Type::None
+            )
+            && !value.small_integer
             && !self
                 .temporaries
                 .iter()
@@ -875,7 +885,18 @@ impl Emitter<'_, '_> {
                 let nonnegative = self.nonnegative_index(index);
                 let list = self.operand(list);
                 let index = self.operand(index);
-                let old = self.get_item(&list.value, &index.value, Type::Int, nonnegative);
+                let element = self
+                    .module
+                    .types
+                    .element(list.value.ty)
+                    .or_else(|| {
+                        self.module
+                            .types
+                            .mapping(list.value.ty)
+                            .map(|(_, value)| value)
+                    })
+                    .unwrap();
+                let old = self.get_item(&list.value, &index.value, element, nonnegative);
                 let right = self.operand(expression);
                 let value = self.binary(*op, &old, &right.value);
                 self.set_item(&list.value, &index.value, &value, nonnegative);
@@ -894,7 +915,11 @@ impl Emitter<'_, '_> {
             }
             Statement::AugmentField(receiver, field, op, expression) => {
                 let receiver = self.operand(receiver);
-                let old = self.get_field(&receiver.value, *field, Type::Int);
+                let Type::Class(class) = receiver.value.ty else {
+                    unreachable!()
+                };
+                let ty = self.module.class_fields[class][*field];
+                let old = self.get_field(&receiver.value, *field, ty);
                 let right = self.operand(expression);
                 let value = self.binary(*op, &old, &right.value);
                 self.set_field(&receiver.value, *field, &value);
@@ -1092,6 +1117,11 @@ impl Emitter<'_, '_> {
                     self.literal(value, Type::Int)
                 }
             }
+            ExprKind::Float(value) => Value {
+                ty: Type::Float,
+                operand: format!("0x{:016X}", value.to_bits()),
+                small_integer: false,
+            },
             ExprKind::Bool(value) => Value {
                 ty: Type::Bool,
                 operand: u8::from(*value).to_string(),
@@ -1193,6 +1223,11 @@ impl Emitter<'_, '_> {
             }
             ExprKind::Unwrap(receiver) => {
                 let receiver = self.operand(receiver);
+                if expression.ty == Type::Float {
+                    let value = self.call("relar_float_unbox", Type::Float, &[&receiver.value]);
+                    self.release_operand(&receiver);
+                    return value;
+                }
                 let receiver = self.own_operand(receiver);
                 self.forget(&receiver);
                 let word = if expression.ty == Type::Bool {
@@ -1220,7 +1255,13 @@ impl Emitter<'_, '_> {
                 let direct = self.ranges.integer(expression).is_some()
                     && self.ranges.integer(value).is_some();
                 let value = self.operand(value);
-                let result = if direct {
+                let result = if value.value.ty == Type::Float {
+                    Value {
+                        ty: Type::Float,
+                        operand: self.instruction(format!("fneg double {}", value.value.operand)),
+                        small_integer: false,
+                    }
+                } else if direct {
                     self.small_binary(Binary::Subtract, &small(0), &value.value, false)
                 } else {
                     self.binary(Binary::Subtract, &small(0), &value.value)
@@ -1423,6 +1464,50 @@ impl Emitter<'_, '_> {
     }
 
     fn binary(&mut self, op: Binary, left: &Value, right: &Value) -> Value {
+        if left.ty == Type::Float || right.ty == Type::Float {
+            let left = if left.ty == Type::Int {
+                self.call("relar_int_float", Type::Float, &[left])
+            } else {
+                left.clone()
+            };
+            let right = if right.ty == Type::Int {
+                self.call("relar_int_float", Type::Float, &[right])
+            } else {
+                right.clone()
+            };
+            let operand = match op {
+                Binary::Add | Binary::Subtract | Binary::Multiply => {
+                    let instruction = match op {
+                        Binary::Add => "fadd",
+                        Binary::Subtract => "fsub",
+                        Binary::Multiply => "fmul",
+                        _ => unreachable!(),
+                    };
+                    self.instruction(format!(
+                        "{instruction} double {}, {}",
+                        left.operand, right.operand
+                    ))
+                }
+                Binary::Divide | Binary::FloorDivide | Binary::Modulo => {
+                    let operation = match op {
+                        Binary::Divide => 0,
+                        Binary::FloorDivide => 1,
+                        Binary::Modulo => 2,
+                        _ => unreachable!(),
+                    };
+                    self.checked_instruction(format!(
+                        "call double @relar_float_divide(double {}, double {}, i32 {operation})",
+                        left.operand, right.operand
+                    ))
+                }
+                Binary::Repeat | Binary::Concat => unreachable!("float arithmetic was checked"),
+            };
+            return Value {
+                ty: Type::Float,
+                operand,
+                small_integer: false,
+            };
+        }
         match op {
             Binary::Repeat => {
                 let (list, count) = if matches!(left.ty, Type::ListInt | Type::List(_)) {
@@ -1441,6 +1526,7 @@ impl Emitter<'_, '_> {
             Binary::Add => self.call("int_add", Type::Int, &[left, right]),
             Binary::Subtract => self.call("int_sub", Type::Int, &[left, right]),
             Binary::Multiply => self.call("int_mul", Type::Int, &[left, right]),
+            Binary::Divide => self.call("relar_int_true_divide", Type::Float, &[left, right]),
             Binary::FloorDivide => self.call("int_floordiv", Type::Int, &[left, right]),
             Binary::Modulo => self.call("int_mod", Type::Int, &[left, right]),
         }
@@ -1469,7 +1555,7 @@ impl Emitter<'_, '_> {
                     (left.min >= 0 && right.min > 0) || (left.max <= 0 && right.max < 0);
                 Some(!same_sign)
             }
-            Binary::Repeat | Binary::Concat => None,
+            Binary::Divide | Binary::Repeat | Binary::Concat => None,
         }
     }
 
@@ -1528,7 +1614,9 @@ impl Emitter<'_, '_> {
                     result
                 }
             }
-            Binary::Repeat | Binary::Concat => unreachable!("only proved integer arithmetic"),
+            Binary::Divide | Binary::Repeat | Binary::Concat => {
+                unreachable!("only proved integer arithmetic")
+            }
         };
         let shifted = self.instruction(format!("shl nsw i64 {result}, 1"));
         Value {
@@ -1547,6 +1635,38 @@ impl Emitter<'_, '_> {
             Compare::Greater => "sgt",
             Compare::GreaterEqual => "sge",
         };
+        if matches!(
+            (left.ty, right.ty),
+            (Type::Int, Type::Float) | (Type::Float, Type::Int)
+        ) {
+            let (integer, float, predicate) = if left.ty == Type::Int {
+                (left, right, predicate)
+            } else {
+                let predicate = match op {
+                    Compare::Equal => "eq",
+                    Compare::NotEqual => "ne",
+                    Compare::Less => "sgt",
+                    Compare::LessEqual => "sge",
+                    Compare::Greater => "slt",
+                    Compare::GreaterEqual => "sle",
+                };
+                (right, left, predicate)
+            };
+            let order = self.instruction(format!(
+                "call i32 @relar_int_float_compare(i64 {}, double {})",
+                integer.operand, float.operand
+            ));
+            let mut operand = self.instruction(format!("icmp {predicate} i32 {order}, 0"));
+            if !matches!(op, Compare::Equal | Compare::NotEqual) {
+                let ordered = self.instruction(format!("icmp ne i32 {order}, 2"));
+                operand = self.instruction(format!("and i1 {ordered}, {operand}"));
+            }
+            return Value {
+                ty: Type::Bool,
+                operand,
+                small_integer: false,
+            };
+        }
         let operand = match left.ty {
             Type::Int if left.small_integer && right.small_integer => self.instruction(format!(
                 "icmp {predicate} i64 {}, {}",
@@ -1558,6 +1678,20 @@ impl Emitter<'_, '_> {
                     left.operand, right.operand
                 ));
                 self.instruction(format!("icmp {predicate} i32 {order}, 0"))
+            }
+            Type::Float => {
+                let predicate = match op {
+                    Compare::Equal => "oeq",
+                    Compare::NotEqual => "une",
+                    Compare::Less => "olt",
+                    Compare::LessEqual => "ole",
+                    Compare::Greater => "ogt",
+                    Compare::GreaterEqual => "oge",
+                };
+                self.instruction(format!(
+                    "fcmp {predicate} double {}, {}",
+                    left.operand, right.operand
+                ))
             }
             Type::Str => {
                 let equal = self.instruction(format!(
@@ -1777,6 +1911,7 @@ impl Emitter<'_, '_> {
             Builtin::Str => match args[0].value.ty {
                 Type::Str => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Int => self.call("relar_int_str", Type::Str, &[&args[0].value]),
+                Type::Float => self.call("relar_float_str", Type::Str, &[&args[0].value]),
                 Type::Bool => {
                     let byte = self.instruction(format!("zext i1 {} to i8", args[0].value.operand));
                     Value {
@@ -1804,7 +1939,20 @@ impl Emitter<'_, '_> {
                     }
                 }
                 Type::Str => self.call("relar_int_parse", Type::Int, &[&args[0].value]),
+                Type::Float => self.call("relar_float_int", Type::Int, &[&args[0].value]),
                 _ => unreachable!("int conversion was checked"),
+            },
+            Builtin::Float => match args[0].value.ty {
+                Type::Float => return self.own_operand(args.into_iter().next().unwrap()),
+                Type::Int => self.call("relar_int_float", Type::Float, &[&args[0].value]),
+                Type::Str => self.call("relar_float_parse", Type::Float, &[&args[0].value]),
+                Type::Bool => Value {
+                    ty: Type::Float,
+                    operand: self
+                        .instruction(format!("uitofp i1 {} to double", args[0].value.operand)),
+                    small_integer: false,
+                },
+                _ => unreachable!("float conversion was checked"),
             },
             Builtin::Len if matches!(args[0].value.ty, Type::Tuple(_)) => {
                 small(self.module.types.fields(args[0].value.ty).unwrap().len() as i64)
@@ -1932,6 +2080,7 @@ impl Emitter<'_, '_> {
             Builtin::Print => {
                 match args[0].value.ty {
                     Type::Int => self.void_call("relar_print_int", &[&args[0].value]),
+                    Type::Float => self.void_call("relar_print_float", &[&args[0].value]),
                     Type::Str => self.void_call("relar_print_str", &[&args[0].value]),
                     Type::Bool => {
                         let byte =
@@ -2061,6 +2210,7 @@ impl Emitter<'_, '_> {
     fn word(&mut self, value: &Value) -> String {
         match value.ty {
             Type::Int | Type::Optional(_) => value.operand.clone(),
+            Type::Float => self.instruction(format!("bitcast double {} to i64", value.operand)),
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
             Type::Str
@@ -2087,6 +2237,7 @@ impl Emitter<'_, '_> {
     fn decode_word(&mut self, word: String, ty: Type) -> Value {
         let operand = match ty {
             Type::Int | Type::Optional(_) => word,
+            Type::Float => self.instruction(format!("bitcast i64 {word} to double")),
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
             Type::Str
@@ -2109,8 +2260,19 @@ impl Emitter<'_, '_> {
 
     /// Moves an owned payload into a nullable word. Canonical integers and live
     /// pointers never use zero; booleans reserve it by encoding False/True as 1/2.
+    /// Floats preserve all binary64 patterns in a separately owned allocation.
     fn present(&mut self, value: Value, ty: Type) -> Value {
         debug_assert_eq!(self.module.types.payload(ty), Some(value.ty));
+        if value.ty == Type::Float {
+            return Value {
+                ty,
+                operand: self.instruction(format!(
+                    "call i64 @relar_float_box(double {})",
+                    value.operand
+                )),
+                small_integer: false,
+            };
+        }
         let word = self.word(&value);
         let operand = if value.ty == Type::Bool {
             self.instruction(format!("add i64 {word}, 1"))
@@ -2151,7 +2313,7 @@ impl Emitter<'_, '_> {
     /// be read only for replacement cleanup, whose ownership operation accepts zero.
     fn field_value(&mut self, pointer: &str, ty: Type) -> Value {
         let operand = self.instruction(format!("load {}, ptr {pointer}", storage_type(ty)));
-        if storage_type(ty) == "ptr" {
+        if matches!(storage_type(ty), "ptr" | "double") {
             Value {
                 ty,
                 operand,
@@ -2177,7 +2339,7 @@ impl Emitter<'_, '_> {
         self.retain(value);
         let pointer = self.field_pointer(receiver, field);
         let old = self.field_value(&pointer, value.ty);
-        let operand = if storage_type(value.ty) == "ptr" {
+        let operand = if matches!(storage_type(value.ty), "ptr" | "double") {
             value.operand.clone()
         } else {
             self.word(value)
@@ -2406,6 +2568,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::None => 0,
         Type::Bool => 1,
         Type::Int => 2,
+        Type::Float => 7,
         Type::Str => 3,
         Type::ListInt => 4,
         Type::Class(_) | Type::Tuple(_) => 6,
@@ -2427,11 +2590,15 @@ fn record_name(ty: Type) -> String {
     }
 }
 
-/// All fields occupy one aligned word. Pointer fields stay pointers in LLVM;
-/// booleans/None use word storage so descriptor offsets are target-independent
+/// All fields occupy one aligned word. Pointers and doubles retain their LLVM
+/// types; booleans/None use word storage so descriptor offsets stay uniform
 /// within the runtime's existing 64-bit ABI.
 fn storage_type(ty: Type) -> &'static str {
-    if ty.llvm() == "ptr" { "ptr" } else { "i64" }
+    match ty.llvm() {
+        "ptr" => "ptr",
+        "double" => "double",
+        _ => "i64",
+    }
 }
 
 /// Emits concrete field layouts and static destruction descriptors. No per-field
@@ -2561,6 +2728,7 @@ fn fallible(name: &str) -> bool {
                 | "int_mod"
                 | "relar_flush_stdout"
                 | "relar_print_int"
+                | "relar_print_float"
                 | "relar_print_str"
                 | "relar_print_bool"
                 | "relar_print_none"
@@ -2573,6 +2741,10 @@ fn fallible(name: &str) -> bool {
                 | "relar_text_flush"
                 | "relar_text_close"
                 | "relar_int_parse"
+                | "relar_int_float"
+                | "relar_float_int"
+                | "relar_float_parse"
+                | "relar_int_true_divide"
                 | "relar_assert_fail"
                 | "relar_range_step_zero"
                 | "relar_list_get"
@@ -2602,6 +2774,18 @@ fn fallible(name: &str) -> bool {
 }
 
 const DECLARATIONS: &str = r#"
+declare i64 @relar_float_box(double)
+declare double @relar_float_unbox(i64)
+declare void @relar_float_box_retain(i64)
+declare void @relar_float_box_release(i64)
+declare ptr @relar_float_str(double)
+declare void @relar_print_float(double)
+declare double @relar_int_float(i64)
+declare i64 @relar_float_int(double)
+declare double @relar_float_parse(ptr)
+declare double @relar_float_divide(double, double, i32)
+declare i32 @relar_int_float_compare(i64, double)
+declare double @relar_int_true_divide(i64, i64)
 declare i8 @relar_error_pending()
 declare ptr @relar_error_take()
 declare void @relar_error_set(ptr)

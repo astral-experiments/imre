@@ -4,6 +4,7 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
     Int,
+    Float,
     Bool,
     Str,
     ListInt,
@@ -37,6 +38,7 @@ impl std::fmt::Display for Type {
         }
         f.write_str(match self {
             Self::Int => "int",
+            Self::Float => "float",
             Self::Bool => "bool",
             Self::Str => "str",
             Self::ListInt => "list[int]",
@@ -99,6 +101,7 @@ impl Module {
                     message.as_ref().is_some_and(|message| expression(message))
                 }
                 ExprKind::Int(_)
+                | ExprKind::Float(_)
                 | ExprKind::Bool(_)
                 | ExprKind::Str(_)
                 | ExprKind::None
@@ -182,6 +185,7 @@ impl CallArgs {
 #[derive(Clone)]
 pub(crate) enum ExprKind {
     Int(String),
+    Float(f64),
     Bool(bool),
     Str(String),
     None,
@@ -226,6 +230,7 @@ pub(crate) enum Binary {
     Add,
     Subtract,
     Multiply,
+    Divide,
     FloorDivide,
     Modulo,
     Repeat,
@@ -247,6 +252,7 @@ pub(crate) enum Builtin {
     Print,
     Input,
     Int,
+    Float,
     Str,
     Len,
     ListGet,

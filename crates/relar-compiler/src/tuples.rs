@@ -454,6 +454,7 @@ fn children(expression: &Expr, mut visit: impl FnMut(&Expr)) {
             visit(no);
         }
         ExprKind::Int(_)
+        | ExprKind::Float(_)
         | ExprKind::Bool(_)
         | ExprKind::Str(_)
         | ExprKind::None
@@ -505,6 +506,7 @@ fn children_mut(expression: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
             visit(no);
         }
         ExprKind::Int(_)
+        | ExprKind::Float(_)
         | ExprKind::Bool(_)
         | ExprKind::Str(_)
         | ExprKind::None
