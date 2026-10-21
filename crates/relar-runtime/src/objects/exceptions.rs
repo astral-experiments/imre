@@ -4,7 +4,7 @@
 //! storage contains only a kind and immutable rendered message, so exceptions
 //! cannot introduce traceback or container ownership cycles.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
 use std::rc::Rc;
 
@@ -121,10 +121,16 @@ impl Error {
     }
 
     /// Installs this error only after any runtime storage access has ended.
+    /// Keep exception allocation and cleanup out of successful access paths.
+    #[cold]
+    #[inline(never)]
     pub(crate) fn raise(self) {
         replace_pending(Some(new_exception(self.kind, Rc::new(self.message))));
     }
 
+    /// Returns a failure sentinel after installing the owned exception.
+    #[cold]
+    #[inline(never)]
     pub(crate) fn returning<T>(self, sentinel: T) -> T {
         self.raise();
         sentinel
@@ -141,6 +147,12 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
 thread_local! {
     static PENDING: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
     static ACTIVE: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
+    // The non-Drop mirror lets successful calls query one TLS byte without
+    // initializing or checking the owning cell's destructor/borrow state.
+    // Only replace_pending/take_pending mutate the owner; both synchronize this
+    // flag before dropping displaced owners. The single-thread, no-callback
+    // contract makes the brief interval between owner and flag writes unobservable.
+    static PENDING_PRESENT: Cell<bool> = const { Cell::new(false) };
 }
 
 fn new_exception(kind: Kind, message: Rc<Str>) -> Rc<Object> {
@@ -152,8 +164,17 @@ fn new_exception(kind: Kind, message: Rc<Str>) -> Rc<Object> {
 
 /// Replaces the pending owner without dropping it during a TLS mutable borrow.
 fn replace_pending(value: Option<Rc<Object>>) {
+    let present = value.is_some();
     let previous = PENDING.with(|pending| pending.replace(value));
+    PENDING_PRESENT.set(present);
     drop(previous);
+}
+
+/// Clears presence before transferring the owner, without dropping under a TLS borrow.
+fn take_pending() -> Option<Rc<Object>> {
+    let pending = PENDING.with(RefCell::take);
+    PENDING_PRESENT.set(false);
+    pending
 }
 
 /// Uses Ruff's Python repr rules and its pinned Unicode printable categories.
@@ -198,13 +219,13 @@ impl Storage {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_error_pending() -> u8 {
-    PENDING.with(|pending| u8::from(pending.borrow().is_some()))
+    u8::from(PENDING_PRESENT.get())
 }
 
 /// Transfers the pending reference to the caller and clears pending state.
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_error_take() -> *const Object {
-    PENDING.with(|pending| pending.take().map_or(std::ptr::null(), Rc::into_raw))
+    take_pending().map_or(std::ptr::null(), Rc::into_raw)
 }
 
 /// # Safety
@@ -325,7 +346,7 @@ pub extern "C" fn relar_exception_reraise() {
 /// teardown. A failed best-effort stdout flush preserves the original error.
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_error_unhandled() -> i32 {
-    let pending = PENDING.with(RefCell::take);
+    let pending = take_pending();
     let active = ACTIVE.with(RefCell::take);
     drop(active);
     let Some(pending) = pending else {
@@ -432,6 +453,50 @@ mod tests {
     }
 
     #[test]
+    fn replacing_clearing_and_reporting_pending_errors_allow_later_recovery() {
+        let first = new_exception(Kind::ValueError, Rc::new(Str::new("first")));
+        let second = new_exception(Kind::IndexError, Rc::new(Str::new("second")));
+        let weak_first = Rc::downgrade(&first);
+        let weak_second = Rc::downgrade(&second);
+        // SAFETY: inputs stay rooted through acquisition, then pending state
+        // becomes their sole owner. Null explicitly clears that owner.
+        unsafe {
+            relar_error_set(Rc::as_ptr(&first));
+            drop(first);
+            assert_eq!(relar_error_pending(), 1);
+            relar_error_set(Rc::as_ptr(&second));
+            drop(second);
+            assert!(weak_first.upgrade().is_none());
+            assert_eq!(relar_error_pending(), 1);
+            relar_error_set(std::ptr::null());
+        }
+        assert!(weak_second.upgrade().is_none());
+        assert_eq!(relar_error_pending(), 0);
+        assert!(relar_error_take().is_null());
+
+        let reported = new_exception(Kind::RuntimeError, Rc::new(Str::new("reported test error")));
+        let weak_reported = Rc::downgrade(&reported);
+        // SAFETY: pending and active independently acquire this rooted exception.
+        unsafe {
+            relar_error_set(Rc::as_ptr(&reported));
+            assert!(relar_exception_swap_active(Rc::as_ptr(&reported)).is_null());
+        }
+        drop(reported);
+        assert_eq!(relar_error_unhandled(), 1);
+        assert!(weak_reported.upgrade().is_none());
+        assert_eq!(relar_error_pending(), 0);
+        assert!(relar_exception_current().is_null());
+        assert_eq!(relar_error_unhandled(), 0);
+        for _ in 0..2 {
+            relar_exception_reraise();
+            assert_eq!(
+                message(&take_error(Kind::RuntimeError)).as_str(),
+                "No active exception to reraise"
+            );
+        }
+    }
+
+    #[test]
     fn builtin_hierarchy_and_keyerror_string_arguments_match_python() {
         for (actual, expected, matches) in [
             (Kind::ZeroDivisionError, Kind::ArithmeticError, true),
@@ -494,7 +559,7 @@ mod tests {
             relar_list_copy_index(Rc::as_ptr(&list), 1, 0);
             drop(take_error(Kind::IndexError));
             assert_eq!(weak.strong_count(), 1);
-            assert_eq!(relar_list_get_index(Rc::as_ptr(&list), 7), 1);
+            assert_eq!(relar_list_get_index(Rc::as_ptr(&list), 7), 0);
             drop(take_error(Kind::IndexError));
             let huge = Int::new(BigInt::from(1_u8) << 100_u32);
             assert!(relar_list_repeat(Rc::as_ptr(&list), huge.0).is_null());
@@ -505,7 +570,7 @@ mod tests {
             let popped = Int(relar_list_pop(Rc::as_ptr(&list)));
             assert_eq!(popped.big().as_ref(), &(BigInt::from(1_u8) << 120_u32));
             drop(popped);
-            assert_eq!(relar_list_pop(Rc::as_ptr(&list)), 1);
+            assert_eq!(relar_list_pop(Rc::as_ptr(&list)), 0);
             drop(take_error(Kind::IndexError));
         }
         assert!(weak.upgrade().is_none());

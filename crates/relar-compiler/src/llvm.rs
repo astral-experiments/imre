@@ -2,6 +2,7 @@
 
 use std::fmt::Write;
 
+use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
     Binary, Builtin, Compare, ExceptHandler, Expr, ExprKind, Function, Module, Statement, Type,
 };
@@ -112,6 +113,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         error_exit: String::new(),
         sanitize,
         ranges,
+        effects: effects::analyze(module),
     };
     for (id, function) in module.functions.iter().enumerate() {
         emitter.function(function, &format!("fn_{id}"), false);
@@ -135,6 +137,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         output.push_str("\"\n");
     }
     output.push_str(&emitter.code);
+    output.push_str("\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n");
     output
 }
 
@@ -155,6 +158,7 @@ struct Emitter<'a, 'module> {
     error_exit: String,
     sanitize: bool,
     ranges: &'a RangeFacts<'module>,
+    effects: ExceptionEffects,
 }
 
 impl Emitter<'_, '_> {
@@ -182,6 +186,26 @@ impl Emitter<'_, '_> {
         self.check_error();
     }
 
+    /// Integer-list reads return raw zero only after installing an error; every
+    /// canonical Int, including numeric zero, has a nonzero word. Pending must
+    /// be clear on entry, as guaranteed by immediate checks and by taking an
+    /// error before entering handlers/finally. Do not decode or own the sentinel.
+    fn checked_int_list_word(&mut self, instruction: impl AsRef<str>) -> String {
+        let word = self.instruction(instruction);
+        let failed = self.instruction(format!("icmp eq i64 {word}, 0"));
+        self.check_failed(&failed);
+        word
+    }
+
+    /// Integer-list writes return one on success and zero with a pending error
+    /// on failure. The same clear-pending entry contract as reads applies, and
+    /// existing expression owners remain live until this status is checked.
+    fn checked_int_list_status(&mut self, instruction: impl AsRef<str>) {
+        let status = self.instruction(instruction);
+        let failed = self.instruction(format!("icmp eq i8 {status}, 0"));
+        self.check_failed(&failed);
+    }
+
     fn label(&mut self) -> String {
         let result = format!("b{}", self.next_label);
         self.next_label += 1;
@@ -205,13 +229,34 @@ impl Emitter<'_, '_> {
     }
 
     fn call(&mut self, name: &str, returns: Type, args: &[&Value]) -> Value {
+        self.call_with_effect(name, returns, args, fallible(name))
+    }
+
+    /// Uses only the final IR's conservative callee summary. Argument evaluation
+    /// has already performed its own checks and rooted every completed value.
+    fn user_call(&mut self, function: usize, returns: Type, args: &[&Value]) -> Value {
+        self.call_with_effect(
+            &format!("fn_{function}"),
+            returns,
+            args,
+            self.effects.may_raise(function),
+        )
+    }
+
+    fn call_with_effect(
+        &mut self,
+        name: &str,
+        returns: Type,
+        args: &[&Value],
+        may_raise: bool,
+    ) -> Value {
         let args = args
             .iter()
             .map(|value| format!("{} {}", value.ty.llvm(), value.operand))
             .collect::<Vec<_>>()
             .join(", ");
         let instruction = format!("call {} @{name}({args})", returns.llvm());
-        let operand = if fallible(name) {
+        let operand = if may_raise {
             self.checked_instruction(instruction)
         } else {
             self.instruction(instruction)
@@ -301,14 +346,24 @@ impl Emitter<'_, '_> {
             .retain(|temporary| temporary.operand != value.operand);
     }
 
-    /// An exceptional edge consumes only owners already produced before the
-    /// failed call. The success edge retains the same SSA owners and resumes
-    /// before the caller can inspect a result or a runtime out-parameter.
+    /// Other fallible calls, including nullable/scalar generic getters, retain
+    /// the pending-flag ABI because zero can also be a valid successful result.
     fn check_error(&mut self) {
         let pending = self.instruction("call i8 @relar_error_pending()");
         let pending = self.instruction(format!("icmp ne i8 {pending}, 0"));
+        self.check_failed(&pending);
+    }
+
+    /// Both error-detection ABIs share exactly the same ownership routing. The
+    /// error edge consumes only owners produced before the failed call; success
+    /// restores those SSA owners before inspecting a result or out-parameter.
+    /// Branch weights guide layout/inlining without assuming errors impossible.
+    fn check_failed(&mut self, failed: &str) {
         let (error, success) = (self.label(), self.label());
-        self.branch(&pending, &error, &success);
+        self.line(format!(
+            "br i1 {failed}, label %{error}, label %{success}, !prof !0"
+        ));
+        self.terminated = true;
         let temporaries = self.temporaries.clone();
         self.start(&error);
         for value in temporaries.iter().rev() {
@@ -1138,8 +1193,8 @@ impl Emitter<'_, '_> {
             ExprKind::Compare(values, ops) => self.comparisons(values, ops),
             ExprKind::Call(id, args) => {
                 let args = args.iter().map(|arg| self.operand(arg)).collect::<Vec<_>>();
-                let result = self.call(
-                    &format!("fn_{id}"),
+                let result = self.user_call(
+                    *id,
                     expression.ty,
                     &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
                 );
@@ -1163,7 +1218,7 @@ impl Emitter<'_, '_> {
                 let object = self.owned(object);
                 let mut inputs = vec![&object];
                 inputs.extend(args.iter().map(|arg| &arg.value));
-                self.call(&format!("fn_{initializer}"), Type::None, &inputs);
+                self.user_call(*initializer, Type::None, &inputs);
                 for arg in &args {
                     self.release_operand(arg);
                 }
@@ -1431,7 +1486,7 @@ impl Emitter<'_, '_> {
             let list = self.operand(receiver);
             let index = self.operand(index);
             let at = self.index_word(&index.value, true);
-            let word = self.checked_instruction(format!(
+            let word = self.checked_int_list_word(format!(
                 "call i64 @relar_list_borrow_index(ptr {}, i64 {at})",
                 list.value.operand
             ));
@@ -1577,7 +1632,11 @@ impl Emitter<'_, '_> {
             }
             Builtin::Pop => {
                 if args[0].value.ty == Type::ListInt {
-                    self.call("relar_list_pop", Type::Int, &[&args[0].value])
+                    let word = self.checked_int_list_word(format!(
+                        "call i64 @relar_list_pop(ptr {})",
+                        args[0].value.operand
+                    ));
+                    self.unpack_word(word, Type::Int)
                 } else {
                     let word = self.checked_instruction(format!(
                         "call i64 @relar_seq_pop(ptr {})",
@@ -1780,18 +1839,24 @@ impl Emitter<'_, '_> {
         self.owned(value)
     }
 
+    /// Closed fixed layouts prove the index valid and the slot initialized.
+    /// Constructors cannot expose partial self values; tuples and present
+    /// optional boxes publish only after initialization, and no operation can
+    /// resize or clear a field. Keep the checked runtime ABI for other callers.
     fn get_field(&mut self, receiver: &Value, field: usize, ty: Type) -> Value {
-        let word = self.checked_instruction(format!(
+        let word = self.instruction(format!(
             "call i64 @relar_object_get(ptr {}, i64 {field})",
             receiver.operand
         ));
         self.unpack_word(word, ty)
     }
 
-    /// The runtime acquires the replacement before releasing the old field.
+    /// The fixed index is valid even during construction. Receiver/replacement
+    /// evaluation keeps its own error checks; only this layout-proved write is
+    /// infallible. The runtime acquires before releasing the old field.
     fn set_field(&mut self, receiver: &Value, field: usize, value: &Value) {
         let word = self.word(value);
-        self.checked_line(format!(
+        self.line(format!(
             "call void @relar_object_set(ptr {}, i64 {field}, i64 {word}, i32 {})",
             receiver.operand,
             representation_kind(value.ty)
@@ -1864,8 +1929,8 @@ impl Emitter<'_, '_> {
         let destination = self.operand(index);
         let from = self.index_word(&source.value, true);
         let to = self.index_word(&destination.value, true);
-        self.checked_line(format!(
-            "call void @relar_list_copy_index(ptr {}, i64 {to}, i64 {from})",
+        self.checked_int_list_status(format!(
+            "call i8 @relar_list_copy_index(ptr {}, i64 {to}, i64 {from})",
             list.value.operand
         ));
         self.release_operand(&destination);
@@ -1901,10 +1966,15 @@ impl Emitter<'_, '_> {
         };
         let suffix = if nonnegative { "_index" } else { "" };
         let index = self.index_word(index, nonnegative);
-        let word = self.checked_instruction(format!(
+        let instruction = format!(
             "call i64 @relar_{family}_get{suffix}(ptr {}, i64 {index})",
             list.operand
-        ));
+        );
+        let word = if list.ty == Type::ListInt {
+            self.checked_int_list_word(instruction)
+        } else {
+            self.checked_instruction(instruction)
+        };
         self.unpack_word(word, returns)
     }
 
@@ -1926,15 +1996,18 @@ impl Emitter<'_, '_> {
         let suffix = if nonnegative { "_index" } else { "" };
         let index = self.index_word(index, nonnegative);
         let word = self.word(value);
-        let kind = if list.ty == Type::ListInt {
-            String::new()
+        if list.ty == Type::ListInt {
+            self.checked_int_list_status(format!(
+                "call i8 @relar_list_set{suffix}(ptr {}, i64 {index}, i64 {word})",
+                list.operand
+            ));
         } else {
-            format!(", i32 {}", representation_kind(value.ty))
-        };
-        self.checked_line(format!(
-            "call void @relar_{family}_set{suffix}(ptr {}, i64 {index}, i64 {word}{kind})",
-            list.operand
-        ));
+            self.checked_line(format!(
+                "call void @relar_{family}_set{suffix}(ptr {}, i64 {index}, i64 {word}, i32 {})",
+                list.operand,
+                representation_kind(value.ty)
+            ));
+        }
     }
 }
 
@@ -2175,11 +2248,11 @@ declare ptr @relar_list_new()
 declare void @relar_list_retain(ptr)
 declare void @relar_list_release(ptr)
 declare i64 @relar_list_get(ptr, i64)
-declare void @relar_list_set(ptr, i64, i64)
+declare i8 @relar_list_set(ptr, i64, i64)
 declare i64 @relar_list_get_index(ptr, i64)
-declare void @relar_list_set_index(ptr, i64, i64)
+declare i8 @relar_list_set_index(ptr, i64, i64)
 declare i64 @relar_list_borrow_index(ptr, i64)
-declare void @relar_list_copy_index(ptr, i64, i64)
+declare i8 @relar_list_copy_index(ptr, i64, i64)
 declare void @relar_list_append(ptr, i64)
 declare i64 @relar_list_pop(ptr)
 declare i64 @relar_list_len(ptr)
