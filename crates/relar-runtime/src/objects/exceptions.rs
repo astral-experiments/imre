@@ -33,6 +33,13 @@ pub(crate) enum Kind {
     AttributeError = 14,
     MemoryError = 15,
     SystemError = 16,
+    UnicodeError = 17,
+    UnicodeDecodeError = 18,
+    UnsupportedOperation = 19,
+    FileNotFoundError = 20,
+    PermissionError = 21,
+    IsADirectoryError = 22,
+    NotADirectoryError = 23,
 }
 
 impl Kind {
@@ -55,6 +62,13 @@ impl Kind {
             14 => Self::AttributeError,
             15 => Self::MemoryError,
             16 => Self::SystemError,
+            17 => Self::UnicodeError,
+            18 => Self::UnicodeDecodeError,
+            19 => Self::UnsupportedOperation,
+            20 => Self::FileNotFoundError,
+            21 => Self::PermissionError,
+            22 => Self::IsADirectoryError,
+            23 => Self::NotADirectoryError,
             _ => fail("SystemError", "invalid exception kind"),
         }
     }
@@ -78,6 +92,13 @@ impl Kind {
             Self::AttributeError => "AttributeError",
             Self::MemoryError => "MemoryError",
             Self::SystemError => "SystemError",
+            Self::UnicodeError => "UnicodeError",
+            Self::UnicodeDecodeError => "UnicodeDecodeError",
+            Self::UnsupportedOperation => "UnsupportedOperation",
+            Self::FileNotFoundError => "FileNotFoundError",
+            Self::PermissionError => "PermissionError",
+            Self::IsADirectoryError => "IsADirectoryError",
+            Self::NotADirectoryError => "NotADirectoryError",
         }
     }
 
@@ -92,6 +113,23 @@ impl Kind {
             Self::LookupError => {
                 matches!(self, Self::LookupError | Self::IndexError | Self::KeyError)
             }
+            Self::ValueError => matches!(
+                self,
+                Self::ValueError
+                    | Self::UnicodeError
+                    | Self::UnicodeDecodeError
+                    | Self::UnsupportedOperation
+            ),
+            Self::UnicodeError => matches!(self, Self::UnicodeError | Self::UnicodeDecodeError),
+            Self::OSError => matches!(
+                self,
+                Self::OSError
+                    | Self::UnsupportedOperation
+                    | Self::FileNotFoundError
+                    | Self::PermissionError
+                    | Self::IsADirectoryError
+                    | Self::NotADirectoryError
+            ),
             _ => self == expected,
         }
     }

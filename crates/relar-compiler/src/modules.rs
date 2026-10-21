@@ -37,6 +37,44 @@ pub(crate) struct DefinitionId {
 pub(crate) enum Binding {
     Module(ModuleId),
     Definition(DefinitionId),
+    IntrinsicModule(IntrinsicModule),
+    Intrinsic(Intrinsic),
+}
+
+/// Sealed namespaces expose only compiler-known symbols, never module values.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum IntrinsicModule {
+    Sys,
+    Typing,
+    Io,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Intrinsic {
+    Argv,
+    TextIO,
+    UnsupportedOperation,
+}
+
+impl IntrinsicModule {
+    fn named(name: &str) -> Option<Self> {
+        match name {
+            "sys" => Some(Self::Sys),
+            "typing" => Some(Self::Typing),
+            "io" => Some(Self::Io),
+            _ => None,
+        }
+    }
+
+    fn symbol(self, name: &str) -> Option<Binding> {
+        let symbol = match (self, name) {
+            (Self::Sys, "argv") => Intrinsic::Argv,
+            (Self::Typing, "TextIO") => Intrinsic::TextIO,
+            (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
+            _ => return None,
+        };
+        Some(Binding::Intrinsic(symbol))
+    }
 }
 
 pub(crate) struct SourceModule {
@@ -65,7 +103,8 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
-    /// An isolated source API has no filesystem search root; imports require the path API.
+    /// An isolated source API supports sealed imports only; first-party imports
+    /// require the path API and its filesystem search root.
     pub(crate) fn single(source: &str) -> Result<Self, String> {
         let mut loader = Loader::new(PathBuf::from("/"))?;
         loader.allow_imports = false;
@@ -144,15 +183,14 @@ impl SourceGraph {
     pub(crate) fn resolve(&self, module: ModuleId, expression: &ast::Expr) -> Option<Binding> {
         match expression {
             ast::Expr::Name(name) => self.modules[module].bindings.get(name.id.as_str()).copied(),
-            ast::Expr::Attribute(attribute) => {
-                let Binding::Module(module) = self.resolve(module, &attribute.value)? else {
-                    return None;
-                };
-                self.modules[module]
+            ast::Expr::Attribute(attribute) => match self.resolve(module, &attribute.value)? {
+                Binding::Module(module) => self.modules[module]
                     .bindings
                     .get(attribute.attr.as_str())
-                    .copied()
-            }
+                    .copied(),
+                Binding::IntrinsicModule(module) => module.symbol(attribute.attr.as_str()),
+                Binding::Definition(_) | Binding::Intrinsic(_) => None,
+            },
             _ => None,
         }
     }
@@ -263,12 +301,6 @@ impl Loader {
                             "imports must precede executable module statements",
                         ));
                     }
-                    if !self.allow_imports {
-                        return Err(self.modules[id].error(
-                            statement,
-                            "imports require a source file and a first-party module root",
-                        ));
-                    }
                     self.import(id, statement)
                         .map_err(|error| self.modules[id].error(statement, &error))?;
                 }
@@ -313,6 +345,11 @@ impl Loader {
                 }
                 for alias in &import.names {
                     let name = alias.name.as_str();
+                    if let Some(module) = self.intrinsic_module(name)? {
+                        let local = alias.asname.as_ref().unwrap_or(&alias.name);
+                        self.bind(id, local.as_str(), Binding::IntrinsicModule(module), alias)?;
+                        continue;
+                    }
                     let leaf = self.load_module(name)?;
                     let (name, target) = if let Some(alias) = &alias.asname {
                         (alias.as_str(), leaf)
@@ -331,6 +368,21 @@ impl Loader {
                     return Err("wildcard imports are unsupported".into());
                 }
                 let name = self.import_name(id, import)?;
+                if import.level == 0
+                    && let Some(module) = self.intrinsic_module(&name)?
+                {
+                    for alias in &import.names {
+                        let binding = module.symbol(alias.name.as_str()).ok_or_else(|| {
+                            format!(
+                                "unsupported sealed standard-library export {name}.{}",
+                                alias.name
+                            )
+                        })?;
+                        let local = alias.asname.as_ref().unwrap_or(&alias.name);
+                        self.bind(id, local.as_str(), binding, alias)?;
+                    }
+                    return Ok(());
+                }
                 // A package currently importing its children is a namespace container,
                 // not an import cycle, unless an import reads its incomplete definitions.
                 let target = match self.by_name.get(&name).copied() {
@@ -378,6 +430,22 @@ impl Loader {
         Ok(())
     }
 
+    /// Intrinsic imports use fixed identities, but never silently accept a
+    /// first-party file that attempts to shadow the standard-library namespace.
+    fn intrinsic_module(&self, name: &str) -> Result<Option<IntrinsicModule>, String> {
+        let module = IntrinsicModule::named(name);
+        if module.is_some()
+            && self.allow_imports
+            && (self.root.join(format!("{name}.py")).exists()
+                || self.root.join(name).join("__init__.py").exists())
+        {
+            return Err(format!(
+                "standard-library shadowing is unsupported: {name:?}"
+            ));
+        }
+        Ok(module)
+    }
+
     fn import_name(&self, id: ModuleId, import: &ast::StmtImportFrom) -> Result<String, String> {
         let suffix = import.module.as_ref().map_or("", |name| name.as_str());
         if import.level == 0 {
@@ -404,6 +472,9 @@ impl Loader {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
+        if !self.allow_imports {
+            return Err("imports require a source file and a first-party module root".into());
+        }
         if let Some(&id) = self.by_name.get(name) {
             if self.loading.contains(&id) {
                 return Err(format!(

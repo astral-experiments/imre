@@ -21,6 +21,7 @@ impl Type {
             | Self::Set(_)
             | Self::Iterator
             | Self::Exception
+            | Self::TextIO
             | Self::Tuple(_)
             | Self::Optional(_) => "ptr",
             Self::None => "i8",
@@ -38,6 +39,7 @@ impl Type {
             | Self::Set(_)
             | Self::Iterator
             | Self::Exception
+            | Self::TextIO
             | Self::Tuple(_)
             | Self::Optional(_) => "null",
             Self::Bool | Self::None => "0",
@@ -114,6 +116,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         sanitize,
         ranges,
         effects: effects::analyze(module),
+        uses_sys_argv: module.uses_sys_argv(),
     };
     for (id, function) in module.functions.iter().enumerate() {
         emitter.function(function, &format!("fn_{id}"), false);
@@ -159,6 +162,7 @@ struct Emitter<'a, 'module> {
     sanitize: bool,
     ranges: &'a RangeFacts<'module>,
     effects: ExceptionEffects,
+    uses_sys_argv: bool,
 }
 
 impl Emitter<'_, '_> {
@@ -297,6 +301,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::Iterator
             | Type::Exception
+            | Type::TextIO
             | Type::Tuple(_)
             | Type::Optional(_) => "relar_object_retain",
             Type::Bool | Type::None => return,
@@ -319,6 +324,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::Iterator
             | Type::Exception
+            | Type::TextIO
             | Type::Tuple(_)
             | Type::Optional(_) => "relar_object_release",
             Type::Bool | Type::None => return,
@@ -669,6 +675,11 @@ impl Emitter<'_, '_> {
             .map(|(i, &slot)| format!("{} %arg{i}", function.locals[slot].llvm()))
             .collect::<Vec<_>>()
             .join(", ");
+        let params = if entry && self.uses_sys_argv {
+            "i32 %argc, ptr %argv".to_owned()
+        } else {
+            params
+        };
         let returns = if entry {
             "i32"
         } else {
@@ -724,6 +735,9 @@ impl Emitter<'_, '_> {
                 value.operand
             ));
         }
+        if entry && self.uses_sys_argv {
+            self.line("call void @relar_args_init(i32 %argc, ptr %argv)");
+        }
         self.block(&function.body);
         if !self.terminated {
             self.jump(&self.return_exit.clone());
@@ -731,6 +745,9 @@ impl Emitter<'_, '_> {
         self.start(&self.return_exit.clone());
         self.cleanup();
         if entry {
+            if self.uses_sys_argv {
+                self.line("call void @relar_args_clear()");
+            }
             self.void_call("relar_flush_stdout", &[]);
             self.line("ret i32 0");
         } else {
@@ -743,6 +760,9 @@ impl Emitter<'_, '_> {
         self.start(&self.error_exit.clone());
         self.cleanup();
         if entry {
+            if self.uses_sys_argv {
+                self.line("call void @relar_args_clear()");
+            }
             let status = self.instruction("call i32 @relar_error_unhandled()");
             self.line(format!("ret i32 {status}"));
         } else {
@@ -1400,14 +1420,13 @@ impl Emitter<'_, '_> {
                 };
                 self.instruction(format!("icmp {predicate} i8 {equal}, 0"))
             }
-            Type::Bool | Type::None | Type::Class(_) | Type::Exception => {
-                self.instruction(format!(
+            Type::Bool | Type::None | Type::Class(_) | Type::Exception | Type::TextIO => self
+                .instruction(format!(
                     "icmp {predicate} {} {}, {}",
                     left.ty.llvm(),
                     left.operand,
                     right.operand
-                ))
-            }
+                )),
             Type::ListInt
             | Type::List(_)
             | Type::Dict(_)
@@ -1535,9 +1554,62 @@ impl Emitter<'_, '_> {
             .collect::<Vec<_>>();
         let result = match builtin {
             Builtin::Input => self.call("relar_input", Type::Str, &[]),
+            Builtin::SysArgv => self.call("relar_sys_argv", returns, &[]),
+            Builtin::TextOpen(mode) => Value {
+                ty: Type::TextIO,
+                operand: self.checked_instruction(format!(
+                    "call ptr @relar_text_open(ptr {}, i32 {mode})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::TextRead => self.call("relar_text_read", Type::Str, &[&args[0].value]),
+            Builtin::TextWrite => self.call(
+                "relar_text_write",
+                Type::Int,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::TextEnter | Builtin::TextFlush | Builtin::TextClose => {
+                let name = match builtin {
+                    Builtin::TextEnter => "relar_text_enter",
+                    Builtin::TextFlush => "relar_text_flush",
+                    Builtin::TextClose => "relar_text_close",
+                    _ => unreachable!(),
+                };
+                self.checked_instruction(format!("call i8 @{name}(ptr {})", args[0].value.operand));
+                none()
+            }
+            Builtin::TextClosed => {
+                let byte = self.instruction(format!(
+                    "call i8 @relar_text_closed(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i8 {byte}, 0")),
+                    small_integer: false,
+                }
+            }
             Builtin::ExceptionMessage => {
                 self.call("relar_exception_message", Type::Str, &[&args[0].value])
             }
+            Builtin::Str => match args[0].value.ty {
+                Type::Str => return self.own_operand(args.into_iter().next().unwrap()),
+                Type::Int => self.call("relar_int_str", Type::Str, &[&args[0].value]),
+                Type::Bool => {
+                    let byte = self.instruction(format!("zext i1 {} to i8", args[0].value.operand));
+                    Value {
+                        ty: Type::Str,
+                        operand: self.instruction(format!("call ptr @relar_bool_str(i8 {byte})")),
+                        small_integer: false,
+                    }
+                }
+                Type::None => self.call("relar_none_str", Type::Str, &[]),
+                Type::Exception => {
+                    self.call("relar_exception_message", Type::Str, &[&args[0].value])
+                }
+                _ => unreachable!("scalar string conversion was checked"),
+            },
             Builtin::Int => match args[0].value.ty {
                 Type::Int => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Bool => {
@@ -1646,6 +1718,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Split => self.call("relar_str_split_whitespace", returns, &[&args[0].value]),
+            Builtin::SplitLines => self.call("relar_str_splitlines", returns, &[&args[0].value]),
             Builtin::IsNone => Value {
                 ty: Type::Bool,
                 operand: match args[0].value.ty {
@@ -1674,6 +1747,7 @@ impl Emitter<'_, '_> {
                     | Type::Set(_)
                     | Type::Iterator
                     | Type::Exception
+                    | Type::TextIO
                     | Type::Tuple(_)
                     | Type::Optional(_) => {
                         unreachable!("container printing is rejected")
@@ -1806,6 +1880,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::Iterator
             | Type::Exception
+            | Type::TextIO
             | Type::Tuple(_)
             | Type::Optional(_) => {
                 self.instruction(format!("ptrtoint ptr {} to i64", value.operand))
@@ -1828,6 +1903,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::Iterator
             | Type::Exception
+            | Type::TextIO
             | Type::Tuple(_)
             | Type::Optional(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
@@ -2057,6 +2133,7 @@ fn representation_kind(ty: Type) -> u32 {
         | Type::Set(_)
         | Type::Iterator
         | Type::Exception
+        | Type::TextIO
         | Type::Tuple(_)
         | Type::Optional(_) => 5,
     }
@@ -2155,6 +2232,13 @@ fn fallible(name: &str) -> bool {
                 | "relar_print_bool"
                 | "relar_print_none"
                 | "relar_input"
+                | "relar_sys_argv"
+                | "relar_text_open"
+                | "relar_text_enter"
+                | "relar_text_read"
+                | "relar_text_write"
+                | "relar_text_flush"
+                | "relar_text_close"
                 | "relar_int_parse"
                 | "relar_assert_fail"
                 | "relar_range_step_zero"
@@ -2228,6 +2312,20 @@ declare ptr @relar_set_iter(ptr)
 declare i8 @relar_mapping_iter_next(ptr, ptr, ptr)
 declare ptr @relar_str_concat(ptr, ptr)
 declare ptr @relar_str_split_whitespace(ptr)
+declare ptr @relar_str_splitlines(ptr)
+declare ptr @relar_int_str(i64)
+declare ptr @relar_bool_str(i8)
+declare ptr @relar_none_str()
+declare ptr @relar_text_open(ptr, i32)
+declare i8 @relar_text_enter(ptr)
+declare ptr @relar_text_read(ptr)
+declare i64 @relar_text_write(ptr, ptr)
+declare i8 @relar_text_flush(ptr)
+declare i8 @relar_text_close(ptr)
+declare i8 @relar_text_closed(ptr)
+declare void @relar_args_init(i32, ptr)
+declare ptr @relar_sys_argv()
+declare void @relar_args_clear()
 declare void @relar_int_retain(i64)
 declare void @relar_int_release(i64)
 declare i64 @relar_int_literal(ptr, i64)

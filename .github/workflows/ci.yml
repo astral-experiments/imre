@@ -38,6 +38,8 @@ jobs:
         run: python3 tests/exceptions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compare output and interactive I/O with CPython
         run: python3 tests/io.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
+      - name: Compare UTF-8 files and context cleanup with CPython
+        run: python3 tests/files.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Build the bitcode runtime for ThinLTO
         env:
           RUSTFLAGS: -Clinker-plugin-lto
@@ -47,7 +49,7 @@ jobs:
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"
           relar_lld_dir="$(rustc --print sysroot)/lib/rustlib/$relar_target/bin"
           python3 tests/lto.py --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --rust-lld "$relar_lld_dir/rust-lld" --python python3
-          for suite in differential imports classes containers exceptions io; do
+          for suite in differential imports classes containers exceptions io files; do
             python3 "tests/$suite.py" --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --lto-linker "$relar_lld_dir/gcc-ld/ld.lld" --opt-levels 3
           done
       - name: Check generated code with AddressSanitizer
@@ -58,6 +60,7 @@ jobs:
           python3 tests/containers.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18 --sanitize --opt-levels 1
           python3 tests/exceptions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18 --sanitize --opt-levels 1
           python3 tests/io.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18 --sanitize --opt-levels 1
+          python3 tests/files.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18 --sanitize --opt-levels 1
       - name: Validate the route planner against an independent oracle
         run: |
           target/release/relar build examples/route_planner.py -o /tmp/route-planner --clang clang-18

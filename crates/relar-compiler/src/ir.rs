@@ -17,6 +17,8 @@ pub(crate) enum Type {
     Iterator,
     /// A sealed builtin exception with an immutable category and string message.
     Exception,
+    /// A sealed UTF-8 text stream; aliases share its open/closed state.
+    TextIO,
     None,
 }
 
@@ -41,6 +43,7 @@ impl std::fmt::Display for Type {
             Self::None => "None",
             Self::Iterator => "iterator",
             Self::Exception => "Exception",
+            Self::TextIO => "typing.TextIO",
             Self::Class(_)
             | Self::List(_)
             | Self::Dict(_)
@@ -56,6 +59,82 @@ impl std::fmt::Display for Type {
 pub(crate) struct Module {
     pub functions: Vec<Function>,
     pub entry: Function,
+}
+
+impl Module {
+    /// Process argument state is required only by an actual argv expression.
+    /// Merely importing sys emits no startup allocation or runtime query.
+    pub(crate) fn uses_sys_argv(&self) -> bool {
+        fn expression(value: &Expr) -> bool {
+            match &value.kind {
+                ExprKind::Builtin(Builtin::SysArgv, _) => true,
+                ExprKind::List(values)
+                | ExprKind::Tuple(values)
+                | ExprKind::Set { values, .. }
+                | ExprKind::Compare(values, _)
+                | ExprKind::Boolean(_, values)
+                | ExprKind::Call(_, values)
+                | ExprKind::Construct { args: values, .. }
+                | ExprKind::Builtin(_, values) => values.iter().any(expression),
+                ExprKind::Dict { entries, .. } => entries
+                    .iter()
+                    .any(|(key, value)| expression(key) || expression(value)),
+                ExprKind::Present(value)
+                | ExprKind::Absent(value)
+                | ExprKind::Unwrap(value)
+                | ExprKind::Not(value)
+                | ExprKind::Negate(value)
+                | ExprKind::Field(value, _) => expression(value),
+                ExprKind::Binary(_, left, right) => expression(left) || expression(right),
+                ExprKind::Exception { message, .. } => {
+                    message.as_ref().is_some_and(|message| expression(message))
+                }
+                ExprKind::Int(_)
+                | ExprKind::Bool(_)
+                | ExprKind::Str(_)
+                | ExprKind::None
+                | ExprKind::Local(_) => false,
+            }
+        }
+        fn block(body: &[Statement]) -> bool {
+            body.iter().any(|statement| match statement {
+                Statement::Assign(_, value)
+                | Statement::Expr(value)
+                | Statement::Return(value)
+                | Statement::Assert(value) => expression(value),
+                Statement::SetItem(receiver, index, value)
+                | Statement::AugmentItem(receiver, index, _, value) => {
+                    expression(receiver) || expression(index) || expression(value)
+                }
+                Statement::SetField(receiver, _, value)
+                | Statement::AugmentField(receiver, _, _, value) => {
+                    expression(receiver) || expression(value)
+                }
+                Statement::Scope { body, .. } => block(body),
+                Statement::If(test, yes, no) => expression(test) || block(yes) || block(no),
+                Statement::While(test, body) => expression(test) || block(body),
+                Statement::For { args, body, .. } => args.iter().any(expression) || block(body),
+                Statement::Try {
+                    body,
+                    handlers,
+                    orelse,
+                    finalbody,
+                } => {
+                    block(body)
+                        || handlers.iter().any(|handler| block(&handler.body))
+                        || block(orelse)
+                        || block(finalbody)
+                }
+                Statement::Raise(value) => value.as_ref().is_some_and(expression),
+                Statement::Move(..)
+                | Statement::Clear(_)
+                | Statement::IterNext { .. }
+                | Statement::Break
+                | Statement::Continue => false,
+            })
+        }
+        block(&self.entry.body) || self.functions.iter().any(|function| block(&function.body))
+    }
 }
 
 pub(crate) struct Function {
@@ -138,12 +217,23 @@ pub(crate) enum Builtin {
     Print,
     Input,
     Int,
+    Str,
     Len,
     ListGet,
     Append,
     Pop,
     IsNone,
     Split,
+    SplitLines,
+    SysArgv,
+    /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
+    TextOpen(u32),
+    TextEnter,
+    TextRead,
+    TextWrite,
+    TextFlush,
+    TextClose,
+    TextClosed,
     DictGet,
     DictGetDefault,
     /// The stored value type determines optional promotion on successful lookup.

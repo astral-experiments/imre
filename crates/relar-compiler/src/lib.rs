@@ -117,3 +117,36 @@ fn check_encoding(source: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{CompileOptions, compile};
+
+    #[test]
+    fn sealed_imports_work_without_filesystem_modules() {
+        let source = r#"
+import sys as process
+from typing import TextIO as Stream
+from io import UnsupportedOperation as WrongMode
+
+def first(stream: Stream) -> str:
+    try:
+        with stream as current:
+            return current.read()
+    except WrongMode:
+        return str(process.argv[0])
+"#;
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert!(llvm.contains("define i32 @main(i32 %argc, ptr %argv)"));
+        assert!(llvm.contains("call void @relar_args_init(i32 %argc, ptr %argv)"));
+        assert_eq!(llvm.matches("call void @relar_args_clear()").count(), 2);
+    }
+
+    #[test]
+    fn unused_intrinsic_import_does_not_initialize_arguments() {
+        let llvm = compile("import sys\nprint(1)\n", &CompileOptions::default()).unwrap();
+        assert!(llvm.contains("define i32 @main()"));
+        assert!(!llvm.contains("call void @relar_args_init"));
+        assert!(!llvm.contains("call void @relar_args_clear"));
+    }
+}

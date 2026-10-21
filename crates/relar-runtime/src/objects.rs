@@ -14,7 +14,9 @@
 //! code. Storage access uses the parent module's single-thread, nonreentrant
 //! contract. Mutable access ends before a displaced owner is dropped.
 
+mod args;
 pub(crate) mod exceptions;
+mod files;
 mod mappings;
 
 use std::rc::Rc;
@@ -43,7 +45,12 @@ enum Storage {
     Set(Box<mappings::Mapping>),
     MappingIterator(mappings::MappingIterator),
     Exception(exceptions::Exception),
+    TextIO(Box<files::TextFile>),
 }
+
+// Resource state stays boxed so it cannot enlarge the existing inline-field layout.
+const _: () =
+    assert!(size_of::<Storage>() == size_of::<(usize, [Option<Slot>; INLINE_FIELD_CAPACITY])>());
 
 /// Owns one value independently of the container from which it was acquired.
 #[derive(Clone)]
@@ -492,10 +499,87 @@ pub unsafe extern "C" fn relar_str_split_whitespace(value: *const Str) -> *const
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(result)))))
 }
 
+/// Splits Python line boundaries without retaining separators. CRLF is one
+/// boundary; a final boundary creates no extra item, and U+001F is not a boundary.
+///
+/// # Safety
+/// `value` must be a rooted string. Returns an owned generic sequence of strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Object {
+    // SAFETY: the caller roots the immutable string throughout the split.
+    let value = unsafe { &*value };
+    let mut result = Vec::new();
+    let mut start = 0;
+    let mut chars = value.char_indices().peekable();
+    while let Some((at, character)) = chars.next() {
+        if matches!(
+            character,
+            '\n' | '\r'
+                | '\x0b'
+                | '\x0c'
+                | '\x1c'
+                | '\x1d'
+                | '\x1e'
+                | '\u{85}'
+                | '\u{2028}'
+                | '\u{2029}'
+        ) {
+            result
+                .try_reserve(1)
+                .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
+            result.push(Slot::Str(Rc::new(Str::new(&value[start..at]))));
+            start = at + character.len_utf8();
+            if character == '\r' && chars.peek().is_some_and(|(_, next)| *next == '\n') {
+                chars.next();
+                start += 1;
+            }
+        }
+    }
+    if start < value.len() {
+        result
+            .try_reserve(1)
+            .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
+        result.push(Slot::Str(Rc::new(Str::new(&value[start..]))));
+    }
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(result)))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use num_bigint::BigInt;
+
+    #[test]
+    fn splitlines_distinguishes_every_python_boundary_and_retains_interior_empty_lines() {
+        for (source, expected) in [
+            ("", vec![]),
+            ("\n", vec![""]),
+            ("\r\n\r\n", vec!["", ""]),
+            (
+                "a\nb\rc\r\nd\x0be\x0cf\x1cg\x1dh\x1ei\u{85}j\u{2028}k\u{2029}",
+                vec!["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
+            ),
+            ("é\x1f🦀\nlast", vec!["é\x1f🦀", "last"]),
+        ] {
+            let source = Str::new(source);
+            // SAFETY: the source is rooted; the returned sequence transfers one
+            // owner, and inspection copies strings without retaining storage refs.
+            let actual = unsafe {
+                let result = Rc::from_raw(relar_str_splitlines(&source));
+                result.0.with(|storage| {
+                    storage
+                        .sequence()
+                        .iter()
+                        .map(|slot| match slot {
+                            Slot::Str(text) => text.to_string(),
+                            _ => unreachable!(),
+                        })
+                        .collect::<Vec<_>>()
+                })
+            };
+            assert_eq!(actual, expected);
+        }
+    }
 
     #[test]
     fn small_fixed_fields_keep_owned_snapshots_across_the_inline_boundary() {
