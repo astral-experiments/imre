@@ -213,7 +213,11 @@ fn preserves_edges(
             }
             ExprKind::Builtin(operation, _) => {
                 readonly_builtin(operation)
-                    || (append && matches!(operation, Builtin::Append | Builtin::ListReserveRange))
+                    || (append
+                        && matches!(
+                            operation,
+                            Builtin::Append | Builtin::ListReserveRange | Builtin::SortByKeys
+                        ))
             }
             // A binding can replace an earlier borrowed operand during evaluation.
             ExprKind::Bind(..) => false,
@@ -434,6 +438,7 @@ mod tests {
         Module {
             types: Types::default(),
             class_fields: vec![vec![Type::Class(0)]],
+            json_records: Vec::new(),
             globals: Vec::new(),
             functions,
             entry: function(Vec::new(), Vec::new(), Vec::new()),

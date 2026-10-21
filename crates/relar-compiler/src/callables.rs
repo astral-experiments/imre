@@ -69,6 +69,7 @@ mod tests {
         let module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
+            json_records: Vec::new(),
             globals: Vec::new(),
             functions: vec![function(vec![Statement::Expr(Expr {
                 ty: first,

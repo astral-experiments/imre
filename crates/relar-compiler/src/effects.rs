@@ -222,7 +222,8 @@ fn binary(op: Binary) -> bool {
 /// separately, including eager defaults on otherwise infallible dictionary lookups.
 fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
     match builtin {
-        Builtin::Print
+        Builtin::JsonDecode(_)
+        | Builtin::Print
         | Builtin::Input
         | Builtin::ListGet
         | Builtin::ListGetI32
@@ -263,6 +264,11 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::UnionProject
         | Builtin::IsInstance(_)
         | Builtin::Len
+        | Builtin::Abs
+        | Builtin::SortByKeys
+        | Builtin::StringJoin
+        | Builtin::StringReplace
+        | Builtin::FloatFormat { .. }
         | Builtin::ListAllI32
         | Builtin::ListSum
         | Builtin::ListReserveRange
@@ -366,6 +372,7 @@ mod tests {
         let mut module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
+            json_records: Vec::new(),
             globals: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(integer())]),
@@ -415,6 +422,7 @@ mod tests {
         let module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
+            json_records: Vec::new(),
             globals: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(call(1, Vec::new()))]),
@@ -469,6 +477,7 @@ def conversion(values: list[str]) -> bool:
         let module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
+            json_records: Vec::new(),
             globals: Vec::new(),
             functions: vec![
                 function(vec![Statement::Return(integer())]),

@@ -10,9 +10,11 @@ mod args;
 mod bytes;
 pub(crate) mod exceptions;
 mod files;
+mod json;
 mod mappings;
 pub(crate) mod records;
 mod sequences;
+mod stdlib;
 mod unions;
 mod words;
 

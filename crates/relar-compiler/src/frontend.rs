@@ -18,9 +18,11 @@ mod comprehensions;
 mod expansions;
 mod inference;
 mod iterables;
+mod json;
 mod matching;
 mod module_values;
 mod pipelines;
+mod stdlib;
 mod truthiness;
 mod unions;
 mod unpacking;
@@ -134,6 +136,8 @@ const RESERVED: &[&str] = &[
     "dict",
     "set",
     "len",
+    "abs",
+    "sorted",
     "divmod",
     "isinstance",
     "input",
@@ -474,9 +478,11 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     for initialization in &initializations {
         initialization.validate(graph, &functions, &callable_definitions, &callable_targets)?;
     }
+    let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
     Ok(ir::Module {
         types,
         class_fields: classes.fields,
+        json_records,
         globals: globals.into_types(),
         functions,
         entry,
@@ -1100,9 +1106,13 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Call(call)
                 if self.types.element(concrete).is_some()
-                    && matches!(&*call.func, ast::Expr::Name(name) if name.id == "list") =>
+                    && matches!(&*call.func, ast::Expr::Name(name) if matches!(name.id.as_str(), "list" | "sorted")) =>
             {
-                self.list_call(call, self.types.element(concrete))?
+                if matches!(&*call.func, ast::Expr::Name(name) if name.id == "sorted") {
+                    self.sorted_call(call, self.types.element(concrete))?
+                } else {
+                    self.list_call(call, self.types.element(concrete))?
+                }
             }
             ast::Expr::Call(call)
                 if self.types.mapping(concrete).is_some()
@@ -2952,59 +2962,7 @@ impl<'a> Checker<'a> {
                                 }
                             }
                             ast::InterpolatedStringElement::Interpolation(field) => {
-                                if field.debug_text.is_some() {
-                                    return Err(error(
-                                        self.source,
-                                        field,
-                                        "debug f-string fields are unsupported",
-                                    ));
-                                }
-                                if !matches!(
-                                    field.conversion,
-                                    ast::ConversionFlag::None | ast::ConversionFlag::Str
-                                ) {
-                                    return Err(error(
-                                        self.source,
-                                        field,
-                                        "f-string conversions support only !s",
-                                    ));
-                                }
-                                if field
-                                    .format_spec
-                                    .as_ref()
-                                    .is_some_and(|spec| !spec.elements.is_empty())
-                                {
-                                    return Err(error(
-                                        self.source,
-                                        field,
-                                        "f-string format specifications must be empty",
-                                    ));
-                                }
-                                let expression = self.expr(&field.expression)?;
-                                if !matches!(
-                                    expression.ty,
-                                    Type::Int
-                                        | Type::Float
-                                        | Type::Bool
-                                        | Type::Str
-                                        | Type::Bytes
-                                        | Type::None
-                                        | Type::Exception
-                                ) {
-                                    return Err(error(
-                                        self.source,
-                                        field,
-                                        "f-string fields require exactly int, float, bool, str, bytes, None, or Exception",
-                                    ));
-                                }
-                                if expression.ty == Type::Str {
-                                    expression
-                                } else {
-                                    Expr {
-                                        ty: Type::Str,
-                                        kind: ExprKind::Builtin(Builtin::Str, vec![expression]),
-                                    }
-                                }
+                                self.formatted_scalar(field)?
                             }
                         };
                         parts.push(part);
@@ -3041,6 +2999,12 @@ impl<'a> Checker<'a> {
                 call,
                 "argument unpacking is unsupported",
             ));
+        }
+        if matches!(
+            self.graph.resolve(self.module, &call.func),
+            Some(Binding::Intrinsic(Intrinsic::JsonDecode))
+        ) {
+            return self.json_decode(call);
         }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "open") {
             return self.open(call);
@@ -3155,6 +3119,13 @@ impl<'a> Checker<'a> {
                     ty: signature.returns,
                     kind: ExprKind::Call(signature.id, args),
                 });
+            }
+            if receiver.ty == Type::Str {
+                match attribute.attr.as_str() {
+                    "join" => return self.join_call(receiver, call),
+                    "replace" => return self.replace_call(receiver, call),
+                    _ => {}
+                }
             }
             self.reject_builtin_keywords(call)?;
             if matches!(receiver.ty, Type::TextIO | Type::BinaryIO) {
@@ -3327,6 +3298,8 @@ impl<'a> Checker<'a> {
         };
         match name.id.as_str() {
             "list" => return self.list_call(call, None),
+            "sorted" => return self.sorted_call(call, None),
+            "abs" => return self.abs_call(call),
             "sum" => return self.sum_call(call),
             "any" | "all" => return self.quantifier_call(call, name.id == "all"),
             "map" | "filter" | "zip" | "reversed" | "enumerate" | "range" => {

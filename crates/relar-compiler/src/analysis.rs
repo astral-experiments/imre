@@ -43,6 +43,24 @@ impl Session {
             .fs()
             .create_directory_all(root)
             .map_err(|error| error.to_string())?;
+        // The loader reserves this namespace for sealed compiler intrinsics.
+        // Give ty its exact public signature without loading the dynamic CPython
+        // compatibility implementation or weakening unresolved-import checks.
+        let intrinsic = SystemPathBuf::from(root).join("relar");
+        system
+            .fs()
+            .write_file_all(
+                intrinsic.join("__init__.pyi"),
+                "from . import json as json\n",
+            )
+            .map_err(|error| error.to_string())?;
+        system
+            .fs()
+            .write_file_all(
+                intrinsic.join("json.pyi"),
+                "from typing import TypeVar\n_T = TypeVar(\"_T\")\ndef decode(text: str, schema: type[_T], /) -> _T: ...\n",
+            )
+            .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
         let mut settings = ProgramSettings::empty(&vendored);
         settings.python_version.version = ruff_python_ast::PythonVersion::PY312;
