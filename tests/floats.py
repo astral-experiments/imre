@@ -40,7 +40,7 @@ REJECTED = {
     "integer_inplace_true_division": "value = 1\nvalue /= 2\n",
     "float_none": "print(float(None))\n",
     "float_keyword": "print(float(value=1))\n",
-    "float_format_spec": 'print(f"{1.0:.2f}")\n',
+    "unsupported_exponential_format": 'print(f"{1.0:.2e}")\n',
     "optional_float_unchecked": "def bad(value: float | None) -> float:\n    return value + 1.0\n",
 }
 
