@@ -178,6 +178,13 @@ empty-report control. Upstream also echoes its report to stderr; that work is
 included and checked. The [Rust reference guide](reference/memory_report/README.md)
 documents reproduction commands and matched ordinary/ThinLTO builds.
 
+The [memory-report results](results/2026-10-21-memory-report.md) meet the ≤2× Rust
+target in both builds: 1.13–1.46× on 65,024 items per input file. They retain all
+840 final benchmark executions, the exploratory baseline, CPU/allocation
+profiles, complete output checks, and a portable evidence audit. Empty controls
+are 1.60–2.75% of the large native medians; small genuine captures are
+startup-heavy.
+
 ## Callback record pipeline
 
 The [payout example](../examples/record_pipeline/README.md) selects records with
@@ -191,6 +198,9 @@ compares gross/net and full/selective filtering at 32 and 4,096 records, with
 balanced three-engine orders, repeated queries, and an empty-input control.
 The reference guide gives reproduction commands, timing boundaries, storage
 differences and matched ordinary/ThinLTO settings.
+
+The [callable milestone report](results/2026-10-21-callable-benchmarks.md) records
+the compatibility boundary, validation, and ordinary/ThinLTO measurements.
 
 ## Telemetry comparison
 

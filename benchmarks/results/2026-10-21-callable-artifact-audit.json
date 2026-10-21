@@ -1,0 +1,28 @@
+{
+  "archive_sha256": "f22977b756efe3172a339103f4f947fb6e3decf04b48445620de849aebbde256",
+  "auditor_sha256": "6d5afd202c945bd86412f318a2922a9f16d3e6d52da9c6c9981196fe3319b534",
+  "exclusions": 21,
+  "execution_counts": {
+    "gates": 54,
+    "measured": 648,
+    "preparation": 732,
+    "warmups": 108
+  },
+  "large_relar_over_rust": {
+    "normal/gross-full-4096": 3.1604355167880698,
+    "normal/gross-selective-4096": 1.7982916464874181,
+    "normal/net-full-4096": 3.482210167212697,
+    "normal/net-selective-4096": 1.8213573027710321,
+    "thinlto/gross-full-4096": 2.934224625029228,
+    "thinlto/gross-selective-4096": 1.5577234924896488,
+    "thinlto/net-full-4096": 2.9599432515382773,
+    "thinlto/net-selective-4096": 1.655488996625382
+  },
+  "manifest_sha256": "4bd2afaa3c89280f7b47f3a12ac037ac3bfa51936b478d321660d1e3ad0bcc12",
+  "members": 590,
+  "numeric_report_rows": 18,
+  "revision": "848477f3d06fb1afe6d4bdd93dae4b107c90229a",
+  "scope": "Independent archive/member/mode/Git-source/sidecar verification and raw-sample statistics/report-table recomputation; application oracle validity is provided by the separately reviewed packaged audit.",
+  "source_files": 461,
+  "status": "passed"
+}

@@ -1,0 +1,209 @@
+{
+  "schema": 1,
+  "kind": "memory-profile-comparison",
+  "status": "passed",
+  "analysis_script_sha256": "b4930fde1982173494cc2f736ac01611d52ec9a2d971e46df5fea0e9ba2246a1",
+  "baseline": {
+    "directory": "/tmp/relar-memory-profile-baseline-v2",
+    "manifest_sha256": "52900a785a32cc2c56b838908f735f05e786d520f5c2190ee87d7d678f0a56fb",
+    "summary_sha256": "7bedfbbb5e96e22c69e178e6c2347bdca1cc97ed39ae411847e6754b4d82356a",
+    "provenance_sha256": "d40afeb22345a1b9817e657c3d12555f1525ede1e3a1c9f89490f2fa808ab227"
+  },
+  "optimized": {
+    "directory": "/tmp/relar-memory-profile-optimized-v1",
+    "manifest_sha256": "7e7b264f277158bb3cc69fb82010a1d461a8dc5257974528dc0857aa811072b2",
+    "summary_sha256": "f3b35af495a310083378155c41e49dd45b8fb886167c7352e2a01db150c24ef5",
+    "provenance_sha256": "41bd733ae9d800d74fb26d74157040dfecb35bd31cb8a5dfa981af7d8476455b"
+  },
+  "baseline_source_mapping": {
+    "path": "/tmp/relar-memory-baseline-source-mapping.json",
+    "sha256": "3062fe8294d22d5d2e3a4bca5d3002188e9a9448b8fe1685369a5f2aec6f454d"
+  },
+  "captured_revisions": {
+    "baseline": "c28b93960b40ffeb51402ce02ec6cbf0d80dcd3b",
+    "optimized": "4fb67dcd36ae47c91be7e78fdc80cfd8b2f58b3a"
+  },
+  "captured_dirty": {
+    "baseline": true,
+    "optimized": false
+  },
+  "unchanged_context_bindings": [
+    "harness",
+    "prepared:rust",
+    "prepared:helper:memory_benchmark.py",
+    "prepared:helper:memory_validate.py",
+    "prepared:helper:benchmark.py",
+    "prepared:helper:telemetry_benchmark.py",
+    "prepared:helper:telemetry_validate.py",
+    "prepared:helper:validate.py",
+    "prepared:helper:manifest_validate.py",
+    "prepared:helper:batch_validate.py",
+    "prepared:helper:incremental_validate.py",
+    "prepared:stdlib:relar/__init__.py",
+    "prepared:stdlib:relar/json.py",
+    "prepared:fixture:ruff-scripts.json",
+    "prepared:fixture:inventory-old.stderr",
+    "prepared:fixture:inventory.json",
+    "prepared:fixture:ruff-scripts-old.stderr",
+    "prepared:fixture:provenance.json",
+    "prepared:fixture:ruff-scripts-old.json",
+    "prepared:fixture:inventory-new.stderr",
+    "prepared:fixture:inventory-old.json",
+    "prepared:fixture:ruff-scripts-new.stderr",
+    "prepared:upstream:LICENSE",
+    "prepared:upstream:memory_report.py",
+    "prepared:upstream:UPSTREAM.json",
+    "prepared:rust_source:Cargo.toml",
+    "prepared:rust_source:Cargo.lock",
+    "prepared:rust_source:build.py",
+    "prepared:rust_source:src/main.rs",
+    "parser",
+    "profiler:valgrind",
+    "profiler:callgrind",
+    "profiler:dhat",
+    "profiler:vgpreload_core-amd64-linux.so",
+    "profiler:vgpreload_dhat-amd64-linux.so",
+    "profiler:vgpreload_drd-amd64-linux.so",
+    "profiler:vgpreload_helgrind-amd64-linux.so",
+    "profiler:vgpreload_massif-amd64-linux.so",
+    "profiler:vgpreload_memcheck-amd64-linux.so"
+  ],
+  "changed_example_sources": [
+    "prepared:example:compare.py"
+  ],
+  "rows": [
+    {
+      "workload": "scaled-full-32",
+      "engine": "relar",
+      "baseline_instructions": 150096383,
+      "optimized_instructions": 126014790,
+      "instruction_reduction_fraction": 0.1604408615229589,
+      "baseline_heap": {
+        "tb": 7096215,
+        "tbk": 53713,
+        "gb": 3250501,
+        "gbk": 44389,
+        "eb": 9216,
+        "ebk": 2,
+        "rb": 40777111,
+        "wb": 11120971
+      },
+      "optimized_heap": {
+        "tb": 7096221,
+        "tbk": 53713,
+        "gb": 3250507,
+        "gbk": 44389,
+        "eb": 9216,
+        "ebk": 2,
+        "rb": 39974160,
+        "wb": 11381067
+      },
+      "allocation_delta": {
+        "tb": 6,
+        "tbk": 0,
+        "gb": 6,
+        "gbk": 0
+      }
+    },
+    {
+      "workload": "scaled-full-32",
+      "engine": "rust",
+      "baseline_instructions": 85521760,
+      "optimized_instructions": 85523395,
+      "instruction_reduction_fraction": -1.9117941445545555e-05,
+      "baseline_heap": {
+        "tb": 6511643,
+        "tbk": 16503,
+        "gb": 5482581,
+        "gbk": 16284,
+        "eb": 544,
+        "ebk": 1,
+        "rb": 16320442,
+        "wb": 5791890
+      },
+      "optimized_heap": {
+        "tb": 6511643,
+        "tbk": 16503,
+        "gb": 5482581,
+        "gbk": 16284,
+        "eb": 544,
+        "ebk": 1,
+        "rb": 16320208,
+        "wb": 5791890
+      },
+      "allocation_delta": {
+        "tb": 0,
+        "tbk": 0,
+        "gb": 0,
+        "gbk": 0
+      }
+    },
+    {
+      "workload": "scaled-unchanged-32",
+      "engine": "relar",
+      "baseline_instructions": 106665569,
+      "optimized_instructions": 87021924,
+      "instruction_reduction_fraction": 0.18416106700748017,
+      "baseline_heap": {
+        "tb": 4808298,
+        "tbk": 48925,
+        "gb": 3249797,
+        "gbk": 44389,
+        "eb": 9216,
+        "ebk": 2,
+        "rb": 13753116,
+        "wb": 5118363
+      },
+      "optimized_heap": {
+        "tb": 4808304,
+        "tbk": 48925,
+        "gb": 3249803,
+        "gbk": 44389,
+        "eb": 9216,
+        "ebk": 2,
+        "rb": 16336664,
+        "wb": 5118363
+      },
+      "allocation_delta": {
+        "tb": 6,
+        "tbk": 0,
+        "gb": 6,
+        "gbk": 0
+      }
+    },
+    {
+      "workload": "scaled-unchanged-32",
+      "engine": "rust",
+      "baseline_instructions": 74296976,
+      "optimized_instructions": 74296962,
+      "instruction_reduction_fraction": 1.8843297202297977e-07,
+      "baseline_heap": {
+        "tb": 5061535,
+        "tbk": 16327,
+        "gb": 4076785,
+        "gbk": 16275,
+        "eb": 544,
+        "ebk": 1,
+        "rb": 10498032,
+        "wb": 4739743
+      },
+      "optimized_heap": {
+        "tb": 5061535,
+        "tbk": 16327,
+        "gb": 4076785,
+        "gbk": 16275,
+        "eb": 544,
+        "ebk": 1,
+        "rb": 10498032,
+        "wb": 4739743
+      },
+      "allocation_delta": {
+        "tb": 0,
+        "tbk": 0,
+        "gb": 0,
+        "gbk": 0
+      }
+    }
+  ],
+  "limits": "Guest instructions are not CPU cycles or elapsed times; requested heap bytes are allocation traffic, not RSS. Full/unchanged inputs differ, so their difference is not exact phase accounting. Two source changes were measured together."
+}
