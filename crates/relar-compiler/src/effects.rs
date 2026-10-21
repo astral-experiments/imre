@@ -191,15 +191,19 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         Builtin::Print
         | Builtin::Input
         | Builtin::ListGet
+        | Builtin::ListGetI32
         | Builtin::StringGet
         | Builtin::BytesGet
         | Builtin::Decode
+        | Builtin::BytesValidateUtf8
         | Builtin::BinaryOpen(_)
         | Builtin::BinaryRead
         | Builtin::BinaryWrite
         | Builtin::Slice
         | Builtin::Pop
         | Builtin::DictGet
+        | Builtin::DictGatherStrInt
+        | Builtin::DictGatherBytesInt
         | Builtin::DictDelete
         | Builtin::SysArgv
         | Builtin::TextOpen(_)
@@ -222,6 +226,9 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::UnionProject
         | Builtin::IsInstance(_)
         | Builtin::Len
+        | Builtin::ListAllI32
+        | Builtin::ListReserveRange
+        | Builtin::ListDistinct
         | Builtin::Append
         | Builtin::IsNone
         | Builtin::Split

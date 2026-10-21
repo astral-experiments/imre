@@ -245,15 +245,30 @@ pub unsafe extern "C" fn relar_bytes_list(value: *const List) -> *const Bytes {
     let result = unsafe {
         (&*value).0.with(|values| {
             let mut result = allocate(values.len())?;
-            for value in values {
-                let byte = value
-                    .as_small()
-                    .and_then(|value| u8::try_from(value).ok())
-                    .ok_or_else(|| {
-                        Error::new(Kind::ValueError, "bytes must be in range(0, 256)")
-                    })?;
-                result.push(byte);
+            for (output, input) in result.spare_capacity_mut()[..values.len()]
+                .chunks_mut(64)
+                .zip(values.chunks(64))
+            {
+                // Canonical tagged bytes have bit zero set and no bits above
+                // bit eight. This reduction permits vectorized validation;
+                // chunking bounds speculative work before an invalid element.
+                let mut invalid = 0;
+                for (slot, value) in output.iter_mut().zip(input) {
+                    invalid |= value.0 ^ 1;
+                    slot.write((value.0 >> 1) as u8);
+                }
+                if invalid & !0x1fe != 0 {
+                    // Every invalid exact Int has this same error; no value
+                    // conversion can call user code or dereference a heap word.
+                    return Err(Error::new(
+                        Kind::ValueError,
+                        "bytes must be in range(0, 256)",
+                    ));
+                }
             }
+            // SAFETY: equal-length chunk pairs initialized every output byte.
+            // An error leaves only unpublished u8 values, which need no cleanup.
+            result.set_len(values.len());
             Ok(Rc::into_raw(Rc::new(result)))
         })
     };
@@ -351,6 +366,25 @@ pub unsafe extern "C" fn relar_bytes_decode(value: *const Bytes) -> *const Str {
         .map(|text| Rc::into_raw(Rc::new(Str::from(text))))
         .map_err(|error| decode_error(value, error));
     finish(result, std::ptr::null())
+}
+
+/// Validates UTF-8 before later comprehension captures and retains the input.
+/// The compiler may then gather characters from these immutable bytes without
+/// allocating an intermediate string. Failure matches ordinary bytes.decode().
+///
+/// # Safety
+/// Root an exact bytes value; success transfers an additional owner of the same
+/// allocation. Invalid UTF-8 returns null and sets UnicodeDecodeError.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_bytes_validate_utf8(value: *const Bytes) -> *const Bytes {
+    // SAFETY: the caller roots immutable bytes throughout validation and errors.
+    let bytes = unsafe { &*value };
+    if let Err(error) = std::str::from_utf8(bytes) {
+        return decode_error(bytes, error).returning(std::ptr::null());
+    }
+    // SAFETY: the rooted exact Rc<Bytes> allocation provides the returned owner.
+    unsafe { Rc::increment_strong_count(value) };
+    value
 }
 
 /// A cursor owns its immutable input independently of the user's source binding.
@@ -462,6 +496,115 @@ mod tests {
             assert_index_error("index out of range");
             assert_eq!(relar_bytes_get_index(&Bytes::new(), 0), 0);
             assert_index_error("index out of range");
+        }
+    }
+
+    #[test]
+    fn utf8_validation_preserves_identity_ownership_and_decode_errors() {
+        for text in ["", "ascii\0", "é\u{10ffff}"] {
+            let source = Rc::new(text.as_bytes().to_vec());
+            let weak = Rc::downgrade(&source);
+            // SAFETY: validation borrows one rooted input and transfers one
+            // owner of that same allocation, which outlives the original root.
+            unsafe {
+                let result = relar_bytes_validate_utf8(Rc::as_ptr(&source));
+                assert_eq!(result, Rc::as_ptr(&source));
+                let result = Rc::from_raw(result);
+                assert_eq!(Rc::strong_count(&source), 2);
+                drop(source);
+                assert_eq!(result.as_slice(), text.as_bytes());
+                drop(result);
+                assert!(weak.upgrade().is_none());
+            }
+        }
+        for bytes in [vec![0xff], vec![b'a', 0xe2, 0x82], vec![b'a', 0xe2, b' ']] {
+            let source = Rc::new(bytes);
+            // SAFETY: each failure transfers one exception; both are consumed
+            // before the next call, and failed validation acquires no owner.
+            unsafe {
+                assert!(relar_bytes_decode(Rc::as_ptr(&source)).is_null());
+                let ordinary = Rc::from_raw(relar_error_take());
+                let expected = Rc::from_raw(relar_exception_message(Rc::as_ptr(&ordinary)));
+                assert!(relar_bytes_validate_utf8(Rc::as_ptr(&source)).is_null());
+                let error = Rc::from_raw(relar_error_take());
+                assert_eq!(
+                    relar_exception_matches(Rc::as_ptr(&error), Kind::UnicodeDecodeError as u32),
+                    1
+                );
+                let message = Rc::from_raw(relar_exception_message(Rc::as_ptr(&error)));
+                assert_eq!(message, expected);
+                assert_eq!(Rc::strong_count(&source), 1);
+                assert_eq!(relar_error_pending(), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn list_conversion_copies_all_bytes_across_chunk_boundaries() {
+        for length in [0, 1, 63, 64, 65, 127, 128, 129, 255, 256, 257, 1024] {
+            let expected = (0..length).map(|index| index as u8).collect::<Vec<_>>();
+            let source = Rc::new(List(StorageCell::new(
+                expected
+                    .iter()
+                    .map(|&byte| Int::from_usize(usize::from(byte)))
+                    .collect(),
+            )));
+            let alias = source.clone();
+            // SAFETY: both aliases root the exact list and conversion returns
+            // one independently owned immutable bytes object.
+            unsafe {
+                let converted = Rc::from_raw(relar_bytes_list(Rc::as_ptr(&source)));
+                assert_eq!(*converted, expected);
+                assert_eq!(Rc::strong_count(&source), 2);
+                alias.0.with_mut(|values| {
+                    assert_eq!(values.len(), expected.len());
+                    for (value, &byte) in values.iter().zip(&expected) {
+                        assert_eq!(value.as_small(), Some(i64::from(byte)));
+                    }
+                    if let Some(first) = values.first_mut() {
+                        *first = Int::from_usize(255);
+                    }
+                });
+                assert_eq!(*converted, expected);
+            }
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn list_conversion_rejects_invalid_words_without_changing_the_source() {
+        let invalid = [
+            Int::small(-1).unwrap(),
+            Int::from_usize(256),
+            Int::small(MIN_SMALL).unwrap(),
+            Int::small(MAX_SMALL).unwrap(),
+            Int::new(BigInt::from(1_u8) << 100_u32),
+            Int::new(-(BigInt::from(1_u8) << 100_u32)),
+        ];
+        for invalid in &invalid {
+            for position in [0, 1, 63, 64, 65, 127, 128] {
+                let mut values = (0..129).map(|_| Int::from_usize(17)).collect::<Vec<_>>();
+                values[position] = invalid.clone();
+                let source = Rc::new(List(StorageCell::new(values)));
+                // SAFETY: the source roots every exact integer while failed
+                // conversion transfers only a pending exception owner.
+                unsafe {
+                    assert!(relar_bytes_list(Rc::as_ptr(&source)).is_null());
+                    let error = Rc::from_raw(relar_error_take());
+                    assert_eq!(
+                        relar_exception_matches(Rc::as_ptr(&error), Kind::ValueError as u32),
+                        1
+                    );
+                    let message = Rc::from_raw(relar_exception_message(Rc::as_ptr(&error)));
+                    assert_eq!(message.as_str(), "bytes must be in range(0, 256)");
+                    source.0.with(|values| {
+                        assert_eq!(values.len(), 129);
+                        assert_eq!(values[position].0, invalid.0);
+                        assert_eq!(values[position].big(), invalid.big());
+                    });
+                }
+                assert_eq!(relar_error_pending(), 0);
+            }
         }
     }
 }

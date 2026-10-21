@@ -60,6 +60,8 @@ jobs:
         run: python3 tests/primitives.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compare string buffer reuse and indexed fragments with CPython
         run: python3 tests/string_reuse.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
+      - name: Compare decoder lookup and integer loop optimizations with CPython
+        run: python3 tests/decoder_optimizations.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compare bounded unions and exact type tests with CPython
         run: python3 tests/unions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Compare module values and ordered initialization with CPython
@@ -85,7 +87,7 @@ jobs:
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"
           relar_lld_dir="$(rustc --print sysroot)/lib/rustlib/$relar_target/bin"
           python3 tests/lto.py --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --rust-lld "$relar_lld_dir/rust-lld" --python python3
-          for suite in differential imports classes containers comprehensions fstrings calls expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse unions module_values base45 exceptions io files; do
+          for suite in differential imports classes containers comprehensions fstrings calls expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 exceptions io files; do
             python3 "tests/$suite.py" --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --lto-linker "$relar_lld_dir/gcc-ld/ld.lld" --opt-levels 3
           done
       - name: Build the runtime with AddressSanitizer
@@ -98,10 +100,10 @@ jobs:
       - name: Check generated code and runtime with AddressSanitizer
         run: |
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"
-          for suite in differential imports classes containers comprehensions fstrings calls expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse unions module_values base45 exceptions io files; do
+          for suite in differential imports classes containers comprehensions fstrings calls expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 exceptions io files; do
             python3 "tests/$suite.py" --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 1
           done
-          for suite in containers fstrings calls expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse unions module_values base45 exceptions files; do
+          for suite in containers fstrings calls expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 exceptions files; do
             python3 "tests/$suite.py" --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 0
           done
       - name: Validate the route planner against an independent oracle

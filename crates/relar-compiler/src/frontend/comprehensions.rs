@@ -285,6 +285,14 @@ impl Checker<'_> {
         }
         // The leaf establishes the result type after its target/filter facts are
         // known. No expression can read this private slot before initialization.
+        let gather_input = match &input {
+            Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } if iterable.ty == Type::Str => Some(iterable.clone()),
+            _ => None,
+        };
         let result = helper.hidden(Type::None);
         let loops = helper.comprehension_clause(display, 0, Some(input), expected, result)?;
         let ty = helper.locals[result];
@@ -306,6 +314,49 @@ impl Checker<'_> {
         let mut body = vec![Statement::Assign(result, Expr { ty, kind: empty })];
         body.extend(loops);
         body.push(Statement::Return(helper.local(result)));
+        if ty == Type::ListInt
+            && let Some(mut input) = gather_input
+            && let Some(mapping) = helper.dictionary_gather_mapping(display)?
+        {
+            // Validate at exactly the original decode's evaluation point, before
+            // subsequent captures and before entering the helper. Immutable bytes
+            // then keep the gather's borrowed UTF-8 view valid without a Str copy.
+            if let ExprKind::Local(slot) = &input.kind
+                && params.first() == Some(slot)
+                && let Some(argument) = args.first_mut()
+                && let ExprKind::Builtin(operation, decoded) = &mut argument.kind
+                && matches!(operation, Builtin::Decode)
+                && matches!(decoded.as_slice(), [value] if value.ty == Type::Bytes)
+            {
+                *operation = Builtin::BytesValidateUtf8;
+                argument.ty = Type::Bytes;
+                helper.locals[*slot] = Type::Bytes;
+                input.ty = Type::Bytes;
+            }
+            let operation = if input.ty == Type::Bytes {
+                Builtin::DictGatherBytesInt
+            } else {
+                Builtin::DictGatherStrInt
+            };
+            let gather = Expr {
+                ty: Type::ListInt,
+                kind: ExprKind::Conditional(
+                    Box::new(Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(Builtin::Bool, vec![input.clone()]),
+                    }),
+                    Box::new(Expr {
+                        ty: Type::ListInt,
+                        kind: ExprKind::Builtin(operation, vec![input, mapping]),
+                    }),
+                    Box::new(Expr {
+                        ty: Type::ListInt,
+                        kind: ExprKind::List(Vec::new()),
+                    }),
+                ),
+            };
+            body = vec![Statement::Return(gather)];
+        }
         self.helpers.finish(
             id,
             Helper {
@@ -327,6 +378,43 @@ impl Checker<'_> {
             ty,
             kind: ExprKind::Call(id, ir::CallArgs::positional(args)),
         })
+    }
+
+    /// Finds the mapping in a checked, callback-free character comprehension.
+    /// Ordinary captures and type checks remain intact; the replacement skips
+    /// this mapping load for an empty source, just as the original loop does.
+    fn dictionary_gather_mapping(&mut self, display: Display<'_>) -> Result<Option<Expr>, String> {
+        let [clause] = display.clauses else {
+            return Ok(None);
+        };
+        if !clause.ifs.is_empty() {
+            return Ok(None);
+        }
+        let ast::Expr::Name(target) = &clause.target else {
+            return Ok(None);
+        };
+        let Yield::List(ast::Expr::Subscript(subscript)) = display.value else {
+            return Ok(None);
+        };
+        let ast::Expr::Name(key) = &*subscript.slice else {
+            return Ok(None);
+        };
+        let ast::Expr::Name(mapping) = &*subscript.value else {
+            return Ok(None);
+        };
+        if key.id != target.id || mapping.id == target.id {
+            return Ok(None);
+        }
+        let mapping = self.expr(&subscript.value)?;
+        if self.types.mapping(mapping.ty) != Some((Type::Str, Type::Int))
+            || !matches!(
+                mapping.kind,
+                ExprKind::Local(_) | ExprKind::Builtin(Builtin::GlobalGet(_), _)
+            )
+        {
+            return Ok(None);
+        }
+        Ok(Some(mapping))
     }
 
     /// Shares enclosing bindings while reserving private targets and owners.
@@ -526,7 +614,107 @@ impl Checker<'_> {
 
 #[cfg(test)]
 mod tests {
+    use crate::ir::{Builtin, ExprKind, Statement, Type, walk_expressions};
     use crate::{CompileOptions, check, compile};
+
+    #[test]
+    fn character_lookup_fusion_requires_an_exact_pure_comprehension() {
+        for (expression, fused) in [
+            ("[mapping[c] for c in text]", true),
+            ("[mapping[c] for c in text if c]", false),
+            ("[mapping[c] for c in text for repeat in range(2)]", false),
+            ("[mapping[c] + 1 for c in text]", false),
+        ] {
+            let source = format!(
+                "def gather(mapping: dict[str, int], text: str) -> list[int]:\n    return {expression}\n"
+            );
+            let llvm = compile(&source, &CompileOptions::default()).unwrap();
+            assert_eq!(
+                llvm.contains("call ptr @relar_dict_gather_str_int"),
+                fused,
+                "{expression}"
+            );
+        }
+        let contextual = "def gather(mapping: dict[str, int], text: str) -> list[int | None]:\n    return [mapping[c] for c in text]\n";
+        let llvm = compile(contextual, &CompileOptions::default()).unwrap();
+        assert!(!llvm.contains("call ptr @relar_dict_gather_str_int"));
+    }
+
+    #[test]
+    fn decoded_character_fusion_requires_the_exact_decode_input() {
+        for (expression, fused) in [
+            ("[mapping[c] for c in data.decode()]", true),
+            ("[mapping[c] for c in data.decode().rstrip()]", false),
+            ("[mapping[c] for c in data.decode() if c]", false),
+            ("[mapping[c] + 1 for c in data.decode()]", false),
+        ] {
+            let source = format!(
+                "def gather(mapping: dict[str, int], data: bytes) -> list[int]:\n    return {expression}\n"
+            );
+            let llvm = compile(&source, &CompileOptions::default()).unwrap();
+            assert_eq!(
+                llvm.contains("call ptr @relar_bytes_validate_utf8"),
+                fused,
+                "{expression}"
+            );
+            assert_eq!(
+                llvm.contains("call ptr @relar_dict_gather_bytes_int"),
+                fused
+            );
+            assert_eq!(llvm.contains("call ptr @relar_bytes_decode"), !fused);
+        }
+    }
+
+    #[test]
+    fn decoded_gather_validates_before_calling_the_lazy_global_helper() {
+        let directory = tempfile::tempdir().unwrap();
+        let entry = directory.path().join("entry.py");
+        std::fs::write(
+            &entry,
+            "from codec import gather\nvalues = gather(b'x')\nprint(len(values))\n",
+        )
+        .unwrap();
+        std::fs::write(
+            directory.path().join("codec.py"),
+            "mapping: dict[str, int] = {'x': 1}\ndef gather(data: bytes) -> list[int]:\n    return [mapping[c] for c in data.decode()]\n",
+        )
+        .unwrap();
+        let graph = crate::modules::SourceGraph::load(&entry, Some(directory.path())).unwrap();
+        let module = crate::frontend::lower(&graph).unwrap();
+        let mut helper = None;
+        walk_expressions(&module.functions[0].body, &mut |value| {
+            if let ExprKind::Call(id, arguments) = &value.kind {
+                assert_eq!(arguments.values.len(), 1);
+                assert_eq!(arguments.values[0].ty, Type::Bytes);
+                assert!(matches!(
+                    arguments.values[0].kind,
+                    ExprKind::Builtin(Builtin::BytesValidateUtf8, _)
+                ));
+                helper = Some(*id);
+            }
+        });
+        let helper = &module.functions[helper.unwrap()];
+        assert_eq!(helper.locals[helper.params[0]], Type::Bytes);
+        let [Statement::Return(value)] = helper.body.as_slice() else {
+            panic!("the fused helper must contain only its conditional gather")
+        };
+        let ExprKind::Conditional(condition, nonempty, empty) = &value.kind else {
+            panic!("empty input must bypass the mapping load")
+        };
+        let ExprKind::Builtin(Builtin::Bool, predicate) = &condition.kind else {
+            panic!("the helper must test only whether the byte input is empty")
+        };
+        assert_eq!(predicate[0].ty, Type::Bytes);
+        assert!(matches!(predicate[0].kind, ExprKind::Local(slot) if slot == helper.params[0]));
+        let ExprKind::Builtin(Builtin::DictGatherBytesInt, arguments) = &nonempty.kind else {
+            panic!("the nonempty arm must gather from the validated bytes")
+        };
+        assert!(matches!(
+            arguments[1].kind,
+            ExprKind::Builtin(Builtin::GlobalGet(_), _)
+        ));
+        assert!(matches!(&empty.kind, ExprKind::List(values) if values.is_empty()));
+    }
 
     #[test]
     fn contextual_nested_displays_preserve_private_target_types() {

@@ -853,11 +853,18 @@ impl Emitter<'_, '_> {
 
     fn block(&mut self, statements: &[Statement]) {
         let incoming = self.temporaries.clone();
-        for statement in statements {
+        let mut statements = statements.iter().peekable();
+        while let Some(statement) = statements.next() {
             if self.terminated {
                 break;
             }
-            self.statement(statement);
+            if let Some(next) = statements.peek()
+                && self.append_pair(statement, next)
+            {
+                statements.next();
+            } else {
+                self.statement(statement);
+            }
             debug_assert!(
                 self.temporaries
                     .iter()
@@ -866,6 +873,52 @@ impl Emitter<'_, '_> {
                 "statement changed its enclosing expression owners"
             );
         }
+    }
+
+    /// Combines two appends whose already-evaluated operands cannot change.
+    /// Integer locals are immutable values, and append cannot replace its local
+    /// receiver. Allocation exhaustion is fatal for both runtime entrypoints.
+    fn append_pair(&mut self, first: &Statement, second: &Statement) -> bool {
+        let (
+            Statement::Expr(Expr {
+                kind: ExprKind::Builtin(Builtin::Append, first),
+                ..
+            }),
+            Statement::Expr(Expr {
+                kind: ExprKind::Builtin(Builtin::Append, second),
+                ..
+            }),
+        ) = (first, second)
+        else {
+            return false;
+        };
+        let ([receiver, first], [other, second]) = (first.as_slice(), second.as_slice()) else {
+            return false;
+        };
+        let (ExprKind::Local(left), ExprKind::Local(right)) = (&receiver.kind, &other.kind) else {
+            return false;
+        };
+        if left != right
+            || receiver.ty != Type::ListInt
+            || other.ty != Type::ListInt
+            || !matches!(first.kind, ExprKind::Local(_))
+            || !matches!(second.kind, ExprKind::Local(_))
+            || first.ty != Type::Int
+            || second.ty != Type::Int
+        {
+            return false;
+        }
+        let receiver = self.operand(receiver);
+        let first = self.operand(first);
+        let second = self.operand(second);
+        self.void_call(
+            "relar_list_append_pair",
+            &[&receiver.value, &first.value, &second.value],
+        );
+        for operand in [&receiver, &first, &second] {
+            self.release_operand(operand);
+        }
+        true
     }
 
     fn statement(&mut self, statement: &Statement) {
@@ -1137,7 +1190,7 @@ impl Emitter<'_, '_> {
                 let mut step_value = self.borrow_slot(*step);
                 step_value.small_integer |= args[2].small_integer;
                 let next = if small_cursor {
-                    self.small_binary(Binary::Add, &current, &step_value, false)
+                    self.small_binary(Binary::Add, &current, &step_value, false, None)
                 } else {
                     self.binary(Binary::Add, &current, &step_value)
                 };
@@ -1381,7 +1434,18 @@ impl Emitter<'_, '_> {
                 let left_value = self.operand(left);
                 let right_value = self.operand(right);
                 let result = if let Some(adjust_floor) = direct {
-                    self.small_binary(*op, &left_value.value, &right_value.value, adjust_floor)
+                    let right_constant = self
+                        .ranges
+                        .integer(right)
+                        .filter(|range| range.min == range.max)
+                        .map(|range| range.min);
+                    self.small_binary(
+                        *op,
+                        &left_value.value,
+                        &right_value.value,
+                        adjust_floor,
+                        right_constant,
+                    )
                 } else {
                     self.binary(*op, &left_value.value, &right_value.value)
                 };
@@ -1400,7 +1464,7 @@ impl Emitter<'_, '_> {
                         small_integer: false,
                     }
                 } else if direct {
-                    self.small_binary(Binary::Subtract, &small(0), &value.value, false)
+                    self.small_binary(Binary::Subtract, &small(0), &value.value, false, None)
                 } else {
                     self.binary(Binary::Subtract, &small(0), &value.value)
                 };
@@ -1885,6 +1949,7 @@ impl Emitter<'_, '_> {
         left: &Value,
         right: &Value,
         adjust_floor: bool,
+        right_constant: Option<i64>,
     ) -> Value {
         debug_assert!(left.small_integer && right.small_integer);
         let left = self.instruction(format!("ashr i64 {}, 1", left.operand));
@@ -1898,6 +1963,19 @@ impl Emitter<'_, '_> {
                     _ => unreachable!(),
                 };
                 self.instruction(format!("{instruction} nsw i64 {left}, {right}"))
+            }
+            Binary::FloorDivide | Binary::Modulo
+                if right_constant
+                    .is_some_and(|value| value > 0 && (value as u64).is_power_of_two()) =>
+            {
+                let divisor = right_constant.unwrap() as u64;
+                // Arithmetic right shift already rounds toward negative infinity.
+                // The corresponding nonnegative remainder is the low-bit mask.
+                if matches!(op, Binary::FloorDivide) {
+                    self.instruction(format!("ashr i64 {left}, {}", divisor.trailing_zeros()))
+                } else {
+                    self.instruction(format!("and i64 {left}, {}", divisor - 1))
+                }
             }
             Binary::FloorDivide | Binary::Modulo => {
                 let instruction = if matches!(op, Binary::FloorDivide) {
@@ -2275,6 +2353,9 @@ impl Emitter<'_, '_> {
             },
             Builtin::Encode => self.call("relar_str_encode", Type::Bytes, &[&args[0].value]),
             Builtin::Decode => self.call("relar_bytes_decode", Type::Str, &[&args[0].value]),
+            Builtin::BytesValidateUtf8 => {
+                self.call("relar_bytes_validate_utf8", Type::Bytes, &[&args[0].value])
+            }
             Builtin::TextRead => self.call("relar_text_read", Type::Str, &[&args[0].value]),
             Builtin::TextWrite => self.call(
                 "relar_text_write",
@@ -2409,6 +2490,63 @@ impl Emitter<'_, '_> {
                 returns,
                 self.nonnegative_index(&expressions[1]),
             ),
+            Builtin::ListGetI32 => {
+                let nonnegative = self.nonnegative_index(&expressions[1]);
+                let index = self.index_word(&args[1].value, nonnegative);
+                let name = if nonnegative {
+                    "relar_list_borrow_index"
+                } else {
+                    "relar_list_get"
+                };
+                let word = self.checked_int_list_word(format!(
+                    "call i64 @{name}(ptr {}, i64 {index})",
+                    args[0].value.operand
+                ));
+                let tag = self.instruction(format!("and i64 {word}, 1"));
+                let tagged = self.instruction(format!("icmp eq i64 {tag}, 1"));
+                self.line(format!("call void @llvm.assume(i1 {tagged})"));
+                let shifted = self.instruction(format!("add i64 {word}, 4294967295"));
+                let bounded = self.instruction(format!("icmp ule i64 {shifted}, 8589934590"));
+                self.line(format!("call void @llvm.assume(i1 {bounded})"));
+                Value {
+                    ty: Type::Int,
+                    operand: word,
+                    small_integer: true,
+                }
+            }
+            Builtin::ListAllI32 => {
+                let result = self.instruction(format!(
+                    "call i8 @relar_list_all_i32(ptr {}, i64 {}, i64 {}, i64 {})",
+                    args[0].value.operand,
+                    args[1].value.operand,
+                    args[2].value.operand,
+                    args[3].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i8 {result}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::ListDistinct => Value {
+                ty: Type::Bool,
+                operand: self.instruction(format!(
+                    "icmp ne ptr {}, {}",
+                    args[0].value.operand, args[1].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::ListReserveRange => {
+                let count = self.index_word(&args[4].value, true);
+                self.line(format!(
+                    "call void @relar_list_reserve_range(ptr {}, i64 {}, i64 {}, i64 {}, i64 {count})",
+                    args[0].value.operand,
+                    args[1].value.operand,
+                    args[2].value.operand,
+                    args[3].value.operand
+                ));
+                none()
+            }
             Builtin::StringGet => self.call(
                 "relar_str_get",
                 Type::Str,
@@ -2452,6 +2590,16 @@ impl Emitter<'_, '_> {
                 &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
             ),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
+            Builtin::DictGatherStrInt => self.call(
+                "relar_dict_gather_str_int",
+                Type::ListInt,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::DictGatherBytesInt => self.call(
+                "relar_dict_gather_bytes_int",
+                Type::ListInt,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::DictGetDefault => {
                 let key = self.word(&args[1].value);
                 let default = self.word(&args[2].value);
@@ -3260,6 +3408,7 @@ fn fallible(name: &str) -> bool {
                 | "relar_bytes_concat"
                 | "relar_bytes_repeat"
                 | "relar_bytes_decode"
+                | "relar_bytes_validate_utf8"
                 | "relar_binary_open"
                 | "relar_binary_read"
                 | "relar_binary_write"
@@ -3300,6 +3449,8 @@ fn fallible(name: &str) -> bool {
                 | "relar_seq_repeat"
                 | "relar_seq_slice"
                 | "relar_dict_get"
+                | "relar_dict_gather_str_int"
+                | "relar_dict_gather_bytes_int"
                 | "relar_dict_delete"
                 | "relar_mapping_iter_next"
                 | "relar_exception_raise"
@@ -3338,6 +3489,7 @@ declare ptr @relar_bytes_repeat(ptr, i64)
 declare ptr @relar_bytes_iter(ptr)
 declare ptr @relar_str_encode(ptr)
 declare ptr @relar_bytes_decode(ptr)
+declare ptr @relar_bytes_validate_utf8(ptr)
 declare ptr @relar_binary_open(ptr, i32)
 declare ptr @relar_binary_read(ptr)
 declare i64 @relar_binary_write(ptr, ptr)
@@ -3378,6 +3530,8 @@ declare ptr @relar_dict_new(i32, i32)
 declare i64 @relar_dict_len(ptr)
 declare i8 @relar_dict_contains(ptr, i64)
 declare i64 @relar_dict_get(ptr, i64)
+declare ptr @relar_dict_gather_str_int(ptr, ptr)
+declare ptr @relar_dict_gather_bytes_int(ptr, ptr)
 declare i8 @relar_dict_try_get(ptr, i64, ptr)
 declare i64 @relar_dict_get_default(ptr, i64, i64)
 declare void @relar_dict_set(ptr, i64, i64)
@@ -3436,6 +3590,8 @@ declare i8 @relar_str_equal(ptr, ptr)
 declare i64 @relar_int_parse(ptr)
 declare ptr @relar_input()
 declare ptr @relar_list_new()
+declare i8 @relar_list_all_i32(ptr, i64, i64, i64)
+declare void @relar_list_reserve_range(ptr, i64, i64, i64, i64)
 declare void @relar_list_retain(ptr)
 declare void @relar_list_release(ptr)
 declare i64 @relar_list_get(ptr, i64)
@@ -3445,6 +3601,7 @@ declare i8 @relar_list_set_index(ptr, i64, i64)
 declare i64 @relar_list_borrow_index(ptr, i64)
 declare i8 @relar_list_copy_index(ptr, i64, i64)
 declare void @relar_list_append(ptr, i64)
+declare void @relar_list_append_pair(ptr, i64, i64)
 declare i64 @relar_list_pop(ptr)
 declare i64 @relar_list_len(ptr)
 declare ptr @relar_list_repeat(ptr, i64)
@@ -3672,4 +3829,131 @@ slow:
         .unwrap();
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{CompileOptions, compile};
+
+    /// Isolates source-function instructions from the always-emitted fallbacks.
+    fn function_body(source: &str) -> String {
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        llvm.split_once("@fn_0(")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0
+            .to_owned()
+    }
+
+    #[test]
+    fn adjacent_integer_local_appends_share_one_capacity_check() {
+        for (source, singles) in [
+            (
+                "def push(output: list[int], first: int, second: int) -> None:\n    output.append(first)\n    output.append(second)\n",
+                0,
+            ),
+            (
+                "def push(output: list[int], first: int, second: int) -> None:\n    output.append(first)\n    output.append(second)\n    output.append(first)\n",
+                1,
+            ),
+            (
+                "def push(output: list[int], value: int) -> None:\n    output.extend(divmod(value, 256))\n",
+                0,
+            ),
+            (
+                "def push(output: list[int], first: int, second: int) -> None:\n    if (first := second) > 0:\n        pass\n    output.append(first)\n    output.append(second)\n",
+                0,
+            ),
+        ] {
+            let body = function_body(source);
+            assert_eq!(
+                body.matches("call void @relar_list_append_pair(").count(),
+                1
+            );
+            assert_eq!(
+                body.matches("call void @relar_list_append(").count(),
+                singles
+            );
+        }
+    }
+
+    #[test]
+    fn append_pair_requires_adjacent_pure_locals_of_the_same_integer_list() {
+        for statements in [
+            "    output.append(first)\n    other.append(second)\n",
+            "    output.append(first)\n    output.append(1)\n",
+            "    output.append(1)\n    output.append(second)\n",
+            "    output.append(first)\n    output.append(len(output))\n",
+            "    output.append(len(output))\n    output.append(second)\n",
+            "    output.append(first)\n    second = first\n    output.append(second)\n",
+        ] {
+            let body = function_body(&format!(
+                "def push(output: list[int], other: list[int], first: int, second: int) -> None:\n{statements}"
+            ));
+            assert!(!body.contains("call void @relar_list_append_pair("));
+            assert_eq!(body.matches("call void @relar_list_append(").count(), 2);
+        }
+        let body = function_body(
+            "def push(output: list[str], first: str, second: str) -> None:\n    output.append(first)\n    output.append(second)\n",
+        );
+        assert!(!body.contains("call void @relar_list_append_pair("));
+        assert_eq!(body.matches("call void @relar_seq_append(").count(), 2);
+        let body = function_body(
+            "def push(outputs: list[list[int]], first: int, second: int) -> None:\n    outputs[0].append(first)\n    outputs[0].append(second)\n",
+        );
+        assert!(!body.contains("call void @relar_list_append_pair("));
+        assert_eq!(body.matches("call void @relar_list_append(").count(), 2);
+    }
+
+    #[test]
+    fn native_power_of_two_division_uses_python_signed_shift_and_mask() {
+        for divisor in [1_u64, 2, 256, 1 << 61] {
+            for operation in ["//", "%"] {
+                let body = function_body(&format!(
+                    "def calculate(value: int) -> int:\n    if -1024 <= value <= 1024:\n        divisor = {divisor}\n        return value {operation} divisor\n    return 0\n"
+                ));
+                let (instruction, constant) = if operation == "//" {
+                    ("ashr", u64::from(divisor.trailing_zeros()))
+                } else {
+                    ("and", divisor - 1)
+                };
+                assert!(body.lines().any(|line| {
+                    line.contains(&format!("= {instruction} i64 "))
+                        && line.ends_with(&format!(", {constant}"))
+                }));
+                assert!(!body.contains("sdiv i64"));
+                assert!(!body.contains("srem i64"));
+                assert!(!body.contains("call i64 @int_floordiv"));
+                assert!(!body.contains("call i64 @int_mod"));
+            }
+        }
+    }
+
+    #[test]
+    fn native_division_keeps_fallbacks_without_a_positive_power_of_two_proof() {
+        for operation in ["//", "%"] {
+            for divisor in ["-256", "3"] {
+                let body = function_body(&format!(
+                    "def calculate(value: int) -> int:\n    if -1024 <= value <= 1024:\n        return value {operation} {divisor}\n    return 0\n"
+                ));
+                let instruction = if operation == "//" { "sdiv" } else { "srem" };
+                assert!(body.contains(&format!("{instruction} i64")));
+            }
+            let helper = if operation == "//" { "floordiv" } else { "mod" };
+            for divisor in ["0", "256", "18446744073709551616"] {
+                let body = function_body(&format!(
+                    "def calculate(value: int) -> int:\n    return value {operation} {divisor}\n"
+                ));
+                assert!(body.contains(&format!("call i64 @int_{helper}")));
+            }
+            let body = function_body(&format!(
+                "def calculate(value: int, divisor: int) -> int:\n    if -1024 <= value <= 1024 and 1 <= divisor <= 4:\n        return value {operation} divisor\n    return 0\n"
+            ));
+            // Interval division currently requires a singleton divisor. A
+            // merely bounded divisor therefore retains the complete helper.
+            assert!(body.contains(&format!("call i64 @int_{helper}")));
+        }
+    }
 }

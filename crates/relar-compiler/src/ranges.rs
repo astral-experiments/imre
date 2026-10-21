@@ -915,6 +915,9 @@ impl Analyzer {
                         _ => Interval::UNKNOWN,
                     },
                     Builtin::BytesGet => Interval::bounded(0, 255),
+                    Builtin::ListGetI32 => {
+                        Interval::bounded(i128::from(i32::MIN), i128::from(i32::MAX))
+                    }
                     Builtin::Int if args[0].ty == Type::Int => values[0],
                     Builtin::Int if args[0].ty == Type::Bool => Interval::bounded(0, 1),
                     _ => Interval::UNKNOWN,
