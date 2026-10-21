@@ -166,6 +166,8 @@ The [assignment, unpacking, and expansion milestone](results/2026-10-19-assignme
 
 The [telemetry comparator](../examples/telemetry_comparison/README.md) aligns two recordings, computes signed/absolute/squared integer error, and answers threshold queries with generator expressions, strict `zip`, `reversed`, `any`, and `all`. `telemetry_validate.py` compares complete output and filesystem effects against an independent indexed oracle, CPython, and an independent Rust implementation with checked native arithmetic and a BigInt fallback.
 
+The [iterator optimization report](results/2026-10-21-iterator-performance.md) brings all four 4,096-record full scans below 2× Rust's time: 1.39–1.72× with matched ThinLTO and 1.45–1.80× with ordinary linking. ThinLTO runs these cases 27.7–46.3× faster than CPython. The Python package and Rust reference remain unchanged. The report retains full-scan and early-exit comparisons at three sizes, all 2,898 benchmark executions, CPU/allocation profiles, and independently audited correctness and sanitizer evidence.
+
 `telemetry_benchmark.py` separates preparation and semantic validation from timing. It compares ordinary and matched ThinLTO builds on short, medium, and long traces, with both full scans and early exits. Each process loads and validates the recordings once, repeats the selected query, and writes the final result plus a checksum. All six engine orders are balanced across measured rounds; startup controls are reported separately without subtraction. The [Rust reference guide](reference/telemetry_comparison/README.md) documents the storage differences, exact timing boundary, build records, and reproduction commands.
 
 ## Unchanged Luhn checksum

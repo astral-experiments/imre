@@ -1,0 +1,232 @@
+{
+  "schema": 1,
+  "kind": "iterator-performance-public-artifact-audit",
+  "status": "passed",
+  "audited_at_utc": "2026-10-21T01:53:32.266838+00:00",
+  "revision": "1fb6fa42fd2ee811dc6ed07702e3632a9aa62f44",
+  "archive_sha256": "1ecd8bb1ba0d8e680977049753b91c10d3cf090bd8d7503070832a77aedf6093",
+  "manifest_sha256": "739fdebb14c87b179b6f9434866dea22d3920f74565a1bd1abcba5288af52419",
+  "report_sha256": "a93e6d409970e4b8b137ccec95043c3f10932527f6482adfc0845955d2e43b17",
+  "render_record_sha256": "c4b0a5a1e26c303635bdb34ddd4230c08f2a865a190c7513d413844fd2c1e06a",
+  "audit_script_sha256": "62a987c09f783bbc82ad01dc4da64ae05202c895181081feef44a04ff20b6ccd",
+  "members_verified": 2016,
+  "uncompressed_bytes_verified": 131629639,
+  "exclusions_verified": 54,
+  "source_files_verified_against_git": 436,
+  "validation_jobs": 138,
+  "raw_timing_output_files_verified": 414,
+  "gzip_records": {
+    "full-normal": {
+      "compressed_sha256": "05a38b69253ec7263a8447dc736f22f6a6bb27f42fa82fe9c59e83f40100f1cc",
+      "uncompressed_sha256": "84190e0bd30bd82c108739662d0b6e64dcd9a8f356ddfdce664766be81885f5d",
+      "uncompressed_bytes": 3442205
+    },
+    "full-thinlto": {
+      "compressed_sha256": "2b8bb8a35316bda0a4d1dea160858702335dbf9f0c45feb6a38c77f84f720df2",
+      "uncompressed_sha256": "11004c01e98a75a9d39c892ef41129d92697f994346ed3d538e3db6cd3c6be15",
+      "uncompressed_bytes": 3443296
+    },
+    "early-normal": {
+      "compressed_sha256": "587406966124c55c64cdcd8233edc035a454c991736d4cbd9ed0f8e31d31c1b8",
+      "uncompressed_sha256": "fbcfed4d1c1d938b219327e3f07eeaa9b15ee8f93623840a66f5993301296266",
+      "uncompressed_bytes": 2953908
+    },
+    "early-thinlto": {
+      "compressed_sha256": "451b36c7745aadd2fb31ca7423048a4f07579338cd960c4e41d38d2b3340190a",
+      "uncompressed_sha256": "30c5a5054ed8d7e1c312eaaa84c63f579ae93b9fae7b5b2590d36e2d7e66c49c",
+      "uncompressed_bytes": 2954866
+    }
+  },
+  "numeric_table_rows_verified": 65,
+  "performance_target": {
+    "all_four_below_two": true,
+    "individual_relar_over_rust": {
+      "report-mixed-4096": 1.3854692407298377,
+      "alert-quiet-4096": 1.72313707103483,
+      "within-quiet-4096": 1.671889098570513,
+      "latest-quiet-4096": 1.4093460249024892
+    },
+    "threshold": 2,
+    "comparison": "strictly below"
+  },
+  "exploratory_pilot_archive_bindings": {
+    "003": {
+      "audit_members": [
+        "exploratory/pilot-003-audit/relar-telemetry-candidate-003-audit.json"
+      ],
+      "profile_roots": [
+        "exploratory/pilot-003-profile"
+      ]
+    },
+    "005": {
+      "audit_members": [
+        "exploratory/pilot-005-audit/relar-telemetry-candidate-005-audit.json"
+      ],
+      "profile_roots": [
+        "exploratory/pilot-005-profile"
+      ]
+    },
+    "006": {
+      "audit_members": [
+        "exploratory/pilot-006-audit/relar-telemetry-candidate-006-audit.json"
+      ],
+      "profile_roots": [
+        "exploratory/pilot-006-profile"
+      ]
+    },
+    "007": {
+      "audit_members": [
+        "exploratory/pilot-007-audit/relar-telemetry-candidate-007-audit.json"
+      ],
+      "profile_roots": [
+        "exploratory/pilot-007-profile"
+      ]
+    },
+    "008": {
+      "audit_members": [
+        "exploratory/pilot-008-audit/relar-telemetry-candidate-008-audit.json"
+      ],
+      "profile_roots": [
+        "exploratory/pilot-008-profile"
+      ]
+    },
+    "009": {
+      "audit_members": [
+        "exploratory/pilot-009-audit/relar-telemetry-candidate-009-audit.json"
+      ],
+      "profile_roots": [
+        "exploratory/pilot-009-profile"
+      ]
+    },
+    "010": {
+      "audit_members": [
+        "exploratory/pilot-010-audit/relar-telemetry-candidate-010-audit.json"
+      ],
+      "profile_roots": [
+        "exploratory/pilot-010-profile"
+      ]
+    }
+  },
+  "exploratory_branch_archive_roots": [
+    "exploratory/branch-005-raw"
+  ],
+  "guarded_inputs": {
+    "/tmp/relar-iterator-performance-artifact-audit-010.py": "62a987c09f783bbc82ad01dc4da64ae05202c895181081feef44a04ff20b6ccd",
+    "/tmp/2026-10-21-iterator-performance-evidence-manifest.json": "739fdebb14c87b179b6f9434866dea22d3920f74565a1bd1abcba5288af52419",
+    "/tmp/2026-10-21-iterator-performance-evidence.tar.gz": "1ecd8bb1ba0d8e680977049753b91c10d3cf090bd8d7503070832a77aedf6093",
+    "/usr/lib/llvm-18/bin/clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "/tmp/relar-iterator-performance-final-validation-v2/artifacts/relar": "822252b2ba9cdf2d2689e6e5149d2c921100b9657b439346da67d0f3512a23e8",
+    "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "/tmp/relar-iterator-performance-final-validation-v2/artifacts/ordinary-runtime.a": "4b71b4eb0c47ef4fab6f02ac6015e8194cfde66cbd569a3c0fe44ce6b1b08607",
+    "/tmp/relar-rename-validation-v2/references/telemetry-normal/telemetry-reference": "f17a244fd0c43a08b186dcb522a4e39cd810285736800114d9890e5563ff1524",
+    "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld": "bf1b9bc68d0f70523a95618cb9be2e4d04698564229838cfe29eb913bba7ce67",
+    "/tmp/relar-iterator-performance-final-validation-v2/artifacts/thinlto-runtime.a": "f63b633ecd88d6208411721e8d2d8bd6724419b1f237acab2e04aa20f1a544a9",
+    "/tmp/relar-rename-validation-v2/references/telemetry-thinlto/telemetry-reference": "e2a9b5fb61b1c25ced4d9ad21100b80d82989a241f3f9484f34e909a3305c0b3",
+    "/tmp/relar-telemetry-final-candidate-v2/prepared-normal/telemetry": "241d4c0ceae7abb08d57983b8d06ebbfdfcdd73570f6608547348bd04633150b",
+    "/tmp/relar-telemetry-final-candidate-v2/prepared-thinlto/telemetry": "19a1bb8973d189c0be57ddd6f1b1957f92bad37bfc9fbe58e38da522130cd741",
+    "/usr/bin/ar": "6452af2eea333b8c65e1adb92964fc8f97863ab003fa13f9d12bff5345cd7dbe",
+    "/home/dev-user/.cargo/bin/cargo": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71",
+    "/usr/bin/clang-18": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "/home/dev-user/.openai/bin/git": "1013d72903eee1de84614ce65ae5a0842a69f16fb408497aa5a1ddb8b046872f",
+    "/usr/bin/nm": "3708df3d7ce16e2c1dcdcd722784ae382d4d582276a71ab7bbe2d542f5621202",
+    "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/cargo": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e",
+    "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/cargo-clippy": "9f6491666444d5a8500dfc5308614fc80c0c4d02d437da865c5a2e3c9685727b",
+    "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/clippy-driver": "475dd62803b23d7decedfdd2b93d6d43866c3b795dfc1ef51eded33e1547a2eb",
+    "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/rustc": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba",
+    "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/bin/rustfmt": "7b428b45c3be46629ea04a0fda008ba6894cbc4bdd68faa8f252de5fb1453075",
+    "/home/dev-user/.virtualenvs/openai/bin/python3": "021044895e95be79dc2f110367607e684119afbc8ce75f6f0eec94844e0acec7",
+    "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+    "/home/dev-user/.cargo/bin/rustc": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71",
+    "/home/dev-user/.cargo/bin/rustup": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71",
+    "/tmp/relar-iterator-performance-final-validation-v2/applications/batch/batch": "67f5e45a6ac4c6cd86fa9bba6ea5731b0a42afbefe38feb37e0be178fca6bb8f",
+    "/tmp/relar-iterator-performance-final-validation-v2/applications/dependency/dependency": "03c92e339783691c3c4db68bef4aa55ffc2d113e4dd1a716e9a7f16c5ee20dfa",
+    "/tmp/relar-iterator-performance-final-validation-v2/applications/incremental/incremental": "d23e58549c5109c6bb9c96112e5bc9ed6e8d36d3e150c981df17e3435358e65a",
+    "/tmp/relar-iterator-performance-final-validation-v2/applications/inventory/inventory": "2c2d1653cdb3e8834fbff7b3f44e9e5a0873250df745758f5fa027431d04396c",
+    "/tmp/relar-iterator-performance-final-validation-v2/applications/manifest/manifest": "a326d2159cfb9cc2af52487192d3f58a083a11e3acbf8bcabbf842930d9e2620",
+    "/tmp/relar-iterator-performance-final-validation-v2/applications/route/route": "19aa08ff502eea9066870cb0e51f660a0e38da644975e276777a37e3849a190b",
+    "/tmp/relar-iterator-performance-final-validation-v2/applications/telemetry/telemetry": "fab0e36e0cff78bfe1f5976f2966370699640bc228955472a467263ddca154ef",
+    "/tmp/relar-iterator-performance-final-validation-v2/artifacts/asan-runtime.a": "dabb701358f09be0e3d7f5d41d2a680b09eef9a2f9ac7748abe54a70477e4eae",
+    "/tmp/relar-iterator-performance-final-validation-v2/jobs/thinlto-member/stdout": "cb8383c9701e4fc0bc32d5edd8499e6c904591663c330bbbf8796239bb97ee2e",
+    "/tmp/relar-iterator-performance-final-validation-v2/references/base45-normal/base45-reference": "1276f8f9d32ae87aebe3828822bccf63bd0dba9e21e5db51e1a1aece0490d750",
+    "/tmp/relar-iterator-performance-final-validation-v2/references/base45-thinlto/base45-reference": "ef705fb74d3c81185fa0f822d5ca3b8c31dfc8ad2e6cdbbd43bc6bbf11092781",
+    "/tmp/relar-iterator-performance-final-validation-v2/references/batch/planner-batch-bigint": "fbae0e0006e060433b8c4aaeb764b73540bc2a83f541d9f04d10bac617f7bf3a",
+    "/tmp/relar-iterator-performance-final-validation-v2/references/dependency/planner-bigint": "4bc41c996f5e580523c9d118d117b5fa76017b06f61dea0415963cfea4d5f6fe",
+    "/tmp/relar-iterator-performance-final-validation-v2/references/dependency/planner-i64": "0a2a1c5af4b9ab44897c3b643cb9c28135d670987fe1760289979d2f8ed11592",
+    "/tmp/relar-iterator-performance-final-validation-v2/references/incremental/planner-bigint": "5c86b61767ef2c872c37a2f1687e1b88f70077bb5ffee23a841e87a0049f6d10",
+    "/tmp/relar-iterator-performance-final-validation-v2/references/incremental/planner-i64": "ff4763aa77b102bacb24a0f6f4a1b94b5d52a0c43fafabb958c946e3d27240af",
+    "/tmp/relar-iterator-performance-final-validation-v2/references/inventory/inventory-bigint": "87ca142627547266b595b53b195ce28053b463e75ba80ec9bfb8fd894b889b00",
+    "/tmp/relar-iterator-performance-final-validation-v2/references/luhn-normal/luhn-reference": "11ed2a92287597baf2d5b9cd4387f8b0f7dff7f0351eb6653db4e9f1ccf4e24d",
+    "/tmp/relar-iterator-performance-final-validation-v2/references/luhn-thinlto/luhn-reference": "3832476125f0092120ac5d4a192a7f955d29b5253cb52ea707f7a0582771bb59",
+    "/tmp/relar-iterator-performance-final-validation-v2/references/manifest/planner-manifest-bigint": "f03946213ae78a5cd9dd85ae90620dcd3ab4e8bd87f534f6adacd39458eb0634",
+    "/tmp/relar-iterator-performance-final-validation-v2/references/telemetry-normal/telemetry-reference": "39fd4008d43f1d8b56be58eece6b90f56891a9ab06f9def05021a07997815d65",
+    "/tmp/relar-iterator-performance-final-validation-v2/references/telemetry-thinlto/telemetry-reference": "f11a61c8393b7c0a1ce78049ef9e238d339dd288b12cfaa63971395042708bbd",
+    "/tmp/2026-10-21-iterator-performance-full-normal.json.gz": "05a38b69253ec7263a8447dc736f22f6a6bb27f42fa82fe9c59e83f40100f1cc",
+    "/tmp/2026-10-21-iterator-performance-full-thinlto.json.gz": "2b8bb8a35316bda0a4d1dea160858702335dbf9f0c45feb6a38c77f84f720df2",
+    "/tmp/2026-10-21-iterator-performance-early-normal.json.gz": "587406966124c55c64cdcd8233edc035a454c991736d4cbd9ed0f8e31d31c1b8",
+    "/tmp/2026-10-21-iterator-performance-early-thinlto.json.gz": "451b36c7745aadd2fb31ca7423048a4f07579338cd960c4e41d38d2b3340190a",
+    "/tmp/2026-10-21-iterator-performance-audit.json": "b31a0c429e8ce8761755ac1e64acc93e20ecff14ed9a92f48c14069430469806",
+    "/tmp/2026-10-21-iterator-performance-validation-audit.json": "667e0afb5fd00e5497a0833a8da9c6b1087acf3f3784bacf9e87e0a43762fafd",
+    "/tmp/2026-10-21-iterator-performance-profile.json": "eca4775eb5841a6488b242f722bb4f54dd896ffcce067ba266f7518c5857e6fc",
+    "/tmp/2026-10-21-iterator-performance.md": "a93e6d409970e4b8b137ccec95043c3f10932527f6482adfc0845955d2e43b17",
+    "/tmp/2026-10-21-iterator-performance-render.json": "c4b0a5a1e26c303635bdb34ddd4230c08f2a865a190c7513d413844fd2c1e06a",
+    "/tmp/relar-iterator-performance-render-report.py": "adc8d57fc86360cb583fd09ec7a7bb6f569375f1c1fdabd7f3dc1aefbad8486e",
+    "/tmp/relar-telemetry-final-v1-audit.json": "b31a0c429e8ce8761755ac1e64acc93e20ecff14ed9a92f48c14069430469806",
+    "/tmp/relar-telemetry-final-audit.py": "b5bd1c624a95f7a50045256a2503c0f883ae3f802b1b93b35972a7f846419401",
+    "/tmp/relar-telemetry-final-v1/plan.json": "133aa703ec404af2a74594f15b218037507e536109d6e9a6638d09bb9a0c77a2",
+    "/tmp/relar-iterator-performance-final-validation-v2/index.json": "1fd14cd9d4eaf69ebcb92ccc3cf56264b7a4400cdd0d9b8689d3b7803d4e0bb7",
+    "/tmp/relar-iterator-performance-final-validation-v2-audit.json": "667e0afb5fd00e5497a0833a8da9c6b1087acf3f3784bacf9e87e0a43762fafd",
+    "/tmp/relar-telemetry-final-v1/full-normal.json": "84190e0bd30bd82c108739662d0b6e64dcd9a8f356ddfdce664766be81885f5d",
+    "/tmp/elir-telemetry-full-v1-normal.json": "890834d3dedc0bbd39e1788b083ff32214f72372cb1caf93599b9f3bfcaf15a7",
+    "/tmp/relar-telemetry-final-v1/full-thinlto.json": "11004c01e98a75a9d39c892ef41129d92697f994346ed3d538e3db6cd3c6be15",
+    "/tmp/elir-telemetry-full-v1-thinlto.json": "bbe69e51b7b9315bfc3e755020999443671c7f3987a3298e033610b301c87401",
+    "/tmp/relar-telemetry-final-v1/early-normal.json": "fbcfed4d1c1d938b219327e3f07eeaa9b15ee8f93623840a66f5993301296266",
+    "/tmp/elir-telemetry-early-v1-normal.json": "030357302cfc760a119f4c62f7ffe29120b899a5073917a7a93699a51fff1cf5",
+    "/tmp/relar-telemetry-final-v1/early-thinlto.json": "30c5a5054ed8d7e1c312eaaa84c63f579ae93b9fae7b5b2590d36e2d7e66c49c",
+    "/tmp/elir-telemetry-early-v1-thinlto.json": "b2f630c600e24a3acd7d1e94d36e4f41d98cdb82d86517730bfd9449567738f2",
+    "/tmp/relar-telemetry-final-v1-profile/summary.json": "eca4775eb5841a6488b242f722bb4f54dd896ffcce067ba266f7518c5857e6fc",
+    "/tmp/relar-telemetry-candidate-003-audit.json": "4b82043e3f9bfc49c4837a930e5cad0b6210a719e52410fe44cf9bcd134dc672",
+    "/tmp/relar-telemetry-candidate-005-audit.json": "8b4bc8d77efdef1562260347bc8b2cecab6d4504409e495bbd5bf75abd788e8c",
+    "/tmp/relar-telemetry-candidate-006-audit.json": "c79333811e7357db8b41d07c428cebdf6178e6f56db43a616b57f3957692b468",
+    "/tmp/relar-telemetry-candidate-007-audit.json": "9790abf062be22adc3188ea67538c53222c9e6ae7c3c691fcc5175de00c01c9c",
+    "/tmp/relar-telemetry-candidate-008-audit.json": "1142f0aef65ab9ef208c680be8831a76191601a774453676676917f0f4eb5ae0",
+    "/tmp/relar-telemetry-candidate-009-audit.json": "2ed6ced608e110e3e1eeb5e91aa3202516f997438dc752eeede09c45be8698c8",
+    "/tmp/relar-telemetry-candidate-010-audit.json": "fe62c3e6f77b1fc35fc9eb619c878b67c368123289dcebedf4193a972954af15",
+    "/tmp/relar-telemetry-candidate-005-branch-audit.json": "3168962790a48522a904c2fbfd6cbad229f7b815ca1021e8ab81ce7917e135a5",
+    "/tmp/relar-rename-public-closure.json": "e2d3121b242d6d56f0d0d9f8535cab200860f8e86ab225459afb02449c1d2796",
+    "/tmp/relar-pinned-ohm-setup.json": "2c8adb3638b2df5721268fd3030394c80e32c89e70136e9f4caf9af5e08eaef5",
+    "/tmp/relar-telemetry-candidate-006-relocation-audit.json": "1b4a17bbfc053e94bc2ec779a6a2559d68ade2a29012dc64d84f0e80fe404f51",
+    "/tmp/relar-telemetry-candidate-006-pinned/pilot-status.json": "1e7459e7b3052175b6b646af8b4ffe9cbb2abef2359b256e7a9e6d2cf28177df",
+    "/tmp/relar-telemetry-relocation-audit.py": "65f1f83d299f44905bc469b1a64c0bbb91a6579304b69b21febb9a4451e2a44d",
+    "/tmp/relar-telemetry-candidate-006-pinned/plan.json": "fc175b39c33f30495ee884278beaff74fb02a5afd942d653ccf0030c8148b273",
+    "/tmp/relar-telemetry-candidate-006/plan.json": "20ffdcc7830bd8cc0acdec6f9c3bc64e30e44f1b8fd19c6d8ee2132b05c29334",
+    "/tmp/relar-telemetry-candidate-006-pinned/tool-path-relocation.json": "9e268e75cd06361e89f4219efecd08306388a7253341f5963506bad991628b09",
+    "/tmp/relar-compiler-inspiration/sources.json": "151b5efb83d4b222a4c571b2d983c222f42166080c9690f0b20d224f61fb4832",
+    "/tmp/relar-compiler-inspiration/scriptc/packages/compiler/src/backend/llvm/dense-array-access.ts": "753814f4af3733d7cf9ea3912f96bcb0e2912622ab65e5b11234f43749c15959",
+    "/tmp/relar-compiler-inspiration/scriptc/packages/compiler/src/backend/llvm/dense-array-loops.ts": "960dd6db0f81906b08aaec4e20317fff57befb5059b2e90212e3c9fcb081d900",
+    "/tmp/relar-compiler-inspiration/scriptc/packages/compiler/src/backend/llvm/counted-loops.ts": "359f89c90a2354c19219af27be40a71b0f424165623ce4663e5723f4563682f3",
+    "/tmp/relar-compiler-inspiration/scriptc/packages/compiler/src/backend/llvm/speculative-integers.ts": "d325e206e8bcc68d7ac5a2dde98eca6e74b0b374d59e33ce476808b7c6b6c7ba",
+    "/tmp/relar-compiler-inspiration/scriptc/packages/compiler/src/backend/llvm/borrowed-inputs.ts": "6967899e3477ae7e51f2d578fc62908432ab93b3d72b2980657ebb405f13b09f",
+    "/tmp/relar-compiler-inspiration/scriptc/packages/compiler/src/backend/llvm/reference-effects.ts": "76fea19acff14462949df6a003eb45736276156a674757e7233d7b8bb48dc9e5",
+    "/tmp/relar-compiler-inspiration/scriptc/packages/compiler/src/backend/llvm/walk-borrows.ts": "1cdf6964510c0d86060fb37aa269aa641d02b51160fbee486604f113c35f2c5c",
+    "/tmp/relar-compiler-inspiration/scriptc/packages/compiler/src/backend/llvm/bytes-loop-versions.ts": "5fa5b707f8f75f99dca7e3e60134f172790da437a8c721dee3183a8083d8be7f",
+    "/tmp/relar-compiler-inspiration/bun/docs/bundler/aot.mdx": "8d024d00f7c63d391cc467cbac42aacc5350a9ced1407d1e785c9a9027f0635d",
+    "/tmp/relar-compiler-inspiration/bun/docs/bundler/aot-types.mdx": "a4da41aeefaca3646398f995f2290ccbe9c31e444b7125fd721ee9ccd7a73aa8",
+    "/tmp/relar-compiler-inspiration/bun/src/aot/ir.rs": "135bb7314e4f56b5dc109e09dfd51ee06f53849889610d84cb89c0c9f969578e",
+    "/tmp/relar-compiler-inspiration/bun/src/aot/field_types.rs": "c8422b9d54e05e8374df493e74e947237392ff204fe88b37a91c11823ec2bec1",
+    "/tmp/relar-compiler-inspiration/webkit/Source/JavaScriptCore/aot/AOTTypedFormat.h": "2fb6299d8ba647dd1ddbbe92a1ec2778d253d6375f6b27b9434ab30bedbcbc27",
+    "/tmp/relar-compiler-inspiration/webkit/Source/JavaScriptCore/aot/AOTTypedPasses.h": "d04104dcaccb4984bfdd9bf560319069870e5e5e5553f191f5a53bafe2eb4837",
+    "/tmp/relar-compiler-inspiration/webkit/Source/JavaScriptCore/aot/AOTTypedPreparation.cpp": "2db86564e59bda334670944f958e3130be2f5aa843c669b23279782a63d9dd08",
+    "/tmp/relar-compiler-inspiration/webkit/Source/JavaScriptCore/b3/B3VersionLoops.cpp": "7a64d76e0b4f69a6b9f4db5420638ef89121e34cd77771fae5cb74e59b0e2bc4",
+    "/tmp/relar-compiler-inspiration/webkit/Source/JavaScriptCore/b3/B3SeparateIntegerPaths.cpp": "b073704a577d2408751e3dbd7b6c7ef734d8392f82eae662bdf88856698fd7d9",
+    "/tmp/relar-compiler-inspiration/webkit/Source/JavaScriptCore/b3/B3CountedLoops.cpp": "2720425f741d4331c305be7debc3c43672aaf8be5a7f98095857928c48fd00ed",
+    "/tmp/relar-telemetry-candidate-003-profile/manifest.json": "b7e0950b364efc6f171f0287098587685903e1e30b23f386f7564c56d2946484",
+    "/tmp/relar-telemetry-candidate-005-profile/manifest.json": "ca8fad988d3b03b9fbb73d17d71dc504e794f61063ce0a415c8cc977e5dfa0a9",
+    "/tmp/relar-telemetry-candidate-006-profile/manifest.json": "7e70bca3a2cecc0edb9d5e2222dbb6765d05019c6482859157b8781a7607a773",
+    "/tmp/relar-telemetry-candidate-007-profile/manifest.json": "8d11e979ea9d25c1a23554e0c2e5bf52b77aec47bc66e853088b25cc15581667",
+    "/tmp/relar-telemetry-candidate-008-profile/manifest.json": "033d6b708cc6d6d551d677daea2b02bc47b5615db76e1ed7ed50f99f1a19f0d9",
+    "/tmp/relar-telemetry-candidate-009-profile/manifest.json": "49cf80a1aa349c195b5294a28fe1d3559dc1fc8c61e60d8ad6ab38811b93f54c",
+    "/tmp/relar-telemetry-candidate-010-profile/manifest.json": "38e20aa88a70eec85f8c87a05c3e498021180aea0f69fdfb15d4901004cf2aa1",
+    "/tmp/2026-10-21-iterator-performance-rename-closure.json": "e2d3121b242d6d56f0d0d9f8535cab200860f8e86ab225459afb02449c1d2796"
+  },
+  "limits": "Archive, sidecar, source, and report integrity audit. No native workload, archived script, producer module, build, timing, profile, or API operation was executed; detailed semantic/profile validity remains established by the separately retained independent audits."
+}

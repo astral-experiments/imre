@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "kind": "public-relar-rename-closure",
+  "status": "passed",
+  "completed_at_utc": "2026-10-21T00:36:58.189049+00:00",
+  "repository": "viarius-experiments/relar",
+  "repository_id": 1423429334,
+  "stack_number": 4,
+  "stack_node_id": "PRS_kwDOVNfO1s4AIoYG",
+  "renamed_public_tip": "1cc6d47b1d21c523e5bcd701f180724b679014e8",
+  "counts": {
+    "rewritten_commits": 260,
+    "local_heads": 85,
+    "local_and_tracking_refs": 143,
+    "published_heads": 58,
+    "preserved_stack_prs": 57,
+    "updated_pr_texts": 34,
+    "moved_worktrees": 19,
+    "successful_ci_heads": 56,
+    "heads_without_ci_workflow": 2,
+    "rename_validation_jobs": 138,
+    "rename_rust_unit_tests": 191
+  },
+  "checks": {
+    "atomic_publication": true,
+    "remote_head_shas_verified": true,
+    "upstreams_preserved": true,
+    "metadata_readback_passed": true,
+    "report_navigation_links_resolve": true,
+    "historical_bare_sha_mentions_preserved": true
+  },
+  "ci_retry": {
+    "id": 39491300421,
+    "run_attempt": 2,
+    "head_sha": "9b9dddab55beeb40241d00788394b8bcf69f9cce",
+    "status": "completed",
+    "conclusion": "success",
+    "html_url": "https://github.com/viarius-experiments/relar/actions/runs/39491300421"
+  },
+  "heads_without_ci_workflow": [
+    "main",
+    "charlie/language-contract"
+  ],
+  "input_audit_sha256": {
+    "source_audit": "78a264704d885d01bb24d576d7a17b97b9fe97e92ee3ee52d62dba18dc82466b",
+    "validation_audit": "cbf6c789f6c40ad901fd2d1ee269a6d7c8876bafe55b87cbf4b32c238dc15de2",
+    "metadata_plan_audit": "0c7492cdabd1816e4e9383eafc1be4ed585ec7c1c91a7ecd2b7e003f03d5f88b",
+    "metadata_publication": "4b6e69aaed586f083dbf17030803326393f576d9edb3f32a737d45772e779bad",
+    "history_publication": "590c622fd8ec68158d50af4f89d1a6c8284df17d8a8312c5db3a272f92d6af74",
+    "local_installation": "d0d4156367f9e337ded96a21e7666588dc92ec55104aac3d2ff116dfa34dc25c",
+    "published_head_ci_inventory": "80a04282bae81a17f5c7126692327a0da5c3a9e508e3a9de1b6604cc4303009b",
+    "retry_terminal": "e3b5f6cee6dca935cf9376078c89f7e192712c7a6cdfe91eaa86350c505d5b32"
+  },
+  "closure_script_sha256": "fa7a6a1ceee1ca25b3141b03d1084438497f92babfa69b8d79bccf568b28edca",
+  "scope": "Public identities, verified aggregate counts, audit hashes, and terminal CI linkage only. Local paths, private branch inventories, Git configuration, credentials, and backup bundles are excluded. CI closure covers the 58 renamed published heads before the subsequent performance PRs."
+}
