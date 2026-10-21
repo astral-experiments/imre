@@ -19,6 +19,12 @@ application process executes the actual CLI once and writes its full report.
 Directory mode reads all matching JSON reports, intersects project names, and
 uses name order to break ties between projects with equal total changes.
 
+The [native-path results](../../results/2026-10-21-native-paths.md) compare both
+directory layouts in ordinary and ThinLTO builds. Relar takes 0.91–1.28× Rust's
+time for the complete application and 1.38–1.63× for repeated
+parse/compare/render work. The report retains raw samples and a portable replay
+of the output, statistics, and source checks.
+
 Prepare separately from timing:
 
 ```sh

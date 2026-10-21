@@ -198,6 +198,15 @@ CPython script. Both build modes preserve complete reports and typed JSON
 semantics. The report retains all samples, independent output/provenance checks,
 sanitizer validation, and a portable evidence replay.
 
+The [native-path milestone](results/2026-10-21-native-paths.md) adds directory
+comparison through native `pathlib.Path`. Across ordinary and ThinLTO builds,
+complete runs take 0.91–1.28× Rust's time and run 2.13–2.89× faster than the
+unchanged upstream CPython script. Separate repeated parse/compare/render runs
+take 1.38–1.63× Rust's time. The two layouts contain 65,024 items per side,
+distributed over 256 small projects or four larger projects. All 1,344 measured
+executions, validation results, and source bindings are independently audited
+and retained in portable evidence.
+
 ## Callback record pipeline
 
 The [payout example](../examples/record_pipeline/README.md) selects records with
