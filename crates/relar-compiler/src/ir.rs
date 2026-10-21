@@ -239,6 +239,12 @@ pub(crate) enum Builtin {
     Str,
     Len,
     ListGet,
+    /// Reduces an exact integer list after evaluating its source and start.
+    /// Integer addition cannot invoke callbacks or raise a recoverable error.
+    ListSum,
+    /// Sums a private integer slice at the slice's original evaluation point.
+    /// Nullable bounds and zero-step errors match ordinary slicing.
+    ListSliceSum,
     /// Internal loop guard over [list, start, stop, step]. Scanning is limited
     /// to four elements per planned iteration; true proves every value fits i32.
     ListAllI32,
@@ -246,10 +252,31 @@ pub(crate) enum Builtin {
     ListReserveRange,
     /// The guarded loop proves all elements fit i32 and cannot be replaced.
     ListGetI32,
+    /// Every call site and intervening operation preserve these exact element
+    /// bounds. The access still checks its index and returns a tagged-small Int.
+    ListGetBounded {
+        min: i64,
+        max: i64,
+    },
+    /// A canonical reduction loop proves its direct source/cursor access is
+    /// in bounds before advancing. The rooted list cannot change during the
+    /// loop; the borrowed result also has these exact tagged-small bounds.
+    ListGetBoundedInBounds {
+        min: i64,
+        max: i64,
+    },
+    /// A checked reduction version proves this canonical integer identity.
+    IntBounded {
+        min: i64,
+        max: i64,
+    },
     /// Internal identity guard between a read source and a mutated list.
     ListDistinct,
     StringGet,
     StringIter,
+    /// Eagerly converts immutable string code points into an integer list,
+    /// preserving `list(map(int, text))` errors without character objects.
+    StringIntList,
     Bytes,
     BytesGet,
     BytesIter,

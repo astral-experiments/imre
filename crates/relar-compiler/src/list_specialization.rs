@@ -7,9 +7,11 @@
 
 use std::collections::BTreeSet;
 
-use crate::ir::{Builtin, Expr, ExprKind, Module, Statement, Type, walk_expressions};
+use crate::ir::{
+    Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type, walk_expressions,
+};
 
-/// Versions leaf range loops after tuple scalarization exposes temporary aliases.
+/// Versions leaf range and canonical list loops after tuple scalarization.
 /// Unknown calls and mutations retain the original arbitrary-precision path.
 pub(crate) fn specialize(module: &mut Module) {
     for function in module.functions.iter_mut().chain([&mut module.entry]) {
@@ -24,12 +26,31 @@ pub(crate) fn specialize(module: &mut Module) {
 fn rewrite_block(body: &mut [Statement], locals: &[Type]) {
     for statement in body {
         match statement {
+            Statement::Assign(_, value)
+            | Statement::Expr(value)
+            | Statement::Return(value)
+            | Statement::Assert(value) => rewrite_expression(value, locals),
+            Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
+                for value in [a, b, c] {
+                    rewrite_expression(value, locals);
+                }
+            }
+            Statement::SetField(a, _, b) | Statement::AugmentField(a, _, _, b) => {
+                rewrite_expression(a, locals);
+                rewrite_expression(b, locals);
+            }
             Statement::Scope { body, .. } => rewrite_block(body, locals),
-            Statement::If(_, yes, no) | Statement::While(_, yes, no) => {
+            Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
+                rewrite_expression(test, locals);
                 rewrite_block(yes, locals);
                 rewrite_block(no, locals);
             }
-            Statement::For { body, orelse, .. } => {
+            Statement::For {
+                args, body, orelse, ..
+            } => {
+                for arg in args {
+                    rewrite_expression(arg, locals);
+                }
                 rewrite_block(body, locals);
                 rewrite_block(orelse, locals);
             }
@@ -46,17 +67,24 @@ fn rewrite_block(body: &mut [Statement], locals: &[Type]) {
                 rewrite_block(orelse, locals);
                 rewrite_block(finalbody, locals);
             }
+            Statement::Raise(Some(value)) => rewrite_expression(value, locals),
             _ => {}
         }
-        let Statement::For {
-            args, body, orelse, ..
-        } = statement
-        else {
-            continue;
+        let (arguments, body, orelse, while_source) = match statement {
+            Statement::For {
+                args, body, orelse, ..
+            } => (range_arguments(args), body, orelse, None),
+            Statement::While(test, body, orelse) => {
+                let Some((args, source)) = while_arguments(test) else {
+                    continue;
+                };
+                (Some(args), body, orelse, Some(source))
+            }
+            _ => continue,
         };
         // The guard also rejects scans whose cost cannot be amortized by the
         // captured range. Only cheap, nonfallible operands may be read twice.
-        let Some([start, stop, step]) = range_arguments(args) else {
+        let Some([start, stop, step]) = arguments else {
             continue;
         };
         if contains_loop(orelse) {
@@ -72,14 +100,18 @@ fn rewrite_block(body: &mut [Statement], locals: &[Type]) {
                 }
             }
         });
+        if while_source.is_some_and(|source| written[source]) {
+            continue;
+        }
         let mut aliases = locals
             .iter()
             .enumerate()
             .map(|(slot, ty)| (*ty == Type::ListInt && !written[slot]).then_some(slot))
             .collect::<Vec<_>>();
         let mut fast = statement.clone();
-        let Statement::For { body, .. } = &mut fast else {
-            unreachable!()
+        let body = match &mut fast {
+            Statement::For { body, .. } | Statement::While(_, body, _) => body,
+            _ => unreachable!(),
         };
         let mut plan = Plan {
             locals,
@@ -87,8 +119,13 @@ fn rewrite_block(body: &mut [Statement], locals: &[Type]) {
             outputs: BTreeSet::new(),
             reads: 0,
             appends: 0,
+            nontrivial_arithmetic: false,
         };
-        if !plan.block(body, &mut aliases) || plan.reads < 2 {
+        if !plan.block(body, &mut aliases)
+            || (plan.reads < 2
+                && !(while_source.is_some() && plan.reads == 1 && plan.nontrivial_arithmetic))
+            || while_source.is_some_and(|source| !plan.inputs.contains(&source))
+        {
             continue;
         }
         if plan.inputs.iter().any(|slot| plan.outputs.contains(slot)) {
@@ -138,9 +175,69 @@ fn rewrite_block(body: &mut [Statement], locals: &[Type]) {
     }
 }
 
+/// Visits each eager expression once, descending into its own statement scopes.
+/// Newly generated loop versions are not revisited by this child-first walk.
+fn rewrite_expression(expression: &mut Expr, locals: &[Type]) {
+    match &mut expression.kind {
+        ExprKind::Scope { body, value, .. } => {
+            rewrite_block(body, locals);
+            rewrite_expression(value, locals);
+        }
+        ExprKind::List(values)
+        | ExprKind::Tuple(values)
+        | ExprKind::Set { values, .. }
+        | ExprKind::Compare(values, _)
+        | ExprKind::Boolean(_, values)
+        | ExprKind::Builtin(_, values) => {
+            for value in values {
+                rewrite_expression(value, locals);
+            }
+        }
+        ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+            for value in &mut args.values {
+                rewrite_expression(value, locals);
+            }
+        }
+        ExprKind::Dict { entries, .. } => {
+            for (key, value) in entries {
+                rewrite_expression(key, locals);
+                rewrite_expression(value, locals);
+            }
+        }
+        ExprKind::Bind(_, value)
+        | ExprKind::Present(value)
+        | ExprKind::Absent(value)
+        | ExprKind::Unwrap(value)
+        | ExprKind::Not(value)
+        | ExprKind::Negate(value)
+        | ExprKind::Field(value, _) => rewrite_expression(value, locals),
+        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
+            rewrite_expression(left, locals);
+            rewrite_expression(right, locals);
+        }
+        ExprKind::Conditional(test, yes, no) => {
+            rewrite_expression(test, locals);
+            rewrite_expression(yes, locals);
+            rewrite_expression(no, locals);
+        }
+        ExprKind::Exception { message, .. } => {
+            if let Some(message) = message {
+                rewrite_expression(message, locals);
+            }
+        }
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Str(_)
+        | ExprKind::Bytes(_)
+        | ExprKind::None
+        | ExprKind::Local(_) => {}
+    }
+}
+
 /// An else suite is cloned with the loop, so nested loops there would multiply
 /// versions even though they are outside the input-stability proof's body.
-fn contains_loop(body: &[Statement]) -> bool {
+pub(crate) fn contains_loop(body: &[Statement]) -> bool {
     let mut found = statements_contain_loop(body);
     walk_expressions(body, &mut |value| {
         if let ExprKind::Scope { body, .. } = &value.kind {
@@ -176,7 +273,7 @@ fn statements_contain_loop(body: &[Statement]) -> bool {
 
 /// Marks all statement-owned writes, including cleanup on abrupt scope exits.
 /// Embedded expression scopes are visited separately by the shared IR walker.
-fn mark_writes(body: &[Statement], written: &mut [bool]) {
+pub(crate) fn mark_writes(body: &[Statement], written: &mut [bool]) {
     for statement in body {
         match statement {
             Statement::Assign(slot, _) | Statement::Clear(slot) => written[*slot] = true,
@@ -244,6 +341,8 @@ struct Plan<'a> {
     reads: usize,
     /// Upper bound for one iteration; mutually exclusive arms take the maximum.
     appends: usize,
+    /// A single list read justifies a scan only when it enables useful arithmetic.
+    nontrivial_arithmetic: bool,
 }
 
 impl Plan<'_> {
@@ -400,7 +499,19 @@ impl Plan<'_> {
                     return false;
                 }
             }
-            ExprKind::Binary(_, left, right) => {
+            ExprKind::Binary(operation, left, right) => {
+                self.nontrivial_arithmetic |= expression.ty == Type::Int
+                    && matches!(
+                        operation,
+                        Binary::Multiply
+                            | Binary::FloorDivide
+                            | Binary::Modulo
+                            | Binary::BitAnd
+                            | Binary::BitOr
+                            | Binary::BitXor
+                            | Binary::LeftShift
+                            | Binary::RightShift
+                    );
                 if !self.expression(left, aliases) || !self.expression(right, aliases) {
                     return false;
                 }
@@ -460,7 +571,7 @@ impl Plan<'_> {
 }
 
 /// These closed operations neither call user code nor mutate existing containers.
-fn readonly_builtin(operation: &Builtin) -> bool {
+pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
     matches!(
         operation,
         Builtin::GlobalGet(_)
@@ -470,6 +581,13 @@ fn readonly_builtin(operation: &Builtin) -> bool {
             | Builtin::Str
             | Builtin::Len
             | Builtin::ListGet
+            | Builtin::ListGetI32
+            | Builtin::ListGetBounded { .. }
+            | Builtin::ListGetBoundedInBounds { .. }
+            | Builtin::IntBounded { .. }
+            | Builtin::ListSum
+            | Builtin::ListSliceSum
+            | Builtin::StringIntList
             | Builtin::StringGet
             | Builtin::Bytes
             | Builtin::BytesGet
@@ -492,6 +610,37 @@ fn readonly_builtin(operation: &Builtin) -> bool {
             | Builtin::ExceptionCause
             | Builtin::ExceptionSuppressContext
     )
+}
+
+/// The condition is nonfallible and reads no storage beyond a rooted list's
+/// length. Keep the current cursor in the scan budget: an exhausted or nearly
+/// exhausted loop must not trigger a full scan of a large source.
+fn while_arguments(test: &Expr) -> Option<([Expr; 3], usize)> {
+    let ExprKind::Compare(values, operations) = &test.kind else {
+        return None;
+    };
+    if !matches!(operations.as_slice(), [Compare::Less]) {
+        return None;
+    }
+    let [cursor, length] = values.as_slice() else {
+        return None;
+    };
+    if !matches!(cursor.kind, ExprKind::Local(_)) || cursor.ty != Type::Int {
+        return None;
+    }
+    let ExprKind::Builtin(Builtin::Len, args) = &length.kind else {
+        return None;
+    };
+    let [
+        Expr {
+            ty: Type::ListInt,
+            kind: ExprKind::Local(source),
+        },
+    ] = args.as_slice()
+    else {
+        return None;
+    };
+    Some(([cursor.clone(), length.clone(), integer(1)], *source))
 }
 
 /// Repeating these reads cannot allocate, raise, mutate, or call user code.
@@ -655,6 +804,110 @@ def triples(data: list[int], output: list[int]) -> None:
             }
         });
         assert_eq!(fallback_reads, 3);
+    }
+
+    #[test]
+    fn versions_arithmetic_list_comprehension_inside_expression_scope() {
+        let module = optimized(
+            r#"
+def transform(data: list[int]) -> list[int]:
+    return [sum(divmod(2 * value, 10)) for value in data]
+"#,
+        );
+        assert_eq!(counts(&module), (1, 1, 1));
+        let mut fallback_reads = 0;
+        let mut reservations = 0;
+        for function in &module.functions {
+            walk_expressions(&function.body, &mut |value| match &value.kind {
+                ExprKind::Builtin(Builtin::ListGet, _) => fallback_reads += 1,
+                ExprKind::Builtin(Builtin::ListReserveRange, args) => {
+                    assert!(matches!(&args[4].kind, ExprKind::Int(value) if value == "1"));
+                    reservations += 1;
+                }
+                _ => {}
+            });
+        }
+        assert_eq!(fallback_reads, 1);
+        assert_eq!(reservations, 1);
+    }
+
+    #[test]
+    fn while_scan_budget_uses_the_current_cursor_and_preserves_checked_access() {
+        let module = optimized(
+            r#"
+def transform(data: list[int], cursor: int, output: list[int]) -> None:
+    while cursor < len(data):
+        output.append(data[cursor] * 2)
+        cursor += 1
+"#,
+        );
+        assert_eq!(counts(&module), (1, 1, 1));
+        let mut guards = 0;
+        walk_expressions(&module.functions[0].body, &mut |value| {
+            if let ExprKind::Builtin(Builtin::ListAllI32, args) = &value.kind {
+                assert!(matches!(args[0].kind, ExprKind::Local(0)));
+                assert!(matches!(args[1].kind, ExprKind::Local(1)));
+                assert!(matches!(args[2].kind, ExprKind::Builtin(Builtin::Len, _)));
+                assert!(matches!(&args[3].kind, ExprKind::Int(value) if value == "1"));
+                guards += 1;
+            }
+        });
+        assert_eq!(guards, 1);
+        let llvm = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        assert!(llvm.contains("call i64 @relar_list_get("));
+    }
+
+    #[test]
+    fn while_versioning_rejects_trivial_loops_callbacks_and_unstable_sources() {
+        for source in [
+            r#"
+def copy(data: list[int]) -> list[int]:
+    return [value for value in data]
+"#,
+            r#"
+def total(data: list[int]) -> int:
+    return sum(data)
+"#,
+            r#"
+def touch(data: list[int]) -> None:
+    data.append(1)
+
+def transform(data: list[int], output: list[int]) -> None:
+    for value in data:
+        touch(data)
+        output.append(value * 2)
+"#,
+            r#"
+def transform(data: list[int], output: list[int]) -> None:
+    cursor = 0
+    while cursor < len(data):
+        output.append(data[cursor] * 2)
+        data = output
+        cursor += 1
+"#,
+            r#"
+def transform(data: list[int]) -> None:
+    cursor = 0
+    while cursor < len(data):
+        data[cursor] = data[cursor] * 2
+        cursor += 1
+"#,
+        ] {
+            assert_eq!(counts(&optimized(source)), (0, 0, 0));
+        }
+    }
+
+    #[test]
+    fn nested_list_loops_only_version_the_leaf() {
+        let module = optimized(
+            r#"
+def transform(data: list[int], output: list[int]) -> None:
+    for first in data:
+        for second in data:
+            output.append(sum(divmod(first + second, 10)))
+"#,
+        );
+        assert_eq!(counts(&module), (1, 1, 1));
     }
 
     #[test]

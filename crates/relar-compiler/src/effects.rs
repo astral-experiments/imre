@@ -192,7 +192,10 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::Input
         | Builtin::ListGet
         | Builtin::ListGetI32
+        | Builtin::ListGetBounded { .. }
+        | Builtin::ListSliceSum
         | Builtin::StringGet
+        | Builtin::StringIntList
         | Builtin::BytesGet
         | Builtin::Decode
         | Builtin::BytesValidateUtf8
@@ -227,8 +230,11 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::IsInstance(_)
         | Builtin::Len
         | Builtin::ListAllI32
+        | Builtin::ListSum
         | Builtin::ListReserveRange
         | Builtin::ListDistinct
+        | Builtin::ListGetBoundedInBounds { .. }
+        | Builtin::IntBounded { .. }
         | Builtin::Append
         | Builtin::IsNone
         | Builtin::Split

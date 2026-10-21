@@ -173,6 +173,58 @@ thread_local! {
     static LIST_BUFFERS: RefCell<[Vec<Int>; 2]> = const {
         RefCell::new([Vec::new(), Vec::new()])
     };
+    // Headers contain neither element owners nor buffer capacity. Only unique
+    // allocations without Weak references enter these bounded slots.
+    static LIST_HEADERS: RefCell<[Option<Rc<List>>; 2]> = const {
+        RefCell::new([None, None])
+    };
+}
+
+/// Publishes a fresh list identity, reusing an unobservable empty header when
+/// available. Live aliases and Weak references never enter the private cache.
+fn new_list(values: Vec<Int>) -> *const List {
+    let cached = LIST_HEADERS
+        .try_with(|headers| {
+            let Ok(mut headers) = headers.try_borrow_mut() else {
+                return None;
+            };
+            let next = headers[1].take();
+            std::mem::replace(&mut headers[0], next)
+        })
+        .ok()
+        .flatten();
+    let owner = if let Some(mut owner) = cached {
+        let list = Rc::get_mut(&mut owner).expect("cached list header is unique");
+        let storage = list.0.0.get_mut();
+        debug_assert!(storage.is_empty() && storage.capacity() == 0);
+        *storage = values;
+        owner
+    } else {
+        Rc::new(List(StorageCell::new(values)))
+    };
+    Rc::into_raw(owner)
+}
+
+/// Consumes a list owner, caching at most two headers whose identities can no
+/// longer be observed. Elements are destroyed before caching, using the same
+/// BigInt cleanup and bounded buffer reuse as ordinary List destruction.
+/// `Rc::get_mut` excludes Weak observers as well as other strong owners.
+fn recycle_list_header(mut owner: Rc<List>) {
+    let Some(list) = Rc::get_mut(&mut owner) else {
+        return;
+    };
+    let values = std::mem::take(list.0.0.get_mut());
+    drop(List(StorageCell::new(values)));
+    let evicted = LIST_HEADERS.try_with(|headers| {
+        let Ok(mut headers) = headers.try_borrow_mut() else {
+            return Some(owner);
+        };
+        let previous = headers[0].replace(owner);
+        std::mem::replace(&mut headers[1], previous)
+    });
+    // Reentry and TLS destruction fall back to ordinary drop. Empty List::drop
+    // never accesses this header cache, including when cached owners are evicted.
+    drop(evicted);
 }
 
 /// Reuses the smallest suitable empty buffer for a known result size. Limiting
@@ -654,17 +706,7 @@ pub unsafe extern "C" fn relar_int_parse(value: *const Str) -> usize {
     // SAFETY: the caller keeps the immutable string alive.
     let original = unsafe { &*value };
     let source = original.trim();
-    let invalid = || {
-        let mut literal = integer_text::literal_repr(original);
-        // CPython's %.200R diagnostic truncates the rendered repr by characters.
-        if let Some((end, _)) = literal.char_indices().nth(200) {
-            literal.truncate(end);
-        }
-        Error::new(
-            Kind::ValueError,
-            compact_str::format_compact!("invalid literal for int() with base 10: {literal}"),
-        )
-    };
+    let invalid = || integer_text::invalid_literal(original);
     // Rust's signed decimal parser accepts a subset of our grammar. Ordinary
     // small inputs need neither normalization nor temporary BigInt allocations;
     // separators and larger values still take the checked path below.
@@ -737,7 +779,7 @@ pub extern "C" fn relar_input() -> *const Str {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_list_new() -> *const List {
-    Rc::into_raw(Rc::new(List(StorageCell::new(Vec::new()))))
+    new_list(Vec::new())
 }
 
 /// # Safety
@@ -756,7 +798,7 @@ pub unsafe extern "C" fn relar_list_retain(value: *const List) {
 pub unsafe extern "C" fn relar_list_release(value: *const List) {
     if !value.is_null() {
         // SAFETY: the caller transfers one live Rc<List> reference.
-        unsafe { Rc::decrement_strong_count(value) };
+        recycle_list_header(unsafe { Rc::from_raw(value) });
     }
 }
 
@@ -855,6 +897,20 @@ pub unsafe extern "C" fn relar_list_borrow_index(list: *const List, at: usize) -
             .with(|list| list.get(at).map(|value| value.0).ok_or_else(Error::index))
     };
     finish(result, 0)
+}
+
+/// Borrows a list element after the compiler has proved its current bounds.
+///
+/// # Safety
+/// `list` must remain rooted, and `at` must be an exact decoded native index
+/// strictly below the current length. No storage access may overlap this call.
+/// The selected element must remain in place until the returned canonical word
+/// is consumed. This does not acquire a reference; the word must not be released.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_borrow_index_proven(list: *const List, at: usize) -> usize {
+    // SAFETY: the caller proves the index is in bounds and roots its element.
+    // Only its borrowed word escapes this nonreentrant storage access.
+    unsafe { (&*list).0.with(|values| values.get_unchecked(at).0) }
 }
 
 /// Returns one after replacement, or zero with a pending error and no mutation.
@@ -1019,6 +1075,56 @@ pub unsafe extern "C" fn relar_list_len(list: *const List) -> usize {
     (length << 1) | 1
 }
 
+/// Sums an exact integer list and an already-evaluated starting value.
+///
+/// An i32 reduction avoids per-element integer owners and arithmetic calls.
+/// Other representations retain arbitrary-precision addition. Addition cannot
+/// invoke user code, so adding the start after the list subtotal is equivalent
+/// and leaves pending exception state unchanged.
+///
+/// # Safety
+/// The caller roots the list and canonical integer start throughout this call.
+/// This nonreentrant call never mutates the list or exposes its storage.
+/// The result transfers one independently owned canonical integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_sum(list: *const List, start: usize) -> usize {
+    // SAFETY: the rooted list is read without callbacks or escaped borrows.
+    let subtotal = unsafe { (&*list).0.with(|values| sum_ints(values.iter())) };
+    // SAFETY: start remains rooted, and subtotal owns the other integer.
+    unsafe { relar_int_binary(start, subtotal.0, 0) }
+}
+
+/// Shares exact reduction between whole lists and normalized slice selections.
+/// Cloning the borrowed iterator permits a checked fast pass without acquiring
+/// element owners; neither pass can mutate the source or call user code.
+fn sum_ints<'a>(values: impl Iterator<Item = &'a Int> + Clone) -> Int {
+    let (length, upper) = values.size_hint();
+    // Callers use standard slice iterators and adapters. Equal bounds retain
+    // the exact-count proof for a chain even though Chain cannot implement
+    // ExactSizeIterator generally: its component lengths might overflow usize.
+    if upper == Some(length) && length <= i32::MAX as usize {
+        let (sum, invalid) = values
+            .clone()
+            .fold((0_i64, 0_usize), |(sum, invalid), value| {
+                // Biasing the tagged i32 interval into 33 bits also rejects heap
+                // words by their even tag. Decoding reads bits, never a pointer.
+                (
+                    sum.wrapping_add((value.0 as i64) >> 1),
+                    invalid | (value.0.wrapping_add(1_usize << 32) >> 33) | (!value.0 & 1),
+                )
+            });
+        if invalid == 0 {
+            // At most 2^31-1 signed i32 values sum within
+            // [-2^62+2^31, 2^62-2^32+1], including every prefix.
+            return Int::small(sum).unwrap();
+        }
+    }
+    values.fold(Int::small(0).unwrap(), |sum, value| {
+        // SAFETY: both owned/borrowed canonical integers remain live for addition.
+        Int(unsafe { relar_int_binary(sum.0, value.0, 0) })
+    })
+}
+
 /// Counts a nonempty range only when its captured components are tagged small.
 ///
 /// # Safety
@@ -1167,10 +1273,7 @@ pub unsafe extern "C" fn relar_list_repeat(list: *const List, count: usize) -> *
             Ok(result)
         })
     };
-    finish(
-        result.map(|values| Rc::into_raw(Rc::new(List(StorageCell::new(values))))),
-        std::ptr::null(),
-    )
+    finish(result.map(new_list), std::ptr::null())
 }
 
 #[unsafe(no_mangle)]
@@ -1219,6 +1322,243 @@ mod tests {
         assert_eq!(weak.strong_count(), 3);
         drop(list);
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn list_sum_reduces_signed_i32_values_across_vector_boundaries() {
+        let pattern = [i32::MIN, i32::MAX, -1, 0, 1];
+        for length in [0, 1, 2, 3, 4, 7, 8, 15, 16, 17, 31, 32, 33, 257] {
+            let expected = (0..length)
+                .map(|index| BigInt::from(pattern[index % pattern.len()]))
+                .sum::<BigInt>();
+            let list = List(StorageCell::new(
+                (0..length)
+                    .map(|index| Int::small(i64::from(pattern[index % pattern.len()])).unwrap())
+                    .collect(),
+            ));
+            for start in [0, -19, MIN_SMALL, MAX_SMALL] {
+                let start = Int::small(start).unwrap();
+                // SAFETY: both exact arguments remain rooted for the sum.
+                let result = Int(unsafe { relar_list_sum(&list, start.0) });
+                assert_eq!(result.big().as_ref(), &(&expected + start.big().as_ref()));
+            }
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn list_sum_preserves_large_values_cancellation_and_canonical_results() {
+        let huge = BigInt::from(1) << 140_u32;
+        for (values, start) in [
+            (vec![], huge.clone()),
+            (vec![-huge.clone(), 17.into()], huge.clone()),
+            (vec![huge.clone(), 17.into()], -huge.clone()),
+            (vec![huge.clone(), -huge.clone(), 5.into()], 9.into()),
+            (
+                vec![BigInt::from(i32::MIN) - 1, BigInt::from(i32::MAX) + 1],
+                0.into(),
+            ),
+            (
+                vec![MAX_SMALL.into(), MAX_SMALL.into(), MIN_SMALL.into()],
+                0.into(),
+            ),
+        ] {
+            let expected = values.iter().sum::<BigInt>() + &start;
+            let list = List(StorageCell::new(values.into_iter().map(Int::new).collect()));
+            let start = Int::new(start);
+            // SAFETY: both exact arguments remain rooted for the sum.
+            let result = Int(unsafe { relar_list_sum(&list, start.0) });
+            assert_eq!(result.big().as_ref(), &expected);
+            assert_eq!(
+                result.as_small(),
+                expected
+                    .to_i64()
+                    .filter(|value| (MIN_SMALL..=MAX_SMALL).contains(value))
+            );
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn list_sum_borrows_aliased_inputs_and_owns_results_after_mutation() {
+        let positive = Rc::new(BigInt::from(1) << 120_u32);
+        let negative = Rc::new(-positive.as_ref());
+        let positive_weak = Rc::downgrade(&positive);
+        let negative_weak = Rc::downgrade(&negative);
+        let list = Rc::new(List(StorageCell::new(vec![
+            Int(Rc::into_raw(positive.clone()) as usize),
+            Int(Rc::into_raw(negative.clone()) as usize),
+            Int::small(7).unwrap(),
+        ])));
+        let alias = list.clone();
+        let start = Rc::as_ptr(&positive) as usize;
+        // SAFETY: start is rooted both directly and by the list. The aliased
+        // mutation occurs between reductions, after all storage borrows end.
+        let result = unsafe {
+            let result = Int(relar_list_sum(Rc::as_ptr(&list), start));
+            assert_eq!(result.big().as_ref(), &(positive.as_ref() + 7));
+            assert_eq!(Rc::strong_count(&positive), 2);
+            assert_eq!(Rc::strong_count(&negative), 2);
+            assert_eq!(
+                relar_list_set_index(Rc::as_ptr(&alias), 0, Int::small(42).unwrap().0),
+                1
+            );
+            let changed = Int(relar_list_sum(Rc::as_ptr(&list), start));
+            assert_eq!(changed.as_small(), Some(49));
+            result
+        };
+        drop(alias);
+        drop(list);
+        assert_eq!(Rc::strong_count(&positive), 1);
+        assert_eq!(Rc::strong_count(&negative), 1);
+        let expected = positive.as_ref() + 7;
+        drop(positive);
+        drop(negative);
+        assert!(positive_weak.upgrade().is_none());
+        assert!(negative_weak.upgrade().is_none());
+        assert_eq!(result.big().as_ref(), &expected);
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn list_header_reuse_preserves_strong_and_weak_aliases() {
+        std::thread::spawn(|| {
+            // SAFETY: every raw owner is consumed exactly once; the extra
+            // retained owner keeps the original list live across the first release.
+            unsafe {
+                let original = relar_list_new();
+                relar_list_retain(original);
+                relar_list_release(original);
+                assert!(LIST_HEADERS.with(|headers| headers.borrow().iter().all(Option::is_none)));
+                relar_list_append(original, Int::small(7).unwrap().0);
+                let distinct = relar_list_new();
+                assert_ne!(distinct, original);
+                relar_list_release(distinct);
+                relar_list_release(original);
+                let reused = relar_list_new();
+                assert_eq!(reused, original);
+                assert_eq!(Int(relar_list_len(reused)).as_small(), Some(0));
+                let owner = Rc::from_raw(reused);
+                let weak = Rc::downgrade(&owner);
+                relar_list_release(Rc::into_raw(owner));
+                assert!(weak.upgrade().is_none());
+                let next = relar_list_new();
+                assert_ne!(next, weak.as_ptr());
+                relar_list_release(next);
+            }
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn list_header_reuse_releases_elements_and_keeps_buffers_separate() {
+        std::thread::spawn(|| {
+            let big = Rc::new(BigInt::from(1_u8) << 200_u32);
+            let weak = Rc::downgrade(&big);
+            let integer = Int(Rc::into_raw(big) as usize);
+            let list = new_list(vec![integer.clone(), integer]);
+            // SAFETY: the sequence retains the list, then releases its last
+            // owner through WordKind. Reuse must retain neither BigInt owner.
+            unsafe {
+                let parent = objects::relar_seq_new(4);
+                objects::relar_seq_append(parent, list as usize, 4);
+                relar_list_release(list);
+                assert_eq!(weak.strong_count(), 2);
+                objects::relar_object_release(parent);
+                assert!(weak.upgrade().is_none());
+                let reused = relar_list_new();
+                assert_eq!(reused, list);
+                relar_list_release(reused);
+            }
+            let mut values = Vec::with_capacity(16);
+            values.push(Int::small(9).unwrap());
+            let buffer = values.as_ptr();
+            // SAFETY: the constructor transfers its sole owner to release.
+            unsafe { relar_list_release(new_list(values)) };
+            LIST_HEADERS.with(|headers| {
+                for header in headers.borrow().iter().flatten() {
+                    // SAFETY: cached headers cannot be accessed by the language
+                    // and this read does not mutate or reenter their storage.
+                    unsafe {
+                        header.0.with(|values| {
+                            assert!(values.is_empty());
+                            assert_eq!(values.capacity(), 0);
+                        });
+                    }
+                }
+            });
+            let reused = take_list_buffer(16);
+            assert_eq!(reused.as_ptr(), buffer);
+            assert!(reused.is_empty());
+            assert_eq!(relar_error_pending(), 0);
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn list_header_cache_is_bounded_and_declines_reentry() {
+        std::thread::spawn(|| {
+            let lists = [relar_list_new(), relar_list_new(), relar_list_new()];
+            // SAFETY: these distinct, unaliased owners are consumed once.
+            unsafe {
+                for list in lists {
+                    relar_list_release(list);
+                }
+            }
+            LIST_HEADERS.with(|headers| {
+                let borrowed = headers.borrow_mut();
+                let pointers = || {
+                    borrowed
+                        .each_ref()
+                        .map(|owner| owner.as_ref().map(Rc::as_ptr))
+                };
+                assert_eq!(pointers(), [Some(lists[2]), Some(lists[1])]);
+                let fresh = relar_list_new();
+                assert!(!pointers().contains(&Some(fresh)));
+                // SAFETY: failed cache borrowing falls back to consuming this
+                // new owner normally, without disturbing the borrowed slots.
+                unsafe { relar_list_release(fresh) };
+                assert_eq!(pointers(), [Some(lists[2]), Some(lists[1])]);
+            });
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn list_header_cache_allows_release_after_thread_local_teardown() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct Teardown(Arc<AtomicBool>);
+        impl Drop for Teardown {
+            fn drop(&mut self) {
+                let big = Rc::new(BigInt::from(1_u8) << 200_u32);
+                let weak = Rc::downgrade(&big);
+                let list = new_list(vec![Int(Rc::into_raw(big) as usize)]);
+                // SAFETY: this sole owner must be released even after cache TLS
+                // destruction, including the contained BigInt allocation.
+                unsafe { relar_list_release(list) };
+                assert!(weak.upgrade().is_none());
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+        thread_local! {
+            static TEARDOWN: RefCell<Option<Teardown>> = const { RefCell::new(None) };
+        }
+        let completed = Arc::new(AtomicBool::new(false));
+        let observed = completed.clone();
+        std::thread::spawn(move || {
+            // Reverse TLS destruction drops the cache before this probe.
+            TEARDOWN.with(|probe| *probe.borrow_mut() = Some(Teardown(observed)));
+            // SAFETY: this cache warm-up transfers one newly constructed owner.
+            unsafe { relar_list_release(relar_list_new()) };
+        })
+        .join()
+        .unwrap();
+        assert!(completed.load(Ordering::Relaxed));
     }
 
     #[test]
@@ -1749,6 +2089,39 @@ mod tests {
             drop(saved);
         }
         assert!(source_weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn proven_indices_borrow_boundary_values_without_acquiring_owners() {
+        let big = Rc::new(BigInt::from(1_u128 << 100));
+        let weak = Rc::downgrade(&big);
+        let list = relar_list_new();
+        // SAFETY: the exact indices are in bounds after all three appends.
+        // Every borrowed word is consumed before the list is released.
+        unsafe {
+            relar_list_append(list, Int::small(MIN_SMALL).unwrap().0);
+            relar_list_append(list, Rc::as_ptr(&big) as usize);
+            relar_list_append(list, Int::small(MAX_SMALL).unwrap().0);
+            drop(big);
+            assert_eq!(
+                Int::borrow(relar_list_borrow_index_proven(list, 0)).as_small(),
+                Some(MIN_SMALL)
+            );
+            assert_eq!(
+                Int::borrow(relar_list_borrow_index_proven(list, 1))
+                    .big()
+                    .as_ref(),
+                &BigInt::from(1_u128 << 100)
+            );
+            assert_eq!(weak.strong_count(), 1);
+            assert_eq!(
+                Int::borrow(relar_list_borrow_index_proven(list, 2)).as_small(),
+                Some(MAX_SMALL)
+            );
+            relar_list_release(list);
+        }
+        assert!(weak.upgrade().is_none());
+        assert_eq!(relar_error_pending(), 0);
     }
 
     #[test]

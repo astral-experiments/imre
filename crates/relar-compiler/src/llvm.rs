@@ -7,7 +7,7 @@ use crate::ir::{
     Binary, Builtin, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType, Module,
     Statement, Type,
 };
-use crate::ranges::RangeFacts;
+use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
 
 mod truthiness;
@@ -499,15 +499,49 @@ impl Emitter<'_, '_> {
 
     /// Publishes the new owned value before releasing the replaced reference.
     fn store(&mut self, slot: usize, value: &Value) {
+        self.store_with_previous_small(slot, value, false);
+    }
+
+    /// A preceding same-slot read may prove the replaced value canonical-small
+    /// at this assignment, even when other paths store BigInts in the slot.
+    /// The caller must exclude every intervening write and cleanup, including
+    /// expression-owned scopes and walrus rebinding. This fact applies only
+    /// after successful RHS evaluation; exception cleanup keeps its own owners.
+    fn store_with_previous_small(&mut self, slot: usize, value: &Value, previous_small: bool) {
         debug_assert!(!self.borrowed_params[slot]);
-        let old = self.borrow_slot(slot);
+        debug_assert!(!previous_small || self.locals[slot] == Type::Int);
+        let old = (!previous_small).then(|| self.borrow_slot(slot));
         self.line(format!(
             "store {} {}, ptr %local{slot}",
             value.ty.llvm(),
             value.operand
         ));
         self.forget(value);
-        self.release(&old);
+        if let Some(old) = old {
+            self.release(&old);
+        }
+    }
+
+    /// Transfers an evaluated left operand's proof to the old assignment slot.
+    /// A user call cannot rebind a caller's immutable integer local, but hidden
+    /// expression statements and binding expressions can replace its owner.
+    fn assignment_replaces_small(&self, slot: usize, expression: &Expr) -> bool {
+        if self.locals[slot] != Type::Int || self.expression_rebound[slot] {
+            return false;
+        }
+        let ExprKind::Binary(_, left, right) = &expression.kind else {
+            return false;
+        };
+        let same_local = match &left.kind {
+            ExprKind::Local(source) => *source == slot,
+            ExprKind::Builtin(Builtin::IntBounded { .. }, args) => {
+                matches!(args.as_slice(), [Expr { kind: ExprKind::Local(source), .. }] if *source == slot)
+            }
+            _ => false,
+        };
+        same_local
+            && self.ranges.integer(left).is_some()
+            && expression_preserves_local(right, slot, self.locals.len())
     }
 
     fn cleanup(&mut self) {
@@ -927,8 +961,9 @@ impl Emitter<'_, '_> {
                 if self.concat_assign(*slot, expression) {
                     return;
                 }
+                let previous_small = self.assignment_replaces_small(*slot, expression);
                 let value = self.expr(expression);
-                self.store(*slot, &value);
+                self.store_with_previous_small(*slot, &value, previous_small);
             }
             Statement::Move(target, source) => {
                 debug_assert_eq!(self.locals[*target], self.locals[*source]);
@@ -1434,17 +1469,13 @@ impl Emitter<'_, '_> {
                 let left_value = self.operand(left);
                 let right_value = self.operand(right);
                 let result = if let Some(adjust_floor) = direct {
-                    let right_constant = self
-                        .ranges
-                        .integer(right)
-                        .filter(|range| range.min == range.max)
-                        .map(|range| range.min);
+                    let bounds = self.ranges.integer(left).zip(self.ranges.integer(right));
                     self.small_binary(
                         *op,
                         &left_value.value,
                         &right_value.value,
                         adjust_floor,
-                        right_constant,
+                        bounds,
                     )
                 } else {
                     self.binary(*op, &left_value.value, &right_value.value)
@@ -1949,11 +1980,15 @@ impl Emitter<'_, '_> {
         left: &Value,
         right: &Value,
         adjust_floor: bool,
-        right_constant: Option<i64>,
+        bounds: Option<(IntRange, IntRange)>,
     ) -> Value {
         debug_assert!(left.small_integer && right.small_integer);
         let left = self.instruction(format!("ashr i64 {}, 1", left.operand));
         let right = self.instruction(format!("ashr i64 {}, 1", right.operand));
+        let right_constant = bounds
+            .map(|(_, right)| right)
+            .filter(|right| right.min == right.max)
+            .map(|right| right.min);
         let result = match op {
             Binary::Add | Binary::Subtract | Binary::Multiply => {
                 let instruction = match op {
@@ -1975,6 +2010,23 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("ashr i64 {left}, {}", divisor.trailing_zeros()))
                 } else {
                     self.instruction(format!("and i64 {left}, {}", divisor - 1))
+                }
+            }
+            Binary::FloorDivide | Binary::Modulo
+                if bounds.is_some_and(|(left, right)| {
+                    left.min >= 0 && right.min > 0 && left.max < 2 * right.min
+                }) =>
+            {
+                // A nonnegative numerator below twice a positive divisor has
+                // quotient zero or one. Both operands were still evaluated,
+                // and their small-integer bounds make the subtraction exact.
+                let at_least = self.instruction(format!("icmp uge i64 {left}, {right}"));
+                if matches!(op, Binary::FloorDivide) {
+                    self.instruction(format!("zext i1 {at_least} to i64"))
+                } else {
+                    let subtract =
+                        self.instruction(format!("select i1 {at_least}, i64 {right}, i64 0"));
+                    self.instruction(format!("sub nsw i64 {left}, {subtract}"))
                 }
             }
             Binary::FloorDivide | Binary::Modulo => {
@@ -2490,27 +2542,70 @@ impl Emitter<'_, '_> {
                 returns,
                 self.nonnegative_index(&expressions[1]),
             ),
-            Builtin::ListGetI32 => {
-                let nonnegative = self.nonnegative_index(&expressions[1]);
-                let index = self.index_word(&args[1].value, nonnegative);
-                let name = if nonnegative {
+            Builtin::ListSum => self.call(
+                "relar_list_sum",
+                Type::Int,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::ListSliceSum => self.call(
+                "relar_list_slice_sum",
+                Type::Int,
+                &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
+            ),
+            Builtin::ListGetI32
+            | Builtin::ListGetBounded { .. }
+            | Builtin::ListGetBoundedInBounds { .. } => {
+                let (min, max) = match builtin {
+                    Builtin::ListGetBounded { min, max }
+                    | Builtin::ListGetBoundedInBounds { min, max } => (*min, *max),
+                    _ => (i64::from(i32::MIN), i64::from(i32::MAX)),
+                };
+                debug_assert!(min <= max && min >= -(1_i64 << 62) && max < (1_i64 << 62));
+                let in_bounds = matches!(builtin, Builtin::ListGetBoundedInBounds { .. });
+                let nonnegative = in_bounds || self.nonnegative_index(&expressions[1]);
+                let mut index = args[1].value.clone();
+                index.small_integer |= in_bounds;
+                let index = self.index_word(&index, nonnegative);
+                let name = if in_bounds {
+                    "relar_list_borrow_index_proven"
+                } else if nonnegative {
                     "relar_list_borrow_index"
                 } else {
                     "relar_list_get"
                 };
-                let word = self.checked_int_list_word(format!(
+                let call = format!(
                     "call i64 @{name}(ptr {}, i64 {index})",
                     args[0].value.operand
-                ));
+                );
+                let word = if in_bounds {
+                    self.instruction(call)
+                } else {
+                    self.checked_int_list_word(call)
+                };
                 let tag = self.instruction(format!("and i64 {word}, 1"));
                 let tagged = self.instruction(format!("icmp eq i64 {tag}, 1"));
                 self.line(format!("call void @llvm.assume(i1 {tagged})"));
-                let shifted = self.instruction(format!("add i64 {word}, 4294967295"));
-                let bounded = self.instruction(format!("icmp ule i64 {shifted}, 8589934590"));
+                let encoded_min = min * 2 + 1;
+                let width = ((i128::from(max) - i128::from(min)) * 2) as u64;
+                let shifted = self.instruction(format!("sub i64 {word}, {encoded_min}"));
+                let bounded = self.instruction(format!("icmp ule i64 {shifted}, {width}"));
                 self.line(format!("call void @llvm.assume(i1 {bounded})"));
                 Value {
                     ty: Type::Int,
                     operand: word,
+                    small_integer: true,
+                }
+            }
+            Builtin::IntBounded { min, max } => {
+                debug_assert!(min <= max && *min >= -(1_i64 << 62) && *max < (1_i64 << 62));
+                debug_assert!(matches!(expressions[0].kind, ExprKind::Local(_)));
+                // Range analysis already uses the checked induction proof to
+                // select native arithmetic and old-value cleanup. Repeating
+                // it as llvm.assume adds a use of the loop-carried subtotal
+                // that prevents LLVM from recognizing an ordinary reduction.
+                Value {
+                    ty: Type::Int,
+                    operand: args[0].value.operand.clone(),
                     small_integer: true,
                 }
             }
@@ -2578,6 +2673,9 @@ impl Emitter<'_, '_> {
             }
             Builtin::BytesIter => self.call("relar_bytes_iter", Type::Iterator, &[&args[0].value]),
             Builtin::StringIter => self.call("relar_str_iter", Type::Iterator, &[&args[0].value]),
+            Builtin::StringIntList => {
+                self.call("relar_str_int_list", Type::ListInt, &[&args[0].value])
+            }
             Builtin::Slice => self.call(
                 match returns {
                     Type::Str => "relar_str_slice",
@@ -3059,7 +3157,8 @@ impl Emitter<'_, '_> {
     }
 
     /// A proved nonnegative immediate can cross the specialized ABI as an
-    /// exact native index. The runtime still checks the current container size.
+    /// exact native index. Its separate current-size check is retained unless
+    /// the caller also carries the canonical loop's relational bounds proof.
     fn index_word(&mut self, index: &Value, nonnegative: bool) -> String {
         if nonnegative {
             debug_assert!(index.small_integer);
@@ -3165,6 +3264,81 @@ fn read_only_integer(expression: &Expr) -> bool {
         }
         _ => false,
     }
+}
+
+/// Rejects every local replacement hidden inside an operand. Statement regions
+/// and expression scopes are each visited once, so nested scopes do not cause
+/// repeated recursive walks of their bodies.
+fn expression_preserves_local(expression: &Expr, slot: usize, locals: usize) -> bool {
+    fn expression_writes(expression: &Expr, written: &mut [bool]) {
+        match &expression.kind {
+            ExprKind::Scope { body, value, clear } => {
+                crate::list_specialization::mark_writes(body, written);
+                for &slot in clear {
+                    written[slot] = true;
+                }
+                crate::ir::walk_expressions(body, &mut |value| match &value.kind {
+                    ExprKind::Scope { body, clear, .. } => {
+                        crate::list_specialization::mark_writes(body, written);
+                        for &slot in clear {
+                            written[slot] = true;
+                        }
+                    }
+                    ExprKind::Bind(slot, _) => written[*slot] = true,
+                    _ => {}
+                });
+                expression_writes(value, written);
+            }
+            ExprKind::Bind(slot, value) => {
+                written[*slot] = true;
+                expression_writes(value, written);
+            }
+            ExprKind::List(values)
+            | ExprKind::Tuple(values)
+            | ExprKind::Set { values, .. }
+            | ExprKind::Compare(values, _)
+            | ExprKind::Boolean(_, values)
+            | ExprKind::Builtin(_, values) => {
+                for value in values {
+                    expression_writes(value, written);
+                }
+            }
+            ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => {
+                for value in &args.values {
+                    expression_writes(value, written);
+                }
+            }
+            ExprKind::Dict { entries, .. } => {
+                for (key, value) in entries {
+                    expression_writes(key, written);
+                    expression_writes(value, written);
+                }
+            }
+            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
+                expression_writes(left, written);
+                expression_writes(right, written);
+            }
+            ExprKind::Conditional(test, yes, no) => {
+                expression_writes(test, written);
+                expression_writes(yes, written);
+                expression_writes(no, written);
+            }
+            ExprKind::Present(value)
+            | ExprKind::Absent(value)
+            | ExprKind::Unwrap(value)
+            | ExprKind::Not(value)
+            | ExprKind::Negate(value)
+            | ExprKind::Field(value, _) => expression_writes(value, written),
+            ExprKind::Exception {
+                message: Some(message),
+                ..
+            } => expression_writes(message, written),
+            _ => {}
+        }
+    }
+    let mut written = vec![false; locals];
+    expression_writes(expression, &mut written);
+    !written[slot]
 }
 
 /// Flattens only exact string additions, preserving both source nesting shapes'
@@ -3439,8 +3613,10 @@ fn fallible(name: &str) -> bool {
                 | "relar_list_pop"
                 | "relar_list_repeat"
                 | "relar_list_slice"
+                | "relar_list_slice_sum"
                 | "relar_str_get"
                 | "relar_str_slice"
+                | "relar_str_int_list"
                 | "relar_seq_get"
                 | "relar_seq_set"
                 | "relar_seq_get_index"
@@ -3580,6 +3756,7 @@ declare ptr @relar_str_literal(ptr, i64)
 declare ptr @relar_str_get(ptr, i64)
 declare ptr @relar_str_slice(ptr, i64, i64, i64)
 declare ptr @relar_str_iter(ptr)
+declare ptr @relar_str_int_list(ptr)
 declare void @relar_str_retain(ptr)
 declare void @relar_str_release(ptr)
 declare void @relar_print_str(ptr)
@@ -3590,6 +3767,8 @@ declare i8 @relar_str_equal(ptr, ptr)
 declare i64 @relar_int_parse(ptr)
 declare ptr @relar_input()
 declare ptr @relar_list_new()
+declare i64 @relar_list_sum(ptr, i64)
+declare i64 @relar_list_slice_sum(ptr, i64, i64, i64)
 declare i8 @relar_list_all_i32(ptr, i64, i64, i64)
 declare void @relar_list_reserve_range(ptr, i64, i64, i64, i64)
 declare void @relar_list_retain(ptr)
@@ -3599,6 +3778,7 @@ declare i8 @relar_list_set(ptr, i64, i64)
 declare i64 @relar_list_get_index(ptr, i64)
 declare i8 @relar_list_set_index(ptr, i64, i64)
 declare i64 @relar_list_borrow_index(ptr, i64)
+declare i64 @relar_list_borrow_index_proven(ptr, i64) nounwind memory(argmem: read)
 declare i8 @relar_list_copy_index(ptr, i64, i64)
 declare void @relar_list_append(ptr, i64)
 declare void @relar_list_append_pair(ptr, i64, i64)
@@ -3835,6 +4015,21 @@ slow:
 mod tests {
     use crate::{CompileOptions, compile};
 
+    /// Classifies only assignments to a source slot, excluding its argument and
+    /// zero-initialization stores. A generic replacement releases its old load
+    /// immediately after publishing the new value.
+    fn update_releases(body: &str, slot: usize) -> Vec<bool> {
+        let lines = body.lines().collect::<Vec<_>>();
+        lines
+            .windows(2)
+            .filter(|lines| {
+                lines[0].trim_start().starts_with("store i64 %v")
+                    && lines[0].ends_with(&format!(", ptr %local{slot}"))
+            })
+            .map(|lines| lines[1].contains("call void @release_int("))
+            .collect()
+    }
+
     /// Isolates source-function instructions from the always-emitted fallbacks.
     fn function_body(source: &str) -> String {
         let llvm = compile(source, &CompileOptions::default()).unwrap();
@@ -3845,6 +4040,54 @@ mod tests {
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn bounded_accumulator_identity_keeps_native_and_fallback_arithmetic_without_extra_uses() {
+        for term in ["10", "-10"] {
+            let body = function_body(&format!(
+                "def total(values: list[int]) -> int:\n    result = 0\n    cursor = 0\n    while cursor < len(values):\n        cursor += 1\n        result += {term}\n    return result\n"
+            ));
+            assert!(
+                !body.contains("call void @llvm.assume"),
+                "the accumulator proof must not add a second use of its recurrence"
+            );
+            assert!(body.contains("add nsw i64"));
+            assert!(
+                body.contains("call i64 @int_add"),
+                "lists outside the checked subtotal budget retain arbitrary-precision arithmetic"
+            );
+            assert!(body.contains("icmp sle i64"));
+        }
+    }
+
+    #[test]
+    fn bounded_reduction_proofs_do_not_request_forced_vectorization() {
+        let llvm = compile(
+            r#"
+def total(text: str) -> int:
+    digits = list(map(int, text))
+    result = 0
+    cursor = 0
+    while cursor < len(digits):
+        digit = digits[cursor]
+        cursor += 1
+        if digit == 0:
+            continue
+        result += digit
+    return result
+"#,
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert!(llvm.contains("call i64 @relar_list_borrow_index_proven("));
+        assert!(llvm.contains("add nsw i64"));
+        assert!(llvm.contains("call i64 @int_add"));
+        assert!(
+            !llvm.contains("!llvm.loop"),
+            "bounded arithmetic and access proofs do not guarantee backend vectorization"
+        );
+        assert!(!llvm.contains("llvm.loop.vectorize"));
     }
 
     #[test]
@@ -3955,5 +4198,119 @@ mod tests {
             // merely bounded divisor therefore retains the complete helper.
             assert!(body.contains(&format!("call i64 @int_{helper}")));
         }
+    }
+
+    #[test]
+    fn bounded_nonnegative_division_uses_a_single_comparison() {
+        for divisor in [3_i64, 10, (1 << 61) + 1] {
+            let upper = (2 * divisor - 1).min((1 << 62) - 1);
+            for operation in ["//", "%"] {
+                let body = function_body(&format!(
+                    "def calculate(value: int) -> int:\n    if 0 <= value <= {upper}:\n        return value {operation} {divisor}\n    return 0\n"
+                ));
+                assert!(body.contains("icmp uge i64"));
+                assert!(!body.contains("sdiv i64"));
+                assert!(!body.contains("srem i64"));
+                assert!(!body.contains("call i64 @int_floordiv"));
+                assert!(!body.contains("call i64 @int_mod"));
+            }
+        }
+    }
+
+    #[test]
+    fn comparison_division_requires_nonnegative_and_strict_upper_bounds() {
+        for (lower, upper, divisor) in [(-1, 19, 10), (0, 20, 10), (0, 19, -10)] {
+            for operation in ["//", "%"] {
+                let body = function_body(&format!(
+                    "def calculate(value: int) -> int:\n    if {lower} <= value <= {upper}:\n        return value {operation} {divisor}\n    return 0\n"
+                ));
+                let instruction = if operation == "//" { "sdiv" } else { "srem" };
+                assert!(body.contains(&format!("{instruction} i64")));
+            }
+        }
+    }
+
+    #[test]
+    fn assignment_cleanup_uses_the_same_slots_evaluated_small_value() {
+        for right in ["increment", "sum(divmod(increment, 10))"] {
+            let body = function_body(&format!(
+                "def calculate(value: int, increment: int) -> int:\n    if 0 <= value <= 9:\n        value = value + {right}\n    return value\n"
+            ));
+            assert_eq!(update_releases(&body, 0), [false]);
+        }
+        let llvm = compile(
+            "def total(text: str) -> int:\n    digits = list(map(int, text))\n    return sum([sum(divmod(2 * digit, 10)) for digit in digits])\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        let body = llvm
+            .split_once("define internal i64 @fn_1(")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        // The private subtotal is local1: its guarded update is immediate, and
+        // its arbitrary-precision fallback still releases the previous owner.
+        assert_eq!(update_releases(body, 1), [false, true]);
+    }
+
+    #[test]
+    fn assignment_cleanup_retains_unknown_and_expression_rebound_owners() {
+        let body = function_body(
+            "def calculate(value: int, increment: int) -> int:\n    value = value + increment\n    return value\n",
+        );
+        assert_eq!(update_releases(&body, 0), [true]);
+        let body = function_body(
+            "def calculate(value: int) -> int:\n    if 0 <= value <= 9:\n        value = value + (value := 100000000000000000000000000000000)\n    return value\n",
+        );
+        assert_eq!(update_releases(&body, 0), [true, true]);
+    }
+
+    #[test]
+    fn assignment_cleanup_rejects_hidden_scope_replacement_after_the_read() {
+        use crate::ir::{Expr, ExprKind, Statement, Type};
+
+        let graph = crate::modules::SourceGraph::single(
+            "def calculate(value: int, increment: int) -> int:\n    if 0 <= value <= 9:\n        value = value + increment\n    return value\n",
+        )
+        .unwrap();
+        let mut module = crate::frontend::lower(&graph).unwrap();
+        let Statement::If(_, body, _) = &mut module.functions[0].body[0] else {
+            unreachable!()
+        };
+        let Statement::Assign(slot, expression) = &mut body[0] else {
+            unreachable!()
+        };
+        let ExprKind::Binary(_, _, right) = &mut expression.kind else {
+            unreachable!()
+        };
+        // Exercise a statement-owned write without a Bind node: the earlier
+        // operand stays small, but the assignment must release this new BigInt.
+        **right = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(
+                    *slot,
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Int("100000000000000000000000000000000".into()),
+                    },
+                )],
+                value: right.clone(),
+                clear: Vec::new(),
+            },
+        };
+        assert!(!module.functions[0].expression_rebound()[0]);
+        let ranges = crate::ranges::analyze(&module);
+        let llvm = super::emit(&module, &ranges, false);
+        let body = llvm
+            .split_once("@fn_0(")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        assert_eq!(update_releases(body, 0), [true, true]);
     }
 }

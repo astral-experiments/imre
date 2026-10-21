@@ -809,6 +809,105 @@ def calculate(left: int, right: int) -> int:
     }
 
     #[test]
+    fn fixed_tuple_sum_uses_scalar_components() {
+        for source in [
+            r#"
+def total(left: int, right: int, start: int) -> int:
+    return sum(divmod(left, right), start)
+"#,
+            r#"
+def total(left: int, right: int, start: int) -> int:
+    return sum((left, right), start=start)
+"#,
+            r#"
+def total(left: str, right: str, start: int) -> int:
+    return sum(map(int, (left, right)), start)
+"#,
+        ] {
+            let graph = crate::modules::SourceGraph::single(source).unwrap();
+            let mut module = crate::frontend::lower(&graph).unwrap();
+            let before = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+            assert_eq!(before.matches("call ptr @relar_record_new(").count(), 1);
+
+            scalarize(&mut module);
+
+            let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+            assert!(!after.contains("call ptr @relar_record_new("));
+        }
+    }
+
+    #[test]
+    fn fixed_tuple_sum_preserves_source_start_and_conversion_order() {
+        for (source, expected) in [
+            (
+                r#"
+def operand(value: int) -> int:
+    print(value)
+    return value
+
+def initial() -> int:
+    print(99)
+    return 100
+
+def total(left: int, right: int) -> int:
+    return sum(divmod(operand(left), operand(right)), initial())
+"#,
+                vec!["operand", "operand", "floor", "modulo", "start"],
+            ),
+            (
+                r#"
+def operand(value: str) -> str:
+    print(value)
+    return value
+
+def initial() -> int:
+    print(99)
+    return 100
+
+def total(left: str, right: str) -> int:
+    return sum(map(int, (operand(left), operand(right))), initial())
+"#,
+                vec!["operand", "operand", "start", "convert", "convert"],
+            ),
+        ] {
+            let graph = crate::modules::SourceGraph::single(source).unwrap();
+            let mut module = crate::frontend::lower(&graph).unwrap();
+            scalarize(&mut module);
+            let mut order = Vec::new();
+            crate::ir::walk_expressions(&module.functions[2].body, &mut |value| match value.kind {
+                ExprKind::Call(0, _) => order.push("operand"),
+                ExprKind::Call(1, _) => order.push("start"),
+                ExprKind::Binary(crate::ir::Binary::FloorDivide, _, _) => order.push("floor"),
+                ExprKind::Binary(crate::ir::Binary::Modulo, _, _) => order.push("modulo"),
+                ExprKind::Builtin(Builtin::Int, _) => order.push("convert"),
+                _ => {}
+            });
+            assert_eq!(order, expected);
+        }
+    }
+
+    #[test]
+    fn fixed_tuple_sum_keeps_escaping_aggregate() {
+        let graph = crate::modules::SourceGraph::single(
+            r#"
+def identity(pair: tuple[int, int]) -> tuple[int, int]:
+    return pair
+
+def total(left: int, right: int) -> int:
+    pair = divmod(left, right)
+    other = identity(pair)
+    return sum(pair) + other[0]
+"#,
+        )
+        .unwrap();
+        let mut module = crate::frontend::lower(&graph).unwrap();
+        scalarize(&mut module);
+        let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        assert_eq!(after.matches("call ptr @relar_record_new(").count(), 1);
+        assert_eq!(after.matches("call ptr @fn_0(").count(), 1);
+    }
+
+    #[test]
     fn expression_scope_scalarizes_tuple_and_keeps_failure_cleanup() {
         let graph = crate::modules::SourceGraph::single(
             r#"

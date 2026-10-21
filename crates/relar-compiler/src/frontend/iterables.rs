@@ -23,6 +23,22 @@ impl Checker<'_> {
             ));
         };
         let (input, convert) = self.consumer_input(source, element)?;
+        if convert
+            && element.is_none_or(|ty| ty == Type::Int)
+            && let Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } = &input
+            && iterable.ty == Type::Str
+        {
+            // The immutable source has no callback or observable iterator
+            // identity. Keep conversion eager and preserve its first error.
+            return Ok(Expr {
+                ty: Type::ListInt,
+                kind: ExprKind::Builtin(Builtin::StringIntList, vec![iterable.clone()]),
+            });
+        }
         let result = self.hidden(Type::None);
         let mut body = self.expand_items(input, call, |checker, value| {
             let value = checker.consumer_value(value, convert, call)?;
@@ -68,26 +84,61 @@ impl Checker<'_> {
                 "sum requires an integer iterable and an optional integer start",
             ));
         }
-        let (input, convert) = self.consumer_input(&call.arguments.args[0], Some(Type::Int))?;
-        let start = call.arguments.args.get(1).or_else(|| {
-            call.arguments
-                .keywords
-                .first()
-                .map(|keyword| &keyword.value)
-        });
-        let start = match start {
-            Some(start) => self.expr_expected(start, Type::Int)?,
-            None => Expr {
+        let source = &call.arguments.args[0];
+        if matches!(source, ast::Expr::ListComp(_)) {
+            let subtotal = self.sum_comprehension(source)?;
+            let start = self.sum_start(call)?;
+            return Ok(add_start(subtotal, start));
+        }
+        let (input, convert) = self.consumer_input(source, Some(Type::Int))?;
+        let start = self.sum_start(call)?;
+        if !convert
+            && let Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } = &input
+            && iterable.ty == Type::ListInt
+        {
+            if let ExprKind::Builtin(Builtin::Slice, arguments) = &iterable.kind {
+                // Capture the slice's numeric snapshot before evaluating
+                // `start`, which may mutate or replace the original list.
+                // Exact integer addition has no observable intermediate work.
+                let subtotal = Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::ListSliceSum, arguments.clone()),
+                };
+                return Ok(add_start(subtotal, start));
+            }
+            // Evaluate both arguments before borrowing the list: `start` may
+            // mutate the source through an alias. Exact integer addition has
+            // no callbacks or recoverable errors during the reduction.
+            return Ok(Expr {
                 ty: Type::Int,
-                kind: ExprKind::Int("0".into()),
-            },
-        };
+                kind: ExprKind::Builtin(Builtin::ListSum, vec![iterable.clone(), start]),
+            });
+        }
         let result = self.hidden(Type::Int);
         let mut body = Vec::new();
         let mut clear = vec![result];
-        let input = self.capture_consumer_input(input, &mut body, &mut clear);
+        let fixed_tuple = matches!(
+            &input,
+            Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } if matches!(iterable.ty, Type::Tuple(_))
+        );
+        // Fixed-tuple expansion already captures its source before running
+        // `start`. A second aggregate capture would hide its projection-only
+        // use from tuple scalar replacement, forcing a temporary allocation.
+        let input = if fixed_tuple {
+            input
+        } else {
+            self.capture_consumer_input(input, &mut body, &mut clear)
+        };
         let initialize = Statement::Assign(result, start);
-        let after = if convert {
+        let after = if convert || fixed_tuple {
             vec![initialize]
         } else {
             body.push(initialize);
@@ -118,6 +169,23 @@ impl Checker<'_> {
                 clear,
             },
         })
+    }
+
+    /// Checks the optional starting value after checking the eager first argument.
+    fn sum_start(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let start = call.arguments.args.get(1).or_else(|| {
+            call.arguments
+                .keywords
+                .first()
+                .map(|keyword| &keyword.value)
+        });
+        match start {
+            Some(start) => self.expr_expected(start, Type::Int),
+            None => Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Int("0".into()),
+            }),
+        }
     }
 
     /// The sealed converter has no user callback or escaping iterator object.
@@ -226,5 +294,46 @@ impl Checker<'_> {
                 start: start.map(capture),
             },
         }
+    }
+}
+
+/// Eager producers finish before `start` is evaluated. Exact integer addition
+/// allows the producer's subtotal to replace a private materialized container.
+fn add_start(subtotal: Expr, start: Expr) -> Expr {
+    if matches!(&start.kind, ExprKind::Int(value) if value == "0") {
+        subtotal
+    } else {
+        Expr {
+            ty: Type::Int,
+            kind: ExprKind::Binary(Binary::Add, Box::new(subtotal), Box::new(start)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{CompileOptions, compile};
+
+    #[test]
+    fn mapped_string_digits_use_the_bulk_list_path() {
+        let llvm = compile(
+            "def digits(text: str) -> list[int]:\n    return list(map(int, text))\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(llvm.matches("call ptr @relar_str_int_list(").count(), 1);
+        assert!(!llvm.contains("call ptr @relar_str_iter("));
+        assert!(!llvm.contains("call i64 @relar_int_parse("));
+    }
+
+    #[test]
+    fn mapped_strings_keep_requested_optional_element_storage() {
+        let llvm = compile(
+            "def digits(text: str) -> list[int | None]:\n    return list(map(int, text))\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert!(!llvm.contains("call ptr @relar_str_int_list("));
+        assert!(llvm.contains("call ptr @relar_str_iter("));
     }
 }

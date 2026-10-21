@@ -34,6 +34,7 @@ unsafe fn slice_component(word: usize) -> Option<isize> {
 
 /// A finite cursor over valid indices. Keeping a count avoids advancing past
 /// the final item, where an arbitrarily large stride could otherwise overflow.
+#[derive(Clone)]
 pub(super) struct SliceIndices {
     at: usize,
     stride: usize,
@@ -237,7 +238,7 @@ pub unsafe extern "C" fn relar_list_slice(
     let result = unsafe {
         (&*value).0.with(|values| {
             let slice = SliceIndices::new(values.len(), start, stop, step)?;
-            let mut result = Vec::new();
+            let mut result = crate::take_list_buffer(slice.len());
             result
                 .try_reserve_exact(slice.len())
                 .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
@@ -245,10 +246,76 @@ pub unsafe extern "C" fn relar_list_slice(
             Ok(result)
         })
     };
-    finish(
-        result.map(|values| Rc::into_raw(Rc::new(List(StorageCell::new(values))))),
-        std::ptr::null(),
-    )
+    finish(result.map(crate::new_list), std::ptr::null())
+}
+
+/// Reduces the selected integer values without allocating the temporary slice.
+///
+/// The compiler evaluates this subtotal where the original slice was created,
+/// before evaluating and adding `sum`'s start. Later source mutations therefore
+/// cannot change the numeric snapshot, and zero-step errors retain their order.
+///
+/// # Safety
+/// Root the source list and every nonzero canonical Int component. Zero denotes
+/// an omitted/None component. No source borrow escapes; success returns one
+/// owned canonical integer, while failure installs an error and returns tagged zero.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_slice_sum(
+    value: *const List,
+    start: usize,
+    stop: usize,
+    step: usize,
+) -> usize {
+    // SAFETY: normalization and exact integer addition cannot reenter the
+    // rooted list. Only an independently owned subtotal escapes its borrow.
+    let subtotal = unsafe {
+        (&*value).0.with(|values| {
+            let slice = SliceIndices::new(values.len(), start, stop, step)?;
+            Ok(sum_integer_slice(values, slice))
+        })
+    };
+    finish(subtotal.map(Int::into_raw), 1)
+}
+
+/// Exposes unit and alternating strides as bounded slice iterators, so the
+/// checked integer reduction can vectorize without a bounds check per item.
+/// Both its speculative pass and arbitrary-precision fallback retain the
+/// original selection order, including reverse slices.
+fn sum_integer_slice(values: &[Int], slice: SliceIndices) -> Int {
+    if slice.len() == 0 {
+        return Int::small(0).unwrap();
+    }
+    if slice.stride > 2 {
+        return crate::sum_ints(slice.map(|at| &values[at]));
+    }
+    // Normalization proves both endpoints are valid and their distance fits
+    // the source length. Slicing checks that bound once before iteration.
+    let distance = (slice.len() - 1) * slice.stride;
+    let (first, last) = if slice.reverse {
+        (slice.at - distance, slice.at)
+    } else {
+        (slice.at, slice.at + distance)
+    };
+    let values = &values[first..=last];
+    if slice.stride == 1 {
+        if slice.reverse {
+            crate::sum_ints(values.iter().rev())
+        } else {
+            crate::sum_ints(values.iter())
+        }
+    } else if slice.reverse {
+        let (remainder, pairs) = values.as_rchunks::<2>();
+        crate::sum_ints(
+            pairs
+                .iter()
+                .rev()
+                .map(|pair| &pair[1])
+                .chain(remainder.iter().rev()),
+        )
+    } else {
+        let (pairs, remainder) = values.as_chunks::<2>();
+        crate::sum_ints(pairs.iter().map(|pair| &pair[0]).chain(remainder.iter()))
+    }
 }
 
 /// Preserves the source's concrete element descriptor and acquires shallow
@@ -325,6 +392,72 @@ pub unsafe extern "C" fn relar_str_iter(value: *const Str) -> *const Object {
     )))))
 }
 
+/// Builds the eager integer list without allocating one-character strings.
+///
+/// ```python
+/// list(map(int, "1٢3"))  # [1, 2, 3]
+/// ```
+///
+/// Only Unicode 16 decimal digits are valid single-character integer literals.
+/// The first invalid code point installs the ordinary `int` ValueError and
+/// returns null; success transfers a fresh list containing immediate integers.
+///
+/// # Safety
+/// The caller roots the immutable string for this call. No borrowed source or
+/// private output buffer escapes, and conversion cannot invoke user code.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_int_list(value: *const Str) -> *const List {
+    // SAFETY: the caller keeps this immutable string rooted throughout conversion.
+    let text = unsafe { &*value };
+    let ascii = text.is_ascii();
+    let length = if ascii {
+        text.len()
+    } else {
+        text.chars().count()
+    };
+    let mut values = crate::take_list_buffer(length);
+    values
+        .try_reserve_exact(length)
+        .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+    if ascii {
+        let mut invalid = false;
+        for (slot, &byte) in values.spare_capacity_mut()[..length]
+            .iter_mut()
+            .zip(text.as_bytes())
+        {
+            let digit = byte.wrapping_sub(b'0');
+            invalid |= digit > 9;
+            slot.write(Int::small(i64::from(digit)).unwrap());
+        }
+        if invalid {
+            let index = text
+                .as_bytes()
+                .iter()
+                .position(|byte| !byte.is_ascii_digit())
+                .unwrap();
+            return crate::integer_text::invalid_literal(&text[index..index + 1])
+                .returning(std::ptr::null());
+        }
+    } else {
+        for (slot, character) in values.spare_capacity_mut()[..length]
+            .iter_mut()
+            .zip(text.chars())
+        {
+            let Some(digit) = crate::integer_text::decimal_digit(character) else {
+                let mut encoded = [0; 4];
+                return crate::integer_text::invalid_literal(character.encode_utf8(&mut encoded))
+                    .returning(std::ptr::null());
+            };
+            slot.write(Int::small(i64::from(digit)).unwrap());
+        }
+    }
+    // SAFETY: both equal-length zips initialized every slot. All written values,
+    // including an invalid ASCII byte's unpublished conversion, fit immediate
+    // Int storage and own no allocation. Errors leave length zero for cleanup.
+    unsafe { values.set_len(length) };
+    crate::new_list(values)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,6 +498,111 @@ mod tests {
             assert_eq!(message.as_str(), expected);
         }
         assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn integer_mapping_owns_canonical_digits_without_retaining_the_source() {
+        for (text, expected) in [
+            ("", vec![]),
+            ("0123456789", (0..10).collect()),
+            ("1٢३４𝟝", vec![1, 2, 3, 4, 5]),
+            ("\u{10d40}\u{116da}\u{1ccf7}\u{1e5f9}", vec![0, 0, 7, 8]),
+        ] {
+            let source = Rc::new(Str::new(text));
+            let weak = Rc::downgrade(&source);
+            // SAFETY: source stays rooted during conversion. Each checked,
+            // nonnull result transfers one independent list owner to Rc.
+            unsafe {
+                let result = relar_str_int_list(Rc::as_ptr(&source));
+                assert!(!result.is_null());
+                let result = Rc::from_raw(result);
+                let other = relar_str_int_list(Rc::as_ptr(&source));
+                assert!(!other.is_null());
+                let other = Rc::from_raw(other);
+                assert!(!Rc::ptr_eq(&result, &other));
+                assert_eq!(Rc::strong_count(&source), 1);
+                drop(source);
+                assert!(weak.upgrade().is_none());
+                result.0.with(|values| {
+                    assert_eq!(values.len(), expected.len());
+                    for (value, expected) in values.iter().zip(&expected) {
+                        assert_eq!(value.as_small(), Some(*expected));
+                    }
+                });
+                if !expected.is_empty() {
+                    assert_eq!(relar_list_set_index(Rc::as_ptr(&result), 0, integer(9)), 1);
+                    assert_eq!(
+                        Int(relar_list_get_index(Rc::as_ptr(&other), 0)).as_small(),
+                        Some(expected[0])
+                    );
+                }
+            }
+            assert_eq!(relar_error_pending(), 0);
+        }
+    }
+
+    #[test]
+    fn integer_mapping_reports_the_first_invalid_character_with_exact_repr() {
+        for (text, literal) in [
+            ("12x3y", "'x'"),
+            ("12y3x", "'y'"),
+            ("1٢x３y", "'x'"),
+            ("1x٢\u{11de0}", "'x'"),
+            ("+12", "'+'"),
+            ("-12", "'-'"),
+            ("1_2", "'_'"),
+            ("1 2", "' '"),
+            ("12\t3", "'\\t'"),
+            ("12\0x", "'\\x00'"),
+            ("12'\"", "\"'\""),
+            ("12\\x", "'\\\\'"),
+            ("12²3", "'²'"),
+            ("12\u{301}x", "'\u{301}'"),
+            ("１２\u{11de0}x", "'\\U00011de0'"),
+            ("\u{88f}1", "'\\u088f'"),
+        ] {
+            let source = Rc::new(Str::new(text));
+            // SAFETY: the immutable source remains rooted, and each pending
+            // exception is consumed before another recoverable call.
+            unsafe {
+                assert!(relar_str_int_list(Rc::as_ptr(&source)).is_null());
+            }
+            clear_error(
+                Kind::ValueError,
+                &format!("invalid literal for int() with base 10: {literal}"),
+            );
+            assert_eq!(source.as_str(), text);
+            assert_eq!(Rc::strong_count(&source), 1);
+        }
+    }
+
+    #[test]
+    fn integer_mapping_repeatedly_cleans_private_buffers_and_reuses_successes() {
+        for text in ["0123456789".repeat(128), "٠١٢٣٤٥٦٧٨٩".repeat(128)] {
+            let source = Str::from(text.clone());
+            let invalid = Str::from(format!("{text}\0x"));
+            for _ in 0..64 {
+                // SAFETY: both strings remain rooted. Successful lists are
+                // checked before adoption; failed partial results never escape.
+                unsafe {
+                    let result = relar_str_int_list(&source);
+                    assert!(!result.is_null());
+                    let result = Rc::from_raw(result);
+                    assert!(relar_str_int_list(&invalid).is_null());
+                    clear_error(
+                        Kind::ValueError,
+                        "invalid literal for int() with base 10: '\\x00'",
+                    );
+                    result.0.with(|values| {
+                        assert_eq!(values.len(), 1280);
+                        for (index, value) in values.iter().enumerate() {
+                            assert_eq!(value.as_small(), Some((index % 10) as i64));
+                        }
+                    });
+                }
+                assert_eq!(relar_error_pending(), 0);
+            }
+        }
     }
 
     #[test]
@@ -412,6 +650,84 @@ mod tests {
             ),
             vec![isize::MAX as usize - 1]
         );
+    }
+
+    #[test]
+    fn integer_slice_sums_preserve_signed_and_arbitrary_precision_selection() {
+        let huge = BigInt::from(1) << 400_u32;
+        let mut cases = [
+            ([None, None, None], 3),
+            ([None, None, Some(-1)], 3),
+            ([None, Some(-1), Some(-1)], 0),
+            ([Some(-100), Some(100), Some(2)], 6),
+            ([Some(-1), Some(-6), Some(-2)], 6),
+            ([Some(4), Some(1), Some(-1)], 3),
+            ([Some(1), Some(4), Some(-1)], 0),
+            ([Some(100), Some(-100), Some(-2)], 6),
+            ([Some(-100), None, Some(-1)], 0),
+            ([None, Some(100), Some(-1)], 0),
+            ([Some(0), Some(2), None], 0),
+        ]
+        .map(|(components, expected)| (components.map(|value| value.map(BigInt::from)), expected))
+        .to_vec();
+        cases.extend([
+            ([Some(-&huge), Some(huge.clone()), None], 3),
+            ([Some(huge.clone()), Some(-&huge), Some((-1).into())], 3),
+            ([None, None, Some(huge.clone())], 1),
+            ([None, None, Some(-&huge)], 3),
+        ]);
+        for scale in [BigInt::from(1), huge] {
+            let source = List(StorageCell::new(
+                [1, -1, 2, -2, 3]
+                    .map(|value| Int::new(&scale * value))
+                    .into(),
+            ));
+            for (components, expected) in &cases {
+                let components = components.clone().map(|value| value.map(Int::new));
+                let [start, stop, step] = components
+                    .each_ref()
+                    .map(|value| value.as_ref().map_or(0, |value| value.0));
+                // SAFETY: source and all nullable slice component owners stay
+                // rooted. A successful subtotal transfers one integer owner.
+                let result = Int(unsafe { relar_list_slice_sum(&source, start, stop, step) });
+                assert_eq!(relar_error_pending(), 0);
+                assert_eq!(result.big().as_ref(), &(&scale * *expected));
+                if *expected == 0 {
+                    assert_eq!(result.as_small(), Some(0));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn integer_slice_sums_cross_vector_and_remainder_boundaries() {
+        for length in [1, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 128, 129] {
+            for heap_at in [None, Some(0), Some(length / 2), Some(length - 1)] {
+                let mut numbers: Vec<BigInt> = (0..length)
+                    .map(|at| BigInt::from([i32::MIN, i32::MAX, 1, -1][at % 4]))
+                    .collect();
+                if let Some(at) = heap_at {
+                    numbers[at] = BigInt::from(1) << 400_u32;
+                }
+                let source = List(StorageCell::new(
+                    numbers.iter().cloned().map(Int::new).collect(),
+                ));
+                for step in [-2_i64, -1, 1, 2] {
+                    let parity = if step < 0 { (length - 1) % 2 } else { 0 };
+                    let expected: BigInt = numbers
+                        .iter()
+                        .enumerate()
+                        .filter(|(at, _)| step.abs() == 1 || at % 2 == parity)
+                        .map(|(_, value)| value)
+                        .sum();
+                    // SAFETY: the source and immediate step stay rooted; the
+                    // subtotal owns its result across vector and scalar tails.
+                    let actual = Int(unsafe { relar_list_slice_sum(&source, 0, 0, integer(step)) });
+                    assert_eq!(actual.big().as_ref(), &expected);
+                    assert_eq!(relar_error_pending(), 0);
+                }
+            }
+        }
     }
 
     #[test]
@@ -469,6 +785,13 @@ mod tests {
             clear_error(Kind::ValueError, "slice step cannot be zero");
             assert!(relar_list_slice(Rc::as_ptr(&list), 0, 0, integer(0)).is_null());
             clear_error(Kind::ValueError, "slice step cannot be zero");
+            assert_eq!(relar_list_slice_sum(Rc::as_ptr(&list), 0, 0, integer(0)), 1);
+            clear_error(Kind::ValueError, "slice step cannot be zero");
+            assert_eq!(
+                relar_list_slice_sum(Rc::as_ptr(&list), 0, 0, integer(-1)),
+                1
+            );
+            assert_eq!(relar_error_pending(), 0);
             assert!(relar_seq_slice(Rc::as_ptr(&sequence), 0, 0, integer(0)).is_null());
             clear_error(Kind::ValueError, "slice step cannot be zero");
             let empty = Rc::from_raw(relar_str_slice(Rc::as_ptr(&text), 0, 0, integer(-1)));
@@ -488,6 +811,7 @@ mod tests {
             relar_list_append(Rc::as_ptr(&source), Rc::as_ptr(&big) as usize);
             relar_list_append(Rc::as_ptr(&source), integer(7));
             let slice = Rc::from_raw(relar_list_slice(Rc::as_ptr(&source), 0, 0, integer(-1)));
+            let subtotal = Int(relar_list_slice_sum(Rc::as_ptr(&source), 0, 0, integer(-1)));
             assert!(!Rc::ptr_eq(&source, &slice));
             assert_eq!(relar_list_set_index(Rc::as_ptr(&source), 0, integer(9)), 1);
             drop((source, big));
@@ -499,6 +823,10 @@ mod tests {
             let saved = Int(relar_list_get_index(Rc::as_ptr(&slice), 1));
             drop(slice);
             assert_eq!(saved.big().as_ref(), &(BigInt::from(1_u8) << 400_u32));
+            assert_eq!(
+                subtotal.big().as_ref(),
+                &((BigInt::from(1_u8) << 400_u32) + 7)
+            );
             drop(saved);
         }
         assert!(weak.upgrade().is_none());

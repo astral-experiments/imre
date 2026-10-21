@@ -2,7 +2,21 @@
 
 use std::fmt::Write;
 
-use crate::Str;
+use crate::{Error, Kind, Str};
+
+/// Builds Python's base-ten conversion diagnostic from the original literal.
+/// CPython's `%.200R` limit truncates the rendered repr by code points.
+#[cold]
+pub(super) fn invalid_literal(value: &str) -> Error {
+    let mut literal = literal_repr(value);
+    if let Some((end, _)) = literal.char_indices().nth(200) {
+        literal.truncate(end);
+    }
+    Error::new(
+        Kind::ValueError,
+        compact_str::format_compact!("invalid literal for int() with base 10: {literal}"),
+    )
+}
 
 /// Returns the decimal value of a Unicode 16.0 digit.
 ///
