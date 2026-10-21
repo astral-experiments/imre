@@ -898,7 +898,7 @@ fn prepared_inputs(
             "--old-ty and --new-ty must be absolute executable paths".into(),
         ));
     }
-    let text = read(path)?;
+    let text = captured_text(read(path)?.into_bytes())?;
     depth_check(&text)?;
     let manifest: PreparedProjects =
         serde_json::from_str(&text).map_err(|error| Failure("ValueError", error.to_string()))?;
