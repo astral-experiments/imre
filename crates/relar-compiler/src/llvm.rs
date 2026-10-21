@@ -4166,8 +4166,10 @@ mod tests {
             ("float", None),
             ("None", None),
         ] {
+            // Rebinding excludes a stable caller root, so this exercises the
+            // independently owned pull rather than projection borrowing.
             let body = function_body(&format!(
-                "def populated(values: list[{ty}]) -> bool:\n    return any(value for value in values)\n"
+                "def populated(values: list[{ty}]) -> bool:\n    values = values\n    return any(value for value in values)\n"
             ));
             let (_, pull) = body.split_once("@relar_seq_borrow_index_proven(").unwrap();
             if let Some(retain) = retain {
