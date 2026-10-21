@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install the pinned Rust toolchain
+        run: rustup show
+      - name: Install LLVM 18
+        run: sudo apt-get update && sudo apt-get install -y clang-18
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: cargo build --workspace --release --locked
+      - name: Compare generated programs with CPython
+        run: python3 tests/differential.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
+      - name: Check generated code with AddressSanitizer
+        run: python3 tests/differential.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18 --sanitize --opt-levels 1

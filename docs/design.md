@@ -16,9 +16,9 @@ We retain ordinary value semantics where supported: arbitrary-precision integers
 
 ## Compiler
 
-The pipeline is Ruff's parser, a deliberately small type checker, a typed intermediate representation, ownership lowering, textual LLVM IR, and LLVM optimization and native linking. We pin the parser dependency and use the system LLVM 18 Clang driver to compile the generated IR. Clang does not compile the Python source or generated C.
+The pipeline is Ruff's cached parser and ty's semantic analysis, a deliberately small Relar contract checker, a typed intermediate representation, ownership lowering, textual LLVM IR, and LLVM optimization and native linking. We pin the Ruff/ty component crates together and use the system LLVM 18 Clang driver to compile the generated IR. Clang does not compile the Python source or generated C.
 
-The first checker implements only the accepted type language. A general Python type checker's inferred types, stubs, `cast`, or user-defined narrowing functions would not by themselves establish the runtime proofs needed by the backend. We can reuse more of ty as its integration becomes useful, while keeping exact runtime types, effects, and storage decisions explicit in the compiler.
+We embed ty's Salsa database, vendored type definitions, semantic checking, and diagnostic rendering. Relar consumes the same parsed Ruff AST after ty succeeds. The second checker implements only the accepted type language: a general Python type checker's inferred types, stubs, `cast`, or user-defined narrowing functions would not by themselves establish the runtime proofs needed by the backend. Exact runtime types, effects, and storage decisions remain explicit in Relar. Suppression comments cannot waive Relar's runtime type contract.
 
 The IR records resolved calls, expression types, variable slots, control flow, and supported runtime operations. The backend only accepts checked IR. Integer operations get a machine-integer fast path and an already-compiled arbitrary-precision fallback. A fallback continues the operation at that point; it does not restart earlier side effects. LLVM overflow flags and alias metadata are emitted only when their preconditions have been established.
 
