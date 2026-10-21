@@ -18,6 +18,8 @@ An ahead-of-time compiler for typed Python, written in Rust.
 - Compose generator expressions, `zip(strict=True)`, and `reversed`, with short-circuiting `any` and `all`.
 - Pass typed function values and bound methods, use noncapturing lambdas, and compose lazy `map`/`filter` pipelines.
 - Use read-only properties, class and static methods, and `Self` annotations.
+- Decode external JSON into fixed records and typed containers, and serialize their layouts directly.
+- Use immutable tuple keys and sort keys, Unicode text operations, and bounded URL decoding.
 - Read and write UTF-8 files, join native `pathlib.Path` values, and scan directories with `iterdir` and bounded `glob`.
 - Create scoped temporary workspaces and atomically replace completed files.
 - Run native subprocesses with captured UTF-8 output, explicit arguments, working directories, and environment snapshots.
@@ -138,6 +140,14 @@ The [workspace and atomic-output comparison](benchmarks/results/2026-10-21-nativ
 takes 1.00–1.57× Rust's time for complete process runs, 1.13–1.26× for file-only
 reports, and 1.42–1.57× for repeated report computation, across ordinary and
 ThinLTO builds. Every measured workload, including controls, stays below 2× Rust.
+
+The [conformance reporter](examples/conformance_report/README.md) ports Ruff's
+typing-test comparison tool. It scans real source annotations, groups captured
+ty diagnostics, and renders the complete Markdown or GitHub report.
+The [Python download catalog](examples/python_catalog/README.md) ports uv's
+offline CPython release transformation, selecting and rendering 6,098 downloads
+from 58,721 raw release artifacts. Both guides explain the typed adaptations,
+accepted input domain, unchanged upstream oracle, and native Rust/Codon comparisons.
 
 ## License
 

@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/astral-sh/uv",
+  "revision": "83d556d712c7e316932b239c49e86a5de95d124a",
+  "source": "crates/uv-python/fetch-download-metadata.py",
+  "scope": "CPythonFinder.find plus render; other network finders are not part of this example",
+  "files": {
+    "LICENSE-APACHE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "LICENSE-MIT": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c",
+    "fetch-download-metadata.py": "ea67010430bc750c968f681cce373f0dd95cbc0ec17d726a3d7c069b4c415ae4"
+  },
+  "network_adapter": "../upstream_adapter.py supplies one retained NDJSON HTTP response without modifying the upstream source"
+}

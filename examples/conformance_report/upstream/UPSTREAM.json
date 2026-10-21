@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/astral-sh/ruff",
+  "revision": "de9071547cfec12f689142a7b8ce98edc7aef909",
+  "source": "scripts/conformance.py",
+  "files": {
+    "conformance.py": "05f1114746f471b365ab0e78edbe12d26724c44767525d2782bcc176c8632772",
+    "LICENSE": "2597d854122b77ddc71971564ca2350a37608575ce324adc5650a2b2051c8f18"
+  }
+}

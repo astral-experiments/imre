@@ -1,0 +1,23 @@
+[package]
+name = "relar-python-catalog-reference"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+memchr = "=2.8.3"
+num-bigint = "=0.4.8"
+num-traits = "=0.2.19"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.151", features = ["arbitrary_precision"] }
+
+[[bin]]
+name = "python-catalog-reference"
+path = "src/main.rs"
+
+[profile.release]
+debug = "line-tables-only"
