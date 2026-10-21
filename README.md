@@ -76,11 +76,15 @@ Check, compile, and run the program:
 
 ```console
 target/release/relar check totals.py
-target/release/relar build totals.py --clang clang-18 -o /tmp/totals
-/tmp/totals
+target/release/relar build totals.py
+./totals
 ```
 
 The executable prints `Total: 42`. The same source runs with `python3 totals.py`.
+By default, `build` writes the executable in the current directory with the source
+filename's extension removed. Use `-o` to choose a different output path. Relar
+tries `clang-18`, then `clang`; use `--clang` to select a different executable.
+
 Relar rejects unsupported syntax and type violations during compilation. Function
 types can come from annotations or be inferred from concrete direct calls,
 scalar defaults, and checked return expressions. Each function has one exact
