@@ -13,6 +13,7 @@ use crate::types::Types;
 
 mod calls;
 mod comprehensions;
+mod matching;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
 
@@ -1707,6 +1708,7 @@ impl<'a> Checker<'a> {
                     self.if_chain(&branch.test, &branch.body, &branch.elif_else_clauses)?;
                 return Ok((vec![statement], flow));
             }
+            ast::Stmt::Match(branch) => return self.match_statement(branch),
             ast::Stmt::While(loop_) => {
                 if !loop_.orelse.is_empty() {
                     return Err(error(

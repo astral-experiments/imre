@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use ruff_python_ast as ast;
-use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr};
+use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr, walk_pattern};
 
 /// Returns facts guaranteed when `test` has the requested truth value.
 /// A true fact means non-None. Only local names are eligible: attribute and
@@ -63,6 +63,19 @@ pub(crate) fn assigned_names(body: &[ast::Stmt]) -> HashSet<String> {
 struct Assignments(HashSet<String>);
 
 impl<'a> Visitor<'a> for Assignments {
+    fn visit_pattern(&mut self, pattern: &'a ast::Pattern) {
+        let name = match pattern {
+            ast::Pattern::MatchAs(pattern) => pattern.name.as_ref(),
+            ast::Pattern::MatchStar(pattern) => pattern.name.as_ref(),
+            ast::Pattern::MatchMapping(pattern) => pattern.rest.as_ref(),
+            _ => None,
+        };
+        if let Some(name) = name {
+            self.0.insert(name.to_string());
+        }
+        walk_pattern(self, pattern);
+    }
+
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
         // Eager displays own their target bindings. Only the leftmost iterable
         // executes in this scope; walrus expressions remain unsupported.

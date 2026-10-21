@@ -100,13 +100,23 @@ impl Session {
                     .check_file(file)
                     .iter()
                     .filter(|diagnostic| {
-                        // These are recoverable value errors, including inside
-                        // try/except and unselected conditional arms. The exact
-                        // checker still enforces index types and fixed tuple bounds.
+                        // The closed checker proves operand, assignment, argument,
+                        // and return compatibility for every statement, including
+                        // dead and unused code. ty can conservatively retain None
+                        // after a successful float pattern; its flow types must
+                        // not override those exact checks.
+                        // Invalid index values and zero slice steps are runtime
+                        // errors. Exact index types and fixed tuple bounds are
+                        // still enforced by the closed checker.
                         diagnostic.severity() >= Severity::Error
                             && !matches!(
                                 diagnostic.id().as_str(),
-                                "zero-stepsize-in-slice" | "index-out-of-bounds"
+                                "unsupported-operator"
+                                    | "invalid-assignment"
+                                    | "invalid-argument-type"
+                                    | "invalid-return-type"
+                                    | "zero-stepsize-in-slice"
+                                    | "index-out-of-bounds"
                             )
                     })
                     .map(|diagnostic| {
