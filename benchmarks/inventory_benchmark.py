@@ -3,6 +3,7 @@
 import argparse
 import itertools
 import json
+import math
 import platform
 import runpy
 import subprocess
@@ -105,6 +106,33 @@ def workload(value) -> dict:
             for name, data in sorted(expected["files"].items())
         },
     }
+
+
+def captured_workloads(record: dict) -> list[dict]:
+    """Keep a comparison's exact input bytes, independently checking its oracle data."""
+    result = []
+    labels = set()
+    for captured in record["workloads"]["inventory"]:
+        case = validator.case_from_record(captured["case"])
+        for name in (
+            *case.arguments,
+            *case.files,
+            *case.directories,
+            *case.hardlinks,
+            *case.hardlinks.values(),
+        ):
+            if Path(name).is_absolute() or ".." in Path(name).parts or "\0" in name:
+                raise ValueError("captured workload paths must stay inside the fixture")
+        checked = workload(case)
+        if case.label in labels or any(
+            captured.get(key) != value for key, value in checked.items()
+        ):
+            raise ValueError("captured workload differs from independent oracle")
+        labels.add(case.label)
+        result.append(checked)
+    if not result:
+        raise ValueError("inventory baseline must contain captured workloads")
+    return result
 
 
 def measure(value: dict, commands: dict, args) -> dict:
@@ -236,6 +264,13 @@ def benchmark(args) -> dict:
     if args.baseline:
         inputs["baseline"] = Path(shared.executable(str(args.baseline)))
         inputs["baseline_record"] = args.baseline_record.resolve(strict=True)
+    if args.inventory_baseline:
+        inputs["inventory_baseline"] = Path(
+            shared.executable(str(args.inventory_baseline))
+        )
+        inputs["inventory_baseline_record"] = args.inventory_baseline_record.resolve(
+            strict=True
+        )
     source_paths = validator.package_sources() + (
         incremental.package_sources() if args.baseline else []
     )
@@ -320,6 +355,45 @@ def benchmark(args) -> dict:
         for name in ("clang", "lto_linker"):
             if name in inputs and baseline["sha256"].get(name) != hashes[name]:
                 raise ValueError("baseline and current tool differ: " + name)
+    inventory_baseline = None
+    inventory_workloads = None
+    if args.inventory_baseline:
+        inventory_baseline = json.loads(inputs["inventory_baseline_record"].read_text())
+        inventory_sources = {
+            name: digest
+            for name, digest in source_hashes.items()
+            if name.startswith("inventory_reconciliation/")
+        }
+        if (
+            inventory_baseline.get("example") != "inventory_reconciliation"
+            or inventory_baseline.get("sha256", {}).get("inventory_binary")
+            != hashes["inventory_baseline"]
+            or {
+                name: digest
+                for name, digest in inventory_baseline.get("sources", {}).items()
+                if name.startswith("inventory_reconciliation/")
+            }
+            != inventory_sources
+        ):
+            raise ValueError(
+                "inventory baseline must identify unchanged source and exact saved binary"
+            )
+        if (
+            inventory_baseline["options"].get("lto") != ("thin" if thin else None)
+            or inventory_baseline["options"].get("llvm_budget")
+            != (1000 if thin else None)
+            or inventory_baseline["options"].get("target") != target
+        ):
+            raise ValueError(
+                "inventory baseline target/linking mode/LLVM budgets differ"
+            )
+        for name in ("clang", "lto_linker"):
+            if (
+                name in inputs
+                and inventory_baseline["sha256"].get(name) != hashes[name]
+            ):
+                raise ValueError("inventory baseline and current tool differ: " + name)
+        inventory_workloads = captured_workloads(inventory_baseline)
     outputs = {
         "inventory_binary": artifacts / "inventory_reconciliation",
         "inventory_ir": artifacts / "inventory_reconciliation.ll",
@@ -402,6 +476,8 @@ def benchmark(args) -> dict:
             "rust_bigint": [str(inputs["rust_bigint"])],
         }
     }
+    if inventory_baseline:
+        commands["inventory"]["baseline"] = [str(inputs["inventory_baseline"])]
     validation = {
         "inventory": validator.validate_commands(commands["inventory"], args.timeout)
     }
@@ -423,7 +499,8 @@ def benchmark(args) -> dict:
             )
         ]
     selected = prior.manifest.select_workloads(
-        {"workloads": [workload(value) for value in corpus()]}, args.workloads
+        {"workloads": inventory_workloads or [workload(value) for value in corpus()]},
+        args.workloads,
     )
     execution["before_samples"] = prior.runtime_context()
     measured_controls = []
@@ -478,7 +555,7 @@ def benchmark(args) -> dict:
         "artifacts": {
             name: {"bytes": path.stat().st_size}
             for name, path in inputs.items()
-            if name in {*outputs, "baseline", "rust_bigint"}
+            if name in {*outputs, "baseline", "inventory_baseline", "rust_bigint"}
         },
         "rust_build_record": reference,
         "relar_build_provenance": prior.build_provenance(build),
@@ -495,6 +572,20 @@ def benchmark(args) -> dict:
             )
         }
         if baseline
+        else None,
+        "inventory_baseline_provenance": {
+            key: inventory_baseline[key]
+            for key in (
+                "git",
+                "sources",
+                "sha256",
+                "tools",
+                "options",
+                "compilation",
+                "relar_build_provenance",
+            )
+        }
+        if inventory_baseline
         else None,
         "tools": tools,
         "execution": execution,
@@ -525,7 +616,7 @@ def benchmark(args) -> dict:
                 name: tuple(itertools.permutations(group))
                 for name, group in commands.items()
             },
-            "ordering": "all six permutations repeated five times by default; positions and directed within-round adjacent pairs balanced; cross-round predecessors not balanced; no discarded samples",
+            "ordering": "each complete engine permutation cycle repeats evenly; positions and directed within-round adjacent pairs balanced; warmups and cross-round predecessors not balanced; no discarded samples",
             "filesystem": "fresh isolated cwd per engine/run; complete input bytes captured once per workload; warm page cache, buffered output with explicit flush/close, no fsync or atomic replacement",
             "output": "complete stdout/stderr/status and full directory bytes compared for every gate/warmup/sample; expected changed-file bytes once per workload, per-run complete file hashes/lengths",
             "hash_seeds": "default per-process hash seeding; report order never depends on set traversal",
@@ -550,6 +641,8 @@ def main() -> None:
         parser.add_argument("--" + option, type=Path, required=True)
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--baseline-record", type=Path)
+    parser.add_argument("--inventory-baseline", type=Path)
+    parser.add_argument("--inventory-baseline-record", type=Path)
     parser.add_argument("--rust-source-root", type=Path, default=REFERENCE)
     parser.add_argument("--python", default="python3.14")
     parser.add_argument("--clang", default="clang")
@@ -563,7 +656,7 @@ def main() -> None:
     )
     parser.add_argument("--workload", action="append", dest="workloads")
     parser.add_argument("--control-workload", action="append", dest="control_workloads")
-    parser.add_argument("--samples", type=shared.positive_int, default=30)
+    parser.add_argument("--samples", type=shared.positive_int)
     parser.add_argument("--warmups", type=shared.positive_int, default=2)
     parser.add_argument("--cpu", type=int)
     parser.add_argument("--timeout", type=shared.positive_float, default=120)
@@ -573,8 +666,16 @@ def main() -> None:
         parser.error("--baseline and --baseline-record must be supplied together")
     if args.control_workloads and not args.baseline:
         parser.error("--control-workload requires a baseline")
-    if args.samples % 6:
-        parser.error("--samples must be a multiple of six")
+    if bool(args.inventory_baseline) != bool(args.inventory_baseline_record):
+        parser.error(
+            "--inventory-baseline and --inventory-baseline-record must be supplied together"
+        )
+    engines = 4 if args.inventory_baseline else 3
+    if args.samples is None:
+        args.samples = 48 if args.inventory_baseline else 30
+    cycle = math.factorial(engines)
+    if args.samples % cycle:
+        parser.error(f"--samples must be a multiple of {cycle}")
     if args.lto_linker and not args.target:
         parser.error("--lto-linker requires explicit --target")
     result = benchmark(args)

@@ -1,0 +1,1154 @@
+{
+  "audit_script": {
+    "path": "benchmarks/local/inventory-performance-final-validation.py",
+    "sha256": "41fed8d172122b29e0c54176e4125c2362ca9915a075f1bc91fc22570a871dcb"
+  },
+  "builds": {
+    "dev3b": {
+      "artifacts_sha256": {
+        "librelar_runtime.a": "0f84565ba01308c42c0cd22171d257c22d551e1c26df5cdc52be5f9bd07d62a9",
+        "librelar_runtime_asan.a": "833ddf686977a24b0ac8a3db82882bc1491cdb775b2d56f06148498dd3e0daac",
+        "librelar_runtime_lto.a": "6626eb59d0f2151041ec7f032374dc1cc86a2e7a689aae87a4150882540c7c6a",
+        "relar": "c0d4431077eb64e908d9c63c60fe883a7d4d2951597e29ecdfc2c9a331207b44"
+      },
+      "embedded_build_script_sha256": "86fac720177fb4fe8f169af298e6e90d45e706aebf1de4b089c5ba165a7bb9b6",
+      "embedded_cargo_wrapper_sha256": "74f3f3596cf89fdecf9458d74fc47cfcf09533b8c10f3b569470f74ddbc80fd8",
+      "record": {
+        "path": "benchmarks/local/inventory-performance-tools-dev3b/build-record.json",
+        "sha256": "d00d4b6d9ba4c6a4f0fff39adaeb0883f4228e47723563d436d65a865d13f6d9"
+      },
+      "recorded_head": "cf81a70c4bb12d453c8b5e0dd66081f191888bad"
+    },
+    "final": {
+      "artifacts_sha256": {
+        "librelar_runtime.a": "0f84565ba01308c42c0cd22171d257c22d551e1c26df5cdc52be5f9bd07d62a9",
+        "librelar_runtime_asan.a": "833ddf686977a24b0ac8a3db82882bc1491cdb775b2d56f06148498dd3e0daac",
+        "librelar_runtime_lto.a": "6626eb59d0f2151041ec7f032374dc1cc86a2e7a689aae87a4150882540c7c6a",
+        "relar": "c0d4431077eb64e908d9c63c60fe883a7d4d2951597e29ecdfc2c9a331207b44"
+      },
+      "embedded_build_script_sha256": "86fac720177fb4fe8f169af298e6e90d45e706aebf1de4b089c5ba165a7bb9b6",
+      "embedded_cargo_wrapper_sha256": "74f3f3596cf89fdecf9458d74fc47cfcf09533b8c10f3b569470f74ddbc80fd8",
+      "record": {
+        "path": "benchmarks/local/inventory-performance-tools-final/build-record.json",
+        "sha256": "f35904503c4c6e0f38255738d5a57bdea275e4e8e0212b3fb4d76d80c91e0476"
+      },
+      "recorded_head": "7ec35cbd0a94ca82419061c725382b2e2a1d4a1e"
+    }
+  },
+  "counting_note": "Suite totals are the harness-reported checks, including repeated rejection checks across modes; they are not counts of unique source programs. Oracle cases and the device case are reported separately.",
+  "dev3b_reuse": {
+    "all_four_artifacts_byte_identical": true,
+    "compiled_sources_identical": true,
+    "note": "Only containers/files ordinary and ASan records are reused; all other suite records use final tools."
+  },
+  "extra_checks": {
+    "inventory-asan": {
+      "optimization_level": "1",
+      "oracle": {
+        "cases": 176,
+        "complete_output_status_filesystem_verified": true,
+        "device_checks": 1,
+        "engines": [
+          "cpython",
+          "relar"
+        ],
+        "record": {
+          "path": "benchmarks/local/inventory-performance-validation-final/inventory-asan/oracle.json",
+          "sha256": "6dffa0a4fdf6d52c9dd5e4a2409fc87e8c13701ee31617ed5c999943cc77059e"
+        },
+        "successful": 127,
+        "terminal_errors": 49
+      },
+      "record": {
+        "path": "benchmarks/local/inventory-performance-validation-final/inventory-asan/record.json",
+        "sha256": "d9b9955d292b93fb569400976a04203686754f2b79aa3c7e7cfdc6a47ede6deb"
+      },
+      "tracer_pid": 0
+    },
+    "lto-cli": {
+      "checks": 10,
+      "record": {
+        "path": "benchmarks/local/inventory-performance-validation-final/lto-cli/record.json",
+        "sha256": "6f042444f8e7598350f13b1accdf97ebeecbb4959cdb12452e2e87b22fbc3b91"
+      },
+      "tracer_pid": 0
+    }
+  },
+  "native_suites": {
+    "asan": {
+      "optimization_levels": [
+        "0",
+        "1"
+      ],
+      "reported_checks": 710,
+      "suites": {
+        "classes": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/classes.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "1",
+            "--sanitize"
+          ],
+          "reported_checks": 58,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/results.json",
+            "sha256": "67f10715dba0f555419c12dcdb516848f02cf91c7a74188e74bf329d8bc0792b"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/classes.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/classes.stdout",
+            "sha256": "e47b9565fcc16d950719c1022a989bc193f1bf95ccab7e1b6fcbf39b1e0209f4"
+          },
+          "tool_stage": "final"
+        },
+        "comprehensions": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/comprehensions.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "1",
+            "--sanitize"
+          ],
+          "reported_checks": 65,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/results.json",
+            "sha256": "67f10715dba0f555419c12dcdb516848f02cf91c7a74188e74bf329d8bc0792b"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/comprehensions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/comprehensions.stdout",
+            "sha256": "4894fa869b3377f0e30b68e96bb24fa8a02458a07eef6ed0b99fcccb8cfb1dce"
+          },
+          "tool_stage": "final"
+        },
+        "containers": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/containers.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-dev3b/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-dev3b/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "1",
+            "--sanitize"
+          ],
+          "reported_checks": 282,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-dev3b/asan/results.json",
+            "sha256": "b0ad574cfaf07bcb310981fbb44083062d10def64576b20d87505ea89c6a453e"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-dev3b/asan/containers.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-dev3b/asan/containers.stdout",
+            "sha256": "520daea6d11faaa8597400848bc9712b09aefc3a8754389695a87b6cb7074490"
+          },
+          "tool_stage": "dev3b"
+        },
+        "differential": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/differential.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "1",
+            "--sanitize"
+          ],
+          "reported_checks": 112,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/results.json",
+            "sha256": "67f10715dba0f555419c12dcdb516848f02cf91c7a74188e74bf329d8bc0792b"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/differential.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/differential.stdout",
+            "sha256": "c4763d7e4a31f958d29de7c58ee3f6d5e7936ec8f731706dea5fea6c4fc6b26d"
+          },
+          "tool_stage": "final"
+        },
+        "exceptions": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/exceptions.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "1",
+            "--sanitize"
+          ],
+          "reported_checks": 48,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/results.json",
+            "sha256": "67f10715dba0f555419c12dcdb516848f02cf91c7a74188e74bf329d8bc0792b"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/exceptions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/exceptions.stdout",
+            "sha256": "e8a9330b9803894544e8e925fcf9047317917337fd7631e6f4114094cd3a0944"
+          },
+          "tool_stage": "final"
+        },
+        "files": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/files.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-dev3b/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-dev3b/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "1",
+            "--sanitize"
+          ],
+          "reported_checks": 74,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-dev3b/asan/results.json",
+            "sha256": "b0ad574cfaf07bcb310981fbb44083062d10def64576b20d87505ea89c6a453e"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-dev3b/asan/files.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-dev3b/asan/files.stdout",
+            "sha256": "b5a5843eee34f5ac820c8ef3a14789cf687fab67bf5d163e63f879b3f36a1bda"
+          },
+          "tool_stage": "dev3b"
+        },
+        "imports": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/imports.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "1",
+            "--sanitize"
+          ],
+          "reported_checks": 51,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/results.json",
+            "sha256": "67f10715dba0f555419c12dcdb516848f02cf91c7a74188e74bf329d8bc0792b"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/imports.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/imports.stdout",
+            "sha256": "29d9fdaf4f4e6d33d6e79f22dbf01c96bae4db4e8b3d1e2fae090b4b6890d835"
+          },
+          "tool_stage": "final"
+        },
+        "io": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/io.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime_asan.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "1",
+            "--sanitize"
+          ],
+          "reported_checks": 20,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/results.json",
+            "sha256": "67f10715dba0f555419c12dcdb516848f02cf91c7a74188e74bf329d8bc0792b"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/io.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/asan/io.stdout",
+            "sha256": "c7db1ba9ef054c6ebc2489f9b66c30e8c4ff823b6e39dce924f6fdf75ec44444"
+          },
+          "tool_stage": "final"
+        }
+      }
+    },
+    "ordinary": {
+      "optimization_levels": [
+        "0",
+        "3"
+      ],
+      "reported_checks": 710,
+      "suites": {
+        "classes": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/classes.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "reported_checks": 58,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/results.json",
+            "sha256": "f437d7624489cd49d80dbcf10bd42779f6ef43950d8d67a423523224cab962fb"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/classes.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/classes.stdout",
+            "sha256": "17b5e0bb55bf9b355d570c75aeb14d06b943d145fd3c750ef0318eb2452fd116"
+          },
+          "tool_stage": "final"
+        },
+        "comprehensions": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/comprehensions.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "reported_checks": 65,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/results.json",
+            "sha256": "f437d7624489cd49d80dbcf10bd42779f6ef43950d8d67a423523224cab962fb"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/comprehensions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/comprehensions.stdout",
+            "sha256": "032c0899953819f366ee418fb6fe57c25b4855e7b31a4b8ea7e012f59833fc4b"
+          },
+          "tool_stage": "final"
+        },
+        "containers": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/containers.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-dev3b/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-dev3b/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "reported_checks": 282,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-dev3b/ordinary/results.json",
+            "sha256": "a12b5551018f5cf70ee59efaf847965070b91bf8635d62a0631e6aaf79f77d8a"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-dev3b/ordinary/containers.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-dev3b/ordinary/containers.stdout",
+            "sha256": "c004e23b9859c05e252ffeceaadad3a26610e7056bb75f00429df4c2e222b00b"
+          },
+          "tool_stage": "dev3b"
+        },
+        "differential": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/differential.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "reported_checks": 112,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/results.json",
+            "sha256": "f437d7624489cd49d80dbcf10bd42779f6ef43950d8d67a423523224cab962fb"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/differential.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/differential.stdout",
+            "sha256": "bd6213d537870f3ce12fc4012cb254b21ddf4ecd47aea1515c035139a7d6c75e"
+          },
+          "tool_stage": "final"
+        },
+        "exceptions": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/exceptions.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "reported_checks": 48,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/results.json",
+            "sha256": "f437d7624489cd49d80dbcf10bd42779f6ef43950d8d67a423523224cab962fb"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/exceptions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/exceptions.stdout",
+            "sha256": "2acc8d882974554d58247a8f2b8a536de2882591a83438ca391f35802fa7cf15"
+          },
+          "tool_stage": "final"
+        },
+        "files": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/files.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-dev3b/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-dev3b/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "reported_checks": 74,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-dev3b/ordinary/results.json",
+            "sha256": "a12b5551018f5cf70ee59efaf847965070b91bf8635d62a0631e6aaf79f77d8a"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-dev3b/ordinary/files.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-dev3b/ordinary/files.stdout",
+            "sha256": "150a6cd78bf0167d4285eb9f1d0e22bcff040c2064ac466c5ade34975c304a35"
+          },
+          "tool_stage": "dev3b"
+        },
+        "imports": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/imports.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "reported_checks": 51,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/results.json",
+            "sha256": "f437d7624489cd49d80dbcf10bd42779f6ef43950d8d67a423523224cab962fb"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/imports.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/imports.stdout",
+            "sha256": "29d9fdaf4f4e6d33d6e79f22dbf01c96bae4db4e8b3d1e2fae090b4b6890d835"
+          },
+          "tool_stage": "final"
+        },
+        "io": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/io.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "0",
+            "3"
+          ],
+          "reported_checks": 20,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/results.json",
+            "sha256": "f437d7624489cd49d80dbcf10bd42779f6ef43950d8d67a423523224cab962fb"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/io.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/ordinary/io.stdout",
+            "sha256": "ff6b20527ed1fc9c431c42fafb7f1f6b7f32182e53ec07ab1cf5d5241f1c23e3"
+          },
+          "tool_stage": "final"
+        }
+      }
+    },
+    "thinlto": {
+      "optimization_levels": [
+        "3"
+      ],
+      "reported_checks": 533,
+      "suites": {
+        "classes": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/classes.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "reported_checks": 56,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/results.json",
+            "sha256": "1e19ffff81f8c907815c49f320607d45deed2c15fa4f9b853bb21c1e52e4ba14"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/classes.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/classes.stdout",
+            "sha256": "724d8cc23455331074e5b350ef4a08ea8a4ace147e236f59b60bd8b511eae8f3"
+          },
+          "tool_stage": "final"
+        },
+        "comprehensions": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/comprehensions.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "reported_checks": 52,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/results.json",
+            "sha256": "1e19ffff81f8c907815c49f320607d45deed2c15fa4f9b853bb21c1e52e4ba14"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/comprehensions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/comprehensions.stdout",
+            "sha256": "6ec2c9414b0c8d28da95a5b3431f7075ce585fd94c0d47f93d106b88234142ad"
+          },
+          "tool_stage": "final"
+        },
+        "containers": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/containers.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "reported_checks": 212,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/results.json",
+            "sha256": "1e19ffff81f8c907815c49f320607d45deed2c15fa4f9b853bb21c1e52e4ba14"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/containers.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/containers.stdout",
+            "sha256": "e8e55df202e6fc0c7fcaa0c5ad4fa2d95dd0cb18ab6c637ecc5d3e11e5a8a14e"
+          },
+          "tool_stage": "final"
+        },
+        "differential": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/differential.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "reported_checks": 72,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/results.json",
+            "sha256": "1e19ffff81f8c907815c49f320607d45deed2c15fa4f9b853bb21c1e52e4ba14"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/differential.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/differential.stdout",
+            "sha256": "b190ebd6e7203c28c17ec7faa0c0f5d8c6decd1e773be99ae0c98e060f7b79ad"
+          },
+          "tool_stage": "final"
+        },
+        "exceptions": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/exceptions.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "reported_checks": 32,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/results.json",
+            "sha256": "1e19ffff81f8c907815c49f320607d45deed2c15fa4f9b853bb21c1e52e4ba14"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/exceptions.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/exceptions.stdout",
+            "sha256": "4be6f9ad9a05c34549de276fa89593d1ea332cc66be7ccb7b0216027cb0ea3f3"
+          },
+          "tool_stage": "final"
+        },
+        "files": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/files.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "reported_checks": 52,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/results.json",
+            "sha256": "1e19ffff81f8c907815c49f320607d45deed2c15fa4f9b853bb21c1e52e4ba14"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/files.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/files.stdout",
+            "sha256": "3dd64d3fc327432c225d6548a6ec9041a05e068128093bc969f1978319f64cc1"
+          },
+          "tool_stage": "final"
+        },
+        "imports": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/imports.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "reported_checks": 47,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/results.json",
+            "sha256": "1e19ffff81f8c907815c49f320607d45deed2c15fa4f9b853bb21c1e52e4ba14"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/imports.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/imports.stdout",
+            "sha256": "f83498e79d485a45cf5d880badfac061b59ec07ac7f8ea00dd9723e7ac0d2cd0"
+          },
+          "tool_stage": "final"
+        },
+        "io": {
+          "command": [
+            "/home/dev-user/.local/bin/python3.14",
+            "-I",
+            "/home/dev-user/code/oss/relar/tests/io.py",
+            "--compiler",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/relar",
+            "--runtime",
+            "/home/dev-user/code/oss/relar/benchmarks/local/inventory-performance-tools-final/librelar_runtime_lto.a",
+            "--python",
+            "/home/dev-user/.local/bin/python3.14",
+            "--clang",
+            "/usr/bin/clang-18",
+            "--opt-levels",
+            "3",
+            "--lto-linker",
+            "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld",
+            "--target",
+            "x86_64-unknown-linux-gnu"
+          ],
+          "reported_checks": 10,
+          "returncode": 0,
+          "source_record": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/results.json",
+            "sha256": "1e19ffff81f8c907815c49f320607d45deed2c15fa4f9b853bb21c1e52e4ba14"
+          },
+          "stderr": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/io.stderr",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stdout": {
+            "path": "benchmarks/local/inventory-performance-validation-final/thinlto/io.stdout",
+            "sha256": "8db850d1783de29fdc0dc48daec150b64f1b10efdcfa1ee0ed8e7bd2dc5e0fc7"
+          },
+          "tool_stage": "final"
+        }
+      }
+    }
+  },
+  "rust_checks": {
+    "clippy": {
+      "command": [
+        "sh",
+        "/tmp/relar-cargo.sh",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "log": {
+        "path": "benchmarks/local/inventory-performance-dev3b-clippy.log",
+        "sha256": "3b7aa9cc5eb67edf8eea37b6552068c9bb1af428b73186b54c0dd26efcada52a"
+      },
+      "root_observed_exec_session": 29513,
+      "root_observed_exit_code": 0
+    },
+    "status_evidence": "Commands and terminal exit 0 were observed and reported by /root; there is no separate machine-readable exit receipt for these two invocations. The hashed logs show successful completion, and their dev3b compiled source snapshot is identical to the final committed snapshot.",
+    "unit": {
+      "command": [
+        "sh",
+        "/tmp/relar-cargo.sh",
+        "test",
+        "--workspace"
+      ],
+      "compiler_tests": 25,
+      "log": {
+        "path": "benchmarks/local/inventory-performance-dev3b-unit.log",
+        "sha256": "cb967f9fe48f725a0b3dfd0e680be8f0ef21b0d904052410a582f950aba2241a"
+      },
+      "passed": 65,
+      "root_observed_exec_session": 73174,
+      "root_observed_exit_code": 0,
+      "runtime_tests": 40
+    }
+  },
+  "sanitizer": {
+    "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+    "environment_evidence": "Verified suite source sets this value; both extra records capture it explicitly.",
+    "runtime_and_generated_code_instrumented": true
+  },
+  "schema": "relar-inventory-performance-final-validation-v1",
+  "source_commit": "7ec35cbd0a94ca82419061c725382b2e2a1d4a1e",
+  "status": "passed",
+  "verified_files_sha256": {
+    "/home/dev-user/.local/bin/python3.14": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+    "/tmp/relar-cargo.sh": "74f3f3596cf89fdecf9458d74fc47cfcf09533b8c10f3b569470f74ddbc80fd8",
+    "/tmp/relar-inventory-final-extra-validation.py": "7aacd39d3a5631c1bc37f8f8950c8ddc0bb4c51aea7bd29ea59857ce7fffb658",
+    "/tmp/relar-inventory-performance-validation.py": "60c743ec180571084b6030009302236336df0a96e64b5e58694505a7a2ab3c80",
+    "/usr/bin/clang-18": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "Cargo.lock": "94ea6e3c2351ad1dff6764dac5c52ff51993b1f7a3a79164e209a4e7c1b80471",
+    "Cargo.toml": "ce49064770ad21744c8ac6cea604da7408be1e5ec474e3f90206fa95f2af614f",
+    "benchmarks/inventory_validate.py": "ec709364c6726a5f6d042a741e408416a06c3bf37f5882185fcb0173618da40f",
+    "benchmarks/local/batch-linker/ld.lld": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+    "benchmarks/local/inventory-performance-dev3b-clippy.log": "3b7aa9cc5eb67edf8eea37b6552068c9bb1af428b73186b54c0dd26efcada52a",
+    "benchmarks/local/inventory-performance-dev3b-unit.log": "cb967f9fe48f725a0b3dfd0e680be8f0ef21b0d904052410a582f950aba2241a",
+    "benchmarks/local/inventory-performance-final-validation.py": "41fed8d172122b29e0c54176e4125c2362ca9915a075f1bc91fc22570a871dcb",
+    "benchmarks/local/inventory-performance-tools-dev3b/asan.log": "cad78f27f10d8a604cbf7642014615ebfe4b0ad88053b55e98acef33df9ea4ff",
+    "benchmarks/local/inventory-performance-tools-dev3b/build-record.json": "d00d4b6d9ba4c6a4f0fff39adaeb0883f4228e47723563d436d65a865d13f6d9",
+    "benchmarks/local/inventory-performance-tools-dev3b/librelar_runtime.a": "0f84565ba01308c42c0cd22171d257c22d551e1c26df5cdc52be5f9bd07d62a9",
+    "benchmarks/local/inventory-performance-tools-dev3b/librelar_runtime_asan.a": "833ddf686977a24b0ac8a3db82882bc1491cdb775b2d56f06148498dd3e0daac",
+    "benchmarks/local/inventory-performance-tools-dev3b/librelar_runtime_lto.a": "6626eb59d0f2151041ec7f032374dc1cc86a2e7a689aae87a4150882540c7c6a",
+    "benchmarks/local/inventory-performance-tools-dev3b/relar": "c0d4431077eb64e908d9c63c60fe883a7d4d2951597e29ecdfc2c9a331207b44",
+    "benchmarks/local/inventory-performance-tools-dev3b/ordinary.log": "e21fc4fdce1f8c167a088ded13eacf3bb1448ec0e7d61e59b022c7b5b3d5a9b2",
+    "benchmarks/local/inventory-performance-tools-dev3b/thinlto.log": "4cc870d17b85d08ff9d5b95d403c18afadfe5afc7d40b2dd4b0bda34a126054c",
+    "benchmarks/local/inventory-performance-tools-final/asan.log": "fc3b7d159f1d2fc41473b7c2bbe5d91f85d6f205fa7d64d51cc5dd094abc7929",
+    "benchmarks/local/inventory-performance-tools-final/build-record.json": "f35904503c4c6e0f38255738d5a57bdea275e4e8e0212b3fb4d76d80c91e0476",
+    "benchmarks/local/inventory-performance-tools-final/librelar_runtime.a": "0f84565ba01308c42c0cd22171d257c22d551e1c26df5cdc52be5f9bd07d62a9",
+    "benchmarks/local/inventory-performance-tools-final/librelar_runtime_asan.a": "833ddf686977a24b0ac8a3db82882bc1491cdb775b2d56f06148498dd3e0daac",
+    "benchmarks/local/inventory-performance-tools-final/librelar_runtime_lto.a": "6626eb59d0f2151041ec7f032374dc1cc86a2e7a689aae87a4150882540c7c6a",
+    "benchmarks/local/inventory-performance-tools-final/relar": "c0d4431077eb64e908d9c63c60fe883a7d4d2951597e29ecdfc2c9a331207b44",
+    "benchmarks/local/inventory-performance-tools-final/ordinary.log": "336dd39767edab5fc9e9f6023c9b0e94124cdb5fdb89255a1297e4243a6f2297",
+    "benchmarks/local/inventory-performance-tools-final/thinlto.log": "e9d8678eb47472ae48fdba2e30e30b09ab9dc7974572f570b78fb502360f373c",
+    "benchmarks/local/inventory-performance-validation-dev3b/asan/containers.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-dev3b/asan/containers.stdout": "520daea6d11faaa8597400848bc9712b09aefc3a8754389695a87b6cb7074490",
+    "benchmarks/local/inventory-performance-validation-dev3b/asan/files.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-dev3b/asan/files.stdout": "b5a5843eee34f5ac820c8ef3a14789cf687fab67bf5d163e63f879b3f36a1bda",
+    "benchmarks/local/inventory-performance-validation-dev3b/asan/results.json": "b0ad574cfaf07bcb310981fbb44083062d10def64576b20d87505ea89c6a453e",
+    "benchmarks/local/inventory-performance-validation-dev3b/ordinary/containers.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-dev3b/ordinary/containers.stdout": "c004e23b9859c05e252ffeceaadad3a26610e7056bb75f00429df4c2e222b00b",
+    "benchmarks/local/inventory-performance-validation-dev3b/ordinary/files.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-dev3b/ordinary/files.stdout": "150a6cd78bf0167d4285eb9f1d0e22bcff040c2064ac466c5ade34975c304a35",
+    "benchmarks/local/inventory-performance-validation-dev3b/ordinary/results.json": "a12b5551018f5cf70ee59efaf847965070b91bf8635d62a0631e6aaf79f77d8a",
+    "benchmarks/local/inventory-performance-validation-final/asan/classes.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/asan/classes.stdout": "e47b9565fcc16d950719c1022a989bc193f1bf95ccab7e1b6fcbf39b1e0209f4",
+    "benchmarks/local/inventory-performance-validation-final/asan/comprehensions.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/asan/comprehensions.stdout": "4894fa869b3377f0e30b68e96bb24fa8a02458a07eef6ed0b99fcccb8cfb1dce",
+    "benchmarks/local/inventory-performance-validation-final/asan/differential.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/asan/differential.stdout": "c4763d7e4a31f958d29de7c58ee3f6d5e7936ec8f731706dea5fea6c4fc6b26d",
+    "benchmarks/local/inventory-performance-validation-final/asan/exceptions.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/asan/exceptions.stdout": "e8a9330b9803894544e8e925fcf9047317917337fd7631e6f4114094cd3a0944",
+    "benchmarks/local/inventory-performance-validation-final/asan/imports.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/asan/imports.stdout": "29d9fdaf4f4e6d33d6e79f22dbf01c96bae4db4e8b3d1e2fae090b4b6890d835",
+    "benchmarks/local/inventory-performance-validation-final/asan/io.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/asan/io.stdout": "c7db1ba9ef054c6ebc2489f9b66c30e8c4ff823b6e39dce924f6fdf75ec44444",
+    "benchmarks/local/inventory-performance-validation-final/asan/results.json": "67f10715dba0f555419c12dcdb516848f02cf91c7a74188e74bf329d8bc0792b",
+    "benchmarks/local/inventory-performance-validation-final/inventory-asan/build.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/inventory-asan/build.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/inventory-asan/inventory_reconciliation": "250e0396c7be943d70882d7e59906e3d7767fdb5f053b8077b9b6ef35d27d010",
+    "benchmarks/local/inventory-performance-validation-final/inventory-asan/inventory_reconciliation.ll": "2bfa844602c671a196fbde1627070c5b04d9fcc83ef0a95031f73e709bcf0444",
+    "benchmarks/local/inventory-performance-validation-final/inventory-asan/oracle.json": "6dffa0a4fdf6d52c9dd5e4a2409fc87e8c13701ee31617ed5c999943cc77059e",
+    "benchmarks/local/inventory-performance-validation-final/inventory-asan/oracle.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/inventory-asan/oracle.stdout": "a67e01bada32b5738fea8e057dd9afbfe8703455d1e5e8bf0942c9a40d443665",
+    "benchmarks/local/inventory-performance-validation-final/inventory-asan/record.json": "d9b9955d292b93fb569400976a04203686754f2b79aa3c7e7cfdc6a47ede6deb",
+    "benchmarks/local/inventory-performance-validation-final/lto-cli/checks.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/lto-cli/checks.stdout": "76141afddfe9efc9534446f90cdcb05d4245911414b020b93096a4069ab512aa",
+    "benchmarks/local/inventory-performance-validation-final/lto-cli/record.json": "6f042444f8e7598350f13b1accdf97ebeecbb4959cdb12452e2e87b22fbc3b91",
+    "benchmarks/local/inventory-performance-validation-final/ordinary/classes.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/ordinary/classes.stdout": "17b5e0bb55bf9b355d570c75aeb14d06b943d145fd3c750ef0318eb2452fd116",
+    "benchmarks/local/inventory-performance-validation-final/ordinary/comprehensions.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/ordinary/comprehensions.stdout": "032c0899953819f366ee418fb6fe57c25b4855e7b31a4b8ea7e012f59833fc4b",
+    "benchmarks/local/inventory-performance-validation-final/ordinary/differential.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/ordinary/differential.stdout": "bd6213d537870f3ce12fc4012cb254b21ddf4ecd47aea1515c035139a7d6c75e",
+    "benchmarks/local/inventory-performance-validation-final/ordinary/exceptions.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/ordinary/exceptions.stdout": "2acc8d882974554d58247a8f2b8a536de2882591a83438ca391f35802fa7cf15",
+    "benchmarks/local/inventory-performance-validation-final/ordinary/imports.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/ordinary/imports.stdout": "29d9fdaf4f4e6d33d6e79f22dbf01c96bae4db4e8b3d1e2fae090b4b6890d835",
+    "benchmarks/local/inventory-performance-validation-final/ordinary/io.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/ordinary/io.stdout": "ff6b20527ed1fc9c431c42fafb7f1f6b7f32182e53ec07ab1cf5d5241f1c23e3",
+    "benchmarks/local/inventory-performance-validation-final/ordinary/results.json": "f437d7624489cd49d80dbcf10bd42779f6ef43950d8d67a423523224cab962fb",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/classes.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/classes.stdout": "724d8cc23455331074e5b350ef4a08ea8a4ace147e236f59b60bd8b511eae8f3",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/comprehensions.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/comprehensions.stdout": "6ec2c9414b0c8d28da95a5b3431f7075ce585fd94c0d47f93d106b88234142ad",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/containers.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/containers.stdout": "e8e55df202e6fc0c7fcaa0c5ad4fa2d95dd0cb18ab6c637ecc5d3e11e5a8a14e",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/differential.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/differential.stdout": "b190ebd6e7203c28c17ec7faa0c0f5d8c6decd1e773be99ae0c98e060f7b79ad",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/exceptions.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/exceptions.stdout": "4be6f9ad9a05c34549de276fa89593d1ea332cc66be7ccb7b0216027cb0ea3f3",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/files.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/files.stdout": "3dd64d3fc327432c225d6548a6ec9041a05e068128093bc969f1978319f64cc1",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/imports.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/imports.stdout": "f83498e79d485a45cf5d880badfac061b59ec07ac7f8ea00dd9723e7ac0d2cd0",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/io.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/io.stdout": "8db850d1783de29fdc0dc48daec150b64f1b10efdcfa1ee0ed8e7bd2dc5e0fc7",
+    "benchmarks/local/inventory-performance-validation-final/thinlto/results.json": "1e19ffff81f8c907815c49f320607d45deed2c15fa4f9b853bb21c1e52e4ba14",
+    "benchmarks/manifest_validate.py": "2ba1a0e0062583add10cc7e5fd347b67ad82769a74dfc761266cc604685d738d",
+    "crates/relar-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
+    "crates/relar-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
+    "crates/relar-compiler/src/classes.rs": "8a57bbf41463e5384d86fc7d70be62fb8c26ef95b89bbcf7b575ea13be373785",
+    "crates/relar-compiler/src/effects.rs": "58d6d4604c2ec19402a696c6b168c63c924493424feab30f013874f10108f62f",
+    "crates/relar-compiler/src/frontend.rs": "555b5f6c8d62a210d38b13aa783ae8bfc9470a8b1bf0db10667a41f7dab2d38b",
+    "crates/relar-compiler/src/frontend/comprehensions.rs": "d90161413c8957a941deeafa82210aca3ff73d51058760a9362124d4ab20bc02",
+    "crates/relar-compiler/src/ir.rs": "a716274199e8cace1a95867148e752e62568cfd59f64aa1bd2c5c344eae3114c",
+    "crates/relar-compiler/src/lib.rs": "aff038d03eadb6f07481b29100e984e3f6de97c089404a574daf3c0f5653861d",
+    "crates/relar-compiler/src/llvm.rs": "363ec32948210e7e1662705f2dbbb33ac7e47356c2245ac6d12d96446a039665",
+    "crates/relar-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+    "crates/relar-compiler/src/modules.rs": "3c597d7ddfe35c2cd12a2189ce7c69cf81c7983e89193c47f00395019210de0a",
+    "crates/relar-compiler/src/narrowing.rs": "f37bbacad8279aa18aff36edbee90477187d8927ca12b0563b0bfedde791832d",
+    "crates/relar-compiler/src/ranges.rs": "29c217f8ef942187f5e945385279ac2548ab645a13145345c2023befa6303060",
+    "crates/relar-compiler/src/tuples.rs": "022bc95c1702a09f6f124754031d13c07ff94b4f721f72f6363bad2ff29211fa",
+    "crates/relar-compiler/src/types.rs": "6ec28df90874d39206cfd36f025964e6e4fd1026bbfff9eba868e7a944d2cbbe",
+    "crates/relar-runtime/Cargo.toml": "504747307550bbb6a62804730b159c158cba5b35e22a533269db00f51f423ba8",
+    "crates/relar-runtime/src/lib.rs": "4ca207eb054a7a9023b08957058ebe4dae933410ea5cd1ede62550c18dab2988",
+    "crates/relar-runtime/src/objects.rs": "345c52b38ea32647cbeb220d853d3f0848906ae275b98a371fb05c021e61ee59",
+    "crates/relar-runtime/src/objects/args.rs": "0f7c2543368bc69da08613471c17dc7ac0981967e7840e3c30ef85dc6a044099",
+    "crates/relar-runtime/src/objects/exceptions.rs": "003d465b3a28ac4cb991d2fa2a9b589add6a35ef714587ad6c705e0667b836af",
+    "crates/relar-runtime/src/objects/files.rs": "17abf6f1aec89723d6508e00756c53108e5c5ec912979eca0be884c4eb78aebd",
+    "crates/relar-runtime/src/objects/mappings.rs": "eca128f038aff16c93af24203b7d66fe652d27430b5cac02a25630758a590ec9",
+    "crates/relar-runtime/src/objects/records.rs": "9e8061a02eca605d6587da87dedb0ca7b2b868d98bef9abb5159bd4b7ceff75d",
+    "crates/relar-runtime/src/objects/words.rs": "251b21899a15b0d40c6de1f8452034d139bf7093aa112c5603c8896427f53ca8",
+    "examples/inventory_reconciliation/__init__.py": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+    "examples/inventory_reconciliation/__main__.py": "853f4a7ae796ab29edbb9ff098d300969905bfe988ede2c90210e988191369a2",
+    "examples/inventory_reconciliation/load.py": "074239fd9df26acc79424aed65e004df89d8b27c2d59fd7e2401ab74abeaad4d",
+    "examples/inventory_reconciliation/model.py": "c3214a814d98213ff00bcb1dac25f18ac2c5bcafba96e07a8457aa161e3cbcbc",
+    "examples/inventory_reconciliation/reconcile.py": "6c5aa3a17b5650e7bdad2434fbf80c3a9c08ca691de31d2cf87fdd1d7829125c",
+    "examples/inventory_reconciliation/render.py": "722a7ce42875d1997ba3dcbd85f17c1afaf14c5445406bb380a268b4681a023f",
+    "tests/classes.py": "c4b409a3b5d7fb08d22c737b20aa96ab4e6cd76026a86d227ad9d497ced8a49c",
+    "tests/comprehensions.py": "9937f7cd9b6f96b6f2da2601523f45fc4696d74f5fd6782a31ccaaf4ea82760b",
+    "tests/containers.py": "16dfcdf29ecb8a6eaba9fee44c10a94ef38c836957067bead6bf0d81aefc4ff6",
+    "tests/differential.py": "6f28393b1b78d967065d080d4aec45836213b2609cd205299d358a4803695ffc",
+    "tests/exceptions.py": "29de31304fa700d21bbafe7d9a63a08642e4c3371e2af3efcc1044e4746deec3",
+    "tests/files.py": "a920cc543636110913668e3383fe678e02c86a281edd90a0cda50288753f60ba",
+    "tests/fixtures/classes/imported/facade.py": "1fc491f43b749999d1afd898230328773a6f0e24113589a3b4f4c36cd8f271df",
+    "tests/fixtures/classes/imported/main.py": "2ee9d22808a2bbff00171e34dceeee35da2b5b7211ddafd056fab7e3a1d19470",
+    "tests/fixtures/classes/imported/models/__init__.py": "cc9368b60161036bb8d4904bd2fccb1ab462fc7490daec4bd15713714d4c4af1",
+    "tests/fixtures/classes/imported/models/records.py": "873d83fdac64010579e753dd2b22acd098ff9824e2ee21f1f9e89255f5e608df",
+    "tests/fixtures/classes/ownership.py": "01a0a4e9b35c26ae99fa00564d947aea82c612e615792afd272785c35520a7bb",
+    "tests/fixtures/comprehensions/cleanup.py": "7948e8cb76c4bdc54f5dc58cdf71b9f68fdc5bb3009049afe954c587c5a7c26a",
+    "tests/fixtures/comprehensions/containers.py": "eb41b01bf52539ca63d12b3a6dff04e9f7144f9a56b9400bc4ddcdc993f89450",
+    "tests/fixtures/comprehensions/effects.py": "84ed6a6904d312f45499542271151c9b8e9cdb4fae1f4e420a7db269353ddcc6",
+    "tests/fixtures/comprehensions/imported/facade.py": "512361b0c69ee74b13171106d7e253c77c71bb4adb5ce97cbba9e6a052f39e5a",
+    "tests/fixtures/comprehensions/imported/helpers.py": "67eee6918df81fcf1ab2fb65673aefe6c7e1b932e03a52fa8996e60463256286",
+    "tests/fixtures/comprehensions/imported/main.py": "f9294a683edf9df46a04777afee80d3ed08db7ade78b397e71eba5dc39f236ae",
+    "tests/fixtures/comprehensions/iteration.py": "3894961fc768597f11506a0c5d07d9c1e7b3c9a294c7eb4a2ccb8d0c9c5738fb",
+    "tests/fixtures/comprehensions/ownership.py": "d921fbef3b7c9acd5ec8a61def79d838a4ed17cd3a8bc97de94e18d2241a7cea",
+    "tests/fixtures/comprehensions/scoping.py": "137401b5756b0b711db61ad0ed3c500ae6d7981611b0b36bfc86a737765459c3",
+    "tests/fixtures/containers/contextual.py": "2cb63da3dfb77ebe72f0cc758a51af9fc3dcaeba5f275ffc186d3d5ab46bc083",
+    "tests/fixtures/containers/dictionaries.py": "f8603f41a2bac9a8209557538b06314d62b2d5888c6b06af13ee86510ea97f3b",
+    "tests/fixtures/containers/index_proofs.py": "c5246e43c65bb66781fa16ce4ea9daa39474569ec03af470d5a35fde11062e6a",
+    "tests/fixtures/containers/iteration.py": "1a32951ce1db29274156067b099169b1bea9633a3462e29cde409a4a0adc6afc",
+    "tests/fixtures/containers/lists.py": "958067d313b7ca0015b49532a32efc1369b24738c012becf6465b52d07d8f961",
+    "tests/fixtures/containers/objects.py": "86c25e805beccb666b331c10351f674a9d7dc7493a1311e388bd3df65adf4e89",
+    "tests/fixtures/containers/optional.py": "f091b226523e2def53faea8692ea6cedfbf1527fd57245a7f9b71d55eaa4b18e",
+    "tests/fixtures/containers/optional_effects.py": "c48d7757e1b20d1fa042aa221b7c4162b62ce50bb941078cd8651728ec0b4f77",
+    "tests/fixtures/containers/optional_flow.py": "b214eaf2cd9016f6d881491b44fcbe5fa5a8bf90ee286fa9a241adbf413c03d5",
+    "tests/fixtures/containers/representation_cleanup.py": "1bba523c14e49a219581fcfac3ec3cf0c56e35a30a27f1250529f9781f276f1a",
+    "tests/fixtures/containers/representation_niches.py": "8cddfe6474b1ec03502aaca243224761a7577a63df7defc6d4e5e3e161a2efb1",
+    "tests/fixtures/containers/sets.py": "dca2b038827e77a9cea25b1034aca14adc4eb1e9f4c6844b7c74a7ea3a92aedd",
+    "tests/fixtures/containers/string_concat.py": "e23c2e5a0ab749f429983a1b551a8c0d4fdabcb39b6c83ff56f5a24182753fe7",
+    "tests/fixtures/containers/strings.py": "d1d2aeb83b6906ccfba1242a23c3be7756915bd2cc86cfcb8ac28703a4b78c51",
+    "tests/fixtures/containers/tuples.py": "be3b2819fc7e8aefd2e14621e67dace0b7a8afc030721fcde6b1fecfe52a592d",
+    "tests/fixtures/imports/arithmetic.py": "61e3f1d26734cf56315c4fccf666e0570cd3b25182e105e4596faaaf5ce93c80",
+    "tests/fixtures/imports/entry.py": "1d573fb62ea858a814cfde55c439dcfa9c66838bac553db5b47b8cb18dd4d5ee",
+    "tests/fixtures/imports/package/__init__.py": "82efee395ef7da7d89ecf588a2459bb975ec94b3d2ac48b358c9e3b735597e25",
+    "tests/fixtures/imports/package/__main__.py": "4f217f1612640f31fe685e70a73f662438dc42eafd8a81e782f8539fce46e6d5",
+    "tests/fixtures/imports/package/nested/__init__.py": "3976178a3891d14d6abd358ff4d68f3a721adabbd76d10f34e5a8bb1de07ed04",
+    "tests/fixtures/imports/package/nested/labels.py": "802c90cda3d7cd7c61080a5e8c065a71597a29f0646981e156e126b074e4b514",
+    "tests/fixtures/imports/package/operations.py": "eacb80ef165efbe1225bced68a8e5387ce45af270a5152622a949469b0d4e029",
+    "tests/fixtures/imports/package/program.py": "b0b1f15f2bfea46039555f8ccb5fd73f32b1f94705b004b083ecc466e4aac0c6",
+    "tests/imports.py": "b3f38a06a5cd40b8f7f1b233739240aad7262868425c49c23a8fbffec67b127a",
+    "tests/io.py": "631d08df643102928d7851a20080baa6bc3eefb75a2f634e00f061ff9defc6bb",
+    "tests/lto.py": "b49156b14c746a6fc34a512eb7263ad25f23d5aecb87ce352b084bb0ff0d5a3f",
+    "tests/programs/borrowed_operands.py": "b11f660bf7be77819c6ce8837b78cda087cfd6f00ab74715ccfea88022cb8b1c",
+    "tests/programs/constant_division.py": "9625893a535b7fbe7421acecce65cee6e9ea06f050b9e59473199d6b1fb38f19",
+    "tests/programs/control_flow.py": "0ab7519f7a2013b611e9c946f95edc48ea254c41514ef331eef10c02178d6b31",
+    "tests/programs/decimal_input.py": "540380824cecc0c073942118144c17d2185c2c9cb92d0d6ee7eb171a55bf8264",
+    "tests/programs/integer_matrix.py": "36d33ac4564ce1a810cfcda04caf67d4775e9e01fdf56cca4eafc08efa8caf3c",
+    "tests/programs/ownership.py": "b581438ef1fdb00edc399f550112c5c153c152f15d4d5cbfd7c33357b9d84d29",
+    "tests/programs/short_strings.py": "c35fc3f77c55f5d5cc70fa3b46312c290180207c5224d0aaee2bf7476688eed0"
+  }
+}
