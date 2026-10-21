@@ -5,6 +5,7 @@ mod ir;
 mod llvm;
 mod modules;
 mod narrowing;
+mod ranges;
 mod tuples;
 mod types;
 
@@ -26,7 +27,8 @@ pub fn check(source: &str) -> Result<(), String> {
 pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String> {
     let mut module = frontend::lower(&modules::SourceGraph::single(source)?)?;
     tuples::scalarize(&mut module);
-    Ok(llvm::emit(&module, options.address_sanitizer))
+    let ranges = ranges::analyze(&module);
+    Ok(llvm::emit(&module, &ranges, options.address_sanitizer))
 }
 
 /// The generated IR and every source file that must be protected from output writes.
@@ -49,8 +51,9 @@ pub fn compile_file(
     let graph = modules::SourceGraph::load(path, module_root)?;
     let mut module = frontend::lower(&graph)?;
     tuples::scalarize(&mut module);
+    let ranges = ranges::analyze(&module);
     Ok(Compilation {
-        llvm_ir: llvm::emit(&module, options.address_sanitizer),
+        llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer),
         input_paths: graph
             .modules
             .into_iter()

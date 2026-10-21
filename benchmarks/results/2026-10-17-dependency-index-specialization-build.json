@@ -1,0 +1,115 @@
+{
+  "git_head": "c0cb211cabbafb9d666bea4417a9a296a9856821",
+  "git_status": "",
+  "rustc_verbose": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8\n",
+  "cargo_wrapper": "#!/bin/sh\nexport CARGO_HOME=/home/dev-user/.cache/relar/cargo-home\nexport CARGO_TARGET_DIR=/home/dev-user/.cache/relar/target\nexport CARGO_BUILD_BUILD_DIR=/home/dev-user/.cache/ohm/shared-build\nexport CARGO_UNSTABLE_OHM_PROC_MACRO_TRUST=all\nexport CARGO_UNSTABLE_OHM_NATIVE_TOOL_TRUST=all\nexec cargo +ohm -Zohm-defaults=no \"$@\"\n",
+  "compiler_build": [
+    "sh",
+    "/tmp/relar-cargo.sh",
+    "build",
+    "--workspace",
+    "--release",
+    "--locked"
+  ],
+  "runtime_lto_build": [
+    "sh",
+    "/tmp/relar-cargo.sh",
+    "build",
+    "-p",
+    "relar-runtime",
+    "--release",
+    "--locked",
+    "--target-dir",
+    "/home/dev-user/.cache/relar/lto-target"
+  ],
+  "runtime_lto_rustflags": "-Clinker-plugin-lto",
+  "sha256": {
+    "benchmarks/local/dependency-index-final-tools/relar": "f68cd09dbb90ca7f4f441c2100af693b0235bc5f5af72484f392da5ee4848b55",
+    "benchmarks/local/dependency-index-final-tools/librelar_runtime.a": "918bb5472036537bfef8d97d27ed94760fc9ed1cdd21b29cea29d2d0557c0113",
+    "benchmarks/local/dependency-index-final-tools/librelar_runtime_lto.a": "c3e968cd9bc426d3c380f43e601ed21763282f9e285218d50a18f16204fbb2ff"
+  },
+  "source_sha256": {
+    "Cargo.toml": "ce49064770ad21744c8ac6cea604da7408be1e5ec474e3f90206fa95f2af614f",
+    "Cargo.lock": "62b84d5f29e184143562b4a022bdb96eed14d9880c922cd36e3b38ce2d3ad2b9",
+    "crates/relar-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
+    "crates/relar-runtime/Cargo.toml": "ca46c91b45fcda42d7b6073c1de9178bf9e93ad7791bbd8b4c0e94caa739fb77",
+    "crates/relar-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
+    "crates/relar-compiler/src/classes.rs": "3d02a3968dcc28bf1c040e7bae4f1b2def6911fa9187813abc213b25a400914c",
+    "crates/relar-compiler/src/frontend.rs": "98026ca31bd572ef90a7603114be02d09024ef5b91bff21cb558646dcbd5a5be",
+    "crates/relar-compiler/src/ir.rs": "3371086ec43aeca6038383ba0492cf7b4d8ab6530374c601f53208d4048cf234",
+    "crates/relar-compiler/src/lib.rs": "9fafcca2352a05d26904d0202147356a9198fcd5afa95e215d2f4009d1ea133a",
+    "crates/relar-compiler/src/llvm.rs": "b35b69654dbcbddf5ceceae30fb0933b1edf6fc4389ae8ff898eb2a8682d9f63",
+    "crates/relar-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+    "crates/relar-compiler/src/modules.rs": "7133088ce8840ab6e72237bb55e8d118bfa30ab2962b486d325af6a0186fe7d6",
+    "crates/relar-compiler/src/narrowing.rs": "bd97ee2f328de9b5985473c5d223a0d73f740bf56a8481a74bd1cf10e5f07d30",
+    "crates/relar-compiler/src/ranges.rs": "08e1a9c1275c93ba8aa79c4dc87c264c63ef1258eff3fd8f43c917e54d806011",
+    "crates/relar-compiler/src/tuples.rs": "adf794c6fc74bcf22d7e786b3da49a8393fb83a9b5a9b9e7a0ad411e94a2a78e",
+    "crates/relar-compiler/src/types.rs": "9f7ad86c6cb4388be30fe00a93a730e31c8ba480910d6490e4d723fd02528ff4",
+    "crates/relar-runtime/src/lib.rs": "4ba7c19ca6e3a6297e4ac49307444451038edfe8879bc8830357e648740100fc",
+    "crates/relar-runtime/src/objects.rs": "a2d3f40d96555fe60def7b9487e9860586f4d9b6432a3321a28920dc3666fa65"
+  },
+  "frozen_source_snapshot": {
+    "path": "benchmarks/local/dependency-index-final-tools/build-record.json",
+    "sha256": "5165aa143c27db0f157291ce7ab94e3be3408ce62e322e0e705c595a0c24da31",
+    "note": "The ignored local snapshot retains full source contents; all final source hashes match the committed implementation."
+  },
+  "validation": {
+    "format": "passed",
+    "clippy_all_targets_warnings_denied": "passed",
+    "compiler_unit_tests": 10,
+    "runtime_unit_tests": 12,
+    "runtime_asan_unit_tests": 12,
+    "native_suites": [
+      "differential",
+      "imports",
+      "classes",
+      "containers",
+      "io"
+    ],
+    "normal_O0_O3_checks": [
+      112,
+      51,
+      58,
+      117,
+      20
+    ],
+    "thinlto_O3_checks": [
+      72,
+      47,
+      56,
+      78,
+      10
+    ],
+    "thinlto_cli_checks": 10,
+    "runtime_and_generated_asan_normal_O1_checks": [
+      72,
+      47,
+      56,
+      78,
+      10
+    ],
+    "runtime_and_generated_asan_thinlto_O3_checks": [
+      72,
+      47,
+      56,
+      78,
+      10
+    ],
+    "sanitizer_scope": "Runtime and emitted code instrumented with ASan; normal exits checked with LSan. Rust standard library was not rebuilt with instrumentation.",
+    "oracle_cases_per_comparison": 135,
+    "oracle_i64_representable_cases": 121,
+    "boundary_cases_per_comparison": 10,
+    "boundary_i64_overflow_rejections": 4,
+    "unchanged_program_and_rust_reference": "git diff against charlie/dependency-performance is empty for examples and benchmarks/reference/dependency_planner"
+  },
+  "sanitizer_runtime_artifacts": {
+    "normal": {
+      "path": "/home/dev-user/.cache/relar/asan-target/x86_64-unknown-linux-gnu/release/librelar_runtime.a",
+      "sha256": "ac14a46c034d114371f580adbc900f434088378f58da958c0af38608265bb539"
+    },
+    "thinlto": {
+      "path": "/home/dev-user/.cache/relar/asan-lto-target/x86_64-unknown-linux-gnu/release/librelar_runtime.a",
+      "sha256": "21d373edbaea9890582f65562b762cb0310f9d7fba94ae14c2a1eb7613428e54"
+    }
+  }
+}

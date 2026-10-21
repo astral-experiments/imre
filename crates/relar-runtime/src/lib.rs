@@ -1,18 +1,27 @@
 //! Runtime for checked Relar IR on 64-bit hosts.
 //!
 //! Integer handles are either signed 63-bit values tagged with a low one bit, or
-//! live `Rc<BigInt>` pointers. String and list handles are live `Rc` pointers of
+//! live `Rc<BigInt>` pointers to values outside that range. This canonical form
+//! lets compiler range proofs imply representation; extension adapters must
+//! normalize incoming integers before exposing them to generated code.
+//! String and list handles are live `Rc` pointers of
 //! their respective types. ABI arguments borrow these handles; results transfer
-//! one owned reference. Release functions consume one reference. Generated code
+//! one owned reference unless an entry point explicitly documents a borrowed
+//! result. Release functions consume one reference. Generated code
 //! must never forge, confuse, or reuse released handles. There are no callbacks
-//! or finalizers in this runtime, so a container borrow cannot reenter user code.
+//! or finalizers in this runtime, so a container access cannot reenter user code.
+//! Handles belong to one execution thread. An operation must finish before
+//! another operation accesses the same mutable storage; no storage reference or
+//! buffer address may escape. Aliased handles are allowed and observe sequential
+//! mutations. Future callback or threaded extension boundaries must uphold these
+//! invariants before entering this ABI.
 
 mod objects;
 
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
 use std::borrow::Cow;
-use std::cell::RefCell;
+use std::cell::UnsafeCell;
 use std::io::{self, BufWriter, IsTerminal, Write};
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
@@ -22,8 +31,15 @@ const MIN_SMALL: i64 = -(1_i64 << 62);
 const MAX_SMALL: i64 = (1_i64 << 62) - 1;
 const _: () = assert!(size_of::<usize>() == 8 && align_of::<BigInt>() >= 2);
 
+/// Lists use nonzero elements at least eight bytes wide, and a Vec allocation
+/// cannot exceed `isize::MAX` bytes. The compiler shares this inclusive bound
+/// when proving that a list length and derived indices fit tagged small integers.
+pub const MAX_LIST_LEN: usize = (isize::MAX as usize) / 8;
+
 /// Owns exactly one integer reference; small integers require no allocation.
 struct Int(usize);
+
+const _: () = assert!(size_of::<Int>() >= 8 && MAX_LIST_LEN <= MAX_SMALL as usize);
 
 impl Int {
     fn from_usize(value: usize) -> Self {
@@ -92,8 +108,41 @@ impl Drop for Int {
     }
 }
 
+/// Interior storage whose aliases are mediated by the closed runtime ABI.
+///
+/// The higher-ranked closures cannot return references tied to their input.
+/// Access remains unsafe: a closure could otherwise reenter through an aliased
+/// handle while its storage reference is live. Owned elements may escape after
+/// acquisition; storage references and buffer pointers may not.
+struct StorageCell<T>(UnsafeCell<T>);
+
+impl<T> StorageCell<T> {
+    fn new(value: T) -> Self {
+        Self(UnsafeCell::new(value))
+    }
+
+    /// # Safety
+    /// No mutable reference to this storage may be live. The closure must not
+    /// reenter an operation on this cell, and no storage reference or buffer
+    /// address may escape. All access must remain on the owning thread.
+    unsafe fn with<R>(&self, read: impl for<'a> FnOnce(&'a T) -> R) -> R {
+        // SAFETY: the caller guarantees nonoverlapping, nonreentrant access.
+        read(unsafe { &*self.0.get() })
+    }
+
+    /// # Safety
+    /// No other reference to this storage may be live. The closure must not
+    /// reenter an operation on this cell, and no storage reference or buffer
+    /// address may escape. All access must remain on the owning thread. Return
+    /// displaced owners so they are dropped only after mutable access ends.
+    unsafe fn with_mut<R>(&self, write: impl for<'a> FnOnce(&'a mut T) -> R) -> R {
+        // SAFETY: the caller guarantees exclusive, nonreentrant access.
+        write(unsafe { &mut *self.0.get() })
+    }
+}
+
 /// An opaque, nonmoving list allocation. Its resizable buffer stays inside Rust.
-pub struct List(RefCell<Vec<Int>>);
+pub struct List(StorageCell<Vec<Int>>);
 
 /// Immutable UTF-8 storage behind an opaque `Rc` handle. Short strings fit inside
 /// that allocation; longer strings own a separate buffer. LLVM never reads this
@@ -273,6 +322,10 @@ pub unsafe extern "C" fn relar_int_binary(a: usize, b: usize, op: u32) -> usize 
 
 /// # Safety
 /// Both arguments must be live integer handles.
+// Generated code compares small integers directly. Keep BigInt comparison code
+// from inflating its hot callers during ThinLTO.
+#[cold]
+#[inline(never)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_int_compare(a: usize, b: usize) -> i32 {
     // SAFETY: the ABI caller keeps both handles alive.
@@ -415,7 +468,7 @@ pub extern "C" fn relar_input() -> *const Str {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_list_new() -> *const List {
-    Rc::into_raw(Rc::new(List(RefCell::new(Vec::new()))))
+    Rc::into_raw(Rc::new(List(StorageCell::new(Vec::new()))))
 }
 
 /// # Safety
@@ -481,23 +534,119 @@ pub unsafe extern "C" fn relar_list_get(list: *const List, at: usize) -> usize {
     // SAFETY: the caller roots the index; conversion cannot call user code.
     let at = unsafe { Int::borrow(at) };
     let at = decode_index(&at);
-    // SAFETY: the caller roots both arguments; this runtime cannot call user code.
-    let list = unsafe { (&*list).0.borrow() };
-    list[index(at, list.len())].clone().into_raw()
+    // SAFETY: this rooted list is accessed only for the nonreentrant clone.
+    let owned = unsafe { (&*list).0.with(|list| list[index(at, list.len())].clone()) };
+    owned.into_raw()
+}
+
+/// Reads an element using a compiler-proven nonnegative, decoded index.
+///
+/// # Safety
+/// `list` must be a rooted list handle. `at` is the exact mathematical index,
+/// represented without truncation as a native unsigned integer, not a tagged
+/// integer handle. The compiler must prove nonnegativity before selecting this
+/// entry point; bounds are still checked, and the result owns one reference.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_get_index(list: *const List, at: usize) -> usize {
+    // SAFETY: the caller roots the list, and the owned clone cannot reenter.
+    let owned = unsafe {
+        (&*list).0.with(|list| {
+            list.get(at)
+                .unwrap_or_else(|| fail("IndexError", "list index out of range"))
+                .clone()
+        })
+    };
+    owned.into_raw()
+}
+
+/// Borrows an integer word without retaining it or exposing list storage.
+///
+/// # Safety
+/// `list` must remain rooted, and its selected element must not be replaced or
+/// removed until the returned word has been consumed. The result is a borrowed
+/// canonical integer handle, not an owned reference, and must not be released.
+/// `at` must be the exact nonnegative native index described by
+/// `relar_list_get_index`; current bounds are still checked.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_borrow_index(list: *const List, at: usize) -> usize {
+    // SAFETY: the caller roots the list and its element throughout consumption.
+    // Only the word escapes this nonreentrant access, never a storage reference.
+    unsafe {
+        (&*list).0.with(|list| {
+            list.get(at)
+                .unwrap_or_else(|| fail("IndexError", "list index out of range"))
+                .0
+        })
+    }
 }
 
 /// # Safety
 /// The arguments must be live list and integer handles.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_list_set(list: *const List, at: usize, value: usize) {
-    // SAFETY: the caller roots the index; conversion cannot call user code.
-    let at = unsafe { Int::borrow(at) };
+    // SAFETY: the caller roots both integers; conversion and acquisition cannot reenter.
+    let (at, value) = unsafe { (Int::borrow(at), Int::borrow(value)) };
     let at = decode_index(&at);
-    // SAFETY: the caller roots all three arguments for the duration of the call.
-    let (mut list, value) = unsafe { ((&*list).0.borrow_mut(), Int::borrow(value)) };
-    let at = index(at, list.len());
-    let old = std::mem::replace(&mut list[at], (*value).clone());
-    drop(list);
+    // SAFETY: no storage reference escapes this exclusive, nonreentrant access.
+    let old = unsafe {
+        (&*list).0.with_mut(|list| {
+            let at = index(at, list.len());
+            std::mem::replace(&mut list[at], (*value).clone())
+        })
+    };
+    drop(old);
+}
+
+/// Replaces an element using a compiler-proven nonnegative, decoded index.
+///
+/// # Safety
+/// `list` and `value` must be rooted list and integer handles. `at` must be the
+/// exact nonnegative native index described by `relar_list_get_index`. Bounds are
+/// checked at this call, including after any intervening mutation through an
+/// alias. The replacement is acquired before the displaced owner is released.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_set_index(list: *const List, at: usize, value: usize) {
+    // SAFETY: the caller roots both handles for the operation.
+    let value = unsafe { Int::borrow(value) };
+    // SAFETY: replacement cannot reenter and returns the displaced owner.
+    let old = unsafe {
+        (&*list).0.with_mut(|list| {
+            let slot = list
+                .get_mut(at)
+                .unwrap_or_else(|| fail("IndexError", "list index out of range"));
+            std::mem::replace(slot, (*value).clone())
+        })
+    };
+    drop(old);
+}
+
+/// Copies an element within one list, acquiring the source before replacement.
+///
+/// # Safety
+/// `list` must be rooted. Both indices must be exact nonnegative native indices,
+/// as described by `relar_list_get_index`. The source is checked and acquired
+/// before the destination is checked, preserving assignment's evaluation order.
+/// The displaced owner is released only after mutable storage access ends.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_copy_index(
+    list: *const List,
+    destination: usize,
+    source: usize,
+) {
+    // SAFETY: the caller roots the list; cloning cannot reenter, and only the
+    // displaced owner escapes this exclusive access. Self-copy acquires first.
+    let old = unsafe {
+        (&*list).0.with_mut(|list| {
+            let value = list
+                .get(source)
+                .unwrap_or_else(|| fail("IndexError", "list index out of range"))
+                .clone();
+            let slot = list
+                .get_mut(destination)
+                .unwrap_or_else(|| fail("IndexError", "list index out of range"));
+            std::mem::replace(slot, value)
+        })
+    };
     drop(old);
 }
 
@@ -505,40 +654,49 @@ pub unsafe extern "C" fn relar_list_set(list: *const List, at: usize, value: usi
 /// The arguments must be live list and integer handles.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_list_append(list: *const List, value: usize) {
-    // SAFETY: the caller roots both arguments; no callbacks occur under the borrow.
-    let (mut list, value) = unsafe { ((&*list).0.borrow_mut(), Int::borrow(value)) };
-    list.try_reserve(1)
-        .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
-    list.push((*value).clone());
+    // SAFETY: the caller roots both handles; allocation and acquisition cannot
+    // reenter the runtime, and no storage reference escapes the closure.
+    unsafe {
+        let value = Int::borrow(value);
+        (&*list).0.with_mut(|list| {
+            list.try_reserve(1)
+                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+            list.push((*value).clone());
+        });
+    }
 }
 
 /// # Safety
 /// The argument must be a live list handle. Returns one owned integer reference.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_list_pop(list: *const List) -> usize {
-    // SAFETY: the caller roots the list and this operation does not reenter.
-    unsafe { &*list }
-        .0
-        .borrow_mut()
-        .pop()
-        .unwrap_or_else(|| fail("IndexError", "pop from empty list"))
-        .into_raw()
+    // SAFETY: the caller roots the list, and removal returns an independent owner.
+    let owned = unsafe {
+        (&*list).0.with_mut(|list| {
+            list.pop()
+                .unwrap_or_else(|| fail("IndexError", "pop from empty list"))
+        })
+    };
+    owned.into_raw()
 }
 
 /// # Safety
 /// The argument must be a live list handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_list_len(list: *const List) -> usize {
-    // SAFETY: the caller roots the list while its length is read.
-    Int::from_usize(unsafe { &*list }.0.borrow().len()).into_raw()
+    // SAFETY: the rooted list is accessed only for a nonreentrant length read.
+    let length = unsafe { (&*list).0.with(Vec::len) };
+    debug_assert!(length <= MAX_LIST_LEN);
+    // Vec<Int>'s allocation limit guarantees that this is a small integer.
+    (length << 1) | 1
 }
 
 /// # Safety
 /// The arguments must be live list and integer handles. Returns a new list.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_list_repeat(list: *const List, count: usize) -> *const List {
-    // SAFETY: both handles are rooted by the caller; integer conversion cannot reenter.
-    let (list, count) = unsafe { ((&*list).0.borrow(), Int::borrow(count)) };
+    // SAFETY: the caller roots the count; integer conversion cannot reenter.
+    let count = unsafe { Int::borrow(count) };
     let count = count
         .as_small()
         .map(|value| value as isize)
@@ -552,20 +710,27 @@ pub unsafe extern "C" fn relar_list_repeat(list: *const List, count: usize) -> *
         return relar_list_new();
     }
     let count = count as usize;
-    let length = list
-        .len()
-        .checked_mul(count)
-        .unwrap_or_else(|| fail("MemoryError", "list is too large"));
-    let mut result = Vec::new();
-    result
-        .try_reserve_exact(length)
-        .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
-    if !list.is_empty() {
-        for _ in 0..count {
-            result.extend(list.iter().cloned());
-        }
-    }
-    Rc::into_raw(Rc::new(List(RefCell::new(result))))
+    // SAFETY: cloning creates owned elements without reentry; only the new
+    // vector escapes, and no references into the source buffer are retained.
+    let result = unsafe {
+        (&*list).0.with(|list| {
+            let length = list
+                .len()
+                .checked_mul(count)
+                .unwrap_or_else(|| fail("MemoryError", "list is too large"));
+            let mut result = Vec::new();
+            result
+                .try_reserve_exact(length)
+                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+            if !list.is_empty() {
+                for _ in 0..count {
+                    result.extend(list.iter().cloned());
+                }
+            }
+            result
+        })
+    };
+    Rc::into_raw(Rc::new(List(StorageCell::new(result))))
 }
 
 #[unsafe(no_mangle)]
@@ -650,5 +815,69 @@ mod tests {
             drop(big);
             assert_eq!(saved.big().as_ref(), &BigInt::from(1_u64 << 63));
         }
+    }
+
+    #[test]
+    fn decoded_indices_acquire_before_replacing_the_only_stored_owner() {
+        let big = Rc::new(BigInt::from(1_u128 << 100));
+        let weak = Rc::downgrade(&big);
+        let word = Rc::as_ptr(&big) as usize;
+        let list = relar_list_new();
+        // SAFETY: the list roots the integer after its original owner is dropped.
+        // Decoded zero is a native index; every acquired result is released.
+        unsafe {
+            relar_list_append(list, word);
+            drop(big);
+            relar_list_set_index(list, 0, word);
+            let saved = Int(relar_list_get_index(list, 0));
+            relar_list_set_index(list, 0, Int::small(7).unwrap().0);
+            assert_eq!(Int(relar_list_len(list)).as_small(), Some(1));
+            relar_list_release(list);
+            assert_eq!(saved.big().as_ref(), &BigInt::from(1_u128 << 100));
+            assert!(weak.upgrade().is_some());
+            drop(saved);
+        }
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn borrowed_indices_and_list_copy_preserve_bigint_owners() {
+        let source = Rc::new(BigInt::from(1_u128 << 100));
+        let displaced = Rc::new(BigInt::from(1_u128 << 120));
+        let source_weak = Rc::downgrade(&source);
+        let displaced_weak = Rc::downgrade(&displaced);
+        let list = relar_list_new();
+        // SAFETY: the list roots both integers after their original owners are
+        // dropped. Borrowed words are consumed before any list mutation; owned
+        // results and the list reference are each released exactly once.
+        unsafe {
+            relar_list_append(list, Rc::as_ptr(&source) as usize);
+            relar_list_append(list, Rc::as_ptr(&displaced) as usize);
+            drop(source);
+            drop(displaced);
+            {
+                let borrowed = Int::borrow(relar_list_borrow_index(list, 0));
+                assert_eq!(borrowed.big().as_ref(), &BigInt::from(1_u128 << 100));
+                assert_eq!(source_weak.strong_count(), 1);
+            }
+            relar_list_copy_index(list, 0, 0);
+            assert_eq!(source_weak.strong_count(), 1);
+            relar_list_copy_index(list, 1, 0);
+            assert_eq!(source_weak.strong_count(), 2);
+            assert!(displaced_weak.upgrade().is_none());
+            relar_list_set_index(list, 0, Int::small(7).unwrap().0);
+            assert_eq!(source_weak.strong_count(), 1);
+            {
+                let borrowed = Int::borrow(relar_list_borrow_index(list, 1));
+                assert_eq!(borrowed.big().as_ref(), &BigInt::from(1_u128 << 100));
+                assert_eq!(source_weak.strong_count(), 1);
+            }
+            let saved = Int(relar_list_get_index(list, 1));
+            relar_list_release(list);
+            assert_eq!(saved.big().as_ref(), &BigInt::from(1_u128 << 100));
+            assert_eq!(source_weak.strong_count(), 1);
+            drop(saved);
+        }
+        assert!(source_weak.upgrade().is_none());
     }
 }

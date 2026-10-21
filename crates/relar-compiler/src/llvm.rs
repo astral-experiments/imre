@@ -3,6 +3,7 @@
 use std::fmt::Write;
 
 use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Function, Module, Statement, Type};
+use crate::ranges::RangeFacts;
 
 impl Type {
     fn llvm(self) -> &'static str {
@@ -36,6 +37,7 @@ impl Type {
 struct Value {
     ty: Type,
     operand: String,
+    small_integer: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -50,7 +52,7 @@ struct Operand {
     ownership: Ownership,
 }
 
-pub(crate) fn emit(module: &Module, sanitize: bool) -> String {
+pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> String {
     let mut emitter = Emitter {
         code: String::new(),
         strings: Vec::new(),
@@ -61,7 +63,9 @@ pub(crate) fn emit(module: &Module, sanitize: bool) -> String {
         loops: Vec::new(),
         locals: Vec::new(),
         borrowed_params: Vec::new(),
+        small_locals: Vec::new(),
         sanitize,
+        ranges,
     };
     for (id, function) in module.functions.iter().enumerate() {
         emitter.function(function, &format!("fn_{id}"), false);
@@ -88,7 +92,7 @@ pub(crate) fn emit(module: &Module, sanitize: bool) -> String {
     output
 }
 
-struct Emitter {
+struct Emitter<'a, 'module> {
     code: String,
     strings: Vec<Vec<u8>>,
     next_value: usize,
@@ -98,10 +102,12 @@ struct Emitter {
     loops: Vec<(String, String)>,
     locals: Vec<Type>,
     borrowed_params: Vec<bool>,
+    small_locals: Vec<bool>,
     sanitize: bool,
+    ranges: &'a RangeFacts<'module>,
 }
 
-impl Emitter {
+impl Emitter<'_, '_> {
     fn line(&mut self, line: impl AsRef<str>) {
         writeln!(self.code, "  {}", line.as_ref()).unwrap();
     }
@@ -144,6 +150,7 @@ impl Emitter {
         Value {
             ty: returns,
             operand: self.instruction(format!("call {} @{name}({args})", returns.llvm())),
+            small_integer: false,
         }
     }
 
@@ -157,6 +164,9 @@ impl Emitter {
     }
 
     fn retain(&mut self, value: &Value) {
+        if value.small_integer {
+            return;
+        }
         let name = match value.ty {
             Type::Int => "retain_int",
             Type::Str => "relar_str_retain",
@@ -170,6 +180,9 @@ impl Emitter {
     }
 
     fn release(&mut self, value: &Value) {
+        if value.small_integer {
+            return;
+        }
         let name = match value.ty {
             Type::Int => "release_int",
             Type::Str => "relar_str_release",
@@ -185,11 +198,14 @@ impl Emitter {
     /// Borrows only direct local values. No expression in the closed IR can
     /// rebind a caller's slot: there are no closures, globals, assignment
     /// expressions, or exposed slot addresses. List mutation can remove an
-    /// element, so element reads and all other computed results stay owned.
+    /// element, so this general path keeps element reads and other computed
+    /// results owned. Comparison-specific borrowing proves no mutation occurs.
     fn operand(&mut self, expression: &Expr) -> Operand {
         if let ExprKind::Local(slot) = &expression.kind {
+            let mut value = self.borrow_slot(*slot);
+            value.small_integer |= self.ranges.integer(expression).is_some();
             Operand {
-                value: self.borrow_slot(*slot),
+                value,
                 ownership: Ownership::Borrowed,
             }
         } else {
@@ -216,8 +232,9 @@ impl Emitter {
 
     /// Acquires an owned value for assignment or return, which may outlive or
     /// replace the source slot.
-    fn load(&mut self, slot: usize) -> Value {
-        let value = self.borrow_slot(slot);
+    fn load(&mut self, slot: usize, small_integer: bool) -> Value {
+        let mut value = self.borrow_slot(slot);
+        value.small_integer |= small_integer;
         self.retain(&value);
         value
     }
@@ -227,6 +244,7 @@ impl Emitter {
         Value {
             ty,
             operand: self.instruction(format!("load {}, ptr %local{slot}", ty.llvm())),
+            small_integer: self.small_locals[slot],
         }
     }
 
@@ -269,6 +287,7 @@ impl Emitter {
     /// never change can share that root; rebound parameters need their own.
     fn function(&mut self, function: &Function, symbol: &str, entry: bool) {
         self.locals = function.locals.clone();
+        self.small_locals = self.ranges.small_locals(function);
         let mut rebound = vec![false; self.locals.len()];
         mark_rebound(&function.body, &mut rebound);
         self.borrowed_params = vec![false; self.locals.len()];
@@ -312,6 +331,7 @@ impl Emitter {
             let value = Value {
                 ty: function.locals[slot],
                 operand: format!("%arg{i}"),
+                small_integer: false,
             };
             if !self.borrowed_params[slot] {
                 self.retain(&value);
@@ -359,23 +379,28 @@ impl Emitter {
                 self.release(&value);
             }
             Statement::SetItem(list, index, expression) => {
+                if self.copy_item(list, index, expression) {
+                    return;
+                }
                 // Python evaluates an assignment's RHS before its target expressions.
+                let nonnegative = self.nonnegative_index(index);
                 let value = self.operand(expression);
                 let list = self.operand(list);
                 let index = self.operand(index);
-                self.set_item(&list.value, &index.value, &value.value);
+                self.set_item(&list.value, &index.value, &value.value, nonnegative);
                 self.release_operand(&value);
                 self.release_operand(&index);
                 self.release_operand(&list);
             }
             Statement::AugmentItem(list, index, op, expression) => {
                 // Augmented assignment instead roots the target and old item first.
+                let nonnegative = self.nonnegative_index(index);
                 let list = self.operand(list);
                 let index = self.operand(index);
-                let old = self.call("relar_list_get", Type::Int, &[&list.value, &index.value]);
+                let old = self.get_item(&list.value, &index.value, Type::Int, nonnegative);
                 let right = self.operand(expression);
                 let value = self.binary(*op, &old, &right.value);
-                self.void_call("relar_list_set", &[&list.value, &index.value, &value]);
+                self.set_item(&list.value, &index.value, &value, nonnegative);
                 self.release(&value);
                 self.release_operand(&right);
                 self.release(&old);
@@ -455,6 +480,9 @@ impl Emitter {
                 args,
                 body,
             } => {
+                // This proof includes the final increment and the hidden cursor,
+                // independently of reassignment of the visible loop target.
+                let small_cursor = self.ranges.range_cursor(statement).is_some();
                 let mut args = args.iter().map(|arg| self.expr(arg)).collect::<Vec<_>>();
                 if args.len() == 1 {
                     args.insert(0, small(0));
@@ -478,9 +506,12 @@ impl Emitter {
                 self.line("call void @relar_range_step_zero()");
                 self.line("unreachable");
                 self.start(&condition);
-                let current = self.borrow_slot(*cursor);
-                let stop_value = self.borrow_slot(*stop);
-                let step_value = self.borrow_slot(*step);
+                let mut current = self.borrow_slot(*cursor);
+                current.small_integer |= small_cursor;
+                let mut stop_value = self.borrow_slot(*stop);
+                stop_value.small_integer |= args[1].small_integer;
+                let mut step_value = self.borrow_slot(*step);
+                step_value.small_integer |= args[2].small_integer;
                 let positive = self.compare(Compare::Greater, &step_value, &small(0));
                 let below = self.compare(Compare::Less, &current, &stop_value);
                 let above = self.compare(Compare::Greater, &current, &stop_value);
@@ -490,7 +521,7 @@ impl Emitter {
                 ));
                 self.branch(&test, &body_label, &end);
                 self.start(&body_label);
-                let current = self.load(*cursor);
+                let current = self.load(*cursor, small_cursor);
                 self.store(*target, &current);
                 self.loops.push((end.clone(), increment.clone()));
                 self.block(body);
@@ -499,9 +530,15 @@ impl Emitter {
                     self.jump(&increment);
                 }
                 self.start(&increment);
-                let current = self.borrow_slot(*cursor);
-                let step_value = self.borrow_slot(*step);
-                let next = self.binary(Binary::Add, &current, &step_value);
+                let mut current = self.borrow_slot(*cursor);
+                current.small_integer |= small_cursor;
+                let mut step_value = self.borrow_slot(*step);
+                step_value.small_integer |= args[2].small_integer;
+                let next = if small_cursor {
+                    self.small_binary(Binary::Add, &current, &step_value, false)
+                } else {
+                    self.binary(Binary::Add, &current, &step_value)
+                };
                 self.store(*cursor, &next);
                 self.jump(&condition);
                 self.start(&end);
@@ -535,11 +572,18 @@ impl Emitter {
                 ty.llvm(),
                 contents.len()
             )),
+            small_integer: false,
         }
     }
 
     /// Produces an owned result; its consumer must transfer or release that ownership.
     fn expr(&mut self, expression: &Expr) -> Value {
+        let mut value = self.expression(expression);
+        value.small_integer |= self.ranges.integer(expression).is_some();
+        value
+    }
+
+    fn expression(&mut self, expression: &Expr) -> Value {
         match &expression.kind {
             ExprKind::Int(value) => {
                 if let Ok(value) = value.parse::<i64>()
@@ -553,10 +597,16 @@ impl Emitter {
             ExprKind::Bool(value) => Value {
                 ty: Type::Bool,
                 operand: u8::from(*value).to_string(),
+                small_integer: false,
             },
             ExprKind::Str(value) => self.literal(value, Type::Str),
             ExprKind::None => none(),
-            ExprKind::Local(slot) => self.load(*slot),
+            ExprKind::Local(slot) => {
+                let mut value = self.borrow_slot(*slot);
+                value.small_integer |= self.ranges.integer(expression).is_some();
+                self.retain(&value);
+                value
+            }
             ExprKind::List(values) => {
                 let name = if expression.ty == Type::ListInt {
                     "relar_list_new"
@@ -576,6 +626,7 @@ impl Emitter {
                     ty: expression.ty,
                     operand: self
                         .instruction(format!("call ptr @relar_object_new(i64 {})", values.len())),
+                    small_integer: false,
                 };
                 for (field, value) in values.iter().enumerate() {
                     let value = self.operand(value);
@@ -589,6 +640,7 @@ impl Emitter {
                 let object = Value {
                     ty: expression.ty,
                     operand: self.instruction("call ptr @relar_object_new(i64 1)"),
+                    small_integer: false,
                 };
                 self.set_field(&object, 0, &value.value);
                 self.release_operand(&value);
@@ -600,6 +652,7 @@ impl Emitter {
                 Value {
                     ty: expression.ty,
                     operand: "null".to_owned(),
+                    small_integer: false,
                 }
             }
             ExprKind::Unwrap(receiver) => {
@@ -609,16 +662,27 @@ impl Emitter {
                 value
             }
             ExprKind::Binary(op, left, right) => {
-                let left = self.operand(left);
-                let right = self.operand(right);
-                let result = self.binary(*op, &left.value, &right.value);
-                self.release_operand(&left);
-                self.release_operand(&right);
+                let direct = self.small_binary_proof(expression, left, right, *op);
+                let left_value = self.operand(left);
+                let right_value = self.operand(right);
+                let result = if let Some(adjust_floor) = direct {
+                    self.small_binary(*op, &left_value.value, &right_value.value, adjust_floor)
+                } else {
+                    self.binary(*op, &left_value.value, &right_value.value)
+                };
+                self.release_operand(&left_value);
+                self.release_operand(&right_value);
                 result
             }
             ExprKind::Negate(value) => {
+                let direct = self.ranges.integer(expression).is_some()
+                    && self.ranges.integer(value).is_some();
                 let value = self.operand(value);
-                let result = self.binary(Binary::Subtract, &small(0), &value.value);
+                let result = if direct {
+                    self.small_binary(Binary::Subtract, &small(0), &value.value, false)
+                } else {
+                    self.binary(Binary::Subtract, &small(0), &value.value)
+                };
                 self.release_operand(&value);
                 result
             }
@@ -627,6 +691,7 @@ impl Emitter {
                 Value {
                     ty: Type::Bool,
                     operand: self.instruction(format!("xor i1 {}, true", value.operand)),
+                    small_integer: false,
                 }
             }
             ExprKind::Boolean(and, values) => self.boolean(*and, values),
@@ -653,6 +718,7 @@ impl Emitter {
                 let object = Value {
                     ty: expression.ty,
                     operand: self.instruction(format!("call ptr @relar_object_new(i64 {fields})")),
+                    small_integer: false,
                 };
                 let mut inputs = vec![&object];
                 inputs.extend(args.iter().map(|arg| &arg.value));
@@ -696,6 +762,98 @@ impl Emitter {
         }
     }
 
+    /// Requires immediate operands and result, plus a nonzero divisor for
+    /// division. The optional result says whether Python's floor correction
+    /// can still be necessary. Missing proofs retain checked runtime arithmetic.
+    fn small_binary_proof(
+        &self,
+        expression: &Expr,
+        left: &Expr,
+        right: &Expr,
+        op: Binary,
+    ) -> Option<bool> {
+        self.ranges.integer(expression)?;
+        let left = self.ranges.integer(left)?;
+        let right = self.ranges.integer(right)?;
+        match op {
+            Binary::Add | Binary::Subtract | Binary::Multiply => Some(false),
+            Binary::FloorDivide | Binary::Modulo => {
+                if right.min <= 0 && right.max >= 0 {
+                    return None;
+                }
+                let same_sign =
+                    (left.min >= 0 && right.min > 0) || (left.max <= 0 && right.max < 0);
+                Some(!same_sign)
+            }
+            Binary::Repeat | Binary::Concat => None,
+        }
+    }
+
+    /// Emits arithmetic only after range analysis proves every value fits the
+    /// immediate representation and division cannot encounter zero. The result
+    /// stays tagged, preserving the ordinary calling and ownership convention.
+    /// Both the result and twice the result fit signed i64, so `nsw` is valid
+    /// for the arithmetic and encoding shift. This lets LLVM remove redundant
+    /// decode/encode round trips without imposing preconditions on Python code.
+    fn small_binary(
+        &mut self,
+        op: Binary,
+        left: &Value,
+        right: &Value,
+        adjust_floor: bool,
+    ) -> Value {
+        debug_assert!(left.small_integer && right.small_integer);
+        let left = self.instruction(format!("ashr i64 {}, 1", left.operand));
+        let right = self.instruction(format!("ashr i64 {}, 1", right.operand));
+        let result = match op {
+            Binary::Add | Binary::Subtract | Binary::Multiply => {
+                let instruction = match op {
+                    Binary::Add => "add",
+                    Binary::Subtract => "sub",
+                    Binary::Multiply => "mul",
+                    _ => unreachable!(),
+                };
+                self.instruction(format!("{instruction} nsw i64 {left}, {right}"))
+            }
+            Binary::FloorDivide | Binary::Modulo => {
+                let instruction = if matches!(op, Binary::FloorDivide) {
+                    "sdiv"
+                } else {
+                    "srem"
+                };
+                let result = self.instruction(format!("{instruction} i64 {left}, {right}"));
+                if adjust_floor {
+                    let remainder = if matches!(op, Binary::Modulo) {
+                        result.clone()
+                    } else {
+                        self.instruction(format!("srem i64 {left}, {right}"))
+                    };
+                    let nonzero = self.instruction(format!("icmp ne i64 {remainder}, 0"));
+                    let signs = self.instruction(format!("xor i64 {remainder}, {right}"));
+                    let opposite = self.instruction(format!("icmp slt i64 {signs}, 0"));
+                    let adjust = self.instruction(format!("and i1 {nonzero}, {opposite}"));
+                    if matches!(op, Binary::FloorDivide) {
+                        let adjust = self.instruction(format!("zext i1 {adjust} to i64"));
+                        self.instruction(format!("sub nsw i64 {result}, {adjust}"))
+                    } else {
+                        let adjust =
+                            self.instruction(format!("select i1 {adjust}, i64 {right}, i64 0"));
+                        self.instruction(format!("add nsw i64 {result}, {adjust}"))
+                    }
+                } else {
+                    result
+                }
+            }
+            Binary::Repeat | Binary::Concat => unreachable!("only proved integer arithmetic"),
+        };
+        let shifted = self.instruction(format!("shl nsw i64 {result}, 1"));
+        Value {
+            ty: Type::Int,
+            operand: self.instruction(format!("or i64 {shifted}, 1")),
+            small_integer: true,
+        }
+    }
+
     fn compare(&mut self, op: Compare, left: &Value, right: &Value) -> Value {
         let predicate = match op {
             Compare::Equal => "eq",
@@ -706,6 +864,10 @@ impl Emitter {
             Compare::GreaterEqual => "sge",
         };
         let operand = match left.ty {
+            Type::Int if left.small_integer && right.small_integer => self.instruction(format!(
+                "icmp {predicate} i64 {}, {}",
+                left.operand, right.operand
+            )),
             Type::Int => {
                 let order = self.instruction(format!(
                     "call i32 @compare_int(i64 {}, i64 {})",
@@ -738,11 +900,23 @@ impl Emitter {
         Value {
             ty: Type::Bool,
             operand,
+            small_integer: false,
         }
     }
 
     /// Keeps a chain's middle operand rooted until its final comparison completes.
     fn comparisons(&mut self, values: &[Expr], ops: &[Compare]) -> Value {
+        if let ([left, right], [op]) = (values, ops)
+            && read_only_integer(left)
+            && read_only_integer(right)
+        {
+            let left = self.comparison_operand(left);
+            let right = self.comparison_operand(right);
+            let result = self.compare(*op, &left.value, &right.value);
+            self.release_operand(&left);
+            self.release_operand(&right);
+            return result;
+        }
         let end = self.label();
         let mut incoming = Vec::new();
         let mut left = self.operand(&values[0]);
@@ -769,7 +943,38 @@ impl Emitter {
         Value {
             ty: Type::Bool,
             operand: self.instruction(format!("phi i1 {}", incoming.join(", "))),
+            small_integer: false,
         }
+    }
+
+    /// Requires both complete operands of a two-value integer comparison to
+    /// pass `read_only_integer`. A direct local roots the list, and neither
+    /// operand can remove or replace its elements before the comparison uses
+    /// this unretained word. Only the immediate get is borrowed; arithmetic and
+    /// nested reads keep their ordinary owned-result lowering.
+    fn comparison_operand(&mut self, expression: &Expr) -> Operand {
+        debug_assert!(read_only_integer(expression));
+        if let ExprKind::Builtin(Builtin::ListGet, args) = &expression.kind
+            && let [receiver, index] = args.as_slice()
+            && receiver.ty == Type::ListInt
+            && matches!(receiver.kind, ExprKind::Local(_))
+            && self.nonnegative_index(index)
+        {
+            let list = self.operand(receiver);
+            let index = self.operand(index);
+            let at = self.index_word(&index.value, true);
+            let word = self.instruction(format!(
+                "call i64 @relar_list_borrow_index(ptr {}, i64 {at})",
+                list.value.operand
+            ));
+            self.release_operand(&index);
+            self.release_operand(&list);
+            return Operand {
+                value: self.unpack_word(word, Type::Int),
+                ownership: Ownership::Borrowed,
+            };
+        }
+        self.operand(expression)
     }
 
     fn boolean(&mut self, and: bool, values: &[Expr]) -> Value {
@@ -794,6 +999,7 @@ impl Emitter {
         Value {
             ty: Type::Bool,
             operand: self.instruction(format!("phi i1 {}", incoming.join(", "))),
+            small_integer: false,
         }
     }
 
@@ -813,6 +1019,7 @@ impl Emitter {
                     Value {
                         ty: Type::Int,
                         operand: self.instruction(format!("or i64 {tagged}, 1")),
+                        small_integer: true,
                     }
                 }
                 Type::Str => self.call("relar_int_parse", Type::Int, &[&args[0].value]),
@@ -829,21 +1036,12 @@ impl Emitter {
                 Type::Int,
                 &[&args[0].value],
             ),
-            Builtin::ListGet => {
-                if args[0].value.ty == Type::ListInt {
-                    self.call(
-                        "relar_list_get",
-                        Type::Int,
-                        &[&args[0].value, &args[1].value],
-                    )
-                } else {
-                    let word = self.instruction(format!(
-                        "call i64 @relar_seq_get(ptr {}, i64 {})",
-                        args[0].value.operand, args[1].value.operand
-                    ));
-                    self.unpack_word(word, returns)
-                }
-            }
+            Builtin::ListGet => self.get_item(
+                &args[0].value,
+                &args[1].value,
+                returns,
+                self.nonnegative_index(&expressions[1]),
+            ),
             Builtin::Append => {
                 self.append(&args[0].value, &args[1].value);
                 none()
@@ -869,6 +1067,7 @@ impl Emitter {
                     Type::None => "true".to_owned(),
                     _ => "false".to_owned(),
                 },
+                small_integer: false,
             },
             Builtin::Print => {
                 match args[0].value.ty {
@@ -929,7 +1128,11 @@ impl Emitter {
             | Type::Tuple(_)
             | Type::Optional(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
-        Value { ty, operand }
+        Value {
+            ty,
+            operand,
+            small_integer: false,
+        }
     }
 
     fn get_field(&mut self, receiver: &Value, field: usize, ty: Type) -> Value {
@@ -963,18 +1166,131 @@ impl Emitter {
         }
     }
 
-    fn set_item(&mut self, list: &Value, index: &Value, value: &Value) {
-        if list.ty == Type::ListInt {
-            self.void_call("relar_list_set", &[list, index, value]);
-        } else {
-            let word = self.word(value);
-            self.line(format!(
-                "call void @relar_seq_set(ptr {}, i64 {}, i64 {word}, i32 {})",
-                list.operand,
-                index.operand,
-                representation_kind(value.ty)
-            ));
+    fn nonnegative_index(&self, expression: &Expr) -> bool {
+        self.ranges
+            .integer(expression)
+            .is_some_and(|range| range.min >= 0)
+    }
+
+    /// Fuses a copy only within the same rooted list local. Both index reads
+    /// must be immediate literals or stable locals, so evaluating the target
+    /// index before the runtime's source bounds check cannot introduce effects
+    /// or failures. The runtime checks and clones the source before validating
+    /// and replacing the destination, preserving self-copy and BigInt owners.
+    fn copy_item(&mut self, receiver: &Expr, index: &Expr, value: &Expr) -> bool {
+        let ExprKind::Local(target) = &receiver.kind else {
+            return false;
+        };
+        if receiver.ty != Type::ListInt || value.ty != Type::Int {
+            return false;
         }
+        let ExprKind::Builtin(Builtin::ListGet, args) = &value.kind else {
+            return false;
+        };
+        let [source_receiver, source] = args.as_slice() else {
+            return false;
+        };
+        if source_receiver.ty != Type::ListInt
+            || !matches!(&source_receiver.kind, ExprKind::Local(slot) if slot == target)
+            || ![source, index].into_iter().all(|expression| {
+                expression.ty == Type::Int
+                    && matches!(expression.kind, ExprKind::Local(_) | ExprKind::Int(_))
+                    && self.nonnegative_index(expression)
+            })
+        {
+            return false;
+        }
+        let list = self.operand(source_receiver);
+        let source = self.operand(source);
+        let destination = self.operand(index);
+        let from = self.index_word(&source.value, true);
+        let to = self.index_word(&destination.value, true);
+        self.line(format!(
+            "call void @relar_list_copy_index(ptr {}, i64 {to}, i64 {from})",
+            list.value.operand
+        ));
+        self.release_operand(&destination);
+        self.release_operand(&source);
+        self.release_operand(&list);
+        true
+    }
+
+    /// A proved nonnegative immediate can cross the specialized ABI as an
+    /// exact native index. The runtime still checks the current container size.
+    fn index_word(&mut self, index: &Value, nonnegative: bool) -> String {
+        if nonnegative {
+            debug_assert!(index.small_integer);
+            self.instruction(format!("lshr i64 {}, 1", index.operand))
+        } else {
+            index.operand.clone()
+        }
+    }
+
+    fn get_item(&mut self, list: &Value, index: &Value, returns: Type, nonnegative: bool) -> Value {
+        let family = if list.ty == Type::ListInt {
+            "list"
+        } else {
+            "seq"
+        };
+        let suffix = if nonnegative { "_index" } else { "" };
+        let index = self.index_word(index, nonnegative);
+        let word = self.instruction(format!(
+            "call i64 @relar_{family}_get{suffix}(ptr {}, i64 {index})",
+            list.operand
+        ));
+        self.unpack_word(word, returns)
+    }
+
+    fn set_item(&mut self, list: &Value, index: &Value, value: &Value, nonnegative: bool) {
+        let family = if list.ty == Type::ListInt {
+            "list"
+        } else {
+            "seq"
+        };
+        let suffix = if nonnegative { "_index" } else { "" };
+        let index = self.index_word(index, nonnegative);
+        let word = self.word(value);
+        let kind = if list.ty == Type::ListInt {
+            String::new()
+        } else {
+            format!(", i32 {}", representation_kind(value.ty))
+        };
+        self.line(format!(
+            "call void @relar_{family}_set{suffix}(ptr {}, i64 {index}, i64 {word}{kind})",
+            list.operand
+        ));
+    }
+}
+
+/// Proves only that integer evaluation cannot mutate a list or invoke user
+/// code. Allocation, arithmetic errors, and current bounds checks remain in
+/// their original order. Both complete comparison operands must pass before
+/// borrowing any element; integer temporaries have no user-defined finalizers.
+fn read_only_integer(expression: &Expr) -> bool {
+    if expression.ty != Type::Int {
+        return false;
+    }
+    match &expression.kind {
+        ExprKind::Int(_) | ExprKind::Local(_) => true,
+        ExprKind::Binary(op, left, right) => {
+            matches!(
+                op,
+                Binary::Add
+                    | Binary::Subtract
+                    | Binary::Multiply
+                    | Binary::FloorDivide
+                    | Binary::Modulo
+            ) && read_only_integer(left)
+                && read_only_integer(right)
+        }
+        ExprKind::Negate(value) => read_only_integer(value),
+        ExprKind::Builtin(Builtin::ListGet, args) => {
+            matches!(args.as_slice(), [receiver, index]
+                if receiver.ty == Type::ListInt
+                    && matches!(receiver.kind, ExprKind::Local(_))
+                    && read_only_integer(index))
+        }
+        _ => false,
     }
 }
 
@@ -1026,6 +1342,7 @@ fn small(value: i64) -> Value {
     Value {
         ty: Type::Int,
         operand: (((value as u64) << 1) | 1).to_string(),
+        small_integer: true,
     }
 }
 
@@ -1033,6 +1350,7 @@ fn none() -> Value {
     Value {
         ty: Type::None,
         operand: "0".to_owned(),
+        small_integer: false,
     }
 }
 
@@ -1047,6 +1365,8 @@ declare i64 @relar_object_len(ptr)
 declare ptr @relar_seq_new()
 declare i64 @relar_seq_get(ptr, i64)
 declare void @relar_seq_set(ptr, i64, i64, i32)
+declare i64 @relar_seq_get_index(ptr, i64)
+declare void @relar_seq_set_index(ptr, i64, i64, i32)
 declare void @relar_seq_append(ptr, i64, i32)
 declare i64 @relar_seq_pop(ptr)
 declare i64 @relar_seq_len(ptr)
@@ -1074,6 +1394,10 @@ declare void @relar_list_retain(ptr)
 declare void @relar_list_release(ptr)
 declare i64 @relar_list_get(ptr, i64)
 declare void @relar_list_set(ptr, i64, i64)
+declare i64 @relar_list_get_index(ptr, i64)
+declare void @relar_list_set_index(ptr, i64, i64)
+declare i64 @relar_list_borrow_index(ptr, i64)
+declare void @relar_list_copy_index(ptr, i64, i64)
 declare void @relar_list_append(ptr, i64)
 declare i64 @relar_list_pop(ptr)
 declare i64 @relar_list_len(ptr)
