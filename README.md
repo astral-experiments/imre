@@ -30,6 +30,31 @@ But not:
 - Generator functions or async code
 - Arbitrary decorators
 
+## Design
+
+Types are part of Relar's compilation contract: variables, containers, and class
+fields have known types, and each function has one declared or inferred
+signature. This lets Relar choose concrete representations. It aims to preserve
+Python's behavior for supported operations, including arbitrary-precision integers.
+
+Relar's runtime uses reference counting and restricts object graphs to avoid
+cycles. Compiled programs run without a Python installation, but Relar must
+implement the features and libraries they use. It cannot use arbitrary Python
+packages or CPython extensions.
+
+Other projects make different trade-offs:
+
+- [PyPy](https://pypy.org/) optimizes dynamic Python with a JIT as the program
+  runs. It supports much more of Python, but needs time to warm up.
+- [Codon](https://docs.exaloop.io/) also compiles Python ahead of time. It can
+  specialize functions for different argument types and can call CPython
+  explicitly. Its default `int` is 64-bit.
+- [Static Python](https://facebookincubator.github.io/cinderx/static-python) and
+  [mypyc](https://mypyc.readthedocs.io/) use types to optimize code running
+  within CPython, so compiled modules can interact with ordinary Python code.
+
+For more, see the [design](docs/design.md) and [supported subset](docs/subset.md).
+
 ## Benchmark
 
 Running the same [inventory reconciliation program](examples/inventory_reconciliation/)
