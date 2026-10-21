@@ -7,7 +7,7 @@ use std::os::fd::IntoRawFd;
 use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
-use super::{Int, Object, Storage, StorageCell, Str, fail, object};
+use super::{Int, Object, Storage, StorageCell, Str, StringPart, concat_parts, fail, object};
 
 pub(super) struct TextFile {
     stream: Option<Stream>,
@@ -89,12 +89,11 @@ impl TextFile {
         Ok(normalized)
     }
 
-    fn write(&mut self, text: &str) -> Result<usize> {
+    fn write(&mut self, text: &str) -> Result<()> {
         let Stream::Write(writer) = self.stream()? else {
             return Err(Error::new(Kind::UnsupportedOperation, "not writable"));
         };
-        writer.write_all(text.as_bytes()).map_err(os_error)?;
-        Ok(Int::from_usize(text.chars().count()).into_raw())
+        writer.write_all(text.as_bytes()).map_err(os_error)
     }
 
     fn flush(&mut self) -> Result<()> {
@@ -214,13 +213,61 @@ pub unsafe extern "C" fn relar_text_read(value: *const Object) -> *const Str {
 /// Raw zero signals failure; a successful empty write returns tagged zero (1).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_text_write(value: *const Object, text: *const Str) -> usize {
+    // SAFETY: the caller roots this immutable string throughout the write and count.
+    let text = unsafe { &*text };
     // SAFETY: text is immutable, both handles are rooted, and no storage escapes.
+    let result = unsafe {
+        object(value)
+            .0
+            .with_mut(|storage| storage.text_file_mut().write(text))
+    };
+    finish(
+        result.map(|()| Int::from_usize(text.chars().count()).into_raw()),
+        0,
+    )
+}
+
+/// Writes exactly as `relar_text_write` when the compiler discards its return
+/// value, avoiding a Unicode character-count scan. Returns 1 on success or 0
+/// with a pending error, including the same closed/unwritable-file checks.
+///
+/// # Safety
+/// Both handles must be rooted with matching types and pending state clear.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_text_write_discard(value: *const Object, text: *const Str) -> u8 {
+    // SAFETY: file I/O cannot reenter; only the write result leaves storage access.
     let result = unsafe {
         object(value)
             .0
             .with_mut(|storage| storage.text_file_mut().write(&*text))
     };
-    finish(result, 0)
+    finish(result.map(|()| 1), 0)
+}
+
+/// Builds the whole concatenation before checking the stream, then performs the
+/// same single write as `relar_text_write_discard`, without a temporary Rc owner.
+/// Returns 1 on success or 0 with a pending error; an empty result still checks
+/// closed and unwritable stream state.
+///
+/// # Safety
+/// `value` is rooted TextIO and pending is clear. The descriptor array and all
+/// fragments satisfy `relar_str_concat_parts`'s lifetime and UTF-8 requirements.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_text_write_parts(
+    value: *const Object,
+    parts: *const StringPart,
+    count: usize,
+) -> u8 {
+    // SAFETY: all fragments remain rooted and immutable through assembly.
+    let text = unsafe { concat_parts(parts, count) };
+    // SAFETY: the file remains rooted; no callback or storage reference escapes.
+    // Assembly precedes even the stream-state check, preserving evaluation order.
+    let result = unsafe {
+        object(value)
+            .0
+            .with_mut(|storage| storage.text_file_mut().write(&text))
+    };
+    finish(result.map(|()| 1), 0)
 }
 
 /// # Safety
@@ -396,6 +443,107 @@ mod tests {
         }
         assert!(weak.upgrade().is_none());
         assert_eq!(std::fs::read(&path).unwrap(), "é🦀\r\n".as_bytes());
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn discarded_writes_preserve_bytes_and_report_state_and_io_failures() {
+        let directory = Directory::new();
+        let path = directory.0.join("output");
+        let file = open(path.to_str().unwrap(), 1);
+        let alias = file.clone();
+        let text = Rc::new(Str::new("partsé\0"));
+        let ending = "🦀\n";
+        let parts = [
+            StringPart {
+                data: Rc::as_ptr(&text).cast(),
+                length: usize::MAX,
+            },
+            StringPart {
+                data: ending.as_ptr(),
+                length: ending.len(),
+            },
+        ];
+        // SAFETY: file aliases and temporary immutable strings remain rooted for
+        // each operation, and every pending failure is consumed before recovery.
+        unsafe {
+            assert_eq!(
+                relar_text_write_discard(Rc::as_ptr(&file), &Str::new("")),
+                1
+            );
+            assert_eq!(
+                relar_text_write_discard(Rc::as_ptr(&file), &Str::new("é\0🦀\n")),
+                1
+            );
+            assert_eq!(
+                relar_text_write_parts(Rc::as_ptr(&file), std::ptr::null(), 0),
+                1
+            );
+            assert_eq!(
+                relar_text_write_parts(Rc::as_ptr(&file), parts.as_ptr(), parts.len()),
+                1
+            );
+            assert_eq!(relar_text_close(Rc::as_ptr(&alias)), 1);
+            assert_eq!(
+                relar_text_write_discard(Rc::as_ptr(&file), &Str::new("")),
+                0
+            );
+            take_error(Kind::ValueError);
+            assert_eq!(
+                relar_text_write_parts(Rc::as_ptr(&file), std::ptr::null(), 0),
+                0
+            );
+            take_error(Kind::ValueError);
+        }
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            "é\0🦀\npartsé\0🦀\n".as_bytes()
+        );
+        let readonly = open(path.to_str().unwrap(), 0);
+        let full = open("/dev/full", 1);
+        let unbuffered = Str::from("x".repeat(8193));
+        let large_parts = [
+            StringPart {
+                data: unbuffered.as_ptr(),
+                length: 4096,
+            },
+            StringPart {
+                data: unbuffered[4096..].as_ptr(),
+                length: 4097,
+            },
+        ];
+        // SAFETY: each failed write leaves its rooted stream available for the
+        // following recovery; a large write reaches /dev/full immediately.
+        unsafe {
+            assert_eq!(
+                relar_text_write_discard(Rc::as_ptr(&readonly), &Str::new("")),
+                0
+            );
+            take_error(Kind::UnsupportedOperation);
+            assert_eq!(
+                relar_text_write_parts(Rc::as_ptr(&readonly), std::ptr::null(), 0),
+                0
+            );
+            take_error(Kind::UnsupportedOperation);
+            assert_eq!(relar_text_write_discard(Rc::as_ptr(&full), &unbuffered), 0);
+            take_error(Kind::OSError);
+            assert_eq!(
+                relar_text_write_parts(Rc::as_ptr(&full), large_parts.as_ptr(), large_parts.len()),
+                0
+            );
+            take_error(Kind::OSError);
+            assert_eq!(
+                relar_text_write_discard(Rc::as_ptr(&full), &Str::new("")),
+                1
+            );
+            assert_eq!(
+                relar_text_write_parts(Rc::as_ptr(&full), std::ptr::null(), 0),
+                1
+            );
+            // One assembled write bypasses the buffer on this failure. Fragmented
+            // writes would leave the first 4096 bytes buffered and make close fail.
+            assert_eq!(relar_text_close(Rc::as_ptr(&full)), 1);
+        }
         assert_eq!(relar_error_pending(), 0);
     }
 
