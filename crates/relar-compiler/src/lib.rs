@@ -4,6 +4,8 @@ mod frontend;
 mod ir;
 mod llvm;
 mod modules;
+mod narrowing;
+mod types;
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};

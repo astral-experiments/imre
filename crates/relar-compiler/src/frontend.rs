@@ -8,6 +8,8 @@ use ruff_text_size::Ranged;
 use crate::classes::Classes;
 use crate::ir::{self, Binary, Builtin, Compare, Expr, ExprKind, Statement, Type};
 use crate::modules::{Binding, DefinitionId, ModuleId, SourceGraph};
+use crate::narrowing;
+use crate::types::Types;
 
 #[derive(Clone)]
 struct Signature {
@@ -24,7 +26,7 @@ struct ClassInfo {
 
 impl ClassInfo {
     /// Resolves all nominal field types before checking constructors and methods.
-    fn new(graph: &SourceGraph) -> Result<Self, String> {
+    fn new(graph: &SourceGraph, types: &Types) -> Result<Self, String> {
         let declarations = Classes::collect(graph)?;
         let fields = declarations
             .definitions
@@ -39,6 +41,7 @@ impl ClassInfo {
                             graph,
                             class.definition.module,
                             &declarations,
+                            types,
                         )
                         .map_err(|error| {
                             format!(
@@ -52,24 +55,33 @@ impl ClassInfo {
             .collect::<Result<Vec<_>, _>>()?;
         // Reference counting is sufficient only while no accepted field graph can
         // close a cycle. This concerns storage types, not method signatures.
-        fn visit(id: usize, fields: &[Vec<Type>], states: &mut [u8]) -> bool {
+        fn visit_type(ty: Type, fields: &[Vec<Type>], types: &Types, states: &mut [u8]) -> bool {
+            if let Type::Class(id) = ty {
+                visit(id, fields, types, states)
+            } else {
+                types
+                    .children(ty)
+                    .into_iter()
+                    .all(|child| visit_type(child, fields, types, states))
+            }
+        }
+        fn visit(id: usize, fields: &[Vec<Type>], types: &Types, states: &mut [u8]) -> bool {
             if states[id] != 0 {
                 return states[id] == 2;
             }
             states[id] = 1;
-            for field in &fields[id] {
-                if let Type::Class(next) = field
-                    && !visit(*next, fields, states)
-                {
-                    return false;
-                }
+            if !fields[id]
+                .iter()
+                .all(|&ty| visit_type(ty, fields, types, states))
+            {
+                return false;
             }
             states[id] = 2;
             true
         }
         let mut states = vec![0; fields.len()];
         for (id, class) in declarations.definitions.iter().enumerate() {
-            if !visit(id, &fields, &mut states) {
+            if !visit(id, &fields, types, &mut states) {
                 return Err(graph.modules[class.definition.module].error(&class.node,
                     "cyclic heap types are unsupported; class fields must form an acyclic ownership graph"));
             }
@@ -83,13 +95,14 @@ impl ClassInfo {
 }
 
 const RESERVED: &[&str] = &[
-    "int", "bool", "str", "list", "len", "input", "print", "range", "None", "True", "False",
-    "__name__",
+    "int", "bool", "str", "list", "tuple", "len", "input", "print", "range", "None", "True",
+    "False", "__name__",
 ];
 
 /// Resolves the project-wide call graph without changing source-level namespaces.
 pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
-    let mut classes = ClassInfo::new(graph)?;
+    let types = Types::default();
+    let mut classes = ClassInfo::new(graph, &types)?;
     let mut signatures = HashMap::new();
     let mut definitions = Vec::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
@@ -109,6 +122,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                         graph,
                         module_id,
                         &classes.declarations,
+                        &types,
                         definitions.len(),
                         None,
                     )
@@ -149,6 +163,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                 graph,
                 module_id,
                 &classes.declarations,
+                &types,
                 definitions.len(),
                 Some(Type::Class(class_id)),
             )
@@ -165,8 +180,14 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     for (module_id, definition, signature) in &definitions {
         let module = &graph.modules[*module_id];
         let result = (|| {
-            let mut checker =
-                Checker::new(graph, *module_id, &signatures, &classes, signature.returns);
+            let mut checker = Checker::new(
+                graph,
+                *module_id,
+                &signatures,
+                &classes,
+                &types,
+                signature.returns,
+            );
             let mut params = Vec::new();
             for (parameter, &ty) in definition
                 .parameters
@@ -177,8 +198,16 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                 checker.assigned.insert(slot);
                 params.push(slot);
             }
-            let (body, falls_through) = checker.block(&definition.body)?;
-            if falls_through && signature.returns != Type::None {
+            let (mut body, falls_through) = checker.block(&definition.body)?;
+            if falls_through && types.payload(signature.returns).is_some() {
+                body.push(Statement::Return(Expr {
+                    ty: signature.returns,
+                    kind: ExprKind::Absent(Box::new(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::None,
+                    })),
+                }));
+            } else if falls_through && signature.returns != Type::None {
                 return Err(error(
                     &module.source,
                     definition,
@@ -222,7 +251,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     }
     let mut entry = None;
     for (module_id, module) in graph.modules.iter().enumerate() {
-        let mut checker = Checker::new(graph, module_id, &signatures, &classes, Type::None);
+        let mut checker = Checker::new(graph, module_id, &signatures, &classes, &types, Type::None);
         checker.module_scope = true;
         let statements = module
             .executable
@@ -252,6 +281,7 @@ fn signature(
     graph: &SourceGraph,
     module: ModuleId,
     classes: &Classes,
+    types: &Types,
     id: usize,
     receiver: Option<Type>,
 ) -> Result<Signature, String> {
@@ -282,7 +312,7 @@ fn signature(
             && index == 0
         {
             if let Some(declared) = parameter.annotation()
-                && annotation(declared, graph, module, classes)? != receiver
+                && annotation(declared, graph, module, classes, types)? != receiver
             {
                 return Err(error(
                     source,
@@ -299,6 +329,7 @@ fn signature(
                 graph,
                 module,
                 classes,
+                types,
             )?
         };
         params.push(ty);
@@ -311,6 +342,7 @@ fn signature(
         graph,
         module,
         classes,
+        types,
     )?;
     Ok(Signature {
         id,
@@ -332,30 +364,50 @@ fn annotation(
     graph: &SourceGraph,
     module: ModuleId,
     classes: &Classes,
+    types: &Types,
 ) -> Result<Type, String> {
-    let source = &graph.modules[module].source;
-    let binding = if let ast::Expr::StringLiteral(value) = expression {
+    annotation_at(
+        expression,
+        graph,
+        module,
+        classes,
+        types,
+        &graph.modules[module].source,
+    )
+}
+
+/// Quoted annotations are parsed as types, never executed. Keeping their source
+/// separate preserves valid ranges even when the outer literal contains escapes.
+fn annotation_at(
+    expression: &ast::Expr,
+    graph: &SourceGraph,
+    module: ModuleId,
+    classes: &Classes,
+    types: &Types,
+    source: &str,
+) -> Result<Type, String> {
+    if let ast::Expr::StringLiteral(value) = expression {
         check_string(value, source)?;
-        let mut names = value.value.to_str().split('.');
-        let mut binding = names
-            .next()
-            .and_then(|name| graph.modules[module].bindings.get(name))
-            .copied();
-        for name in names {
-            binding = match binding {
-                Some(Binding::Module(module)) => graph.modules[module].bindings.get(name).copied(),
-                _ => None,
-            };
-        }
-        binding
-    } else {
-        graph.resolve(module, expression)
-    };
-    if let Some(Binding::Definition(definition)) = binding
+        let contents = value.value.to_str();
+        let parsed = ruff_python_parser::parse_expression(contents)
+            .map_err(|_| error(source, expression, "invalid quoted type annotation"))?;
+        return annotation_at(parsed.expr(), graph, module, classes, types, contents).map_err(
+            |message| {
+                error(
+                    source,
+                    expression,
+                    &format!("invalid quoted annotation: {message}"),
+                )
+            },
+        );
+    }
+    if let Some(Binding::Definition(definition)) = graph.resolve(module, expression)
         && let Some(&id) = classes.ids.get(&definition)
     {
         return Ok(Type::Class(id));
     }
+    let nested =
+        |expression: &ast::Expr| annotation_at(expression, graph, module, classes, types, source);
     match expression {
         ast::Expr::Name(name) => match name.id.as_str() {
             "int" => Ok(Type::Int),
@@ -364,15 +416,43 @@ fn annotation(
             _ => Err(error(
                 source,
                 expression,
-                "supported annotations are int, bool, str, None, list[int], and fixed classes",
+                "unsupported exact type annotation",
             )),
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
-        ast::Expr::Subscript(value)
-            if matches!(&*value.value, ast::Expr::Name(name) if name.id == "list")
-                && matches!(&*value.slice, ast::Expr::Name(name) if name.id == "int") =>
-        {
-            Ok(Type::ListInt)
+        ast::Expr::Subscript(value) => match &*value.value {
+            ast::Expr::Name(name) if name.id == "list" => Ok(types.list(nested(&value.slice)?)),
+            ast::Expr::Name(name) if name.id == "tuple" => {
+                let fields = if let ast::Expr::Tuple(fields) = &*value.slice {
+                    fields
+                        .elts
+                        .iter()
+                        .map(nested)
+                        .collect::<Result<Vec<_>, _>>()?
+                } else {
+                    vec![nested(&value.slice)?]
+                };
+                Ok(types.tuple(fields))
+            }
+            _ => Err(error(
+                source,
+                expression,
+                "only list[T] and fixed tuple[T, ...] are supported",
+            )),
+        },
+        ast::Expr::BinOp(union) if union.op == ast::Operator::BitOr => {
+            let left = nested(&union.left)?;
+            let right = nested(&union.right)?;
+            match (left, right) {
+                (Type::None, other) | (other, Type::None) if other != Type::None => {
+                    Ok(types.optional(other))
+                }
+                _ => Err(error(
+                    source,
+                    expression,
+                    "only optional unions T | None are supported",
+                )),
+            }
         }
         _ => Err(error(source, expression, "unsupported type annotation")),
     }
@@ -425,6 +505,8 @@ struct Checker<'a> {
     module: ModuleId,
     functions: &'a HashMap<DefinitionId, Signature>,
     classes: &'a ClassInfo,
+    types: &'a Types,
+    narrowed: HashMap<usize, Type>,
     returns: Type,
     names: HashMap<String, usize>,
     locals: Vec<Type>,
@@ -440,6 +522,7 @@ impl<'a> Checker<'a> {
         module: ModuleId,
         functions: &'a HashMap<DefinitionId, Signature>,
         classes: &'a ClassInfo,
+        types: &'a Types,
         returns: Type,
     ) -> Self {
         Self {
@@ -448,6 +531,8 @@ impl<'a> Checker<'a> {
             module,
             functions,
             classes,
+            types,
+            narrowed: HashMap::new(),
             returns,
             names: HashMap::new(),
             locals: Vec::new(),
@@ -499,15 +584,13 @@ impl<'a> Checker<'a> {
     }
 
     fn type_name(&self, ty: Type) -> String {
-        if let Type::Class(id) = ty {
+        self.types.describe(ty, &|id| {
             let class = &self.classes.declarations.definitions[id];
             format!(
                 "{}.{}",
                 self.graph.modules[class.definition.module].name, class.name
             )
-        } else {
-            ty.to_string()
-        }
+        })
     }
 
     /// Resolves a fixed field without evaluating its receiver more than once.
@@ -547,12 +630,155 @@ impl<'a> Checker<'a> {
             .args
             .iter()
             .zip(params)
-            .map(|(argument, &expected)| {
-                let argument = self.expr(argument)?;
-                self.expect(expected, argument.ty, call)?;
-                Ok(argument)
-            })
+            .map(|(argument, &expected)| self.expr_expected(argument, expected))
             .collect()
+    }
+
+    /// Optional values are explicit boxes; all other storage remains invariant.
+    fn coerce(&self, value: Expr, expected: Type, node: &impl Ranged) -> Result<Expr, String> {
+        if value.ty == expected {
+            return Ok(value);
+        }
+        if let Some(payload) = self.types.payload(expected) {
+            let kind = if value.ty == Type::None {
+                ExprKind::Absent(Box::new(value))
+            } else {
+                self.expect(payload, value.ty, node)?;
+                ExprKind::Present(Box::new(value))
+            };
+            return Ok(Expr { ty: expected, kind });
+        }
+        self.expect(expected, value.ty, node)?;
+        unreachable!("mismatched exact types return an error")
+    }
+
+    /// Context determines empty literals and optional elements at storage boundaries.
+    fn expr_expected(&mut self, expression: &ast::Expr, expected: Type) -> Result<Expr, String> {
+        let concrete = self.types.payload(expected).unwrap_or(expected);
+        let value = match expression {
+            ast::Expr::List(list) if self.types.element(concrete).is_some() => {
+                let element = self.types.element(concrete).unwrap();
+                let values = list
+                    .elts
+                    .iter()
+                    .map(|value| self.expr_expected(value, element))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Expr {
+                    ty: concrete,
+                    kind: ExprKind::List(values),
+                }
+            }
+            ast::Expr::Tuple(tuple) if self.types.fields(concrete).is_some() => {
+                let fields = self.types.fields(concrete).unwrap();
+                if tuple.elts.len() != fields.len() {
+                    return Err(error(
+                        self.source,
+                        expression,
+                        "tuple literal has the wrong number of fields",
+                    ));
+                }
+                let values = tuple
+                    .elts
+                    .iter()
+                    .zip(fields)
+                    .map(|(value, ty)| self.expr_expected(value, ty))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Expr {
+                    ty: concrete,
+                    kind: ExprKind::Tuple(values),
+                }
+            }
+            ast::Expr::BinOp(binary)
+                if binary.op == ast::Operator::Mult && self.types.element(concrete).is_some() =>
+            {
+                let left = if matches!(&*binary.left, ast::Expr::List(_)) {
+                    self.expr_expected(&binary.left, concrete)?
+                } else {
+                    self.expr(&binary.left)?
+                };
+                let right = if left.ty == Type::Int {
+                    self.expr_expected(&binary.right, concrete)?
+                } else {
+                    self.expr_expected(&binary.right, Type::Int)?
+                };
+                let (op, ty) = self.binary_op(binary.op, left.ty, right.ty, expression)?;
+                Expr {
+                    ty,
+                    kind: ExprKind::Binary(op, Box::new(left), Box::new(right)),
+                }
+            }
+            _ => self.expr(expression)?,
+        };
+        self.coerce(value, expected, expression)
+    }
+
+    fn apply_facts(&mut self, test: &ast::Expr, truth: bool) {
+        for (name, present) in narrowing::facts(test, truth) {
+            if let Some(&slot) = self.names.get(&name)
+                && let Some(payload) = self.types.payload(self.locals[slot])
+            {
+                self.narrowed
+                    .insert(slot, if present { payload } else { Type::None });
+            }
+        }
+    }
+
+    /// Loop backedges can observe stores from a previous iteration.
+    fn invalidate_loop_facts(&mut self, body: &[ast::Stmt]) {
+        for name in narrowing::assigned_names(body) {
+            if let Some(slot) = self.names.get(&name) {
+                self.narrowed.remove(slot);
+            }
+        }
+    }
+
+    fn assigned_value(&mut self, slot: usize, value: &Expr) {
+        self.assigned.insert(slot);
+        self.narrowed.remove(&slot);
+        if let Some(payload) = self.types.payload(self.locals[slot]) {
+            match value.kind {
+                ExprKind::Present(_) => {
+                    self.narrowed.insert(slot, payload);
+                }
+                ExprKind::Absent(_) => {
+                    self.narrowed.insert(slot, Type::None);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Builds the target once; LLVM lowering still evaluates the RHS before it.
+    fn assignment(&mut self, target: &ast::Expr, value: &ast::Expr) -> Result<Statement, String> {
+        match target {
+            ast::Expr::Name(name) => {
+                let value = if let Some(&slot) = self.names.get(name.id.as_str()) {
+                    self.expr_expected(value, self.locals[slot])?
+                } else {
+                    self.expr(value)?
+                };
+                self.assign(target, value)
+            }
+            ast::Expr::Subscript(subscript) => {
+                let list = self.expr(&subscript.value)?;
+                let element = self.types.element(list.ty).ok_or_else(|| {
+                    error(
+                        self.source,
+                        target,
+                        "indexed assignment requires a mutable typed list",
+                    )
+                })?;
+                let index = self.expr_expected(&subscript.slice, Type::Int)?;
+                let value = self.expr_expected(value, element)?;
+                Ok(Statement::SetItem(list, index, value))
+            }
+            ast::Expr::Attribute(attribute) => {
+                let (receiver, field, ty) = self.field(attribute)?;
+                let value = self.expr_expected(value, ty)?;
+                Ok(Statement::SetField(receiver, field, value))
+            }
+            _ => Err(error(self.source, target, "unsupported assignment target")),
+        }
     }
 
     /// Checks dead syntax too, but merges definite assignment only from reachable exits.
@@ -570,8 +796,7 @@ impl<'a> Checker<'a> {
     fn statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
         let result = match statement {
             ast::Stmt::Assign(assign) if assign.targets.len() == 1 => {
-                let value = self.expr(&assign.value)?;
-                Some(self.assign(&assign.targets[0], value)?)
+                Some(self.assignment(&assign.targets[0], &assign.value)?)
             }
             ast::Stmt::AnnAssign(assign) => {
                 let ast::Expr::Name(name) = &*assign.target else {
@@ -582,12 +807,12 @@ impl<'a> Checker<'a> {
                     self.graph,
                     self.module,
                     &self.classes.declarations,
+                    self.types,
                 )?;
                 let slot = self.declare(name.id.as_str(), ty, statement)?;
                 if let Some(value) = &assign.value {
-                    let value = self.expr(value)?;
-                    self.expect(ty, value.ty, statement)?;
-                    self.assigned.insert(slot);
+                    let value = self.expr_expected(value, ty)?;
+                    self.assigned_value(slot, &value);
                     Some(Statement::Assign(slot, value))
                 } else {
                     None
@@ -618,7 +843,7 @@ impl<'a> Checker<'a> {
                     let left = self.expr(&assign.target)?;
                     let right = self.expr(&assign.value)?;
                     let (op, ty) = self.binary_op(assign.op, left.ty, right.ty, statement)?;
-                    if ty == Type::ListInt {
+                    if self.types.element(ty).is_some() {
                         return Err(error(
                             self.source,
                             statement,
@@ -652,12 +877,16 @@ impl<'a> Checker<'a> {
                         "loop else clauses are unsupported",
                     ));
                 }
+                self.invalidate_loop_facts(&loop_.body);
+                let facts = self.narrowed.clone();
                 let test = self.condition(&loop_.test)?;
                 let before = self.assigned.clone();
+                self.apply_facts(&loop_.test, true);
                 self.loop_depth += 1;
                 let (body, _) = self.block(&loop_.body)?;
                 self.loop_depth -= 1;
                 self.assigned = before;
+                self.narrowed = facts;
                 Some(Statement::While(test, body))
             }
             ast::Stmt::For(loop_) if !loop_.is_async && loop_.orelse.is_empty() => {
@@ -688,12 +917,16 @@ impl<'a> Checker<'a> {
                     return Err(error(self.source, statement, "range target must be a name"));
                 };
                 let target = self.declare(name.id.as_str(), Type::Int, &*loop_.target)?;
+                self.invalidate_loop_facts(&loop_.body);
+                self.narrowed.remove(&target);
+                let facts = self.narrowed.clone();
                 let before = self.assigned.clone();
                 self.assigned.insert(target);
                 self.loop_depth += 1;
                 let (body, _) = self.block(&loop_.body)?;
                 self.loop_depth -= 1;
                 self.assigned = before;
+                self.narrowed = facts;
                 Some(Statement::For {
                     target,
                     cursor: self.hidden(Type::Int),
@@ -705,14 +938,14 @@ impl<'a> Checker<'a> {
             }
             ast::Stmt::Return(return_) if !self.module_scope => {
                 let value = if let Some(value) = &return_.value {
-                    self.expr(value)?
+                    self.expr_expected(value, self.returns)?
                 } else {
                     Expr {
                         ty: Type::None,
                         kind: ExprKind::None,
                     }
                 };
-                self.expect(self.returns, value.ty, statement)?;
+                let value = self.coerce(value, self.returns, statement)?;
                 return Ok((vec![Statement::Return(value)], false));
             }
             ast::Stmt::Break(_) | ast::Stmt::Continue(_) if self.loop_depth > 0 => {
@@ -726,7 +959,9 @@ impl<'a> Checker<'a> {
                 ));
             }
             ast::Stmt::Assert(assert) if assert.msg.is_none() => {
-                Some(Statement::Assert(self.condition(&assert.test)?))
+                let test = self.condition(&assert.test)?;
+                self.apply_facts(&assert.test, true);
+                Some(Statement::Assert(test))
             }
             ast::Stmt::Pass(_) => None,
             _ => {
@@ -746,11 +981,16 @@ impl<'a> Checker<'a> {
         body: &[ast::Stmt],
         clauses: &[ast::ElifElseClause],
     ) -> Result<(Statement, bool), String> {
-        let test = self.condition(test)?;
+        let condition = self.condition(test)?;
         let before = self.assigned.clone();
+        let facts = self.narrowed.clone();
+        self.apply_facts(test, true);
         let (yes, yes_falls) = self.block(body)?;
         let yes_assigned = self.assigned.clone();
+        let yes_facts = self.narrowed.clone();
         self.assigned = before;
+        self.narrowed = facts;
+        self.apply_facts(test, false);
         let (no, no_falls) = if let Some((clause, rest)) = clauses.split_first() {
             if let Some(test) = &clause.test {
                 let (nested, flow) = self.if_chain(test, &clause.body, rest)?;
@@ -763,34 +1003,31 @@ impl<'a> Checker<'a> {
         };
         if yes_falls && no_falls {
             self.assigned.retain(|slot| yes_assigned.contains(slot));
+            self.narrowed
+                .retain(|slot, ty| yes_facts.get(slot) == Some(ty));
         } else if yes_falls {
             self.assigned = yes_assigned;
+            self.narrowed = yes_facts;
         }
-        Ok((Statement::If(test, yes, no), yes_falls || no_falls))
+        Ok((Statement::If(condition, yes, no), yes_falls || no_falls))
     }
 
     fn assign(&mut self, target: &ast::Expr, value: Expr) -> Result<Statement, String> {
-        match target {
-            ast::Expr::Name(name) => {
-                let slot = self.declare(name.id.as_str(), value.ty, target)?;
-                self.assigned.insert(slot);
-                Ok(Statement::Assign(slot, value))
-            }
-            ast::Expr::Subscript(subscript) => {
-                self.expect(Type::Int, value.ty, target)?;
-                let list = self.expr(&subscript.value)?;
-                let index = self.expr(&subscript.slice)?;
-                self.expect(Type::ListInt, list.ty, target)?;
-                self.expect(Type::Int, index.ty, target)?;
-                Ok(Statement::SetItem(list, index, value))
-            }
-            ast::Expr::Attribute(attribute) => {
-                let (receiver, field, ty) = self.field(attribute)?;
-                self.expect(ty, value.ty, target)?;
-                Ok(Statement::SetField(receiver, field, value))
-            }
-            _ => Err(error(self.source, target, "unsupported assignment target")),
-        }
+        let ast::Expr::Name(name) = target else {
+            return Err(error(
+                self.source,
+                target,
+                "local assignment requires a name",
+            ));
+        };
+        let value = if let Some(&slot) = self.names.get(name.id.as_str()) {
+            self.coerce(value, self.locals[slot], target)?
+        } else {
+            value
+        };
+        let slot = self.declare(name.id.as_str(), value.ty, target)?;
+        self.assigned_value(slot, &value);
+        Ok(Statement::Assign(slot, value))
     }
 
     fn condition(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
@@ -806,11 +1043,16 @@ impl<'a> Checker<'a> {
         right: Type,
         node: &impl Ranged,
     ) -> Result<(Binary, Type), String> {
-        if op == ast::Operator::Mult
-            && ((left == Type::ListInt && right == Type::Int)
-                || (left == Type::Int && right == Type::ListInt))
-        {
-            return Ok((Binary::Repeat, Type::ListInt));
+        if op == ast::Operator::Mult {
+            if self.types.element(left).is_some() && right == Type::Int {
+                return Ok((Binary::Repeat, left));
+            }
+            if left == Type::Int && self.types.element(right).is_some() {
+                return Ok((Binary::Repeat, right));
+            }
+        }
+        if op == ast::Operator::Add && left == Type::Str && right == Type::Str {
+            return Ok((Binary::Concat, Type::Str));
         }
         self.expect(Type::Int, left, node)?;
         self.expect(Type::Int, right, node)?;
@@ -860,16 +1102,45 @@ impl<'a> Checker<'a> {
                         "local may be uninitialized on this path",
                     ));
                 }
-                (self.locals[slot], ExprKind::Local(slot))
+                if let Some(&ty) = self.narrowed.get(&slot) {
+                    if ty == Type::None {
+                        (Type::None, ExprKind::None)
+                    } else {
+                        (
+                            ty,
+                            ExprKind::Unwrap(Box::new(Expr {
+                                ty: self.locals[slot],
+                                kind: ExprKind::Local(slot),
+                            })),
+                        )
+                    }
+                } else {
+                    (self.locals[slot], ExprKind::Local(slot))
+                }
             }
             ast::Expr::List(list) => {
                 let mut values = Vec::new();
+                let mut element = Type::Int;
                 for value in &list.elts {
                     let item = self.expr(value)?;
-                    self.expect(Type::Int, item.ty, value)?;
+                    if values.is_empty() {
+                        element = item.ty;
+                    }
+                    self.expect(element, item.ty, value)?;
                     values.push(item);
                 }
-                (Type::ListInt, ExprKind::List(values))
+                (self.types.list(element), ExprKind::List(values))
+            }
+            ast::Expr::Tuple(tuple) => {
+                let values = tuple
+                    .elts
+                    .iter()
+                    .map(|value| self.expr(value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let ty = self
+                    .types
+                    .tuple(values.iter().map(|value| value.ty).collect());
+                (ty, ExprKind::Tuple(values))
             }
             ast::Expr::BinOp(binary) => {
                 let left = self.expr(&binary.left)?;
@@ -895,17 +1166,46 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Expr::BoolOp(boolean) => {
-                let values = boolean
-                    .values
-                    .iter()
-                    .map(|value| self.condition(value))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let facts = self.narrowed.clone();
+                let mut values = Vec::new();
+                for value in &boolean.values {
+                    values.push(self.condition(value)?);
+                    self.apply_facts(value, boolean.op == ast::BoolOp::And);
+                }
+                self.narrowed = facts;
                 (
                     Type::Bool,
                     ExprKind::Boolean(boolean.op == ast::BoolOp::And, values),
                 )
             }
             ast::Expr::Compare(compare) => {
+                if compare.ops.len() == 1
+                    && matches!(compare.ops[0], ast::CmpOp::Is | ast::CmpOp::IsNot)
+                {
+                    let value = match compare.operands.as_ref() {
+                        [ast::Expr::NoneLiteral(_), value] | [value, ast::Expr::NoneLiteral(_)] => {
+                            self.expr(value)?
+                        }
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                expression,
+                                "identity comparisons are supported only with None",
+                            ));
+                        }
+                    };
+                    let mut result = Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(Builtin::IsNone, vec![value]),
+                    };
+                    if compare.ops[0] == ast::CmpOp::IsNot {
+                        result = Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Not(Box::new(result)),
+                        };
+                    }
+                    return Ok(result);
+                }
                 let values = compare
                     .operands
                     .iter()
@@ -930,11 +1230,14 @@ impl<'a> Checker<'a> {
                             ));
                         }
                     };
-                    if ty == Type::ListInt {
+                    if matches!(
+                        ty,
+                        Type::ListInt | Type::List(_) | Type::Tuple(_) | Type::Optional(_)
+                    ) {
                         return Err(error(
                             self.source,
                             expression,
-                            "list comparison is unsupported",
+                            "container and optional value comparisons are unsupported",
                         ));
                     }
                     ops.push(op);
@@ -943,11 +1246,61 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Subscript(subscript) => {
                 let list = self.expr(&subscript.value)?;
+                if let Some(fields) = self.types.fields(list.ty) {
+                    let (literal, negative) = if let ast::Expr::UnaryOp(unary) = &*subscript.slice {
+                        if unary.op != ast::UnaryOp::USub {
+                            return Err(error(
+                                self.source,
+                                expression,
+                                "tuple indexes must be integer literals",
+                            ));
+                        }
+                        (&*unary.operand, true)
+                    } else {
+                        (&*subscript.slice, false)
+                    };
+                    let index = if let ast::Expr::NumberLiteral(value) = literal
+                        && let ast::Number::Int(value) = &value.value
+                    {
+                        value.to_string().parse::<i64>().ok()
+                    } else {
+                        None
+                    }
+                    .ok_or_else(|| {
+                        error(
+                            self.source,
+                            expression,
+                            "tuple indexes must be bounded integer literals",
+                        )
+                    })?;
+                    let index = if negative { -index } else { index };
+                    let index = if index < 0 {
+                        index + fields.len() as i64
+                    } else {
+                        index
+                    };
+                    let field = usize::try_from(index)
+                        .ok()
+                        .filter(|&index| index < fields.len())
+                        .ok_or_else(|| {
+                            error(self.source, expression, "tuple index is out of bounds")
+                        })?;
+                    return Ok(Expr {
+                        ty: fields[field],
+                        kind: ExprKind::Field(Box::new(list), field),
+                    });
+                }
+                let element = self.types.element(list.ty).ok_or_else(|| {
+                    error(
+                        self.source,
+                        expression,
+                        "indexing requires a typed list or fixed tuple",
+                    )
+                })?;
                 let index = self.expr(&subscript.slice)?;
-                self.expect(Type::ListInt, list.ty, expression)?;
                 self.expect(Type::Int, index.ty, expression)?;
                 (
-                    Type::Int,
+                    element,
                     ExprKind::Builtin(Builtin::ListGet, vec![list, index]),
                 )
             }
@@ -1029,22 +1382,34 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Call(signature.id, args),
                 });
             }
-            self.expect(Type::ListInt, receiver.ty, call)?;
-            let mut args = vec![receiver];
-            for arg in &call.arguments.args {
-                args.push(self.expr(arg)?);
+            if receiver.ty == Type::Str
+                && attribute.attr.as_str() == "split"
+                && call.arguments.args.is_empty()
+            {
+                return Ok(Expr {
+                    ty: self.types.list(Type::Str),
+                    kind: ExprKind::Builtin(Builtin::Split, vec![receiver]),
+                });
             }
+            let element = self.types.element(receiver.ty).ok_or_else(|| {
+                error(
+                    self.source,
+                    call,
+                    "supported value methods are typed-list append/pop and str.split()",
+                )
+            })?;
+            let mut args = vec![receiver];
             let (builtin, ty) = match attribute.attr.as_str() {
-                "append" if args.len() == 2 => {
-                    self.expect(Type::Int, args[1].ty, call)?;
+                "append" if call.arguments.args.len() == 1 => {
+                    args.push(self.expr_expected(&call.arguments.args[0], element)?);
                     (Builtin::Append, Type::None)
                 }
-                "pop" if args.len() == 1 => (Builtin::Pop, Type::Int),
+                "pop" if call.arguments.args.is_empty() => (Builtin::Pop, element),
                 _ => {
                     return Err(error(
                         self.source,
                         call,
-                        "supported methods are list[int].append(int) and .pop()",
+                        "supported list methods are append(value) and pop()",
                     ));
                 }
             };
@@ -1073,7 +1438,13 @@ impl<'a> Checker<'a> {
             {
                 (Builtin::Int, Type::Int)
             }
-            "len" if args.len() == 1 && matches!(args[0].ty, Type::Str | Type::ListInt) => {
+            "len"
+                if args.len() == 1
+                    && matches!(
+                        args[0].ty,
+                        Type::Str | Type::ListInt | Type::List(_) | Type::Tuple(_)
+                    ) =>
+            {
                 (Builtin::Len, Type::Int)
             }
             "print"
