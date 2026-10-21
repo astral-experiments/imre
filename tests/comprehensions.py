@@ -37,8 +37,6 @@ REJECTED = {
     "optional_unchecked": "def bad(values: list[int | None]) -> list[int]:\n    return [value + 1 for value in values]\nbad([None])\n",
     "capture_uninitialized": "def bad(flag: bool) -> list[int]:\n    if flag:\n        offset = 1\n    return [offset + value for value in range(2)]\nbad(False)\n",
     "global_read": "offset = 1\ndef bad() -> list[int]:\n    return [offset + value for value in range(2)]\nbad()\n",
-    "list_unpack": "values = [left + right for left, right in [[1, 2]]]\n",
-    "starred_unpack": "values = [first for first, *rest in [(1, 2)]]\n",
     "subscript_target": "source = [0]\nvalues = [source[0] for source[0] in range(3)]\n",
     "attribute_target": "class Item:\n    value: int\n    def __init__(self, value: int) -> None:\n        self.value = value\nitem = Item(0)\nvalues = [item.value for item.value in range(3)]\n",
     "shadow_static_call": "def step(value: int) -> int:\n    return value + 1\nvalues = [step(1) for step in range(3)]\n",

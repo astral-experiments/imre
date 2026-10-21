@@ -100,7 +100,7 @@ impl<'a> Display<'a> {
         };
         self.clauses[index..]
             .iter()
-            .flat_map(|clause| &clause.ifs)
+            .flat_map(|clause| std::iter::once(&clause.target).chain(clause.ifs.iter()))
             .chain([first])
             .chain(second)
             .flat_map(narrowing::expression_assignments)
@@ -111,6 +111,8 @@ impl<'a> Display<'a> {
 fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
     if let ast::Expr::Name(name) = target {
         names.insert(name.id.to_string());
+    } else if let ast::Expr::Starred(starred) = target {
+        target_names(&starred.value, names);
     } else if let Some(elements) = pattern_elements(target) {
         for element in elements {
             target_names(element, names);
@@ -135,6 +137,7 @@ impl<'a> Visitor<'a> for Reads {
             }
             self.bound.push(targets);
             for (index, clause) in display.clauses.iter().enumerate() {
+                self.visit_expr(&clause.target);
                 if index != 0 {
                     self.visit_expr(&clause.iter);
                 }
@@ -206,6 +209,7 @@ impl Checker<'_> {
             bound: vec![targets.clone()],
         };
         for (index, clause) in display.clauses.iter().enumerate() {
+            reads.visit_expr(&clause.target);
             if index != 0 {
                 reads.visit_expr(&clause.iter);
             }

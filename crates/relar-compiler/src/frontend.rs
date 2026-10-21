@@ -14,8 +14,10 @@ use crate::types::Types;
 mod assignments;
 mod calls;
 mod comprehensions;
+mod expansions;
 mod matching;
 mod truthiness;
+mod unpacking;
 use assignments::LocalState;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
@@ -891,6 +893,15 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::List(list) if self.types.element(concrete).is_some() => {
                 let element = self.types.element(concrete).unwrap();
+                if list
+                    .elts
+                    .iter()
+                    .any(|value| matches!(value, ast::Expr::Starred(_)))
+                {
+                    return self
+                        .expanded_sequence(&list.elts, Some(element), false, list)
+                        .and_then(|value| self.coerce(value, expected, expression));
+                }
                 let values = list
                     .elts
                     .iter()
@@ -1085,6 +1096,9 @@ impl<'a> Checker<'a> {
         dict: &ast::ExprDict,
         expected: Option<(Type, Type)>,
     ) -> Result<Expr, String> {
+        if dict.items.iter().any(|item| item.key.is_none()) {
+            return self.expanded_dictionary(dict, expected);
+        }
         let mut types = expected;
         let mut entries = Vec::with_capacity(dict.items.len());
         for item in &dict.items {
@@ -1131,6 +1145,13 @@ impl<'a> Checker<'a> {
 
     /// Exact scalar elements keep hashing and equality free of user callbacks.
     fn set_literal(&mut self, set: &ast::ExprSet, expected: Option<Type>) -> Result<Expr, String> {
+        if set
+            .elts
+            .iter()
+            .any(|value| matches!(value, ast::Expr::Starred(_)))
+        {
+            return self.expanded_sequence(&set.elts, expected, true, set);
+        }
         let mut element = expected;
         let mut values = Vec::with_capacity(set.elts.len());
         for value in &set.elts {
@@ -1160,119 +1181,6 @@ impl<'a> Checker<'a> {
             ty: self.types.set(element),
             kind: ExprKind::Set { element, values },
         })
-    }
-
-    /// Checks and lowers RHS evaluation before receiver/index evaluation. Target
-    /// context is queried without publishing any speculative binding effects.
-    fn assignment(&mut self, target: &ast::Expr, value: &ast::Expr) -> Result<Statement, String> {
-        if let ast::Expr::Name(name) = target {
-            let value = if let Some(&slot) = self.names.get(name.id.as_str()) {
-                self.expr_expected(value, self.locals[slot])?
-            } else {
-                self.expr(value)?
-            };
-            return self.assign(target, value);
-        }
-        let value = if let Some(context) = self.assignment_context(target) {
-            self.expr_expected(value, context)?
-        } else {
-            self.expr(value)?
-        };
-        match target {
-            ast::Expr::Subscript(subscript) => {
-                let list = self.expr(&subscript.value)?;
-                let (key, element) = self
-                    .types
-                    .mapping(list.ty)
-                    .or_else(|| {
-                        self.types
-                            .element(list.ty)
-                            .map(|element| (Type::Int, element))
-                    })
-                    .ok_or_else(|| {
-                        error(
-                            self.source,
-                            target,
-                            "indexed assignment requires a mutable typed list or dictionary",
-                        )
-                    })?;
-                let index = self.expr_expected(&subscript.slice, key)?;
-                let value = self.coerce(value, element, target)?;
-                Ok(Statement::SetItem(list, index, value))
-            }
-            ast::Expr::Attribute(attribute) => {
-                let (receiver, field, ty) = self.field(attribute)?;
-                let value = self.coerce(value, ty, target)?;
-                Ok(Statement::SetField(receiver, field, value))
-            }
-            _ => Err(error(self.source, target, "unsupported assignment target")),
-        }
-    }
-
-    /// Supplies existing target types to literal fields before any names are bound.
-    fn unpacking_value(&mut self, target: &ast::Expr, value: &ast::Expr) -> Result<Expr, String> {
-        if let Some(targets) = pattern_elements(target)
-            && let ast::Expr::Tuple(tuple) = value
-            && targets.len() == tuple.elts.len()
-        {
-            let values = targets
-                .iter()
-                .zip(&tuple.elts)
-                .map(|(target, value)| self.unpacking_value(target, value))
-                .collect::<Result<Vec<_>, _>>()?;
-            return Ok(Expr {
-                ty: self
-                    .types
-                    .tuple(values.iter().map(|value| value.ty).collect()),
-                kind: ExprKind::Tuple(values),
-            });
-        }
-        if let ast::Expr::Name(name) = target
-            && let Some(&slot) = self.names.get(name.id.as_str())
-        {
-            let value = self.expr_expected(value, self.locals[slot])?;
-            // Wrap at the eventual store, preserving known presence for local
-            // narrowing instead of hiding it inside the temporary tuple.
-            return Ok(match value.kind {
-                ExprKind::Present(value) | ExprKind::Absent(value) => *value,
-                _ => value,
-            });
-        }
-        self.expr(value)
-    }
-
-    /// Captures a fixed tuple before rebinding any of its recursively named targets.
-    fn bind_pattern(&mut self, target: &ast::Expr, value: Expr) -> Result<Vec<Statement>, String> {
-        let Some(targets) = pattern_elements(target) else {
-            return Ok(vec![self.assign(target, value)?]);
-        };
-        let fields = self.types.fields(value.ty).ok_or_else(|| {
-            error(
-                self.source,
-                target,
-                "unpacking requires a fixed tuple value",
-            )
-        })?;
-        if targets.len() != fields.len() {
-            return Err(error(
-                self.source,
-                target,
-                "unpacking target has the wrong number of fields",
-            ));
-        }
-        let captured = self.hidden(value.ty);
-        let mut output = vec![Statement::Assign(captured, value)];
-        for (index, (target, ty)) in targets.iter().zip(fields).enumerate() {
-            let value = Expr {
-                ty,
-                kind: ExprKind::Field(Box::new(self.local(captured)), index),
-            };
-            output.extend(self.bind_pattern(target, value)?);
-        }
-        Ok(vec![Statement::Scope {
-            body: output,
-            clear: vec![captured],
-        }])
     }
 
     /// Recognizes items views only at a loop boundary; no view value escapes.
@@ -1348,6 +1256,11 @@ impl<'a> Checker<'a> {
     fn iteration(&mut self, loop_: &ast::StmtFor) -> Result<(Vec<Statement>, bool), String> {
         let input = self.iteration_input(&loop_.iter)?;
         self.invalidate_loop_facts(&loop_.body);
+        for name in narrowing::expression_assignments(&loop_.target) {
+            if let Some(slot) = self.names.get(&name) {
+                self.narrowed.remove(slot);
+            }
+        }
         self.lower_iteration(&loop_.target, input, &loop_.orelse, |checker| {
             Ok(checker.block(&loop_.body)?.0)
         })
@@ -1565,9 +1478,16 @@ impl<'a> Checker<'a> {
                 if let Some(slot) = names.get(name.id.as_str()) {
                     facts.remove(slot);
                 }
+            } else if let ast::Expr::Starred(starred) = target {
+                remove_target_facts(&starred.value, names, facts);
             } else if let Some(elements) = pattern_elements(target) {
                 for element in elements {
                     remove_target_facts(element, names, facts);
+                }
+            }
+            for name in narrowing::expression_assignments(target) {
+                if let Some(slot) = names.get(&name) {
+                    facts.remove(slot);
                 }
             }
         }
@@ -1657,12 +1577,8 @@ impl<'a> Checker<'a> {
 
     fn statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
         let result = match statement {
-            ast::Stmt::Assign(assign) if assign.targets.len() == 1 => {
-                if pattern_elements(&assign.targets[0]).is_some() {
-                    let value = self.unpacking_value(&assign.targets[0], &assign.value)?;
-                    return Ok((self.bind_pattern(&assign.targets[0], value)?, true));
-                }
-                Some(self.assignment(&assign.targets[0], &assign.value)?)
+            ast::Stmt::Assign(assign) => {
+                return Ok((self.assignment_statement(assign)?, true));
             }
             ast::Stmt::AnnAssign(assign) => {
                 let ast::Expr::Name(name) = &*assign.target else {
@@ -2344,6 +2260,13 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Expr::List(list) => {
+                if list
+                    .elts
+                    .iter()
+                    .any(|value| matches!(value, ast::Expr::Starred(_)))
+                {
+                    return self.expanded_sequence(&list.elts, None, false, list);
+                }
                 let mut values = Vec::new();
                 let mut element = Type::Int;
                 for value in &list.elts {

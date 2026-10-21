@@ -19,6 +19,11 @@ class Item:
 # Projection-only tuple locals may be scalarized. These cases protect snapshot
 # ownership, evaluation order, control-flow rebinding, and boxed escape paths.
 ACCEPTED = {
+    "set_literal_expansion": "values = {1}\nexpanded = {*values}\nexpanded.add(2)\nprint(len(values))\nprint(1 in expanded)\nprint(2 in expanded)\n",
+    "dict_literal_expansion": 'values = {"one": 1}\ncopy = {**values}\ncopy["one"] = 2\nprint(values["one"])\nprint(copy["one"])\n',
+    "iteration_list_unpacking": "first, second = [1, 2]\nprint(first)\nprint(second)\n",
+    "iteration_starred_unpacking": "first, *rest = (1, 2, 3)\nprint(first)\nprint(rest[0])\nprint(rest[1])\n",
+    "iteration_mutable_unpacking_leaf": "values = [0]\nvalues[0], other = (1, 2)\nprint(values[0])\nprint(other)\n",
     "dict_contextual_empty": """
 def empty() -> dict[str, list[int]]:
     return {}
@@ -314,7 +319,6 @@ REJECTED = {
     "set_index_write": "values = {1}\nvalues[0] = 2\n",
     "set_first_class_iterator": "values = {1}\niterator = iter(values)\n",
     "set_first_class_enumerate": "values = {1}\niterator = enumerate(values)\n",
-    "set_literal_expansion": "values = {1}\nexpanded = {*values}\n",
     "set_optional_receiver": "def add(values: set[int] | None) -> None:\n    values.add(1)\n",
     "set_optional_membership": "def has(values: set[int] | None) -> bool:\n    return 1 in values\n",
     "set_maybe_unbound_target": """
@@ -376,7 +380,6 @@ REJECTED = {
     "dict_keys_view": 'values = {"one": 1}\nfor key in values.keys():\n    pass\n',
     "dict_values_view": 'values = {"one": 1}\nfor value in values.values():\n    pass\n',
     "dict_first_class_iterator": 'values = {"one": 1}\niterator = iter(values)\n',
-    "dict_literal_expansion": 'values = {"one": 1}\ncopy = {**values}\n',
     "dict_wrong_items_target": 'values = {"one": 1}\nfor key, value, extra in values.items():\n    pass\n',
     "dict_invariant_values": """
         def use(values: dict[str, int | None]) -> None:
@@ -428,11 +431,8 @@ REJECTED = {
     "iteration_enumerate_arity": "for index, value in enumerate([1], 0, 1):\n    pass\n",
     "iteration_enumerate_keyword": "for index, value in enumerate([1], start=2):\n    pass\n",
     "iteration_enumerate_escapes": "iterator = enumerate([1])\n",
-    "iteration_list_unpacking": "first, second = [1, 2]\n",
-    "iteration_starred_unpacking": "first, *rest = (1, 2, 3)\n",
     "iteration_nested_wrong_arity": 'first, (second, third) = (1, ("two",))\n',
     "iteration_repeated_name_type_mismatch": 'same, same = (1, "two")\n',
-    "iteration_mutable_unpacking_leaf": "values = [0]\nvalues[0], other = (1, 2)\n",
     "iteration_rhs_precedes_target_declaration": "first, second = (1, first)\n",
     "iteration_nested_rhs_precedes_target_declaration": "first, (second, third) = (1, (2, first))\n",
     "iteration_optional_target_invalidates_fact": """
