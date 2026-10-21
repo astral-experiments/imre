@@ -32,9 +32,8 @@ But not:
 
 ## Benchmark
 
-We ran the same [inventory reconciliation program](examples/inventory_reconciliation/)
-with Relar and CPython and compared it with a Rust implementation using
-arbitrary-precision integers. Each workload has 16,384 positive requests:
+Running the same [inventory reconciliation program](examples/inventory_reconciliation/)
+with Relar, CPython, and Rust:
 
 | Workload | CPython 3.14.5 (ms) | Relar (ms) | Rust (ms) | Relar speedup vs. CPython |
 | --- | ---: | ---: | ---: | ---: |
