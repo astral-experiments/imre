@@ -12,54 +12,38 @@ An ahead-of-time compiler for typed Python, written in Rust.
 Relar compiles a restricted subset of Python into native executables that run
 without a Python installation.
 
-**Supported:** Statically resolved imports; functions with exact declared or
-inferred signatures; classes and dataclasses with fixed fields; concrete typed
-containers; common control flow, comprehensions, and immediately consumed iterator
-pipelines; and selected file and path operations. Integers retain arbitrary
-precision.
+Relar supports:
 
-**Unsupported:** Dynamically typed storage (`Any` or unrestricted unions), recursive
-calls, capturing closures, reflection, dynamic attributes, generator functions,
-async, and arbitrary decorators. Relar rejects unsupported operations during
-compilation, even in unused functions or unreachable branches; it does not fall back
-to CPython. See the [supported-subset guide](docs/subset.md) for the full contract.
+- Statically resolved imports
+- Functions with exact declared or inferred signatures
+- Classes and dataclasses with fixed fields
+- Typed containers and arbitrary-precision integers
+- Common control flow, comprehensions, and immediately consumed iterator pipelines
+- Selected file and path operations
 
-## Benchmarks
+But not:
 
-| Workload | Positive requests | Relar | CPython 3.14.5 | Speedup |
-| --- | ---: | ---: | ---: | ---: |
-| Dense inventory reconciliation | 16,384 | 21.09 ms | 76.64 ms | 3.63× |
-| Sparse inventory reconciliation | 16,384 | 41.58 ms | 112.60 ms | 2.71× |
-
-These [Linux measurements](benchmarks/results/2026-10-19-assignment-unpacking-expansion.md) run
-the same inventory program under Relar and CPython, with ThinLTO for the native
-builds. Times are medians of 48 fresh processes per workload and include startup,
-file parsing, reconciliation, and complete report writing, flushing, and closing.
-Inputs are created before timing on a shared machine. Relar takes 1.9–9.7% more
-time than the Rust BigInt reference; the [benchmark guide](benchmarks/README.md)
-describes the method, comparisons, and reproduction commands.
-
-Relar owns the compiler and runtime; Ruff provides parsing and ty provides Python
-semantic analysis. An additional checker enforces exact types and a restricted
-language contract before emitting LLVM IR. Validation combines Rust tests,
-differential checks against CPython, sanitizer checks, and independent application
-oracles.
+- Most of the Python standard library
+- Dynamically typed storage (`Any` or unrestricted unions)
+- Recursive calls or closures that capture variables
+- Reflection or dynamic attributes
+- Generator functions or async code
+- Arbitrary decorators
 
 ## Installation
 
-Build from this checkout on 64-bit Linux with the
-[pinned Rust toolchain](rust-toolchain.toml) and Clang 18:
+On 64-bit Linux, install the [Rust toolchain](rust-toolchain.toml) and Clang 18,
+then build and install Relar from Git:
 
 ```console
+git clone https://github.com/astral-sh/relar.git
+cd relar
 cargo build --workspace --release --locked
+mkdir -p ~/.cargo/bin
+cp target/release/relar target/release/librelar_runtime.a ~/.cargo/bin/
 ```
 
-This builds `target/release/relar` and `target/release/librelar_runtime.a`. Keep them
-together when compiling programs, or select the runtime with `--runtime`.
-Commands below run from the repository root with Cargo's default target directory.
-CPython is needed only to run the Python examples and differential tests; CI uses
-CPython 3.14.5 as its semantic reference. See the [build guide](docs/subset.md#build-and-validate) for validation,
-sanitizers, and optional cross-language ThinLTO.
+Make sure `~/.cargo/bin` is on your `PATH`.
 
 ## Getting started
 
@@ -76,68 +60,13 @@ def total(quantities: list[int]) -> int:
 print(f"Total: {total([10, 20, 12])}")
 ```
 
-Check, compile, and run the program:
+Compile and run the program:
 
 ```console
-target/release/relar check totals.py
-target/release/relar build totals.py
+relar build totals.py
 ./totals
+# Output: Total: 42
 ```
-
-The executable prints `Total: 42`. The same source runs with `python3 totals.py`.
-By default, `build` writes the executable in the current directory with the source
-filename's extension removed. Use `-o` to choose a different output path. Relar
-tries `clang-18`, then `clang`; use `--clang` to select a different executable.
-
-Relar rejects unsupported syntax and type violations during compilation. Function
-types can come from annotations or be inferred from concrete direct calls,
-scalar defaults, and checked return expressions. Each function has one exact
-signature; conflicting callers require an explicit supported common type.
-
-To compile and run the inventory reconciler, including its imported modules:
-
-```console
-target/release/relar build examples/inventory_reconciliation/__main__.py \
-  --module-root examples --clang clang-18 -o /tmp/inventory-reconciliation
-/tmp/inventory-reconciliation \
-  examples/inventory_reconciliation/sample/stock.txt \
-  examples/inventory_reconciliation/sample/orders.txt /tmp/inventory-report.txt
-cat /tmp/inventory-report.txt
-```
-
-See the [inventory guide](examples/inventory_reconciliation/README.md) for input
-formats, report fields, and validation. The [supported-subset guide](docs/subset.md)
-covers syntax and compatibility, the [design](docs/design.md) explains compilation
-and ownership, and the [benchmark guide](benchmarks/README.md) collects the example
-programs, performance results, and reproduction instructions. Run
-`target/release/relar --help` for compiler options.
-
-The [python-base45 example](examples/base45_codec/README.md) compiles an unchanged
-upstream codec and compares it with CPython, including its original tests, error
-causes, and shared module lookup table. Its guide covers building, file-based use,
-the enforced type boundary, and benchmark reproduction.
-
-The [luhn example](examples/luhn_checksum/README.md) compiles the unchanged,
-unannotated checksum library. Its guide covers the original upstream tests,
-Unicode decimal inputs, and comparisons with CPython and an independent Rust
-implementation.
-
-The [telemetry example](examples/telemetry_comparison/README.md) aligns two sample
-recordings, calculates integer error metrics, and searches for threshold
-violations with lazy forward and reverse iteration.
-
-The [record pipeline](examples/record_pipeline/README.md) selects eligible
-transactions with configured callbacks, transforms gross or net payouts, and
-aggregates a report through lazy `map` and `filter`.
-
-The [memory-report comparator](examples/memory_report/README.md) ports ty's real
-report-comparison script: it compares individual files or directories of projects,
-decodes JSON into typed records, ranks changes, and writes a Markdown report.
-Its guide includes captured ty reports and comparisons
-with the original CPython script, the typed Python port, and an independent Rust
-implementation. The [dataclass comparison](benchmarks/results/2026-10-21-dataclass-records.md)
-runs within 1.16–1.47× Rust's time on the large report inputs, using dataclasses,
-keyword-only fields, a class method, and a read-only property.
 
 ## License
 
