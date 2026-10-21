@@ -16,9 +16,7 @@ def show(report: Report, *, output: TextIO) -> None:
         for sku, quantity in report.remaining.items()
         if sku not in report.requested_skus
     ]
-    requested_total = 0
-    filled_total = 0
-    shortage_total = 0
+    requested_total = filled_total = shortage_total = 0
     for result in report.results:
         requested_total += result.request.quantity
         filled_total += result.filled

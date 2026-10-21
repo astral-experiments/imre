@@ -48,18 +48,22 @@ class Reader:
 
     def count(self) -> int:
         fields = self.next()
-        if len(fields) != 1:
+        try:
+            (token,) = fields
+        except ValueError:
             raise ValueError(self.label + ": expected count")
-        value = self.count_value(fields[0])
+        value = self.count_value(token)
         if value < 0:
             raise ValueError(self.label + ": negative count")
         return value
 
     def item(self) -> tuple[str, int]:
         fields = self.next()
-        if len(fields) != 2:
+        try:
+            sku, quantity = fields
+        except ValueError:
             raise ValueError(self.label + ": expected SKU and quantity")
-        return fields[0], self.number(token=fields[1])
+        return sku, self.number(token=quantity)
 
     def finish(self) -> None:
         if self.position != len(self.lines):

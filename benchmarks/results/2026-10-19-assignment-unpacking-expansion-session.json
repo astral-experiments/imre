@@ -1,0 +1,618 @@
+{
+  "source_commit": "3cc767b401f988ece94e1eb4bb98c43cd06c02b2",
+  "started_at_utc": "2026-10-19T13:48:53.127953+00:00",
+  "validation_only": false,
+  "source_guard_before": {
+    "head": "3cc767b401f988ece94e1eb4bb98c43cd06c02b2",
+    "dirty": false,
+    "all_compiled_sources_match_commit": true,
+    "application_source_sha256": {
+      "examples/inventory_reconciliation/__init__.py": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+      "examples/inventory_reconciliation/__main__.py": "83dddda51b6a25f0ed27c17635d06392e9a786231afac3401d634ae60dfffabf",
+      "examples/inventory_reconciliation/load.py": "a487031da43dae551dc884721fa603062cfe89858e7642342b74e20c7366b2b0",
+      "examples/inventory_reconciliation/model.py": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
+      "examples/inventory_reconciliation/reconcile.py": "6cd8d119a7dfc86a110d17d7fc10c1d0cbc713b6c3b2da5356c63927fe9dc67f",
+      "examples/inventory_reconciliation/render.py": "b9127fc3254bff9d16d2bfa3099852238d235ec0b07463fab15520d78f2036af"
+    },
+    "build_record_sha256": "badc428f68f28540fe3cc2b77e833eec01a7d538ff3aace3803b0f7482ac782c",
+    "artifact_sha256": {
+      "relar": "497bf8e34ee7ff5ebfbdd65e6e9d7c86b0045b81b3d07ec3674f0ba330c1a537",
+      "librelar_runtime.a": "0079d909653763d6062823a8eb249bbc39ad5aa330251424bc096f4043310f82",
+      "librelar_runtime_lto.a": "7259cdb2422ad9c311ca29bae468ff8380073c6886c966628e9d0fc088e17a61"
+    }
+  },
+  "preserved_guard_before": {
+    "sha256": {
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/asan.log": "c8fb3f28bf9c67ae685e39f3215c80d5b6bf927bdb93d00d21cfb8d2badfe0b0",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/build-record.json": "ed3e4ad2cb880532f2451c42fcfa525f18a342f1b78682a19ac6ba2576465516",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/freeze.py": "6931d9c03bc6bcd299baf8ff6173ef6e962433284f5c6283f6c3c9f247d4d0c2",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime.a": "0079d909653763d6062823a8eb249bbc39ad5aa330251424bc096f4043310f82",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime_asan.a": "0239335867da86e5e1bafe9b114045653f31038b7a7ef1a0543db33c0ee5be3f",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime_lto.a": "7259cdb2422ad9c311ca29bae468ff8380073c6886c966628e9d0fc088e17a61",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/relar": "0cfce8614ed1a0a72bec4b3fc3b460548a34857da0e3a9225514c7df63b97db1",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/ordinary.log": "98f837b162414ce697c0385f744cc1d5f8ff426bf7daa4dde5f0de408c519451",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/thinlto.log": "4e98f21b0a5ce81f557a23de49fa5d70351768af3882a165e0fd5dfdb3e3632f",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal/inventory_reconciliation": "dbabfcafe5c8ce40fa11caf5fe3f986b06e81ac7eb383ada4f3dfbd8e9b61d38",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal/inventory_reconciliation.ll": "635b4c5dc30d1afc1ba33a28ec118ecebf2d13a06e27122bb2a0474ee6e88290",
+      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint": "dae07835587c65d3b1d82558e5eebb9f2cc11fc549f7ab5876570132c932f2f5",
+      "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+      "/usr/lib/llvm-18/bin/clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal.json": "afd20b245d41cb5d04a6c9019a908045c458a27393756d1015f4dba1b27dd0c7",
+      "/home/dev-user/code/oss/relar/benchmarks/results/2026-10-19-truthiness-loop-else-application-normal.json.gz": "075698aad0a29cbf10384659c48506bdf824612d7dbfedae007fe7403a813bb6",
+      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json": "b43013232af09bdc8c1ce5d0c3d095cc48941fe9301b2f7e5fef0019ce65e8fb",
+      "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/Cargo.toml": "1bca622581e0122a40193f41c63ffef865c2e02b3e34853aaa2ab04fc096c839",
+      "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/Cargo.lock": "5fc2164c7d5d646f2dffefb4ae6bfe004cb211c240cbd1f591971e2e75ead1e0",
+      "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/src/main.rs": "e21c4a4aa25aa1509398afa76feb64d644535ff4b1707317037630e811db6617",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto/inventory_reconciliation": "b7d73ae015201da8fae1357c76dda98947d1d59a548601da84c0f3eb35b35ab3",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto/inventory_reconciliation.ll": "635b4c5dc30d1afc1ba33a28ec118ecebf2d13a06e27122bb2a0474ee6e88290",
+      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint": "00d4086b398ffe41a3346a9e24d14659002d763b1d25a058a353a3e5fd108270",
+      "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto.json": "198d26f10fee0774325df233defcee37d7b9df5349d8254f8550a6c50b1df06e",
+      "/home/dev-user/code/oss/relar/benchmarks/results/2026-10-19-truthiness-loop-else-application-lto.json.gz": "5a434a2c409b4851ee92e7c63e163f3cef2ebe5fd440cf6d0cbefd48c6fa2200",
+      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json": "001a121e8c549548ded1b976e9b2c099cbc07226b0678714fe39cb1707f97fce"
+    },
+    "snapshots": {
+      "baseline_source": {
+        "inventory_reconciliation/__init__.py": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+        "inventory_reconciliation/__main__.py": "48c3015dcbac52a08f48b800197398076ac26f37ca480a4ee1ebab2b72c9349c",
+        "inventory_reconciliation/load.py": "63b6a27309c84a8e201703f23f1e825ffdc76b5f367b1f336001aa84dcee8429",
+        "inventory_reconciliation/model.py": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
+        "inventory_reconciliation/reconcile.py": "eca175bf2a76c26b7429e0f7ad574be004a63e0f3424a9a3f3ac7aea4bd8d0ea",
+        "inventory_reconciliation/render.py": "df456686711363c55c13f652df5a32df6b47ce666a71b8a2c8806b542e31357f"
+      },
+      "application_source": {
+        "inventory_reconciliation/__init__.py": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+        "inventory_reconciliation/__main__.py": "83dddda51b6a25f0ed27c17635d06392e9a786231afac3401d634ae60dfffabf",
+        "inventory_reconciliation/load.py": "a487031da43dae551dc884721fa603062cfe89858e7642342b74e20c7366b2b0",
+        "inventory_reconciliation/model.py": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
+        "inventory_reconciliation/reconcile.py": "6cd8d119a7dfc86a110d17d7fc10c1d0cbc713b6c3b2da5356c63927fe9dc67f",
+        "inventory_reconciliation/render.py": "b9127fc3254bff9d16d2bfa3099852238d235ec0b07463fab15520d78f2036af"
+      }
+    }
+  },
+  "scripts": {
+    "/tmp/relar-unpacking-inventory/launch.py": "ceaa9a0a1fb7cd72536c47099c9a0017d77bfffc4c29833c525d20e133d2250d",
+    "/tmp/relar-unpacking-inventory/run_comparison.py": "2eecc09b5afd39d928556f9040e6d076d2bb80377d2dcde0d251872630164262",
+    "/tmp/relar-unpacking-inventory/prepared-manifest.json": "9ecabcedfd20cc5e1c8677fbbedded88b0501b9a041396646e3f3ce4fb02c570",
+    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-final-launch.py": "8aaacc03b3c40fb5b505518827d5d8afdf577745bda9a09326e0190a327ca508"
+  },
+  "comparison_families": {
+    "application": "CPython/current Relar run the rewritten source; preserved Relar runs the verified old source; Rust source is unchanged. Application and compiler effects are combined.",
+    "common-source": "CPython/current Relar/preserved Relar run the verified old source; Rust source is unchanged. Current/preserved Relar compares compiler/runtime changes with application source fixed."
+  },
+  "cache_preparation": {
+    "command": [
+      "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "-I",
+      "-m",
+      "compileall",
+      "-q",
+      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation",
+      "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation"
+    ],
+    "timed": false
+  },
+  "bytecode_before": {
+    "current": {
+      "python": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+      "cache_tag": "cpython-314",
+      "magic": "2b0e0d0a",
+      "pycache_prefix": null,
+      "dont_write_bytecode": false,
+      "files": {
+        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__init__.py": {
+          "source_sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
+          "cache_sha256": "363df6ba1b6d8875d50e03f1f83983871c49843a872dfa796596b9b6a532d9b5",
+          "cache_bytes": 256,
+          "flags": 0,
+          "source_mtime_ns": 1792327978557777105,
+          "valid_header": true
+        },
+        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py": {
+          "source_sha256": "83dddda51b6a25f0ed27c17635d06392e9a786231afac3401d634ae60dfffabf",
+          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
+          "cache_sha256": "18e2c27f2a8267028d405194e754daaadb9edf6c7d02f5efdaf77866aa3abad0",
+          "cache_bytes": 1643,
+          "flags": 0,
+          "source_mtime_ns": 1792416006019098525,
+          "valid_header": true
+        },
+        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/load.py": {
+          "source_sha256": "a487031da43dae551dc884721fa603062cfe89858e7642342b74e20c7366b2b0",
+          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
+          "cache_sha256": "8c4ec72ea53953acbe65ed1dc1ecf849a3e18b06aefc0f1a376d89fc94bee3e4",
+          "cache_bytes": 8393,
+          "flags": 0,
+          "source_mtime_ns": 1792416722479527695,
+          "valid_header": true
+        },
+        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/model.py": {
+          "source_sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
+          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
+          "cache_sha256": "736e3da875859f41e443ec769f7029112e284fb5cf275fbc87c9348fd4e3cb39",
+          "cache_bytes": 4993,
+          "flags": 0,
+          "source_mtime_ns": 1792368213235952247,
+          "valid_header": true
+        },
+        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/reconcile.py": {
+          "source_sha256": "6cd8d119a7dfc86a110d17d7fc10c1d0cbc713b6c3b2da5356c63927fe9dc67f",
+          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
+          "cache_sha256": "cb4aeecd9019c82b65281bde438d9f2d403335ea5424235b2f070fc84d174a1b",
+          "cache_bytes": 2609,
+          "flags": 0,
+          "source_mtime_ns": 1792416006292096803,
+          "valid_header": true
+        },
+        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/render.py": {
+          "source_sha256": "b9127fc3254bff9d16d2bfa3099852238d235ec0b07463fab15520d78f2036af",
+          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
+          "cache_sha256": "42cc16eaed07fb752aaea346da7b24a4c97576a7d9a26440ddad1cb024bc24d0",
+          "cache_bytes": 4257,
+          "flags": 0,
+          "source_mtime_ns": 1792416006429095939,
+          "valid_header": true
+        }
+      }
+    },
+    "baseline": {
+      "python": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+      "cache_tag": "cpython-314",
+      "magic": "2b0e0d0a",
+      "pycache_prefix": null,
+      "dont_write_bytecode": false,
+      "files": {
+        "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__init__.py": {
+          "source_sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+          "cache_path": "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
+          "cache_sha256": "c0e5ea3d19e91fe3108d68de9c0b42e4a8ee81cb49911d81b9cf046527edca52",
+          "cache_bytes": 264,
+          "flags": 0,
+          "source_mtime_ns": 1792416008473083045,
+          "valid_header": true
+        },
+        "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__main__.py": {
+          "source_sha256": "48c3015dcbac52a08f48b800197398076ac26f37ca480a4ee1ebab2b72c9349c",
+          "cache_path": "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
+          "cache_sha256": "3d2a47989ffcae12dd4a0c4f10ce0677442458dad5f33f3e69c7edd95664ea89",
+          "cache_bytes": 1636,
+          "flags": 0,
+          "source_mtime_ns": 1792416008493082919,
+          "valid_header": true
+        },
+        "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/load.py": {
+          "source_sha256": "63b6a27309c84a8e201703f23f1e825ffdc76b5f367b1f336001aa84dcee8429",
+          "cache_path": "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
+          "cache_sha256": "a711e4fcdd769b3cb77b00c4afa0681ea712d81ed1f0e6652a377a2317bc5d33",
+          "cache_bytes": 8375,
+          "flags": 0,
+          "source_mtime_ns": 1792416008505082843,
+          "valid_header": true
+        },
+        "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/model.py": {
+          "source_sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
+          "cache_path": "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
+          "cache_sha256": "7bd566f323202e5bd0004ec34bea3b8d7da096e8a28f2a42ae46b2dfb76d84f3",
+          "cache_bytes": 5001,
+          "flags": 0,
+          "source_mtime_ns": 1792416008519082755,
+          "valid_header": true
+        },
+        "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/reconcile.py": {
+          "source_sha256": "eca175bf2a76c26b7429e0f7ad574be004a63e0f3424a9a3f3ac7aea4bd8d0ea",
+          "cache_path": "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
+          "cache_sha256": "14f13b8716d25f8d6b1c11a8757247738874c360d130917fac42091988d8f55c",
+          "cache_bytes": 2692,
+          "flags": 0,
+          "source_mtime_ns": 1792416008538082635,
+          "valid_header": true
+        },
+        "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/render.py": {
+          "source_sha256": "df456686711363c55c13f652df5a32df6b47ce666a71b8a2c8806b542e31357f",
+          "cache_path": "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
+          "cache_sha256": "51eabc4c37845ee8617068cc6226ab6a428e70d80697ac9633ce24e444520ba0",
+          "cache_bytes": 4269,
+          "flags": 0,
+          "source_mtime_ns": 1792416008557082514,
+          "valid_header": true
+        }
+      }
+    }
+  },
+  "runs": {
+    "application-normal": {
+      "command": [
+        "/home/dev-user/.virtualenvs/openai/bin/python3",
+        "-u",
+        "/tmp/relar-unpacking-inventory/run_comparison.py",
+        "--repository",
+        "/home/dev-user/code/oss/relar",
+        "--application-source-root",
+        "/home/dev-user/code/oss/relar/examples",
+        "--compiler",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/relar",
+        "--runtime",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/librelar_runtime.a",
+        "--relar-build-record",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/build-record.json",
+        "--rust-bigint",
+        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint",
+        "--rust-build-record",
+        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json",
+        "--inventory-baseline",
+        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal/inventory_reconciliation",
+        "--inventory-baseline-record",
+        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal.json",
+        "--inventory-baseline-source-root",
+        "/tmp/relar-unpacking-inventory/baseline-source",
+        "--python",
+        "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "--clang",
+        "/usr/lib/llvm-18/bin/clang",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--cpu",
+        "0",
+        "--samples",
+        "48",
+        "--warmups",
+        "2",
+        "--artifact-dir",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/application-normal",
+        "--output",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/application-normal.json"
+      ],
+      "started_at_utc": "2026-10-19T13:48:54.184609+00:00",
+      "returncode": 0,
+      "completed_at_utc": "2026-10-19T13:49:40.357244+00:00",
+      "log_sha256": "f33883fc2394d7cc0a8dbf0a423786382ca05e012371baee35b8e1ea42f7b4b8",
+      "record_sha256": "11099f6893af042c64905e716124be2126d623640708999c68497aa1b214e838"
+    },
+    "common-source-normal": {
+      "command": [
+        "/home/dev-user/.virtualenvs/openai/bin/python3",
+        "-u",
+        "/tmp/relar-unpacking-inventory/run_comparison.py",
+        "--repository",
+        "/home/dev-user/code/oss/relar",
+        "--application-source-root",
+        "/tmp/relar-unpacking-inventory/baseline-source",
+        "--compiler",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/relar",
+        "--runtime",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/librelar_runtime.a",
+        "--relar-build-record",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/build-record.json",
+        "--rust-bigint",
+        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint",
+        "--rust-build-record",
+        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json",
+        "--inventory-baseline",
+        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal/inventory_reconciliation",
+        "--inventory-baseline-record",
+        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal.json",
+        "--inventory-baseline-source-root",
+        "/tmp/relar-unpacking-inventory/baseline-source",
+        "--python",
+        "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "--clang",
+        "/usr/lib/llvm-18/bin/clang",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--cpu",
+        "0",
+        "--samples",
+        "48",
+        "--warmups",
+        "2",
+        "--artifact-dir",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/common-source-normal",
+        "--output",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/common-source-normal.json"
+      ],
+      "started_at_utc": "2026-10-19T13:49:42.512403+00:00",
+      "returncode": 0,
+      "completed_at_utc": "2026-10-19T13:50:27.471465+00:00",
+      "log_sha256": "3e8c44eba0c52d6081184eccfb78186ec9961969969e839bee640abe69aab804",
+      "record_sha256": "3a58cbc48b5dd03e00f91f2db9bab8623dbaccdba10107475e76f5189c6b9169"
+    },
+    "application-lto": {
+      "command": [
+        "/home/dev-user/.virtualenvs/openai/bin/python3",
+        "-u",
+        "/tmp/relar-unpacking-inventory/run_comparison.py",
+        "--repository",
+        "/home/dev-user/code/oss/relar",
+        "--application-source-root",
+        "/home/dev-user/code/oss/relar/examples",
+        "--compiler",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/relar",
+        "--runtime",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/librelar_runtime_lto.a",
+        "--relar-build-record",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/build-record.json",
+        "--rust-bigint",
+        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint",
+        "--rust-build-record",
+        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json",
+        "--inventory-baseline",
+        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto/inventory_reconciliation",
+        "--inventory-baseline-record",
+        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto.json",
+        "--inventory-baseline-source-root",
+        "/tmp/relar-unpacking-inventory/baseline-source",
+        "--python",
+        "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "--clang",
+        "/usr/lib/llvm-18/bin/clang",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--cpu",
+        "0",
+        "--samples",
+        "48",
+        "--warmups",
+        "2",
+        "--artifact-dir",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/application-lto",
+        "--output",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/application-lto.json",
+        "--lto-linker",
+        "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld"
+      ],
+      "started_at_utc": "2026-10-19T13:50:29.545129+00:00",
+      "returncode": 0,
+      "completed_at_utc": "2026-10-19T13:51:21.132962+00:00",
+      "log_sha256": "5ab0b3300d13db520ddc421beca5b9c1a7483653d04bf2de67fcd74a57d1501b",
+      "record_sha256": "89f7a263c2c6415a26dfdb4b59f3ab7d5bc88dc2ad5d56dd1da45e7f8cf33e2a"
+    },
+    "common-source-lto": {
+      "command": [
+        "/home/dev-user/.virtualenvs/openai/bin/python3",
+        "-u",
+        "/tmp/relar-unpacking-inventory/run_comparison.py",
+        "--repository",
+        "/home/dev-user/code/oss/relar",
+        "--application-source-root",
+        "/tmp/relar-unpacking-inventory/baseline-source",
+        "--compiler",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/relar",
+        "--runtime",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/librelar_runtime_lto.a",
+        "--relar-build-record",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-tools-final/build-record.json",
+        "--rust-bigint",
+        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint",
+        "--rust-build-record",
+        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json",
+        "--inventory-baseline",
+        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto/inventory_reconciliation",
+        "--inventory-baseline-record",
+        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto.json",
+        "--inventory-baseline-source-root",
+        "/tmp/relar-unpacking-inventory/baseline-source",
+        "--python",
+        "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "--clang",
+        "/usr/lib/llvm-18/bin/clang",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--cpu",
+        "0",
+        "--samples",
+        "48",
+        "--warmups",
+        "2",
+        "--artifact-dir",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/common-source-lto",
+        "--output",
+        "/home/dev-user/code/oss/relar/benchmarks/local/unpacking-comparison-final/common-source-lto.json",
+        "--lto-linker",
+        "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld"
+      ],
+      "started_at_utc": "2026-10-19T13:51:23.362443+00:00",
+      "returncode": 0,
+      "completed_at_utc": "2026-10-19T13:52:15.542841+00:00",
+      "log_sha256": "7cedadb584e4806a3fda8a3630f3a44cf3d34dc717dde28248462eccabc999b2",
+      "record_sha256": "59fbf31289589e6ab8295c5114744ddfbb91afeed684405f5c77049f0ec55f04"
+    }
+  },
+  "completed_at_utc": "2026-10-19T13:52:16.786706+00:00",
+  "source_guard_after": {
+    "head": "3cc767b401f988ece94e1eb4bb98c43cd06c02b2",
+    "dirty": false,
+    "all_compiled_sources_match_commit": true,
+    "application_source_sha256": {
+      "examples/inventory_reconciliation/__init__.py": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+      "examples/inventory_reconciliation/__main__.py": "83dddda51b6a25f0ed27c17635d06392e9a786231afac3401d634ae60dfffabf",
+      "examples/inventory_reconciliation/load.py": "a487031da43dae551dc884721fa603062cfe89858e7642342b74e20c7366b2b0",
+      "examples/inventory_reconciliation/model.py": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
+      "examples/inventory_reconciliation/reconcile.py": "6cd8d119a7dfc86a110d17d7fc10c1d0cbc713b6c3b2da5356c63927fe9dc67f",
+      "examples/inventory_reconciliation/render.py": "b9127fc3254bff9d16d2bfa3099852238d235ec0b07463fab15520d78f2036af"
+    },
+    "build_record_sha256": "badc428f68f28540fe3cc2b77e833eec01a7d538ff3aace3803b0f7482ac782c",
+    "artifact_sha256": {
+      "relar": "497bf8e34ee7ff5ebfbdd65e6e9d7c86b0045b81b3d07ec3674f0ba330c1a537",
+      "librelar_runtime.a": "0079d909653763d6062823a8eb249bbc39ad5aa330251424bc096f4043310f82",
+      "librelar_runtime_lto.a": "7259cdb2422ad9c311ca29bae468ff8380073c6886c966628e9d0fc088e17a61"
+    }
+  },
+  "preserved_guard_after": {
+    "sha256": {
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/asan.log": "c8fb3f28bf9c67ae685e39f3215c80d5b6bf927bdb93d00d21cfb8d2badfe0b0",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/build-record.json": "ed3e4ad2cb880532f2451c42fcfa525f18a342f1b78682a19ac6ba2576465516",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/freeze.py": "6931d9c03bc6bcd299baf8ff6173ef6e962433284f5c6283f6c3c9f247d4d0c2",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime.a": "0079d909653763d6062823a8eb249bbc39ad5aa330251424bc096f4043310f82",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime_asan.a": "0239335867da86e5e1bafe9b114045653f31038b7a7ef1a0543db33c0ee5be3f",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime_lto.a": "7259cdb2422ad9c311ca29bae468ff8380073c6886c966628e9d0fc088e17a61",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/relar": "0cfce8614ed1a0a72bec4b3fc3b460548a34857da0e3a9225514c7df63b97db1",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/ordinary.log": "98f837b162414ce697c0385f744cc1d5f8ff426bf7daa4dde5f0de408c519451",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/thinlto.log": "4e98f21b0a5ce81f557a23de49fa5d70351768af3882a165e0fd5dfdb3e3632f",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal/inventory_reconciliation": "dbabfcafe5c8ce40fa11caf5fe3f986b06e81ac7eb383ada4f3dfbd8e9b61d38",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal/inventory_reconciliation.ll": "635b4c5dc30d1afc1ba33a28ec118ecebf2d13a06e27122bb2a0474ee6e88290",
+      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint": "dae07835587c65d3b1d82558e5eebb9f2cc11fc549f7ab5876570132c932f2f5",
+      "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+      "/usr/lib/llvm-18/bin/clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal.json": "afd20b245d41cb5d04a6c9019a908045c458a27393756d1015f4dba1b27dd0c7",
+      "/home/dev-user/code/oss/relar/benchmarks/results/2026-10-19-truthiness-loop-else-application-normal.json.gz": "075698aad0a29cbf10384659c48506bdf824612d7dbfedae007fe7403a813bb6",
+      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json": "b43013232af09bdc8c1ce5d0c3d095cc48941fe9301b2f7e5fef0019ce65e8fb",
+      "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/Cargo.toml": "1bca622581e0122a40193f41c63ffef865c2e02b3e34853aaa2ab04fc096c839",
+      "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/Cargo.lock": "5fc2164c7d5d646f2dffefb4ae6bfe004cb211c240cbd1f591971e2e75ead1e0",
+      "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/src/main.rs": "e21c4a4aa25aa1509398afa76feb64d644535ff4b1707317037630e811db6617",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto/inventory_reconciliation": "b7d73ae015201da8fae1357c76dda98947d1d59a548601da84c0f3eb35b35ab3",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto/inventory_reconciliation.ll": "635b4c5dc30d1afc1ba33a28ec118ecebf2d13a06e27122bb2a0474ee6e88290",
+      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint": "00d4086b398ffe41a3346a9e24d14659002d763b1d25a058a353a3e5fd108270",
+      "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+      "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto.json": "198d26f10fee0774325df233defcee37d7b9df5349d8254f8550a6c50b1df06e",
+      "/home/dev-user/code/oss/relar/benchmarks/results/2026-10-19-truthiness-loop-else-application-lto.json.gz": "5a434a2c409b4851ee92e7c63e163f3cef2ebe5fd440cf6d0cbefd48c6fa2200",
+      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json": "001a121e8c549548ded1b976e9b2c099cbc07226b0678714fe39cb1707f97fce"
+    },
+    "snapshots": {
+      "baseline_source": {
+        "inventory_reconciliation/__init__.py": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+        "inventory_reconciliation/__main__.py": "48c3015dcbac52a08f48b800197398076ac26f37ca480a4ee1ebab2b72c9349c",
+        "inventory_reconciliation/load.py": "63b6a27309c84a8e201703f23f1e825ffdc76b5f367b1f336001aa84dcee8429",
+        "inventory_reconciliation/model.py": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
+        "inventory_reconciliation/reconcile.py": "eca175bf2a76c26b7429e0f7ad574be004a63e0f3424a9a3f3ac7aea4bd8d0ea",
+        "inventory_reconciliation/render.py": "df456686711363c55c13f652df5a32df6b47ce666a71b8a2c8806b542e31357f"
+      },
+      "application_source": {
+        "inventory_reconciliation/__init__.py": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+        "inventory_reconciliation/__main__.py": "83dddda51b6a25f0ed27c17635d06392e9a786231afac3401d634ae60dfffabf",
+        "inventory_reconciliation/load.py": "a487031da43dae551dc884721fa603062cfe89858e7642342b74e20c7366b2b0",
+        "inventory_reconciliation/model.py": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
+        "inventory_reconciliation/reconcile.py": "6cd8d119a7dfc86a110d17d7fc10c1d0cbc713b6c3b2da5356c63927fe9dc67f",
+        "inventory_reconciliation/render.py": "b9127fc3254bff9d16d2bfa3099852238d235ec0b07463fab15520d78f2036af"
+      }
+    }
+  },
+  "bytecode_after": {
+    "current": {
+      "python": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+      "cache_tag": "cpython-314",
+      "magic": "2b0e0d0a",
+      "pycache_prefix": null,
+      "dont_write_bytecode": false,
+      "files": {
+        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__init__.py": {
+          "source_sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
+          "cache_sha256": "363df6ba1b6d8875d50e03f1f83983871c49843a872dfa796596b9b6a532d9b5",
+          "cache_bytes": 256,
+          "flags": 0,
+          "source_mtime_ns": 1792327978557777105,
+          "valid_header": true
+        },
+        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py": {
+          "source_sha256": "83dddda51b6a25f0ed27c17635d06392e9a786231afac3401d634ae60dfffabf",
+          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
+          "cache_sha256": "18e2c27f2a8267028d405194e754daaadb9edf6c7d02f5efdaf77866aa3abad0",
+          "cache_bytes": 1643,
+          "flags": 0,
+          "source_mtime_ns": 1792416006019098525,
+          "valid_header": true
+        },
+        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/load.py": {
+          "source_sha256": "a487031da43dae551dc884721fa603062cfe89858e7642342b74e20c7366b2b0",
+          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
+          "cache_sha256": "8c4ec72ea53953acbe65ed1dc1ecf849a3e18b06aefc0f1a376d89fc94bee3e4",
+          "cache_bytes": 8393,
+          "flags": 0,
+          "source_mtime_ns": 1792416722479527695,
+          "valid_header": true
+        },
+        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/model.py": {
+          "source_sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
+          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
+          "cache_sha256": "736e3da875859f41e443ec769f7029112e284fb5cf275fbc87c9348fd4e3cb39",
+          "cache_bytes": 4993,
+          "flags": 0,
+          "source_mtime_ns": 1792368213235952247,
+          "valid_header": true
+        },
+        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/reconcile.py": {
+          "source_sha256": "6cd8d119a7dfc86a110d17d7fc10c1d0cbc713b6c3b2da5356c63927fe9dc67f",
+          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
+          "cache_sha256": "cb4aeecd9019c82b65281bde438d9f2d403335ea5424235b2f070fc84d174a1b",
+          "cache_bytes": 2609,
+          "flags": 0,
+          "source_mtime_ns": 1792416006292096803,
+          "valid_header": true
+        },
+        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/render.py": {
+          "source_sha256": "b9127fc3254bff9d16d2bfa3099852238d235ec0b07463fab15520d78f2036af",
+          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
+          "cache_sha256": "42cc16eaed07fb752aaea346da7b24a4c97576a7d9a26440ddad1cb024bc24d0",
+          "cache_bytes": 4257,
+          "flags": 0,
+          "source_mtime_ns": 1792416006429095939,
+          "valid_header": true
+        }
+      }
+    },
+    "baseline": {
+      "python": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+      "cache_tag": "cpython-314",
+      "magic": "2b0e0d0a",
+      "pycache_prefix": null,
+      "dont_write_bytecode": false,
+      "files": {
+        "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__init__.py": {
+          "source_sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
+          "cache_path": "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
+          "cache_sha256": "c0e5ea3d19e91fe3108d68de9c0b42e4a8ee81cb49911d81b9cf046527edca52",
+          "cache_bytes": 264,
+          "flags": 0,
+          "source_mtime_ns": 1792416008473083045,
+          "valid_header": true
+        },
+        "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__main__.py": {
+          "source_sha256": "48c3015dcbac52a08f48b800197398076ac26f37ca480a4ee1ebab2b72c9349c",
+          "cache_path": "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
+          "cache_sha256": "3d2a47989ffcae12dd4a0c4f10ce0677442458dad5f33f3e69c7edd95664ea89",
+          "cache_bytes": 1636,
+          "flags": 0,
+          "source_mtime_ns": 1792416008493082919,
+          "valid_header": true
+        },
+        "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/load.py": {
+          "source_sha256": "63b6a27309c84a8e201703f23f1e825ffdc76b5f367b1f336001aa84dcee8429",
+          "cache_path": "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
+          "cache_sha256": "a711e4fcdd769b3cb77b00c4afa0681ea712d81ed1f0e6652a377a2317bc5d33",
+          "cache_bytes": 8375,
+          "flags": 0,
+          "source_mtime_ns": 1792416008505082843,
+          "valid_header": true
+        },
+        "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/model.py": {
+          "source_sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
+          "cache_path": "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
+          "cache_sha256": "7bd566f323202e5bd0004ec34bea3b8d7da096e8a28f2a42ae46b2dfb76d84f3",
+          "cache_bytes": 5001,
+          "flags": 0,
+          "source_mtime_ns": 1792416008519082755,
+          "valid_header": true
+        },
+        "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/reconcile.py": {
+          "source_sha256": "eca175bf2a76c26b7429e0f7ad574be004a63e0f3424a9a3f3ac7aea4bd8d0ea",
+          "cache_path": "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
+          "cache_sha256": "14f13b8716d25f8d6b1c11a8757247738874c360d130917fac42091988d8f55c",
+          "cache_bytes": 2692,
+          "flags": 0,
+          "source_mtime_ns": 1792416008538082635,
+          "valid_header": true
+        },
+        "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/render.py": {
+          "source_sha256": "df456686711363c55c13f652df5a32df6b47ce666a71b8a2c8806b542e31357f",
+          "cache_path": "/tmp/relar-unpacking-inventory/baseline-source/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
+          "cache_sha256": "51eabc4c37845ee8617068cc6226ab6a428e70d80697ac9633ce24e444520ba0",
+          "cache_bytes": 4269,
+          "flags": 0,
+          "source_mtime_ns": 1792416008557082514,
+          "valid_header": true
+        }
+      }
+    }
+  }
+}

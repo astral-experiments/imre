@@ -17,9 +17,9 @@ def reconcile(stocks: list[Stock], *, batches: list[list[Request]]) -> Report:
     positive: list[Request] = [
         request for batch in batches for request in batch if request.quantity > 0
     ]
-    requested_skus: set[str] = {request.sku for request in positive}
     # A dict preserves first-request order while repeated values start at zero.
     requested: dict[str, int] = {request.sku: 0 for request in positive}
+    requested_skus: set[str] = {*requested}
     for request in positive:
         requested[request.sku] += request.quantity
     # Eagerness and source order matter: every call mutates the same inventory.
