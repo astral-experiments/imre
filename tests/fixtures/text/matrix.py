@@ -43,6 +43,11 @@ line_parts: list[str] = [
     "", "x", "\n", "\r", "\r\n", "\v", "\f", "\x1c", "\x1d", "\x1e",
     "\x1f", "\x85", "\u2028", "\u2029", "éλ🙂", "¢—",
 ]
+chunk = "0123456789abcdef"
+padding = chunk + chunk + chunk + chunk + "x"
+for size in [31, 32, 33, 63, 64, 65]:
+    for separator in line_parts:
+        print(repr((padding[:size] + separator + "last\r\n").splitlines()))
 for left in line_parts:
     for right in line_parts:
         print(repr((left + right).splitlines()))

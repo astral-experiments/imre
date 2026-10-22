@@ -6,7 +6,17 @@ use crate::ir::TextOperation;
 impl Emitter<'_, '_> {
     /// Elides a temporary split sequence only when its selected field is known.
     /// Ordinary argument evaluation and rooting still precede separator checks.
-    pub(super) fn rsplit_last(&mut self, expressions: &[Expr]) -> Option<Value> {
+    pub(super) fn rsplit_last(&mut self, builtin: &Builtin, expressions: &[Expr]) -> Option<Value> {
+        let (expressions, function) = match (builtin, expressions) {
+            (Builtin::ListGet, args) => (args, "relar_str_rsplit_last"),
+            (Builtin::Text(TextOperation::Unquote), [arg]) => match &arg.kind {
+                ExprKind::Builtin(Builtin::ListGet, args) => {
+                    (args.as_slice(), "relar_str_unquote_rsplit_last")
+                }
+                _ => return None,
+            },
+            _ => return None,
+        };
         let [split, index] = expressions else {
             return None;
         };
@@ -26,7 +36,7 @@ impl Emitter<'_, '_> {
         let args = args.iter().map(|arg| self.operand(arg)).collect::<Vec<_>>();
         let separator = self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
         let operand = self.checked_instruction(format!(
-            "call ptr @relar_str_rsplit_last(ptr {}, ptr {separator})",
+            "call ptr @{function}(ptr {}, ptr {separator})",
             args[0].value.operand,
         ));
         let result = self.owned(Value {
@@ -102,6 +112,28 @@ impl Emitter<'_, '_> {
 #[cfg(test)]
 mod tests {
     use crate::{CompileOptions, compile};
+
+    #[test]
+    fn unquote_borrows_only_an_immediately_selected_tail() {
+        for (body, fused) in [
+            ("return unquote(url.rsplit(sep, 1)[-1])", true),
+            (
+                "tail = url.rsplit(sep, 1)[-1]\n    return unquote(tail)",
+                false,
+            ),
+            ("return unquote(url.rsplit(sep, limit)[-1])", false),
+        ] {
+            let source = format!(
+                "from urllib.parse import unquote\ndef name(url: str, sep: str, limit: int) -> str:\n    {body}\n"
+            );
+            let llvm = compile(&source, &CompileOptions::default()).unwrap();
+            assert_eq!(
+                llvm.contains("call ptr @relar_str_unquote_rsplit_last("),
+                fused
+            );
+            assert_eq!(llvm.contains("call ptr @relar_str_unquote("), !fused);
+        }
+    }
 
     #[test]
     fn only_ephemeral_right_splits_with_literal_selection_are_fused() {

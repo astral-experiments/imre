@@ -171,6 +171,27 @@ pub unsafe extern "C" fn relar_str_rsplit_last(
     value: *const Str,
     separator: *const Str,
 ) -> *const Str {
+    // SAFETY: the caller roots both strings for the duration of the split.
+    unsafe { rsplit_last(value, separator, false) }
+}
+
+/// Percent-decodes the borrowed final field of a right split into its result.
+///
+/// # Safety
+/// Both inputs must be nonnull, immutable strings rooted for this call. Returns
+/// an independent owned string, or null with a pending empty-separator error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_unquote_rsplit_last(
+    value: *const Str,
+    separator: *const Str,
+) -> *const Str {
+    // SAFETY: both source strings remain live through decoding.
+    unsafe { rsplit_last(value, separator, true) }
+}
+
+/// # Safety
+/// Both inputs are rooted immutable strings. The returned reference is owned.
+unsafe fn rsplit_last(value: *const Str, separator: *const Str, decode: bool) -> *const Str {
     // SAFETY: both string owners remain live throughout the operation.
     let (source, separator) = unsafe { (&*value, &*separator) };
     if separator.is_empty() {
@@ -184,8 +205,11 @@ pub unsafe extern "C" fn relar_str_rsplit_last(
     } else {
         source.rfind(separator.as_str())
     };
-    if let Some(index) = boundary {
-        Rc::into_raw(Rc::new(Str::new(&source[index + separator.len()..])))
+    let tail = &source[boundary.map_or(0, |index| index + separator.len())..];
+    if decode && let Some(first) = memchr::memchr(b'%', tail.as_bytes()) {
+        Rc::into_raw(Rc::new(unquote(tail, first)))
+    } else if boundary.is_some() {
+        Rc::into_raw(Rc::new(Str::new(tail)))
     } else {
         // SAFETY: the caller's live owner permits acquiring the result reference.
         unsafe { Rc::increment_strong_count(value) };

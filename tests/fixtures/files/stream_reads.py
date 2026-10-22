@@ -44,6 +44,12 @@ def binary_lines(stream: BinaryIO) -> None:
     print(len(alias.readline()))
 
 
+with open("long-rows.txt", "r", encoding="utf-8") as long_rows:
+    kept = [line for line in long_rows]
+for line in kept:
+    print(len(line))
+    print(repr(line[:2]))
+    print(repr(line[-2:]))
 with open("rows.txt", "r", encoding="utf-8") as text:
     text_lines(text)
 with gzip.open(Path("rows.gz"), "rt", encoding="utf-8") as text:

@@ -59,9 +59,13 @@ The compiler and runtime passed 296 unit tests. The four reader-related suites p
 
 The [raw measurements](2026-10-22-streaming-catalog-measurements.json.gz) retain every time, peak RSS, output hash, warmup, command, build identity, and engine order. The [independent audit](2026-10-22-streaming-catalog-audit.json) checked 320 retained file identities on the measuring host and reproduced every median and ratio. The [validation evidence](2026-10-22-streaming-catalog-validation.json) and [exploratory profiles](2026-10-22-streaming-catalog-profile.json) describe the tested configurations and the optimization pilot.
 
-The [benchmark guide](../README.md#streaming-python-download-catalog) gives the build and measurement commands. From the commit that published these results, this command checks the recorded source identities and shipped fixture, then recomputes the statistics using Python’s standard library.
+Export the measured source revision to replay these results from a later checkout. The audit checks each guarded source and the shipped fixture before recomputing the statistics. The build and measurement commands are in the [benchmark guide](../README.md#streaming-python-download-catalog).
 
 ```sh
+git fetch --no-tags origin f9b28e8a25182e0f7739c7835e171a01872b3c02
+source_dir=$(mktemp -d)
+git archive f9b28e8a25182e0f7739c7835e171a01872b3c02 | tar -x -C "$source_dir"
 python3.14 benchmarks/stream_catalog_audit.py benchmarks/results/2026-10-22-streaming-catalog-measurements.json.gz \
+  --source-root "$source_dir" \
   --sha256 a6d3818c4cf92b8681acf5bde0a2fa4276e40dfef5f6a2dd72fcfeebf2fd00c9
 ```

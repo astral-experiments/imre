@@ -797,6 +797,19 @@ pub unsafe extern "C" fn relar_str_split_whitespace(value: *const Str) -> *const
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(result)))))
 }
 
+/// Bytes in 0x20..=0x7f contain no Python line break. Reducing fixed-size
+/// blocks lets LLVM check long ASCII lines without branching on each byte.
+fn plain_ascii_line(bytes: &[u8]) -> bool {
+    let (blocks, tail) = bytes.as_chunks::<32>();
+    blocks.iter().all(|block| {
+        block
+            .iter()
+            .fold(0_u8, |bits, &byte| bits | byte | byte.wrapping_sub(32))
+            & 0x80
+            == 0
+    }) && tail.iter().all(|byte| (32..128).contains(byte))
+}
+
 /// Splits Python line boundaries without retaining separators. CRLF is one
 /// boundary; a final boundary creates no extra item, and U+001F is not a boundary.
 ///
@@ -816,6 +829,14 @@ pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Objec
             .values
             .push(Rc::into_raw(Rc::new(Str::new(part))) as usize);
     };
+    let single = value
+        .strip_suffix("\r\n")
+        .or_else(|| value.strip_suffix(['\r', '\n']))
+        .unwrap_or(value);
+    if !value.is_empty() && plain_ascii_line(single.as_bytes()) {
+        push(single);
+        return Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(result)))));
+    }
     let mut start = 0;
     let bytes = value.as_bytes();
     // These vectorized guards exclude every additional Python boundary. The

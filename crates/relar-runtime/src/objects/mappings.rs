@@ -74,17 +74,20 @@ impl Hash for TupleKey {
 unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
     // SAFETY: the owner roots its immutable descriptor and every field.
     let layout = unsafe { super::records::descriptor(value) };
-    layout.length.hash(state);
+    // Tuple equality requires the same descriptor, which identifies the length
+    // and every field kind. Hash the shared shape once for the entire tuple.
+    std::ptr::from_ref(layout).hash(state);
     for index in 0..layout.length {
         // SAFETY: the static layout covers each initialized concrete field.
         unsafe {
             let kind = WordKind::new(*layout.kinds.add(index));
             let word = kind.read_record_field(value.add(index));
             let raw = kind.raw();
-            raw.hash(state);
-            if raw & NULLABLE != 0 && word == 0 {
-                0_usize.hash(state);
-                continue;
+            if raw & NULLABLE != 0 {
+                (word != 0).hash(state);
+                if word == 0 {
+                    continue;
+                }
             }
             match raw & !NULLABLE {
                 0 | 1 => word.hash(state),
