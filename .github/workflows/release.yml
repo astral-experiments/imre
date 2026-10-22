@@ -1,0 +1,125 @@
+name: Release
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/*release*
+      - Cargo.toml
+      - Cargo.lock
+      - crates/*/Cargo.toml
+      - rust-toolchain.toml
+      - LICENSE-*
+      - examples/conformance_report/upstream/LICENSE
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Bare Cargo version to publish from main, or dry-run'
+        type: string
+        default: dry-run
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - id: version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || 'dry-run' }}
+        run: |
+          if [[ "$RELEASE_TAG" != dry-run && ( "$GITHUB_REPOSITORY" != astral-sh/relar || "$GITHUB_REF" != refs/heads/main ) ]]; then
+            echo 'Publish releases from astral-sh/relar on main.' >&2
+            exit 1
+          fi
+          version=$(python3 scripts/release-version.py -- "$RELEASE_TAG")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  package:
+    name: Package ${{ matrix.target }}
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    env:
+      TARGET: ${{ matrix.target }}
+      CARGO_PROFILE_RELEASE_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install Clang 18
+        run: sudo apt-get update && sudo apt-get install -y clang-18
+      - name: Build the compiler and runtime
+        run: cargo build --workspace --release --locked
+      - name: Package and run a script from the extracted archive
+        run: bash scripts/package-release.sh "$TARGET" target/release dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: relar-${{ matrix.target }}
+          path: dist/
+          compression-level: 0
+          if-no-files-found: error
+
+  publish:
+    needs: [plan, package]
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'astral-sh/relar' && github.ref == 'refs/heads/main' && inputs.tag == needs.plan.outputs.version
+    runs-on: ubuntu-24.04
+    concurrency: relar-publish
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: relar-*-unknown-linux-gnu
+          path: dist
+          merge-multiple: true
+      - name: Publish verified archives to GitHub Releases
+        working-directory: dist
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.version }}
+        run: |
+          assets=()
+          for arch in x86_64 aarch64; do
+            archive="relar-$arch-unknown-linux-gnu.tar.gz"
+            # Bind the sidecar to its expected filename before checking the archive.
+            sha256sum "$archive" | cmp - "$archive.sha256"
+            assets+=("$archive" "$archive.sha256")
+          done
+
+          releases=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].tag_name')
+          if grep -Fxq -- "$TAG" <<< "$releases"; then
+            echo "Release $TAG already exists." >&2
+            exit 1
+          fi
+          refs=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG" --jq '.[].ref')
+          if grep -Fxq -- "refs/tags/$TAG" <<< "$refs"; then
+            # The commits endpoint peels annotated tags to the underlying commit.
+            commit=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$TAG" --jq .sha)
+            if [[ "$commit" != "$GITHUB_SHA" ]]; then
+              echo "Tag $TAG points to $commit, expected $GITHUB_SHA." >&2
+              exit 1
+            fi
+          fi
+          flags=()
+          if [[ ${TAG%%+*} == *-* ]]; then
+            flags+=(--prerelease --latest=false)
+          fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Relar $TAG" --generate-notes "${flags[@]}" "${assets[@]}"
