@@ -150,6 +150,10 @@ and reproducible evidence for CPython, Relar, Codon, and Rust.
 The [fixed-regex comparison](../../benchmarks/results/2026-10-22-fixed-regex.md)
 times Ruff’s original pattern against the previous scanner on the same checkout
 and verifies the text and offsets of each captured annotation.
+The [string-enum comparison](../../benchmarks/results/2026-10-22-string-enums.md)
+measures Ruff’s original `compute_stats` over 1,269 preloaded test groups. It
+also times complete and repeated reports and includes Rust controls that
+specialize the common one- and two-diagnostic cases.
 
 `benchmarks/conformance_validate.py` compares full reports and filesystem effects
 against the unchanged upstream implementation. Its seeded checks exercise the

@@ -82,6 +82,12 @@ one HTTP response by reading the entire plain or compressed input file and calls
 the unchanged finder and renderer. The typed port also runs on CPython, giving
 a separate measurement of the same streaming algorithm.
 
+The [Variant sort check](../../benchmarks/uv_variant_validate.py) compiles uv’s
+original `Variant` and `variant_sort_key`. Relar and CPython produce the same
+order for all 6,110 downloads passed to the renderer, including ties within
+each of the four ranks. The renderer then filters 12 downloads for Python
+versions older than 3.8.
+
 Validate the full catalog, focused edge cases, errors, and complete filesystem
 effects against that upstream oracle:
 

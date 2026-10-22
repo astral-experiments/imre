@@ -1,0 +1,273 @@
+{
+  "revision": "d5d48a88cd5b4a0af26080caf09d4d11b7eec599",
+  "baseline_revision": "0d61459957cf483404c48150c543032d87cf91c2",
+  "indexed_files": 691,
+  "validated_build_sources": 247,
+  "timed": 2016,
+  "warmups": 168,
+  "secondary_timed": 288,
+  "secondary_warmups": 24,
+  "groups": 1269,
+  "distribution": {
+    "old": {
+      "false_negative": 122,
+      "true_positive": 1012,
+      "false_positive": 59,
+      "true_negative": 76
+    },
+    "new": {
+      "false_negative": 20,
+      "true_positive": 1116,
+      "true_negative": 113,
+      "false_positive": 20
+    },
+    "change": {
+      "unchanged": 1020,
+      "changed": 100,
+      "added": 107,
+      "removed": 42
+    },
+    "optional": 100,
+    "multi": 6
+  },
+  "boundary_counts": {
+    "application": 156,
+    "compute": 196,
+    "stdout": 5,
+    "output-error": 10
+  },
+  "specified_rust_time_target_met": true,
+  "all_three_rust_targets_met": false,
+  "secondary_rust_ratios": {
+    "strong-rust": {
+      "normal": 1.7183227182439311,
+      "thinlto": 2.1792311160368594
+    },
+    "small-rust": {
+      "normal": 2.654254658762139,
+      "thinlto": 3.5504752295151234
+    }
+  },
+  "strongest_rust_changed_diff_full": {
+    "complete": {
+      "normal": 1.6293286969145324,
+      "thinlto": 1.5186935182333041
+    },
+    "repeated": {
+      "normal": 1.7110017327482927,
+      "thinlto": 1.4898064763619738
+    }
+  },
+  "profiles": {
+    "before": {
+      "0": {
+        "instructions": 148364202,
+        "allocated_blocks": 101615,
+        "allocated_bytes": 13880369
+      },
+      "64": {
+        "instructions": 513357695,
+        "allocated_blocks": 632687,
+        "allocated_bytes": 53707314
+      }
+    },
+    "after": {
+      "0": {
+        "instructions": 148661978,
+        "allocated_blocks": 101636,
+        "allocated_bytes": 13881175
+      },
+      "64": {
+        "instructions": 167340416,
+        "allocated_blocks": 102788,
+        "allocated_bytes": 13964120
+      }
+    },
+    "rust": {
+      "0": {
+        "instructions": 88155664,
+        "allocated_blocks": 56268,
+        "allocated_bytes": 11218680
+      },
+      "64": {
+        "instructions": 197020794,
+        "allocated_blocks": 189004,
+        "allocated_bytes": 18123258
+      }
+    },
+    "rust-fast": {
+      "0": {
+        "instructions": 88257194,
+        "allocated_blocks": 56268,
+        "allocated_bytes": 11218690
+      },
+      "64": {
+        "instructions": 104423745,
+        "allocated_blocks": 62348,
+        "allocated_bytes": 11537156
+      }
+    },
+    "rust-two": {
+      "0": {
+        "instructions": 88264677,
+        "allocated_blocks": 56268,
+        "allocated_bytes": 11218688
+      },
+      "64": {
+        "instructions": 98869932,
+        "allocated_blocks": 56524,
+        "allocated_bytes": 11234306
+      }
+    }
+  },
+  "modes": {
+    "normal": {
+      "matrix_sha256": "00a27b35e9258d716291371a776580586db356a03abf588fd76eace44ae1541c",
+      "pilot": false,
+      "timed": 1008,
+      "warmups": 84,
+      "strict_files_checked": 0,
+      "matched_capture_transcripts": 6,
+      "real_source_files": 146,
+      "reconstructed_reports": [
+        "changed-diff",
+        "changed-github",
+        "unchanged-github"
+      ],
+      "time_target_met": true,
+      "ratios": {
+        "classification": 0.52214354914354,
+        "unchanged-github/complete-report": 1.559375720013481,
+        "unchanged-github/repeated-report": 1.7497481819063014,
+        "unchanged-github/live-checkout": 1.0154556989987613,
+        "changed-github/complete-report": 1.5649529078176725,
+        "changed-github/repeated-report": 1.6937431246513523,
+        "changed-github/live-checkout": 1.0175029168128156,
+        "changed-diff/complete-report": 1.5483519296220578,
+        "changed-diff/repeated-report": 1.6716359019853664,
+        "changed-diff/live-checkout": 1.0136831577003815,
+        "classification/net": 0.23636298308124662,
+        "changed-github/repeated-report/net": 1.6952254265392137,
+        "changed-diff/repeated-report/net": 1.6596914384190915,
+        "unchanged-github/repeated-report/net": 1.756322260436152
+      }
+    },
+    "thinlto": {
+      "matrix_sha256": "1fccba052ee026a8b207a3edd931855968a1d33d6d7b8ede2f2be0eec3197398",
+      "pilot": false,
+      "timed": 1008,
+      "warmups": 84,
+      "strict_files_checked": 0,
+      "matched_capture_transcripts": 6,
+      "real_source_files": 146,
+      "reconstructed_reports": [
+        "changed-diff",
+        "changed-github",
+        "unchanged-github"
+      ],
+      "time_target_met": true,
+      "ratios": {
+        "classification": 0.5845027382252806,
+        "unchanged-github/complete-report": 1.4612433165963363,
+        "unchanged-github/repeated-report": 1.5615603806091267,
+        "unchanged-github/live-checkout": 1.0143509668145414,
+        "changed-github/complete-report": 1.4544971650888439,
+        "changed-github/repeated-report": 1.5218434745270988,
+        "changed-github/live-checkout": 1.006036460771082,
+        "changed-diff/complete-report": 1.4624749988376868,
+        "changed-diff/repeated-report": 1.5112058710108551,
+        "changed-diff/live-checkout": 1.0044206149692394,
+        "classification/net": 0.2723222807518476,
+        "unchanged-github/repeated-report/net": 1.5310289950428322,
+        "changed-diff/repeated-report/net": 1.4701182284823122,
+        "changed-github/repeated-report/net": 1.481959243716499
+      }
+    }
+  },
+  "shipping_revision": "9778ef24b8e504da5402f4d8adef39e5b60e54a4",
+  "post_fix_llvm_identities": 9,
+  "post_fix_canonical_elf_identities": {
+    "normal": {
+      "report": true,
+      "compute": true,
+      "classification": true
+    },
+    "thinlto": {
+      "report": true,
+      "compute": true,
+      "classification": true
+    },
+    "asan": {
+      "report": true,
+      "compute": true,
+      "classification": true
+    }
+  },
+  "post_fix_natural_executable_section_identities": {
+    "normal": {
+      "report": true,
+      "compute": true,
+      "classification": true
+    },
+    "thinlto": {
+      "report": true,
+      "compute": true,
+      "classification": true
+    },
+    "asan": {
+      "report": true,
+      "compute": true,
+      "classification": true
+    }
+  },
+  "post_fix_natural_pt_load_identities": {
+    "normal": {
+      "report": false,
+      "compute": false,
+      "classification": false
+    },
+    "thinlto": {
+      "report": false,
+      "compute": false,
+      "classification": false
+    },
+    "asan": {
+      "report": false,
+      "compute": false,
+      "classification": false
+    }
+  },
+  "post_fix_complete_output_observations": 90,
+  "attribution_timed_processes": 144,
+  "attribution_warmup_processes": 12,
+  "attribution_ns": {
+    "old-strings-thinlto": 359090.2731933594,
+    "new-strings-thinlto": 93948.41040039062,
+    "new-strings-normal": 190781.7265625,
+    "new-enums-normal": 34761.119873046875,
+    "new-enums-thinlto": 30765.74755859375,
+    "old-strings-normal": 648367.7421875
+  },
+  "generic_compiler_speedup": {
+    "normal": 3.3984792666979824,
+    "thinlto": 3.822207014072761
+  },
+  "string_to_enum_speedup": {
+    "normal": 5.488365370829971,
+    "thinlto": 3.0536690266168476
+  },
+  "combined_paired_speedup": {
+    "normal": 18.65209592082884,
+    "thinlto": 11.671755172191654
+  },
+  "uv_downloads": 6110,
+  "frozen_sanitized_suites": 37,
+  "focused_callback_comparisons": 8,
+  "on_host_strict_input_fingerprints": {
+    "normal": 82,
+    "thinlto": 83
+  },
+  "study_sha256": "ff079f51f6e4195a38a1bdcbcf58d832a8f5958c7878b9d9ac9e026f7ed4853e",
+  "study_bytes": 1916016,
+  "local_replay_matches_host": true
+}
