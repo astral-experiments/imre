@@ -3795,12 +3795,13 @@ impl Emitter<'_, '_> {
     /// The zeroed payload is safe to destroy before every initializer completes.
     /// The checked constructor cannot expose a partially initialized record.
     fn record(&mut self, ty: Type) -> Value {
+        self.record_with_layout(ty, &record_name(ty))
+    }
+
+    fn record_with_layout(&mut self, ty: Type, name: &str) -> Value {
         let value = Value {
             ty,
-            operand: self.instruction(format!(
-                "call ptr @relar_record_new(ptr @layout_{})",
-                record_name(ty)
-            )),
+            operand: self.instruction(format!("call ptr @relar_record_new(ptr @layout_{name})")),
             small_integer: false,
         };
         self.owned(value)

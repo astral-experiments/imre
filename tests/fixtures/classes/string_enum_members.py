@@ -1,4 +1,5 @@
 import enum
+from typing import Callable
 
 
 class Status(enum.StrEnum):
@@ -7,6 +8,9 @@ class Status(enum.StrEnum):
     SAME = "ready"
     EMPTY = ""
     LABEL = "é\0marker"
+
+    def choose(self, override: "Status | None") -> "Status":
+        return self if override is None else override
 
 
 class Other(enum.StrEnum):
@@ -33,9 +37,32 @@ def echo(value: str) -> str:
     return repr(value)
 
 
+def invoke(callback: Callable[[Status | None], Status], override: Status | None) -> Status:
+    return callback(override)
+
+
+class Picker:
+    def __init__(self) -> None:
+        pass
+
+    def choose(self, override: Status | None) -> Status:
+        return Status.LABEL if override is None else override
+
+
+def observe_callback(callback: Callable[[Status | None], Status]) -> None:
+    print(invoke(callback, None).name)
+    print(invoke(callback, Status.LABEL) is Status.LABEL)
+
+
 for member in [Status.READY, Status.ALIAS, Status.SAME, Status.EMPTY, Status.LABEL]:
     observe(member, Status.READY)
     print(echo(member.value))
     print(echo(str(member)))
 observe(None, None)
 print(isinstance("ready", enum.StrEnum))
+
+
+# A scalar enum and an owned record share one dynamic callback signature.
+observe_callback(Status.ALIAS.choose)
+observe_callback(Status.EMPTY.choose)
+observe_callback(Picker().choose)
