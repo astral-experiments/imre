@@ -283,6 +283,22 @@ platform with `--thinlto`. Keep the benchmark host free of builds and profilers
 during measurement. Raw samples are retained incrementally; only a final passing
 `benchmark.json` with all input guards represents a completed comparison.
 
+Audit completed ordinary and ThinLTO records independently of the timing driver:
+
+```sh
+python3.14 benchmarks/live_conformance_audit.py \
+  /path/to/ordinary-measurements/benchmark.json \
+  /path/to/thinlto-measurements/benchmark.json
+```
+
+The audit checks raw sample ordering, complete outputs, compute checksums,
+statistics, validation records, captured inputs, and retained build identities.
+For a copied evidence bundle, use `--portable` and `--rebase OLD=NEW` to map
+retained source and artifact directories; the receipt reports which evidence
+categories were checked. Auditing does not execute or rebuild native programs.
+The [checkout comparison](results/2026-10-21-live-conformance.md) contains the
+five-engine timing tables, retained evidence, and a portable audit command.
+
 ### Captured-input developer tools
 
 The [conformance reporter](../examples/conformance_report/README.md) ports Ruff's

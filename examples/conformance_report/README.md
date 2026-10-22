@@ -130,7 +130,7 @@ relar build examples/conformance_report/compute.py --module-root examples \
   --format diff --force-summary-table --rounds 8 --output /tmp/conformance.md
 ```
 
-The real comparison inputs select 146 tests from the pinned typing suite. The
+The captured-input comparisons select 146 tests from the pinned typing suite. The
 ty 0.0.89 → 0.0.90 captures are identical (1,201 diagnostics each); ty 0.0.60 →
 0.0.90 exercises changed reports (1,169 → 1,201 diagnostics) under the exact same
 upstream command and lint policy. Both raw captures, including their original
@@ -139,6 +139,11 @@ helper copies the selected source bytes and rebases the manifest's canonical
 identities for offline replay; preparation records bind the original source,
 tool and stream hashes. Retain the typing checkout's root `LICENSE` alongside
 the captured inputs when sharing them.
+
+The live benchmark runs ty 0.0.90 on both sides for its unchanged case and
+0.0.60 → 0.0.90 for changed reports. The [checkout comparison](../../benchmarks/results/2026-10-21-live-conformance.md)
+includes complete workflow timings, separate report-computation timings,
+and reproducible evidence for CPython, Relar, Codon, and Rust.
 
 `benchmarks/conformance_validate.py` compares full reports and filesystem effects
 against the unchanged upstream implementation. Its seeded checks exercise the

@@ -1,0 +1,34 @@
+{
+  "core_revision": "8bfc0b72fbfd26f92004d4a60f4ea48e289a0d7a",
+  "files": {
+    "2026-10-21-live-conformance-audit.json": {
+      "bytes": 16745,
+      "sha256": "900323790e60715793cc0bc955e5b7064955ad93c78128873bef0a86c955bcb3"
+    },
+    "2026-10-21-live-conformance-evidence.tar.xz": {
+      "bytes": 5124912,
+      "sha256": "a752489aeff35e007d27f5ea19f7d2f762ccf7d2edb860312cf9c1998712491c"
+    },
+    "2026-10-21-live-conformance-normal.json.gz": {
+      "bytes": 618417,
+      "sha256": "af4361a67bec3426d30e3fe6cd8f70ab75f9c11e85ba85aef55ff0531aba6c24"
+    },
+    "2026-10-21-live-conformance-portable-check.json": {
+      "bytes": 16884,
+      "sha256": "f733f4ccedffb0bffe04b8a28b09d9915168a491e12d8ea3fb317b2a079b88b4"
+    },
+    "2026-10-21-live-conformance-thinlto.json.gz": {
+      "bytes": 613442,
+      "sha256": "f09c2c869e56331964f9953a29ef3a19815f0f1598a5e4b14810bd32f39a856e"
+    },
+    "2026-10-21-live-conformance.md": {
+      "bytes": 11530,
+      "sha256": "b5109e3a7366fcc86fba4f70bba6349d51da8e0aaeb43d571f02966b5e9bd1eb"
+    }
+  },
+  "portable_receipt_reproduced_byte_for_byte": true,
+  "relar_program_revision": "4eed53a642d7230445bcfaed66c78ce40b93e8c1",
+  "schema": 1,
+  "source_revision": "207ad26a179fdf2e3cd6e6ad2c555d49a603d329",
+  "status": "passed"
+}

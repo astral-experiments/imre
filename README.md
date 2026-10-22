@@ -74,7 +74,7 @@ with Relar and CPython, and comparing it with a Rust implementation:
 
 The [memory-report comparator](examples/memory_report/README.md) compares report files and directories or runs two versions of ty over prepared projects. It can keep the child processes’ transcripts and atomically publish the Markdown report. The [workspace and atomic-output comparison](benchmarks/results/2026-10-21-native-workspaces.md) measures complete runs at 1.00–1.57× Rust’s time, file-only reports at 1.13–1.26×, and repeated report computation at 1.42–1.57× across ordinary and ThinLTO builds.
 
-The [conformance reporter](examples/conformance_report/README.md) reads test groups from a typing checkout, runs both ty executables with timeouts, resolves diagnostic paths, and atomically publishes the Markdown or GitHub report. Captured diagnostics can also be replayed.
+The [conformance reporter](examples/conformance_report/README.md) reads test groups from a typing checkout, runs both ty executables with timeouts, resolves diagnostic paths, and atomically publishes the Markdown or GitHub report. Captured diagnostics can also be replayed. In the [live conformance comparison](benchmarks/results/2026-10-21-live-conformance.md), complete runs take about 1.02× Rust’s time. Repeated report computation takes 1.53–1.95×.
 
 The [Python download catalog](examples/python_catalog/README.md) selects and renders 6,098 downloads from uv’s index of 58,721 release artifacts.
 
