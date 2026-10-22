@@ -692,7 +692,11 @@ mod tests {
         let input = state.input().ok().unwrap();
         assert_eq!(input.read_bytes(Some(2)).ok().unwrap(), b"ab");
         assert_eq!(input.binary_line().ok().unwrap(), b"c\n");
-        assert_eq!(input.read_bytes(None).ok().unwrap(), b"def");
+        let short = input.read_bytes(Some(1024 * 1024)).ok().unwrap();
+        assert_eq!(short, b"def");
+        assert!(short.capacity() < 1024);
+        let empty = input.read_bytes(Some(1024 * 1024)).ok().unwrap();
+        assert_eq!(empty.capacity(), 0);
 
         let end = gzip.len();
         gzip[end - 8] ^= 1;
