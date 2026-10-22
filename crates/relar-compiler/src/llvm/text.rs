@@ -20,19 +20,7 @@ impl Emitter<'_, '_> {
         let [split, index] = expressions else {
             return None;
         };
-        let ExprKind::Builtin(Builtin::Text(TextOperation::Split(true)), args) = &split.kind else {
-            return None;
-        };
-        let [_, separator, limit] = args.as_slice() else {
-            return None;
-        };
-        if !matches!(separator.kind, ExprKind::Present(_))
-            || !matches!(&limit.kind, ExprKind::Int(value) if value == "1")
-            || !matches!(&index.kind, ExprKind::Negate(value)
-                if matches!(&value.kind, ExprKind::Int(value) if value == "1"))
-        {
-            return None;
-        }
+        let args = split.last_rsplit_args(index)?;
         let args = args.iter().map(|arg| self.operand(arg)).collect::<Vec<_>>();
         let separator = self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
         let operand = self.checked_instruction(format!(
