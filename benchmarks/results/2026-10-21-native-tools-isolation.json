@@ -1,0 +1,13 @@
+{
+  "status": "passed",
+  "archive_index_sha256": "f6d8498d72a0e98f0091185403231230d77415d727d6ef05c1fc2a9009a603a2",
+  "script_sha256": "7f20de03d31bca210d82abd985c52a39f67898e97ef427c1630408f625a374a0",
+  "blocked_operations": {
+    "original_path_accesses": 0,
+    "native_processes": 0,
+    "network_operations": 0
+  },
+  "relocated_archive": "/tmp/relar-native-tools-evidence-final-3-isolated",
+  "replay_output": "/tmp/relar-native-tools-evidence-final-3-isolated-replay.json",
+  "replay_output_sha256": "3d67f8c7923710334320cff9a0dff2ae4dbf26bbf14a061943d98803cd184f42"
+}

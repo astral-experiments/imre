@@ -77,6 +77,8 @@ The [conformance reporter](examples/conformance_report/README.md) scans real typ
 
 The [Python download catalog](examples/python_catalog/README.md) selects and renders 6,098 downloads from uv’s index of 58,721 release artifacts.
 
+The [five-engine comparison](benchmarks/results/2026-10-21-native-tools.md) runs the catalog and conformance reporter against upstream and typed CPython, Codon, and Rust. Complete runs take 1.48–1.84× Rust’s time ordinarily and 1.33–1.77× with ThinLTO. Repeated computation also stays within 2× in both modes.
+
 ## Installation
 
 On 64-bit Linux, install the [Rust toolchain](rust-toolchain.toml) and Clang 18,

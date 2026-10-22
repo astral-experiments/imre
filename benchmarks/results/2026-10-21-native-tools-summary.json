@@ -1,0 +1,1370 @@
+{
+  "revision": "88169978bfc9436024a6bfc34fc8a6c7de285023",
+  "context": "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-context-final-3.json",
+  "context_sha256": "ed8dfb44796f6685f0f5352883d1f124be39bf414fe1bf5482fe99a4954473c1",
+  "driver": "/home/dev-user/.cache/relar-native-tools-20261021/relar-native-tools-final-3-summary.py",
+  "driver_sha256": "3c78691523f95e47d94b0bd5817c3c460a8d211602b1e2d3a37fa19d1874dd7b",
+  "modes": {
+    "normal": {
+      "raw": "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-normal-final-3.json",
+      "raw_sha256": "eb0cb68b634526c635abd07070c20d1487943517fdc223a26987ef4d44c1361c",
+      "rows": [
+        {
+          "label": "catalog-real",
+          "rounds": null,
+          "median_seconds": {
+            "relar": 0.28626068849999997,
+            "port": 2.972906885,
+            "original": 0.999933134,
+            "codon": 0.567205551,
+            "rust": 0.1554545375
+          },
+          "ratios": {
+            "relar_over_rust": 1.8414431196644871,
+            "codon_over_rust": 3.648690865649387,
+            "original_over_relar": 3.4930857577393133,
+            "port_over_relar": 10.385313123425957,
+            "codon_over_relar": 1.981430122215332,
+            "original_over_rust": 6.43231873498707
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.28626068849999997,
+              "min_seconds": 0.278430919,
+              "max_seconds": 0.292765343,
+              "p25_seconds": 0.28448810075,
+              "p75_seconds": 0.28931917175
+            },
+            "port": {
+              "median_seconds": 2.972906885,
+              "min_seconds": 2.929394509,
+              "max_seconds": 3.169213004,
+              "p25_seconds": 2.9540099252500003,
+              "p75_seconds": 2.9845876660000004
+            },
+            "original": {
+              "median_seconds": 0.999933134,
+              "min_seconds": 0.978527281,
+              "max_seconds": 1.02063,
+              "p25_seconds": 0.9956124255,
+              "p75_seconds": 1.006696953
+            },
+            "codon": {
+              "median_seconds": 0.567205551,
+              "min_seconds": 0.560455459,
+              "max_seconds": 0.581922211,
+              "p25_seconds": 0.56570707525,
+              "p75_seconds": 0.57088938025
+            },
+            "rust": {
+              "median_seconds": 0.1554545375,
+              "min_seconds": 0.153279727,
+              "max_seconds": 0.162587494,
+              "p25_seconds": 0.15453345525,
+              "p75_seconds": 0.15606930525
+            }
+          }
+        },
+        {
+          "label": "catalog-real-compute-0",
+          "rounds": 0,
+          "median_seconds": {
+            "relar": 0.030103135500000003,
+            "port": 0.1056091995,
+            "original": 0.139807907,
+            "codon": 0.030098923,
+            "rust": 0.028638860500000002
+          },
+          "ratios": {
+            "relar_over_rust": 1.0511289546593519,
+            "codon_over_rust": 1.0509818643098596,
+            "original_over_relar": 4.644297169642012,
+            "port_over_relar": 3.508245827083361,
+            "codon_over_relar": 0.9998600644108983,
+            "original_over_rust": 4.881755229053195
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.030103135500000003,
+              "min_seconds": 0.028632678,
+              "max_seconds": 0.031740917,
+              "p25_seconds": 0.029210557249999998,
+              "p75_seconds": 0.03086456925
+            },
+            "port": {
+              "median_seconds": 0.1056091995,
+              "min_seconds": 0.104075093,
+              "max_seconds": 0.109710545,
+              "p25_seconds": 0.10510511975,
+              "p75_seconds": 0.1076617775
+            },
+            "original": {
+              "median_seconds": 0.139807907,
+              "min_seconds": 0.137141065,
+              "max_seconds": 0.154350288,
+              "p25_seconds": 0.1387246315,
+              "p75_seconds": 0.14143966325000001
+            },
+            "codon": {
+              "median_seconds": 0.030098923,
+              "min_seconds": 0.029134437,
+              "max_seconds": 0.035667032,
+              "p25_seconds": 0.029575697249999998,
+              "p75_seconds": 0.03055984325
+            },
+            "rust": {
+              "median_seconds": 0.028638860500000002,
+              "min_seconds": 0.027143765,
+              "max_seconds": 0.029976451,
+              "p25_seconds": 0.027671134500000003,
+              "p75_seconds": 0.02929838225
+            }
+          }
+        },
+        {
+          "label": "catalog-real-compute-4",
+          "rounds": 4,
+          "median_seconds": {
+            "relar": 0.9680682275,
+            "port": 11.5770466805,
+            "original": 3.4634512705000002,
+            "codon": 2.2829585975,
+            "rust": 0.4944841565
+          },
+          "ratios": {
+            "relar_over_rust": 1.9577335588506364,
+            "codon_over_rust": 4.616848826176699,
+            "original_over_relar": 3.577693360977494,
+            "port_over_relar": 11.958916067721065,
+            "codon_over_relar": 2.3582620859230707,
+            "original_over_rust": 7.0041703560627635
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.9680682275,
+              "min_seconds": 0.951810767,
+              "max_seconds": 1.022997314,
+              "p25_seconds": 0.96154502275,
+              "p75_seconds": 0.9758988292499999
+            },
+            "port": {
+              "median_seconds": 11.5770466805,
+              "min_seconds": 11.426634566,
+              "max_seconds": 11.85909392,
+              "p25_seconds": 11.504875673,
+              "p75_seconds": 11.693072526249999
+            },
+            "original": {
+              "median_seconds": 3.4634512705000002,
+              "min_seconds": 3.414329015,
+              "max_seconds": 3.804665026,
+              "p25_seconds": 3.44000102025,
+              "p75_seconds": 3.5208362840000005
+            },
+            "codon": {
+              "median_seconds": 2.2829585975,
+              "min_seconds": 2.236549416,
+              "max_seconds": 2.621723426,
+              "p25_seconds": 2.25443599375,
+              "p75_seconds": 2.330263205
+            },
+            "rust": {
+              "median_seconds": 0.4944841565,
+              "min_seconds": 0.48876678,
+              "max_seconds": 0.51905814,
+              "p25_seconds": 0.49181661474999994,
+              "p75_seconds": 0.4991162785
+            }
+          }
+        },
+        {
+          "label": "conformance-unchanged-github",
+          "rounds": null,
+          "median_seconds": {
+            "relar": 0.035286925,
+            "port": 0.2515807545,
+            "original": 0.15321489900000002,
+            "codon": 0.0586594495,
+            "rust": 0.023767523
+          },
+          "ratios": {
+            "relar_over_rust": 1.4846698581084785,
+            "codon_over_rust": 2.4680506041794934,
+            "original_over_relar": 4.341973663049417,
+            "port_over_relar": 7.129574325334384,
+            "codon_over_relar": 1.662356510237149,
+            "original_over_rust": 6.446397422230327
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.035286925,
+              "min_seconds": 0.034783418,
+              "max_seconds": 0.03659712,
+              "p25_seconds": 0.03509402225,
+              "p75_seconds": 0.0357925785
+            },
+            "port": {
+              "median_seconds": 0.2515807545,
+              "min_seconds": 0.244224869,
+              "max_seconds": 0.257850616,
+              "p25_seconds": 0.25086836549999997,
+              "p75_seconds": 0.25409259475
+            },
+            "original": {
+              "median_seconds": 0.15321489900000002,
+              "min_seconds": 0.148502727,
+              "max_seconds": 0.161744008,
+              "p25_seconds": 0.15220133275,
+              "p75_seconds": 0.15404443875
+            },
+            "codon": {
+              "median_seconds": 0.0586594495,
+              "min_seconds": 0.056183198,
+              "max_seconds": 0.060137455,
+              "p25_seconds": 0.058159894749999996,
+              "p75_seconds": 0.058926848500000004
+            },
+            "rust": {
+              "median_seconds": 0.023767523,
+              "min_seconds": 0.023151947,
+              "max_seconds": 0.025427213,
+              "p25_seconds": 0.02349770375,
+              "p75_seconds": 0.02389853575
+            }
+          }
+        },
+        {
+          "label": "conformance-unchanged-github-compute-0",
+          "rounds": 0,
+          "median_seconds": {
+            "relar": 0.0106303495,
+            "port": 0.085655618,
+            "original": 0.09534443100000001,
+            "codon": 0.019784383500000002,
+            "rust": 0.0097785415
+          },
+          "ratios": {
+            "relar_over_rust": 1.0871099232947983,
+            "codon_over_rust": 2.023244826439608,
+            "original_over_relar": 8.969077733521367,
+            "port_over_relar": 8.057648339784125,
+            "codon_over_relar": 1.8611225811531409,
+            "original_over_rust": 9.750373406913496
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0106303495,
+              "min_seconds": 0.01017002,
+              "max_seconds": 0.011824504,
+              "p25_seconds": 0.010461682,
+              "p75_seconds": 0.010950396250000001
+            },
+            "port": {
+              "median_seconds": 0.085655618,
+              "min_seconds": 0.082846072,
+              "max_seconds": 0.090088116,
+              "p25_seconds": 0.08488162225000001,
+              "p75_seconds": 0.0868002605
+            },
+            "original": {
+              "median_seconds": 0.09534443100000001,
+              "min_seconds": 0.09254925,
+              "max_seconds": 0.100973117,
+              "p25_seconds": 0.09481201524999999,
+              "p75_seconds": 0.09606477274999999
+            },
+            "codon": {
+              "median_seconds": 0.019784383500000002,
+              "min_seconds": 0.019325381,
+              "max_seconds": 0.021254449,
+              "p25_seconds": 0.01966110075,
+              "p75_seconds": 0.02033924175
+            },
+            "rust": {
+              "median_seconds": 0.0097785415,
+              "min_seconds": 0.009421971,
+              "max_seconds": 0.01021865,
+              "p25_seconds": 0.00963817675,
+              "p75_seconds": 0.010076767
+            }
+          }
+        },
+        {
+          "label": "conformance-unchanged-github-compute-4",
+          "rounds": 4,
+          "median_seconds": {
+            "relar": 0.10030456700000001,
+            "port": 0.725692265,
+            "original": 0.3006823305,
+            "codon": 0.140317207,
+            "rust": 0.051680567
+          },
+          "ratios": {
+            "relar_over_rust": 1.9408565505869937,
+            "codon_over_rust": 2.7150864463232383,
+            "original_over_relar": 2.997693320384903,
+            "port_over_relar": 7.234887569974753,
+            "codon_over_relar": 1.398911447372082,
+            "original_over_rust": 5.818092717519915
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.10030456700000001,
+              "min_seconds": 0.096770768,
+              "max_seconds": 0.106651336,
+              "p25_seconds": 0.099240902,
+              "p75_seconds": 0.10107901225
+            },
+            "port": {
+              "median_seconds": 0.725692265,
+              "min_seconds": 0.715840825,
+              "max_seconds": 0.902450517,
+              "p25_seconds": 0.722519563,
+              "p75_seconds": 0.7289553034999999
+            },
+            "original": {
+              "median_seconds": 0.3006823305,
+              "min_seconds": 0.29697513,
+              "max_seconds": 0.391149277,
+              "p25_seconds": 0.299713806,
+              "p75_seconds": 0.303418552
+            },
+            "codon": {
+              "median_seconds": 0.140317207,
+              "min_seconds": 0.133691649,
+              "max_seconds": 0.181507966,
+              "p25_seconds": 0.1397029785,
+              "p75_seconds": 0.14199886625000002
+            },
+            "rust": {
+              "median_seconds": 0.051680567,
+              "min_seconds": 0.050420825,
+              "max_seconds": 0.059941529,
+              "p25_seconds": 0.05141480175,
+              "p75_seconds": 0.05227782525
+            }
+          }
+        },
+        {
+          "label": "conformance-changed-github",
+          "rounds": null,
+          "median_seconds": {
+            "relar": 0.036824473999999996,
+            "port": 0.252678087,
+            "original": 0.155717723,
+            "codon": 0.059839953,
+            "rust": 0.0243064775
+          },
+          "ratios": {
+            "relar_over_rust": 1.5150066067779668,
+            "codon_over_rust": 2.461893254586149,
+            "original_over_relar": 4.228647583669492,
+            "port_over_relar": 6.861688968048805,
+            "codon_over_relar": 1.6250049627321224,
+            "original_over_rust": 6.406429026994965
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.036824473999999996,
+              "min_seconds": 0.036231421,
+              "max_seconds": 0.039245957,
+              "p25_seconds": 0.036526723500000004,
+              "p75_seconds": 0.03717805575
+            },
+            "port": {
+              "median_seconds": 0.252678087,
+              "min_seconds": 0.245051165,
+              "max_seconds": 0.449534328,
+              "p25_seconds": 0.250182679,
+              "p75_seconds": 0.255000905
+            },
+            "original": {
+              "median_seconds": 0.155717723,
+              "min_seconds": 0.152260526,
+              "max_seconds": 0.198599451,
+              "p25_seconds": 0.1545437285,
+              "p75_seconds": 0.15733958975
+            },
+            "codon": {
+              "median_seconds": 0.059839953,
+              "min_seconds": 0.058563677,
+              "max_seconds": 0.102581237,
+              "p25_seconds": 0.059386747499999996,
+              "p75_seconds": 0.06047349925
+            },
+            "rust": {
+              "median_seconds": 0.0243064775,
+              "min_seconds": 0.023836388,
+              "max_seconds": 0.063062801,
+              "p25_seconds": 0.024130656,
+              "p75_seconds": 0.024651316000000003
+            }
+          }
+        },
+        {
+          "label": "conformance-changed-github-compute-0",
+          "rounds": 0,
+          "median_seconds": {
+            "relar": 0.0107091935,
+            "port": 0.086556019,
+            "original": 0.096010451,
+            "codon": 0.0201814035,
+            "rust": 0.0099951185
+          },
+          "ratios": {
+            "relar_over_rust": 1.0714423745951587,
+            "codon_over_rust": 2.019125986350237,
+            "original_over_relar": 8.965236364437713,
+            "port_over_relar": 8.082403124007424,
+            "codon_over_relar": 1.8844933094168108,
+            "original_over_rust": 9.605734139120012
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0107091935,
+              "min_seconds": 0.010238047,
+              "max_seconds": 0.011450575,
+              "p25_seconds": 0.010574616500000002,
+              "p75_seconds": 0.010834986999999999
+            },
+            "port": {
+              "median_seconds": 0.086556019,
+              "min_seconds": 0.084189543,
+              "max_seconds": 0.089965474,
+              "p25_seconds": 0.08557212175,
+              "p75_seconds": 0.08760047625
+            },
+            "original": {
+              "median_seconds": 0.096010451,
+              "min_seconds": 0.090757827,
+              "max_seconds": 0.098812321,
+              "p25_seconds": 0.09535966925,
+              "p75_seconds": 0.09712172075
+            },
+            "codon": {
+              "median_seconds": 0.0201814035,
+              "min_seconds": 0.019444805,
+              "max_seconds": 0.021201001,
+              "p25_seconds": 0.020038070499999998,
+              "p75_seconds": 0.02045171925
+            },
+            "rust": {
+              "median_seconds": 0.0099951185,
+              "min_seconds": 0.008564316,
+              "max_seconds": 0.010919492,
+              "p25_seconds": 0.00972144625,
+              "p75_seconds": 0.01019423
+            }
+          }
+        },
+        {
+          "label": "conformance-changed-github-compute-4",
+          "rounds": 4,
+          "median_seconds": {
+            "relar": 0.104965809,
+            "port": 0.726241213,
+            "original": 0.306310339,
+            "codon": 0.150433549,
+            "rust": 0.0555581825
+          },
+          "ratios": {
+            "relar_over_rust": 1.8892952266752066,
+            "codon_over_rust": 2.707675849547454,
+            "original_over_relar": 2.918191570361736,
+            "port_over_relar": 6.918835951619256,
+            "codon_over_relar": 1.4331671468373097,
+            "original_over_rust": 5.513325404408253
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.104965809,
+              "min_seconds": 0.10294786,
+              "max_seconds": 0.11154348,
+              "p25_seconds": 0.10390458949999999,
+              "p75_seconds": 0.10602966425
+            },
+            "port": {
+              "median_seconds": 0.726241213,
+              "min_seconds": 0.719259795,
+              "max_seconds": 0.739709221,
+              "p25_seconds": 0.723812253,
+              "p75_seconds": 0.72894945875
+            },
+            "original": {
+              "median_seconds": 0.306310339,
+              "min_seconds": 0.302715147,
+              "max_seconds": 0.317461237,
+              "p25_seconds": 0.30452173050000003,
+              "p75_seconds": 0.30913013225
+            },
+            "codon": {
+              "median_seconds": 0.150433549,
+              "min_seconds": 0.147711337,
+              "max_seconds": 0.158659637,
+              "p25_seconds": 0.14976107925,
+              "p75_seconds": 0.152634931
+            },
+            "rust": {
+              "median_seconds": 0.0555581825,
+              "min_seconds": 0.054204668,
+              "max_seconds": 0.058656663,
+              "p25_seconds": 0.054716577499999995,
+              "p75_seconds": 0.055885591
+            }
+          }
+        },
+        {
+          "label": "conformance-changed-diff",
+          "rounds": null,
+          "median_seconds": {
+            "relar": 0.03611191,
+            "port": 0.25139417,
+            "original": 0.155295522,
+            "codon": 0.0591782555,
+            "rust": 0.024051924
+          },
+          "ratios": {
+            "relar_over_rust": 1.501414606166226,
+            "codon_over_rust": 2.4604374893251784,
+            "original_over_relar": 4.300396240464711,
+            "port_over_relar": 6.961530697213191,
+            "codon_over_relar": 1.6387462058916298,
+            "original_over_rust": 6.456677727736043
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.03611191,
+              "min_seconds": 0.035571399,
+              "max_seconds": 0.037302868,
+              "p25_seconds": 0.03596423025,
+              "p75_seconds": 0.036342535749999995
+            },
+            "port": {
+              "median_seconds": 0.25139417,
+              "min_seconds": 0.247775673,
+              "max_seconds": 0.268817188,
+              "p25_seconds": 0.250536653,
+              "p75_seconds": 0.25266523124999996
+            },
+            "original": {
+              "median_seconds": 0.155295522,
+              "min_seconds": 0.151372962,
+              "max_seconds": 0.15864057,
+              "p25_seconds": 0.154452847,
+              "p75_seconds": 0.15627016025
+            },
+            "codon": {
+              "median_seconds": 0.0591782555,
+              "min_seconds": 0.058289889,
+              "max_seconds": 0.060526292,
+              "p25_seconds": 0.05873949825000001,
+              "p75_seconds": 0.05960611
+            },
+            "rust": {
+              "median_seconds": 0.024051924,
+              "min_seconds": 0.02342437,
+              "max_seconds": 0.027046695,
+              "p25_seconds": 0.02366159625,
+              "p75_seconds": 0.02441145125
+            }
+          }
+        },
+        {
+          "label": "conformance-changed-diff-compute-0",
+          "rounds": 0,
+          "median_seconds": {
+            "relar": 0.0105786345,
+            "port": 0.086193974,
+            "original": 0.0958562805,
+            "codon": 0.0195541065,
+            "rust": 0.009716002000000001
+          },
+          "ratios": {
+            "relar_over_rust": 1.0887847182411035,
+            "codon_over_rust": 2.012567154679466,
+            "original_over_relar": 9.061309425143671,
+            "port_over_relar": 8.147930056568265,
+            "codon_over_relar": 1.848452794167338,
+            "original_over_rust": 9.865815229350508
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0105786345,
+              "min_seconds": 0.010002668,
+              "max_seconds": 0.010951012,
+              "p25_seconds": 0.010241216499999999,
+              "p75_seconds": 0.010733725999999999
+            },
+            "port": {
+              "median_seconds": 0.086193974,
+              "min_seconds": 0.082608894,
+              "max_seconds": 0.092521144,
+              "p25_seconds": 0.08554035774999999,
+              "p75_seconds": 0.08724310275
+            },
+            "original": {
+              "median_seconds": 0.0958562805,
+              "min_seconds": 0.091265535,
+              "max_seconds": 0.09916629,
+              "p25_seconds": 0.09513417375,
+              "p75_seconds": 0.09623412925
+            },
+            "codon": {
+              "median_seconds": 0.0195541065,
+              "min_seconds": 0.018832392,
+              "max_seconds": 0.020528605,
+              "p25_seconds": 0.0192211465,
+              "p75_seconds": 0.02000261625
+            },
+            "rust": {
+              "median_seconds": 0.009716002000000001,
+              "min_seconds": 0.009453892,
+              "max_seconds": 0.010228391,
+              "p25_seconds": 0.009563598750000001,
+              "p75_seconds": 0.00988423825
+            }
+          }
+        },
+        {
+          "label": "conformance-changed-diff-compute-4",
+          "rounds": 4,
+          "median_seconds": {
+            "relar": 0.10134205299999999,
+            "port": 0.7239529330000001,
+            "original": 0.304644005,
+            "codon": 0.147122933,
+            "rust": 0.053852322
+          },
+          "ratios": {
+            "relar_over_rust": 1.8818511298361469,
+            "codon_over_rust": 2.7319700903519073,
+            "original_over_relar": 3.0060966398618354,
+            "port_over_relar": 7.143657658089877,
+            "codon_over_relar": 1.4517461275429266,
+            "original_over_rust": 5.657026358120639
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.10134205299999999,
+              "min_seconds": 0.097612307,
+              "max_seconds": 0.103354077,
+              "p25_seconds": 0.10108414724999999,
+              "p75_seconds": 0.10181021199999998
+            },
+            "port": {
+              "median_seconds": 0.7239529330000001,
+              "min_seconds": 0.715732882,
+              "max_seconds": 0.743537478,
+              "p25_seconds": 0.7209831277500001,
+              "p75_seconds": 0.72624212325
+            },
+            "original": {
+              "median_seconds": 0.304644005,
+              "min_seconds": 0.297382907,
+              "max_seconds": 0.309389977,
+              "p25_seconds": 0.30309991799999997,
+              "p75_seconds": 0.3057257095
+            },
+            "codon": {
+              "median_seconds": 0.147122933,
+              "min_seconds": 0.144729594,
+              "max_seconds": 0.15500436,
+              "p25_seconds": 0.14640975925,
+              "p75_seconds": 0.148314239
+            },
+            "rust": {
+              "median_seconds": 0.053852322,
+              "min_seconds": 0.053290842,
+              "max_seconds": 0.055744381,
+              "p25_seconds": 0.0537056205,
+              "p75_seconds": 0.05450619725
+            }
+          }
+        }
+      ],
+      "real_workload_max_relar_over_rust": 1.9577335588506364,
+      "all_real_workloads_within_2x_rust": true
+    },
+    "thinlto": {
+      "raw": "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-thinlto-final-3.json",
+      "raw_sha256": "da42234ca5d6c7499e3a5892ccfd567b1c4444864f0a094cefa1d172282cf95c",
+      "rows": [
+        {
+          "label": "catalog-real",
+          "rounds": null,
+          "median_seconds": {
+            "relar": 0.2148446985,
+            "port": 2.9791188615,
+            "original": 0.997993532,
+            "codon": 0.568819126,
+            "rust": 0.1215605285
+          },
+          "ratios": {
+            "relar_over_rust": 1.767388651160726,
+            "codon_over_rust": 4.679307773822322,
+            "original_over_relar": 4.645185750301398,
+            "port_over_relar": 13.86638293753383,
+            "codon_over_relar": 2.6475827887370467,
+            "original_over_rust": 8.209848577616212
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.2148446985,
+              "min_seconds": 0.21047264,
+              "max_seconds": 0.220950264,
+              "p25_seconds": 0.21385294675,
+              "p75_seconds": 0.2158320035
+            },
+            "port": {
+              "median_seconds": 2.9791188615,
+              "min_seconds": 2.932978902,
+              "max_seconds": 3.045720317,
+              "p25_seconds": 2.9546030585,
+              "p75_seconds": 2.99176934725
+            },
+            "original": {
+              "median_seconds": 0.997993532,
+              "min_seconds": 0.974784054,
+              "max_seconds": 1.015680394,
+              "p25_seconds": 0.99245053225,
+              "p75_seconds": 1.0022244235
+            },
+            "codon": {
+              "median_seconds": 0.568819126,
+              "min_seconds": 0.553429411,
+              "max_seconds": 0.581025716,
+              "p25_seconds": 0.5652146785000001,
+              "p75_seconds": 0.57009715525
+            },
+            "rust": {
+              "median_seconds": 0.1215605285,
+              "min_seconds": 0.118658977,
+              "max_seconds": 0.123477583,
+              "p25_seconds": 0.1206745125,
+              "p75_seconds": 0.12248942399999999
+            }
+          }
+        },
+        {
+          "label": "catalog-real-compute-0",
+          "rounds": 0,
+          "median_seconds": {
+            "relar": 0.029683438,
+            "port": 0.1056405265,
+            "original": 0.1388174245,
+            "codon": 0.029871905,
+            "rust": 0.028231306999999997
+          },
+          "ratios": {
+            "relar_over_rust": 1.0514369030098394,
+            "codon_over_rust": 1.0581127186212103,
+            "original_over_relar": 4.676595227951696,
+            "port_over_relar": 3.558904682806621,
+            "codon_over_relar": 1.0063492308404438,
+            "original_over_rust": 4.917144803108124
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.029683438,
+              "min_seconds": 0.027980208,
+              "max_seconds": 0.030402789,
+              "p25_seconds": 0.02908931125,
+              "p75_seconds": 0.03005201825
+            },
+            "port": {
+              "median_seconds": 0.1056405265,
+              "min_seconds": 0.10399337,
+              "max_seconds": 0.109459846,
+              "p25_seconds": 0.10462025750000001,
+              "p75_seconds": 0.10699921575
+            },
+            "original": {
+              "median_seconds": 0.1388174245,
+              "min_seconds": 0.135648872,
+              "max_seconds": 0.142356894,
+              "p25_seconds": 0.1382736125,
+              "p75_seconds": 0.14022371299999997
+            },
+            "codon": {
+              "median_seconds": 0.029871905,
+              "min_seconds": 0.029003352,
+              "max_seconds": 0.033436874,
+              "p25_seconds": 0.02953044925,
+              "p75_seconds": 0.030297909749999997
+            },
+            "rust": {
+              "median_seconds": 0.028231306999999997,
+              "min_seconds": 0.027136931,
+              "max_seconds": 0.029733518,
+              "p25_seconds": 0.027778802000000002,
+              "p75_seconds": 0.028689278
+            }
+          }
+        },
+        {
+          "label": "catalog-real-compute-4",
+          "rounds": 4,
+          "median_seconds": {
+            "relar": 0.691478528,
+            "port": 11.5765109585,
+            "original": 3.4858856075,
+            "codon": 2.2839818745000002,
+            "rust": 0.362284138
+          },
+          "ratios": {
+            "relar_over_rust": 1.9086635473949456,
+            "codon_over_rust": 6.304393802910577,
+            "original_over_relar": 5.041205860118914,
+            "port_over_relar": 16.741678142896724,
+            "codon_over_relar": 3.3030409217565757,
+            "original_over_rust": 9.621965860122753
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.691478528,
+              "min_seconds": 0.67755741,
+              "max_seconds": 1.021866085,
+              "p25_seconds": 0.68440983425,
+              "p75_seconds": 0.70124199825
+            },
+            "port": {
+              "median_seconds": 11.5765109585,
+              "min_seconds": 11.401004512,
+              "max_seconds": 11.950833156,
+              "p25_seconds": 11.464418033,
+              "p75_seconds": 11.7510499725
+            },
+            "original": {
+              "median_seconds": 3.4858856075,
+              "min_seconds": 3.400608999,
+              "max_seconds": 3.820288301,
+              "p25_seconds": 3.4353166677500004,
+              "p75_seconds": 3.5657850865000005
+            },
+            "codon": {
+              "median_seconds": 2.2839818745000002,
+              "min_seconds": 2.216128352,
+              "max_seconds": 2.57444238,
+              "p25_seconds": 2.243521579,
+              "p75_seconds": 2.3435160287500003
+            },
+            "rust": {
+              "median_seconds": 0.362284138,
+              "min_seconds": 0.356669519,
+              "max_seconds": 0.662942538,
+              "p25_seconds": 0.35886320475,
+              "p75_seconds": 0.3678020145
+            }
+          }
+        },
+        {
+          "label": "conformance-unchanged-github",
+          "rounds": null,
+          "median_seconds": {
+            "relar": 0.0298535835,
+            "port": 0.2506035535,
+            "original": 0.15266515,
+            "codon": 0.058107097499999996,
+            "rust": 0.0220868305
+          },
+          "ratios": {
+            "relar_over_rust": 1.3516463351316974,
+            "codon_over_rust": 2.6308481653807227,
+            "original_over_relar": 5.113796472708209,
+            "port_over_relar": 8.394421175601918,
+            "codon_over_relar": 1.9464027660196974,
+            "original_over_rust": 6.912044260945453
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0298535835,
+              "min_seconds": 0.029013943,
+              "max_seconds": 0.031603419,
+              "p25_seconds": 0.029558677,
+              "p75_seconds": 0.030097583499999997
+            },
+            "port": {
+              "median_seconds": 0.2506035535,
+              "min_seconds": 0.24727755,
+              "max_seconds": 0.259995358,
+              "p25_seconds": 0.249404296,
+              "p75_seconds": 0.25243778499999997
+            },
+            "original": {
+              "median_seconds": 0.15266515,
+              "min_seconds": 0.148964601,
+              "max_seconds": 0.157325845,
+              "p25_seconds": 0.15182163475,
+              "p75_seconds": 0.153256144
+            },
+            "codon": {
+              "median_seconds": 0.058107097499999996,
+              "min_seconds": 0.057175738,
+              "max_seconds": 0.061079287,
+              "p25_seconds": 0.05775691425,
+              "p75_seconds": 0.058456630249999995
+            },
+            "rust": {
+              "median_seconds": 0.0220868305,
+              "min_seconds": 0.021544981,
+              "max_seconds": 0.023639482,
+              "p25_seconds": 0.02183821125,
+              "p75_seconds": 0.02243360425
+            }
+          }
+        },
+        {
+          "label": "conformance-unchanged-github-compute-0",
+          "rounds": 0,
+          "median_seconds": {
+            "relar": 0.010424423,
+            "port": 0.08562368149999999,
+            "original": 0.095847766,
+            "codon": 0.019943853499999997,
+            "rust": 0.009896471
+          },
+          "ratios": {
+            "relar_over_rust": 1.0533475013466922,
+            "codon_over_rust": 2.0152490215956775,
+            "original_over_relar": 9.194539208549001,
+            "port_over_relar": 8.21375739453397,
+            "codon_over_relar": 1.9131853628733213,
+            "original_over_rust": 9.685044901359282
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.010424423,
+              "min_seconds": 0.009955587,
+              "max_seconds": 0.067190064,
+              "p25_seconds": 0.010258589,
+              "p75_seconds": 0.010798876
+            },
+            "port": {
+              "median_seconds": 0.08562368149999999,
+              "min_seconds": 0.084482876,
+              "max_seconds": 0.096432775,
+              "p25_seconds": 0.084809993,
+              "p75_seconds": 0.087356295
+            },
+            "original": {
+              "median_seconds": 0.095847766,
+              "min_seconds": 0.094141333,
+              "max_seconds": 0.107349851,
+              "p25_seconds": 0.095090917,
+              "p75_seconds": 0.09721596325
+            },
+            "codon": {
+              "median_seconds": 0.019943853499999997,
+              "min_seconds": 0.019263721,
+              "max_seconds": 0.023931428,
+              "p25_seconds": 0.0195796245,
+              "p75_seconds": 0.02034630425
+            },
+            "rust": {
+              "median_seconds": 0.009896471,
+              "min_seconds": 0.009394495,
+              "max_seconds": 0.016433172,
+              "p25_seconds": 0.00961127625,
+              "p75_seconds": 0.0100025485
+            }
+          }
+        },
+        {
+          "label": "conformance-unchanged-github-compute-4",
+          "rounds": 4,
+          "median_seconds": {
+            "relar": 0.0775731285,
+            "port": 0.7247003615000001,
+            "original": 0.30106779100000003,
+            "codon": 0.1405345255,
+            "rust": 0.0455364845
+          },
+          "ratios": {
+            "relar_over_rust": 1.70353792902041,
+            "codon_over_rust": 3.0861962016413456,
+            "original_over_relar": 3.8810835249476887,
+            "port_over_relar": 9.342157207182897,
+            "codon_over_relar": 1.8116392650065674,
+            "original_over_rust": 6.6115729904446185
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0775731285,
+              "min_seconds": 0.075339025,
+              "max_seconds": 0.079842445,
+              "p25_seconds": 0.07736826,
+              "p75_seconds": 0.07828081825
+            },
+            "port": {
+              "median_seconds": 0.7247003615000001,
+              "min_seconds": 0.717080121,
+              "max_seconds": 0.766129087,
+              "p25_seconds": 0.72368031975,
+              "p75_seconds": 0.733441644
+            },
+            "original": {
+              "median_seconds": 0.30106779100000003,
+              "min_seconds": 0.296886973,
+              "max_seconds": 0.419143527,
+              "p25_seconds": 0.29823280775000005,
+              "p75_seconds": 0.30466453225
+            },
+            "codon": {
+              "median_seconds": 0.1405345255,
+              "min_seconds": 0.13916242,
+              "max_seconds": 0.346856985,
+              "p25_seconds": 0.13985173875,
+              "p75_seconds": 0.14603035925000002
+            },
+            "rust": {
+              "median_seconds": 0.0455364845,
+              "min_seconds": 0.044325992,
+              "max_seconds": 0.053884766,
+              "p25_seconds": 0.044982836250000005,
+              "p75_seconds": 0.046198949499999996
+            }
+          }
+        },
+        {
+          "label": "conformance-changed-github",
+          "rounds": null,
+          "median_seconds": {
+            "relar": 0.030988727,
+            "port": 0.2530010065,
+            "original": 0.15540332750000002,
+            "codon": 0.060316319,
+            "rust": 0.02271527
+          },
+          "ratios": {
+            "relar_over_rust": 1.3642244622229893,
+            "codon_over_rust": 2.655320363790525,
+            "original_over_relar": 5.01483418470207,
+            "port_over_relar": 8.16429169549301,
+            "codon_over_relar": 1.946395506985492,
+            "original_over_rust": 6.8413594687626444
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.030988727,
+              "min_seconds": 0.029673194,
+              "max_seconds": 0.033316463,
+              "p25_seconds": 0.03065195075,
+              "p75_seconds": 0.032204578250000004
+            },
+            "port": {
+              "median_seconds": 0.2530010065,
+              "min_seconds": 0.244914997,
+              "max_seconds": 0.264618159,
+              "p25_seconds": 0.251259126,
+              "p75_seconds": 0.25823763075
+            },
+            "original": {
+              "median_seconds": 0.15540332750000002,
+              "min_seconds": 0.148844336,
+              "max_seconds": 0.183805249,
+              "p25_seconds": 0.15418415325,
+              "p75_seconds": 0.159610206
+            },
+            "codon": {
+              "median_seconds": 0.060316319,
+              "min_seconds": 0.057583057,
+              "max_seconds": 0.062838625,
+              "p25_seconds": 0.058889061,
+              "p75_seconds": 0.060737151499999996
+            },
+            "rust": {
+              "median_seconds": 0.02271527,
+              "min_seconds": 0.022036479,
+              "max_seconds": 0.025301311,
+              "p25_seconds": 0.022375030749999997,
+              "p75_seconds": 0.02325907975
+            }
+          }
+        },
+        {
+          "label": "conformance-changed-github-compute-0",
+          "rounds": 0,
+          "median_seconds": {
+            "relar": 0.010389042,
+            "port": 0.0858092715,
+            "original": 0.095458213,
+            "codon": 0.019842282000000003,
+            "rust": 0.0097246735
+          },
+          "ratios": {
+            "relar_over_rust": 1.0683178206445698,
+            "codon_over_rust": 2.040405983810151,
+            "original_over_relar": 9.188355673217993,
+            "port_over_relar": 8.259594243627085,
+            "codon_over_relar": 1.9099241296743246,
+            "original_over_rust": 9.816084108119414
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.010389042,
+              "min_seconds": 0.009926661,
+              "max_seconds": 0.011146475,
+              "p25_seconds": 0.0101998725,
+              "p75_seconds": 0.010591824
+            },
+            "port": {
+              "median_seconds": 0.0858092715,
+              "min_seconds": 0.08418954,
+              "max_seconds": 0.088368421,
+              "p25_seconds": 0.08537011175,
+              "p75_seconds": 0.086569079
+            },
+            "original": {
+              "median_seconds": 0.095458213,
+              "min_seconds": 0.094834737,
+              "max_seconds": 0.099333037,
+              "p25_seconds": 0.09522421075,
+              "p75_seconds": 0.09625189375000001
+            },
+            "codon": {
+              "median_seconds": 0.019842282000000003,
+              "min_seconds": 0.018945232,
+              "max_seconds": 0.021504423,
+              "p25_seconds": 0.0195141165,
+              "p75_seconds": 0.0200338225
+            },
+            "rust": {
+              "median_seconds": 0.0097246735,
+              "min_seconds": 0.009382803,
+              "max_seconds": 0.010509411,
+              "p25_seconds": 0.00952937525,
+              "p75_seconds": 0.0099147655
+            }
+          }
+        },
+        {
+          "label": "conformance-changed-github-compute-4",
+          "rounds": 4,
+          "median_seconds": {
+            "relar": 0.0813483535,
+            "port": 0.727600408,
+            "original": 0.3072136215,
+            "codon": 0.1514610795,
+            "rust": 0.049159639000000005
+          },
+          "ratios": {
+            "relar_over_rust": 1.6547793099131585,
+            "codon_over_rust": 3.0810047140500765,
+            "original_over_relar": 3.7765192321931873,
+            "port_over_relar": 8.944254882798582,
+            "codon_over_relar": 1.8618825456620953,
+            "original_over_rust": 6.249305888922414
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.0813483535,
+              "min_seconds": 0.079855535,
+              "max_seconds": 0.084374812,
+              "p25_seconds": 0.0808640715,
+              "p75_seconds": 0.0819530685
+            },
+            "port": {
+              "median_seconds": 0.727600408,
+              "min_seconds": 0.722763719,
+              "max_seconds": 0.753639499,
+              "p25_seconds": 0.72499454375,
+              "p75_seconds": 0.7368103855000001
+            },
+            "original": {
+              "median_seconds": 0.3072136215,
+              "min_seconds": 0.30208971,
+              "max_seconds": 0.324683969,
+              "p25_seconds": 0.30362605724999997,
+              "p75_seconds": 0.30952823474999996
+            },
+            "codon": {
+              "median_seconds": 0.1514610795,
+              "min_seconds": 0.149146684,
+              "max_seconds": 0.163251326,
+              "p25_seconds": 0.150514658,
+              "p75_seconds": 0.15383377225
+            },
+            "rust": {
+              "median_seconds": 0.049159639000000005,
+              "min_seconds": 0.047892986,
+              "max_seconds": 0.050920223,
+              "p25_seconds": 0.04862757775,
+              "p75_seconds": 0.049700930500000004
+            }
+          }
+        },
+        {
+          "label": "conformance-changed-diff",
+          "rounds": null,
+          "median_seconds": {
+            "relar": 0.030504378,
+            "port": 0.254273749,
+            "original": 0.15713840950000002,
+            "codon": 0.0600015305,
+            "rust": 0.0230029725
+          },
+          "ratios": {
+            "relar_over_rust": 1.3261059195719163,
+            "codon_over_rust": 2.6084250850623762,
+            "original_over_relar": 5.151339571650995,
+            "port_over_relar": 8.335647722435121,
+            "codon_over_relar": 1.9669809527012811,
+            "original_over_rust": 6.831221899691443
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.030504378,
+              "min_seconds": 0.029914073,
+              "max_seconds": 0.035452399,
+              "p25_seconds": 0.030165498000000002,
+              "p75_seconds": 0.0313179715
+            },
+            "port": {
+              "median_seconds": 0.254273749,
+              "min_seconds": 0.24854375,
+              "max_seconds": 0.298746802,
+              "p25_seconds": 0.25275685525,
+              "p75_seconds": 0.25908622750000004
+            },
+            "original": {
+              "median_seconds": 0.15713840950000002,
+              "min_seconds": 0.152932788,
+              "max_seconds": 0.366099392,
+              "p25_seconds": 0.1555847685,
+              "p75_seconds": 0.1641120095
+            },
+            "codon": {
+              "median_seconds": 0.0600015305,
+              "min_seconds": 0.056970496,
+              "max_seconds": 0.104357957,
+              "p25_seconds": 0.05940402275,
+              "p75_seconds": 0.060830757250000006
+            },
+            "rust": {
+              "median_seconds": 0.0230029725,
+              "min_seconds": 0.021895033,
+              "max_seconds": 0.029651742,
+              "p25_seconds": 0.0224114115,
+              "p75_seconds": 0.023716904750000004
+            }
+          }
+        },
+        {
+          "label": "conformance-changed-diff-compute-0",
+          "rounds": 0,
+          "median_seconds": {
+            "relar": 0.010576897,
+            "port": 0.086059359,
+            "original": 0.09632813500000001,
+            "codon": 0.0199725095,
+            "rust": 0.0098238635
+          },
+          "ratios": {
+            "relar_over_rust": 1.0766534978829867,
+            "codon_over_rust": 2.033060567260528,
+            "original_over_relar": 9.107409762995708,
+            "port_over_relar": 8.136541274818125,
+            "codon_over_relar": 1.888314644644833,
+            "original_over_rust": 9.805524577982991
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.010576897,
+              "min_seconds": 0.010013343,
+              "max_seconds": 0.011715749,
+              "p25_seconds": 0.01039221175,
+              "p75_seconds": 0.010757942
+            },
+            "port": {
+              "median_seconds": 0.086059359,
+              "min_seconds": 0.083315898,
+              "max_seconds": 0.096183644,
+              "p25_seconds": 0.08556704524999999,
+              "p75_seconds": 0.0867150165
+            },
+            "original": {
+              "median_seconds": 0.09632813500000001,
+              "min_seconds": 0.091769982,
+              "max_seconds": 0.101977098,
+              "p25_seconds": 0.09483336125,
+              "p75_seconds": 0.09783212424999999
+            },
+            "codon": {
+              "median_seconds": 0.0199725095,
+              "min_seconds": 0.01936615,
+              "max_seconds": 0.021585683,
+              "p25_seconds": 0.019836306249999998,
+              "p75_seconds": 0.0203706165
+            },
+            "rust": {
+              "median_seconds": 0.0098238635,
+              "min_seconds": 0.009400356,
+              "max_seconds": 0.010368379,
+              "p25_seconds": 0.0096163425,
+              "p75_seconds": 0.01006629
+            }
+          }
+        },
+        {
+          "label": "conformance-changed-diff-compute-4",
+          "rounds": 4,
+          "median_seconds": {
+            "relar": 0.079354186,
+            "port": 0.7240801035,
+            "original": 0.3036545025,
+            "codon": 0.1501149255,
+            "rust": 0.047951804
+          },
+          "ratios": {
+            "relar_over_rust": 1.6548738395744191,
+            "codon_over_rust": 3.1305376018804214,
+            "original_over_relar": 3.8265719529906086,
+            "port_over_relar": 9.124661722319223,
+            "codon_over_relar": 1.8917077102901667,
+            "original_over_rust": 6.332493820253352
+          },
+          "summary": {
+            "relar": {
+              "median_seconds": 0.079354186,
+              "min_seconds": 0.077716505,
+              "max_seconds": 0.080920602,
+              "p25_seconds": 0.0788268825,
+              "p75_seconds": 0.079623982
+            },
+            "port": {
+              "median_seconds": 0.7240801035,
+              "min_seconds": 0.714884951,
+              "max_seconds": 0.746510344,
+              "p25_seconds": 0.719043896,
+              "p75_seconds": 0.7279865755
+            },
+            "original": {
+              "median_seconds": 0.3036545025,
+              "min_seconds": 0.298178001,
+              "max_seconds": 0.320967925,
+              "p25_seconds": 0.3024887415,
+              "p75_seconds": 0.30679850625
+            },
+            "codon": {
+              "median_seconds": 0.1501149255,
+              "min_seconds": 0.146032448,
+              "max_seconds": 0.157833301,
+              "p25_seconds": 0.146939175,
+              "p75_seconds": 0.15260352249999998
+            },
+            "rust": {
+              "median_seconds": 0.047951804,
+              "min_seconds": 0.047255159,
+              "max_seconds": 0.050351826,
+              "p25_seconds": 0.047656757,
+              "p75_seconds": 0.04833815575
+            }
+          }
+        }
+      ],
+      "real_workload_max_relar_over_rust": 1.9086635473949456,
+      "all_real_workloads_within_2x_rust": true
+    }
+  },
+  "status": "passed"
+}
