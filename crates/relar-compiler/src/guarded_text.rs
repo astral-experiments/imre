@@ -59,7 +59,7 @@ fn block(body: &mut Vec<Statement>, private: &[bool], in_loop: bool) {
             _ => {}
         }
     }
-    if !in_loop {
+    if !in_loop || !contains_continue(body) {
         return;
     }
     // Replacing a region leaves the indices of earlier statements unchanged.
