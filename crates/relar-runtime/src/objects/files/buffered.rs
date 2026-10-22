@@ -74,6 +74,11 @@ impl Input {
                 .take(limit as u64)
                 .read_to_end(&mut bytes)
                 .map_err(os_error)?;
+            // CPython releases the unused part of a short read. Keeping the
+            // requested capacity alive with a tiny result exhausts address space.
+            if bytes.len() < limit {
+                bytes.shrink_to_fit();
+            }
         } else {
             self.raw.read_to_end(&mut bytes).map_err(os_error)?;
         }
