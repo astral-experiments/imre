@@ -221,10 +221,12 @@ def benchmark(args):
                                      env=environment, timeout=180, check=False)
             if process.returncode or process.stdout or process.stderr:
                 raise RuntimeError((label, engine, process.returncode, process.stdout, process.stderr))
-            assert output.read_bytes() == expected_bytes, (label, engine, "different output")
+            actual = output.read_bytes()
+            assert actual == expected_bytes, (label, engine, "different output")
             elapsed_ns, rss_kib = map(int, metrics.read_text().split())
             assert elapsed_ns > 0 and rss_kib > 0
-            observation = {"engine": engine, "elapsed_ns": elapsed_ns, "peak_rss_kib": rss_kib}
+            observation = {"engine": engine, "elapsed_ns": elapsed_ns, "peak_rss_kib": rss_kib,
+                           "output_sha256": hashlib.sha256(actual).hexdigest()}
             if crosscheck:
                 # Linux wait4 propagates the largest child high-water mark to GNU time's monitor process.
                 independent_rss = int(gnu.read_text())
