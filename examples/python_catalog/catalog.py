@@ -42,28 +42,32 @@ class Triple:
 
 
 @dataclass(slots=True, frozen=True)
-class Download:
-    release: int
-    version: Version
+class Target:
     triple: Triple
-    flavor: str
+    variant: str | None
+    key: tuple[str, str, str, str]
+    priority: tuple[int, int]
+
+
+@dataclass(slots=True, frozen=True)
+class Download:
+    version: Version
+    target: Target
     filename: str
     url: str
     build: str
     sha256: str | None
-    build_options: list[str]
-    variant: str | None
-
-
-@dataclass(slots=True, frozen=True)
-class Choice:
-    download: Download
-    priority: tuple[int, int]
 
 
 @dataclass(slots=True)
 class Group:
-    selected: dict[tuple[str, str, str, str], Choice]
+    selected: dict[tuple[str, str, str, str], Download]
+
+
+@dataclass(slots=True)
+class Selection:
+    groups: dict[tuple[int, int, int, str], Group]
+    targets: dict[tuple[str, str], Target]
 
 
 @dataclass(slots=True, frozen=True)
@@ -156,9 +160,7 @@ def build_variant(options: list[str]) -> str | None:
     return None
 
 
-def parse_artifact(version: Version, release: int, artifact: Artifact) -> Download | None:
-    filename = unquote(artifact.url.rsplit("/", maxsplit=1)[-1])
-    platform = artifact.platform
+def parse_target(platform: str, variant: str) -> Target | None:
     options: list[str] = []
     if platform.endswith("-debug"):
         platform = platform[:-len("-debug")]
@@ -166,16 +168,16 @@ def parse_artifact(version: Version, release: int, artifact: Artifact) -> Downlo
     if platform.endswith("-freethreaded"):
         platform = platform[:-len("-freethreaded")]
         options.append("freethreaded")
-    flavor = parse_variant(artifact.variant, options)
+    flavor = parse_variant(variant, options)
     if contains(options, "static"):
         return None
     triple = normalize_triple(platform)
     if triple is None:
         return None
-    return Download(
-        release, version, triple, flavor, filename, artifact.url, str(release),
-        artifact.sha256, options, build_variant(options),
-    )
+    normalized_variant = build_variant(options)
+    key = (triple.platform, arch_key(triple.arch), triple.libc, str(normalized_variant or ""))
+    optimized = int(contains(options, "lto")) + int(contains(options, "pgo")) + 1
+    return Target(triple, normalized_variant, key, (flavor_priority(flavor), -optimized))
 
 
 def flavor_priority(flavor: str) -> int:
@@ -192,12 +194,6 @@ def flavor_priority(flavor: str) -> int:
     return 6
 
 
-def download_priority(download: Download) -> tuple[int, int]:
-    options = download.build_options
-    optimized = int(contains(options, "lto")) + int(contains(options, "pgo")) + int(not contains(options, "static"))
-    return flavor_priority(download.flavor), -optimized
-
-
 def arch_key(arch: Arch) -> str:
     variant = arch.variant
     return arch.family + "_" + variant if variant else arch.family
@@ -207,41 +203,37 @@ def artifact_key(artifact: Artifact) -> str:
     return artifact.url
 
 
-def find_downloads(text: str) -> list[Download]:
-    groups: dict[tuple[int, int, int, str], Group] = {}
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
+def select_line(selection: Selection, raw_line: str) -> None:
+    line = raw_line.strip()
+    if not line:
+        return
+    record = decode(line, Release)
+    version_text, _separator, date = record.version.partition("+")
+    version = parse_version(version_text)
+    release = int(date)
+    build = str(release)
+    version_key = (version.major, version.minor, version.patch, version.prerelease)
+    group = selection.groups.get(version_key)
+    for artifact in sorted(record.artifacts, key=artifact_key):
+        filename = unquote(artifact.url.rsplit("/", maxsplit=1)[-1])
+        labels = (artifact.platform, artifact.variant)
+        target = selection.targets.get(labels)
+        if target is None:
+            target = parse_target(artifact.platform, artifact.variant)
+            if target is None:
+                continue
+            if len(selection.targets) < 512:
+                selection.targets[labels] = target
+        if release < 20250311 and target.triple.libc == "musl":
             continue
-        record = decode(line, Release)
-        version_text, _separator, date = record.version.partition("+")
-        version = parse_version(version_text)
-        release = int(date)
-        version_key = (version.major, version.minor, version.patch, version.prerelease)
-        group = groups.get(version_key)
-        for artifact in sorted(record.artifacts, key=artifact_key):
-            download = parse_artifact(version, release, artifact)
-            if download is None:
-                continue
-            if download.release < 20250311 and download.triple.libc == "musl":
-                continue
-            if group is None:
-                group = Group({})
-                groups[version_key] = group
-            triple = download.triple
-            key = (triple.platform, arch_key(triple.arch), triple.libc, str(download.variant or ""))
-            priority = download_priority(download)
-            previous = group.selected.get(key)
-            if previous is not None and priority >= previous.priority:
-                continue
-            # Updating a winner keeps the original insertion position. Selection
-            # can happen while parsing because priorities have no side effects.
-            group.selected[key] = Choice(download, priority)
-    downloads: list[Download] = []
-    for _version_key, group in groups.items():
-        for _selection_key, choice in group.selected.items():
-            downloads.append(choice.download)
-    return downloads
+        if group is None:
+            group = Group({})
+            selection.groups[version_key] = group
+        previous = group.selected.get(target.key)
+        if previous is not None and target.priority >= previous.target.priority:
+            continue
+        # On ties, the first winner keeps its value and insertion position.
+        group.selected[target.key] = Download(version, target, filename, artifact.url, build, artifact.sha256)
 
 
 def prerelease_key(text: str) -> tuple[int, int]:
@@ -269,10 +261,10 @@ def variant_order(variant: str | None) -> int:
 def download_sort_key(download: Download) -> tuple[int, int, int, int, int, int, str, str, str, str]:
     version = download.version
     kind, number = prerelease_key(version.prerelease)
-    triple = download.triple
+    triple = download.target.triple
     return (
         -version.major, -version.minor, -version.patch, -kind, -number,
-        variant_order(download.variant), triple.platform, triple.arch.family,
+        variant_order(download.target.variant), triple.platform, triple.arch.family,
         str(triple.arch.variant or ""), triple.libc,
     )
 
@@ -280,23 +272,34 @@ def download_sort_key(download: Download) -> tuple[int, int, int, int, int, int,
 def download_key(download: Download) -> str:
     version = download.version
     key = f"cpython-{version.major}.{version.minor}.{version.patch}{version.prerelease}"
-    variant = download.variant
+    variant = download.target.variant
     if variant:
         key += "+" + variant
-    triple = download.triple
+    triple = download.target.triple
     return key + "-" + triple.platform + "-" + arch_key(triple.arch) + "-" + triple.libc
 
 
-def generate_catalog(text: str) -> dict[str, CatalogEntry]:
+def finish_catalog(selection: Selection) -> dict[str, CatalogEntry]:
+    downloads: list[Download] = []
+    for _version_key, group in selection.groups.items():
+        for _selection_key, chosen in group.selected.items():
+            downloads.append(chosen)
     results: dict[str, CatalogEntry] = {}
-    for download in sorted(find_downloads(text), key=download_sort_key):
+    for download in sorted(downloads, key=download_sort_key):
         version = download.version
         if (version.major, version.minor) < (3, 8):
             continue
-        triple = download.triple
+        triple = download.target.triple
         results[download_key(download)] = CatalogEntry(
             "cpython", triple.arch, triple.platform, triple.libc,
             version.major, version.minor, version.patch, version.prerelease,
-            download.url, download.sha256, download.variant, download.build,
+            download.url, download.sha256, download.target.variant, download.build,
         )
     return results
+
+
+def generate_catalog(text: str) -> dict[str, CatalogEntry]:
+    selection = Selection({}, {})
+    for line in text.splitlines():
+        select_line(selection, line)
+    return finish_catalog(selection)

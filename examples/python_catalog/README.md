@@ -9,19 +9,21 @@ network finders are outside this example.
 From the repository root, after building Relar:
 
 ```sh
-gzip -dc examples/python_catalog/sample/python-build-standalone.ndjson.gz \
-  > /tmp/python-build-standalone.ndjson
 target/release/relar build examples/python_catalog/__main__.py \
   --module-root examples --clang clang-18 -o /tmp/python-catalog
-/tmp/python-catalog /tmp/python-build-standalone.ndjson /tmp/download-metadata.json
+/tmp/python-catalog examples/python_catalog/sample/python-build-standalone.ndjson.gz \
+  /tmp/download-metadata.json
 ```
 
 The retained real index contains 567 release rows and 58,721 artifacts. The
-program produces 6,098 catalog entries. Input acquisition and lossless gzip
-decompression are preparation; the program parses every raw release and
-artifact, sorts artifact URLs, filters unsupported builds, selects preferred
-builds, sorts the final catalog, and renders every JSON field. It does not
-consume preselected builds or a precomputed catalog. Published source/input
+program produces 6,098 catalog entries. A `.gz` input is decompressed inside
+the executable. Plain NDJSON uses the same buffered line loop. The program
+parses every raw release and artifact, sorts artifact URLs, filters unsupported
+builds, selects preferred builds, sorts the final catalog, and renders every
+JSON field. The loop retains the current release, selected builds, and up to
+512 successfully normalized platform/variant pairs. Uncached pairs follow the
+same normalization path after the cache fills.
+Published source/input
 revisions and hashes are in [upstream/UPSTREAM.json](upstream/UPSTREAM.json) and
 [sample/provenance.json](sample/provenance.json).
 
@@ -29,7 +31,7 @@ Run the same typed program on CPython:
 
 ```sh
 PYTHONPATH=stdlib:examples python3.14 -m python_catalog \
-  /tmp/python-build-standalone.ndjson /tmp/download-metadata.json
+  examples/python_catalog/sample/python-build-standalone.ndjson.gz /tmp/download-metadata.json
 ```
 
 The port uses fixed dataclasses, typed JSON decoding and encoding, tuple
@@ -37,7 +39,10 @@ dictionary keys, and stable tuple-key sorting. It replaces the network request
 with a file argument and selects winners while parsing, preserving the upstream
 first-insertion order and first-on-equal-priority behavior. Release dates do not
 break priority ties. Each release looks up its version group once, creating a
-new group when its first artifact passes filtering. Historical static builds,
+new group when its first artifact passes filtering. Artifacts reuse their
+normalized target labels across releases, while the historical musl eligibility
+check still uses the date of each release. A winning artifact supplies its own
+URL and checksum. Historical static builds,
 the musl cutoff, architecture aliases, platform suffix order, prerelease ranking,
 and the Python 3.8 floor
 follow the retained upstream code. Successful output is quiet and byte-identical
@@ -62,15 +67,20 @@ rejects that ambiguous spelling so ordinary tuple ordering stays faithful.
 The retained real index contains no such architecture. Other normalization
 rules, including ignored extra triple/architecture components, are preserved.
 
-The complete catalog is rendered before opening the output. Parse or selection
-failures preserve an existing output. Missing output parents are created, then
+The complete catalog is rendered before opening the output. Decompression,
+decoding, and selection failures preserve an existing output. On malformed
+records, the reader finishes checking the input so a later I/O or UTF-8 error
+retains the upstream bulk reader's precedence. If text decoding fails in a
+regular gzip file, a bounded binary pass checks the rest of the framing.
+Missing output parents are created, then
 the destination is written normally; write failures can leave a partial file.
 This matches the upstream renderer's publication behavior.
 
 The [unchanged upstream snapshot](upstream/fetch-download-metadata.py) retains
 its Rye MIT attribution and the uv licenses. `upstream_adapter.py` supplies its
-one HTTP response from the input file and calls the unchanged finder and
-renderer. It neither rewrites their implementation nor invokes a network client.
+one HTTP response by reading the entire plain or compressed input file and calls
+the unchanged finder and renderer. The typed port also runs on CPython, giving
+a separate measurement of the same streaming algorithm.
 
 Validate the full catalog, focused edge cases, errors, and complete filesystem
 effects against that upstream oracle:
