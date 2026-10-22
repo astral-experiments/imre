@@ -1,3 +1,5 @@
+pub(crate) mod scanner_benchmark;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 

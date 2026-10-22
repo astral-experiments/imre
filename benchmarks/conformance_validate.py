@@ -449,14 +449,21 @@ def materialize_case(case: Case, directory: Path, *, format: str = "github",
                     format, force_summary_table)
 
 
-def parser_differentials(count: int = 30_000) -> int:
+def parser_differentials(
+    count: int = 30_000, *, native: Path | None = None, directory: Path | None = None,
+) -> int:
     sys.path[:0] = [str(ROOT / "examples"), str(ROOT / "stdlib")]
-    from conformance_report.parse import scan_annotation
+    from conformance_report.parse import CONFORMANCE_ERROR_PATTERN, scan_annotation
     generator = random.Random(7441)
     tokens = ["", "#", "# E", "#E", " E", "\tE", "x", "?", "[", "]", "+", "tag",
               ":", " ", "\t", "\x1f", "\u2003", "é", "😀", "E", "code()", "\\", '"']
     pattern = upstream().CONFORMANCE_ERROR_PATTERN
-    for _ in range(count):
+    assert CONFORMANCE_ERROR_PATTERN.pattern == pattern.pattern
+    assert CONFORMANCE_ERROR_PATTERN.flags == pattern.flags
+    lines = []
+    rows = []
+    checksum = 0
+    for number in range(count):
         line = "".join(generator.choice(tokens) for _ in range(generator.randrange(1, 18)))
         match = pattern.search(line)
         expected = None if match is None else (
@@ -468,6 +475,22 @@ def parser_differentials(count: int = 30_000) -> int:
             result.start, result.end, result.optional, result.tag, result.multi, result.description,
         )
         assert actual == expected, (line, expected, actual)
+        if native is not None:
+            lines.append(line)
+            if expected is not None:
+                start, end, optional, tag, multi, description = expected
+                tag = tag or ""
+                rows.append(f"{number}:{start}:{end}:{int(optional)}:{int(multi)}:{len(tag)}:{tag}{description}")
+                checksum += (1 + start + 3 * end + 5 * len(description)
+                             + 7 * len(tag) + 11 * optional + 13 * multi)
+    if native is not None:
+        assert directory is not None
+        path = directory / "scanner-lines"
+        path.write_text("\0".join(lines), encoding="utf-8")
+        rows.append(f"{len(rows)} {checksum}")
+        expected_bytes = ("\n".join(rows) + "\n").encode()
+        result = subprocess.run([native, path, "1", "dump"], capture_output=True, check=True, timeout=60)
+        assert result.stdout == expected_bytes, (digest(result.stdout), digest(expected_bytes))
     return count
 
 
@@ -514,7 +537,8 @@ def report_differentials(directory: Path, count: int = 100) -> int:
 
 
 def source_hashes() -> dict[str, str]:
-    files = [Path(__file__), *APP.rglob("*"), *(ROOT / "stdlib" / "relar").rglob("*.py")]
+    files = [Path(__file__), Path(__file__).with_name("conformance_scanner.py"),
+             *APP.rglob("*"), *(ROOT / "stdlib" / "relar").rglob("*.py")]
     return {str(path): digest(path.read_bytes()) for path in sorted(set(files))
             if path.is_file() and "__pycache__" not in path.parts}
 
@@ -561,6 +585,10 @@ def validate(args: argparse.Namespace) -> dict:
         compute_engines["codon"] = [str(args.codon_compute_binary.resolve())]
     guarded_sources = source_hashes()
     executables = {Path(command[0]).resolve() for command in [*engines.values(), *compute_engines.values()]}
+    scanner = getattr(args, "scanner_binary", None)
+    if scanner is not None:
+        scanner = scanner.resolve()
+        executables.add(scanner)
     guarded_binaries = {str(path): digest(path.read_bytes()) for path in sorted(executables)}
     record = {
         "schema": 1, "status": "failed", "source_sha256": guarded_sources,
@@ -631,7 +659,7 @@ def validate(args: argparse.Namespace) -> dict:
         assert before == after, (name, "input files changed")
 
     try:
-        record["parser_differentials"] = parser_differentials()
+        record["parser_differentials"] = parser_differentials(native=scanner, directory=directory)
         record["report_differentials"] = report_differentials(directory / "differentials")
         for case in cases():
             base = materialize_case(case, directory / "fixtures" / case.name)
@@ -700,6 +728,7 @@ def main() -> None:
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
     parser.add_argument("--binary", type=Path)
     parser.add_argument("--compute-binary", type=Path)
+    parser.add_argument("--scanner-binary", type=Path)
     parser.add_argument("--rust-binary", type=Path)
     parser.add_argument("--codon-binary", type=Path)
     parser.add_argument("--codon-compute-binary", type=Path)

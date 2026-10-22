@@ -22,6 +22,14 @@ package search. Typed JSON adapters use Codon's stock native JSON parser/formatt
 A native UTF-8 percent decoder supplies the bounded
 `urllib.parse.unquote` operation.
 
+The conformance reporter uses named captures from Ruff’s verbose annotation
+pattern. Codon 0.20.4’s `re` module accepts a `VERBOSE` argument but misses
+markers in that pattern, and its module-level `search` expects a string pattern.
+The benchmark adapter checks the declaration against the vendored Ruff source,
+removes verbose layout, spells out Python’s whitespace set, and calls the native
+RE2 pattern’s `search` method. Capture text and character offsets are checked
+against Ruff on CPython.
+
 Codon 0.20.4's formatter leaves DEL (U+007F) literal with `ensure_ascii=True`.
 The encoding adapter normalizes that character after formatting, including
 the extra output scan in measured work. All other formatting uses stock JSON.
