@@ -1286,6 +1286,12 @@ impl Emitter<'_, '_> {
                 if self.concat_assign(*slot, expression) {
                     return;
                 }
+                if !self.loops.is_empty()
+                    && let ExprKind::Tuple(fields) = &expression.kind
+                {
+                    self.assign_loop_tuple(*slot, fields);
+                    return;
+                }
                 let previous_small = self.assignment_replaces_small(*slot, expression);
                 let value = self.expr(expression);
                 self.store_with_previous_small(*slot, &value, previous_small);
@@ -3542,6 +3548,44 @@ impl Emitter<'_, '_> {
         self.owned(value)
     }
 
+    /// An unaliased tuple local can reuse its allocation on the next iteration.
+    /// Finish every RHS effect first, including rebinding the destination, and
+    /// root each field across the remaining evaluations and all replacements.
+    fn assign_loop_tuple(&mut self, slot: usize, fields: &[Expr]) {
+        let fields: Vec<_> = fields.iter().map(|field| self.expr(field)).collect();
+        let previous = self.borrow_slot(slot);
+        let empty = self.instruction(format!("icmp eq ptr {}, null", previous.operand));
+        let allocate = self.label();
+        let cached = self.label();
+        let write = self.label();
+        self.branch(&empty, &allocate, &cached);
+        self.start(&allocate);
+        let fresh = self.instruction(format!(
+            "call ptr @relar_record_new(ptr @layout_{})",
+            record_name(previous.ty)
+        ));
+        self.jump(&write);
+        self.start(&cached);
+        let replacement = self.instruction(format!(
+            "call ptr @relar_record_cached_result(ptr {})",
+            previous.operand
+        ));
+        self.jump(&write);
+        self.start(&write);
+        let record = Value {
+            ty: previous.ty,
+            operand: self.instruction(format!(
+                "phi ptr [{fresh}, %{allocate}], [{replacement}, %{cached}]"
+            )),
+            small_integer: false,
+        };
+        for (index, field) in fields.iter().enumerate() {
+            self.forget(field);
+            self.replace_field(&record, index, field);
+        }
+        self.store(slot, &record);
+    }
+
     fn field_pointer(&mut self, receiver: &Value, field: usize) -> String {
         self.instruction(format!(
             "getelementptr inbounds %{}, ptr {}, i32 0, i32 {field}",
@@ -3578,6 +3622,11 @@ impl Emitter<'_, '_> {
     /// replacement. Zero-initialized owning fields are valid cleanup sentinels.
     fn set_field(&mut self, receiver: &Value, field: usize, value: &Value) {
         self.retain(value);
+        self.replace_field(receiver, field, value);
+    }
+
+    /// Transfers an already-owned field and then releases the previous word.
+    fn replace_field(&mut self, receiver: &Value, field: usize, value: &Value) {
         let pointer = self.field_pointer(receiver, field);
         let old = self.field_value(&pointer, value.ty);
         let operand = if matches!(storage_type(value.ty), "ptr" | "double") {
