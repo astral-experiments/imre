@@ -13,6 +13,7 @@ mod files;
 mod json;
 mod mappings;
 mod paths;
+mod processes;
 pub(crate) mod records;
 mod sequences;
 mod stdlib;

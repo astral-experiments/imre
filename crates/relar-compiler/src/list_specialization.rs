@@ -591,6 +591,7 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
         operation,
         Builtin::GlobalGet(_)
             | Builtin::Path(_)
+            | Builtin::Process(_)
             | Builtin::Int
             | Builtin::Float
             | Builtin::Bool

@@ -126,6 +126,9 @@ impl Session {
                         // Invalid index values and zero slice steps are runtime
                         // errors. Exact index types and fixed tuple bounds are
                         // still enforced by the closed checker.
+                        // Attribute reads also use closed layouts. In particular,
+                        // sealed exception payload getters guard their category
+                        // at runtime rather than depending on ty's narrowing.
                         diagnostic.severity() >= Severity::Error
                             && !matches!(
                                 diagnostic.id().as_str(),
@@ -135,6 +138,7 @@ impl Session {
                                     | "invalid-return-type"
                                     | "zero-stepsize-in-slice"
                                     | "index-out-of-bounds"
+                                    | "unresolved-attribute"
                             )
                     })
                     .map(|diagnostic| {

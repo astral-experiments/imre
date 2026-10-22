@@ -137,6 +137,28 @@ mod tests {
     use super::{CompileOptions, compile};
 
     #[test]
+    fn sealed_exception_fields_keep_runtime_guards_and_reject_unknown_attributes() {
+        let llvm = compile(
+            "def fields(error: Exception) -> tuple[int, list[str], str, str, str]:\n    return error.returncode, error.cmd, error.stdout, error.output, error.stderr\n",
+            &CompileOptions::default(),
+        ).unwrap();
+        assert!(llvm.contains("call i64 @relar_subprocess_error_field"));
+        assert!(llvm.contains("call i8 @relar_error_pending"));
+        for source in [
+            "def field(error: Exception) -> int:\n    return error.pid\n",
+            "def field(text: str) -> str:\n    return text.stdout\n",
+            "import subprocess\nsubprocess.unknown()\n",
+            "def field(error: Exception) -> None:\n    error.stdout = 'replacement'\n",
+            "if False:\n    print('text'.stdout)\n",
+        ] {
+            assert!(
+                compile(source, &CompileOptions::default()).is_err(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
     fn sealed_imports_work_without_filesystem_modules() {
         let source = r#"
 import sys as process

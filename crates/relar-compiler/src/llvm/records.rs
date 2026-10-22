@@ -19,9 +19,29 @@ fn bytes(output: &mut String, name: &str, value: &str) {
 /// offsets, and ownership operations do not depend on generated value behavior.
 pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut String) -> String {
     let (kind, flags, class_name, qualified_name, fields) = match ty {
-        Type::Class(class) => {
-            let Some(metadata) = module.class_metadata.get(class) else {
-                return "null".to_owned();
+        Type::Class(_) | Type::CompletedProcess => {
+            let process;
+            let metadata = if let Type::Class(class) = ty {
+                let Some(metadata) = module.class_metadata.get(class) else {
+                    return "null".to_owned();
+                };
+                metadata
+            } else {
+                process = crate::ir::ClassMetadata {
+                    name: "CompletedProcess".to_owned(),
+                    qualified_name: "subprocess.CompletedProcess".to_owned(),
+                    dataclass_eq: false,
+                    dataclass_repr: true,
+                    fields: ["args", "returncode", "stdout", "stderr"]
+                        .into_iter()
+                        .map(|name| crate::ir::ClassFieldMetadata {
+                            name: name.to_owned(),
+                            compare: false,
+                            repr: true,
+                        })
+                        .collect(),
+                };
+                &process
             };
             bytes(output, &format!("repr_name_{name}"), &metadata.name);
             bytes(
@@ -64,7 +84,7 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
             "ptr null, i64 0".to_owned(),
             "null".to_owned(),
         ),
-        _ => unreachable!("only class and tuple layouts have public value behavior"),
+        _ => unreachable!("only public record layouts have value behavior"),
     };
     writeln!(
         output,

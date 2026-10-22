@@ -20,6 +20,7 @@ Relar supports:
 - Typed containers and arbitrary-precision integers
 - Common control flow, comprehensions, and immediately consumed iterator pipelines
 - Selected file and path operations
+- Run native subprocesses with captured UTF-8 output, explicit arguments, working directories, and environment snapshots.
 
 But not:
 

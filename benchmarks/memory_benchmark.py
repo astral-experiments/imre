@@ -20,6 +20,7 @@ REFERENCE = HERE / "reference/memory_report"
 shared = SimpleNamespace(**runpy.run_path(str(HERE / "benchmark.py")))
 targets = SimpleNamespace(**runpy.run_path(str(HERE / "telemetry_benchmark.py")))
 validator = SimpleNamespace(**runpy.run_path(str(HERE / "memory_validate.py")))
+process_api = SimpleNamespace(**runpy.run_path(str(HERE / "memory_process.py")))
 
 
 def scaled(source, copies):
@@ -97,9 +98,11 @@ def compute_commands_for(prepared, paths):
             "original": validator.compute_original_command(str(paths["python"])), "rust": [str(paths["rust"]), "compute"]}
 
 
-def measure(workload, value, commands, directory, args, compute=False):
-    expected = validator.compute_oracle(value) if compute else validator.oracle(value)
-    check = validator.check_compute_result if compute else validator.check_result
+def measure(workload, value, commands, directory, args, compute=False, prepared_process=False, environment_override=None):
+    expected = (process_api.oracle(value) if prepared_process else
+                validator.compute_oracle(value) if compute else validator.oracle(value))
+    check = (process_api.check_result if prepared_process else
+             validator.check_compute_result if compute else validator.check_result)
     directories = {name: directory / name for name in commands}
     for path in directories.values():
         path.mkdir(parents=True)
@@ -111,7 +114,9 @@ def measure(workload, value, commands, directory, args, compute=False):
         command = [*commands[name], *value.arguments]
         start = time.perf_counter_ns()
         process = subprocess.run(command, input=b"", capture_output=True, cwd=path,
-                                 env=validator.environment(), timeout=args.timeout, check=False)
+                                 env=environment_override if environment_override is not None else
+                                     process_api.environment() if prepared_process else validator.environment(),
+                                 timeout=args.timeout, check=False)
         elapsed = time.perf_counter_ns() - start
         return {"command": command, "elapsed_ns": elapsed,
                 **check(value, expected, process, path, name)}
@@ -152,9 +157,13 @@ def source_paths(args):
                   for path in validator.STDLIB.rglob("*.py")})
     paths.update({"fixture:" + path.name: path for path in (validator.PACKAGE / "sample").iterdir() if path.is_file()})
     paths.update({"upstream:" + path.name: path for path in (validator.PACKAGE / "upstream").iterdir() if path.is_file()})
-    reference_paths = [REFERENCE / name for name in ("Cargo.toml", "Cargo.lock", "build.py", "src/main.rs")]
+    reference_paths = [REFERENCE / name for name in ("Cargo.toml", "Cargo.lock", "build.py")]
+    reference_paths.extend(sorted((REFERENCE / "src").glob("*.rs")))
     paths.update({"rust_source:" + str(path.relative_to(REFERENCE)): path for path in reference_paths})
     rust_record = json.loads(paths["rust_build_record"].read_text())
+    paths["producer"] = (paths["rust"].parent / rust_record["binaries"]["producer"]["name"]).resolve(strict=True)
+    assert rust_record["binaries"]["producer"]["sha256"] == shared.sha256(paths["producer"])
+    paths.update({"helper:" + path.name: path for path in HERE.glob("memory_*.py")})
     assert rust_record["input_guards_passed"]
     assert rust_record["binary_sha256"] == shared.sha256(paths["rust"])
     assert rust_record["sources"] == {str(path.relative_to(REFERENCE)): shared.sha256(path) for path in reference_paths}
@@ -202,6 +211,10 @@ def prepare(args, paths, hashes, rust_record, revision, dirty):
     compute_validation = validator.validate_compute_commands(compute_commands_for({"compute_binary": str(compute_binary)}, paths), args.timeout)
     compute_validation_path = artifact / "compute-validation.json"
     compute_validation_path.write_text(json.dumps(compute_validation, indent=2) + "\n")
+    process_commands = {**commands, "original": process_api.original_command(str(paths["python"]))}
+    process_validation = process_api.validate_commands(process_commands, str(paths["python"]), args.timeout)
+    process_validation_path = artifact / "process-validation.json"
+    process_validation_path.write_text(json.dumps(process_validation, indent=2) + "\n")
     return {"schema": 1, "kind": "memory-preparation", "revision": revision, "dirty": dirty,
             "compile_command": command, "compute_compile_command": compute_command, "effective_target": target, "thinlto": bool(args.lto_linker),
             "source_and_tool_paths": {name: str(path) for name, path in paths.items()},
@@ -211,6 +224,8 @@ def prepare(args, paths, hashes, rust_record, revision, dirty):
             "compute_llvm": str(compute_llvm), "compute_llvm_sha256": shared.sha256(compute_llvm),
             "compute_validation": str(compute_validation_path), "compute_validation_sha256": shared.sha256(compute_validation_path),
             "compute_validation_cases": compute_validation["cases"],
+            "process_validation": str(process_validation_path), "process_validation_sha256": shared.sha256(process_validation_path),
+            "process_validation_cases": process_validation["cases"],
             "llvm": str(llvm), "llvm_sha256": shared.sha256(llvm),
             "validation": str(validation_path), "validation_sha256": shared.sha256(validation_path),
             "validation_cases": validation["cases"], "native_elf": targets.elf_target(binary),
@@ -224,12 +239,12 @@ def verify(prepared, paths, hashes, args, revision, dirty):
     assert prepared["source_and_tool_sha256"] == hashes
     assert prepared["thinlto"] == bool(args.lto_linker)
     assert prepared["effective_target"] == (args.target or targets.rust_host(prepared["rust_build_record"]))
-    for name in ("binary", "llvm", "validation", "compute_binary", "compute_llvm", "compute_validation"):
+    for name in ("binary", "llvm", "validation", "compute_binary", "compute_llvm", "compute_validation", "process_validation"):
         assert prepared[name + "_sha256"] == shared.sha256(Path(prepared[name]))
     assert prepared["native_elf"] == targets.elf_target(Path(prepared["binary"])) == targets.elf_target(paths["rust"])
 
 
-def main():
+def argument_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("compiler", "runtime", "rust", "artifact-dir", "output"):
         parser.add_argument("--" + name, required=True, type=Path if name in ("runtime", "artifact-dir", "output") else str)
@@ -250,7 +265,11 @@ def main():
     parser.add_argument("--compute-rounds", type=shared.positive_int, default=8)
     parser.add_argument("--timeout", type=shared.positive_float, default=120)
     parser.add_argument("--cpu", type=int)
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    args = argument_parser().parse_args()
     assert args.samples % 4 == 0, "samples must balance all four engine orders"
     assert len(set(args.copies)) == len(args.copies)
     args.directory_layouts = [tuple(shared.positive_int(value) for value in item.split(":")) for item in args.directory_layouts]
@@ -274,7 +293,7 @@ def main():
     preparation_hash = shared.sha256(args.prepared_record) if args.prepared_record else None
     prepared = json.loads(args.prepared_record.read_text()) if args.prepared_record else prepare(args, paths, hashes, rust_record, revision, dirty)
     verify(prepared, paths, hashes, args, revision, dirty)
-    for name in ("binary", "llvm", "validation", "compute_binary", "compute_llvm", "compute_validation"):
+    for name in ("binary", "llvm", "validation", "compute_binary", "compute_llvm", "compute_validation", "process_validation"):
         path = Path(prepared[name])
         assert args.output.resolve() != path.resolve() and not (args.output.exists() and args.output.samefile(path))
     if args.prepare_only:

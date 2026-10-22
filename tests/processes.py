@@ -1,0 +1,235 @@
+"""Compare sealed synchronous processes, captured text, errors, and ownership."""
+
+import argparse
+import fcntl
+import os
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+if sys.flags.optimize:
+    raise SystemExit("validation requires Python assertions")
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import files
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "processes"
+IMPORTS = """import os
+import subprocess
+from subprocess import run, CompletedProcess, CalledProcessError, SubprocessError
+from pathlib import Path
+"""
+CALL = "run(['command'], capture_output=True, encoding='utf-8')"
+REJECTED = {
+    "missing_args": "run(capture_output=True, encoding='utf-8')",
+    "duplicate_args": "run(['command'], args=['other'], capture_output=True, encoding='utf-8')",
+    "extra_positional": "run(['command'], True, capture_output=True, encoding='utf-8')",
+    "string_args": "run('command', capture_output=True, encoding='utf-8')",
+    "bytes_args": "run(b'command', capture_output=True, encoding='utf-8')",
+    "integer_args": "run([1], capture_output=True, encoding='utf-8')",
+    "path_args": "run([Path('command')], capture_output=True, encoding='utf-8')",
+    "optional_args": "args: list[str] | None = None\nrun(args, capture_output=True, encoding='utf-8')",
+    "expanded_args": "run(*[['command']], capture_output=True, encoding='utf-8')",
+    "expanded_kwargs": "run(['command'], capture_output=True, encoding='utf-8', **{'check': True})",
+    "missing_capture": "run(['command'], encoding='utf-8')",
+    "false_capture": "run(['command'], capture_output=False, encoding='utf-8')",
+    "dynamic_capture": "capture = True\nrun(['command'], capture_output=capture, encoding='utf-8')",
+    "missing_encoding": "run(['command'], capture_output=True)",
+    "other_encoding": "run(['command'], capture_output=True, encoding='latin-1')",
+    "dynamic_encoding": "encoding = 'utf-8'\nrun(['command'], capture_output=True, encoding=encoding)",
+    "false_text": "run(['command'], capture_output=True, encoding='utf-8', text=False)",
+    "dynamic_text": "text = True\nrun(['command'], capture_output=True, encoding='utf-8', text=text)",
+    "wrong_check": "run(['command'], capture_output=True, encoding='utf-8', check=1)",
+    "wrong_cwd": "run(['command'], capture_output=True, encoding='utf-8', cwd=b'directory')",
+    "wrong_env": "run(['command'], capture_output=True, encoding='utf-8', env={'KEY': 1})",
+    "wrong_env_key": "run(['command'], capture_output=True, encoding='utf-8', env={1: 'value'})",
+    "raw_environ": "run(['command'], capture_output=True, encoding='utf-8', env=os.environ)",
+    "environ_index": "print(os.environ['KEY'])",
+    "environ_assignment": "os.environ['KEY'] = 'value'",
+    "environ_copy_args": "os.environ.copy(1)",
+    "environ_get": "print(os.environ.get('KEY'))",
+    "stored_run": "callback = run\ncallback(['command'])",
+    "construct_result": "CompletedProcess(['command'], 0, '', '')",
+    "construct_failure": "CalledProcessError(1, ['command'])",
+    "construct_parent_error": "SubprocessError('message')",
+    "failure_annotation": "def code(error: CalledProcessError) -> int:\n    return error.returncode",
+    "bytes_result": "result: CompletedProcess[bytes] = " + CALL,
+    "extra_type_arguments": "result: CompletedProcess[str, int] = " + CALL,
+    "unknown_result_attribute": "result = " + CALL + "\nprint(result.pid)",
+    "check_method_args": "result = " + CALL + "\nresult.check_returncode(1)",
+    "stored_check_method": "result = " + CALL + "\ncallback = result.check_returncode\ncallback()",
+    "optional_result": "result: CompletedProcess[str] | None = None\nprint(result.stdout)",
+    "result_subclass": "class Custom(CompletedProcess):\n    pass",
+    "unsupported_import": "from subprocess import Popen\nPopen(['command'])",
+    "unsupported_mkdir": "Path('directory').mkdir(parents=True, exist_ok=True)",
+}
+for name, value in {
+    "shell": "True",
+    "timeout": "1",
+    "input": "'data'",
+    "stdin": "0",
+    "stdout": "1",
+    "stderr": "2",
+    "errors": "'replace'",
+    "universal_newlines": "True",
+    "executable": "'command'",
+    "close_fds": "False",
+}.items():
+    REJECTED[f"unsupported_{name}"] = f"run(['command'], capture_output=True, encoding='utf-8', {name}={value})"
+for name, value in {"args": "['other']", "returncode": "0", "stdout": "'text'", "stderr": "'text'"}.items():
+    REJECTED[f"write_{name}"] = f"result = {CALL}\nresult.{name} = {value}"
+REJECTED["write_error_field"] = "error: Exception = ValueError('message')\nerror.stdout = 'text'"
+
+INVALID_ENV = """import os
+import subprocess
+from sys import argv
+for turn in range(2):
+    try:
+        os.environ.copy()
+    except UnicodeDecodeError:
+        print('invalid environment')
+result = subprocess.run([argv[1], '-I', '-c', "print('recovered')"], capture_output=True, encoding='utf-8', env={})
+print(result.stdout)
+"""
+
+
+def seed(directory: Path, python: str) -> None:
+    directory.mkdir(parents=True)
+    (directory / "sentinel.txt").write_bytes(b"preserve this file")
+    (directory / "plain-file").write_bytes(b"plain file")
+    (directory / "not-executable").write_bytes(b"#!/bin/sh\nexit 0\n")
+    (directory / "not-executable").chmod(0o644)
+    (directory / "executable-text").write_bytes(b"printf unexpected > fallback.txt\n")
+    (directory / "executable-text").chmod(0o755)
+    (directory / "directory" / "bin").mkdir(parents=True)
+    (directory / "directory" / "bin" / "relar-process-child").symlink_to(python)
+    (directory / "directory" / "relative-executable").symlink_to(python)
+
+
+def snapshot(directory: Path) -> dict:
+    """Compare exact file contents without following executable symlinks."""
+    result = {}
+    for parent, directories, names in os.walk(directory, followlinks=False):
+        for name in directories + names:
+            path = Path(parent) / name
+            mode = path.lstat().st_mode
+            value = ("link", os.readlink(path)) if stat.S_ISLNK(mode) else (
+                ("directory", None) if stat.S_ISDIR(mode) else ("file", path.read_bytes())
+            )
+            result[str(path.relative_to(directory))] = value
+    return result
+
+
+def run(command: list[str], directory: Path, *, descriptor: int | None = None, limited: bool = False, invalid: tuple[bytes, bytes] | None = None):
+    environment = files.environment()
+    environment.update(RELAR_PROCESS_PARENT="inherited λ", RELAR_PROCESS_OVERRIDE="parent")
+    environment[""] = "inherited empty name λ"
+    environment.pop("RELAR_PROCESS_EMPTY", None)
+    if invalid is not None:
+        environment = {os.fsencode(key): os.fsencode(value) for key, value in environment.items()}
+        environment[invalid[0]] = invalid[1]
+    return subprocess.run(
+        command,
+        cwd=directory,
+        input="from parent\r\néλ🙂\rfinal\n".encode(),
+        capture_output=True,
+        timeout=60,
+        check=False,
+        env=environment,
+        pass_fds=() if descriptor is None else (descriptor,),
+        preexec_fn=files.descriptor_limit if limited else None,
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--compiler", required=True, type=Path)
+    parser.add_argument("--runtime", required=True, type=Path)
+    parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--clang", default="clang")
+    parser.add_argument("--target")
+    parser.add_argument("--lto-linker", type=Path)
+    parser.add_argument("--opt-levels", nargs="+", choices=["0", "1", "2", "3"], default=["0", "3"])
+    parser.add_argument("--sanitize", action="store_true")
+    args = parser.parse_args()
+    assert sys.platform == "linux", "process validation requires the Linux backend"
+    assert len(set(args.opt_levels)) == len(args.opt_levels)
+    compiler = str(args.compiler.resolve())
+    flags = ["--runtime", str(args.runtime.resolve()), "--clang", args.clang]
+    if args.target:
+        flags += ["--target", args.target]
+    if args.lto_linker:
+        flags += ["--lto-linker", str(args.lto_linker.absolute())]
+    if args.sanitize:
+        flags += ["--sanitize"]
+    resolved = files.run([args.python, "-I", "-c", "import sys; print(sys.executable)"], FIXTURES)
+    files.check_result(resolved, None, "CPython interpreter")
+    python = str(Path(resolved.stdout.decode().strip()).resolve())
+    checks = 0
+    with tempfile.TemporaryDirectory(prefix="relar-processes-") as directory, open(os.devnull, "rb") as original:
+        temporary = Path(directory)
+        # Preserve an inherited descriptor above the child's deliberately lowered
+        # soft limit. Closing only up to RLIMIT_NOFILE would leave this one open.
+        with os.fdopen(fcntl.fcntl(original.fileno(), fcntl.F_DUPFD_CLOEXEC, 211), "rb") as inherited:
+            descriptor = inherited.fileno()
+            signal_child = temporary / "signal-child"
+            built = files.run([args.clang, str(FIXTURES / "signal.c"), "-o", str(signal_child)], temporary)
+            files.check_result(built, None, "signal probe build")
+            arguments = [python, str(FIXTURES / "child.py"), str(descriptor), str(signal_child)]
+            sources = [source for source in sorted(FIXTURES.glob("*.py")) if source.name != "child.py"]
+            sources.append(FIXTURES / "imported" / "main.py")
+            for source in sources:
+                name = source.stem if source.parent == FIXTURES else "imported"
+                project = temporary / name
+                reference_dir = project / "cpython" / "work"
+                seed(reference_dir, python)
+                options = {"limited": name in {"cleanup", "stdin_fds"}, "descriptor": descriptor if name == "stdin_fds" else None}
+                reference = run([python, "-E", "-B", str(source), *arguments], reference_dir, **options)
+                files.check_result(reference, None, f"CPython {name}")
+                expected_files = snapshot(reference_dir)
+                if name == "stdin_fds":
+                    assert b"closed\n" in reference.stdout and reference.stdout.endswith(b"-13\n"), reference.stdout
+                for level in args.opt_levels:
+                    binary = project / f"native-O{level}"
+                    built = files.run([compiler, "build", str(source), "--module-root", str(source.parent), "-o", str(binary), "--opt-level", level, *flags], temporary)
+                    files.check_result(built, None, f"build {name} O{level}")
+                    native_dir = project / f"relar-O{level}" / "work"
+                    seed(native_dir, python)
+                    actual = run([str(binary), *arguments], native_dir, **options)
+                    files.check_result(actual, None, f"Relar {name} O{level}")
+                    assert actual.stdout == reference.stdout, (name, level, actual.stdout, reference.stdout)
+                    assert snapshot(native_dir) == expected_files, (name, level, "filesystem effects differ")
+                    checks += 1
+        for name, source in REJECTED.items():
+            path = temporary / f"reject-{name}.py"
+            path.write_text(IMPORTS + source + "\n", encoding="utf-8")
+            result = files.run([compiler, "check", str(path)], temporary)
+            assert result.returncode > 0 and result.stderr, (name, result)
+            assert b"panicked" not in result.stderr and b"Sanitizer" not in result.stderr, (name, result.stderr)
+            checks += 1
+        for module in ["subprocess", "os"]:
+            shadow = temporary / f"shadow-{module}"
+            shadow.mkdir()
+            (shadow / f"{module}.py").write_text("def value() -> int:\n    return 1\n")
+            (shadow / "main.py").write_text(f"import {module}\nprint({module}.value())\n")
+            result = files.run([compiler, "check", str(shadow / "main.py")], temporary)
+            assert result.returncode > 0 and b"standard-library" in result.stderr, result.stderr
+            checks += 1
+        source = temporary / "invalid_environment.py"
+        source.write_text(INVALID_ENV)
+        for level in args.opt_levels:
+            binary = temporary / f"invalid-environment-O{level}"
+            built = files.run([compiler, "build", str(source), "-o", str(binary), "--opt-level", level, *flags], temporary)
+            files.check_result(built, None, "build invalid environment boundary")
+            for invalid in [(b"RELAR_INVALID", b"\xff"), (b"RELAR_\xff", b"value")]:
+                actual = run([str(binary), python], temporary, invalid=invalid)
+                files.check_result(actual, None, "invalid environment boundary")
+                assert actual.stdout == b"invalid environment\ninvalid environment\nrecovered\n\n", actual.stdout
+                checks += 1
+    print(f"Passed {checks} process checks ({len(REJECTED) + 2} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})")
+
+
+if __name__ == "__main__":
+    main()

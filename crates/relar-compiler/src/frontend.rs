@@ -24,6 +24,7 @@ mod matching;
 mod module_values;
 mod paths;
 mod pipelines;
+mod processes;
 mod records;
 mod stdlib;
 mod truthiness;
@@ -706,6 +707,9 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
+        Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
+            return Ok(Type::CompletedProcess);
+        }
         _ => {}
     }
     let nested = |expression: &ast::Expr| {
@@ -726,6 +730,21 @@ fn annotation_at(
             )),
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
+        ast::Expr::Subscript(value)
+            if matches!(
+                graph.resolve(module, &value.value),
+                Some(Binding::Intrinsic(Intrinsic::CompletedProcess))
+            ) =>
+        {
+            if nested(&value.slice)? != Type::Str {
+                return Err(error(
+                    source,
+                    expression,
+                    "CompletedProcess requires str output",
+                ));
+            }
+            Ok(Type::CompletedProcess)
+        }
         ast::Expr::Subscript(value)
             if matches!(
                 graph.resolve(module, &value.value),
@@ -2289,7 +2308,7 @@ impl<'a> Checker<'a> {
     /// Class-form raises construct a new instance, just like an explicit call.
     fn raised_exception(&mut self, value: &ast::Expr) -> Result<Expr, String> {
         if let Some(kind) = self.exception_category(value) {
-            if matches!(kind, 0 | 18) {
+            if matches!(kind, 0 | 18 | 25 | 26) {
                 return Err(error(
                     self.source,
                     value,
@@ -2314,6 +2333,8 @@ impl<'a> Checker<'a> {
         }
         match self.resolve(expression) {
             Some(Binding::Intrinsic(Intrinsic::UnsupportedOperation)) => Some(19),
+            Some(Binding::Intrinsic(Intrinsic::SubprocessError)) => Some(25),
+            Some(Binding::Intrinsic(Intrinsic::CalledProcessError)) => Some(26),
             Some(_) => None,
             None => match expression {
                 ast::Expr::Name(name) => exception_kind(name.id.as_str()),
@@ -2997,7 +3018,13 @@ impl<'a> Checker<'a> {
                 if receiver.ty == Type::Path {
                     return self.path_attribute(receiver, attribute);
                 }
+                if receiver.ty == Type::CompletedProcess {
+                    return self.process_attribute(receiver, attribute);
+                }
                 if receiver.ty == Type::Exception {
+                    if let Some(value) = self.process_error_attribute(&receiver, attribute) {
+                        return Ok(value);
+                    }
                     let (ty, builtin) = match attribute.attr.as_str() {
                         "__cause__" => (
                             self.types.optional(Type::Exception),
@@ -3103,6 +3130,20 @@ impl<'a> Checker<'a> {
 
     fn call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
+        if matches!(
+            self.resolve(&call.func),
+            Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
+        ) {
+            return self.process_run(call);
+        }
+        if let ast::Expr::Attribute(attribute) = &*call.func
+            && matches!(
+                self.resolve(&attribute.value),
+                Some(Binding::Intrinsic(Intrinsic::Environ))
+            )
+        {
+            return self.environ_copy(attribute, call);
+        }
         if let Some(class) = self.class_reference(&call.func) {
             return self.construct(call, class);
         }
@@ -3126,7 +3167,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(kind) = self.exception_category(&call.func) {
             self.reject_builtin_keywords(call)?;
-            if matches!(kind, 0 | 18) {
+            if matches!(kind, 0 | 18 | 25 | 26) {
                 return Err(error(
                     self.source,
                     call,
@@ -3190,6 +3231,9 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::Path {
                 return self.path_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::CompletedProcess {
+                return self.process_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Str {
                 match attribute.attr.as_str() {
@@ -3495,13 +3539,16 @@ impl<'a> Checker<'a> {
             });
         }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
-            if name.id == "repr" || (name.id == "str" && matches!(args[0].ty, Type::Class(_))) {
+            if name.id == "repr"
+                || (name.id == "str"
+                    && matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess))
+            {
                 return Ok(Expr {
                     ty: Type::Str,
                     kind: ExprKind::Builtin(Builtin::Repr, args),
                 });
             }
-            if name.id == "print" && matches!(args[0].ty, Type::Class(_)) {
+            if name.id == "print" && matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess) {
                 return Ok(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(

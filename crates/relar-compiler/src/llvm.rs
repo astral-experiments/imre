@@ -16,6 +16,7 @@ mod conditionals;
 mod integer_regions;
 mod json;
 mod paths;
+mod processes;
 mod records;
 mod stdlib;
 mod truthiness;
@@ -38,6 +39,7 @@ impl Type {
             | Self::Iterator
             | Self::Exception
             | Self::Path
+            | Self::CompletedProcess
             | Self::TextIO
             | Self::BinaryIO
             | Self::Tuple(_) => "ptr",
@@ -60,6 +62,7 @@ impl Type {
             | Self::Iterator
             | Self::Exception
             | Self::Path
+            | Self::CompletedProcess
             | Self::TextIO
             | Self::BinaryIO
             | Self::Tuple(_) => "null",
@@ -398,7 +401,9 @@ impl Emitter<'_, '_> {
             Type::Str => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
-            Type::Class(_) | Type::Tuple(_) | Type::Callable(_) => "record",
+            Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess => {
+                "record"
+            }
             Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
@@ -2527,6 +2532,7 @@ impl Emitter<'_, '_> {
             | Type::Class(_)
             | Type::Exception
             | Type::TextIO
+            | Type::CompletedProcess
             | Type::BinaryIO => self.instruction(format!(
                 "icmp {predicate} {} {}, {}",
                 left.ty.llvm(),
@@ -2703,6 +2709,7 @@ impl Emitter<'_, '_> {
             .collect::<Vec<_>>();
         let result = match builtin {
             Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
+            Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
             Builtin::JsonDecode(class) => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
@@ -3231,6 +3238,7 @@ impl Emitter<'_, '_> {
                     | Type::Path
                     | Type::TextIO
                     | Type::BinaryIO
+                    | Type::CompletedProcess
                     | Type::Tuple(_)
                     | Type::Optional(_)
                     | Type::Callable(_)
@@ -3363,6 +3371,7 @@ impl Emitter<'_, '_> {
             | Type::Path
             | Type::TextIO
             | Type::BinaryIO
+            | Type::CompletedProcess
             | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
         }
     }
@@ -3394,6 +3403,7 @@ impl Emitter<'_, '_> {
             | Type::Path
             | Type::TextIO
             | Type::BinaryIO
+            | Type::CompletedProcess
             | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
         Value {
@@ -3833,7 +3843,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Bytes => 8,
         Type::Union(_) => 9,
         Type::ListInt => 4,
-        Type::Class(_) | Type::Tuple(_) | Type::Callable(_) => 6,
+        Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess => 6,
         Type::List(_)
         | Type::Dict(_)
         | Type::Set(_)
@@ -3851,7 +3861,8 @@ fn record_name(ty: Type) -> String {
         Type::Class(id) => format!("class_{id}"),
         Type::Tuple(id) => format!("tuple_{id}"),
         Type::Callable(_) => "callable".to_owned(),
-        _ => unreachable!("only classes, tuples, and callables have fixed record layouts"),
+        Type::CompletedProcess => "completed_process".to_owned(),
+        _ => unreachable!("only fixed record types have layout names"),
     }
 }
 
@@ -3876,7 +3887,19 @@ fn record_layouts(module: &Module) -> String {
         .iter()
         .enumerate()
         .map(|(id, fields)| (Type::Class(id), fields.clone()));
-    for (ty, fields) in classes.chain(module.types.tuples()) {
+    let process = (
+        Type::CompletedProcess,
+        vec![
+            module.types.list(Type::Str),
+            Type::Int,
+            Type::Str,
+            Type::Str,
+        ],
+    );
+    for (ty, fields) in classes
+        .chain(module.types.tuples())
+        .chain(std::iter::once(process))
+    {
         let name = record_name(ty);
         let storage = fields
             .iter()
@@ -3933,6 +3956,10 @@ fn fallible(name: &str) -> bool {
                 | "int_lshift"
                 | "int_rshift"
                 | "relar_flush_stdout"
+                | "relar_subprocess_run"
+                | "relar_environ_copy"
+                | "relar_subprocess_check"
+                | "relar_subprocess_error_field"
                 | "relar_print_int"
                 | "relar_print_float"
                 | "relar_print_str"
@@ -4001,6 +4028,10 @@ fn fallible(name: &str) -> bool {
 }
 
 const DECLARATIONS: &str = r#"
+declare ptr @relar_subprocess_run(ptr, ptr, ptr, i8, ptr)
+declare ptr @relar_environ_copy()
+declare void @relar_subprocess_check(ptr)
+declare i64 @relar_subprocess_error_field(ptr, i32)
 declare ptr @relar_path_new(ptr)
 declare ptr @relar_path_join(ptr, ptr)
 declare ptr @relar_path_text(ptr)

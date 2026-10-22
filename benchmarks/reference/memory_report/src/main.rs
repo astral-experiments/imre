@@ -2,10 +2,11 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{ToPrimitive, Zero};
@@ -672,6 +673,152 @@ fn compute(rounds: usize, old_directory: &str, new_directory: &str) -> Result<()
     Ok(())
 }
 
+#[derive(Deserialize)]
+struct PreparedProject {
+    name: String,
+    cwd: String,
+    argv: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct PreparedProjects {
+    projects: Vec<PreparedProject>,
+}
+
+/// Map process launch failures to the same catchable operating-system categories.
+fn process_error(error: io::Error) -> Failure {
+    let category = match error.kind() {
+        io::ErrorKind::NotFound => "FileNotFoundError",
+        io::ErrorKind::PermissionDenied => "PermissionError",
+        io::ErrorKind::NotADirectory => "NotADirectoryError",
+        io::ErrorKind::IsADirectory => "IsADirectoryError",
+        io::ErrorKind::InvalidInput => "ValueError",
+        _ => "OSError",
+    };
+    Failure(category, error.to_string())
+}
+
+/// Text capture uses strict UTF-8 and Python's universal-newline conversion.
+fn captured_text(bytes: Vec<u8>) -> Result<String, Failure> {
+    let text = String::from_utf8(bytes)
+        .map_err(|error| Failure("UnicodeDecodeError", error.to_string()))?;
+    Ok(if text.contains('\r') {
+        text.replace("\r\n", "\n").replace('\r', "\n")
+    } else {
+        text
+    })
+}
+
+/// Launch the same argv, cwd, and complete environment as the typed application.
+/// Command::output drains both pipes, and explicit stdin inheritance preserves run().
+fn collect_report(
+    project: &PreparedProject,
+    executable: &str,
+    environment: &HashMap<String, String>,
+) -> Result<Input<'static>, Failure> {
+    let arguments: Vec<_> = project
+        .argv
+        .iter()
+        .map(|argument| {
+            if argument == "{ty}" {
+                executable
+            } else {
+                argument
+            }
+        })
+        .collect();
+    let output = Command::new(arguments[0])
+        .args(&arguments[1..])
+        .current_dir(&project.cwd)
+        .env_clear()
+        .envs(environment)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(process_error)?;
+    let stdout = captured_text(output.stdout)?;
+    let _stderr = captured_text(output.stderr)?;
+    if !output.status.success() {
+        return Err(Failure(
+            "CalledProcessError",
+            format!("command {arguments:?} failed: {}", output.status),
+        ));
+    }
+    Input::parse(stdout)
+}
+
+/// Validate the complete manifest before launching children, then run each old/new
+/// pair in manifest order and sort names before the renderer's stable ranking.
+fn prepared_inputs(
+    path: &str,
+    old_ty: &str,
+    new_ty: &str,
+) -> Result<Vec<(String, Input<'static>, Input<'static>)>, Failure> {
+    if !old_ty.starts_with('/') || !new_ty.starts_with('/') {
+        return Err(Failure(
+            "ValueError",
+            "--old-ty and --new-ty must be absolute executable paths".into(),
+        ));
+    }
+    let text = read(path)?;
+    depth_check(&text)?;
+    let manifest: PreparedProjects =
+        serde_json::from_str(&text).map_err(|error| Failure("ValueError", error.to_string()))?;
+    if manifest.projects.is_empty() {
+        return Err(Failure(
+            "ValueError",
+            "prepared-project manifest must contain at least one project".into(),
+        ));
+    }
+    let mut names = HashSet::new();
+    for project in &manifest.projects {
+        if project.name.is_empty() || !names.insert(&project.name) {
+            return Err(Failure(
+                "ValueError",
+                "prepared project names must be nonempty and unique".into(),
+            ));
+        }
+        if project.cwd.is_empty() {
+            return Err(Failure(
+                "ValueError",
+                "prepared project cwd must be nonempty".into(),
+            ));
+        }
+        if project.argv.is_empty() || !project.argv.iter().any(|argument| argument == "{ty}") {
+            return Err(Failure(
+                "ValueError",
+                "prepared project argv must contain a {ty} placeholder".into(),
+            ));
+        }
+    }
+    let mut environment = std::env::vars_os()
+        .map(|(key, value)| {
+            Ok((
+                key.into_string().map_err(|_| {
+                    Failure("UnicodeDecodeError", "environment key is not UTF-8".into())
+                })?,
+                value.into_string().map_err(|_| {
+                    Failure(
+                        "UnicodeDecodeError",
+                        "environment value is not UTF-8".into(),
+                    )
+                })?,
+            ))
+        })
+        .collect::<Result<HashMap<_, _>, Failure>>()?;
+    environment.insert("TY_MEMORY_REPORT".into(), "json".into());
+    environment.insert("TY_MAX_PARALLELISM".into(), "1".into());
+    let mut inputs = Vec::with_capacity(manifest.projects.len());
+    for project in manifest.projects {
+        let old = collect_report(&project, old_ty, &environment)?;
+        let new = collect_report(&project, new_ty, &environment)?;
+        inputs.push((project.name, old, new));
+    }
+    inputs.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(inputs)
+}
+
 fn run() -> Result<(), Failure> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     if arguments
@@ -689,29 +836,43 @@ fn run() -> Result<(), Failure> {
             .map_err(|_| Failure("ValueError", "rounds must be nonnegative".into()))?;
         return compute(rounds, &arguments[2], &arguments[3]);
     }
+    let run_mode = arguments.first().is_some_and(|argument| argument == "run");
     let mut index = usize::from(
         arguments
             .first()
-            .is_some_and(|argument| argument == "compare"),
+            .is_some_and(|argument| argument == "compare" || run_mode),
     );
     let (mut old_path, mut new_path, mut old_directory, mut new_directory, mut output_path) =
         ("", "", "", "", None);
+    let (mut projects_path, mut old_ty, mut new_ty) = ("", "", "");
     while index < arguments.len() {
         let flag = &arguments[index];
         let value = arguments
             .get(index + 1)
             .ok_or_else(|| Failure("ValueError", format!("expected a value after {flag}")))?;
         match flag.as_str() {
-            "--old" => old_path = value,
-            "--new" => new_path = value,
-            "--old-dir" => old_directory = value,
-            "--new-dir" => new_directory = value,
+            "--projects" if run_mode => projects_path = value,
+            "--old-ty" if run_mode => old_ty = value,
+            "--new-ty" if run_mode => new_ty = value,
+            "--old" if !run_mode => old_path = value,
+            "--new" if !run_mode => new_path = value,
+            "--old-dir" if !run_mode => old_directory = value,
+            "--new-dir" if !run_mode => new_directory = value,
             "--output" => output_path = Some(value),
             _ => return Err(Failure("ValueError", format!("unknown argument: {flag}"))),
         }
         index += 2;
     }
-    let inputs = if !old_path.is_empty() && !new_path.is_empty() {
+    let inputs = if run_mode {
+        if projects_path.is_empty() || old_ty.is_empty() || new_ty.is_empty() {
+            return Err(Failure(
+                "ValueError",
+                "expected run --projects MANIFEST --old-ty ABS --new-ty ABS [--output REPORT.md]"
+                    .into(),
+            ));
+        }
+        prepared_inputs(projects_path, old_ty, new_ty)?
+    } else if !old_path.is_empty() && !new_path.is_empty() {
         vec![(
             project_name(&normalize_path(new_path)).to_owned(),
             Input::parse(read(old_path)?)?,

@@ -229,7 +229,8 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
                 | crate::ir::PathOperation::Iterdir
                 | crate::ir::PathOperation::Next
         ),
-        Builtin::JsonDecode(_)
+        Builtin::Process(_)
+        | Builtin::JsonDecode(_)
         | Builtin::Print
         | Builtin::Input
         | Builtin::ListGet

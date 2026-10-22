@@ -207,6 +207,19 @@ distributed over 256 small projects or four larger projects. All 1,344 measured
 executions, validation results, and source bindings are independently audited
 and retained in portable evidence.
 
+`memory_process_benchmark.py` extends this workflow to native process orchestration.
+It runs both pinned ty versions over retained inventory/Ruff source snapshots,
+then compares 64 small captures with two large captures through an identical native
+child producer. Every layout has 16,256 records per side. The timed Python baseline
+is explicitly a prepared-project adapter using upstream's unchanged models and
+renderer; the typed CPython port is also validated. Complete child execution and
+UTF-8 stdout/stderr capture are included, with a two-child empty-report control.
+Separate repeated compute workloads and zero-repetition preload controls expose
+report-processing performance without ty or process-launch costs. See the
+[reference guide](reference/memory_report/README.md) for preparation, measurement,
+source pinning, and ordinary/ThinLTO commands. No host environment values are
+copied into the process benchmark record.
+
 ## Callback record pipeline
 
 The [payout example](../examples/record_pipeline/README.md) selects records with

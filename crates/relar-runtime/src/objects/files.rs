@@ -71,29 +71,7 @@ impl FileState {
     }
 
     fn read(&mut self) -> Result<Str> {
-        let bytes = self.read_bytes()?;
-        let text = String::from_utf8(bytes).map_err(|error| {
-            Error::new(
-                Kind::UnicodeDecodeError,
-                format!("invalid UTF-8 at byte {}", error.utf8_error().valid_up_to()),
-            )
-        })?;
-        if !text.contains('\r') {
-            return Ok(Str::from(text));
-        }
-        let mut normalized = Str::with_capacity(text.len());
-        let mut chars = text.chars().peekable();
-        while let Some(value) = chars.next() {
-            if value == '\r' {
-                if chars.peek() == Some(&'\n') {
-                    chars.next();
-                }
-                normalized.push('\n');
-            } else {
-                normalized.push(value);
-            }
-        }
-        Ok(normalized)
+        decode_utf8_text(self.read_bytes()?)
     }
 
     fn read_bytes(&mut self) -> Result<Bytes> {
@@ -149,6 +127,33 @@ impl FileState {
             Stream::Write(writer) => writer.flush().map_err(os_error),
         }
     }
+}
+
+/// Decodes a complete text stream strictly before normalizing CRLF and lone CR.
+/// File reads and captured subprocess streams share these text-mode semantics.
+pub(super) fn decode_utf8_text(bytes: Vec<u8>) -> Result<Str> {
+    let text = String::from_utf8(bytes).map_err(|error| {
+        Error::new(
+            Kind::UnicodeDecodeError,
+            format!("invalid UTF-8 at byte {}", error.utf8_error().valid_up_to()),
+        )
+    })?;
+    if !text.contains('\r') {
+        return Ok(Str::from(text));
+    }
+    let mut normalized = Str::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(value) = chars.next() {
+        if value == '\r' {
+            if chars.peek() == Some(&'\n') {
+                chars.next();
+            }
+            normalized.push('\n');
+        } else {
+            normalized.push(value);
+        }
+    }
+    Ok(normalized)
 }
 
 impl Storage {

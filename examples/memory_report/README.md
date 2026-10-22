@@ -2,7 +2,8 @@
 
 This is a typed port of Ruff's real
 [`scripts/memory_report.py`](https://github.com/astral-sh/ruff/blob/3e4fffb05a2b143fafbf31d891c79c878fe3bcd3/scripts/memory_report.py)
-file and directory comparison modes. It reads `TY_MEMORY_REPORT=json` captures and
+file and directory comparison modes, plus a prepared-project collection mode.
+It reads `TY_MEMORY_REPORT=json` captures and
 produces the same Markdown summary and largest-change tables. The retained
 upstream source and license are in [upstream/](upstream/).
 
@@ -40,6 +41,33 @@ other extensions are ignored. A matching directory is an input error. Empty,
 missing, or disjoint report directories produce a clear error and preserve any
 existing output.
 
+Run two existing ty executables over project trees that are already prepared:
+
+```sh
+cat >/tmp/projects.json <<'JSON'
+{"projects":[{"name":"inventory","cwd":".","argv":["{ty}","check","--python-version","3.14","--extra-search-path","examples","examples/inventory_reconciliation"]}]}
+JSON
+/tmp/memory-report run --projects /tmp/projects.json \
+  --old-ty /absolute/path/to/old/ty --new-ty /absolute/path/to/new/ty \
+  --output /tmp/memory-report.md
+```
+
+Each manifest entry has a unique nonempty `name`, a nonempty `cwd`, and a string
+`argv` list containing `{ty}`. Relative working directories are relative to the
+report program's working directory. Every exact `{ty}` argument is replaced with
+the selected absolute executable path. Arguments are passed directly without a
+shell. The complete manifest is validated before any child starts. Projects run
+in manifest order, old then new; the report uses deterministic project-name order.
+Children inherit a copy of the environment with `TY_MEMORY_REPORT=json` and
+`TY_MAX_PARALLELISM=1`. Both output streams are captured as strict UTF-8 text, and
+nonzero child status raises `CalledProcessError`. Only stdout is decoded as a
+memory report; successful diagnostic stderr is captured and discarded.
+
+All child runs, decoding, comparison, and rendering must succeed before the final
+report file opens. A failed child or malformed capture preserves an existing
+report. This does not roll back side effects made by the child programs. Project
+checkout, dependency installation, and ty installation remain preparation steps.
+
 Run the same typed source on CPython with the compatibility library:
 
 ```sh
@@ -71,9 +99,9 @@ before sorting, so equal-change order and selection can vary with the Python
 hash seed. This port uses stable first appearance: old items first, then new-only
 items. The independent validator permits only that upstream tie ambiguity.
 
-This example implements file and directory comparison, with optional `compare`
-before the flags. Upstream's project checkout and ty execution modes remain
-outside its scope. Successful file output is quiet; the upstream script
+File and directory comparison accept optional `compare` before the flags.
+The prepared-project `run` command reuses the same comparison and renderer.
+Successful file output is quiet; the upstream script
 also echoes the completed report to stderr. Parsing and formatting finish before
 the output file opens, preserving an existing report on those failures.
 CLI validation errors use `ValueError`; upstream prints its own diagnostics.
@@ -88,8 +116,9 @@ python3 benchmarks/memory_validate.py --binary /tmp/memory-report \
 ```
 
 The [benchmark guide](../../benchmarks/reference/memory_report/README.md) compares
-the unchanged upstream script, typed CPython port, Relar, and independent Rust on
-real captures and clearly labeled larger copies.
+the unchanged upstream comparison CLI, a prepared-project adapter using its
+unchanged models and renderer, typed CPython, Relar, and independent Rust on
+real captures, actual ty child runs, and clearly labeled larger copies.
 
 The [native-path results](../../benchmarks/results/2026-10-21-native-paths.md)
 take 0.91–1.28× Rust's time for complete directory comparisons and

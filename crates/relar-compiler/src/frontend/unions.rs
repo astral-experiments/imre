@@ -54,6 +54,12 @@ impl Checker<'_> {
         ) {
             return Ok(vec![InstanceType::Exact(Type::Path)]);
         }
+        if matches!(
+            self.resolve(expression),
+            Some(Binding::Intrinsic(Intrinsic::CompletedProcess))
+        ) {
+            return Ok(vec![InstanceType::Exact(Type::CompletedProcess)]);
+        }
         if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(&class) = self.classes.declarations.ids.get(&definition)
         {
