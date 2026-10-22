@@ -547,15 +547,17 @@ impl Emitter<'_, '_> {
     /// A field load or literal match selector has no intervening operand
     /// evaluation. Its local owner stays alive until the operation finishes.
     fn immediate_receiver(&mut self, expression: &Expr) -> Operand {
-        if matches!(&expression.kind, ExprKind::Local(_))
-            || matches!(&expression.kind, ExprKind::Unwrap(inner) if matches!(inner.kind, ExprKind::Local(_)))
-        {
-            Operand {
-                value: self.borrow_projection(expression),
-                ownership: Ownership::Borrowed,
+        let value = match &expression.kind {
+            ExprKind::Local(slot) => self.borrow_slot(*slot),
+            ExprKind::Unwrap(inner) if let ExprKind::Local(slot) = inner.kind => {
+                let word = self.borrow_slot(slot).operand;
+                self.decode_word(word, expression.ty)
             }
-        } else {
-            self.operand(expression)
+            _ => return self.operand(expression),
+        };
+        Operand {
+            value,
+            ownership: Ownership::Borrowed,
         }
     }
 
