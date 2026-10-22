@@ -115,6 +115,7 @@ fn drain<R: Read>(stream: &mut Option<R>, output: &mut Vec<u8>) -> Result<()> {
     Ok(())
 }
 
+/// Pipe EOF and child exit can arrive in either order; neither extends the deadline.
 fn capture(
     child: &mut Child,
     timeout: Duration,
@@ -129,11 +130,13 @@ fn capture(
     let mut status = None;
     let started = Instant::now();
     loop {
+        drain(&mut out, &mut stdout)?;
+        drain(&mut err, &mut stderr)?;
+        // Draining can observe the child's final writes and EOF. Check status
+        // afterward so a completed child does not incur another polling delay.
         if status.is_none() {
             status = child.try_wait().map_err(Error::io)?;
         }
-        drain(&mut out, &mut stdout)?;
-        drain(&mut err, &mut stderr)?;
         if out.is_none() && err.is_none() {
             if let Some(status) = status {
                 return Ok((status, stdout, stderr));
@@ -163,7 +166,9 @@ fn capture(
             });
         }
         let remaining = timeout.saturating_sub(started.elapsed());
-        let milliseconds = remaining.as_millis().clamp(1, 20) as i32;
+        // Closed streams cannot wake poll; keep the child-exit race inexpensive.
+        let maximum_wait = if descriptors.is_empty() { 1 } else { 20 };
+        let milliseconds = remaining.as_millis().clamp(1, maximum_wait) as i32;
         let polled = unsafe {
             libc::poll(
                 descriptors.as_mut_ptr(),
@@ -401,6 +406,14 @@ mod tests {
         assert_eq!(completed.stdout.len(), 131072);
         assert_eq!(completed.stderr.len(), 131072);
         assert_eq!(completed.returncode, 0);
+    }
+
+    #[test]
+    fn waits_for_child_after_both_streams_close() {
+        let completed = run(request("exec 1>&- 2>&-; sleep 0.02")).unwrap();
+        assert_eq!(completed.returncode, 0);
+        assert!(completed.stdout.is_empty());
+        assert!(completed.stderr.is_empty());
     }
 
     #[test]
