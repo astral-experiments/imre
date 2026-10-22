@@ -6,6 +6,8 @@ use std::rc::Rc;
 
 use super::{fail, words::WordKind};
 
+pub(super) mod strings;
+
 /// Compiler-emitted immutable metadata; every field occupies one eight-byte word.
 /// The descriptor and its kind array must outlive every allocation using them.
 #[repr(C)]
@@ -249,24 +251,38 @@ pub unsafe extern "C" fn relar_record_release(payload: *const usize) {
     }
     // SAFETY: metadata remains immutable and live even while payloads are released.
     let descriptor = header.descriptor();
-    for index in 0..descriptor.length {
-        // SAFETY: each nonzero owning word transfers the field's final reference.
-        unsafe {
-            let kind = WordKind::new(descriptor.kinds.add(index).read());
-            kind.release(kind.read_record_field(payload.add(index)));
-        }
-    }
     if let Some(block) = header.block() {
         // SAFETY: no live owner can reach this record now. Other records in
         // the block, and an active cursor, keep their own storage alive.
-        unsafe { Rc::decrement_strong_count(block) };
+        unsafe {
+            release_fields::<true>(payload, descriptor);
+            Rc::decrement_strong_count(block);
+        }
     } else {
         // SAFETY: the standalone constructor already checked this exact layout,
         // and the immutable descriptor cannot change during the record's lifetime.
         unsafe {
+            release_fields::<false>(payload, descriptor);
             let size = size_of::<Header>() + descriptor.length * size_of::<usize>();
             let layout = Layout::from_size_align_unchecked(size, align_of::<Header>());
             dealloc(payload.cast::<Header>().sub(1).cast_mut().cast(), layout);
+        }
+    }
+}
+
+/// # Safety
+/// The caller transfers the final record's fields with their original descriptor.
+unsafe fn release_fields<const PACKED: bool>(payload: *const usize, descriptor: &RecordDescriptor) {
+    for index in 0..descriptor.length {
+        // SAFETY: each nonzero owning word transfers the field's final reference.
+        unsafe {
+            let kind = WordKind::new(descriptor.kinds.add(index).read());
+            let word = kind.read_record_field(payload.add(index));
+            if PACKED && kind.raw() & !super::words::NULLABLE == 3 && word != 0 {
+                strings::release(Rc::from_raw(word as *const crate::Str));
+            } else {
+                kind.release(word);
+            }
         }
     }
 }

@@ -254,6 +254,8 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
                 *slot = Some(Rc::clone(&owner));
                 owner
             }
+        } else if value.len() > 32 && self.1.records.is_some() {
+            super::records::strings::copy(value)
         } else {
             Rc::new(Str::new(value))
         };
