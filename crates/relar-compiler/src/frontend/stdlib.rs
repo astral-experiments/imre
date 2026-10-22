@@ -385,6 +385,7 @@ impl Checker<'_> {
                 | Type::Bytes
                 | Type::None
                 | Type::Exception
+                | Type::TimeoutExpired
         ) {
             return Err(error(
                 self.source,

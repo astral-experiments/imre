@@ -59,6 +59,7 @@ pub(crate) enum IntrinsicModule {
     Io,
     Relar,
     RelarJson,
+    RelarToml,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -71,6 +72,7 @@ pub(crate) enum Intrinsic {
     UnsupportedOperation,
     JsonDecode,
     JsonEncode,
+    TomlDecode,
     Dataclass,
     DataclassField,
     SelfType,
@@ -80,6 +82,7 @@ pub(crate) enum Intrinsic {
     CompletedProcess,
     SubprocessError,
     CalledProcessError,
+    TimeoutExpired,
     Environ,
     Unquote,
 }
@@ -101,6 +104,7 @@ impl IntrinsicModule {
             "io" => Some(Self::Io),
             "relar" => Some(Self::Relar),
             "relar.json" => Some(Self::RelarJson),
+            "relar.toml" => Some(Self::RelarToml),
             _ => None,
         }
     }
@@ -115,6 +119,9 @@ impl IntrinsicModule {
         if self == Self::Relar && name == "json" {
             return Some(Binding::IntrinsicModule(Self::RelarJson));
         }
+        if self == Self::Relar && name == "toml" {
+            return Some(Binding::IntrinsicModule(Self::RelarToml));
+        }
         let symbol = match (self, name) {
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
@@ -125,6 +132,7 @@ impl IntrinsicModule {
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::RelarJson, "decode") => Intrinsic::JsonDecode,
             (Self::RelarJson, "encode") => Intrinsic::JsonEncode,
+            (Self::RelarToml, "decode") => Intrinsic::TomlDecode,
             (Self::Dataclasses, "dataclass") => Intrinsic::Dataclass,
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
             (Self::Pathlib, "Path") => Intrinsic::Path,
@@ -133,6 +141,7 @@ impl IntrinsicModule {
             (Self::Subprocess, "CompletedProcess") => Intrinsic::CompletedProcess,
             (Self::Subprocess, "SubprocessError") => Intrinsic::SubprocessError,
             (Self::Subprocess, "CalledProcessError") => Intrinsic::CalledProcessError,
+            (Self::Subprocess, "TimeoutExpired") => Intrinsic::TimeoutExpired,
             (Self::Os, "environ") => Intrinsic::Environ,
             (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
             _ => return None,

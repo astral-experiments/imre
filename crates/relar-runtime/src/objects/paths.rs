@@ -1,6 +1,7 @@
 //! Sealed POSIX paths with lexical normalization and snapshot directory iterators.
 //! Path objects are immutable; directory state owns names, never open descriptors.
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
 use std::io;
@@ -83,6 +84,111 @@ fn parent(path: &str) -> &str {
         Some(index) => &path[..index],
         None => ".",
     }
+}
+
+enum ResolvePart {
+    Component(Str),
+    ResolvedLink(Str),
+}
+
+/// Resolve links component by component, retaining missing suffixes when not
+/// strict. An explicit stack and link cache handle long acyclic link chains
+/// without recursion or the kernel's per-lookup symlink traversal limit.
+fn resolve(path: &str, strict: bool) -> Result<Str> {
+    let mut resolved = if path.starts_with('/') {
+        Str::from("/")
+    } else {
+        let directory = std::env::current_dir().map_err(files::os_error)?;
+        path_utf8(directory.into_os_string())?
+    };
+    let mut remaining = path.split('/').count();
+    let mut parts: Vec<_> = path
+        .split('/')
+        .rev()
+        .map(|part| ResolvePart::Component(Str::from(part)))
+        .collect();
+    let mut links: HashMap<Str, Option<Str>> = HashMap::new();
+    while let Some(part) = parts.pop() {
+        let part = match part {
+            ResolvePart::Component(part) => part,
+            ResolvePart::ResolvedLink(link) => {
+                links.insert(link, Some(resolved.clone()));
+                continue;
+            }
+        };
+        remaining -= 1;
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            resolved = Str::from(parent(&resolved));
+            continue;
+        }
+        let mut next = resolved.clone();
+        if next != "/" {
+            next.push('/');
+        }
+        next.push_str(&part);
+        // Validate at the actual lookup, so an earlier strict filesystem error
+        // still precedes a later component containing a NUL.
+        check_nul(&next)?;
+        let metadata = match fs::symlink_metadata(next.as_str()) {
+            Ok(metadata) => metadata,
+            Err(error) if strict => return Err(files::os_error(error)),
+            Err(_) => {
+                resolved = next;
+                continue;
+            }
+        };
+        if !metadata.file_type().is_symlink() {
+            if strict && remaining != 0 && !metadata.is_dir() {
+                return Err(files::os_error(io::Error::from_raw_os_error(libc::ENOTDIR)));
+            }
+            resolved = next;
+            continue;
+        }
+        match links.get(&next) {
+            Some(Some(target)) => {
+                resolved = target.clone();
+                continue;
+            }
+            Some(None) => {
+                if strict {
+                    return Err(files::os_error(io::Error::from_raw_os_error(libc::ELOOP)));
+                }
+                resolved = next;
+                continue;
+            }
+            None => {}
+        }
+        let target = match fs::read_link(next.as_str()) {
+            Ok(target) => path_utf8(target.into_os_string())?,
+            Err(error) if strict => return Err(files::os_error(error)),
+            Err(_) => {
+                resolved = next;
+                continue;
+            }
+        };
+        if target.starts_with('/') {
+            resolved = Str::from("/");
+        }
+        links.insert(next.clone(), None);
+        parts.push(ResolvePart::ResolvedLink(next));
+        remaining += target.split('/').count();
+        parts.extend(
+            target
+                .split('/')
+                .rev()
+                .map(|part| ResolvePart::Component(Str::from(part))),
+        );
+    }
+    Ok(resolved)
+}
+
+fn path_utf8(path: OsString) -> Result<Str> {
+    path.into_string()
+        .map(Str::from)
+        .map_err(|_| Error::new(Kind::UnicodeDecodeError, "resolved path is not valid UTF-8"))
 }
 
 fn suffix_start(name: &str) -> Option<usize> {
@@ -191,6 +297,32 @@ pub unsafe extern "C" fn relar_path_parent(path: *const Object) -> *const Object
             .with(|storage| Str::from(parent(storage.path())))
     };
     new_path(parent)
+}
+
+/// # Safety
+/// Root an exact Path; this lexical predicate cannot fail or invoke callbacks.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_is_absolute(path: *const Object) -> u8 {
+    // SAFETY: the immutable rooted path is borrowed only for the predicate.
+    unsafe {
+        object(path)
+            .0
+            .with(|storage| u8::from(storage.path().starts_with('/')))
+    }
+}
+
+/// # Safety
+/// Root an exact Path with clear pending error state. Success transfers a new
+/// absolute Path owner; strict lookup failures preserve their OS error category.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_resolve(path: *const Object, strict: u8) -> *const Object {
+    // SAFETY: filesystem calls cannot reenter; no borrowed storage escapes.
+    let result = unsafe {
+        object(path)
+            .0
+            .with(|storage| resolve(storage.path(), strict != 0))
+    };
+    finish(result.map(new_path), std::ptr::null())
 }
 
 /// # Safety

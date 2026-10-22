@@ -135,6 +135,34 @@ Integer fields accept integer tokens of arbitrary precision, excluding booleans,
 
 The checked CPython implementation lives in `stdlib/relar/json.py`. Add `stdlib` to Python's import path when running the same source, for example `PYTHONPATH=stdlib python3 program.py` from this repository. The native compiler recognizes the sealed import without executing that module. It rejects a first-party file that shadows the intrinsic namespace.
 
+## Typed TOML boundary
+
+`from relar.toml import decode` provides `decode(text, Schema)` for complete TOML 1.1 documents. The schema is a statically resolved record class or `dict[str, T]`; TOML's document root is always a table. Import aliases, module imports, and first-party re-exports work as they do for typed JSON. The result uses ordinary concrete records and containers, with no exposed dynamic TOML value type.
+
+```python
+from dataclasses import dataclass
+from relar.toml import decode
+
+@dataclass(slots=True)
+class Group:
+    name: str
+    href: str
+
+groups = decode('[concepts]\nname = "Concepts"\nhref = "/concepts"',
+                dict[str, Group])
+print(groups["concepts"].name)
+```
+
+Nested schemas support exact `int`, `float`, `bool`, and `str` values, lists, string-keyed dictionaries, fixed records, and their supported optional forms. Records share typed JSON's structural-constructor checks, dataclass support, and native field layouts. Arrays of tables decode as lists of records or dictionaries. Dictionaries retain source insertion order. Bytes, tuples, sets, arbitrary unions, resource handles, and datetime annotations are unsupported.
+
+TOML scalar categories remain distinct: booleans cannot satisfy integer fields, and integer tokens cannot satisfy float fields. Decimal, hexadecimal, octal, and binary integers retain arbitrary precision through Relar's canonical integer representation. Floating-point tokens produce binary64 values, including signed zero, `inf`, and `nan`; overflow follows CPython's conversion to infinity. CPython's maintained parser retains its configured decimal integer conversion limit (4300 digits by default); native decoding has no corresponding digit limit. Applications that need larger decimal inputs under CPython can configure its standard integer conversion guard before decoding.
+
+A missing field requires a constructor default, even when its annotation is optional. Scalar defaults and fresh list defaults follow the typed JSON rules. An optional list with a list factory receives a fresh `[]` when absent; an optional field defaulting to `None` receives `None`. TOML has no null token. Present values must match the optional payload's exact type. Decoding applies the compiler-proved field writes without executing arbitrary constructor code.
+
+The complete document is parsed before schema conversion. Unknown record fields are ignored after validation, and duplicate keys or tables are rejected even in ignored data. Valid date, local time, local datetime, and offset datetime values can appear in ignored fields; they cannot be exposed as strings, records, or dictionaries through a schema. Calendar validation follows CPython's representable range, excluding year zero and leap-second values. Invalid syntax, schema mismatches, missing required fields, and more than 64 nested table/array containers raise `ValueError`; the depth count includes the document table and ignored data. Error wording is not a parser-library compatibility promise.
+
+The CPython module is `stdlib/relar/toml.py`. Add `stdlib` to the import path as for typed JSON. Python 3.15+ uses its TOML 1.1 `tomllib`; earlier versions require `tomli>=2.4`, for example `python -m pip install 'tomli>=2.4'`. Native compilation uses the pinned Rust TOML parser and links no Python interpreter or compatibility module. This boundary currently provides decoding only.
+
 ## Native text operations
 
 `str.split(sep=None, maxsplit=-1)` and `str.rsplit(sep=None, maxsplit=-1)` accept both positional and named arguments. With no separator, they group Python whitespace and omit empty fields; an explicit string separator preserves empty fields and must be nonempty. The split limit follows Python's left or right scanning rules. `str.strip([chars])`, `str.lstrip([chars])`, and `str.rstrip([chars])` accept an optional positional string or `None`: omitted/`None` removes Python whitespace, while a string names a set of Unicode scalar values to remove.
@@ -274,7 +302,7 @@ Imported modules, including package `__init__.py` files, run their typed top-lev
 
 An optional `if __name__ == "__main__":` guard without an `else` is supported. Every loaded module is type-checked and lowered for validation, including unused functions and inactive guards. The fixed `__name__` string is `"__main__"` in the entry and the qualified module name in imported code.
 
-Imports are resolved statically from `.py` files and packages with `__init__.py`. Wildcards, dynamic or function-local imports, namespace packages, import cycles, dependencies outside the module root, and general standard-library imports or shadowing are rejected. The compiler recognizes sealed bindings for `typing.TextIO`, `typing.BinaryIO`, `typing.Union`, `typing.Callable`, `typing.Self`, `collections.abc.Callable`, `dataclasses.dataclass`, `dataclasses.field`, `pathlib.Path`, `tempfile.TemporaryDirectory`, `subprocess.run`, `subprocess.CompletedProcess`, `subprocess.SubprocessError`, `subprocess.CalledProcessError`, `os.environ` for `copy()`, `sys.argv`, `io.UnsupportedOperation`, `urllib.parse.unquote`, and `relar.json.decode`/`encode`; these do not execute standard-library Python code. Their import aliases and first-party re-exports preserve identity. A package can re-export definitions from its children; reading an unfinished parent's definitions through a circular import is rejected. Symlinks cannot escape the module root or give one source file multiple module identities. The source-string library APIs accept sealed bindings but remain isolated from filesystem imports, which use the path-based APIs.
+Imports are resolved statically from `.py` files and packages with `__init__.py`. Wildcards, dynamic or function-local imports, namespace packages, import cycles, dependencies outside the module root, and general standard-library imports or shadowing are rejected. The compiler recognizes sealed bindings for `typing.TextIO`, `typing.BinaryIO`, `typing.Union`, `typing.Callable`, `typing.Self`, `collections.abc.Callable`, `dataclasses.dataclass`, `dataclasses.field`, `pathlib.Path`, `tempfile.TemporaryDirectory`, `subprocess.run`, `subprocess.CompletedProcess`, `subprocess.SubprocessError`, `subprocess.CalledProcessError`, `subprocess.TimeoutExpired`, `os.environ` for `copy()`, `sys.argv`, `io.UnsupportedOperation`, `urllib.parse.unquote`, `relar.json.decode`/`encode`, and `relar.toml.decode`; these do not execute standard-library Python code. Their import aliases and first-party re-exports preserve identity. A package can re-export definitions from its children; reading an unfinished parent's definitions through a circular import is rejected. Symlinks cannot escape the module root or give one source file multiple module identities. The source-string library APIs accept sealed bindings but remain isolated from filesystem imports, which use the path-based APIs.
 
 The I/O surface is intentionally small. `input()` reads a UTF-8 line and removes its trailing LF. A preceding CR remains part of the value, matching CPython's piped input on the Linux target. `int(str)` accepts signed decimal digits, optional underscores between digits, and surrounding Python numeric whitespace. Decimal classification is pinned to Unicode 16, matching CPython 3.14; mixed decimal digit families are accepted, while superscripts and other numeric lookalikes are rejected. Other bases remain unsupported. Surrogate escapes in non-raw string literals are rejected: Ruff's analysis AST substitutes replacement characters for them, which is unsuitable for executable semantics. Strings support `+` and local `+=`; `text.split()` groups Python whitespace and omits empty fields, returning `list[str]`. `text.splitlines()` recognizes LF, CR, CRLF, vertical tab, form feed, U+001C through U+001E, U+0085, U+2028, and U+2029. It returns no elements for empty input and no extra element for a final line break; U+001F remains ordinary text. Additional string operations and their accepted signatures are listed under [native text operations](#native-text-operations). Retained line endings, general formatting protocols, and arbitrary codecs remain unsupported. CPython's configurable integer conversion digit limit is not reproduced.
 
@@ -342,6 +370,8 @@ for path in sorted(root.glob("*.json"), key=lambda path: path.name):
 
 `mkdir(mode=0o777, parents=False, exist_ok=False)` creates a directory. The mode is an exact integer within the signed C-int range; larger values raise `OverflowError`. Boolean options require exact booleans. The process umask applies, and missing parents use mode `0o777` independently of the leaf mode. `exist_ok=True` accepts an existing directory, including a symlink to one, without changing its permissions. `unlink(missing_ok=False)` removes a file or symlink; its flag suppresses only `FileNotFoundError`. `rmdir()` removes an empty directory. These methods return `None` and preserve their normal filesystem error categories.
 
+`is_absolute()` checks the lexical anchor without accessing the filesystem. `resolve(strict=False)` returns a new absolute path, resolves symbolic links, and removes `..` components in filesystem order. Its `strict` argument is an exact boolean and may be positional or named. With `strict=True`, missing components, non-directory traversal, permission failures, and symlink loops retain their operating-system exception categories. The default resolves as far as possible, appending unresolved components while still normalizing parents. Acyclic symlink chains are not limited by the kernel's per-system-call symlink count. Argument evaluation precedes filesystem access. Resolution requires UTF-8 paths and symlink targets; `absolute`, `relative_to`, user expansion, and general path protocols remain unsupported.
+
 `replace(target)` accepts a string or native path, performs POSIX replacement, and returns the destination `Path`. Relative targets refer to the process working directory. The original path value remains unchanged. A string target reaches the filesystem before its returned path is normalized, so a trailing slash retains its operating-system meaning. Existing files or empty directories can be replaced, subject to normal type and filesystem restrictions; cross-filesystem replacement fails. The rename is atomic on one filesystem, but does not promise durable storage. All mutation arguments evaluate in source order before the operation; positional and keyword calls follow the corresponding Python signatures.
 
 `iterdir()` and `glob(pattern)` are supported at immediate iteration boundaries, including loops, comprehensions, generator pipelines, `list`, `sorted`, `map`, `filter`, `enumerate`, `zip`, `any`, and `all`. They yield exact `Path` values and never include `.` or `..` directory entries. Iteration order is unspecified; sort by a scalar key when order matters. `glob` accepts one nonempty literal POSIX component containing ordinary names, `*`, `?`, or bracket character classes. Matching is case-sensitive and includes leading-dot names, directories, and broken symlinks. Separators, `**`, optional glob flags, recursive traversal, and escaping iterator values are rejected.
@@ -407,11 +437,12 @@ result = subprocess.run(
     check=True,
     cwd=Path("."),
     env=environment,
+    timeout=15.0,
 )
 print(result.stdout)
 ```
 
-The call waits for the child, captures stdout and stderr independently, and inherits stdin. It closes other inherited descriptors in the child and restores the default pipe and file-size signal dispositions. Executable lookup respects the supplied environment and child working directory. Arguments pass literally to the executable; shell expansion is never implicit. Both captured streams use strict UTF-8 and translate CRLF and bare CR to LF. Decoding happens after the child has been reaped and before a nonzero status is checked.
+The call waits for the child, captures stdout and stderr independently, and inherits stdin. It closes other inherited descriptors in the child and restores the default pipe and file-size signal dispositions. Executable lookup respects the supplied environment and child working directory. Arguments pass literally to the executable; shell expansion is never implicit. Both completed captures use strict UTF-8 and translate CRLF and bare CR to LF. Decoding happens after the child has been reaped and before a nonzero status is checked.
 
 The result has the exact type `subprocess.CompletedProcess[str]`; bare `CompletedProcess` denotes the same sealed type. Its read-only fields are `args: list[str]`, `returncode: int`, `stdout: str`, and `stderr: str`. Empty captures are empty strings, and signal termination produces a negative return code. Results can be stored in classes, containers, and optionals. Equality compares identity; `str`, `repr`, formatted output, and `isinstance` support the sealed result. `args` retains the original argument list, so later list mutation remains visible through that field. Calling `check_returncode()` immediately checks the stored status; escaping that bound method is unsupported.
 
@@ -419,7 +450,11 @@ The result has the exact type `subprocess.CompletedProcess[str]`; bare `Complete
 
 `os.environ.copy()` returns an independent `dict[str, str]` snapshot. Passing a dictionary as `env` replaces the child's environment; use a snapshot to preserve inherited variables before making overrides. `env=None` inherits the existing environment. Snapshotting undecodable Unix names or values raises `UnicodeDecodeError`; surrogateescaped strings remain outside Relar's string domain. NUL-containing arguments, directories, or environment entries, and environment keys containing `=`, raise `ValueError`.
 
-Other subprocess modes are rejected, including `shell`, `Popen`, timeouts, input data, stream redirection, descriptor options, arbitrary encodings, and custom path or mapping protocols. Result construction, field replacement, exception construction, inheritance, and general access or mutation through `os.environ` are unsupported. This API adds process execution without embedding a Python interpreter or exposing an asynchronous process handle.
+The optional `timeout` keyword accepts exact `float | None` seconds; use `15.0`, not `15`. `None` waits without a deadline. A deadline expiry kills and reaps the direct child, closes the capture pipes, and raises catch-only `subprocess.TimeoutExpired`, which matches `SubprocessError` and `Exception`. Its read-only fields are `cmd: list[str]`, `timeout: float`, and `stdout`, `output`, and `stderr: bytes | None`. Partial captures remain bytes even in text mode, so incomplete UTF-8 is preserved. During pipe capture, an observed empty stream is `b""`; a stream not observed before the deadline is `None`. If both pipes close and waiting for the child itself expires, all capture fields are `None`, even after earlier reads, matching CPython. The runtime does not wait indefinitely for descendants holding inherited pipes. This API terminates the direct child and does not manage a process group.
+
+An `except subprocess.TimeoutExpired as error` binding has these exact field types. Stored generic exception values can be narrowed with `isinstance(error, subprocess.TimeoutExpired)` before accessing timeout fields. `cmd` retains the original list and `stdout` aliases `output`. Launch precedes timeout validation, so a missing executable takes precedence over an invalid timeout. Zero and negative timeouts, including negative infinity, launch the child and expire immediately; NaN raises `ValueError`, while positive infinity or an unrepresentable polling duration raises `OverflowError`. Exceptions can be retained and re-raised through the existing sealed exception storage; constructing or annotating a `TimeoutExpired` value directly is unsupported.
+
+Other subprocess modes are rejected, including `shell`, `Popen`, input data, stream redirection, descriptor options, arbitrary encodings, and custom path or mapping protocols. Result construction, field replacement, exception construction, inheritance, and general access or mutation through `os.environ` are unsupported. This API adds process execution without embedding a Python interpreter or exposing an asynchronous process handle.
 
 ## Structural pattern matching
 
@@ -623,6 +658,8 @@ python3 tests/expressions.py --compiler target/release/relar --runtime target/re
 python3 tests/exceptions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/files.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/processes.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+python3 tests/paths.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+python3 tests/toml_records.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 python3 tests/io.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
 ```
 

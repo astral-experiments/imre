@@ -150,8 +150,8 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
-        if matches!(name, "mkdir" | "unlink" | "replace") {
-            return self.path_mutation(receiver, name, call);
+        if matches!(name, "mkdir" | "unlink" | "replace" | "resolve") {
+            return self.path_call(receiver, name, call);
         }
         if matches!(name, "iterdir" | "glob") {
             return Err(error(
@@ -164,6 +164,7 @@ impl Checker<'_> {
             "exists" => (PathOperation::Exists, Type::Bool, 0),
             "is_file" => (PathOperation::IsFile, Type::Bool, 0),
             "is_dir" => (PathOperation::IsDir, Type::Bool, 0),
+            "is_absolute" => (PathOperation::IsAbsolute, Type::Bool, 0),
             "read_text" => (PathOperation::ReadText, Type::Str, 0),
             "write_text" => (PathOperation::WriteText, Type::Int, 1),
             "rmdir" => (PathOperation::Rmdir, Type::None, 0),
@@ -190,7 +191,7 @@ impl Checker<'_> {
 
     /// Method arguments retain source evaluation order even when keywords bind
     /// a different ABI position. Every operand stays rooted through the syscall.
-    fn path_mutation(
+    fn path_call(
         &mut self,
         receiver: Expr,
         name: &str,
@@ -223,7 +224,12 @@ impl Checker<'_> {
                 Type::Path,
                 vec![parameter("target", Type::Str, None)],
             ),
-            _ => unreachable!("only mutating path methods have this signature"),
+            "resolve" => (
+                PathOperation::Resolve,
+                Type::Path,
+                vec![parameter("strict", Type::Bool, Some(boolean(false)))],
+            ),
+            _ => unreachable!("only path methods with parameters have this signature"),
         };
         let arguments =
             self.arguments_with(call, &params, Some(receiver), |checker, index, value| {

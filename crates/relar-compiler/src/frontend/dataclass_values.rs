@@ -22,9 +22,12 @@ fn has_container_float(ty: Type, inside: bool, types: &Types) -> bool {
 /// subset. Excluding a field from generated repr keeps those records usable.
 pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
     match ty {
-        Type::Exception | Type::TextIO | Type::BinaryIO | Type::Iterator | Type::Callable(_) => {
-            false
-        }
+        Type::Exception
+        | Type::TimeoutExpired
+        | Type::TextIO
+        | Type::BinaryIO
+        | Type::Iterator
+        | Type::Callable(_) => false,
         Type::Class(_) => true,
         _ => types
             .children(ty)

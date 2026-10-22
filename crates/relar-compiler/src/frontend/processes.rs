@@ -34,6 +34,7 @@ impl Checker<'_> {
         let strings = self.types.list(Type::Str);
         let directory = self.types.optional(Type::Str);
         let environment = self.types.optional(self.types.dict(Type::Str, Type::Str));
+        let timeout = self.types.optional(Type::Float);
         let params = [
             ("args", strings, None),
             ("cwd", directory, Some(absent(directory))),
@@ -42,6 +43,7 @@ impl Checker<'_> {
             ("capture_output", Type::Bool, None),
             ("encoding", Type::Str, None),
             ("text", Type::Bool, Some(boolean(true))),
+            ("timeout", timeout, Some(absent(timeout))),
         ]
         .into_iter()
         .enumerate()
@@ -71,15 +73,32 @@ impl Checker<'_> {
                     }
                     checker.expr(argument)
                 }
+                7 => {
+                    let value = checker.expr(argument)?;
+                    if !matches!(value.ty, Type::Float | Type::None) && value.ty != timeout {
+                        return Err(error(checker.source, argument, "process timeout requires float | None; write e.g. 15.0 for float seconds"));
+                    }
+                    checker.coerce(value, timeout, argument)
+                }
                 _ => checker.expr_expected(argument, params[index].ty),
             }
         })?;
         let mut body = Vec::new();
         let mut clear = Vec::new();
+        let timed = call.arguments.keywords.iter().any(|keyword| {
+            keyword
+                .arg
+                .as_ref()
+                .is_some_and(|name| name.as_str() == "timeout")
+        });
+        let mut order = supplied.order[..4].to_vec();
+        if timed {
+            order.push(supplied.order[7]);
+        }
         let mut values = vec![None; supplied.values.len()];
         for (index, value) in supplied.values.into_iter().enumerate() {
             // The validated mode literals have no effects and need no runtime storage.
-            if supplied.order[..4].contains(&index) {
+            if order.contains(&index) {
                 let slot = self.hidden(value.ty);
                 values[index] = Some(Expr {
                     ty: value.ty,
@@ -89,7 +108,7 @@ impl Checker<'_> {
                 clear.push(slot);
             }
         }
-        let args = supplied.order[..4]
+        let args = order
             .iter()
             .map(|&index| values[index].take().unwrap())
             .collect();
@@ -98,7 +117,11 @@ impl Checker<'_> {
             kind: ExprKind::Scope {
                 body,
                 value: Box::new(operation(
-                    ProcessOperation::Run,
+                    if timed {
+                        ProcessOperation::RunTimeout
+                    } else {
+                        ProcessOperation::Run
+                    },
                     Type::CompletedProcess,
                     args,
                 )),
@@ -245,6 +268,27 @@ impl Checker<'_> {
         };
         Some(operation(
             ProcessOperation::ErrorField(field),
+            ty,
+            vec![receiver.clone()],
+        ))
+    }
+
+    /// A proved timeout exposes bytes snapshots without reusing text projections.
+    pub(super) fn timeout_error_attribute(
+        &self,
+        receiver: &Expr,
+        attribute: &ast::ExprAttribute,
+    ) -> Option<Expr> {
+        let (field, ty) = match attribute.attr.as_str() {
+            "cmd" => (0, self.types.list(Type::Str)),
+            "timeout" => (1, Type::Float),
+            "stdout" => (2, self.types.optional(Type::Bytes)),
+            "stderr" => (3, self.types.optional(Type::Bytes)),
+            "output" => (4, self.types.optional(Type::Bytes)),
+            _ => return None,
+        };
+        Some(operation(
+            ProcessOperation::TimeoutField(field),
             ty,
             vec![receiver.clone()],
         ))

@@ -229,6 +229,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         Builtin::Path(operation) => matches!(
             operation,
             crate::ir::PathOperation::ReadText
+                | crate::ir::PathOperation::Resolve
                 | crate::ir::PathOperation::WriteText
                 | crate::ir::PathOperation::Mkdir
                 | crate::ir::PathOperation::Unlink
@@ -241,6 +242,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         ),
         Builtin::Process(_)
         | Builtin::JsonDecode(_)
+        | Builtin::TomlDecode(_)
         | Builtin::JsonEncode(_)
         | Builtin::Print
         | Builtin::Input

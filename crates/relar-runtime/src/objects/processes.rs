@@ -12,13 +12,14 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
-use super::exceptions::{Error, Kind, Result, finish, raise_process};
+use super::exceptions::{Error, Kind, Result, finish, raise_process, raise_timeout};
 use super::files::{decode_utf8_text, os_error};
 use super::mappings::{relar_dict_contains, relar_dict_new, relar_dict_set};
 use super::records::{RecordDescriptor, relar_record_new};
 use super::words::WordKind;
-use super::{Object, Storage, Str, acquire_rc, fail, object};
+use super::{Bytes, Object, Storage, Str, acquire_rc, fail, object};
 
 unsafe extern "C" {
     static environ: *const *const libc::c_char;
@@ -67,6 +68,47 @@ impl ProcessError {
                 self.returncode
             ))
         }
+    }
+}
+
+/// A deadline failure owns the original argv and undecoded pipe snapshots.
+/// Empty streams distinguish an observed EOF from no data observed before expiry.
+pub(super) struct TimeoutError {
+    cmd: Rc<Object>,
+    timeout: f64,
+    stdout: Option<Rc<Bytes>>,
+    stderr: Option<Rc<Bytes>>,
+}
+
+impl TimeoutError {
+    /// Fields use exact word kinds [5, 7, 264, 264, 264].
+    pub(super) fn field(&self, field: u32) -> usize {
+        match field {
+            0 => Rc::into_raw(self.cmd.clone()) as usize,
+            1 => self.timeout.to_bits() as usize,
+            2 | 4 => self
+                .stdout
+                .as_ref()
+                .map_or(0, |value| Rc::into_raw(value.clone()) as usize),
+            3 => self
+                .stderr
+                .as_ref()
+                .map_or(0, |value| Rc::into_raw(value.clone()) as usize),
+            _ => fail("SystemError", "invalid timeout exception field"),
+        }
+    }
+
+    /// Formatting observes later mutations of the same rooted argv list.
+    pub(super) fn message(&self) -> Str {
+        let mut cmd = String::new();
+        // SAFETY: this owner roots an exact acyclic list[str] during repr.
+        unsafe {
+            super::values::write_repr(&mut cmd, Rc::as_ptr(&self.cmd) as usize, WordKind::new(5));
+        }
+        Str::from(format!(
+            "Command '{cmd}' timed out after {} seconds",
+            crate::floats::render(self.timeout)
+        ))
     }
 }
 
@@ -353,6 +395,34 @@ struct ChildGuard {
 }
 
 impl ChildGuard {
+    /// Reaps without blocking, including an inherited auto-reaping SIGCHLD policy.
+    fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        match self.child.try_wait() {
+            Ok(Some(status)) => {
+                self.reaped = true;
+                Ok(Some(status))
+            }
+            Err(error) if error.raw_os_error() == Some(libc::ECHILD) => {
+                self.reaped = true;
+                Ok(Some(ExitStatus::from_raw(0)))
+            }
+            result => result,
+        }
+    }
+
+    /// Kills only a still-running direct child and always collects its status.
+    fn terminate(&mut self) -> io::Result<()> {
+        if self.try_wait()?.is_none() {
+            match self.child.kill() {
+                Ok(()) => {}
+                Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {}
+                Err(error) => return Err(error),
+            }
+            self.wait()?;
+        }
+        Ok(())
+    }
+
     fn wait(&mut self) -> io::Result<ExitStatus> {
         match self.child.wait() {
             Ok(status) => {
@@ -367,6 +437,150 @@ impl ChildGuard {
             }
             Err(error) => Err(error),
         }
+    }
+}
+
+/// Timeout capture stops at the deadline rather than waiting for descendant pipes.
+enum Captured {
+    Completed(ExitStatus, Vec<u8>, Vec<u8>),
+    TimedOut(Option<Vec<u8>>, Option<Vec<u8>>),
+}
+
+/// Matches POSIX communicate: poll fairly, snapshot before post-deadline reads,
+/// then kill/reap the direct child without an unbounded post-timeout pipe drain.
+fn capture_timeout(child: Child, timeout: f64) -> Result<Captured> {
+    let started = Instant::now();
+    let mut child = ChildGuard {
+        child,
+        reaped: false,
+    };
+    let mut stdout = child
+        .child
+        .stdout
+        .take()
+        .expect("captured stdout was configured");
+    let mut stderr = child
+        .child
+        .stderr
+        .take()
+        .expect("captured stderr was configured");
+    nonblocking(stdout.as_raw_fd()).map_err(os_error)?;
+    nonblocking(stderr.as_raw_fd()).map_err(os_error)?;
+    if timeout.is_nan() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "cannot convert float NaN to integer",
+        ));
+    }
+    if timeout == f64::INFINITY {
+        return Err(Error::new(
+            Kind::OverflowError,
+            "cannot convert float infinity to integer",
+        ));
+    }
+    // Python's poll first converts milliseconds to its signed nanosecond clock,
+    // then bounds the millisecond argument to the platform's signed C int.
+    let milliseconds = ((timeout - started.elapsed().as_secs_f64()) * 1000.0).ceil();
+    if milliseconds >= 9_223_372_036_855.0 {
+        return Err(Error::new(
+            Kind::OverflowError,
+            "timestamp too large to convert to C PyTime_t",
+        ));
+    }
+    if milliseconds > f64::from(i32::MAX) {
+        return Err(Error::new(Kind::OverflowError, "timeout is too large"));
+    }
+    let duration = if timeout > 0.0 {
+        Duration::from_secs_f64(timeout)
+    } else {
+        Duration::ZERO
+    };
+    let deadline = started + duration;
+    let mut polls = [stdout.as_raw_fd(), stderr.as_raw_fd()].map(|fd| libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    });
+    let mut outputs = [Vec::new(), Vec::new()];
+    let mut observed = [false; 2];
+    let mut remaining = 2;
+    let mut buffer = [0_u8; 32 * 1024];
+    while remaining != 0 {
+        let now = Instant::now();
+        if now >= deadline {
+            child.terminate().map_err(os_error)?;
+            let [stdout, stderr] = outputs;
+            return Ok(Captured::TimedOut(
+                observed[0].then_some(stdout),
+                observed[1].then_some(stderr),
+            ));
+        }
+        let milliseconds = ((deadline - now).as_secs_f64() * 1000.0).ceil() as i32;
+        // SAFETY: poll receives two writable descriptors owned by this frame.
+        if unsafe {
+            libc::poll(
+                polls.as_mut_ptr(),
+                polls.len() as libc::nfds_t,
+                milliseconds,
+            )
+        } < 0
+        {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(os_error(error));
+        }
+        // CPython checks expiry before consuming events returned by poll.
+        if Instant::now() >= deadline {
+            continue;
+        }
+        for index in 0..2 {
+            if polls[index].revents & libc::POLLNVAL != 0 {
+                return Err(os_error(io::Error::from_raw_os_error(libc::EBADF)));
+            }
+            if polls[index].revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) == 0 {
+                continue;
+            }
+            let result = if index == 0 {
+                stdout.read(&mut buffer)
+            } else {
+                stderr.read(&mut buffer)
+            };
+            match result {
+                Ok(count) => {
+                    observed[index] = true;
+                    if count == 0 {
+                        polls[index].fd = -1;
+                        remaining -= 1;
+                    } else {
+                        outputs[index].extend_from_slice(&buffer[..count]);
+                    }
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                    ) => {}
+                Err(error) => return Err(os_error(error)),
+            }
+        }
+    }
+    // Both streams can close while the child keeps running. CPython's wait
+    // timeout has no output payload, even when communicate previously read data.
+    let mut delay = Duration::from_micros(500);
+    loop {
+        if let Some(status) = child.try_wait().map_err(os_error)? {
+            let [stdout, stderr] = outputs;
+            return Ok(Captured::Completed(status, stdout, stderr));
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            child.terminate().map_err(os_error)?;
+            return Ok(Captured::TimedOut(None, None));
+        }
+        std::thread::sleep(delay.min(deadline - now));
+        delay = (delay * 2).min(Duration::from_millis(50));
     }
 }
 
@@ -544,6 +758,38 @@ pub unsafe extern "C" fn relar_subprocess_run(
     check: u8,
     descriptor: *const RecordDescriptor,
 ) -> *mut usize {
+    // SAFETY: this public entrypoint forwards its exact rooted input contract.
+    unsafe { run_process(args, cwd, env, check, None, descriptor) }
+}
+
+/// Runs the same sealed text process with an optional exact float deadline.
+/// Timeout errors retain undecoded bytes; `None` uses the original capture path.
+///
+/// # Safety
+/// The ordinary run preconditions apply. `timeout` is null or points to a rooted
+/// `f64`; this call borrows it and checks pending before returning a null record.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_subprocess_run_timeout(
+    args: *const Object,
+    cwd: *const Str,
+    env: *const Object,
+    check: u8,
+    timeout: *const f64,
+    descriptor: *const RecordDescriptor,
+) -> *mut usize {
+    // SAFETY: the nullable timeout and all process inputs remain rooted.
+    unsafe { run_process(args, cwd, env, check, timeout.as_ref().copied(), descriptor) }
+}
+
+/// Shares launch validation and successful records without changing no-timeout IO.
+unsafe fn run_process(
+    args: *const Object,
+    cwd: *const Str,
+    env: *const Object,
+    check: u8,
+    timeout: Option<f64>,
+    descriptor: *const RecordDescriptor,
+) -> *mut usize {
     // SAFETY: only independent native strings escape the exact input storage.
     let prepared = unsafe {
         (|| {
@@ -593,21 +839,43 @@ pub unsafe extern "C" fn relar_subprocess_run(
         Ok(prepared) => prepared,
         Err(error) => return error.returning(std::ptr::null_mut()),
     };
-    let result = launch
+    let captured = launch
         .spawn(cwd.as_ref())
-        .and_then(capture)
         .map_err(os_error)
-        .and_then(|(status, stdout, stderr)| {
-            let returncode = status
-                .code()
-                .unwrap_or_else(|| -status.signal().unwrap_or(0));
-            // Python decodes stdout before stderr, even when check=True would fail.
-            Ok((
-                returncode,
-                Rc::new(decode_utf8_text(stdout)?),
-                Rc::new(decode_utf8_text(stderr)?),
-            ))
+        .and_then(|child| {
+            if let Some(timeout) = timeout {
+                capture_timeout(child, timeout)
+            } else {
+                capture(child)
+                    .map(|(status, stdout, stderr)| Captured::Completed(status, stdout, stderr))
+                    .map_err(os_error)
+            }
         });
+    let (status, stdout, stderr) = match captured {
+        Ok(Captured::Completed(status, stdout, stderr)) => (status, stdout, stderr),
+        Ok(Captured::TimedOut(stdout, stderr)) => {
+            // SAFETY: the original argv stays rooted across launch and capture.
+            raise_timeout(TimeoutError {
+                cmd: unsafe { acquire_rc(args as usize) },
+                timeout: timeout.expect("only a deadline produces a timeout"),
+                stdout: stdout.map(Rc::new),
+                stderr: stderr.map(Rc::new),
+            });
+            return std::ptr::null_mut();
+        }
+        Err(error) => return error.returning(std::ptr::null_mut()),
+    };
+    let result: Result<_> = (|| {
+        let returncode = status
+            .code()
+            .unwrap_or_else(|| -status.signal().unwrap_or(0));
+        // Python decodes stdout before stderr, even when check=True would fail.
+        Ok((
+            returncode,
+            Rc::new(decode_utf8_text(stdout)?),
+            Rc::new(decode_utf8_text(stderr)?),
+        ))
+    })();
     let (returncode, stdout, stderr) = match result {
         Ok(result) => result,
         Err(error) => return error.returning(std::ptr::null_mut()),
@@ -678,7 +946,7 @@ mod tests {
 
     use super::super::exceptions::{
         relar_error_pending, relar_error_take, relar_exception_matches, relar_exception_message,
-        relar_exception_new, relar_subprocess_error_field,
+        relar_exception_new, relar_subprocess_error_field, relar_subprocess_timeout_field,
     };
     use super::super::records::relar_record_release;
     use super::super::{relar_seq_append, relar_seq_new};
@@ -823,6 +1091,164 @@ mod tests {
     fn message(error: &Rc<Object>) -> Rc<Str> {
         // SAFETY: formatting returns one owned string from the rooted exception.
         unsafe { Rc::from_raw(relar_exception_message(Rc::as_ptr(error))) }
+    }
+
+    /// Exercises the public deadline ABI and transfers the resulting pending owner.
+    fn timeout_failure(args: &Rc<Object>, timeout: f64) -> Rc<Object> {
+        const KINDS: [u32; 4] = [5, 2, 3, 3];
+        let descriptor = RecordDescriptor {
+            length: KINDS.len(),
+            kinds: KINDS.as_ptr(),
+            semantics: std::ptr::null(),
+        };
+        // SAFETY: exact rooted inputs and static field kinds survive the call.
+        unsafe {
+            let result = relar_subprocess_run_timeout(
+                Rc::as_ptr(args),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+                &timeout,
+                &descriptor,
+            );
+            if !result.is_null() {
+                super::super::records::relar_record_release(result);
+                panic!("controlled timeout unexpectedly succeeded");
+            }
+            assert_eq!(relar_error_pending(), 1);
+            Rc::from_raw(relar_error_take())
+        }
+    }
+
+    /// Reads one nullable immutable bytes owner from an exact timeout view.
+    fn timeout_bytes(error: &Rc<Object>, field: u32) -> Option<Rc<Bytes>> {
+        // SAFETY: the caller proves TimeoutExpired and selects a nullable byte field.
+        unsafe {
+            let word = relar_subprocess_timeout_field(Rc::as_ptr(error), field);
+            (word != 0).then(|| Rc::from_raw(word as *const Bytes))
+        }
+    }
+
+    #[test]
+    fn timeout_preserves_raw_bytes_and_reaps_the_direct_child() {
+        let args = args(&[
+            "/usr/bin/python3",
+            "-c",
+            "import os,time; os.write(1,b'raw\\r\\n\\xff\\xe2\\x82'); os.write(2,str(os.getpid()).encode()); time.sleep(10)",
+        ]);
+        let weak = Rc::downgrade(&args);
+        let error = timeout_failure(&args, 0.5);
+        assert_kind(&error, Kind::TimeoutExpired);
+        assert_kind(&error, Kind::SubprocessError);
+        assert_kind(&error, Kind::Exception);
+        let stdout = timeout_bytes(&error, 2).unwrap();
+        let output = timeout_bytes(&error, 4).unwrap();
+        assert!(Rc::ptr_eq(&stdout, &output));
+        assert_eq!(stdout.as_slice(), b"raw\r\n\xff\xe2\x82");
+        let stderr = timeout_bytes(&error, 3).unwrap();
+        let pid: i32 = std::str::from_utf8(&stderr).unwrap().parse().unwrap();
+        // SAFETY: kill with signal zero only probes this reaped child PID;
+        // waitpid's null status is valid with WNOHANG and cannot consume other children.
+        unsafe {
+            assert_eq!(libc::kill(pid, 0), -1);
+            assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
+            assert_eq!(libc::waitpid(pid, std::ptr::null_mut(), libc::WNOHANG), -1);
+            assert_eq!(
+                io::Error::last_os_error().raw_os_error(),
+                Some(libc::ECHILD)
+            );
+            assert_eq!(
+                relar_exception_matches(Rc::as_ptr(&error), Kind::CalledProcessError as u32),
+                0
+            );
+            assert_eq!(
+                f64::from_bits(relar_subprocess_timeout_field(Rc::as_ptr(&error), 1) as u64),
+                0.5
+            );
+            let cmd = Rc::<Object>::from_raw(
+                relar_subprocess_timeout_field(Rc::as_ptr(&error), 0) as *const Object
+            );
+            assert!(Rc::ptr_eq(&cmd, &args));
+            let addition = Rc::new(Str::new("mutated"));
+            relar_seq_append(Rc::as_ptr(&args), Rc::as_ptr(&addition) as usize, 3);
+        }
+        assert!(message(&error).ends_with("'mutated']' timed out after 0.5 seconds"));
+        drop(args);
+        assert!(weak.upgrade().is_some());
+        drop(error);
+        assert!(weak.upgrade().is_none());
+        assert_eq!(stdout.as_slice(), b"raw\r\n\xff\xe2\x82");
+    }
+
+    #[test]
+    fn timeout_does_not_wait_for_descendant_pipe_owners() {
+        let argv = args(&[
+            "/usr/bin/python3",
+            "-c",
+            "import os,time\npid=os.fork()\nif pid == 0:\n time.sleep(2)\n os._exit(0)\nos.write(1,b'parent finished')\nos._exit(0)",
+        ]);
+        let started = Instant::now();
+        let error = timeout_failure(&argv, 0.4);
+        assert_kind(&error, Kind::TimeoutExpired);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(
+            timeout_bytes(&error, 2).unwrap().as_slice(),
+            b"parent finished"
+        );
+    }
+
+    #[test]
+    fn deadline_capture_drains_both_full_pipes_before_expiry() {
+        let argv = args(&[
+            "/usr/bin/python3",
+            "-c",
+            "import os,time\nfor _ in range(4):\n os.write(1,b'O'*65536)\n os.write(2,b'E'*65536)\ntime.sleep(10)",
+        ]);
+        let error = timeout_failure(&argv, 0.5);
+        assert_kind(&error, Kind::TimeoutExpired);
+        let stdout = timeout_bytes(&error, 2).unwrap();
+        let stderr = timeout_bytes(&error, 3).unwrap();
+        assert_eq!(stdout.len(), 262_144);
+        assert_eq!(stderr.len(), 262_144);
+        assert!(stdout.iter().all(|byte| *byte == b'O'));
+        assert!(stderr.iter().all(|byte| *byte == b'E'));
+    }
+
+    #[test]
+    fn timeout_boundaries_and_failed_validation_leave_no_direct_children() {
+        let argv = args(&["/usr/bin/python3", "-c", "import time; time.sleep(10)"]);
+        for timeout in [0.0, -0.0, -0.5, f64::NEG_INFINITY] {
+            let error = timeout_failure(&argv, timeout);
+            assert_kind(&error, Kind::TimeoutExpired);
+            assert!(timeout_bytes(&error, 2).is_none());
+            assert!(timeout_bytes(&error, 3).is_none());
+        }
+        for (timeout, kind, expected) in [
+            (
+                f64::NAN,
+                Kind::ValueError,
+                "cannot convert float NaN to integer",
+            ),
+            (
+                f64::INFINITY,
+                Kind::OverflowError,
+                "cannot convert float infinity to integer",
+            ),
+            (2147484.0, Kind::OverflowError, "timeout is too large"),
+            (
+                1e20,
+                Kind::OverflowError,
+                "timestamp too large to convert to C PyTime_t",
+            ),
+        ] {
+            let error = timeout_failure(&argv, timeout);
+            assert_kind(&error, kind);
+            assert_eq!(message(&error).as_str(), expected);
+        }
+        for _ in 0..32 {
+            drop(timeout_failure(&argv, 0.0));
+        }
+        assert_eq!(success(&args(&["/bin/true"]), None, None).code(), 0);
     }
 
     #[test]

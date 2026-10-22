@@ -1,11 +1,22 @@
-//! Checks concrete JSON shapes and proves constructors used during decoding.
+//! Checks concrete JSON/TOML shapes and proves constructors used during decoding.
 
 use super::*;
 use crate::ir::{JsonDefault, JsonField, JsonRecordSchema};
 
 impl Checker<'_> {
+    /// TOML shares concrete field layouts and defaults, but its document root
+    /// is always a table rather than an arbitrary JSON value.
+    pub(super) fn toml_decode(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.typed_decode(call, true)
+            .map_err(|message| message.replace("JSON", "TOML"))
+    }
+
     /// The schema is a static type expression; no runtime type object is created.
     pub(super) fn json_decode(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.typed_decode(call, false)
+    }
+
+    fn typed_decode(&mut self, call: &ast::ExprCall, toml: bool) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         let [text, schema] = call.arguments.args.as_ref() else {
             return Err(error(
@@ -25,12 +36,23 @@ impl Checker<'_> {
                 "decode schema must be a fixed record, list, or string-key dictionary",
             ));
         }
+        if toml && matches!(ty, Type::ListInt | Type::List(_)) {
+            return Err(error(
+                self.source,
+                schema,
+                "TOML decode schema must be a fixed record or string-key dictionary",
+            ));
+        }
         check_type(ty, self.types, &mut Vec::new())
             .map_err(|message| error(self.source, schema, message))?;
         Ok(Expr {
             ty,
             kind: ExprKind::Builtin(
-                Builtin::JsonDecode(ty),
+                if toml {
+                    Builtin::TomlDecode(ty)
+                } else {
+                    Builtin::JsonDecode(ty)
+                },
                 vec![self.expr_expected(text, Type::Str)?],
             ),
         })
@@ -212,7 +234,9 @@ pub(super) fn schemas(
     let mut encoded = Vec::new();
     for function in functions.iter().chain([entry]) {
         ir::walk_expressions(&function.body, &mut |value| match value.kind {
-            ExprKind::Builtin(Builtin::JsonDecode(ty), _) => decoded.push(ty),
+            ExprKind::Builtin(Builtin::JsonDecode(ty) | Builtin::TomlDecode(ty), _) => {
+                decoded.push(ty);
+            }
             ExprKind::Builtin(Builtin::JsonEncode(ty), _) => encoded.push(ty),
             _ => {}
         });

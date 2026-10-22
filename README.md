@@ -18,11 +18,11 @@ An ahead-of-time compiler for typed Python, written in Rust.
 - Compose generator expressions, `zip(strict=True)`, and `reversed`, with short-circuiting `any` and `all`.
 - Pass typed function values and bound methods, use noncapturing lambdas, and compose lazy `map`/`filter` pipelines.
 - Use read-only properties, class and static methods, and `Self` annotations.
-- Decode external JSON into fixed records and typed containers, and serialize their layouts directly.
+- Decode external JSON and TOML into fixed records and typed containers, and serialize JSON layouts directly.
 - Use immutable tuple keys and sort keys, Unicode text operations, and bounded URL decoding.
-- Read and write UTF-8 files, join native `pathlib.Path` values, and scan directories with `iterdir` and bounded `glob`.
+- Read and write UTF-8 files, resolve native `pathlib.Path` values, and scan directories with `iterdir` and bounded `glob`.
 - Create scoped temporary workspaces and atomically replace completed files.
-- Run native subprocesses with captured UTF-8 output, explicit arguments, working directories, and environment snapshots.
+- Run native subprocesses with captured UTF-8 output, deadlines, explicit arguments, working directories, and environment snapshots.
 - Preserve arbitrary-precision integers, shared mutation, and supported exception behavior.
 - Run compiled programs without a Python installation or a CPython dependency.
 

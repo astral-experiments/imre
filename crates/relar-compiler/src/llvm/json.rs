@@ -1,4 +1,4 @@
-//! Immutable JSON schemas share the ordinary native record ownership layouts.
+//! Immutable JSON/TOML schemas share the ordinary native record ownership layouts.
 
 use std::collections::HashSet;
 
@@ -10,8 +10,10 @@ pub(super) fn schemas(module: &Module) -> String {
     let mut roots = Vec::new();
     for function in module.functions.iter().chain([&module.entry]) {
         ir::walk_expressions(&function.body, &mut |value| {
-            if let ExprKind::Builtin(Builtin::JsonDecode(ty) | Builtin::JsonEncode(ty), _) =
-                value.kind
+            if let ExprKind::Builtin(
+                Builtin::JsonDecode(ty) | Builtin::TomlDecode(ty) | Builtin::JsonEncode(ty),
+                _,
+            ) = value.kind
             {
                 roots.push(ty);
             }

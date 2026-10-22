@@ -11,6 +11,18 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            PathOperation::Resolve => {
+                let strict = self.instruction(format!("zext i1 {} to i8", args[1].value.operand));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @relar_path_resolve(ptr {}, i8 {strict})",
+                    args[0].value.operand,
+                ));
+                self.owned(Value {
+                    ty: Type::Path,
+                    operand,
+                    small_integer: false,
+                })
+            }
             PathOperation::Mkdir => {
                 let parents = self.instruction(format!("zext i1 {} to i8", args[2].value.operand));
                 let exist_ok = self.instruction(format!("zext i1 {} to i8", args[3].value.operand));
@@ -51,11 +63,15 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
-            PathOperation::Exists | PathOperation::IsFile | PathOperation::IsDir => {
+            PathOperation::Exists
+            | PathOperation::IsFile
+            | PathOperation::IsDir
+            | PathOperation::IsAbsolute => {
                 let name = match operation {
                     PathOperation::Exists => "exists",
                     PathOperation::IsFile => "is_file",
                     PathOperation::IsDir => "is_dir",
+                    PathOperation::IsAbsolute => "is_absolute",
                     _ => unreachable!(),
                 };
                 let byte = self.instruction(format!(

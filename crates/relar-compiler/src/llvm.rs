@@ -41,6 +41,7 @@ impl Type {
             | Self::Set(_)
             | Self::Iterator
             | Self::Exception
+            | Self::TimeoutExpired
             | Self::Path
             | Self::CompletedProcess
             | Self::TextIO
@@ -64,6 +65,7 @@ impl Type {
             | Self::Set(_)
             | Self::Iterator
             | Self::Exception
+            | Self::TimeoutExpired
             | Self::Path
             | Self::CompletedProcess
             | Self::TextIO
@@ -415,6 +417,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::Iterator
             | Type::Exception
+            | Type::TimeoutExpired
             | Type::Path
             | Type::TextIO
             | Type::BinaryIO => "object",
@@ -2564,6 +2567,7 @@ impl Emitter<'_, '_> {
             | Type::None
             | Type::Class(_)
             | Type::Exception
+            | Type::TimeoutExpired
             | Type::TextIO
             | Type::CompletedProcess
             | Type::BinaryIO => self.instruction(format!(
@@ -2748,15 +2752,22 @@ impl Emitter<'_, '_> {
             Builtin::Text(operation) => self.text_builtin(*operation, &args, returns),
             Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
-            Builtin::JsonDecode(schema) => Value {
-                ty: returns,
-                operand: self.checked_instruction(format!(
-                    "call ptr @relar_json_decode(ptr {}, ptr @{})",
-                    args[0].value.operand,
-                    json::schema_name(*schema),
-                )),
-                small_integer: false,
-            },
+            Builtin::JsonDecode(schema) | Builtin::TomlDecode(schema) => {
+                let format = if matches!(builtin, Builtin::TomlDecode(_)) {
+                    "toml"
+                } else {
+                    "json"
+                };
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @relar_{format}_decode(ptr {}, ptr @{})",
+                        args[0].value.operand,
+                        json::schema_name(*schema),
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::JsonEncode(schema) => {
                 let word = self.word(&args[0].value);
                 let ascii = self.instruction(format!("zext i1 {} to i8", args[2].value.operand));
@@ -2927,7 +2938,7 @@ impl Emitter<'_, '_> {
                     }
                 }
                 Type::None => self.call("relar_none_str", Type::Str, &[]),
-                Type::Exception => {
+                Type::Exception | Type::TimeoutExpired => {
                     self.call("relar_exception_message", Type::Str, &[&args[0].value])
                 }
                 Type::Class(_) => self.value_repr(&args[0].value),
@@ -3287,6 +3298,7 @@ impl Emitter<'_, '_> {
                     | Type::Set(_)
                     | Type::Iterator
                     | Type::Exception
+                    | Type::TimeoutExpired
                     | Type::Path
                     | Type::TextIO
                     | Type::BinaryIO
@@ -3420,6 +3432,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::Iterator
             | Type::Exception
+            | Type::TimeoutExpired
             | Type::Path
             | Type::TextIO
             | Type::BinaryIO
@@ -3452,6 +3465,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::Iterator
             | Type::Exception
+            | Type::TimeoutExpired
             | Type::Path
             | Type::TextIO
             | Type::BinaryIO
@@ -3901,6 +3915,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Set(_)
         | Type::Iterator
         | Type::Exception
+        | Type::TimeoutExpired
         | Type::Path
         | Type::TextIO
         | Type::BinaryIO => 5,
@@ -4009,6 +4024,7 @@ fn fallible(name: &str) -> bool {
                 | "int_rshift"
                 | "relar_flush_stdout"
                 | "relar_subprocess_run"
+                | "relar_subprocess_run_timeout"
                 | "relar_environ_copy"
                 | "relar_subprocess_check"
                 | "relar_subprocess_error_field"
@@ -4038,6 +4054,7 @@ fn fallible(name: &str) -> bool {
                 | "relar_path_unlink"
                 | "relar_path_rmdir"
                 | "relar_path_replace"
+                | "relar_path_resolve"
                 | "relar_tempdir_new"
                 | "relar_tempdir_cleanup"
                 | "relar_path_next"
@@ -4087,9 +4104,11 @@ fn fallible(name: &str) -> bool {
 
 const DECLARATIONS: &str = r#"
 declare ptr @relar_subprocess_run(ptr, ptr, ptr, i8, ptr)
+declare ptr @relar_subprocess_run_timeout(ptr, ptr, ptr, i8, ptr, ptr)
 declare ptr @relar_environ_copy()
 declare void @relar_subprocess_check(ptr)
 declare i64 @relar_subprocess_error_field(ptr, i32)
+declare i64 @relar_subprocess_timeout_field(ptr, i32)
 declare ptr @relar_path_new(ptr)
 declare ptr @relar_path_join(ptr, ptr)
 declare ptr @relar_path_text(ptr)
@@ -4097,6 +4116,8 @@ declare ptr @relar_path_name(ptr)
 declare ptr @relar_path_stem(ptr)
 declare ptr @relar_path_suffix(ptr)
 declare ptr @relar_path_parent(ptr)
+declare i8 @relar_path_is_absolute(ptr)
+declare ptr @relar_path_resolve(ptr, i8)
 declare i8 @relar_path_exists(ptr)
 declare i8 @relar_path_is_file(ptr)
 declare i8 @relar_path_is_dir(ptr)
@@ -4166,6 +4187,7 @@ declare void @relar_exception_reraise()
 declare void @relar_flush_stdout()
 declare ptr @relar_record_new(ptr)
 declare ptr @relar_json_decode(ptr, ptr)
+declare ptr @relar_toml_decode(ptr, ptr)
 declare ptr @relar_json_encode(i64, ptr, i64, i8)
 declare ptr @relar_record_cached_result(ptr)
 declare void @relar_record_retain(ptr)
