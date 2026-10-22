@@ -1,0 +1,213 @@
+{
+  "schema": 1,
+  "record_sha256": "8fab049d4aa373b9778f271854076d4d4407edf283a394b696d6322d452bc677",
+  "json_sha256": "8fab049d4aa373b9778f271854076d4d4407edf283a394b696d6322d452bc677",
+  "strict_files_checked": 320,
+  "workloads": 4,
+  "measured": 392,
+  "warmups": 28,
+  "medians": {
+    "1x-plain": {
+      "original": {
+        "elapsed_ns": 1002422320.0,
+        "peak_rss_kib": 121900.0
+      },
+      "port": {
+        "elapsed_ns": 2619155630.5,
+        "peak_rss_kib": 32208.0
+      },
+      "codon": {
+        "elapsed_ns": 551717564.0,
+        "peak_rss_kib": 43776.0
+      },
+      "relar": {
+        "elapsed_ns": 176007117.5,
+        "peak_rss_kib": 15798.0
+      },
+      "rust": {
+        "elapsed_ns": 105700317.5,
+        "peak_rss_kib": 11438.0
+      },
+      "relar_thin": {
+        "elapsed_ns": 128100328.0,
+        "peak_rss_kib": 16040.0
+      },
+      "rust_thin": {
+        "elapsed_ns": 78950821.5,
+        "peak_rss_kib": 11752.0
+      }
+    },
+    "1x-gzip": {
+      "original": {
+        "elapsed_ns": 1058260048.5,
+        "peak_rss_kib": 122136.0
+      },
+      "port": {
+        "elapsed_ns": 2654290730.5,
+        "peak_rss_kib": 32694.0
+      },
+      "codon": {
+        "elapsed_ns": 587121886.5,
+        "peak_rss_kib": 43520.0
+      },
+      "relar": {
+        "elapsed_ns": 195758856.5,
+        "peak_rss_kib": 16232.0
+      },
+      "rust": {
+        "elapsed_ns": 126481718.0,
+        "peak_rss_kib": 11560.0
+      },
+      "relar_thin": {
+        "elapsed_ns": 145991605.5,
+        "peak_rss_kib": 16216.0
+      },
+      "rust_thin": {
+        "elapsed_ns": 97624794.5,
+        "peak_rss_kib": 11552.0
+      }
+    },
+    "10x-plain": {
+      "original": {
+        "elapsed_ns": 10152478661.0,
+        "peak_rss_kib": 1013940.0
+      },
+      "port": {
+        "elapsed_ns": 23738915943.0,
+        "peak_rss_kib": 32244.0
+      },
+      "codon": {
+        "elapsed_ns": 4502372209.0,
+        "peak_rss_kib": 44160.0
+      },
+      "relar": {
+        "elapsed_ns": 1289426893.0,
+        "peak_rss_kib": 15740.0
+      },
+      "rust": {
+        "elapsed_ns": 724364330.0,
+        "peak_rss_kib": 11612.0
+      },
+      "relar_thin": {
+        "elapsed_ns": 880400521.0,
+        "peak_rss_kib": 15980.0
+      },
+      "rust_thin": {
+        "elapsed_ns": 496653723.5,
+        "peak_rss_kib": 11612.0
+      }
+    },
+    "10x-gzip": {
+      "original": {
+        "elapsed_ns": 11085890440.5,
+        "peak_rss_kib": 1014108.0
+      },
+      "port": {
+        "elapsed_ns": 24294049444.0,
+        "peak_rss_kib": 32800.0
+      },
+      "codon": {
+        "elapsed_ns": 4926421496.5,
+        "peak_rss_kib": 44160.0
+      },
+      "relar": {
+        "elapsed_ns": 1517943209.0,
+        "peak_rss_kib": 16108.0
+      },
+      "rust": {
+        "elapsed_ns": 952009282.0,
+        "peak_rss_kib": 11684.0
+      },
+      "relar_thin": {
+        "elapsed_ns": 1086192631.5,
+        "peak_rss_kib": 16092.0
+      },
+      "rust_thin": {
+        "elapsed_ns": 705190335.0,
+        "peak_rss_kib": 11676.0
+      }
+    }
+  },
+  "relar_over_rust": {
+    "1x-plain": {
+      "ordinary": {
+        "elapsed_ns": 1.6651522120546138,
+        "peak_rss_kib": 1.3811855219443958
+      },
+      "thinlto": {
+        "elapsed_ns": 1.622533186687614,
+        "peak_rss_kib": 1.3648740639891082
+      }
+    },
+    "1x-gzip": {
+      "ordinary": {
+        "elapsed_ns": 1.5477245217368094,
+        "peak_rss_kib": 1.404152249134948
+      },
+      "thinlto": {
+        "elapsed_ns": 1.495435726627829,
+        "peak_rss_kib": 1.4037396121883656
+      }
+    },
+    "10x-plain": {
+      "ordinary": {
+        "elapsed_ns": 1.7800806025332583,
+        "peak_rss_kib": 1.3554943162245952
+      },
+      "thinlto": {
+        "elapsed_ns": 1.7726646944186255,
+        "peak_rss_kib": 1.3761625904236996
+      }
+    },
+    "10x-gzip": {
+      "ordinary": {
+        "elapsed_ns": 1.5944626147037924,
+        "peak_rss_kib": 1.3786374529270797
+      },
+      "thinlto": {
+        "elapsed_ns": 1.5402829244674774,
+        "peak_rss_kib": 1.3782117163412126
+      }
+    }
+  },
+  "peak_rss_10x_over_1x": {
+    "plain": {
+      "original": 8.31780147662018,
+      "port": 1.001117734724292,
+      "codon": 1.0087719298245614,
+      "relar": 0.9963286491961008,
+      "rust": 1.0152124497289736,
+      "relar_thin": 0.9962593516209476,
+      "rust_thin": 0.9880871341048332
+    },
+    "gzip": {
+      "original": 8.30310473570446,
+      "port": 1.0032421851104179,
+      "codon": 1.0147058823529411,
+      "relar": 0.992360768851651,
+      "rust": 1.010726643598616,
+      "relar_thin": 0.9923532313764184,
+      "rust_thin": 1.0107340720221607
+    }
+  },
+  "elapsed_10x_over_1x": {
+    "plain": {
+      "original": 10.12794553596931,
+      "port": 9.063575935145256,
+      "codon": 8.160646864960057,
+      "relar": 7.325992899122389,
+      "rust": 6.853000512510286,
+      "relar_thin": 6.872742129122417,
+      "rust_thin": 6.290672016629998
+    },
+    "gzip": {
+      "original": 10.475582496205327,
+      "port": 9.152746217602028,
+      "codon": 8.390798588463113,
+      "relar": 7.754148323807766,
+      "rust": 7.526852868965616,
+      "relar_thin": 7.440103338681347,
+      "rust_thin": 7.223475743142282
+    }
+  }
+}

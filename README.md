@@ -152,7 +152,7 @@ offline CPython release transformation, selecting and rendering 6,098 downloads
 from 58,721 raw release artifacts. Both guides explain the typed adaptations,
 accepted input domain, unchanged upstream oracle, and native Rust/Codon comparisons.
 
-In the [five-engine comparison](benchmarks/results/2026-10-21-native-tools.md),
+In the [first five-engine comparison](benchmarks/results/2026-10-21-native-tools.md),
 median complete runtimes are 1.33–1.77× Rust with ThinLTO and 1.48–1.84× with
 ordinary builds. Repeated full computation also stays below 2× in both modes;
 the tables include upstream CPython, the typed CPython port, and native Codon.
@@ -162,6 +162,10 @@ includes configuration discovery, both actual ty processes, and atomic report
 publication. Complete runs take about 1.02× Rust's time; separate repeated report
 computation takes 1.53–1.95× across ordinary and ThinLTO builds. Every measured
 case, including startup controls, stays below 2× Rust.
+
+The download catalog now reads uv’s compressed release index directly. Complete
+runs on plain and gzip input at 1× and 10× take 1.50–1.78× Rust’s time
+and peak at 15.4–15.9 MiB. [Streaming catalog results](benchmarks/results/2026-10-22-streaming-catalog.md)
 
 ## License
 
