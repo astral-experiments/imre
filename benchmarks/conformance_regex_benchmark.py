@@ -33,14 +33,17 @@ def file_id(path: Path) -> dict:
     return {"path": str(path), "bytes": path.stat().st_size, "sha256": sha(path.read_bytes())}
 
 
-def orders() -> list[list[str]]:
-    """A complete even Williams design balances positions and directed neighbors."""
-    n = len(ENGINES)
-    first = [0, 1, -1, 2, -2, 3]
-    rows = [[ENGINES[(start + x) % n] for x in first] for start in range(n)]
-    assert all(len({row[i] for row in rows}) == n for i in range(n))
+def orders(engines=ENGINES) -> list[list[str]]:
+    """Williams designs balance positions and directed neighbors for six or seven engines."""
+    n = len(engines)
+    first = [0, 1, -1, 2, -2, 3, -3][:n]
+    rows = [[engines[(start + x) % n] for x in first] for start in range(n)]
+    if n % 2:
+        rows.extend(row[::-1] for row in rows.copy())
+    multiplicity = len(rows) // n
+    assert all(Counter(row[i] for row in rows) == {e: multiplicity for e in engines} for i in range(n))
     assert Counter(pair for row in rows for pair in zip(row, row[1:])) == {
-        (a, b): 1 for a in ENGINES for b in ENGINES if a != b
+        (a, b): multiplicity for a in engines for b in engines if a != b
     }
     return rows
 
@@ -123,18 +126,20 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cpu", type=int, required=True)
     parser.add_argument("--samples", type=int, default=12)
-    parser.add_argument("--kernel", choices=("scanner", "classification", "entries"), default="scanner")
+    parser.add_argument("--kernel", choices=("scanner", "classification", "entries", "entry-ownership"), default="scanner")
     parser.add_argument("--scan-rounds", "--kernel-rounds", type=int, default=64)
     parser.add_argument("--report-rounds", type=int, default=4)
     parser.add_argument("--report-panels", nargs="+", choices=PANELS, default=PANELS)
     parser.add_argument("--pilot", action="store_true")
     args = parser.parse_args()
-    if args.samples <= 0 or (not args.pilot and args.samples % len(ENGINES)) or min(args.scan_rounds, args.report_rounds) < 1:
+    engines = (*ENGINES, "port") if args.kernel == "entry-ownership" else ENGINES
+    plan = orders(engines)
+    if args.samples <= 0 or (not args.pilot and args.samples % len(plan)) or min(args.scan_rounds, args.report_rounds) < 1:
         parser.error("positive samples/rounds required; full runs must complete the balanced design")
     directory = args.output.resolve()
     directory.mkdir(parents=True, exist_ok=False)
     cfg = json.loads(args.config.read_bytes())
-    assert set(cfg["engines"]) == set(ENGINES)
+    assert set(cfg["engines"]) == set(engines)
     assert args.pilot or (cfg["source_locked"] and tuple(args.report_panels) == PANELS)
     assert cfg["revision"] == subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     for value in cfg["guarded_inputs"]:
@@ -142,8 +147,8 @@ def main() -> None:
     affinity = sorted(os.sched_getaffinity(0))
     os.sched_setaffinity(0, {args.cpu})
     kernel = args.kernel
-    entry = {"classification": "classify", "scanner": "scan", "entries": "entries"}[kernel]
-    inputs = prepare(directory, args.captures.resolve(), kernel)
+    entry = {"classification": "classify", "scanner": "scan", "entries": "entries", "entry-ownership": "entries"}[kernel]
+    inputs = prepare(directory, args.captures.resolve(), "entries" if kernel == "entry-ownership" else kernel)
     panels, full, reports = {}, {}, {}
     for panel in args.report_panels:
         location = args.captures.resolve().parents[1] / panel / "captures"
@@ -166,7 +171,7 @@ def main() -> None:
     env = VALIDATION["environment"](directory / "home")
     env["PYTHONPATH"] = ""
     (directory / "home").mkdir()
-    by_case, plan = {}, orders()
+    by_case = {}
     for name, rounds in ((kernel + "-preload", 0), (kernel, args.scan_rounds)):
         by_case[name] = {"executable": entry, "rounds": rounds, "control": rounds == 0}
     for panel in args.report_panels:
@@ -237,7 +242,7 @@ def main() -> None:
         for i in range(args.samples):
             case["runs"].append([sample(e) for e in plan[i % len(plan)]])
             save()
-        med = {e: statistics.median(s["elapsed_ns"] for row in case["runs"] for s in row if s["engine"] == e) for e in ENGINES}
+        med = {e: statistics.median(s["elapsed_ns"] for row in case["runs"] for s in row if s["engine"] == e) for e in engines}
         case.update(medians_ns=med, after_over_rust=med["after"]/med["rust"], after_over_before=med["after"]/med["before"])
         print(name, {e: round(x/1e6, 2) for e, x in med.items()}, round(case["after_over_rust"], 4), flush=True)
     pairs = [(kernel, kernel + "-preload")] + [
@@ -245,9 +250,9 @@ def main() -> None:
     ]
     record["per_round_ns"] = {
         case: {engine: (by_case[case]["medians_ns"][engine] - by_case[base]["medians_ns"][engine]) / by_case[case]["rounds"]
-               for engine in ENGINES} for case, base in pairs
+               for engine in engines} for case, base in pairs
     }
-    # The entry collector is diagnostic. Its release gate covers whole and repeated reports.
+    # The original entries release gated reports. The ownership study also gates the isolated collector.
     gated = [c["after_over_rust"] for n, c in by_case.items() if not c["control"] and (kernel != "entries" or "/" in n)]
     gated += [v["after"]/v["rust"] for n, v in record["per_round_ns"].items() if kernel != "entries" or "/" in n]
     record["time_target_met"] = all(0 < ratio <= 2 for ratio in gated)

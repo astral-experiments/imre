@@ -1303,8 +1303,8 @@ impl Checker<'_> {
         } else {
             checked.expect("ordinary callback was checked before its source")
         };
-        let callback_slot = self.hidden(callback.ty);
         let operation = if filter && callback.ty == Type::None {
+            input.evaluate.insert(0, Statement::Expr(callback));
             self.local(input.value)
         } else {
             let (params, returns) = self.types.signature(callback.ty).ok_or_else(|| {
@@ -1321,23 +1321,32 @@ impl Checker<'_> {
                     "map/filter callbacks require one positional parameter",
                 ));
             };
-            Expr {
-                ty: returns,
-                kind: ExprKind::Invoke {
-                    callable: Box::new(self.local(callback_slot)),
-                    args: ir::CallArgs::positional(vec![self.coerce(
-                        self.local(input.value),
-                        *parameter,
-                        call,
-                    )?]),
-                },
-            }
+            let args = ir::CallArgs::positional(vec![self.coerce(
+                self.local(input.value),
+                *parameter,
+                call,
+            )?]);
+            // An immediately consumed function or noncapturing lambda has no
+            // context to acquire. Only dynamic or bound callbacks need an owner.
+            let kind = if let ExprKind::Callable {
+                function,
+                receiver: None,
+            } = callback.kind
+            {
+                self.calls.insert(function);
+                ExprKind::Call(function, args)
+            } else {
+                let slot = self.hidden(callback.ty);
+                input.evaluate.insert(0, Statement::Assign(slot, callback));
+                input.clear.push(slot);
+                ExprKind::Invoke {
+                    callable: Box::new(self.local(slot)),
+                    args,
+                }
+            };
+            Expr { ty: returns, kind }
         };
-        input
-            .evaluate
-            .insert(0, Statement::Assign(callback_slot, callback));
         input.evaluate.append(&mut input.acquire);
-        input.clear.push(callback_slot);
         if filter {
             let ready = self.hidden(Type::Bool);
             let done = self.hidden(Type::Bool);

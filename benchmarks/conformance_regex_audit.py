@@ -33,21 +33,28 @@ def main() -> None:
     m = json.loads(raw)
     assert m["completed"] and ((not m["pilot"] and m["config"]["source_locked"]) or args.allow_pilot)
     kernel = m.get("kernel", "scanner")
+    engines = ENGINES | {"port"} if kernel == "entry-ownership" else ENGINES
+    assert set(m["config"]["engines"]) == engines
     baseline = {"scanner": "dad5a967fa7fa34cc34cddbc02e4ab35d147e0da",
                 "classification": "0d61459957cf483404c48150c543032d87cf91c2",
-                "entries": "490ff91eb4ac3d9af47e790259a7441bf8a6fa00"}[kernel]
-    operation = {"scanner": "scan", "classification": "classify", "entries": "entries"}[kernel]
+                "entries": "490ff91eb4ac3d9af47e790259a7441bf8a6fa00",
+                "entry-ownership": "53172f1c02e282b51af8436262ea38fb5751b1ae"}[kernel]
+    if kernel == "entry-ownership":
+        assert m["config"]["port_revision"] == "490ff91eb4ac3d9af47e790259a7441bf8a6fa00"
+    operation = {"scanner": "scan", "classification": "classify", "entries": "entries", "entry-ownership": "entries"}[kernel]
     assert m["revision"] == m["config"]["revision"] and m["baseline_revision"] == m["config"]["baseline_revision"] == baseline
     if kernel != "scanner":
         assert m["config"]["mode"] in ("normal", "thinlto")
         assert all(set(commands) == {operation, "report", "compute", "live"} for commands in m["config"]["engines"].values())
-        assert m["pilot"] or m["samples"] == 12
+        assert m["pilot"] or m["samples"] == (14 if kernel == "entry-ownership" else 12)
     orders = m["orders"]
-    assert len(orders) == 6 and m["samples"] >= 6 and m["samples"] % 6 == 0
-    assert all(len(row) == 6 and set(row) == ENGINES for row in orders)
-    assert all({row[i] for row in orders} == ENGINES for i in range(6))
+    n_engines = len(engines)
+    multiplicity = 2 if n_engines % 2 else 1
+    assert len(orders) == n_engines * multiplicity and m["samples"] >= len(orders) and m["samples"] % len(orders) == 0
+    assert all(len(row) == n_engines and set(row) == engines for row in orders)
+    assert all(Counter(row[i] for row in orders) == {e: multiplicity for e in engines} for i in range(n_engines))
     assert Counter(p for row in orders for p in zip(row, row[1:])) == {
-        (a, b): 1 for a in ENGINES for b in ENGINES if a != b
+        (a, b): multiplicity for a in engines for b in engines if a != b
     }
     strict = 0
     if args.strict_files:
@@ -88,7 +95,7 @@ def main() -> None:
         transcript = ("\n".join(output) + "\n").encode()
         assert (len(text), total, score) == (fixture["lines"], fixture["matches"], fixture["checksum"])
         assert read(fixture["capture_oracle"], name + ".captures") == transcript
-        assert m["capture_validation"][name] == {engine: digest(transcript) for engine in ENGINES}
+        assert m["capture_validation"][name] == {engine: digest(transcript) for engine in engines}
         scores[name] = (total, score)
     assert set(m["panels"]) == PANELS
     reports = {}
@@ -103,12 +110,12 @@ def main() -> None:
         workload = validation["Workload"](location("manifest"), location("old"), location("new"), name.split("-")[1])
         if name == "changed-github" and kernel != "scanner":
             helper = runpy.run_path(str(args.source_root / "benchmarks/conformance_classification_upstream.py"))
-            transcript, distribution = helper["snapshot"](validation, workload, texts, kernel=kernel)
+            transcript, distribution = helper["snapshot"](validation, workload, texts, kernel="entries" if kernel == "entry-ownership" else kernel)
             fixture = inputs["fixtures"]["corpus"]
             n, score = map(int, transcript.splitlines()[-1].split())
             assert (n, score, distribution) == (fixture["cases"], fixture["checksum"], fixture["distribution"])
             assert read(fixture["capture_oracle"], "corpus.captures") == transcript
-            assert m["capture_validation"]["corpus"] == {engine: digest(transcript) for engine in ENGINES}
+            assert m["capture_validation"]["corpus"] == {engine: digest(transcript) for engine in engines}
             scores["corpus"] = n, score
         original = validation["oracle"](workload, source_contents=texts).report
         assert original is not None and original.encode() == read(panel["expected_report"], name + ".md")
@@ -140,24 +147,24 @@ def main() -> None:
         assert [s["engine"] for s in case["warmup"]] == orders[0][::-1]
         assert len(case["runs"]) == m["samples"]
         assert [[s["engine"] for s in row] for row in case["runs"]] == [
-            orders[i % 6] for i in range(m["samples"])
+            orders[i % len(orders)] for i in range(m["samples"])
         ]
         for s in [*case["warmup"], *(s for row in case["runs"] for s in row)]:
             assert s["elapsed_ns"] > 0 and s["output_sha256"] == digest(output) and s["stdout_sha256"] == digest(stdout)
         medians = {engine: statistics.median(s["elapsed_ns"] for row in case["runs"] for s in row if s["engine"] == engine)
-                   for engine in ENGINES}
+                   for engine in engines}
         assert medians == case["medians_ns"]
         ratio = medians["after"] / medians["rust"]
         assert ratio == case["after_over_rust"] and medians["after"] / medians["before"] == case["after_over_before"]
         times[name] = medians
         if not case["control"]:
             all_ratios[name] = ratio
-        timed += 6 * m["samples"]
-        warmups += 6
+        timed += n_engines * m["samples"]
+        warmups += n_engines
     pairs = [(kernel, kernel + "-preload")] + [(p+"/repeated-report", p+"/report-preload") for p in PANELS]
     assert set(m["per_round_ns"]) == {case for case, _ in pairs}
     for case, control in pairs:
-        net = {e: (times[case][e] - times[control][e]) / m["cases"][case]["rounds"] for e in ENGINES}
+        net = {e: (times[case][e] - times[control][e]) / m["cases"][case]["rounds"] for e in engines}
         assert net == m["per_round_ns"][case] and min(net.values()) > 0
         all_ratios[case + "/net"] = net["after"] / net["rust"]
     gated = [r for n, r in all_ratios.items() if kernel != "entries" or n.split("/")[0] in PANELS]
@@ -165,7 +172,7 @@ def main() -> None:
     if kernel != "scanner" and not m["pilot"] and not m["time_target_met"]:
         raise SystemExit("completed conformance comparison exceeds 2x Rust")
     print(json.dumps({"matrix_sha256": digest(raw), "pilot": m["pilot"], "timed": timed, "warmups": warmups,
-                      "strict_files_checked": strict, "matched_capture_transcripts": len(inputs["fixtures"])*6,
+                      "strict_files_checked": strict, "matched_capture_transcripts": len(inputs["fixtures"])*n_engines,
                       "real_source_files": len(texts), "reconstructed_reports": sorted(reports),
                       "time_target_met": m["time_target_met"], "ratios": all_ratios}, indent=2))
 

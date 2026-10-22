@@ -199,6 +199,27 @@ print(apply(increment, 4))
     }
 
     #[test]
+    fn immediately_consumed_map_and_filter_call_known_functions_directly() {
+        let output = compile(
+            "def add(x: int) -> int:\n    return x + 1\ndef keep(x: int) -> int:\n    return x - 1\ndef transform(xs: list[int]) -> list[int]:\n    return list(map(add, filter(keep, xs)))\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        let body = output
+            .split_once("define internal ptr @fn_2(")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        assert!(
+            body.contains("call i64 @fn_0(") && body.contains("call i64 @fn_1("),
+            "{body}"
+        );
+        assert!(!body.contains("@relar_record_new"), "{body}");
+    }
+
+    #[test]
     fn unused_higher_order_functions_still_define_the_callable_layout() {
         let output = compile(
             "from typing import Callable\ndef apply(callback: Callable[[int], int], value: int) -> int:\n    return callback(value)\n",

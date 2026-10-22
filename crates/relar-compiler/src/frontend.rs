@@ -27,6 +27,7 @@ mod module_values;
 mod paths;
 mod pipelines;
 mod processes;
+mod projected_equality;
 mod records;
 mod regex;
 mod stdlib;
@@ -385,7 +386,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                 checker.assigned.insert(slot);
                 params.push(slot);
             }
-            let (mut body, falls_through) = checker.block(&definition.body)?;
+            let (mut body, falls_through) = checker.function_body(&definition.body)?;
             if falls_through && types.payload(signature.returns).is_some() {
                 body.push(Statement::Return(Expr {
                     ty: signature.returns,

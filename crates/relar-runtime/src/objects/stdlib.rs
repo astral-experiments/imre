@@ -3,6 +3,8 @@
 use std::cmp::Ordering;
 use std::rc::Rc;
 
+use smallvec::SmallVec;
+
 use super::{Bytes, Error, Kind, List, Object, Storage, StorageCell, Str, Words, fail, object};
 
 /// Sorts original indices instead of moving key owners. Reversing comparison,
@@ -11,8 +13,8 @@ fn ordered_indices(
     length: usize,
     reverse: bool,
     mut compare: impl FnMut(usize, usize) -> Ordering,
-) -> Vec<usize> {
-    let mut order: Vec<_> = (0..length).collect();
+) -> SmallVec<[usize; 4]> {
+    let mut order: SmallVec<_> = (0..length).collect();
     order.sort_by(|&left, &right| {
         let order = compare(left, right);
         if reverse { order.reverse() } else { order }
@@ -20,18 +22,16 @@ fn ordered_indices(
     order
 }
 
-/// Applies a destination-to-source permutation using owner-preserving swaps.
-fn permute<T>(values: &mut [T], order: &[usize]) {
+/// Walks each cycle with owner-preserving swaps, marking visited indices in the permutation.
+fn permute<T>(values: &mut [T], order: &mut [usize]) {
     if values.len() != order.len() {
         fail("SystemError", "sort key count differs from value count");
     }
-    let mut visited = vec![false; values.len()];
     for start in 0..values.len() {
         let mut current = start;
-        while !visited[current] {
-            visited[current] = true;
-            let next = order[current];
-            if visited[next] {
+        while order[current] != current {
+            let next = std::mem::replace(&mut order[current], current);
+            if next == start {
                 break;
             }
             values.swap(current, next);
@@ -54,7 +54,7 @@ unsafe fn compare_int(left: usize, right: usize) -> Ordering {
 /// # Safety
 /// `keys` is a rooted list with the exact nonnullable scalar element kind.
 /// No mutation or callback overlaps the short immutable storage access.
-unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Vec<usize> {
+unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> SmallVec<[usize; 4]> {
     if kind == 2 {
         // SAFETY: integer lists have their separate exact runtime allocation.
         return unsafe {
@@ -206,13 +206,13 @@ pub unsafe extern "C" fn relar_sort_by_keys(
     reverse: u8,
 ) {
     // SAFETY: both exact list owners remain rooted throughout this operation.
-    let order = unsafe { key_order(keys, key_kind, reverse != 0) };
+    let mut order = unsafe { key_order(keys, key_kind, reverse != 0) };
     if element_kind == 2 {
         // SAFETY: all immutable key access has ended; swaps transfer existing owners.
         unsafe {
             (&*values.cast::<List>())
                 .0
-                .with_mut(|values| permute(values, &order))
+                .with_mut(|values| permute(values, &mut order))
         };
     } else {
         // SAFETY: no storage reference escapes and swaps never drop an owner.
@@ -220,7 +220,7 @@ pub unsafe extern "C" fn relar_sort_by_keys(
             object(values.cast()).0.with_mut(|storage| {
                 let values = storage.sequence_mut();
                 values.check_kind(element_kind);
-                permute(&mut values.values, &order);
+                permute(&mut values.values, &mut order);
             })
         };
     }
@@ -339,10 +339,21 @@ mod tests {
     fn stable_permutations_preserve_ties_in_both_directions() {
         let keys = [2, 1, 2, 1, 0];
         for (reverse, expected) in [(false, [4, 1, 3, 0, 2]), (true, [0, 2, 1, 3, 4])] {
-            let order = ordered_indices(keys.len(), reverse, |a, b| keys[a].cmp(&keys[b]));
+            let mut order = ordered_indices(keys.len(), reverse, |a, b| keys[a].cmp(&keys[b]));
             let mut values = [0, 1, 2, 3, 4];
-            permute(&mut values, &order);
+            permute(&mut values, &mut order);
             assert_eq!(values, expected);
+        }
+    }
+
+    #[test]
+    fn short_sorts_keep_the_permutation_inline() {
+        for length in 0..=4 {
+            let mut order = ordered_indices(length, true, |left, right| left.cmp(&right));
+            assert!(!order.spilled());
+            let mut values: Vec<_> = (0..length).collect();
+            permute(&mut values, &mut order);
+            assert!(values.into_iter().eq((0..length).rev()));
         }
     }
 
