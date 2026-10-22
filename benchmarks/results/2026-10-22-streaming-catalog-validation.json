@@ -1,0 +1,366 @@
+{
+  "core": {
+    "asan_differentials": {
+      "optimization_levels": [
+        0,
+        3
+      ],
+      "suites": {
+        "bytes": {
+          "checker_rejections": 30,
+          "checks": 64,
+          "log_sha256": "d43e1ef43e4d504fc019036f574ac8533c29a52b18ebea7df278245c84d7ec9d"
+        },
+        "files": {
+          "checks": 85,
+          "log_sha256": "ac5f02ecdab6405b1038c6d84a8ff10356103ab5d85fa0f389c78b721a822a88"
+        },
+        "iterator_pipelines": {
+          "checker_rejections": 47,
+          "checks": 85,
+          "log_sha256": "d4d747a8383a6278c0c1fd62ba4b6353ca358af220d6102bf44777fd3190ec38"
+        },
+        "paths": {
+          "checker_rejections": 49,
+          "checks": 75,
+          "log_sha256": "ae7c3ca53d1ff845ae51488659b77edc02454600fbde7d8700b24f389a3989f0"
+        }
+      },
+      "total_checks": 309
+    },
+    "compiler_clippy": "passed",
+    "direct_runtime_probes": {
+      "recovery": {
+        "mismatches": 0,
+        "observed_exceptions": 2994,
+        "operations": 6864,
+        "seed": 42723,
+        "source_sha256": "ebfadff3b48dc5d11d0aca8554f74911d38cdb221c517526b9d27525b8d75594",
+        "stdout_sha256": "9459766b164ad150c746434cab2a95e423be931bc6774f357c2b4ba370704562"
+      },
+      "runtime_archive_sha256": "4b00b8db92bed187e100bacfd02d468a997b2e55e522e5957008efe72db21dfe",
+      "shim_link_flags": [
+        "-shared",
+        "-fPIC",
+        "shim.c",
+        "librelar_runtime.a",
+        "-lpthread",
+        "-lm",
+        "-ldl"
+      ],
+      "shim_sha256": "6c042497f84aeea2e7fd6e462c321116c33ec886596cb6c63d2dd91a0c0ce171",
+      "shim_source_sha256": "060a4dfcdc5eb4b36a1762c8b4ac8de11364ca845a0c5da741e6371bbf0293d0",
+      "sizes": {
+        "address_space_limit_bytes": 201326592,
+        "checks": 114,
+        "requested_each_bytes": 67108864,
+        "retained_reads": 6,
+        "retained_sizes": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "source_sha256": "7a91633aa016f3c42dec411dc7fda36d635f623ddd09e02256acedba49a5726f",
+        "stdout_sha256": "aa39f62797cd045f5f5736839971f7687a5127ec3b3693f3226797899b56e2cf"
+      },
+      "type": "Local CPython 3.14.5 ctypes differential; C shim linked to the final debug archive"
+    },
+    "format": "passed",
+    "local_artifacts_sha256": {
+      "librelar_runtime.a": "4b00b8db92bed187e100bacfd02d468a997b2e55e522e5957008efe72db21dfe",
+      "relar": "f065ca32fed0ec9361b85c3fda5a05d93884ed824074c7a556c3ff36ce9cf17d"
+    },
+    "local_validation_sha256": "8f87bcbb04a3a43b09cae5e3fef563bf0e73a36d5da0bbf53b14226e395904ef",
+    "ordinary_differentials": {
+      "optimization_levels": [
+        0,
+        3
+      ],
+      "suites": {
+        "bytes": {
+          "checker_rejections": 30,
+          "checks": 64,
+          "log_sha256": "674052bcf024afc8069a1d67aeeabc35b5539f9e43b2ec1d5fc5b8e9b2c31dc3"
+        },
+        "files": {
+          "checks": 85,
+          "log_sha256": "c3c21bc8ab4b02cdaca0a6265784f51a86adc09b675ab0cd8ca976d97d104766"
+        },
+        "iterator_pipelines": {
+          "checker_rejections": 47,
+          "checks": 85,
+          "log_sha256": "4c9100c33c331a13089f9912a2d6e6189d1cf9154f871df7d15a44dd8f8ad4ea"
+        },
+        "paths": {
+          "checker_rejections": 49,
+          "checks": 75,
+          "log_sha256": "51683630a51813cf55540d97468172fef132dcefa7f14d92b42c85e16a14b81b"
+        }
+      },
+      "total_checks": 309
+    },
+    "retained_short_reads": {
+      "address_space_limit_bytes": 201326592,
+      "cpython_stdout": "70\n",
+      "input_bytes": 46,
+      "reads": 24,
+      "record_sha256": "a28ad0c4519bbba8e7163cf0c5d2200b01b7de900ec15e7b93b83f1cca395a8e",
+      "relar_stdout": "70\n",
+      "requested_bytes": 33554432,
+      "source_sha256": "e35f9c37428f8d0c10cb596b749b7a05fc31039047a590c92895787e88cf7964"
+    },
+    "revision": "347fc67e3dc859213b977a7238dc0f293fd1851c",
+    "strict_workspace_clippy": {
+      "existing_findings": [
+        "json/toml.rs:34 collapsible_match",
+        "processes.rs:859 undocumented_unsafe_blocks"
+      ],
+      "introduced_in": "8bfc0b7",
+      "status": "failed"
+    },
+    "tools": {
+      "cargo": "cargo 1.99.0-dev (c40676e26 2026-10-21) (ohm-1.99.0-7)",
+      "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+      "python": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+      "rustc": "rustc 1.99.0-dev (a912f1842 2026-10-21) (ohm-1.99.0-7)"
+    },
+    "units": {
+      "compiler": 147,
+      "log_sha256": "7f55add5198b4b566b7cfe791a75bd8399a30cdbb647ee56b10374cec37e6c9e",
+      "runtime": 149,
+      "separate_runtime_log_sha256": "8deb3e5cab396d04c19aa5ed00c3ea81931ed6a9ca766355dec08575c6c0387e",
+      "total": 296
+    }
+  },
+  "local_catalog": {
+    "bounded_cache_record_sha256": "ab5ec2edbcc95b7b3019e1eaab84f75e50372eea808662f9db3fb62efed70002",
+    "cache_saturation": {
+      "full_plain_and_gzip_catalog_sha256": "430dd9f1f350e27b8ad39cbad4ee9647e80d977af43d970e9cec5f6345db92cc",
+      "overflow_errors_cases_preserving_output": 4,
+      "overflow_errors_sha256": "30e4e6507c803a9dddf0a852e6f745b788f505691b83c5ede30b8e03e39ef894",
+      "partial_catalog_sha256": "44d7baead7d5a55e091c92f6307d07a7f5ffbcf43335e1a148bd02590751d355",
+      "probe_binary_sha256": "a350dd694ee139e438dd0e28ef5605f4662c5eb84c8fa74ee01ae15ca9e4dacd",
+      "probe_source_sha256": "10a5724ea230f59753a661b55ba89c44e4eef966daf4dd0d3d26ad85f3fda214",
+      "probe_stdout": "512\n512\n512\n512\n512\nTrue\nFalse\n3\n"
+    },
+    "error_precedence": {
+      "gzip-invalid-utf8-before-incorrect-crc": "BadGzipFile",
+      "gzip-malformed-row-before-incorrect-crc": "BadGzipFile",
+      "gzip-malformed-row-before-invalid-utf8": "UnicodeDecodeError",
+      "malformed-row-before-invalid-utf8": "UnicodeDecodeError"
+    },
+    "native_application": {
+      "cases": 66,
+      "complete_case_fixture_manifest_sha256": "04c878275d79afefac8bb44640dbebbb0d99f2e64775f670d9beac3361c859eb",
+      "complete_file_effects_stdout_and_category_manifest_sha256": "29d63d3b00209e0d175187f50de08b991e23bad248f84b67a35d2540eb7bdfee",
+      "domain_exclusions": {
+        "original": [
+          "duplicate-known-field",
+          "missing-required-field",
+          "wrong-field-type",
+          "known-unpaired-surrogate",
+          "empty-architecture-variant"
+        ]
+      },
+      "engine_executions": 193,
+      "executions_by_engine": {
+        "original": 61,
+        "port": 66,
+        "relar": 66
+      },
+      "expected_case_outcomes": {
+        "BadGzipFile": 4,
+        "EOFError": 1,
+        "FileExistsError": 1,
+        "FileNotFoundError": 1,
+        "IsADirectoryError": 1,
+        "UnicodeDecodeError": 3,
+        "ValueError": 12,
+        "success": 43
+      },
+      "mode": "complete-process",
+      "raw_receipt": {
+        "bytes": 27291596,
+        "sha256": "251490886995f560824a535b8b975855c6ebf7475b9cae1b0777eca6ee4b35bf"
+      }
+    },
+    "native_catalog_binary_sha256": "dd0f0fb45b5b66f0d32af8923db05b0fb3256e917fc2cfeb2cf619ac60f79f0d",
+    "source_input_sha256": {
+      "examples/python_catalog/__init__.py": "a0db9d6cc1f92d7fbd57a76bd9603aff6e544524cd6a91a45c9365b1929eb164",
+      "examples/python_catalog/__main__.py": "19048a0c4f86d78992b92afe7cdc5f9408a2fca94b61c34f706a4adf91e91810",
+      "examples/python_catalog/catalog.py": "aa8d22a6aaff3dec0f9d97c235e55ad94aa5878ded4e19b9f77cf226ec1e0f75"
+    }
+  },
+  "receipt_checks": "The counts, captured exit categories, stdout, complete file-effect hashes, and tool-reported suite summaries were checked locally against the individual raw records. Each catalog result includes a digest of its complete case manifest and of its per-case file effects, stdout, and expected category.",
+  "release_reference_preflight": {
+    "classification": "Post-target-cache pilot, excluding the full real index. This is separate from frozen release timing validation.",
+    "runs": {
+      "five_engines": {
+        "cases": 65,
+        "complete_case_fixture_manifest_sha256": "093cd41fa405378a74ec7db0b266a6b0f781b717a978b2856f4969e365092d5a",
+        "complete_file_effects_stdout_and_category_manifest_sha256": "5f55cbd0e8908cf8d1df766ca59b2a882fe1aa9c5117ac0ecf51d1dc5a318f1c",
+        "domain_exclusions": {
+          "codon": [
+            "gzip-zero-padded-members",
+            "gzip-missing-magic",
+            "arbitrary-precision-version-and-release",
+            "duplicate-known-field"
+          ],
+          "original": [
+            "duplicate-known-field",
+            "missing-required-field",
+            "wrong-field-type",
+            "known-unpaired-surrogate",
+            "empty-architecture-variant"
+          ]
+        },
+        "engine_executions": 316,
+        "executions_by_engine": {
+          "codon": 61,
+          "original": 60,
+          "port": 65,
+          "relar": 65,
+          "rust": 65
+        },
+        "expected_case_outcomes": {
+          "BadGzipFile": 4,
+          "EOFError": 1,
+          "FileExistsError": 1,
+          "FileNotFoundError": 1,
+          "IsADirectoryError": 1,
+          "UnicodeDecodeError": 3,
+          "ValueError": 12,
+          "success": 42
+        },
+        "mode": "complete-process",
+        "raw_receipt": {
+          "bytes": 899606,
+          "sha256": "e31c09c39decea3b23c7ea3d24285863574ad2461d76cf20cd0bef64ef10c5f5"
+        }
+      },
+      "references": {
+        "cases": 65,
+        "complete_case_fixture_manifest_sha256": "093cd41fa405378a74ec7db0b266a6b0f781b717a978b2856f4969e365092d5a",
+        "complete_file_effects_stdout_and_category_manifest_sha256": "5f55cbd0e8908cf8d1df766ca59b2a882fe1aa9c5117ac0ecf51d1dc5a318f1c",
+        "domain_exclusions": {
+          "original": [
+            "duplicate-known-field",
+            "missing-required-field",
+            "wrong-field-type",
+            "known-unpaired-surrogate",
+            "empty-architecture-variant"
+          ]
+        },
+        "engine_executions": 190,
+        "executions_by_engine": {
+          "original": 60,
+          "port": 65,
+          "rust": 65
+        },
+        "expected_case_outcomes": {
+          "BadGzipFile": 4,
+          "EOFError": 1,
+          "FileExistsError": 1,
+          "FileNotFoundError": 1,
+          "IsADirectoryError": 1,
+          "UnicodeDecodeError": 3,
+          "ValueError": 12,
+          "success": 42
+        },
+        "mode": "complete-process",
+        "raw_receipt": {
+          "bytes": 804927,
+          "sha256": "be64fe7724990509aadb497d057f855e7c98960accefcf4381795e33f937c2c0"
+        }
+      }
+    }
+  },
+  "sanitized_final_catalog": {
+    "asan_runtime_sha256": "adfaafa27c43d7a42fb3d79b67a395a149263f1bd2e08f5c04fe5a8e37d43c68",
+    "catalog": {
+      "cases": 66,
+      "complete_case_fixture_manifest_sha256": "04c878275d79afefac8bb44640dbebbb0d99f2e64775f670d9beac3361c859eb",
+      "complete_file_effects_stdout_and_category_manifest_sha256": "29d63d3b00209e0d175187f50de08b991e23bad248f84b67a35d2540eb7bdfee",
+      "domain_exclusions": {
+        "original": [
+          "duplicate-known-field",
+          "missing-required-field",
+          "wrong-field-type",
+          "known-unpaired-surrogate",
+          "empty-architecture-variant"
+        ]
+      },
+      "engine_executions": 193,
+      "executions_by_engine": {
+        "original": 61,
+        "port": 66,
+        "relar": 66
+      },
+      "expected_case_outcomes": {
+        "BadGzipFile": 4,
+        "EOFError": 1,
+        "FileExistsError": 1,
+        "FileNotFoundError": 1,
+        "IsADirectoryError": 1,
+        "UnicodeDecodeError": 3,
+        "ValueError": 12,
+        "success": 43
+      },
+      "mode": "complete-process",
+      "raw_receipt": {
+        "bytes": 27291002,
+        "sha256": "68f6f6ec07598550139ba18e69890a593c24025a8760814d1fdbc50abb842927"
+      }
+    },
+    "compiler_sha256": "71d1a3dfbf96e756063020a5251411ffe7cb758d75702a68d2a4b6575603c8af",
+    "compute": {
+      "cases": 14,
+      "complete_case_fixture_manifest_sha256": "294a09ee7c703b2abfe19db5a507f0043056c9881b992ef071ab1d8130d3ed11",
+      "complete_file_effects_stdout_and_category_manifest_sha256": "e058995cedf2bcc9a8c3988a4550499fd57eddab07e77f47e491e6bd6d815b8c",
+      "domain_exclusions": {
+        "original": [
+          "duplicate-known-field-compute-2"
+        ]
+      },
+      "engine_executions": 41,
+      "executions_by_engine": {
+        "original": 13,
+        "port": 14,
+        "relar": 14
+      },
+      "expected_case_outcomes": {
+        "FileExistsError": 1,
+        "FileNotFoundError": 1,
+        "ValueError": 4,
+        "success": 8
+      },
+      "mode": "repeated-full-compute",
+      "raw_receipt": {
+        "bytes": 53051097,
+        "sha256": "f4f7e6e40a9c42a3b971c8062754c0c983a00e2b9a9bd4e061afe2cb3b4f59ac"
+      }
+    },
+    "core_build_record_sha256": "fa0e79e41d375d1f394f67929cb757d9277e1b8a8d230aba954904528087f7aa",
+    "program_build_record_sha256": "1071d1c3115452a944c7f0072279c8cca6e8dd5cdd6c15be89c8bd234db705e9",
+    "rehashed_binaries": {
+      "python_catalog": {
+        "bytes": 11924168,
+        "sha256": "f8dce4fc4f0737c5a7c85cde7ba9683fb676604ec4caf1dc159ec92977c1e6e8"
+      },
+      "python_catalog-compute": {
+        "bytes": 11924272,
+        "sha256": "251a2131cbab917761e8ee18ce2f923e90e4fdc343993fae90ccca0e63340daa"
+      }
+    },
+    "revision": "f9b28e8a25182e0f7739c7835e171a01872b3c02",
+    "sanitizers": {
+      "halt_on_error": true,
+      "invocation_source": "Operator's recorded local ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 outside ptrace. Raw per-process validator files include captured stderr.",
+      "leak_detection": true
+    }
+  },
+  "schema": 1
+}

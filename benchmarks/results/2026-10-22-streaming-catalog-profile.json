@@ -1,0 +1,746 @@
+{
+  "corpus": {
+    "expected": {
+      "bytes": 3440812,
+      "sha256": "753cd906307c1b4f830e9348703e0110ba38fddd97293780f146f78f0ed9a3f6"
+    },
+    "inputs": {
+      "10x-gzip": {
+        "bytes": 28441940,
+        "sha256": "1ef9726035ffde42567adce210d25413a7a7e5f79860d4f9ffb68e8228077674"
+      },
+      "10x-plain": {
+        "bytes": 198704170,
+        "sha256": "96aad627f5fa656d2bc03126978b7f771223e2fee37727c9a31df1b23843f7e6"
+      },
+      "1x-gzip": {
+        "bytes": 2844194,
+        "sha256": "d3dcc0f4d8ceaa166eb38db9153bea40dab46afd1e984fa3e4970f7942172a3a"
+      },
+      "1x-plain": {
+        "bytes": 19870417,
+        "sha256": "e861c8ba1a18743f07395b83c4a54c9a6933ec2941637b3dc598c151ffe499f0"
+      }
+    },
+    "manifest_sha256": "ed54ea92ecf043a0cc7fbb169c935d11ad458019019cca2e4d1c53e587c26ebb",
+    "upstream": {
+      "bytes": 19870417,
+      "fetched_at_utc": "2026-10-21",
+      "git_blob": "18e9cffb6ed3593a328fbbb36ef7cc984e598f45",
+      "gzip_bytes": 2844194,
+      "gzip_sha256": "d3dcc0f4d8ceaa166eb38db9153bea40dab46afd1e984fa3e4970f7942172a3a",
+      "path": "v1/python-build-standalone.ndjson",
+      "platforms": 31,
+      "preparation": "Lossless gzip only. Parsing every raw row and artifact, filtering, selection, sorting, and complete JSON rendering belong to the program.",
+      "python_versions": 155,
+      "raw_artifacts": 58721,
+      "release_rows": 567,
+      "repository": "https://github.com/astral-sh/versions",
+      "revision": "db0d0dbfa44ff1306ea0e571962e0b2a6211e3c9",
+      "sha256": "e861c8ba1a18743f07395b83c4a54c9a6933ec2941637b3dc598c151ffe499f0",
+      "url": "https://raw.githubusercontent.com/astral-sh/versions/db0d0dbfa44ff1306ea0e571962e0b2a6211e3c9/v1/python-build-standalone.ndjson"
+    }
+  },
+  "host": "charlie-oss-8",
+  "pilot_core": {
+    "artifacts_sha256": {
+      "compiler": "71d1a3dfbf96e756063020a5251411ffe7cb758d75702a68d2a4b6575603c8af",
+      "normal_runtime": "ae446ef2b16a410e03b340ba1d851bf503bf5a8e3e7e1831f643225d4934b638",
+      "thinlto_runtime": "e0ea0dd45ced4a798790e03513d37597d0dc89b1671719630e90d20b8c5256f2"
+    },
+    "build_record_sha256": "cd138e15b6b7f126351cb1e8d815e117b4d9a27a1ac23ec2d8333b2fe74cf3d5",
+    "revision": "822f103dae0407b065ad151cd0e808ba32d10907"
+  },
+  "pilot_limits": [
+    "The pilot drivers built Relar against working-tree application sources without a build-time source hash. Catalog source hashes listed here were captured by the contemporary Codon builds of that checkout.",
+    "The ordinary pre-optimization Relar executable is bound by the profiler's copied-binary hash. The pilot drivers did not persist hashes for the other three Relar pilot executables.",
+    "The preliminary 10x fixture repeated the same corpus and had the same output as 1x. The separately frozen benchmark and truncation-sensitive correctness cases cover full-input consumption."
+  ],
+  "pilots": {
+    "after": {
+      "cases": {
+        "10x.ndjson": {
+          "engines": {
+            "relar": {
+              "median_ns": 1329897111.0,
+              "median_peak_rss_kib": 15738.0
+            },
+            "relar_thin": {
+              "median_ns": 897404000.5,
+              "median_peak_rss_kib": 15978.0
+            },
+            "rust": {
+              "median_ns": 747696749.0,
+              "median_peak_rss_kib": 11488.0
+            },
+            "rust_thin": {
+              "median_ns": 525139892.0,
+              "median_peak_rss_kib": 11868.0
+            }
+          },
+          "relar_over_rust": {
+            "normal": 1.778658,
+            "thinlto": 1.708886
+          }
+        },
+        "10x.ndjson.gz": {
+          "engines": {
+            "relar": {
+              "median_ns": 1527603481.0,
+              "median_peak_rss_kib": 15980.0
+            },
+            "relar_thin": {
+              "median_ns": 1083957997.0,
+              "median_peak_rss_kib": 16094.0
+            },
+            "rust": {
+              "median_ns": 952459126.0,
+              "median_peak_rss_kib": 11514.0
+            },
+            "rust_thin": {
+              "median_ns": 709395026.0,
+              "median_peak_rss_kib": 11508.0
+            }
+          },
+          "relar_over_rust": {
+            "normal": 1.603852,
+            "thinlto": 1.528003
+          }
+        },
+        "1x.ndjson": {
+          "engines": {
+            "relar": {
+              "median_ns": 195590066.5,
+              "median_peak_rss_kib": 15926.0
+            },
+            "relar_thin": {
+              "median_ns": 138181523.0,
+              "median_peak_rss_kib": 15940.0
+            },
+            "rust": {
+              "median_ns": 115597074.0,
+              "median_peak_rss_kib": 11246.0
+            },
+            "rust_thin": {
+              "median_ns": 89922669.0,
+              "median_peak_rss_kib": 11758.0
+            }
+          },
+          "relar_over_rust": {
+            "normal": 1.691998,
+            "thinlto": 1.536671
+          }
+        },
+        "1x.ndjson.gz": {
+          "engines": {
+            "relar": {
+              "median_ns": 199698976.0,
+              "median_peak_rss_kib": 16230.0
+            },
+            "relar_thin": {
+              "median_ns": 148001378.5,
+              "median_peak_rss_kib": 16214.0
+            },
+            "rust": {
+              "median_ns": 128702854.5,
+              "median_peak_rss_kib": 11558.0
+            },
+            "rust_thin": {
+              "median_ns": 100208091.5,
+              "median_peak_rss_kib": 11548.0
+            }
+          },
+          "relar_over_rust": {
+            "normal": 1.551628,
+            "thinlto": 1.47694
+          }
+        }
+      },
+      "cpu": 31,
+      "driver_sha256": "87c31fa0a70cda967ad2ac3920f2354a495070c263601db7857bde757210070a",
+      "raw_results": {
+        "bytes": 5577,
+        "sha256": "795e9b234cba935a39a92f99c6476d0ce32fca3402c3280b2646e742f018db03"
+      },
+      "samples_per_engine_per_case": 4
+    },
+    "before": {
+      "cases": {
+        "10x.ndjson": {
+          "engines": {
+            "relar": {
+              "median_ns": 2496677110.5,
+              "median_peak_rss_kib": 19920.0
+            },
+            "relar_thin": {
+              "median_ns": 2105008624.5,
+              "median_peak_rss_kib": 19898.0
+            },
+            "rust": {
+              "median_ns": 1188181916.5,
+              "median_peak_rss_kib": 15642.0
+            },
+            "rust_thin": {
+              "median_ns": 989968249.0,
+              "median_peak_rss_kib": 15900.0
+            }
+          },
+          "relar_over_rust": {
+            "normal": 2.101258,
+            "thinlto": 2.12634
+          }
+        },
+        "10x.ndjson.gz": {
+          "engines": {
+            "relar": {
+              "median_ns": 2481180686.5,
+              "median_peak_rss_kib": 20210.0
+            },
+            "relar_thin": {
+              "median_ns": 1850737172.5,
+              "median_peak_rss_kib": 20186.0
+            },
+            "rust": {
+              "median_ns": 1541634253.5,
+              "median_peak_rss_kib": 16228.0
+            },
+            "rust_thin": {
+              "median_ns": 914421360.0,
+              "median_peak_rss_kib": 16268.0
+            }
+          },
+          "relar_over_rust": {
+            "normal": 1.609448,
+            "thinlto": 2.023944
+          }
+        },
+        "1x.ndjson": {
+          "engines": {
+            "relar": {
+              "median_ns": 283762662.5,
+              "median_peak_rss_kib": 19892.0
+            },
+            "relar_thin": {
+              "median_ns": 200316502.0,
+              "median_peak_rss_kib": 20128.0
+            },
+            "rust": {
+              "median_ns": 145588423.5,
+              "median_peak_rss_kib": 15630.0
+            },
+            "rust_thin": {
+              "median_ns": 108379892.5,
+              "median_peak_rss_kib": 15658.0
+            }
+          },
+          "relar_over_rust": {
+            "normal": 1.949074,
+            "thinlto": 1.848281
+          }
+        },
+        "1x.ndjson.gz": {
+          "engines": {
+            "relar": {
+              "median_ns": 290760086.5,
+              "median_peak_rss_kib": 20298.0
+            },
+            "relar_thin": {
+              "median_ns": 211454782.5,
+              "median_peak_rss_kib": 20308.0
+            },
+            "rust": {
+              "median_ns": 159011264.5,
+              "median_peak_rss_kib": 15438.0
+            },
+            "rust_thin": {
+              "median_ns": 123930766.0,
+              "median_peak_rss_kib": 15764.0
+            }
+          },
+          "relar_over_rust": {
+            "normal": 1.82855,
+            "thinlto": 1.706233
+          }
+        }
+      },
+      "cpu": 31,
+      "driver_sha256": "c05ea18050598ddb86e6f7caf95d079bfc9588f9a9becbded91c71ebacf072da",
+      "raw_results": {
+        "bytes": 5606,
+        "sha256": "dc34803e265d82176554a8b1c3fd68a3cb9e202318b9ce10560af26ea2489333"
+      },
+      "samples_per_engine_per_case": 4
+    }
+  },
+  "profile_tools": {
+    "callgrind": {
+      "binary_sha256": {
+        "/usr/bin/valgrind": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+        "/usr/libexec/valgrind/callgrind-amd64-linux": "825eb197d519240c112e03ed00f40a8bbe1a0a0614f79ea95e28c67e8695cb03",
+        "/usr/libexec/valgrind/vgpreload_core-amd64-linux.so": "87edd6ad90b12bb5fe58f2ea2235db5b6a3d637657488f3e06d07e482354a8c5",
+        "/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so": "1cb4fa3188da5492822b33976fe83a150809e39515cc37fe2e52d605a8197436",
+        "/usr/libexec/valgrind/vgpreload_drd-amd64-linux.so": "40fe5fc95edc6abce11375641083e93abe3515d6c3adfa36f7aca398808c2379",
+        "/usr/libexec/valgrind/vgpreload_helgrind-amd64-linux.so": "56762c3246609dd15facc092778621e613e8b63d942f9e8481fc13613c41f601",
+        "/usr/libexec/valgrind/vgpreload_massif-amd64-linux.so": "7406647d5b1378593399d353b89cd5c002bb93adf06ec2cc4ebecc3ec212315b",
+        "/usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so": "3fd773d3a2913989621a0e39ed7aaf421036e91afa66a25b58165aa61656f3c6"
+      },
+      "kernel": "6.8.0-147-generic",
+      "source_sha256": {
+        "benchmarks/dependency_profile.py": "828276971d56aa86e44c8f04a04635d6a448babb20f748ea5e29e0577f907b27",
+        "benchmarks/native_tools_profile.py": "03a811830f7257b72f344c8dd0a6edd5bf9c064752b1e6d4e41ada193aa414aa"
+      },
+      "version": "valgrind-3.22.0"
+    },
+    "dhat": {
+      "binary_sha256": {
+        "/usr/bin/valgrind": "4652774bd116cb49951ef74115ad4237cad5021b2bd4d80002f09d986ec438b9",
+        "/usr/libexec/valgrind/dhat-amd64-linux": "cbe15a883012c617da1359656425faed0b1a049fce329801a31cb5f45c5d71fc",
+        "/usr/libexec/valgrind/vgpreload_core-amd64-linux.so": "87edd6ad90b12bb5fe58f2ea2235db5b6a3d637657488f3e06d07e482354a8c5",
+        "/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so": "1cb4fa3188da5492822b33976fe83a150809e39515cc37fe2e52d605a8197436",
+        "/usr/libexec/valgrind/vgpreload_drd-amd64-linux.so": "40fe5fc95edc6abce11375641083e93abe3515d6c3adfa36f7aca398808c2379",
+        "/usr/libexec/valgrind/vgpreload_helgrind-amd64-linux.so": "56762c3246609dd15facc092778621e613e8b63d942f9e8481fc13613c41f601",
+        "/usr/libexec/valgrind/vgpreload_massif-amd64-linux.so": "7406647d5b1378593399d353b89cd5c002bb93adf06ec2cc4ebecc3ec212315b",
+        "/usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so": "3fd773d3a2913989621a0e39ed7aaf421036e91afa66a25b58165aa61656f3c6"
+      },
+      "kernel": "6.8.0-147-generic",
+      "source_sha256": {
+        "benchmarks/dependency_profile.py": "828276971d56aa86e44c8f04a04635d6a448babb20f748ea5e29e0577f907b27",
+        "benchmarks/native_tools_profile.py": "03a811830f7257b72f344c8dd0a6edd5bf9c064752b1e6d4e41ada193aa414aa"
+      },
+      "version": "valgrind-3.22.0"
+    }
+  },
+  "profiler_driver_sha256": "acd65d8feb0db2467b9d17a4019e671bfd793d1179156220b0cebe5d0906a6c8",
+  "profiles": {
+    "10x": {
+      "relar": {
+        "binary_sha256": "23c71c7425133617902834821041c5f81d1a3baf5f27727a5fdca62e8ffc7b18",
+        "callgrind": {
+          "cpu": 20,
+          "highest_exclusive": [
+            {
+              "name": "_int_free",
+              "self_instructions": 1132808935
+            },
+            {
+              "name": "_int_malloc",
+              "self_instructions": 1029581933
+            },
+            {
+              "name": "<serde_json::read::SliceRead>::skip_to_escape",
+              "self_instructions": 760666710
+            },
+            {
+              "name": "<relar_runtime::objects::json::Seed as serde_core::de::DeserializeSeed>::deserialize::<&mut serde_json::de::Deserializer<serde_json::read::StrRead>>'2",
+              "self_instructions": 701193110
+            }
+          ],
+          "instructions": 16273726443,
+          "raw": {
+            "log_sha256": "cd07eafd8d4abdeedc1c7a66d1be6b8aea4ffd597453361a358c843813543d2d",
+            "provenance_sha256": "a84d52e442ab7010f02a45e16e96de8a832e8d5f44efbf5012c63579fc2ad654",
+            "summary_sha256": "e70adf2cdd0f822f6c47eb5aa3d902dfdee822de8f37ae44aa95d9743d011a38",
+            "trace_sha256": "51fe63b724626a1666c1015195e2a8d0aa19db52a19acc2feb2eb6961dfbf466"
+          },
+          "selected_inclusive": [
+            {
+              "incoming_inclusive_instructions": 4082070253,
+              "name": "relar_json_decode"
+            },
+            {
+              "incoming_inclusive_instructions": 1323611179,
+              "name": "relar_str_split"
+            },
+            {
+              "incoming_inclusive_instructions": 713500429,
+              "name": "relar_str_splitlines"
+            },
+            {
+              "incoming_inclusive_instructions": 256017676,
+              "name": "relar_str_rsplit_last"
+            },
+            {
+              "incoming_inclusive_instructions": 200723599,
+              "name": "relar_runtime::objects::relar_str_splitlines::{closure#0}"
+            }
+          ]
+        },
+        "dhat": {
+          "allocated_bytes": 1745900165,
+          "allocation_blocks": 16715183,
+          "cpu": 21,
+          "ending_live_blocks": 2,
+          "ending_live_bytes": 9216,
+          "peak_live_blocks": 73381,
+          "peak_live_bytes": 13293312,
+          "raw": {
+            "log_sha256": "73d6e746a5686275dc052620cbaa65c0d89b9f7a594d9cd9d12b1ceb3bec36d4",
+            "provenance_sha256": "d848a86495ad8e8a41ad7672f9afba4adac149370efb9b3156113d72a0b5b0d7",
+            "summary_sha256": "bea40092823dfc6b55f1db67f89c962eb7e31d78b4b46e8e3c3bd946c311df40",
+            "trace_sha256": "3ee5e57c0e1d503e4624c49a9e459dc44f3254a4a83351c7db12c19e51d07c72"
+          },
+          "top_allocating_entries_by_block_count": [
+            {
+              "entry": "relar_str_split",
+              "tb": 233364880,
+              "tbk": 5251900
+            },
+            {
+              "entry": "relar_json_decode",
+              "tb": 252198620,
+              "tbk": 4026590
+            },
+            {
+              "entry": "relar_record_new",
+              "tb": 163294376,
+              "tbk": 3304208
+            },
+            {
+              "entry": "relar_str_rsplit_last",
+              "tb": 68436300,
+              "tbk": 1174420
+            },
+            {
+              "entry": "relar_str_unquote",
+              "tb": 67797810,
+              "tbk": 1162300
+            }
+          ]
+        },
+        "input_sha256": "96aad627f5fa656d2bc03126978b7f771223e2fee37727c9a31df1b23843f7e6",
+        "output": {
+          "bytes": 3440812,
+          "sha256": "753cd906307c1b4f830e9348703e0110ba38fddd97293780f146f78f0ed9a3f6"
+        }
+      },
+      "rust": {
+        "binary_sha256": "8f64cdcc225ba7466113bce84c3aa3b2f1db521f89669650c68f1cd9ede39ed7",
+        "callgrind": {
+          "cpu": 22,
+          "highest_exclusive": [
+            {
+              "name": "<serde_json::read::SliceRead>::skip_to_escape",
+              "self_instructions": 760666710
+            },
+            {
+              "name": "_int_free",
+              "self_instructions": 490320625
+            },
+            {
+              "name": "<python_catalog_reference::Selection>::offer_line",
+              "self_instructions": 418797795
+            },
+            {
+              "name": "malloc",
+              "self_instructions": 367162384
+            }
+          ],
+          "instructions": 7287790988,
+          "raw": {
+            "log_sha256": "a1adae5aa2f921d778d895872d971c04e26a67e634304fe27b7d9b68829dc884",
+            "provenance_sha256": "8e180ec2a07fcab689c16d806e00cb0523281b74f8402ad3e84bec017cfb3bad",
+            "summary_sha256": "3938198ae8a7d7bb7cead252c620f13b5d6bd504899aaf52d966e2ccd24bde2c",
+            "trace_sha256": "d455837ae004a5e12ae38b9b0ad9683f5d2e147a9da1313ba18508b0b41aa725"
+          },
+          "selected_inclusive": [
+            {
+              "incoming_inclusive_instructions": 6967671464,
+              "name": "<python_catalog_reference::Selection>::offer_physical_line"
+            },
+            {
+              "incoming_inclusive_instructions": 6502492821,
+              "name": "<python_catalog_reference::Selection>::offer_line"
+            },
+            {
+              "incoming_inclusive_instructions": 194259674,
+              "name": "core::slice::sort::stable::driftsort_main::<python_catalog_reference::Artifact, <[python_catalog_reference::Artifact]>::sort_by<<python_catalog_reference::Selection>::offer_line::{closure#1}>::{closure#0}, alloc::vec::Vec<python_catalog_reference::Artifact>>"
+            },
+            {
+              "incoming_inclusive_instructions": 187996970,
+              "name": "core::slice::sort::stable::drift::sort::<python_catalog_reference::Artifact, <[python_catalog_reference::Artifact]>::sort_by<<python_catalog_reference::Selection>::offer_line::{closure#1}>::{closure#0}>"
+            },
+            {
+              "incoming_inclusive_instructions": 155348390,
+              "name": "core::slice::sort::stable::quicksort::quicksort::<python_catalog_reference::Artifact, <[python_catalog_reference::Artifact]>::sort_by<<python_catalog_reference::Selection>::offer_line::{closure#1}>::{closure#0}>"
+            }
+          ]
+        },
+        "dhat": {
+          "allocated_bytes": 572372957,
+          "allocation_blocks": 8530587,
+          "cpu": 23,
+          "ending_live_blocks": 1,
+          "ending_live_bytes": 544,
+          "peak_live_blocks": 56927,
+          "peak_live_bytes": 10362725,
+          "raw": {
+            "log_sha256": "725ef7cd444ff760647bfcd3932b9abda4a51313ebd0ce8fd03db1d39f4b38d7",
+            "provenance_sha256": "329d8f552eebdb02ce4027af7243ffef0c717777902e705f6f245e0907ffca02",
+            "summary_sha256": "d307b03cd9b5f59b1f5da215bfeef984ab70b6ccdb7405df2a4b9f8d54dcc6f3",
+            "trace_sha256": "1c887b16dd935f38c7c5f672a3baeb8a05218dbc40b387b40c39b58bab54d8da"
+          },
+          "top_allocating_entries_by_block_count": [
+            {
+              "entry": "other",
+              "tb": 572372957,
+              "tbk": 8530587
+            }
+          ]
+        },
+        "input_sha256": "96aad627f5fa656d2bc03126978b7f771223e2fee37727c9a31df1b23843f7e6",
+        "output": {
+          "bytes": 3440812,
+          "sha256": "753cd906307c1b4f830e9348703e0110ba38fddd97293780f146f78f0ed9a3f6"
+        }
+      }
+    },
+    "1x": {
+      "relar": {
+        "binary_sha256": "23c71c7425133617902834821041c5f81d1a3baf5f27727a5fdca62e8ffc7b18",
+        "callgrind": {
+          "cpu": 16,
+          "highest_exclusive": [
+            {
+              "name": "_int_malloc",
+              "self_instructions": 119254684
+            },
+            {
+              "name": "_int_free",
+              "self_instructions": 116596939
+            },
+            {
+              "name": "<serde_json::read::SliceRead>::skip_to_escape",
+              "self_instructions": 76066671
+            },
+            {
+              "name": "<relar_runtime::objects::json::Seed as serde_core::de::DeserializeSeed>::deserialize::<&mut serde_json::de::Deserializer<serde_json::read::StrRead>>'2",
+              "self_instructions": 70119311
+            }
+          ],
+          "instructions": 1798886406,
+          "raw": {
+            "log_sha256": "9c0cd3b52a6ca305fda6ffb81577dd337e5429f1a290eff5a694b716511a750b",
+            "provenance_sha256": "c2d415f80ba89afb25125d4689f2f5cc4c01c187054fdb7ad7e9277d1d629ffc",
+            "summary_sha256": "2f71b1fd34054be00469e6290d9d31591862b7e99114a4f10516462729bf04ec",
+            "trace_sha256": "321fc14dcb0c65cab01452bc31be69e1983a2cb446c746e5a905bcc4501cc9ec"
+          },
+          "selected_inclusive": [
+            {
+              "incoming_inclusive_instructions": 408440315,
+              "name": "relar_json_decode"
+            },
+            {
+              "incoming_inclusive_instructions": 135767456,
+              "name": "relar_str_split"
+            },
+            {
+              "incoming_inclusive_instructions": 71316781,
+              "name": "relar_str_splitlines"
+            },
+            {
+              "incoming_inclusive_instructions": 25686172,
+              "name": "relar_str_rsplit_last"
+            },
+            {
+              "incoming_inclusive_instructions": 20033369,
+              "name": "relar_runtime::objects::relar_str_splitlines::{closure#0}"
+            }
+          ]
+        },
+        "dhat": {
+          "allocated_bytes": 192281541,
+          "allocation_blocks": 1730851,
+          "cpu": 17,
+          "ending_live_blocks": 2,
+          "ending_live_bytes": 9216,
+          "peak_live_blocks": 73381,
+          "peak_live_bytes": 13293311,
+          "raw": {
+            "log_sha256": "1c55cc6102eab9722fb96524635fa91f6678b6c6a28a4a45b4fb066acaa4de84",
+            "provenance_sha256": "f143edc3d1d0875c67cc3fc5a87b747e027fa65277ee117b281dce38c5029181",
+            "summary_sha256": "d07879944375a10e095fb42b92fa464229f783270c1dfd9af7d37361dc7112ce",
+            "trace_sha256": "f2ca5cad43ad010041acc7009b50974cd0f594f67769275e2a3ed4c405b6fbea"
+          },
+          "top_allocating_entries_by_block_count": [
+            {
+              "entry": "relar_str_split",
+              "tb": 23336488,
+              "tbk": 525190
+            },
+            {
+              "entry": "relar_json_decode",
+              "tb": 25219862,
+              "tbk": 402659
+            },
+            {
+              "entry": "relar_record_new",
+              "tb": 18256856,
+              "tbk": 365969
+            },
+            {
+              "entry": "relar_str_rsplit_last",
+              "tb": 6843630,
+              "tbk": 117442
+            },
+            {
+              "entry": "relar_str_unquote",
+              "tb": 6779781,
+              "tbk": 116230
+            }
+          ]
+        },
+        "input_sha256": "e861c8ba1a18743f07395b83c4a54c9a6933ec2941637b3dc598c151ffe499f0",
+        "output": {
+          "bytes": 3440812,
+          "sha256": "753cd906307c1b4f830e9348703e0110ba38fddd97293780f146f78f0ed9a3f6"
+        }
+      },
+      "rust": {
+        "binary_sha256": "8f64cdcc225ba7466113bce84c3aa3b2f1db521f89669650c68f1cd9ede39ed7",
+        "callgrind": {
+          "cpu": 18,
+          "highest_exclusive": [
+            {
+              "name": "<serde_json::read::SliceRead>::skip_to_escape",
+              "self_instructions": 76066671
+            },
+            {
+              "name": "__memcpy_avx_unaligned_erms",
+              "self_instructions": 57104153
+            },
+            {
+              "name": "_int_free",
+              "self_instructions": 51551666
+            },
+            {
+              "name": "<python_catalog_reference::Selection>::offer_line",
+              "self_instructions": 41937197
+            }
+          ],
+          "instructions": 879252454,
+          "raw": {
+            "log_sha256": "05417a6b2571c9176165acc052e6a0bd894183473934e24a26d973d36db45726",
+            "provenance_sha256": "fb4094d903c1ded20edbfe09f18d91575aa3b44df1038f0bf45702faba8d2674",
+            "summary_sha256": "fe480fc42661dc8a0efef71d9c49dc7795eaf11c87d27cf11a492506ff86fd49",
+            "trace_sha256": "cd70d67732ed81ac3dc236f51c33765644f23c16cd349c4627c6f1666813b6e0"
+          },
+          "selected_inclusive": [
+            {
+              "incoming_inclusive_instructions": 702318521,
+              "name": "<python_catalog_reference::Selection>::offer_physical_line"
+            },
+            {
+              "incoming_inclusive_instructions": 655800221,
+              "name": "<python_catalog_reference::Selection>::offer_line"
+            },
+            {
+              "incoming_inclusive_instructions": 19606236,
+              "name": "core::slice::sort::stable::driftsort_main::<python_catalog_reference::Artifact, <[python_catalog_reference::Artifact]>::sort_by<<python_catalog_reference::Selection>::offer_line::{closure#1}>::{closure#0}, alloc::vec::Vec<python_catalog_reference::Artifact>>"
+            },
+            {
+              "incoming_inclusive_instructions": 18800219,
+              "name": "core::slice::sort::stable::drift::sort::<python_catalog_reference::Artifact, <[python_catalog_reference::Artifact]>::sort_by<<python_catalog_reference::Selection>::offer_line::{closure#1}>::{closure#0}>"
+            },
+            {
+              "incoming_inclusive_instructions": 15536234,
+              "name": "core::slice::sort::stable::quicksort::quicksort::<python_catalog_reference::Artifact, <[python_catalog_reference::Artifact]>::sort_by<<python_catalog_reference::Selection>::offer_line::{closure#1}>::{closure#0}>"
+            }
+          ]
+        },
+        "dhat": {
+          "allocated_bytes": 87902353,
+          "allocation_blocks": 885672,
+          "cpu": 19,
+          "ending_live_blocks": 1,
+          "ending_live_bytes": 544,
+          "peak_live_blocks": 56927,
+          "peak_live_bytes": 10362724,
+          "raw": {
+            "log_sha256": "494e793219b491b8fa99ea2c3b8d3af47cd9e0f03ecf73190f44161281201e9d",
+            "provenance_sha256": "535c9de2a50096e88f5573ef63224b070b5dd4fe8de57c12bfd44f00ffe87f13",
+            "summary_sha256": "3eeeb9ef28caa8d4c9b4f10bf9c55885f2612e4e67e85192a3fee97b733159cc",
+            "trace_sha256": "5949c754947e840a40d1a23bb045943c8a22f9ff7f552cdf629e8501bb7441fa"
+          },
+          "top_allocating_entries_by_block_count": [
+            {
+              "entry": "other",
+              "tb": 87902353,
+              "tbk": 885672
+            }
+          ]
+        },
+        "input_sha256": "e861c8ba1a18743f07395b83c4a54c9a6933ec2941637b3dc598c151ffe499f0",
+        "output": {
+          "bytes": 3440812,
+          "sha256": "753cd906307c1b4f830e9348703e0110ba38fddd97293780f146f78f0ed9a3f6"
+        }
+      }
+    }
+  },
+  "purpose": "Exploratory native pilots and pre-target-cache CPU/heap profiles. These runs are separate from the published performance gate.",
+  "related_source_receipts": {
+    "after": {
+      "catalog_sources_in_contemporaneous_codon_build": {
+        "examples/python_catalog/__init__.py": "a0db9d6cc1f92d7fbd57a76bd9603aff6e544524cd6a91a45c9365b1929eb164",
+        "examples/python_catalog/__main__.py": "19048a0c4f86d78992b92afe7cdc5f9408a2fca94b61c34f706a4adf91e91810",
+        "examples/python_catalog/catalog.py": "aa8d22a6aaff3dec0f9d97c235e55ad94aa5878ded4e19b9f77cf226ec1e0f75",
+        "examples/python_catalog/compute.py": "484b16c384d9b6a7985a4d01c9916fab25a3782c8754ce323e315fea2c3aac9e"
+      },
+      "codon_record_sha256": "503253fb3e933917a02126303dc86fa4812f8449cdcd1d88db814b4a5043482c",
+      "rust_builds": {
+        "normal": {
+          "binary_sha256": "aed68f07a464e622591579ea43589ab54414bacc9f9d9f2a9e271bb6a7a26672",
+          "build_record_sha256": "9e67f088984f6bc94e0fc55ea75f9f7a1a03495bcb299a8871a1d8d4b227bb11",
+          "sources_sha256": {
+            "Cargo.lock": "c95082ff27ae29108f6a8ab89e4559644b8a5afd667c4d2fb170461718cb339c",
+            "Cargo.toml": "c2d8784aea551caf2156aaa8fa147a25a44bc59d590f1ebf99b89debe166bb01",
+            "build.py": "552b1783427c45bd5c895a3972c2b1589b4b70993fef3d40c527838afddbf94d",
+            "src/main.rs": "31a89f82c8c68ee3da1e0de92154c0e65eb221805d5e405c9ad80e7baaa9ab7a"
+          }
+        },
+        "thin": {
+          "binary_sha256": "0c29cf7a575097e3c45b3906552478918fe8372d58f32e9385f5248eebefc0d0",
+          "build_record_sha256": "76ff60d57cc49ccdb4db97cf6177e511941e9e096ff14dc4cfd75d0406d78167",
+          "sources_sha256": {
+            "Cargo.lock": "c95082ff27ae29108f6a8ab89e4559644b8a5afd667c4d2fb170461718cb339c",
+            "Cargo.toml": "c2d8784aea551caf2156aaa8fa147a25a44bc59d590f1ebf99b89debe166bb01",
+            "build.py": "552b1783427c45bd5c895a3972c2b1589b4b70993fef3d40c527838afddbf94d",
+            "src/main.rs": "31a89f82c8c68ee3da1e0de92154c0e65eb221805d5e405c9ad80e7baaa9ab7a"
+          }
+        }
+      }
+    },
+    "before": {
+      "catalog_sources_in_contemporaneous_codon_build": {
+        "examples/python_catalog/__init__.py": "a0db9d6cc1f92d7fbd57a76bd9603aff6e544524cd6a91a45c9365b1929eb164",
+        "examples/python_catalog/__main__.py": "423c76a92a61be88c891e1624211f9257b985c11dc8742f254cab91d86e68f90",
+        "examples/python_catalog/catalog.py": "891f1bfecbd29441301e2449f7c3cb332ca493376182d0cf1d497ca450fbae92",
+        "examples/python_catalog/compute.py": "484b16c384d9b6a7985a4d01c9916fab25a3782c8754ce323e315fea2c3aac9e"
+      },
+      "codon_record_sha256": "fb1d1e3cb16ac0c345c76f86f61f7eb9e966033887dd65e109810802dee819ee",
+      "rust_builds": {
+        "normal": {
+          "binary_sha256": "8f64cdcc225ba7466113bce84c3aa3b2f1db521f89669650c68f1cd9ede39ed7",
+          "build_record_sha256": "858dc3cfdf54e9017b818821f97232f5bbebe1d421d0694ddae8afab3a7c9b95",
+          "sources_sha256": {
+            "Cargo.lock": "c95082ff27ae29108f6a8ab89e4559644b8a5afd667c4d2fb170461718cb339c",
+            "Cargo.toml": "c2d8784aea551caf2156aaa8fa147a25a44bc59d590f1ebf99b89debe166bb01",
+            "build.py": "552b1783427c45bd5c895a3972c2b1589b4b70993fef3d40c527838afddbf94d",
+            "src/main.rs": "bcb191c7814ac8493a892a268153b89681c96e7d0def0f51769d96b6b4dd1ddf"
+          }
+        },
+        "thin": {
+          "binary_sha256": "b8c497bc123b94e87fe93e0d16cbf88857c57d215b1c09fbe5be3c48af6b2bf4",
+          "build_record_sha256": "54dce2624068fcf34301a5787310984629558c8739179994d8d6a7d7a5dac7df",
+          "sources_sha256": {
+            "Cargo.lock": "c95082ff27ae29108f6a8ab89e4559644b8a5afd667c4d2fb170461718cb339c",
+            "Cargo.toml": "c2d8784aea551caf2156aaa8fa147a25a44bc59d590f1ebf99b89debe166bb01",
+            "build.py": "552b1783427c45bd5c895a3972c2b1589b4b70993fef3d40c527838afddbf94d",
+            "src/main.rs": "bcb191c7814ac8493a892a268153b89681c96e7d0def0f51769d96b6b4dd1ddf"
+          }
+        }
+      }
+    }
+  },
+  "schema": 1
+}

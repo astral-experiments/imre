@@ -307,6 +307,10 @@ file. The 10× archive contains ten concatenated members. All four inputs must
 produce the same 6,098-entry catalog. A separate preflight gives every member
 a unique winning download and compares the full result across engines.
 
+The [streaming catalog results](results/2026-10-22-streaming-catalog.md) include
+median time and peak memory for every engine, the raw measurements, and an
+independent replay command.
+
 Build the compiler and runtimes with `native_tools_build.py` as described below.
 For each Relar program, use `live_conformance_build.py --application python_catalog`
 with the core build record and the matching `--mode` and linker. Build the
