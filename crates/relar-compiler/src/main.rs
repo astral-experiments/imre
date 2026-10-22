@@ -1,11 +1,11 @@
-use std::ffi::OsString;
-use std::io::Write;
+use std::ffi::{OsStr, OsString};
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use relar_compiler::CompileOptions;
 
-const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY]\n       relar build SOURCE.py -o OUTPUT [--module-root DIRECTORY]\n           [--runtime LIBRARY.a] [--emit-llvm FILE.ll] [--clang CLANG]\n           [--opt-level 0|1|2|3] [--sanitize]\n           [--target TRIPLE] [--lto-linker PATH]\n\nThinLTO (--lto-linker) requires explicit --runtime and --target.";
+const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY]\n       relar build SOURCE.py [-o OUTPUT] [--module-root DIRECTORY]\n           [--runtime LIBRARY.a] [--emit-llvm FILE.ll] [--clang CLANG]\n           [--opt-level 0|1|2|3] [--sanitize]\n           [--target TRIPLE] [--lto-linker PATH]\n\nBuild writes the executable to the current directory using the source filename without its extension.\nThinLTO (--lto-linker) requires explicit --runtime and --target.";
 
 fn main() -> ExitCode {
     match run() {
@@ -41,7 +41,7 @@ fn run() -> Result<(), String> {
     let mut module_root = None;
     let mut lto_linker = None;
     let mut target = None;
-    let mut clang = OsString::from("clang");
+    let mut clang = None;
     let mut optimization = OsString::from("3");
     let mut options = CompileOptions::default();
     while let Some(flag) = args.next() {
@@ -58,7 +58,7 @@ fn run() -> Result<(), String> {
             Some("-o") => output = Some(PathBuf::from(value)),
             Some("--runtime") => runtime = Some(PathBuf::from(value)),
             Some("--emit-llvm") => llvm_path = Some(PathBuf::from(value)),
-            Some("--clang") => clang = value,
+            Some("--clang") => clang = Some(value),
             Some("--lto-linker") => lto_linker = Some(PathBuf::from(value)),
             Some("--target") => target = Some(value),
             Some("--opt-level") if matches!(value.to_str(), Some("0" | "1" | "2" | "3")) => {
@@ -78,7 +78,9 @@ fn run() -> Result<(), String> {
     if !cfg!(all(target_os = "linux", target_pointer_width = "64")) {
         return Err("The prototype currently supports 64-bit Linux hosts".to_owned());
     }
-    let output = output.ok_or(USAGE)?;
+    let output = output
+        .or_else(|| source_path.file_stem().map(PathBuf::from))
+        .ok_or("Could not infer an executable name from the source path; pass -o OUTPUT.")?;
     if lto_linker.is_some() && (runtime.is_none() || target.is_none()) {
         return Err("--lto-linker requires explicit --runtime and --target".to_owned());
     }
@@ -151,7 +153,7 @@ fn run() -> Result<(), String> {
     if let Some(path) = llvm_path {
         std::fs::write(path, &ir).map_err(|error| error.to_string())?;
     }
-    let mut linker = Command::new(clang);
+    let mut linker = Command::new(clang.as_deref().unwrap_or(OsStr::new("clang-18")));
     linker
         .arg(format!("-O{}", optimization.to_string_lossy()))
         .arg("-Wno-override-module")
@@ -178,9 +180,22 @@ fn run() -> Result<(), String> {
         argument.push(target);
         linker.arg(argument);
     }
-    let status = linker
-        .status()
-        .map_err(|error| format!("Could not run clang: {error}"))?;
+    let status = match linker.status() {
+        Err(error) if clang.is_none() && error.kind() == ErrorKind::NotFound => {
+            let mut fallback = Command::new("clang");
+            fallback.args(linker.get_args()).status().map_err(|error| {
+                format!(
+                    "Could not run clang-18 or clang: {error}. Install Clang 18 or pass --clang PATH."
+                )
+            })?
+        }
+        result => result.map_err(|error| {
+            format!(
+                "Could not run {}: {error}",
+                linker.get_program().to_string_lossy()
+            )
+        })?,
+    };
     if !status.success() {
         return Err(format!("LLVM compilation/linking failed: {status}"));
     }
