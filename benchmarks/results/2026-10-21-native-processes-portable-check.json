@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "copied_inputs": [
+    "2026-10-21-native-processes-evidence.tar.gz",
+    "2026-10-21-native-processes-normal.json.gz",
+    "2026-10-21-native-processes-replay.py",
+    "replay-result.json",
+    "2026-10-21-native-processes-evidence-manifest.json",
+    "2026-10-21-native-processes-evidence-index.json",
+    "2026-10-21-native-processes-thinlto.json.gz"
+  ],
+  "source_and_capture_access": "forbidden outside isolated bundle",
+  "external_execution_and_network": "forbidden by audit hook",
+  "opened_paths": 3641,
+  "python_version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+  "python_runtime_roots": [
+    "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu"
+  ]
+}

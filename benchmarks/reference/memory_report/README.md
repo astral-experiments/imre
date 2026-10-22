@@ -30,6 +30,12 @@ time for the complete application and 1.38–1.63× for repeated
 parse/compare/render work. The report retains raw samples and a portable replay
 of the output, statistics, and source checks.
 
+The [native-process results](../../results/2026-10-21-native-processes.md) cover
+actual ty runs and synthetic capture workloads with 16,256 items per side.
+Complete runs take 1.00–1.61× Rust's time; repeated report computation takes
+1.43–1.60×. The report retains all 48 samples per engine and workload,
+validation records, and portable evidence.
+
 Prepare separately from timing:
 
 ```sh
@@ -127,7 +133,8 @@ python3 benchmarks/memory_process_benchmark.py \
   --rust /tmp/memory-rust/memory-report-reference --clang clang-18 \
   --old-ty /absolute/path/to/ty-0.0.89 --new-ty /absolute/path/to/ty-0.0.90 \
   --ruff-source /path/to/pinned/ruff --prepared-record /tmp/process-prepared.json \
-  --cpu 0 --artifact-dir /tmp/process-timing --output /tmp/process-timing.json
+  --cpu 0 --samples 48 --warmups 2 \
+  --artifact-dir /tmp/process-timing --output /tmp/process-timing.json
 ```
 
 The ty binaries and retained Ruff/inventory source files must match the hashes in

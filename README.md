@@ -66,6 +66,10 @@ with Relar and CPython, and comparing it with a Rust implementation:
 | Repeated requests (64 products in stock) | 77.66 | 26.69 | 23.34 | 2.91× |
 | Distinct requests (16,384 products in stock) | 112.35 | 52.24 | 43.05 | 2.15× |
 
+## Developer tools
+
+The [memory-report comparator](examples/memory_report/README.md) compares report files and directories or runs two versions of ty over prepared projects. The [native-process comparison](benchmarks/results/2026-10-21-native-processes.md) measures complete runs at 1.00–1.61× Rust’s time and repeated report computation at 1.43–1.60× across ordinary and ThinLTO builds.
+
 ## Installation
 
 On 64-bit Linux, install the [Rust toolchain](rust-toolchain.toml) and Clang 18,
