@@ -1,0 +1,234 @@
+{
+  "elapsed_10x_over_1x": {
+    "gzip": {
+      "codon": 8.37622855153086,
+      "original": 10.565409097333204,
+      "port": 9.134812007637045,
+      "relar": 7.17704398448508,
+      "relar_thin": 6.843511855503482,
+      "rust": 7.489891960169439,
+      "rust_thin": 7.177353463463919
+    },
+    "plain": {
+      "codon": 8.745091553235998,
+      "original": 10.56126748807476,
+      "port": 9.114140973095575,
+      "relar": 6.943488786838878,
+      "relar_thin": 6.544801220435077,
+      "rust": 7.0090928110734705,
+      "rust_thin": 6.551396818526174
+    }
+  },
+  "json_sha256": "e74c42bf5cb9e295dd2adbcea85500f2851df9c8594b7aea0c7109f05412975e",
+  "measured": 392,
+  "medians": {
+    "10x-gzip": {
+      "codon": {
+        "elapsed_ns": 4953668751.5,
+        "peak_rss_kib": 43776.0
+      },
+      "original": {
+        "elapsed_ns": 11195574048.0,
+        "peak_rss_kib": 1014128.0
+      },
+      "port": {
+        "elapsed_ns": 24298198917.5,
+        "peak_rss_kib": 33236.0
+      },
+      "relar": {
+        "elapsed_ns": 1071306245.5,
+        "peak_rss_kib": 16228.0
+      },
+      "relar_thin": {
+        "elapsed_ns": 786596387.0,
+        "peak_rss_kib": 16216.0
+      },
+      "rust": {
+        "elapsed_ns": 956831039.0,
+        "peak_rss_kib": 11660.0
+      },
+      "rust_thin": {
+        "elapsed_ns": 709369882.5,
+        "peak_rss_kib": 11656.0
+      }
+    },
+    "10x-plain": {
+      "codon": {
+        "elapsed_ns": 4809331613.0,
+        "peak_rss_kib": 43776.0
+      },
+      "original": {
+        "elapsed_ns": 10489185765.5,
+        "peak_rss_kib": 1013944.0
+      },
+      "port": {
+        "elapsed_ns": 23896798136.5,
+        "peak_rss_kib": 32138.0
+      },
+      "relar": {
+        "elapsed_ns": 890907464.5,
+        "peak_rss_kib": 15790.0
+      },
+      "relar_thin": {
+        "elapsed_ns": 619728314.0,
+        "peak_rss_kib": 16028.0
+      },
+      "rust": {
+        "elapsed_ns": 735589627.5,
+        "peak_rss_kib": 11360.0
+      },
+      "rust_thin": {
+        "elapsed_ns": 517178500.5,
+        "peak_rss_kib": 11738.0
+      }
+    },
+    "1x-gzip": {
+      "codon": {
+        "elapsed_ns": 591396082.5,
+        "peak_rss_kib": 43776.0
+      },
+      "original": {
+        "elapsed_ns": 1059644160.0,
+        "peak_rss_kib": 122140.0
+      },
+      "port": {
+        "elapsed_ns": 2659956099.5,
+        "peak_rss_kib": 32336.0
+      },
+      "relar": {
+        "elapsed_ns": 149268452.0,
+        "peak_rss_kib": 15988.0
+      },
+      "relar_thin": {
+        "elapsed_ns": 114940458.0,
+        "peak_rss_kib": 15968.0
+      },
+      "rust": {
+        "elapsed_ns": 127749645.0,
+        "peak_rss_kib": 11584.0
+      },
+      "rust_thin": {
+        "elapsed_ns": 98834464.0,
+        "peak_rss_kib": 11576.0
+      }
+    },
+    "1x-plain": {
+      "codon": {
+        "elapsed_ns": 549946399.5,
+        "peak_rss_kib": 43776.0
+      },
+      "original": {
+        "elapsed_ns": 993174898.5,
+        "peak_rss_kib": 121904.0
+      },
+      "port": {
+        "elapsed_ns": 2621947390.0,
+        "peak_rss_kib": 31512.0
+      },
+      "relar": {
+        "elapsed_ns": 128308332.0,
+        "peak_rss_kib": 15560.0
+      },
+      "relar_thin": {
+        "elapsed_ns": 94690166.0,
+        "peak_rss_kib": 15796.0
+      },
+      "rust": {
+        "elapsed_ns": 104947908.0,
+        "peak_rss_kib": 11500.0
+      },
+      "rust_thin": {
+        "elapsed_ns": 78941715.0,
+        "peak_rss_kib": 11626.0
+      }
+    }
+  },
+  "paired": {
+    "audit": {
+      "bytes": 4239,
+      "sha256": "2ce02857e9506cde9c69ac5ad77bc8185c48aa3796393dc241b59a733863cab8"
+    },
+    "measured": 144,
+    "previous_matrix_sha256": "0f2cedec5550e3a16ffd42d7fd2e8fa8fb7533832feedb655a3e635a45067012",
+    "raw": {
+      "bytes": 45056,
+      "sha256": "01a8c28bd5bab572c261fc05e80cd9fb00494b6b1c90188343b79af9298e203b"
+    },
+    "warmups": 24
+  },
+  "peak_rss_10x_over_1x": {
+    "gzip": {
+      "codon": 1.0,
+      "original": 8.302996561323072,
+      "port": 1.0278327560613558,
+      "relar": 1.0150112584438329,
+      "relar_thin": 1.0155310621242486,
+      "rust": 1.006560773480663,
+      "rust_thin": 1.0069108500345543
+    },
+    "plain": {
+      "codon": 1.0,
+      "original": 8.317561359758498,
+      "port": 1.0198654480832698,
+      "relar": 1.0147814910025708,
+      "relar_thin": 1.014687262598126,
+      "rust": 0.9878260869565217,
+      "rust_thin": 1.0096335799071048
+    }
+  },
+  "portable": {
+    "record_sha256": "d3f564bf7cf3db93a77eb213c43f812daf5a3282267acc4935ca7397c73323e1",
+    "statistics_match_strict": true
+  },
+  "record_sha256": "d3f564bf7cf3db93a77eb213c43f812daf5a3282267acc4935ca7397c73323e1",
+  "relar_over_rust": {
+    "10x-gzip": {
+      "ordinary": {
+        "elapsed_ns": 1.1196399383318918,
+        "peak_rss_kib": 1.3917667238421956
+      },
+      "thinlto": {
+        "elapsed_ns": 1.1088663423767502,
+        "peak_rss_kib": 1.3912148249828415
+      }
+    },
+    "10x-plain": {
+      "ordinary": {
+        "elapsed_ns": 1.2111473995736841,
+        "peak_rss_kib": 1.3899647887323943
+      },
+      "thinlto": {
+        "elapsed_ns": 1.198287077674065,
+        "peak_rss_kib": 1.3654796387800308
+      }
+    },
+    "1x-gzip": {
+      "ordinary": {
+        "elapsed_ns": 1.1684451412761265,
+        "peak_rss_kib": 1.3801795580110496
+      },
+      "thinlto": {
+        "elapsed_ns": 1.1629592891807456,
+        "peak_rss_kib": 1.3794056668970283
+      }
+    },
+    "1x-plain": {
+      "ordinary": {
+        "elapsed_ns": 1.2225906589772138,
+        "peak_rss_kib": 1.3530434782608696
+      },
+      "thinlto": {
+        "elapsed_ns": 1.1994946651463045,
+        "peak_rss_kib": 1.3586788233270257
+      }
+    }
+  },
+  "schema": 1,
+  "source_revision": "db44bcc2e9d0f3dca291ed141d7b742227ab44b4",
+  "strict_measuring_host": {
+    "record_sha256": "e74c42bf5cb9e295dd2adbcea85500f2851df9c8594b7aea0c7109f05412975e",
+    "retained_files_rehashed": 328
+  },
+  "warmups": 28,
+  "workloads": 4
+}

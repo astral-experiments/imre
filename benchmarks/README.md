@@ -308,9 +308,11 @@ produce the same 6,098-entry catalog. A separate preflight gives every member
 a unique winning download and compares the full result across engines.
 
 The latest comparison includes full-process time and peak RSS for every engine,
-a paired run against the previous Relar binaries, and CPU and allocation
-profiles. Both studies include raw measurements and replay commands.
-[Optimized catalog](results/2026-10-22-catalog-hot-paths.md) ·
+paired runs against the previous Relar binaries, and profiles showing how many
+record and string allocations remain. The studies include raw measurements and
+replay commands.
+[Record and string allocations](results/2026-10-22-catalog-ownership.md) ·
+[Earlier compiler and decoder improvements](results/2026-10-22-catalog-hot-paths.md) ·
 [Original streaming comparison](results/2026-10-22-streaming-catalog.md).
 
 Build the compiler and runtimes with `native_tools_build.py` as described below.
