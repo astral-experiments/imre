@@ -163,7 +163,8 @@ impl Drop for OwnedWord {
 /// Three words fit inline; spilling preserves their existing owned references.
 #[repr(C)]
 pub(super) struct Words {
-    cached_len: u32,
+    // Twice the saturated length, plus one when the buffer lives inside the handle.
+    header: u32,
     pub(super) kind: WordKind,
     pub(super) values: SmallVec<[usize; 3]>,
 }
@@ -171,7 +172,7 @@ pub(super) struct Words {
 impl Words {
     pub(super) fn new(kind: u32) -> Self {
         Self {
-            cached_len: 0,
+            header: 1,
             kind: WordKind::new(kind),
             values: SmallVec::new(),
         }
@@ -187,7 +188,8 @@ impl Words {
 
     /// A saturated header defers to the full-width buffer length in the runtime.
     pub(super) fn update_len(&mut self) {
-        self.cached_len = u32::try_from(self.values.len()).unwrap_or(u32::MAX);
+        let length = self.values.len().min(i32::MAX as usize) as u32;
+        self.header = (length << 1) | u32::from(!self.values.spilled());
     }
 
     /// Checks the private compiler/runtime contract before transferring a value.
@@ -198,16 +200,28 @@ impl Words {
     }
 }
 
-/// Offset of the cached length within a rooted sequence handle. The compiler
-/// queries it once so generated code never depends on Rust's enum layout.
+#[repr(C)]
+pub struct SequenceLayout {
+    header: usize,
+    inline_words: usize,
+}
+
+/// Offsets within a rooted sequence handle. Querying this once keeps Rust's
+/// enum and inline-buffer layout on the runtime side of the ABI.
 #[unsafe(no_mangle)]
-pub extern "C" fn relar_seq_length_offset() -> usize {
-    // The empty example owns neither elements nor a heap buffer.
-    let storage = ManuallyDrop::new(super::Storage::Sequence(Words::new(0)));
+pub extern "C" fn relar_seq_layout() -> SequenceLayout {
+    let mut sample = Words::new(0);
+    sample.values.push(0);
+    // One non-owning word fits inline and needs no destructor.
+    let storage = ManuallyDrop::new(super::Storage::Sequence(sample));
     let super::Storage::Sequence(words) = &*storage else {
         unreachable!()
     };
-    std::ptr::from_ref(&words.cached_len).addr() - std::ptr::from_ref(&*storage).addr()
+    let base = std::ptr::from_ref(&*storage).addr();
+    SequenceLayout {
+        header: std::ptr::from_ref(&words.header).addr() - base,
+        inline_words: words.values.as_ptr().addr() - base,
+    }
 }
 
 impl Drop for Words {
@@ -244,14 +258,13 @@ mod tests {
             let word = Rc::as_ptr(&child) as usize;
             let sequence = Rc::from_raw(relar_seq_new(5));
             let alias = Rc::clone(&sequence);
-            let cached = Rc::as_ptr(&sequence)
-                .byte_add(relar_seq_length_offset())
-                .cast::<u32>();
-            assert_eq!(cached.read(), 0);
+            let layout = relar_seq_layout();
+            let cached = Rc::as_ptr(&sequence).byte_add(layout.header).cast::<u32>();
+            assert_eq!(cached.read(), 1);
             for _ in 0..3 {
                 relar_seq_append(Rc::as_ptr(&sequence), word, 5);
             }
-            assert_eq!(cached.read(), 3);
+            assert_eq!(cached.read(), 7);
             assert_eq!(Rc::strong_count(&child), 4);
             assert!(
                 !sequence
@@ -260,11 +273,15 @@ mod tests {
             );
             {
                 let view = relar_seq_data_readonly(Rc::as_ptr(&sequence));
+                assert_eq!(
+                    view,
+                    Rc::as_ptr(&sequence).byte_add(layout.inline_words).cast()
+                );
                 assert_eq!(std::slice::from_raw_parts(view, 3), &[word; 3]);
             }
 
             relar_seq_append(Rc::as_ptr(&alias), word, 5);
-            assert_eq!(cached.read(), 4);
+            assert_eq!(cached.read(), 8);
             assert_eq!(Rc::strong_count(&child), 5);
             assert!(
                 sequence
@@ -281,7 +298,7 @@ mod tests {
             }
 
             let popped = Rc::from_raw(relar_seq_pop(Rc::as_ptr(&alias)) as *const Object);
-            assert_eq!(cached.read(), 3);
+            assert_eq!(cached.read(), 6); // Popping preserves spilled storage.
             assert!(Rc::ptr_eq(&child, &popped));
             assert_eq!(Rc::strong_count(&child), 5);
             assert_eq!(

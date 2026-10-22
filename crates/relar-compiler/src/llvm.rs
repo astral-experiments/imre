@@ -568,7 +568,10 @@ impl Emitter<'_, '_> {
         Some(match &expression.kind {
             ExprKind::Local(slot) => self.borrow_slot(*slot),
             ExprKind::Call(..) => self.selected_list_field(expression)?,
-            ExprKind::Unwrap(inner) if let ExprKind::Local(slot) = inner.kind => {
+            ExprKind::Unwrap(inner)
+                if let ExprKind::Local(slot) = inner.kind
+                    && !matches!(expression.ty, Type::Bool | Type::Float) =>
+            {
                 let word = self.borrow_slot(slot).operand;
                 self.decode_word(word, expression.ty)
             }
@@ -719,7 +722,7 @@ impl Emitter<'_, '_> {
             .filter(|(_, view)| view.data.is_some());
         let Some((root, view)) = snapshot else {
             return self.instruction(format!(
-                "call i64 @relar_seq_borrow_index_proven(ptr {}, i64 {index})",
+                "call i64 @relar_seq_borrow_index_proven_fast(ptr {}, i64 {index})",
                 receiver.operand
             ));
         };
@@ -744,7 +747,7 @@ impl Emitter<'_, '_> {
         self.jump(&end);
         self.start(&fallback);
         let ordinary = self.instruction(format!(
-            "call i64 @relar_seq_borrow_index_proven(ptr {}, i64 {index})",
+            "call i64 @relar_seq_borrow_index_proven_fast(ptr {}, i64 {index})",
             receiver.operand
         ));
         self.jump(&end);
@@ -809,7 +812,7 @@ impl Emitter<'_, '_> {
                 if snapshot.data.is_none() {
                     debug_assert!(matches!(snapshot.receiver.ty, Type::List(_)));
                     let data = self.instruction(format!(
-                        "call ptr @relar_seq_data_readonly(ptr {})",
+                        "call ptr @relar_seq_data_readonly_fast(ptr {})",
                         snapshot.receiver.operand
                     ));
                     self.length_snapshots[root].as_mut().unwrap().data = Some(data);
@@ -1242,8 +1245,10 @@ impl Emitter<'_, '_> {
             ));
         }
         if entry {
-            let offset = self.instruction("call i64 @relar_seq_length_offset()".to_owned());
-            self.line(format!("store i64 {offset}, ptr @sequence_length_offset"));
+            let layout = self.instruction("call { i64, i64 } @relar_seq_layout()");
+            self.line(format!(
+                "store {{ i64, i64 }} {layout}, ptr @sequence_layout"
+            ));
             self.line("call void @relar_init_literals()");
         }
         if entry && self.uses_sys_argv {
@@ -4525,26 +4530,43 @@ declare void @relar_seq_set_index(ptr, i64, i64, i32)
 declare void @relar_seq_append(ptr, i64, i32)
 declare i64 @relar_seq_pop(ptr)
 declare i64 @relar_seq_len(ptr) nounwind memory(argmem: read)
-declare i64 @relar_seq_length_offset() nounwind willreturn memory(none)
-@sequence_length_offset = internal global i64 0
-define internal i32 @sequence_length_hint(ptr %sequence) alwaysinline nounwind {
-  %offset = load i64, ptr @sequence_length_offset
+declare { i64, i64 } @relar_seq_layout() nounwind willreturn memory(none)
+@sequence_layout = internal global { i64, i64 } zeroinitializer
+define internal i32 @sequence_header(ptr %sequence) alwaysinline nounwind {
+  %offset = load i64, ptr @sequence_layout
   %field = getelementptr inbounds i8, ptr %sequence, i64 %offset
   %length = load i32, ptr %field, align 4
   ret i32 %length
 }
 define internal i64 @relar_seq_len_fast(ptr %sequence) alwaysinline nounwind {
-  %length = call i32 @sequence_length_hint(ptr %sequence)
-  %short = icmp ne i32 %length, -1
+  %length = call i32 @sequence_header(ptr %sequence)
+  %short = icmp ult i32 %length, -2
   br i1 %short, label %cached, label %large, !prof !1
 cached:
   %size = zext i32 %length to i64
-  %twice = shl i64 %size, 1
-  %tagged = or i64 %twice, 1
+  %tagged = or i64 %size, 1
   ret i64 %tagged
 large:
   %full = call i64 @relar_seq_len(ptr %sequence)
   ret i64 %full
+}
+define internal ptr @relar_seq_data_readonly_fast(ptr %sequence) alwaysinline nounwind {
+  %header = call i32 @sequence_header(ptr %sequence)
+  %inline = trunc i32 %header to i1
+  br i1 %inline, label %small, label %spilled
+small:
+  %offset = load i64, ptr getelementptr ({ i64, i64 }, ptr @sequence_layout, i32 0, i32 1)
+  %data = getelementptr inbounds i8, ptr %sequence, i64 %offset
+  ret ptr %data
+spilled:
+  %heap = call ptr @relar_seq_data_readonly(ptr %sequence)
+  ret ptr %heap
+}
+define internal i64 @relar_seq_borrow_index_proven_fast(ptr %sequence, i64 %index) alwaysinline nounwind {
+  %data = call ptr @relar_seq_data_readonly_fast(ptr %sequence)
+  %slot = getelementptr inbounds i64, ptr %data, i64 %index
+  %word = load i64, ptr %slot
+  ret i64 %word
 }
 declare ptr @relar_seq_repeat(ptr, i64)
 declare ptr @relar_dict_new(i32, i32)
@@ -5112,7 +5134,9 @@ mod tests {
             let body = function_body(&format!(
                 "def populated(values: list[{ty}]) -> bool:\n    values = values\n    return any(value for value in values)\n"
             ));
-            let (_, pull) = body.split_once("@relar_seq_borrow_index_proven(").unwrap();
+            let (_, pull) = body
+                .split_once("@relar_seq_borrow_index_proven_fast(")
+                .unwrap();
             if let Some(retain) = retain {
                 let acquired = pull.split_once("store ").unwrap().0;
                 assert!(acquired.contains(retain), "{ty}: {acquired}");

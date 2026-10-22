@@ -116,7 +116,20 @@ def optional_field_rebind() -> None:
     print(envelope.record.items[0])
 
 
+def published_accumulator(rows: list[Record]) -> int:
+    fresh = Record(1, False, "fresh", None, [41])
+    rows.append(fresh)
+    for row in rows:
+        original = row.items
+        fresh.items = [99]
+        return original[0]
+    return -1
+
+
 def main() -> None:
+    rows: list[Record] = []
+    print(published_accumulator(rows))
+    print(rows[0].items[0])
     optional_field_rebind()
     value = Record(1000000000000000000000000000000, True, "λ record", None, [1, 2])
     print(value.number)
