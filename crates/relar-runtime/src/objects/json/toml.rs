@@ -30,14 +30,13 @@ fn validate(value: &DeValue<'_>, depth: usize) -> Result<(), String> {
                 validate(value.get_ref(), depth + 1)?;
             }
         }
-        DeValue::Datetime(value) => {
+        DeValue::Datetime(value)
             if value.date.is_some_and(|date| date.year == 0)
                 || value
                     .time
-                    .is_some_and(|time| time.second.is_some_and(|second| second > 59))
-            {
-                return Err("TOML datetime is outside the supported calendar range".to_owned());
-            }
+                    .is_some_and(|time| time.second.is_some_and(|second| second > 59)) =>
+        {
+            return Err("TOML datetime is outside the supported calendar range".to_owned());
         }
         _ => {}
     }
