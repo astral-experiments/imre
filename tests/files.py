@@ -1,6 +1,7 @@
 """Compare sealed UTF-8 files, context cleanup, and process arguments with CPython."""
 
 import argparse
+import gzip
 import os
 import resource
 import selectors
@@ -440,7 +441,12 @@ REJECTED = {
     "dynamic_encoding": 'encoding = "utf-8"\nopen("input.txt", "r", encoding=encoding)',
     "newline_keyword": 'open("input.txt", "r", encoding="utf-8", newline="")',
     "read_size": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.read(1)',
-    "readline": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.readline()',
+    "readline_size": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.readline(2)',
+    "gzip_write": 'import gzip\ngzip.open("output.gz", "wb")',
+    "gzip_text_codec": 'import gzip\ngzip.open("input.gz", "rt", encoding="latin1")',
+    "gzip_binary_encoding": 'import gzip\ngzip.open("input.gz", "rb", encoding="utf-8")',
+    "gzip_text_no_encoding": 'import gzip\ngzip.open("input.gz", "rt")',
+    "gzip_dynamic_mode": 'import gzip\nmode = "rt"\ngzip.open("input.gz", mode, encoding="utf-8")',
     "seek": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.seek(0)',
     "write_type": 'with open("output.txt", "w", encoding="utf-8") as stream:\n    stream.write(1)',
     "closed_assignment": 'stream = open("input.txt", "r", encoding="utf-8")\nstream.closed = False',
@@ -517,7 +523,7 @@ def run(command, cwd: Path, *, limit_descriptors: bool = False):
     )
 
 
-def seed(directory: Path) -> None:
+def seed(directory: Path, case: str) -> None:
     directory.mkdir()
     (directory / "input.txt").write_bytes("alpha\r\néλ🙂\rzero\0tail\n".encode())
     (directory / "empty.txt").write_bytes(b"")
@@ -525,6 +531,18 @@ def seed(directory: Path) -> None:
     (directory / "truncated.txt").write_bytes(b"truncated \xf0\x9f")
     (directory / "output.txt").write_bytes(b"old data that must be truncated")
     (directory / "directory").mkdir()
+    if case.startswith("stream_"):
+        # Split both a CRLF and a four-byte UTF-8 scalar at 8 KiB boundaries.
+        contents = b"a" * 8191 + b"\r\n" + b"b" * 8189 + "🙂\rC\n\nD\0".encode()
+        (directory / "rows.txt").write_bytes(contents)
+        members = gzip.compress(contents[:8192], mtime=0) + gzip.compress(contents[8192:], mtime=0)
+        (directory / "rows.gz").write_bytes(members)
+        (directory / "empty.gz").write_bytes(gzip.compress(b"", mtime=0))
+        (directory / "padded.gz").write_bytes(members + b"\0" * 20)
+        (directory / "short.gz").write_bytes(members[:-3])
+        (directory / "crc.gz").write_bytes(members[:-8] + bytes([members[-8] ^ 1]) + members[-7:])
+        (directory / "invalid-block.gz").write_bytes(bytes.fromhex("1f8b0800000000000003ff") + bytes(16))
+        (directory / "invalid-text.gz").write_bytes(gzip.compress(b"bad\xff", mtime=0))
 
 
 def snapshot(directory: Path) -> dict[str, bytes | None]:
@@ -631,7 +649,7 @@ def main() -> None:
             result = run([compiler, "check", str(path)], temporary)
             assert result.returncode > 0 and result.stderr, (name, result)
             passed += 1
-        for module in ["sys", "typing", "io"]:
+        for module in ["sys", "typing", "io", "gzip", "zlib"]:
             project = temporary / f"shadow-{module}"
             project.mkdir()
             (project / "main.py").write_text(f"import {module}\n")
@@ -643,6 +661,8 @@ def main() -> None:
             )
             passed += 1
         cases = [(name, source, None) for name, source in ACCEPTED.items()]
+        for fixture in sorted((Path(__file__).parent / "fixtures/files").glob("*.py")):
+            cases.append((fixture.stem, fixture.read_text(encoding="utf-8"), None))
         cases += [
             (name, source, category) for name, (source, category) in ERRORS.items()
         ]
@@ -656,7 +676,7 @@ def main() -> None:
                 ["", "é λ🙂", "space separated"] if name == "argument_aliases" else []
             )
             reference_dir = project / "cpython"
-            seed(reference_dir)
+            seed(reference_dir, name)
             reference = run(
                 [args.python, "-E", "-B", str(path), *argv],
                 reference_dir,
@@ -689,7 +709,7 @@ def main() -> None:
                     assert "call void @relar_args_init" not in llvm.read_text()
                     assert "call void @relar_args_clear" not in llvm.read_text()
                 native_dir = project / f"relar-O{level}"
-                seed(native_dir)
+                seed(native_dir, name)
                 actual = run(
                     [str(binary), *argv],
                     native_dir,

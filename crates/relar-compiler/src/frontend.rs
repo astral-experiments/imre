@@ -233,8 +233,10 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     let mut definitions = Vec::new();
     let mut callable_definitions = Vec::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
-        for name in module.bindings.keys() {
-            if reserved(name) {
+        for (name, binding) in &module.bindings {
+            if reserved(name)
+                && !(name == "open" && *binding == Binding::Intrinsic(Intrinsic::GzipOpen))
+            {
                 return Err(module.error(
                     module.parsed.syntax(),
                     "a static binding uses a reserved builtin name",
@@ -1763,6 +1765,16 @@ impl<'a> Checker<'a> {
         else {
             unreachable!("range iteration returned above")
         };
+        if matches!(iterable.ty, Type::TextIO | Type::BinaryIO) {
+            let input = self.prepare_file_lines(iterable);
+            return self.lower_prepared_iteration(
+                target,
+                input,
+                orelse,
+                before_iteration,
+                lower_body,
+            );
+        }
         let mapping = self.types.mapping(iterable.ty);
         let set_element = self.types.set_element(iterable.ty);
         let string = iterable.ty == Type::Str;
@@ -2356,7 +2368,7 @@ impl<'a> Checker<'a> {
     /// Class-form raises construct a new instance, just like an explicit call.
     fn raised_exception(&mut self, value: &ast::Expr) -> Result<Expr, String> {
         if let Some(kind) = self.exception_category(value) {
-            if matches!(kind, 0 | 18 | 25 | 26 | 27) {
+            if matches!(kind, 0 | 18 | 25..=29) {
                 return Err(error(
                     self.source,
                     value,
@@ -2384,6 +2396,8 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::SubprocessError)) => Some(25),
             Some(Binding::Intrinsic(Intrinsic::CalledProcessError)) => Some(26),
             Some(Binding::Intrinsic(Intrinsic::TimeoutExpired)) => Some(27),
+            Some(Binding::Intrinsic(Intrinsic::BadGzipFile)) => Some(28),
+            Some(Binding::Intrinsic(Intrinsic::ZlibError)) => Some(29),
             Some(_) => None,
             None => match expression {
                 ast::Expr::Name(name) => exception_kind(name.id.as_str()),
@@ -3247,15 +3261,19 @@ impl<'a> Checker<'a> {
         ) {
             return self.json_encode(call);
         }
-        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "open") {
-            return self.open(call);
+        let gzip = matches!(
+            self.resolve(&call.func),
+            Some(Binding::Intrinsic(Intrinsic::GzipOpen))
+        );
+        if gzip || matches!(&*call.func, ast::Expr::Name(name) if name.id == "open") {
+            return self.open(call, gzip);
         }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "isinstance") {
             return self.isinstance(call);
         }
         if let Some(kind) = self.exception_category(&call.func) {
             self.reject_builtin_keywords(call)?;
-            if matches!(kind, 0 | 18 | 25 | 26 | 27) {
+            if matches!(kind, 0 | 18 | 25..=29) {
                 return Err(error(
                     self.source,
                     call,
@@ -3347,6 +3365,8 @@ impl<'a> Checker<'a> {
                         },
                         data_type,
                     ),
+                    ("read", 1) if binary => (Builtin::BinaryReadSize, Type::Bytes),
+                    ("readline", 0) => (Builtin::FileReadline, data_type),
                     ("write", 1) => (
                         if binary {
                             Builtin::BinaryWrite
@@ -3361,13 +3381,18 @@ impl<'a> Checker<'a> {
                         return Err(error(
                             self.source,
                             call,
-                            "supported file methods are read(), write(data), flush(), and close()",
+                            "supported file methods are read(), binary read(size), readline(), write(data), flush(), and close()",
                         ));
                     }
                 };
                 let mut args = vec![receiver];
                 if let Some(value) = call.arguments.args.first() {
-                    args.push(self.expr_expected(value, data_type)?);
+                    let parameter = if matches!(builtin, Builtin::BinaryReadSize) {
+                        Type::Int
+                    } else {
+                        data_type
+                    };
+                    args.push(self.expr_expected(value, parameter)?);
                 }
                 return Ok(Expr {
                     ty,
@@ -3721,7 +3746,7 @@ impl<'a> Checker<'a> {
 
     /// Explicit UTF-8 and literal mode keep this builtin's semantics sealed;
     /// only the path is dynamic, and it is evaluated once in source order.
-    fn open(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    fn open(&mut self, call: &ast::ExprCall, gzip: bool) -> Result<Expr, String> {
         let [path, ast::Expr::StringLiteral(mode)] = call.arguments.args.as_ref() else {
             return Err(error(
                 self.source,
@@ -3730,23 +3755,23 @@ impl<'a> Checker<'a> {
             ));
         };
         check_string(mode, self.source)?;
-        if let Some(mode) = match mode.value.to_str() {
-            "rb" => Some(0),
-            "wb" => Some(1),
-            "ab" => Some(2),
-            "xb" => Some(3),
-            _ => None,
-        } {
-            self.reject_builtin_keywords(call)?;
-            return Ok(Expr {
-                ty: Type::BinaryIO,
-                kind: ExprKind::Builtin(Builtin::BinaryOpen(mode), vec![self.path_argument(path)?]),
-            });
-        }
-        let mode = match mode.value.to_str() {
-            "r" => 0,
-            "w" => 1,
-            _ => {
+        let (ty, builtin) = match (gzip, mode.value.to_str()) {
+            (true, "rt") => (Type::TextIO, Builtin::GzipOpen),
+            (true, "rb") => (Type::BinaryIO, Builtin::GzipOpen),
+            (false, "r") => (Type::TextIO, Builtin::TextOpen(0)),
+            (false, "w") => (Type::TextIO, Builtin::TextOpen(1)),
+            (false, "rb") => (Type::BinaryIO, Builtin::BinaryOpen(0)),
+            (false, "wb") => (Type::BinaryIO, Builtin::BinaryOpen(1)),
+            (false, "ab") => (Type::BinaryIO, Builtin::BinaryOpen(2)),
+            (false, "xb") => (Type::BinaryIO, Builtin::BinaryOpen(3)),
+            (true, _) => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "gzip.open supports literal 'rb' or 'rt' mode",
+                ));
+            }
+            (false, _) => {
                 return Err(error(
                     self.source,
                     call,
@@ -3754,11 +3779,24 @@ impl<'a> Checker<'a> {
                 ));
             }
         };
+        if ty == Type::BinaryIO {
+            self.reject_builtin_keywords(call)?;
+        } else {
+            self.utf8_encoding(call)?;
+        }
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Builtin(builtin, vec![self.path_argument(path)?]),
+        })
+    }
+
+    /// All native file and path operations use an explicit, literal UTF-8 encoding.
+    fn utf8_encoding(&self, call: &ast::ExprCall) -> Result<(), String> {
         let [encoding] = call.arguments.keywords.as_ref() else {
             return Err(error(
                 self.source,
                 call,
-                "open requires only encoding='utf-8' as a keyword",
+                "text file I/O requires encoding='utf-8'",
             ));
         };
         if encoding
@@ -3769,7 +3807,7 @@ impl<'a> Checker<'a> {
             return Err(error(
                 self.source,
                 encoding,
-                "open requires encoding='utf-8'",
+                "text file I/O accepts only encoding='utf-8'",
             ));
         }
         let ast::Expr::StringLiteral(value) = &encoding.value else {
@@ -3787,10 +3825,7 @@ impl<'a> Checker<'a> {
                 "encoding must be the literal 'utf-8'",
             ));
         }
-        Ok(Expr {
-            ty: Type::TextIO,
-            kind: ExprKind::Builtin(Builtin::TextOpen(mode), vec![self.path_argument(path)?]),
-        })
+        Ok(())
     }
 }
 
