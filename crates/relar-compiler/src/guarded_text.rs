@@ -69,9 +69,16 @@ fn block(body: &mut Vec<Statement>, private: &[bool], in_loop: bool) {
             continue;
         };
         let slot = *slot;
-        if !private[slot] || source(expression).is_none() {
+        if !private[slot] {
             continue;
         }
+        let Some(input) = source(expression) else {
+            continue;
+        };
+        let local = match input.kind {
+            ExprKind::Local(id) => Some(id),
+            _ => None,
+        };
         let Some(distance) = body[start..].iter().position(|statement| {
             let mut found = false;
             walk_expressions(std::slice::from_ref(statement), &mut |value| {
@@ -84,6 +91,16 @@ fn block(body: &mut Vec<Statement>, private: &[bool], in_loop: bool) {
         let use_at = start + distance;
         if !contains_continue(&body[start..use_at]) {
             continue;
+        }
+        if let Some(local) = local {
+            let mut writes = vec![0; private.len()];
+            count_writes(&body[start..use_at], &mut writes);
+            if writes[local] == 0 {
+                // The local still owns the original string immediately before
+                // the use statement. Move the assignment without a second owner.
+                body[index..use_at].rotate_left(1);
+                continue;
+            }
         }
         // The input can be a fallible call or a mutable field read. Snapshot it
         // at its original evaluation point. No other read, write, move, or
@@ -147,6 +164,29 @@ fn source(expression: &mut Expr) -> Option<&mut Expr> {
 #[cfg(test)]
 mod tests {
     use crate::{CompileOptions, compile};
+
+    #[test]
+    fn delaying_an_unchanged_local_needs_no_extra_owner() {
+        let retain_calls = |on_skip| {
+            let python = format!(
+                "from urllib.parse import unquote
+def tally(urls: list[str], skip: bool) -> int:
+    total = 0
+    for url in urls:
+        name = unquote(url)
+        if skip:
+            {on_skip}
+        total += len(name)
+    return total
+"
+            );
+            compile(&python, &CompileOptions::default())
+                .unwrap()
+                .matches("call void @relar_str_retain(")
+                .count()
+        };
+        assert_eq!(retain_calls("continue"), retain_calls("pass"));
+    }
 
     #[test]
     fn only_total_single_use_projections_cross_a_guard() {

@@ -52,6 +52,21 @@ def direct(items: list[Item]) -> None:
         print(name)
 
 
+def local_inputs(urls: list[str], replacement: str) -> list[str]:
+    names: list[str] = []
+    for url in urls:
+        stable = unquote(url.rsplit("/", 1)[-1])
+        if url.endswith(".sig"):
+            continue
+        names.append(stable)
+    for url in urls:
+        original = unquote(url)
+        if (url := replacement).endswith(".sig"):
+            continue
+        names.append(original + "|" + url)
+    return names
+
+
 def main() -> None:
     rows = [Item("x/a%2Fb", True), Item("y/drop%20this", False), Item("z/%FF%00+%ZZ", True)]
     print(repr(collect(rows)))
@@ -65,6 +80,7 @@ def main() -> None:
         print(str(error))
     multiple_reads([Item("a/b%20c", False), Item("d/+%2B", True)])
     direct([Item("drop", False), Item("saved%2Ftext", True)])
+    print(repr(local_inputs(["x/a%2Fb", "skip.sig", "%FF+%00"], "new")))
 
 
 main()
