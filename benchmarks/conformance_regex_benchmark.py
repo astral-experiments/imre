@@ -72,10 +72,10 @@ def prepare(directory: Path, captures: Path, kernel: str = "scanner") -> dict:
         assert sha(file.read_bytes()) == provenance["source_sha256"][str(file.relative_to(suite))]
     for role in ("old", "new"):
         assert sha(paths[role].read_bytes()) == provenance["captures"][role]["stdout_sha256"]
-    if kernel == "classification":
+    if kernel != "scanner":
         workload = VALIDATION["Workload"](paths["manifest"], paths["old"], paths["new"])
         helper = runpy.run_path(str(ROOT / "benchmarks/conformance_classification_upstream.py"))
-        transcript, distribution = helper["snapshot"](VALIDATION, workload)
+        transcript, distribution = helper["snapshot"](VALIDATION, workload, kernel=kernel)
         path = directory / "corpus.captures"
         path.write_bytes(transcript)
         count, checksum = map(int, transcript.splitlines()[-1].split())
@@ -123,7 +123,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cpu", type=int, required=True)
     parser.add_argument("--samples", type=int, default=12)
-    parser.add_argument("--kernel", choices=("scanner", "classification"), default="scanner")
+    parser.add_argument("--kernel", choices=("scanner", "classification", "entries"), default="scanner")
     parser.add_argument("--scan-rounds", "--kernel-rounds", type=int, default=64)
     parser.add_argument("--report-rounds", type=int, default=4)
     parser.add_argument("--report-panels", nargs="+", choices=PANELS, default=PANELS)
@@ -142,7 +142,7 @@ def main() -> None:
     affinity = sorted(os.sched_getaffinity(0))
     os.sched_setaffinity(0, {args.cpu})
     kernel = args.kernel
-    entry = "classify" if kernel == "classification" else "scan"
+    entry = {"classification": "classify", "scanner": "scan", "entries": "entries"}[kernel]
     inputs = prepare(directory, args.captures.resolve(), kernel)
     panels, full, reports = {}, {}, {}
     for panel in args.report_panels:
@@ -196,7 +196,7 @@ def main() -> None:
         target = Path(fixture["capture_oracle"]["path"]).read_bytes()
         record["capture_validation"][key] = {}
         for engine, cmds in cfg["engines"].items():
-            arguments = fixture["arguments"] if kernel == "classification" else [fixture["input"]["path"]]
+            arguments = fixture["arguments"] if kernel != "scanner" else [fixture["input"]["path"]]
             _, stdout = run([*cmds[entry], *arguments, "1", "dump"])
             assert stdout == target, (key, engine, "capture mismatch")
             record["capture_validation"][key][engine] = sha(stdout)
@@ -208,7 +208,7 @@ def main() -> None:
             cmd = cfg["engines"][engine][operation]
             if operation == entry:
                 fixture = inputs["fixtures"]["corpus"]
-                if kernel == "classification":
+                if kernel != "scanner":
                     arguments, count = fixture["arguments"], fixture["cases"]
                 else:
                     arguments, count = [fixture["input"]["path"]], fixture["matches"] * rounds
@@ -247,8 +247,9 @@ def main() -> None:
         case: {engine: (by_case[case]["medians_ns"][engine] - by_case[base]["medians_ns"][engine]) / by_case[case]["rounds"]
                for engine in ENGINES} for case, base in pairs
     }
-    gated = [c["after_over_rust"] for c in by_case.values() if not c["control"]]
-    gated += [v["after"]/v["rust"] for v in record["per_round_ns"].values()]
+    # The entry collector is diagnostic. Its release gate covers whole and repeated reports.
+    gated = [c["after_over_rust"] for n, c in by_case.items() if not c["control"] and (kernel != "entries" or "/" in n)]
+    gated += [v["after"]/v["rust"] for n, v in record["per_round_ns"].items() if kernel != "entries" or "/" in n]
     record["time_target_met"] = all(0 < ratio <= 2 for ratio in gated)
     assert all(file_id(Path(v["path"])) == v for v in cfg["guarded_inputs"])
     record["completed"] = True

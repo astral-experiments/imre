@@ -39,11 +39,36 @@ def observe(upstream, cases, rounds, dump):
     print(f"{len(cases)} {checksum}")
 
 
-def snapshot(validation, workload, source_contents=None):
+def observe_entries(upstream, cases, rounds, dump):
+    checksum = 0
+    for _ in range(rounds):
+        if len(cases) > 1:
+            cases[0], cases[-1] = cases[-1], cases[0]
+        for index, entry in enumerate(upstream.collect_diagnostic_entries(cases)):
+            side = entry.source
+            source = 0 if side is None else (1 if side == upstream.Source.OLD else 2)
+            checksum += (index + 1) * (len(entry.title) + 3 * len(entry.test_case.key) + 7 * source)
+            if dump:
+                label = "none" if side is None else str(side)
+                print(f"{entry.title}\t{entry.test_case.key}\t{label}")
+    print(f"{len(cases)} {checksum}")
+
+
+def snapshot(validation, workload, source_contents=None, kernel="classification"):
     _, paths, sources, old, new = validation["_inputs"](workload, source_contents)
     upstream = validation["upstream"]()
     cases = load_cases(SimpleNamespace(paths=paths, sources=sources, old=old, new=new), upstream)
     buffer = StringIO()
+    if kernel == "entries":
+        entries = upstream.collect_diagnostic_entries(cases)
+        keys = [(upstream.TITLE_PRIORITY.get(e.title, 99), e.title, e.test_case.key) for e in entries]
+        assert (len(cases), len(entries)) == (1269, 249) and keys == sorted(keys)
+        with redirect_stdout(buffer):
+            observe_entries(upstream, cases, 1, True)
+        return buffer.getvalue().encode(), {
+            "entries": len(entries), "titles": dict(Counter(e.title for e in entries)),
+            "sources": dict(Counter("none" if e.source is None else str(e.source) for e in entries)),
+        }
     with redirect_stdout(buffer):
         observe(upstream, cases, 1, True)
     distribution = {
@@ -59,4 +84,9 @@ def snapshot(validation, workload, source_contents=None):
 
 if __name__ == "__main__":
     up = original.load_upstream()
-    observe(up, load_cases(original.read_inputs(*sys.argv[1:4]), up), int(sys.argv[4]), sys.argv[5] == "dump")
+    args = sys.argv[1:]
+    observer = observe
+    if args[0] == "--entries":
+        args = args[1:]
+        observer = observe_entries
+    observer(up, load_cases(original.read_inputs(*args[:3]), up), int(args[3]), args[4] == "dump")

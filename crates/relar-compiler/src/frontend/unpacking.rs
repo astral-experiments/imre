@@ -28,7 +28,7 @@ fn comparison(left: Expr, op: Compare, right: Expr) -> Expr {
 }
 
 /// Materializes a constant fragment of Python's unpacking diagnostics.
-fn string(value: impl Into<String>) -> Expr {
+pub(super) fn string(value: impl Into<String>) -> Expr {
     Expr {
         ty: Type::Str,
         kind: ExprKind::Str(value.into()),
@@ -36,7 +36,7 @@ fn string(value: impl Into<String>) -> Expr {
 }
 
 /// Joins diagnostic fragments only on the corresponding failure path.
-fn concat(left: Expr, right: Expr) -> Expr {
+pub(super) fn concat(left: Expr, right: Expr) -> Expr {
     Expr {
         ty: Type::Str,
         kind: ExprKind::Binary(Binary::Concat, Box::new(left), Box::new(right)),

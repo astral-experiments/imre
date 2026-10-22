@@ -3026,6 +3026,9 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::SortByKeys
+            | Builtin::SortDetach
+            | Builtin::ListExtendUnhinted
+            | Builtin::SortRestore
             | Builtin::StringJoin
             | Builtin::StringReplace
             | Builtin::FloatFormat { .. }
@@ -4619,6 +4622,9 @@ declare void @relar_str_partition(ptr, ptr, ptr)
 declare ptr @relar_str_unquote(ptr)
 declare ptr @relar_str_splitlines(ptr)
 declare ptr @relar_str_rstrip(ptr, ptr)
+declare void @relar_list_extend_unhinted(ptr, i32)
+declare ptr @relar_sort_detach(ptr, i32)
+declare void @relar_sort_restore(ptr, i32, ptr, i8)
 declare void @relar_sort_by_keys(ptr, i32, ptr, i32, i8)
 declare ptr @relar_str_join(ptr, ptr)
 declare ptr @relar_str_replace(ptr, ptr, ptr)

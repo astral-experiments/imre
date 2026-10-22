@@ -128,6 +128,10 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
             raise ValueError("unexpected conformance title annotation")
         changed = changed.replace(literal, "str")
         edits.append({"kind": "closed title literal annotation", "before": literal, "after": "str"})
+    if name == "conformance_report/render.py" and "from typing import assert_never\n" in changed:
+        changed = changed.replace("from typing import assert_never\n",
+                                  'def assert_never(value):\n    raise AssertionError(f"Expected code to be unreachable, but got: {value!r}")\n')
+        edits.append({"kind": "native assert_never for exhaustive Change branches"})
     dataclass_import = "from dataclasses import dataclass\n"
     if dataclass_import in changed:
         if changed.count(dataclass_import) != 1:

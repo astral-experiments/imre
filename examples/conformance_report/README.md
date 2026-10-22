@@ -98,8 +98,10 @@ absolute identities produced by preparation. Inputs must use UTF-8 and complete
 GitLab diagnostic records with integer positions; unknown JSON fields are ignored.
 
 The reporter compiles Ruff’s complete `Source`, `Classification`, and `Change`
-enums and its `compute_stats` function unchanged. The same applies to
-`TestCase.classify`, `TestCase.change`, and `TestCase.diagnostics_by_source`.
+enums and its `compute_stats` and `collect_diagnostic_entries` functions
+unchanged. The latter checks that every change is handled and stably sorts
+entries by title priority, title, and test-case key. The same source check
+covers `TestCase.classify`, `TestCase.change`, and `TestCase.diagnostics_by_source`.
 Enum methods take Ruff’s original string-valued `Literal` arguments. Other
 parts of the port use display helpers and concrete records for decoded JSON.
 Ruff’s original verbose regex runs with Rust’s regex engine and exposes the
@@ -154,6 +156,9 @@ The [string-enum comparison](../../benchmarks/results/2026-10-22-string-enums.md
 measures Ruff’s original `compute_stats` over 1,269 preloaded test groups. It
 also times complete and repeated reports and includes Rust controls that
 specialize the common one- and two-diagnostic cases.
+The [in-place sort comparison](../../benchmarks/results/2026-10-22-entry-sort.md)
+measures Ruff’s unchanged diagnostic entry collector and full reports against
+the previous Relar port, CPython, native Codon, and Rust.
 
 `benchmarks/conformance_validate.py` compares full reports and filesystem effects
 against the unchanged upstream implementation. Its seeded checks exercise the

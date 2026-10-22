@@ -110,9 +110,11 @@ impl Checker<'_> {
         &mut self,
         expression: &ast::Expr,
         element: Option<Type>,
-    ) -> Result<Option<Prepared>, String> {
+    ) -> Result<Option<Iteration>, String> {
         if let ast::Expr::Generator(generator) = expression {
-            return self.generator_input(generator, element).map(Some);
+            return Ok(Some(Iteration::Prepared(
+                self.generator_input(generator, element)?,
+            )));
         }
         let ast::Expr::Call(call) = expression else {
             return Ok(None);
@@ -128,13 +130,18 @@ impl Checker<'_> {
             if receiver.ty == Type::Path {
                 let iterator =
                     self.path_iterator(receiver, call, attribute.attr.as_str() == "glob")?;
-                return Ok(Some(self.prepare_path_iterator(iterator)));
+                return Ok(Some(Iteration::Prepared(
+                    self.prepare_path_iterator(iterator),
+                )));
             }
             if let Type::Class(class) = receiver.ty {
-                let iterable = self.class_method_call(call, attribute, class, Some(receiver))?;
-                return self
-                    .prepare_container(iterable, false, call, false)
-                    .map(Some);
+                // A first-party method with the same spelling returns an ordinary
+                // value. Preserve its length hint and list.extend's alias snapshot.
+                return Ok(Some(Iteration::Container {
+                    iterable: self.class_method_call(call, attribute, class, Some(receiver))?,
+                    items: false,
+                    start: None,
+                }));
             }
             return Err(error(
                 self.source,
@@ -145,8 +152,8 @@ impl Checker<'_> {
         let ast::Expr::Name(name) = &*call.func else {
             return Ok(None);
         };
-        match name.id.as_str() {
-            "zip" => self.zip_input(call, element).map(Some),
+        let input = match name.id.as_str() {
+            "zip" => self.zip_input(call, element)?,
             "reversed" => {
                 if !call.arguments.keywords.is_empty() || call.arguments.args.len() != 1 {
                     return Err(error(
@@ -158,12 +165,14 @@ impl Checker<'_> {
                 let input = self.expansion_input(&call.arguments.args[0], element)?;
                 let mut input = self.prepare_iteration(input, call, true)?;
                 input.evaluate.append(&mut input.acquire);
-                Ok(Some(input))
+                input
             }
             "map" => {
                 if !matches!(call.arguments.args.as_ref(), [ast::Expr::Name(name), _] if name.id == "int")
                 {
-                    return self.callback_input(call, element, false).map(Some);
+                    return Ok(Some(Iteration::Prepared(
+                        self.callback_input(call, element, false)?,
+                    )));
                 }
                 if !call.arguments.keywords.is_empty()
                     || !matches!(call.arguments.args.as_ref(), [ast::Expr::Name(name), _] if name.id == "int")
@@ -191,9 +200,9 @@ impl Checker<'_> {
                 input.elementless = false;
                 input.clear.push(value);
                 input.evaluate.append(&mut input.acquire);
-                Ok(Some(input))
+                input
             }
-            "filter" => self.callback_input(call, element, true).map(Some),
+            "filter" => self.callback_input(call, element, true)?,
             "enumerate" => {
                 if !call.arguments.keywords.is_empty()
                     || !(1..=2).contains(&call.arguments.args.len())
@@ -265,10 +274,11 @@ impl Checker<'_> {
                 input.value = value;
                 input.elementless = false;
                 input.clear.extend([counter, value]);
-                Ok(Some(input))
+                input
             }
-            _ => Ok(None),
-        }
+            _ => return Ok(None),
+        };
+        Ok(Some(Iteration::Prepared(input)))
     }
 
     /// Method evaluation creates the iterator at Python's observable point.

@@ -17,17 +17,6 @@ impl Checker<'_> {
                 "sorted requires one positional iterable",
             ));
         }
-        let mut keywords = HashSet::new();
-        for keyword in &call.arguments.keywords {
-            let name = keyword.arg.as_ref().map(|name| name.as_str());
-            if !matches!(name, Some("key" | "reverse")) || !keywords.insert(name) {
-                return Err(error(
-                    self.source,
-                    keyword,
-                    "sorted accepts key and reverse once each",
-                ));
-            }
-        }
         let mut body = Vec::new();
         let mut clear = Vec::new();
         let input = self.expansion_input(&call.arguments.args[0], element)?;
@@ -38,6 +27,134 @@ impl Checker<'_> {
         body.append(&mut input.evaluate);
         clear.extend(&input.clear);
 
+        let (callback, reverse) = self.sort_options(call, element, &mut body, &mut clear)?;
+        let result_type = self.types.list(element);
+        let result = self.hidden(result_type);
+        clear.push(result);
+        body.push(Statement::Assign(
+            result,
+            Expr {
+                ty: result_type,
+                kind: ExprKind::List(Vec::new()),
+            },
+        ));
+        body.extend(
+            self.expand_items(Iteration::Prepared(input), call, |checker, value| {
+                Ok(vec![Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::Append, vec![checker.local(result), value]),
+                })])
+            })?,
+        );
+
+        self.sort_values(call, result, callback, reverse, &mut body, &mut clear)?;
+        Ok(Expr {
+            ty: result_type,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(self.local(result)),
+                clear,
+            },
+        })
+    }
+
+    /// Keeps the receiver identity and argument order. A key can observe or mutate
+    /// the temporarily empty list, so restoration must run on every completion.
+    pub(super) fn list_sort(
+        &mut self,
+        receiver: Expr,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        if !call.arguments.args.is_empty() {
+            return Err(error(
+                self.source,
+                call,
+                "list.sort accepts only keyword arguments",
+            ));
+        }
+        let ty = receiver.ty;
+        let element = self.types.element(ty).unwrap();
+        let target = self.hidden(ty);
+        let mut body = vec![Statement::Assign(target, receiver)];
+        let mut clear = vec![target];
+        let (callback, reverse) = self.sort_options(call, element, &mut body, &mut clear)?;
+        if callback.is_some() {
+            let original = self.hidden(ty);
+            let completed = self.hidden(Type::Bool);
+            clear.extend([original, completed]);
+            body.push(Statement::Assign(
+                original,
+                Expr {
+                    ty,
+                    kind: ExprKind::Builtin(Builtin::SortDetach, vec![self.local(target)]),
+                },
+            ));
+            body.push(Statement::Assign(
+                completed,
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(false),
+                },
+            ));
+            let mut sorting = Vec::new();
+            self.sort_values(call, original, callback, reverse, &mut sorting, &mut clear)?;
+            sorting.push(Statement::Assign(
+                completed,
+                Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(true),
+                },
+            ));
+            body.push(Statement::Try {
+                body: sorting,
+                handlers: Vec::new(),
+                orelse: Vec::new(),
+                finalbody: vec![Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(
+                        Builtin::SortRestore,
+                        vec![
+                            self.local(target),
+                            self.local(original),
+                            self.local(completed),
+                        ],
+                    ),
+                })],
+            });
+        } else {
+            self.sort_values(call, target, callback, reverse, &mut body, &mut clear)?;
+        }
+        Ok(Expr {
+            ty: Type::None,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                }),
+                clear,
+            },
+        })
+    }
+
+    fn sort_options(
+        &mut self,
+        call: &ast::ExprCall,
+        element: Type,
+        body: &mut Vec<Statement>,
+        clear: &mut Vec<usize>,
+    ) -> Result<(Option<usize>, Expr), String> {
+        let mut keywords = HashSet::new();
+        for keyword in &call.arguments.keywords {
+            let name = keyword.arg.as_ref().map(|name| name.as_str());
+            if !matches!(name, Some("key" | "reverse")) || !keywords.insert(name) {
+                return Err(error(
+                    self.source,
+                    keyword,
+                    "sort accepts key and reverse once each",
+                ));
+            }
+        }
         let mut callback = None;
         let mut reverse = Expr {
             ty: Type::Bool,
@@ -58,25 +175,20 @@ impl Checker<'_> {
                 callback = Some(slot);
             }
         }
-        let result_type = self.types.list(element);
-        let result = self.hidden(result_type);
-        clear.push(result);
-        body.push(Statement::Assign(
-            result,
-            Expr {
-                ty: result_type,
-                kind: ExprKind::List(Vec::new()),
-            },
-        ));
-        body.extend(
-            self.expand_items(Iteration::Prepared(input), call, |checker, value| {
-                Ok(vec![Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(Builtin::Append, vec![checker.local(result), value]),
-                })])
-            })?,
-        );
+        Ok((callback, reverse))
+    }
 
+    /// Collects keys in forward order before applying one stable permutation.
+    fn sort_values(
+        &mut self,
+        call: &ast::ExprCall,
+        result: usize,
+        callback: Option<usize>,
+        reverse: Expr,
+        body: &mut Vec<Statement>,
+        clear: &mut Vec<usize>,
+    ) -> Result<(), String> {
+        let element = self.types.element(self.locals[result]).unwrap();
         let keys = if let Some(callback) = callback {
             let (parameters, key) = self.types.signature(self.locals[callback]).unwrap();
             let [parameter] = parameters.as_slice() else {
@@ -132,14 +244,7 @@ impl Checker<'_> {
                 vec![self.local(result), self.local(keys), reverse],
             ),
         }));
-        Ok(Expr {
-            ty: result_type,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(self.local(result)),
-                clear,
-            },
-        })
+        Ok(())
     }
 
     /// Learns one callback input from the already checked iterable. Scalar key

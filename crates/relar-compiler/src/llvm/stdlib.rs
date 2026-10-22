@@ -18,6 +18,37 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
+            Builtin::SortDetach | Builtin::SortRestore | Builtin::ListExtendUnhinted => {
+                let list = &args[0].value;
+                let kind = representation_kind(
+                    self.module.types.element(list.ty).unwrap(),
+                    &self.module.types,
+                );
+                if matches!(builtin, Builtin::ListExtendUnhinted) {
+                    self.line(format!(
+                        "call void @relar_list_extend_unhinted(ptr {}, i32 {kind})",
+                        list.operand
+                    ));
+                    none()
+                } else if matches!(builtin, Builtin::SortDetach) {
+                    Value {
+                        ty: list.ty,
+                        operand: self.instruction(format!(
+                            "call ptr @relar_sort_detach(ptr {}, i32 {kind})",
+                            list.operand
+                        )),
+                        small_integer: false,
+                    }
+                } else {
+                    let completed =
+                        self.instruction(format!("zext i1 {} to i8", args[2].value.operand));
+                    self.checked_line(format!(
+                        "call void @relar_sort_restore(ptr {}, i32 {kind}, ptr {}, i8 {completed})",
+                        list.operand, args[1].value.operand
+                    ));
+                    none()
+                }
+            }
             Builtin::StringJoin => self.call(
                 "relar_str_join",
                 Type::Str,

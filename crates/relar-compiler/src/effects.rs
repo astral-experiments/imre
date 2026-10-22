@@ -263,6 +263,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::GzipOpen
         | Builtin::BinaryWrite
         | Builtin::Slice
+        | Builtin::SortRestore
         | Builtin::Pop
         | Builtin::DictGet
         | Builtin::DictGatherStrInt
@@ -299,6 +300,8 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::Len
         | Builtin::Abs
         | Builtin::SortByKeys
+        | Builtin::SortDetach
+        | Builtin::ListExtendUnhinted
         | Builtin::StringJoin
         | Builtin::StringReplace
         | Builtin::FloatFormat { .. }

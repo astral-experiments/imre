@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 use std::rc::Rc;
 
-use super::{Bytes, List, Object, Str, fail, object};
+use super::{Bytes, Error, Kind, List, Object, Storage, StorageCell, Str, Words, fail, object};
 
 /// Sorts original indices instead of moving key owners. Reversing comparison,
 /// rather than the finished sequence, preserves the order of equal keys.
@@ -85,7 +85,109 @@ unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Vec<usize> {
     }
 }
 
-/// Reorders a private materialized result by already evaluated scalar keys.
+/// Transfers a list's elements to a new owner, leaving its existing aliases
+/// observing an empty list while Python key callbacks execute.
+///
+/// # Safety
+/// The caller roots the exact list and supplies its element representation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_sort_detach(list: *const (), kind: u32) -> *const () {
+    if kind == 2 {
+        // SAFETY: no callback runs during this exclusive move of the buffer.
+        let saved = unsafe {
+            (&*list.cast::<List>())
+                .0
+                .with_mut(|values| std::mem::replace(values, crate::sorting_empty_ints()))
+        };
+        crate::new_list(saved).cast()
+    } else {
+        // SAFETY: the exact descriptor and cached length travel with the owners.
+        let saved = unsafe {
+            object(list.cast()).0.with_mut(|storage| {
+                let words = storage.sequence_mut();
+                words.check_kind(kind);
+                std::mem::replace(words, Words::sorting_empty(kind))
+            })
+        };
+        // Preserve the header verbatim, including a surrounding sort's marker.
+        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(saved))))).cast()
+    }
+}
+
+/// Extending from an iterator without a length hint modifies the temporary
+/// list even when it yields nothing. An ordinary destination needs no mutation.
+///
+/// # Safety
+/// The argument is a rooted list with the supplied element representation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_extend_unhinted(list: *const (), kind: u32) {
+    if kind == 2 {
+        // SAFETY: only an unallocated empty marker is replaced.
+        unsafe {
+            (&*list.cast::<List>()).0.with_mut(|values| {
+                if crate::is_sorting_empty_ints(values) {
+                    *values = Vec::new();
+                }
+            })
+        };
+    } else {
+        // SAFETY: the real length stays unchanged at zero.
+        unsafe {
+            object(list.cast()).0.with_mut(|storage| {
+                let words = storage.sequence_mut();
+                if words.is_sorting_empty() {
+                    words.update_header();
+                }
+            })
+        };
+    }
+}
+
+/// Restores the saved elements and discards any additions made by key callbacks.
+/// A mutation raises ValueError after a completed sort; a failed key keeps its
+/// own exception and the original element order.
+///
+/// # Safety
+/// Both same-kind lists are independently rooted and distinct. The private
+/// saved list came from the matching detach and cannot be observed elsewhere.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_sort_restore(
+    list: *const (),
+    kind: u32,
+    saved: *const (),
+    completed: u8,
+) {
+    let modified = if kind == 2 {
+        // SAFETY: the caller proves distinct handles and no reentrant access.
+        unsafe {
+            (&*list.cast::<List>()).0.with_mut(|current| {
+                let modified = !crate::is_sorting_empty_ints(current);
+                (&*saved.cast::<List>())
+                    .0
+                    .with_mut(|saved| std::mem::swap(current, saved));
+                modified
+            })
+        }
+    } else {
+        // SAFETY: the swap transfers all owners and headers without releasing
+        // any value during access. Normal scope cleanup later drops the additions.
+        unsafe {
+            object(list.cast()).0.with_mut(|storage| {
+                let current = storage.sequence_mut();
+                let modified = !current.is_sorting_empty();
+                object(saved.cast())
+                    .0
+                    .with_mut(|storage| std::mem::swap(current, storage.sequence_mut()));
+                modified
+            })
+        }
+    };
+    if modified && completed != 0 {
+        Error::new(Kind::ValueError, "list modified during sort").raise();
+    }
+}
+
+/// Reorders materialized values by already evaluated scalar keys.
 /// Key callbacks and their errors are handled by ordinary generated code before
 /// this operation. No comparison calls user code or changes reference counts.
 ///
@@ -241,6 +343,52 @@ mod tests {
             let mut values = [0, 1, 2, 3, 4];
             permute(&mut values, &order);
             assert_eq!(values, expected);
+        }
+    }
+
+    #[test]
+    fn failed_key_restores_owners_and_drops_temporary_additions() {
+        let original = Rc::new(Str::from("original"));
+        let addition = Rc::new(Str::from("addition"));
+        // SAFETY: both strings and both distinct list handles stay rooted. The
+        // saved list is released exactly once after restoration.
+        unsafe {
+            let list = Rc::from_raw(super::super::relar_seq_new(3));
+            let alias = Rc::clone(&list);
+            let target = Rc::as_ptr(&list);
+            super::super::relar_seq_append(target, Rc::as_ptr(&original) as usize, 3);
+            let saved = Rc::from_raw(relar_sort_detach(target.cast(), 3).cast::<Object>());
+            assert!(alias.0.with(|storage| storage.sequence().values.is_empty()));
+            assert_eq!(Rc::strong_count(&original), 2);
+            super::super::relar_seq_append(target, Rc::as_ptr(&addition) as usize, 3);
+            relar_sort_restore(target.cast(), 3, Rc::as_ptr(&saved).cast(), 0);
+            assert_eq!(
+                alias.0.with(|storage| storage.sequence().values[0]),
+                Rc::as_ptr(&original) as usize,
+            );
+            drop(saved);
+            assert_eq!(Rc::strong_count(&addition), 1);
+            assert_eq!(Rc::strong_count(&original), 2);
+        }
+        assert_eq!(Rc::strong_count(&original), 1);
+    }
+
+    #[test]
+    fn speculative_range_capacity_does_not_mark_integer_sort_as_modified() {
+        // SAFETY: the buffers are distinct; the range words encode 0, 8, and 1.
+        unsafe {
+            let target = crate::new_list(vec![crate::Int(5)]);
+            let saved = relar_sort_detach(target.cast(), 2);
+            crate::relar_list_reserve_range(target, 1, 17, 3, 1);
+            assert!(
+                (*target)
+                    .0
+                    .with(|values| crate::is_sorting_empty_ints(values))
+            );
+            relar_sort_restore(target.cast(), 2, saved, 1);
+            crate::relar_list_release(saved.cast());
+            assert_eq!((*target).0.with(|values| values[0].0), 5);
+            crate::relar_list_release(target);
         }
     }
 

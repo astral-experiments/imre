@@ -1,5 +1,6 @@
 """Complete report rendering adapted from the pinned Ruff source in upstream/."""
 from pathlib import Path
+from typing import assert_never
 from conformance_report.model import Change, DiagnosticEntry, FileStats, Source, Statistics, TestCase, TyDiagnostic, compute_stats, diagnostic_text
 
 def signed_int(value: int) -> str:
@@ -77,36 +78,88 @@ def render_diff_row(diagnostics: list[TyDiagnostic], *, removed: bool=False) -> 
 def collect_diagnostic_entries(test_cases: list[TestCase]) -> list[DiagnosticEntry]:
     """Classify each changed test case and assign it to a titled section."""
     entries: list[DiagnosticEntry] = []
+
     for tc in test_cases:
         change = tc.change
         if change == Change.UNCHANGED:
             continue
+
         if tc.optional:
             if change == Change.ADDED:
-                entries.append(DiagnosticEntry(title=Change.ADDED.into_title(), test_case=tc, source=Source.NEW))
+                entries.append(
+                    DiagnosticEntry(
+                        title=Change.ADDED.into_title(), test_case=tc, source=Source.NEW
+                    )
+                )
             elif change == Change.REMOVED:
-                entries.append(DiagnosticEntry(title=Change.REMOVED.into_title(), test_case=tc, source=Source.OLD))
+                entries.append(
+                    DiagnosticEntry(
+                        title=Change.REMOVED.into_title(),
+                        test_case=tc,
+                        source=Source.OLD,
+                    )
+                )
             elif change == Change.CHANGED:
-                entries.append(DiagnosticEntry(title=Change.CHANGED.into_title(), test_case=tc, source=None))
+                entries.append(
+                    DiagnosticEntry(
+                        title=Change.CHANGED.into_title(), test_case=tc, source=None
+                    )
+                )
             else:
-                raise AssertionError('unreachable diagnostic change')
-        elif change == Change.ADDED:
-            new_class = tc.classify(Source.NEW)
-            entries.append(DiagnosticEntry(title=new_class.into_title(verb='added'), test_case=tc, source=Source.NEW))
-        elif change == Change.REMOVED:
-            old_class = tc.classify(Source.OLD)
-            entries.append(DiagnosticEntry(title=old_class.into_title(verb='removed'), test_case=tc, source=Source.OLD))
-        elif change == Change.CHANGED:
-            old_class = tc.classify(Source.OLD)
-            new_class = tc.classify(Source.NEW)
-            if old_class == new_class:
-                entries.append(DiagnosticEntry(title=new_class.into_title(verb='changed'), test_case=tc, source=None))
-            else:
-                entries.append(DiagnosticEntry(title=old_class.into_title(verb='removed'), test_case=tc, source=Source.OLD))
-                entries.append(DiagnosticEntry(title=new_class.into_title(verb='added'), test_case=tc, source=Source.NEW))
+                assert_never(change)
         else:
-            raise AssertionError('unreachable diagnostic change')
-    entries = sorted(entries, key=lambda e: (TITLE_PRIORITY.get(e.title, 99), e.title, e.test_case.key))
+            if change == Change.ADDED:
+                new_class = tc.classify(Source.NEW)
+                entries.append(
+                    DiagnosticEntry(
+                        title=new_class.into_title(verb="added"),
+                        test_case=tc,
+                        source=Source.NEW,
+                    )
+                )
+            elif change == Change.REMOVED:
+                old_class = tc.classify(Source.OLD)
+                entries.append(
+                    DiagnosticEntry(
+                        title=old_class.into_title(verb="removed"),
+                        test_case=tc,
+                        source=Source.OLD,
+                    )
+                )
+            elif change == Change.CHANGED:
+                old_class = tc.classify(Source.OLD)
+                new_class = tc.classify(Source.NEW)
+                if old_class == new_class:
+                    # Same classification but different diagnostics: one "changed" section.
+                    entries.append(
+                        DiagnosticEntry(
+                            title=new_class.into_title(verb="changed"),
+                            test_case=tc,
+                            source=None,
+                        )
+                    )
+                else:
+                    # Classification changed: split into separate removed/added sections.
+                    entries.append(
+                        DiagnosticEntry(
+                            title=old_class.into_title(verb="removed"),
+                            test_case=tc,
+                            source=Source.OLD,
+                        )
+                    )
+                    entries.append(
+                        DiagnosticEntry(
+                            title=new_class.into_title(verb="added"),
+                            test_case=tc,
+                            source=Source.NEW,
+                        )
+                    )
+            else:
+                assert_never(change)
+
+    entries.sort(
+        key=lambda e: (TITLE_PRIORITY.get(e.title, 99), e.title, e.test_case.key)
+    )
     return entries
 
 def render_test_cases(test_cases: list[TestCase], base_url: str, *, format: str='diff') -> str:

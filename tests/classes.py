@@ -122,6 +122,7 @@ def verify_upstream_definitions() -> None:
     checks = [
         (reporter / "upstream/conformance.py", reporter / "model.py",
          {"Source", "Classification", "Change", "compute_stats", "change", "diagnostics_by_source", "classify"}),
+        (reporter / "upstream/conformance.py", reporter / "render.py", {"collect_diagnostic_entries"}),
         (PROJECT / "examples/python_catalog/upstream/fetch-download-metadata.py",
          FIXTURES / "uv_variant.py", {"Variant", "variant_sort_key"}),
     ]
@@ -180,7 +181,7 @@ def main() -> None:
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
-        for relative in ["ownership.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "conditional_lists.py", "uv_variant.py"]:
+        for relative in ["ownership.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "enum_exhaustion.py", "conditional_lists.py", "uv_variant.py"]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)

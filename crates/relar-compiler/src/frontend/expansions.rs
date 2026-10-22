@@ -37,18 +37,38 @@ impl Checker<'_> {
             };
         }
         let mut body = vec![Statement::Assign(destination, receiver)];
-        body.extend(self.expand_items(input, node, |checker, value| {
-            Ok(vec![Statement::Expr(Expr {
+        // CPython reserves space on acquiring an iterator with no length hint,
+        // even when its first pull stops or raises. A reentrant sort observes it.
+        let unhinted = match &input {
+            Iteration::Prepared(_) => !matches!(source, ast::Expr::Call(call)
+                if matches!(&*call.func, ast::Expr::Name(name) if name.id == "reversed")),
+            Iteration::Container { iterable, .. } => {
+                matches!(iterable.ty, Type::TextIO | Type::BinaryIO)
+            }
+            Iteration::Range(_) => false,
+        };
+        let before = if unhinted {
+            vec![Statement::Expr(Expr {
                 ty: Type::None,
-                kind: ExprKind::Builtin(
-                    Builtin::Append,
-                    vec![
-                        checker.local(destination),
-                        checker.coerce(value, element, node)?,
-                    ],
-                ),
-            })])
-        })?);
+                kind: ExprKind::Builtin(Builtin::ListExtendUnhinted, vec![self.local(destination)]),
+            })]
+        } else {
+            Vec::new()
+        };
+        body.extend(
+            self.expand_items_after(input, node, before, |checker, value| {
+                Ok(vec![Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(
+                        Builtin::Append,
+                        vec![
+                            checker.local(destination),
+                            checker.coerce(value, element, node)?,
+                        ],
+                    ),
+                })])
+            })?,
+        );
         Ok(Expr {
             ty: Type::None,
             kind: ExprKind::Scope {
@@ -127,8 +147,10 @@ impl Checker<'_> {
         element: Option<Type>,
     ) -> Result<Iteration, String> {
         if let Some(input) = self.pipeline_input(expression, element)? {
-            self.hint_empty_iteration(&input, element);
-            return Ok(Iteration::Prepared(input));
+            if let Iteration::Prepared(prepared) = &input {
+                self.hint_empty_iteration(prepared, element);
+            }
+            return Ok(input);
         }
         if let ast::Expr::Call(call) = expression {
             if self.resolve(&call.func).is_some() {

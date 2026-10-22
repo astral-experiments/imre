@@ -3,6 +3,101 @@
 use super::*;
 
 impl Checker<'_> {
+    pub(super) fn assert_never(&mut self, call: &ast::ExprCall) -> Result<Statement, String> {
+        let [arg @ ast::Expr::Name(name)] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "assert_never requires one StrEnum local",
+            ));
+        };
+        let val = self.expr(arg)?;
+        if !call.arguments.keywords.is_empty()
+            || !self.names.contains_key(name.id.as_str())
+            || !matches!(
+                self.types.payload(val.ty).unwrap_or(val.ty),
+                Type::StrEnum(_)
+            )
+        {
+            return Err(error(
+                self.source,
+                call,
+                "assert_never requires one StrEnum local",
+            ));
+        }
+        // A finally suite also receives pending returns, breaks and exceptions.
+        // ty's ordinary fallthrough narrowing does not cover all those entries.
+        if self.in_finally {
+            return Err(error(
+                self.source,
+                call,
+                "assert_never inside finally is unsupported",
+            ));
+        }
+        if !self.graph.session.is_never(self.module, arg) {
+            return Err(error(
+                self.source,
+                arg,
+                "assert_never requires an exhausted StrEnum domain",
+            ));
+        }
+        // Keep the defensive Python exception even when the checker proves the
+        // argument uninhabited. typing truncates repr at 100 Unicode code points.
+        let repr = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::Repr, vec![val]),
+        };
+        let slot = self.hidden(Type::Str);
+        let limit = pipelines::integer(100);
+        let index_type = self.types.optional(Type::Int);
+        let absent = self.coerce(
+            Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            },
+            index_type,
+            call,
+        )?;
+        let stop = self.coerce(limit.clone(), index_type, call)?;
+        let len = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::Len, vec![self.local(slot)]),
+        };
+        let prefix = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(
+                Builtin::Slice,
+                vec![self.local(slot), absent.clone(), stop, absent],
+            ),
+        };
+        let clipped = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Conditional(
+                Box::new(pipelines::compare(Compare::Greater, len, limit)),
+                Box::new(unpacking::concat(prefix, unpacking::string("..."))),
+                Box::new(self.local(slot)),
+            ),
+        };
+        let message = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, repr)],
+                value: Box::new(unpacking::concat(
+                    unpacking::string("Expected code to be unreachable, but got: "),
+                    clipped,
+                )),
+                clear: vec![slot],
+            },
+        };
+        Ok(Statement::Raise(Some(Expr {
+            ty: Type::Exception,
+            kind: ExprKind::Exception {
+                kind: exception_kind("AssertionError").unwrap(),
+                message: Some(Box::new(message)),
+            },
+        })))
+    }
+
     pub(super) fn enum_member(&self, class: usize, name: &str) -> Option<Expr> {
         let members = self.classes.declarations.definitions[class]
             .enum_members
@@ -150,6 +245,31 @@ mod tests {
         ] {
             assert!(check(body).is_err(), "{body}");
         }
+    }
+
+    #[test]
+    fn assert_never_requires_a_semantic_proof_even_when_ty_diagnostics_are_ignored() {
+        let imported = "from typing import assert_never as exhausted\n";
+        let skipped = "  # ty: ignore[type-assertion-failure]\n";
+        for body in [
+            "def f(v: State) -> None:\n    if v == State.OPEN or v == State.ALIAS:\n        return\n    exhausted(v)",
+            "def f(v: State | None) -> None:\n    if v == State.OPEN or v == State.CLOSED:\n        return\n    exhausted(v)",
+            "def f(v: State, set_open: bool) -> None:\n    if v == State.OPEN:\n        return\n    if set_open:\n        v = State.OPEN\n    if v == State.CLOSED:\n        return\n    exhausted(v)",
+            "def f(v: State, next_state: State, steps: list[int]) -> None:\n    if v == State.OPEN:\n        return\n    for i in steps:\n        if v == State.CLOSED:\n            v = next_state\n            continue\n        exhausted(v)",
+        ] {
+            let err = crate::check(&format!("{imported}{PREFIX}{body}{skipped}")).unwrap_err();
+            assert!(
+                err.contains("assert_never requires an exhausted StrEnum domain"),
+                "{err}"
+            );
+        }
+        let body = "def f(v: State) -> None:\n    try:\n        if v == State.OPEN:\n            return\n    finally:\n        if v == State.CLOSED:\n            return\n        exhausted(v)\n";
+        let two_members = "from enum import StrEnum\nclass State(StrEnum):\n    OPEN = 'open'\n    CLOSED = 'closed'\n";
+        let err = crate::check(&format!("{imported}{two_members}{body}")).unwrap_err();
+        assert!(
+            err.contains("assert_never inside finally is unsupported"),
+            "{err}"
+        );
     }
 
     #[test]

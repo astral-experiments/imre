@@ -983,6 +983,7 @@ struct Checker<'a> {
     assigned: HashSet<usize>,
     calls: HashSet<usize>,
     loop_breaks: Vec<Vec<LocalState>>,
+    in_finally: bool,
     reachable: bool,
     module_scope: bool,
     class: Option<usize>,
@@ -1022,6 +1023,7 @@ impl<'a> Checker<'a> {
             assigned: HashSet::new(),
             calls: HashSet::new(),
             loop_breaks: Vec::new(),
+            in_finally: false,
             reachable: true,
             module_scope: false,
             class: None,
@@ -1678,7 +1680,7 @@ impl<'a> Checker<'a> {
     /// Checks an iterable in its current lexical scope, before target binding.
     fn iteration_input(&mut self, expression: &ast::Expr) -> Result<Iteration, String> {
         if let Some(input) = self.pipeline_input(expression, None)? {
-            return Ok(Iteration::Prepared(input));
+            return Ok(input);
         }
         if let ast::Expr::Call(call) = expression
             && matches!(&*call.func, ast::Expr::Name(name) if name.id == "range")
@@ -2245,7 +2247,14 @@ impl<'a> Checker<'a> {
                     ));
                 }
             }
-            ast::Stmt::Expr(expression) => Some(Statement::Expr(self.expr(&expression.value)?)),
+            ast::Stmt::Expr(expression) => {
+                if let ast::Expr::Call(call) = &*expression.value
+                    && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::AssertNever))
+                {
+                    return Ok((vec![self.assert_never(call)?], false));
+                }
+                Some(Statement::Expr(self.expr(&expression.value)?))
+            }
             ast::Stmt::Delete(delete) => {
                 let mut statements = Vec::new();
                 for target in &delete.targets {
@@ -2672,7 +2681,10 @@ impl<'a> Checker<'a> {
                 .map(|(states, start)| states.split_off(start))
                 .collect::<Vec<_>>()
         };
+        let outer_finally = self.in_finally;
+        self.in_finally = true;
         let (finalbody, final_falls) = self.block(&try_.finalbody)?;
+        self.in_finally = outer_finally;
         if final_falls && !pending_breaks.is_empty() {
             let final_state = self.local_state();
             let written = narrowing::assigned_names(&try_.finalbody)
@@ -3569,6 +3581,9 @@ impl<'a> Checker<'a> {
                     }
                     _ => {}
                 }
+            }
+            if attribute.attr.as_str() == "sort" && self.types.element(receiver.ty).is_some() {
+                return self.list_sort(receiver, call);
             }
             self.reject_builtin_keywords(call)?;
             if matches!(receiver.ty, Type::TextIO | Type::BinaryIO) {

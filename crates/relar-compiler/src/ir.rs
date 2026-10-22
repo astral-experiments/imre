@@ -346,8 +346,11 @@ pub(crate) enum Builtin {
     Repr,
     Len,
     Abs,
-    /// Stable permutation of a private materialized list by precomputed scalar keys.
+    /// Stable permutation of a fully typed list by precomputed scalar keys.
     SortByKeys,
+    ListExtendUnhinted,
+    SortDetach,
+    SortRestore,
     StringJoin,
     StringReplace,
     Text(TextOperation),

@@ -33,7 +33,9 @@ def run(path: str) -> None:
     rows: list[Row] = []
     for index, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines()):
         rows.append(Row(index, Variant.from_build_options(line.split())))
-    for row in sorted(rows, key=rank):
+    original = rows
+    rows.sort(key=rank)
+    for row in original:
         variant = row.variant
         name = variant.value if variant is not None else "none"
         print(f"{row.index} {rank(row)} {name}")
