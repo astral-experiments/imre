@@ -97,11 +97,18 @@ try:
 except ValueError as error:
     print(str(error).startswith("JSON nesting exceeds 128"))
 
-shared = decode(r'["shared","shared","\u0073hared","different"]', list[str])
+for length in [127, 128, 129]:
+    try:
+        named = decode(repeat("[", length), Item)
+        print("unexpected malformed success")
+    except ValueError as error:
+        assert str(error).startswith("JSON nesting exceeds 128") == (length > 128)
+
+shared = decode(r'["shared","shared","\u0073hared","different","additional tag","shared"]' + repeat(" ", 512), list[str])
 changed = shared[0]
 changed += "!"
 shared[0] = changed
-print(f"{shared[0]} {shared[1]} {shared[2]} {shared[3]}")
+print(f"{shared[0]} {shared[1]} {shared[2]} {shared[3]} {shared[5]}")
 
 # Every failure occurs after owning long strings, BigInts, nested records, and lists.
 prefix = '{"total":1267650600228229401496703205376,"items":[{"name":"' + repeat("x", 1024) + '","amount":1267650600228229401496703205376},'

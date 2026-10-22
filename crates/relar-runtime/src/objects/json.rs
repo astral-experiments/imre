@@ -137,12 +137,14 @@ impl Seen {
     }
 }
 
+type StringSlots = [Option<Rc<Str>>; 64];
+
 /// Raw numeric tokens and ignored containers can bypass serde's recursion
 /// budget. Check the full document once before admitting such values.
 struct DecodeState<'a> {
     text: &'a str,
     checked: bool,
-    strings: [Option<Rc<Str>>; 64],
+    strings: Option<&'a mut StringSlots>,
 }
 
 impl DecodeState<'_> {
@@ -233,13 +235,15 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
     }
 
     fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
-        // Long strings bypass the table. A collision evicts just one immutable
-        // owner, keeping the cache bounded even for adversarial input.
-        let owner = if !value.is_empty() && value.len() <= 32 {
+        // A collision evicts one immutable owner from the document-local table.
+        let owner = if !value.is_empty()
+            && value.len() <= 32
+            && let Some(strings) = self.1.strings.as_deref_mut()
+        {
             let bytes = value.as_bytes();
             let index = (value.len() ^ usize::from(bytes[0]) ^ usize::from(bytes[bytes.len() - 1]))
-                % self.1.strings.len();
-            let slot = &mut self.1.strings[index];
+                % strings.len();
+            let slot = &mut strings[index];
             if let Some(owner) = slot
                 && owner.as_str() == value
             {
@@ -469,6 +473,14 @@ fn empty_list(schema: &Schema) -> OwnedWord {
 /// Counts containers even in ignored values, where serde's skipping path does
 /// not consume its recursion budget. Syntax validation remains the parser's job.
 fn check_depth(text: &str) -> Result<(), &'static str> {
+    // Even brackets inside strings are a conservative upper bound. Most flat
+    // numeric documents can be certified without tokenizing quotes and escapes.
+    if memchr::memchr2_iter(b'[', b'{', text.as_bytes())
+        .nth(MAX_DEPTH)
+        .is_none()
+    {
+        return Ok(());
+    }
     let mut depth = 0_usize;
     let mut remaining = text.as_bytes();
     while let Some((&byte, rest)) = remaining.split_first() {
@@ -512,16 +524,27 @@ fn decode_with_depth(
     schema: &Schema,
     checked: bool,
 ) -> Result<OwnedWord, serde_json::Error> {
+    // Even malformed input this short cannot open more than MAX_DEPTH containers.
+    let checked = checked || text.len() <= MAX_DEPTH;
     let mut deserializer = serde_json::Deserializer::from_str(text);
     if checked {
         deserializer.disable_recursion_limit();
     }
+    // Keep the table on the stack for large documents. Inputs smaller than
+    // the table bypass its initialization and destruction entirely.
+    let mut slots;
+    let strings = if text.len() >= size_of::<StringSlots>() {
+        slots = [const { None }; 64];
+        Some(&mut slots)
+    } else {
+        None
+    };
     let value = Seed(
         schema,
         &mut DecodeState {
             text,
             checked,
-            strings: [const { None }; 64],
+            strings,
         },
     )
     .deserialize(&mut deserializer)?;
