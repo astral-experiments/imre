@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Package already-built release artifacts and smoke-test the extracted distribution.
+# Build a native cargo-dist archive and smoke-test the extracted distribution.
 set -euo pipefail
+umask 022
 
-target=${1:?usage: package-release.sh TARGET BUILD_DIR DIST_DIR}
-build_dir=$(realpath "${2:?missing build directory}")
-dist_dir=$(realpath -m "${3:?missing distribution directory}")
+target=${1:?usage: package-release.sh TARGET DIST_DIR}
+dist_dir=$(realpath -m "${2:?missing distribution directory}")
 root=$(cd "$(dirname "$0")/.." && pwd)
 case "$target" in
     x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu) ;;
@@ -15,25 +15,32 @@ if [[ $(uname -s) != Linux || $(uname -m) != "${target%%-*}" ]]; then
     exit 1
 fi
 
-name="relar-$target"
 scratch=$(mktemp -d)
 trap 'rm -rf -- "$scratch"' EXIT
-bundle="$scratch/$name"
-mkdir -m 755 "$bundle"
-mkdir -p "$dist_dir" "$scratch/smoke"
-install -m 755 "$build_dir/relar" "$bundle/relar"
-install -m 644 "$build_dir/librelar_runtime.a" "$root"/LICENSE-{APACHE,MIT} "$bundle/"
-# Ruff and ty share Ruff's license. ty also embeds typeshed in the compiler.
-install -m 644 "$root/examples/conformance_report/upstream/LICENSE" "$bundle/LICENSE-Ruff"
-typeshed_manifest=$("${CARGO:-cargo}" metadata --manifest-path "$root/Cargo.toml" --locked --offline \
-    --format-version 1 --filter-platform "$target" | jq -er '.packages[] | select(.name == "ty_vendored") | .manifest_path')
-install -m 644 "$(dirname "$typeshed_manifest")/vendor/typeshed/LICENSE" "$bundle/LICENSE-typeshed"
+cd "$root"
+version=$(python3 scripts/release-version.py)
+cargo=${CARGO:-cargo}
+"$cargo" build --locked --profile dist --target "$target" --workspace
+"$cargo" metadata --locked --format-version 1 --filter-platform "$target" > "$scratch/metadata.json"
+target_dir=$(jq -er '.target_directory' "$scratch/metadata.json")
+typeshed_manifest=$(jq -er '.packages[] | select(.name == "ty_vendored") | .manifest_path' "$scratch/metadata.json")
+# The compiler and runtime are separate Cargo packages. Ship the runtime beside the executable.
+assets=target/release-assets
+mkdir -p "$assets"
+build_dir="$target_dir/$target/dist"
+chmod 755 "$build_dir/relar"
+install -m 644 "$build_dir/librelar_runtime.a" LICENSE-APACHE LICENSE-MIT "$assets/"
+install -m 644 examples/conformance_report/upstream/LICENSE "$assets/LICENSE-Ruff"
+install -m 644 "$(dirname "$typeshed_manifest")/vendor/typeshed/LICENSE" "$assets/LICENSE-typeshed"
 
-tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-    -C "$scratch" -czf "$scratch/$name.tar.gz" "$name"
-cd "$scratch/smoke"
-tar -xzf "$scratch/$name.tar.gz"
-version=$(python3 "$root/scripts/release-version.py")
+# cargo-dist's Cargo invocation has no --locked flag. Check the lockfile across its build.
+sha256sum Cargo.lock > "$scratch/lock.sha256"
+dist build --tag "$version" --artifacts local --target "$target"
+sha256sum --check --status "$scratch/lock.sha256"
+name="relar-$target"
+archive="$root/target/distrib/$name.tar.gz"
+cd "$scratch"
+tar -xzf "$archive"
 [[ $("./$name/relar" --version) == "relar $version ("* ]]
 cat > hello.py <<'PY'
 import sys
@@ -44,6 +51,6 @@ printf 'Hello, release!\n' > expected
 "./$name/relar" run hello.py -- release > actual
 cmp expected actual
 
-mv "$scratch/$name.tar.gz" "$dist_dir/"
-cd "$dist_dir"
-sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+mkdir -p "$dist_dir"
+cp "$archive" "$archive.sha256" "$dist_dir/"
+(cd "$dist_dir" && sha256sum --check --strict "$name.tar.gz.sha256")

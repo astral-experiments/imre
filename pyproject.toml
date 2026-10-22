@@ -1,0 +1,21 @@
+[dependency-groups]
+release = ["rooster==0.1.1"]
+
+[tool.uv.dependency-groups]
+release = { requires-python = ">=3.12" }
+
+[tool.rooster]
+changelog-contributors = false
+major-labels = []
+minor-labels = ["breaking"]
+ignore-labels = ["internal", "internal:ci", "internal:testing", "internal:automations"]
+version-files = ["crates/relar-compiler/Cargo.toml", "crates/relar-runtime/Cargo.toml"]
+version-format = "cargo"
+
+[tool.rooster.section-labels]
+"Breaking changes" = ["breaking"]
+"Enhancements" = ["enhancement", "compatibility"]
+"Performance" = ["performance"]
+"Bug fixes" = ["bug"]
+"Documentation" = ["documentation"]
+"Other changes" = ["__unknown__"]

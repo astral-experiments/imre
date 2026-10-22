@@ -32,6 +32,10 @@ regex-syntax = "=0.8.11"
 [profile.release]
 debug = "line-tables-only"
 
+[profile.dist]
+inherits = "release"
+debug = 0
+
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 
