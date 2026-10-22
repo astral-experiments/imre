@@ -210,6 +210,8 @@ impl Expr {
 /// implicit receiver, which is allocated only after these values are evaluated.
 #[derive(Clone)]
 pub(crate) struct CallArgs {
+    /// The callee's nominal tag feeds a complete member dispatch at this site.
+    pub exhaustive_enum_match: bool,
     pub values: Vec<Expr>,
     pub order: Vec<usize>,
 }
@@ -218,6 +220,7 @@ impl CallArgs {
     /// Uses the existing positional order for calls that need no argument binding.
     pub(crate) fn positional(values: Vec<Expr>) -> Self {
         Self {
+            exhaustive_enum_match: false,
             order: (0..values.len()).collect(),
             values,
         }

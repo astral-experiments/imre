@@ -180,16 +180,20 @@ impl Words {
 
     /// Publish a fully initialized buffer after bulk initialization by a decoder or splitter.
     pub(super) fn into_object(mut self) -> Rc<Object> {
-        self.update_len();
+        self.update_header();
         Rc::new(Object(super::StorageCell::new(super::Storage::Sequence(
             self,
         ))))
     }
 
     /// A saturated header defers to the full-width buffer length in the runtime.
-    pub(super) fn update_len(&mut self) {
-        let length = self.values.len().min(i32::MAX as usize) as u32;
-        self.header = (length << 1) | u32::from(!self.values.spilled());
+    pub(super) fn update_header(&mut self) {
+        self.header = Self::header_for(self.values.len(), !self.values.spilled());
+    }
+
+    fn header_for(length: usize, inline: bool) -> u32 {
+        let length = length.min(i32::MAX as usize) as u32;
+        (length << 1) | u32::from(inline)
     }
 
     /// Checks the private compiler/runtime contract before transferring a value.
@@ -242,6 +246,13 @@ mod tests {
     fn inline_words_fit_the_existing_object_layout() {
         assert_eq!(std::mem::size_of::<Words>(), 40);
         assert_eq!(std::mem::size_of::<Object>(), 48);
+        assert_eq!(Words::header_for(0, false), 0);
+        assert_eq!(
+            Words::header_for(i32::MAX as usize - 1, false),
+            u32::MAX - 3
+        );
+        assert_eq!(Words::header_for(i32::MAX as usize, false), u32::MAX - 1);
+        assert_eq!(Words::header_for(usize::MAX, false), u32::MAX - 1);
     }
 
     #[test]

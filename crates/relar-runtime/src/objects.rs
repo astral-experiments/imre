@@ -305,7 +305,7 @@ pub unsafe extern "C" fn relar_seq_append(value: *const Object, word: usize, kin
                 .try_reserve(1)
                 .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
             sequence.values.push(new.into_word());
-            sequence.update_len();
+            sequence.update_header();
         })
     };
 }
@@ -323,7 +323,7 @@ pub unsafe extern "C" fn relar_seq_pop(value: *const Object) -> usize {
                 .values
                 .pop()
                 .ok_or_else(|| Error::new(Kind::IndexError, "pop from empty list"))?;
-            values.update_len();
+            values.update_header();
             Ok(OwnedWord::from_owned(word, values.kind))
         })
     };

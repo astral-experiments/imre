@@ -660,6 +660,7 @@ mod tests {
             kind: ExprKind::Call(
                 0,
                 crate::ir::CallArgs {
+                    exhaustive_enum_match: false,
                     values: vec![
                         Expr {
                             ty: Type::Str,

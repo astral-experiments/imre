@@ -2,6 +2,33 @@
 
 use super::*;
 
+/// Fold finite tag producers into one exhaustive dispatch without duplicating
+/// unbounded bodies or recursively forcing nested dispatches to inline.
+pub(super) fn inline_dispatch(module: &Module, effects: &effects::ExceptionEffects) -> Vec<bool> {
+    let mut sites = vec![0usize; module.functions.len()];
+    for function in module.functions.iter().chain([&module.entry]) {
+        crate::ir::walk_expressions(&function.body, &mut |expression| {
+            if let ExprKind::Call(target, args) = &expression.kind
+                && args.exhaustive_enum_match
+            {
+                sites[*target] += 1;
+            }
+        });
+    }
+    module.functions.iter().enumerate().map(|(id, function)| {
+        if sites[id] != 1 || !matches!(function.returns, Type::StrEnum(_)) || effects.may_raise(id) {
+            return false;
+        }
+        let mut nodes = 0;
+        let mut nested = false;
+        crate::ir::walk_expressions(&function.body, &mut |expression| {
+            nodes += 1;
+            nested |= matches!(&expression.kind, ExprKind::Call(_, args) if args.exhaustive_enum_match);
+        });
+        nodes <= 192 && !nested
+    }).collect()
+}
+
 impl Emitter<'_, '_> {
     pub(super) fn prepare_enum_members(&mut self) {
         let module = self.module;
@@ -84,6 +111,50 @@ print(label(S.ON))
             !llvm
                 .lines()
                 .any(|line| line.contains("call ptr @relar_record_new("))
+        );
+    }
+
+    #[test]
+    fn only_the_single_infallible_exhaustive_callsite_is_inlined() {
+        let definitions = r#"
+from enum import StrEnum
+class Side(StrEnum):
+    FIRST = "a"
+    SECOND = "b"
+def pick(check: bool) -> Side:
+    if check:
+        return Side.FIRST
+    return Side.SECOND
+"#;
+        let dispatch = r#"
+def show(check: bool) -> str:
+    match pick(check):
+        case Side.FIRST:
+            return "a"
+        case Side.SECOND:
+            return "b"
+"#;
+        let sites = |source: String| {
+            crate::compile(&source, &crate::CompileOptions::default())
+                .unwrap()
+                .lines()
+                .filter(|line| line.contains("call i64 @fn_0(") && line.ends_with(" alwaysinline"))
+                .count()
+        };
+        assert_eq!(
+            sites(format!(
+                "{definitions}{dispatch}\nprint(show(True))\nprint(pick(False))"
+            )),
+            1
+        );
+        let second = dispatch.replace("def show(", "def again(");
+        let fallible = definitions.replace("return Side.SECOND", "raise ValueError(\"no side\")");
+        let partial = dispatch.replace("case Side.SECOND:", "case Side.SECOND if check:");
+        assert_eq!(sites(format!("{definitions}{dispatch}{second}")), 0);
+        assert_eq!(sites(format!("{fallible}{dispatch}")), 0);
+        assert_eq!(
+            sites(format!("{definitions}{partial}    return \"other\"\n")),
+            0
         );
     }
 }

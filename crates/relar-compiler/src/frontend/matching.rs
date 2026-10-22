@@ -129,6 +129,9 @@ impl Checker<'_> {
         }
         let mut value = self.expr(&branch.subject)?;
         let exhaustive = self.enum_exhaustive(value.ty, &branch.cases);
+        if exhaustive && let ExprKind::Call(_, args) = &mut value.kind {
+            args.exhaustive_enum_match = true;
+        }
         // A named subject stores its target before yielding the same value.
         // Track that outer target with the same narrowing rules as a bare name.
         let visible = match &*branch.subject {

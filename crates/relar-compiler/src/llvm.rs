@@ -146,6 +146,8 @@ enum Completion {
 
 pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> String {
     let borrows = borrows::analyze(module);
+    let effects = effects::analyze(module);
+    let inline_dispatch = string_enums::inline_dispatch(module, &effects);
     let mut emitter = Emitter {
         module,
         code: String::new(),
@@ -174,7 +176,8 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         error_exit: String::new(),
         sanitize,
         ranges,
-        effects: effects::analyze(module),
+        effects,
+        inline_dispatch,
         callable_targets: crate::callables::Targets::analyze(module),
         integer_regions: integer_regions::analyze(module),
         uses_sys_argv: module.uses_sys_argv(),
@@ -252,6 +255,7 @@ struct Emitter<'a, 'module> {
     sanitize: bool,
     ranges: &'a RangeFacts<'module>,
     effects: ExceptionEffects,
+    inline_dispatch: Vec<bool>,
     callable_targets: crate::callables::Targets,
     integer_regions: Vec<Option<integer_regions::Summary>>,
     uses_sys_argv: bool,
@@ -334,17 +338,24 @@ impl Emitter<'_, '_> {
     }
 
     fn call(&mut self, name: &str, returns: Type, args: &[&Value]) -> Value {
-        self.call_with_effect(name, returns, args, fallible(name))
+        self.call_with_effect(name, returns, args, fallible(name), false)
     }
 
     /// Uses only the final IR's conservative callee summary. Argument evaluation
     /// has already performed its own checks and rooted every completed value.
-    fn user_call(&mut self, function: usize, returns: Type, args: &[&Value]) -> Value {
+    fn user_call(
+        &mut self,
+        function: usize,
+        returns: Type,
+        args: &[&Value],
+        enum_match: bool,
+    ) -> Value {
         self.call_with_effect(
             &format!("fn_{function}"),
             returns,
             args,
             self.effects.may_raise(function),
+            enum_match && self.inline_dispatch[function],
         )
     }
 
@@ -360,13 +371,15 @@ impl Emitter<'_, '_> {
         returns: Type,
         args: &[&Value],
         may_raise: bool,
+        inline: bool,
     ) -> Value {
         let args = args
             .iter()
             .map(|value| format!("{} {}", value.ty.llvm(), value.operand))
             .collect::<Vec<_>>()
             .join(", ");
-        let instruction = format!("call {} @{name}({args})", returns.llvm());
+        let attribute = if inline { " alwaysinline" } else { "" };
+        let instruction = format!("call {} @{name}({args}){attribute}", returns.llvm());
         let operand = if may_raise {
             self.checked_instruction(instruction)
         } else {
@@ -1985,6 +1998,7 @@ impl Emitter<'_, '_> {
                         .iter()
                         .map(|&index| &values[index].value)
                         .collect::<Vec<_>>(),
+                    args.exhaustive_enum_match,
                 );
                 for arg in &values {
                     self.release_operand(arg);
@@ -2003,7 +2017,7 @@ impl Emitter<'_, '_> {
                 let object = self.record(expression.ty);
                 let mut inputs = vec![&object];
                 inputs.extend(args.order.iter().map(|&index| &values[index].value));
-                self.user_call(*initializer, Type::None, &inputs);
+                self.user_call(*initializer, Type::None, &inputs, false);
                 for arg in &values {
                     self.release_operand(arg);
                 }

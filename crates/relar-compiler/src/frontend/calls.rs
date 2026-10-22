@@ -223,7 +223,11 @@ impl Checker<'_> {
                 values.push(default.clone());
             }
         }
-        Ok(ir::CallArgs { values, order })
+        Ok(ir::CallArgs {
+            values,
+            order,
+            exhaustive_enum_match: false,
+        })
     }
 
     pub(super) fn reject_builtin_keywords(&self, call: &ast::ExprCall) -> Result<(), String> {

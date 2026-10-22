@@ -19,7 +19,7 @@ pub(crate) fn selected(call: &Expr, functions: &[Function]) -> Option<Getter> {
     if !matches!(call.ty, Type::ListInt | Type::List(_)) || !args.values.iter().all(atom) {
         return None;
     }
-    let function = &functions[*id];
+    let function = functions.get(*id)?;
     let [Statement::Return(value)] = function.body.as_slice() else {
         return None;
     };
