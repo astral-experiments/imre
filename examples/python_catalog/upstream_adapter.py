@@ -1,6 +1,7 @@
 """Run the unchanged upstream CPython finder and renderer without networking."""
 
 import asyncio
+import gzip
 import importlib.util
 import logging
 import sys
@@ -96,14 +97,20 @@ def compute(rounds: int, source: Path, output: Path) -> int:
     return checksum
 
 
+def read_source(source: Path) -> str:
+    if source.name.endswith(".gz"):
+        with gzip.open(source, "rt", encoding="utf-8") as stream:
+            return stream.read()
+    return source.read_text(encoding="utf-8")
+
+
 def main() -> None:
     if len(sys.argv) == 5 and sys.argv[1] == "--compute":
         print(compute(int(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[4])))
         return
     if len(sys.argv) != 3:
         raise ValueError("expected INPUT.ndjson OUTPUT.json")
-    text = Path(sys.argv[1]).read_text(encoding="utf-8")
-    run(text, Path(sys.argv[2]))
+    run(read_source(Path(sys.argv[1])), Path(sys.argv[2]))
 
 
 if __name__ == "__main__":

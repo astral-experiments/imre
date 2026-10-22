@@ -1,4 +1,4 @@
-"""Build the live and compute Relar programs from retained, verified inputs."""
+"""Build the developer-tool entrypoints from retained, verified inputs."""
 
 from __future__ import annotations
 
@@ -22,11 +22,11 @@ benchmark = SimpleNamespace(**runpy.run_path(str(HERE / "live_conformance_benchm
 shared = benchmark.shared
 
 
-def source_paths() -> list[Path]:
+def source_paths(application: str) -> list[Path]:
     paths = [Path(__file__), HERE / "live_conformance_benchmark.py",
              HERE / "live_conformance_validate.py", HERE / "native_tools_benchmark.py",
              HERE / "conformance_validate.py", HERE / "benchmark.py", HERE / "validate.py"]
-    for directory in (ROOT / "examples/conformance_report", ROOT / "stdlib/relar"):
+    for directory in (ROOT / "examples" / application, ROOT / "stdlib/relar"):
         paths.extend(path for path in directory.rglob("*.py") if "__pycache__" not in path.parts)
     return sorted(set(paths))
 
@@ -36,6 +36,7 @@ def main() -> None:
         raise SystemExit("build validation requires assertions")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--core-build-record", required=True, type=Path)
+    parser.add_argument("--application", choices=("conformance_report", "python_catalog"), default="conformance_report")
     parser.add_argument("--mode", choices=("normal", "thinlto", "asan"), default="normal")
     parser.add_argument("--clang", default="clang-18")
     parser.add_argument("--lto-linker", type=Path)
@@ -60,7 +61,7 @@ def main() -> None:
         # ld.lld's spelling chooses the GNU linker driver even when it is a symlink.
         tools["lto_linker"] = args.lto_linker.absolute()
         assert tools["lto_linker"].is_file()
-    sources = source_paths()
+    sources = source_paths(args.application)
     guarded.update({str(path): benchmark.identity(path) for path in [*sources, *tools.values()]})
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     hashes = {str(path): benchmark.digest(path) for path in sources}
@@ -87,7 +88,8 @@ def main() -> None:
     tool_versions = {name: subprocess.check_output([str(path), "--version"], env=environment,
                                                   text=True, timeout=30)
                      for name, path in tools.items()}
-    record = {"schema": 1, "kind": "live-conformance-program-build", "status": "running",
+    kind = "live-conformance-program-build" if args.application == "conformance_report" else "streaming-catalog-program-build"
+    record = {"schema": 1, "kind": kind, "status": "running",
               "mode": args.mode, "target": core["target"], "revision": revision,
               "source_matches_revision": matches, "input_guards_passed": False,
               "core_build_record": benchmark.identity(core_path),
@@ -98,10 +100,10 @@ def main() -> None:
               "binaries": {}, "llvm": {}, "linked_libraries": {}}
     try:
         for suffix, entry in (("", "__main__.py"), ("-compute", "compute.py")):
-            name = "conformance_report" + suffix
-            binary = output / ("conformance-report" + suffix)
+            name = args.application + suffix
+            binary = output / ("conformance-report" + suffix if args.application == "conformance_report" else name)
             llvm = output / (binary.name + ".ll")
-            command = [str(compiler), "build", str(ROOT / "examples/conformance_report" / entry),
+            command = [str(compiler), "build", str(ROOT / "examples" / args.application / entry),
                        "--module-root", str(ROOT / "examples"), "-o", str(binary),
                        "--runtime", str(runtime), "--clang", str(tools["clang"]),
                        "--opt-level", "3", "--emit-llvm", str(llvm), "--target", core["target"]]
@@ -124,7 +126,7 @@ def main() -> None:
             record["llvm"][name] = benchmark.identity(llvm)
             record["linked_libraries"][str(binary)] = shared.linked_libraries(binary)
             print("Built " + str(binary), flush=True)
-        assert source_paths() == sources, "program source membership changed during build"
+        assert source_paths(args.application) == sources, "program source membership changed during build"
         assert all(benchmark.identity(Path(path)) == item for path, item in guarded.items()), "build input changed"
         assert all(benchmark.identity(Path(item["path"])) == item for item in retained.values()), "retained source changed"
         assert revision == subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
