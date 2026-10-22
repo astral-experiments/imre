@@ -15,6 +15,7 @@ mod mappings;
 mod paths;
 mod processes;
 pub(crate) mod records;
+mod regexes;
 mod sequences;
 mod stdlib;
 mod tempdirs;
@@ -45,6 +46,8 @@ enum Storage {
     File(Box<files::FileState>),
     Path(Str),
     PathIterator(Box<paths::PathIterator>),
+    RegexPattern(Box<regexes::Pattern>),
+    RegexMatch(regexes::Match),
 }
 
 /// Acquires a reference without consuming the caller's live Rc handle.
