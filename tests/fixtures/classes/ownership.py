@@ -97,7 +97,20 @@ def first(value: int, ignored: int) -> int:
     return value
 
 
+def first_item(items: list[int], ignored: list[int]) -> int:
+    return items[0]
+
+
+def optional_field_rebind() -> None:
+    record: Record | None = Record(1, True, "original", None, [31])
+    if record is not None:
+        # The second argument drops the only owner of the original record.
+        print(first_item(record.items, (record := Record(2, False, "new", None, [7])).items))
+        print(record.items[0])
+
+
 def main() -> None:
+    optional_field_rebind()
     value = Record(1000000000000000000000000000000, True, "λ record", None, [1, 2])
     print(value.number)
     print(value.enabled)

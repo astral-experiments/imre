@@ -544,6 +544,21 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// A field load or literal match selector has no intervening operand
+    /// evaluation. Its local owner stays alive until the operation finishes.
+    fn immediate_receiver(&mut self, expression: &Expr) -> Operand {
+        if matches!(&expression.kind, ExprKind::Local(_))
+            || matches!(&expression.kind, ExprKind::Unwrap(inner) if matches!(inner.kind, ExprKind::Local(_)))
+        {
+            Operand {
+                value: self.borrow_projection(expression),
+                ownership: Ownership::Borrowed,
+            }
+        } else {
+            self.operand(expression)
+        }
+    }
+
     fn release_operand(&mut self, operand: &Operand) {
         if matches!(operand.ownership, Ownership::Owned) {
             self.release(&operand.value);
@@ -1945,7 +1960,7 @@ impl Emitter<'_, '_> {
                 value
             }
             ExprKind::Field(receiver, field) => {
-                let receiver = self.operand(receiver);
+                let receiver = self.immediate_receiver(receiver);
                 let value = self.get_field(&receiver.value, *field, expression.ty);
                 self.release_operand(&receiver);
                 value
@@ -2796,21 +2811,11 @@ impl Emitter<'_, '_> {
             .iter()
             .enumerate()
             .map(|(index, arg)| {
-                // Match selectors are scalar literals. None can replace the
-                // originating slot between this narrowed read and the call.
-                if index == 0
-                    && arg.ty == Type::RegexMatch
-                    && matches!(builtin, Builtin::RegexCapture { .. })
-                    && let ExprKind::Unwrap(inner) = &arg.kind
-                    && let ExprKind::Local(slot) = inner.kind
-                {
-                    let word = self.borrow_slot(slot).operand;
-                    return Operand {
-                        value: self.decode_word(word, Type::RegexMatch),
-                        ownership: Ownership::Borrowed,
-                    };
+                if index == 0 && matches!(builtin, Builtin::RegexCapture { .. }) {
+                    self.immediate_receiver(arg)
+                } else {
+                    self.operand(arg)
                 }
-                self.operand(arg)
             })
             .collect::<Vec<_>>();
         let result = match builtin {

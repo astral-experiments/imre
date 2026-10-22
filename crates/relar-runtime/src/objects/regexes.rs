@@ -249,6 +249,7 @@ pub unsafe extern "C" fn relar_regex_search(
 
 impl Match {
     /// Distinguishes an unknown selector (IndexError) from a nonparticipating group.
+    #[inline(always)] // Keep the scalar span in the calling group or bound operation.
     unsafe fn span(&self, selector: usize, named: u8) -> Result<Option<(usize, usize)>, Error> {
         let index = if named == 0 {
             // SAFETY: the ABI roots an integer selector's canonical word. Every
