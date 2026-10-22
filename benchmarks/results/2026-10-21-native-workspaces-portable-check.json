@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "copied_inputs": [
+    "2026-10-21-native-workspaces-evidence.tar.gz",
+    "2026-10-21-native-workspaces-evidence-manifest.json",
+    "2026-10-21-native-workspaces-evidence-index.json",
+    "2026-10-21-native-workspaces-normal.json.gz",
+    "replay-result.json",
+    "2026-10-21-native-workspaces-replay.py",
+    "2026-10-21-native-workspaces-thinlto.json.gz"
+  ],
+  "source_and_capture_access": "forbidden outside isolated bundle",
+  "external_execution_and_network": "forbidden by audit hook",
+  "opened_paths": 7711,
+  "python_version": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+  "python_runtime_roots": [
+    "/usr"
+  ]
+}
