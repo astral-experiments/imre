@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -16,7 +17,7 @@ LIBRARIES = {
     "libcodonrt.so": "b7dbed21f9bd086d6331581b0bc330e48abab14766e3a69fb970c9855baf878d",
 }
 FILES = {
-    "conformance_report": ["__init__.py", "__main__.py", "compute.py", "app.py", "model.py", "parse.py", "render.py"],
+    "conformance_report": ["__init__.py", "__main__.py", "compute.py", "app.py", "model.py", "parse.py", "render.py", "live.py"],
     "python_catalog": ["__init__.py", "__main__.py", "compute.py", "catalog.py"],
 }
 
@@ -121,6 +122,19 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
             raise ValueError("typed encoder import changed")
         changed = changed.replace(before, "from .catalog import encode\n")
         edits.append({"kind": "native encoder import"})
+    if name == "conformance_report/live.py":
+        before = "from relar.json import decode\n"
+        if changed.count(before) != 1:
+            raise ValueError("live typed JSON import changed")
+        changed = changed.replace(before, "from conformance_report.parse import decode\n")
+        before = "from relar.toml import decode as decode_toml\n"
+        if changed.count(before) != 1:
+            raise ValueError("live typed TOML import changed")
+        changed = changed.replace(before, "")
+        addition = (HERE / "conformance_toml.py").read_text()
+        changed += "\n\n" + addition
+        edits.append({"kind": "native typed TOML boundary", "adapter": "conformance_toml.py", "adapter_sha256": digest(addition.encode())})
+        edits.append({"kind": "native live typed JSON import", "adapter": "conformance_json.py"})
     original_bodies, generated_bodies = bodies(source), bodies(changed, restore_calls=True)
     if any(generated_bodies.get(name) != body for name, body in original_bodies.items()):
         raise ValueError("adapter changed an application function body beyond declared native calls")
@@ -132,7 +146,10 @@ def main() -> None:
     parser.add_argument("--codon", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--applications", nargs="+", choices=FILES, default=list(FILES))
+    parser.add_argument("--platform-library", type=Path, help="native benchmark platform shared library, required for conformance")
     args = parser.parse_args()
+    if "conformance_report" in args.applications and args.platform_library is None:
+        parser.error("conformance_report requires --platform-library (native Rust OS/TOML boundary)")
     codon = args.codon.resolve(strict=True)
     if digest(codon.read_bytes()) != COMPILER_SHA256:
         parser.error("use the pinned official Codon 0.20.4 Linux x86_64 release")
@@ -154,6 +171,10 @@ def main() -> None:
         "commands": [], "binaries": {}, "environment_overrides": {"CODON_PYTHON": "/nonexistent/relar-native-codon-libpython.so", "CODON_PATH": str(source_root)},
         "domain": {"integers": "signed 64-bit; no arbitrary-precision fallback", "duplicate_json_keys": "stock Codon JSON keeps the last value; typed Relar rejects known-field duplicates", "python_interop": False},
     }
+    if args.platform_library is not None:
+        platform = args.platform_library.resolve(strict=True)
+        record["native_platform"] = {"path": str(platform), "sha256": digest(platform.read_bytes()),
+                                     "scope": "TOML decoding, child capture/timeouts, temporary workspaces; no report computation or Python interop"}
     for app in args.applications:
         directory = source_root / app
         directory.mkdir()
@@ -173,6 +194,11 @@ def main() -> None:
     (source_root / "codon_json_helpers.codon").write_bytes((HERE / "json_helpers.py").read_bytes())
     (source_root / "codon_decimal.codon").write_bytes((HERE / "decimal.py").read_bytes())
     (source_root / "codon_sort.codon").write_bytes((HERE / "sort.py").read_bytes())
+    if "conformance_report" in args.applications:
+        for source, generated in (("live_platform.py", "codon_platform.codon"),
+                                  ("live_subprocess.py", "subprocess.codon"),
+                                  ("live_tempfile.py", "tempfile.codon")):
+            (source_root / generated).write_bytes((HERE / source).read_bytes())
     urllib = source_root / "urllib"
     urllib.mkdir()
     (urllib / "__init__.codon").write_text("")
@@ -196,6 +222,8 @@ def main() -> None:
     for name, entry in entries:
         binary = output / name
         command = [str(codon), "build", "-release", "-numerics=py", "-disable-native", "-exe", "-o", str(binary), str(entry)]
+        if args.platform_library is not None:
+            command.extend(["--linker-flags", shlex.join([str(platform), "-Wl,-rpath," + str(platform.parent)])])
         print("Building " + name, flush=True)
         result = subprocess.run(command, cwd=source_root, env={**os.environ, **record["environment_overrides"]}, capture_output=True)
         captures = {}

@@ -1,3 +1,4 @@
+mod live;
 mod model;
 mod parse;
 mod report;
@@ -207,6 +208,13 @@ fn render_report(inputs: &Inputs, options: &Options) -> Result<String> {
 }
 
 fn run() -> Result<()> {
+    let arguments: Vec<String> = std::env::args().collect();
+    if arguments
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "--suite" | "--old-ty" | "--new-ty"))
+    {
+        return live::run(&arguments);
+    }
     let options = options()?;
     let inputs = parse::read_inputs(&options.manifest, &options.old, &options.new)?;
     if options.compute {

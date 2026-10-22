@@ -48,5 +48,27 @@ official release identities; it records the native JSON module hash as well.
 ```sh
 python3 benchmarks/codon_native/build.py \
   --codon /path/to/codon-deploy-linux-x86_64/bin/codon \
+  --platform-library /path/to/native-platform/librelar_benchmark_platform.so \
   --output /path/to/fresh-build-directory
 ```
+
+## Live conformance workflow
+
+The checkout-based reporter additionally uses explicit native TOML, subprocess,
+and temporary-directory adapters. Build `benchmarks/native_platform` and pass
+its shared library with `--platform-library`; select `--applications conformance_report`
+to build the live and compute reporter binaries. The platform library uses Rust
+for configuration decoding, deadline-bound process capture, and temporary
+directories. It contains no annotation parsing, diagnostic classification, or
+report rendering, and links neither Python nor Relar.
+
+The subprocess adapter serializes arguments and the environment across its native
+FFI boundary and returns decoded captures. All serialization and native calls
+remain inside live timings. The Rust reference calls the same platform routines
+through Rust types. A `__fspath__` adapter accommodates Codon's context manager
+binding behavior; native error adapters preserve the tested exception categories
+and cleanup, although Codon's uncaught-error process exit differs from Python's.
+
+Ordinary and ThinLTO comparisons keep the Codon compiler flags above. Only its
+linked Rust platform library changes between those pairings; this is not a
+Codon cross-language ThinLTO build. The compute reporter has no platform calls.

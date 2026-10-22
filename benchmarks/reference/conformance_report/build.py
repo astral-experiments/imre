@@ -23,11 +23,13 @@ def digest(path: Path) -> str:
 
 def sources() -> dict[str, Path]:
     return {
-        str(path.relative_to(HERE)): path
+        os.path.relpath(path, HERE): path
         for path in (
             HERE / "Cargo.toml",
             HERE / "Cargo.lock",
             *sorted((HERE / "src").glob("*.rs")),
+            HERE / "../../native_platform/Cargo.toml",
+            HERE / "../../native_platform/src/lib.rs",
         )
     }
 
@@ -210,7 +212,10 @@ def main() -> None:
             "precision with native i64 storage for ordinary coordinates. The compute mode repeats all report "
             "computation over preloaded raw text with black-boxed inputs/results and a Unicode-length checksum. "
             "Optional compute output publishes the full final report once, or an empty report for zero rounds. "
-            "Both success bytes and errors are checked against pinned upstream Ruff code and typed CPython."
+            "Both success bytes and errors are checked against pinned upstream Ruff code and typed CPython. "
+            "Live mode discovers typing cases from TOML, runs both ty children with deadlines, resolves paths, "
+            "and atomically publishes the same report. Only native OS/TOML support is shared with Codon's "
+            "benchmark platform crate; all report computation remains independently implemented here."
         ),
         "input_guards_passed": True,
     }
