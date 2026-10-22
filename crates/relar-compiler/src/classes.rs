@@ -5,9 +5,11 @@ use std::collections::{HashMap, HashSet};
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{Visitor, walk_expr};
 
-use crate::modules::{DefinitionId, SourceGraph, SourceModule};
+use crate::ir::Type;
+use crate::modules::{Binding, DefinitionId, Intrinsic, SourceGraph, SourceModule};
 
 mod dataclasses;
+mod enums;
 pub(crate) use dataclasses::{ContainerFactory, DataclassOptions, FieldDefault};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,9 +33,10 @@ pub(crate) struct Class {
     pub(crate) methods: Vec<ast::StmtFunctionDef>,
     pub(crate) method_kinds: Vec<MethodKind>,
     pub(crate) dataclass: Option<DataclassOptions>,
+    pub(crate) enum_members: Option<enums::Members>,
     pub(crate) generated_initializer: bool,
     /// Index into `methods`, including the initializer itself.
-    pub(crate) initializer: usize,
+    pub(crate) initializer: Option<usize>,
 }
 
 pub(crate) struct Field {
@@ -46,6 +49,14 @@ pub(crate) struct Field {
 }
 
 impl Classes {
+    pub(crate) fn instance(&self, id: usize) -> Type {
+        if self.definitions[id].enum_members.is_some() {
+            Type::StrEnum(id)
+        } else {
+            Type::Class(id)
+        }
+    }
+
     /// Assigns nominal identities in module and source order, independently of imports' aliases.
     pub(crate) fn collect(graph: &SourceGraph) -> Result<Self, String> {
         let mut definitions = Vec::new();
@@ -73,17 +84,26 @@ fn collect_class(
     definition: DefinitionId,
     node: &ast::StmtClassDef,
 ) -> Result<Class, String> {
+    let is_enum = node.arguments.as_ref().is_some_and(|arguments| {
+        matches!(arguments.args.as_ref(), [base] if graph.resolve(definition.module, base) == Some(Binding::Intrinsic(Intrinsic::StrEnum)))
+            && arguments.keywords.is_empty()
+    });
     if node.type_params.is_some()
-        || node
-            .arguments
-            .as_ref()
-            .is_some_and(|args| !args.args.is_empty() || !args.keywords.is_empty())
+        || !is_enum
+            && node
+                .arguments
+                .as_ref()
+                .is_some_and(|args| !args.args.is_empty() || !args.keywords.is_empty())
     {
         return Err(module.error(
             node,
             "class inheritance, metaclasses, and type parameters are unsupported",
         ));
     }
+    if is_enum && !node.decorator_list.is_empty() {
+        return Err(module.error(node, "decorated StrEnum declarations are unsupported"));
+    }
+    let mut enum_members = is_enum.then(enums::Members::default);
     let dataclass = dataclasses::options(graph, definition.module, node)?;
     let mut names = HashSet::new();
     let mut class_bindings = HashSet::new();
@@ -93,7 +113,15 @@ fn collect_class(
     let mut initializer = None;
     for statement in &node.body {
         match statement {
-            ast::Stmt::AnnAssign(field) if field.value.is_none() || dataclass.is_some() => {
+            ast::Stmt::Assign(member) if let Some(members) = &mut enum_members => {
+                let name =
+                    members.declare(graph, module, definition.module, member, &class_bindings)?;
+                names.insert(name.clone());
+                class_bindings.insert(name);
+            }
+            ast::Stmt::AnnAssign(field)
+                if !is_enum && (field.value.is_none() || dataclass.is_some()) =>
+            {
                 if dataclass.is_some() && !field.simple {
                     return Err(module.error(
                         field,
@@ -131,6 +159,12 @@ fn collect_class(
                     ));
                 }
                 let name = method.name.as_str();
+                if is_enum && (name.starts_with('_') || matches!(name, "name" | "value")) {
+                    return Err(module.error(
+                        method,
+                        "StrEnum methods cannot override member metadata or special behavior",
+                    ));
+                }
                 if name.starts_with("__") && name != "__init__" {
                     return Err(module.error(
                         method,
@@ -192,19 +226,26 @@ fn collect_class(
         let index = methods.len();
         methods.push(dataclasses::initializer(module, node, &fields)?);
         method_kinds.push(MethodKind::Instance);
-        index
+        Some(index)
+    } else if is_enum {
+        if enum_members.as_ref().unwrap().values.is_empty() {
+            return Err(module.error(node, "a StrEnum requires at least one declared member"));
+        }
+        None
     } else {
         if dataclass.is_some_and(|options| options.frozen) {
             return Err(module.error(node, "frozen dataclasses require a generated initializer"));
         }
-        initializer.ok_or_else(|| {
+        Some(initializer.ok_or_else(|| {
             module.error(
                 node,
                 "a fixed class requires an explicit or generated __init__ method",
             )
-        })?
+        })?)
     };
-    check_initializer(module, &methods[initializer], &fields)?;
+    if let Some(initializer) = initializer {
+        check_initializer(module, &methods[initializer], &fields)?;
+    }
     Ok(Class {
         definition,
         name: node.name.as_str().to_owned(),
@@ -213,6 +254,7 @@ fn collect_class(
         methods,
         method_kinds,
         dataclass,
+        enum_members,
         generated_initializer,
         initializer,
     })

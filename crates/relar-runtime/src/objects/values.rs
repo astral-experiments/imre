@@ -43,6 +43,7 @@ pub(super) unsafe fn tuple_order(left: *const usize, right: *const usize) -> Ord
             match kind.raw() {
                 0 => Ordering::Equal,
                 1 => left.cmp(&right),
+                10 => super::string_enums::compare(left, right),
                 2 if left & right & 1 != 0 => (left as isize).cmp(&(right as isize)),
                 2 => crate::relar_int_compare(left, right).cmp(&0),
                 3 => (&*(left as *const Str)).cmp(&*(right as *const Str)),
@@ -137,7 +138,7 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
     // SAFETY: the shared kind selects the exact scalar or rooted allocation.
     unsafe {
         match raw & !NULLABLE {
-            0 | 1 => left == right,
+            0 | 1 | 10 => left == right,
             2 => integer_equal(left, right),
             3 => *(left as *const Str) == *(right as *const Str),
             4 => {
@@ -222,6 +223,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
     unsafe {
         match raw & !NULLABLE {
             0 => output.push_str("None"),
+            10 => super::string_enums::write_repr(output, word),
             1 => {
                 let value = if raw & NULLABLE != 0 { word - 1 } else { word };
                 output.push_str(if value == 0 { "False" } else { "True" });

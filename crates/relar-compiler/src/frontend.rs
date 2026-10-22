@@ -16,10 +16,12 @@ mod callables;
 mod calls;
 mod comprehensions;
 mod dataclass_values;
+mod enums;
 mod expansions;
 mod inference;
 mod iterables;
 mod json;
+mod literals;
 mod matching;
 mod module_values;
 mod paths;
@@ -548,7 +550,7 @@ fn signature(
                 crate::classes::MethodKind::Instance | crate::classes::MethodKind::Property
             )
         })
-        .map(|context| Type::Class(context.class));
+        .map(|context| classes.instance(context.class));
     if function.is_async
         || !function.decorator_list.is_empty()
         || function.type_params.is_some()
@@ -701,11 +703,11 @@ fn annotation_at(
     match graph.resolve(module, expression) {
         Some(Binding::Definition(definition)) => {
             if let Some(&id) = classes.ids.get(&definition) {
-                return Ok(Type::Class(id));
+                return Ok(classes.instance(id));
             }
         }
         Some(Binding::Intrinsic(Intrinsic::SelfType)) => {
-            return owner.map(Type::Class).ok_or_else(|| {
+            return owner.map(|id| classes.instance(id)).ok_or_else(|| {
                 error(
                     source,
                     expression,
@@ -739,6 +741,12 @@ fn annotation_at(
             )),
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
+        ast::Expr::Subscript(subscript)
+            if graph.resolve(module, &subscript.value)
+                == Some(Binding::Intrinsic(Intrinsic::Literal)) =>
+        {
+            literals::annotation(&subscript.slice, types, source)
+        }
         ast::Expr::Subscript(value)
             if let Some(Binding::Intrinsic(
                 kind @ (Intrinsic::RegexPattern | Intrinsic::RegexMatch),
@@ -891,7 +899,7 @@ fn annotation_at(
 
 /// Ruff replaces surrogate escapes with U+FFFD in its analysis AST. Reject those
 /// source literals rather than silently compiling a different Python value.
-fn check_string(value: &ast::ExprStringLiteral, source: &str) -> Result<(), String> {
+pub(crate) fn check_string(value: &ast::ExprStringLiteral, source: &str) -> Result<(), String> {
     for part in value.value.iter() {
         check_string_literal(part, source)?;
     }
@@ -1144,6 +1152,30 @@ impl<'a> Checker<'a> {
         if value.ty == expected {
             return Ok(value);
         }
+        if matches!(value.ty, Type::StrEnum(_)) && expected == Type::Str {
+            return Err(error(
+                self.source,
+                node,
+                "passing a StrEnum as plain str requires str(member) or member.value",
+            ));
+        }
+        if literals::accepts(self.types, expected, &value) {
+            return Ok(literals::view(value, expected));
+        }
+        let payload = self.types.payload(value.ty).unwrap_or(value.ty);
+        if matches!(payload, Type::StrLiteral(_))
+            && self
+                .types
+                .members(self.types.payload(expected).unwrap_or(expected))
+                .is_some_and(|members| members.contains(&Type::Str))
+        {
+            let string = if value.ty == payload {
+                Type::Str
+            } else {
+                self.types.optional(Type::Str)
+            };
+            return self.coerce(literals::view(value, string), expected, node);
+        }
         if value.ty == Type::TimeoutExpired && expected == Type::Exception {
             return Ok(Expr {
                 ty: expected,
@@ -1154,6 +1186,11 @@ impl<'a> Checker<'a> {
             });
         }
         if let Some(payload) = self.types.payload(expected) {
+            if let Some(actual) = self.types.payload(value.ty)
+                && literals::domain_fits(self.types, actual, payload)
+            {
+                return Ok(literals::view(value, expected));
+            }
             if let Some(actual) = self.types.payload(value.ty)
                 && self
                     .types
@@ -1212,7 +1249,7 @@ impl<'a> Checker<'a> {
                     return self.coerce(value, expected, expression);
                 }
                 let receiver = self.expr(&attribute.value)?;
-                if let Type::Class(class) = receiver.ty {
+                if let Type::Class(class) | Type::StrEnum(class) = receiver.ty {
                     let value =
                         self.class_attribute(attribute, class, Some(receiver), Some(concrete))?;
                     return self.coerce(value, expected, expression);
@@ -1358,7 +1395,7 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Binary(op, Box::new(left), Box::new(right)),
                 }
             }
-            _ => self.expr(expression)?,
+            _ => self.typed_expr(expression)?,
         };
         self.coerce(value, expected, expression)
     }
@@ -1443,6 +1480,7 @@ impl<'a> Checker<'a> {
             }
         }
         self.apply_instance_facts(test, truth);
+        self.apply_literal_fact(test, truth);
     }
 
     /// Captures the receiver before ordered bounds. Nullable integer operands
@@ -2800,6 +2838,15 @@ impl<'a> Checker<'a> {
     }
 
     fn expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        let value = self.typed_expr(expression)?;
+        Ok(if matches!(value.ty, Type::StrLiteral(_)) {
+            literals::view(value, Type::Str)
+        } else {
+            value
+        })
+    }
+
+    fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         self.reject_class_receiver_value(expression)?;
         if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(signature) = self.functions.get(&definition).cloned()
@@ -2918,8 +2965,15 @@ impl<'a> Checker<'a> {
                 (ty, ExprKind::Tuple(values))
             }
             ast::Expr::BinOp(binary) => {
-                let left = self.expr(&binary.left)?;
-                let right = self.expr(&binary.right)?;
+                let mut left = self.expr(&binary.left)?;
+                let mut right = self.expr(&binary.right)?;
+                if binary.op == ast::Operator::Add
+                    && matches!(left.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
+                    && matches!(right.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
+                {
+                    left = Self::string_value(left);
+                    right = Self::string_value(right);
+                }
                 if binary.op == ast::Operator::Div
                     && (left.ty == Type::Path || right.ty == Type::Path)
                 {
@@ -2979,6 +3033,8 @@ impl<'a> Checker<'a> {
                             (key, Builtin::DictContains)
                         } else if let Some(element) = self.types.set_element(receiver.ty) {
                             (element, Builtin::SetContains)
+                        } else if self.types.element(receiver.ty) == Some(Type::Str) {
+                            (Type::Str, Builtin::StringListContains)
                         } else {
                             return Err(error(
                                 self.source,
@@ -2986,6 +3042,11 @@ impl<'a> Checker<'a> {
                                 "membership requires a concrete dictionary or set",
                             ));
                         };
+                    let key = if key_type == Type::Str {
+                        Self::string_value(key)
+                    } else {
+                        key
+                    };
                     self.expect(key_type, key.ty, expression)?;
                     let mut result = Expr {
                         ty: Type::Bool,
@@ -3006,13 +3067,10 @@ impl<'a> Checker<'a> {
                         [ast::Expr::NoneLiteral(_), value] | [value, ast::Expr::NoneLiteral(_)] => {
                             self.expr(value)?
                         }
-                        _ => {
-                            return Err(error(
-                                self.source,
-                                expression,
-                                "identity comparisons are supported only with None",
-                            ));
+                        [left, right] => {
+                            return self.enum_identity(left, right, compare.ops[0], expression);
                         }
+                        _ => unreachable!(),
                     };
                     let mut result = Expr {
                         ty: Type::Bool,
@@ -3050,6 +3108,29 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.join_states(exits);
+                if let [left, right] = values.as_slice()
+                    && matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
+                    && (self.types.payload(left.ty).is_some()
+                        || self.types.payload(right.ty).is_some())
+                    && let ty @ Type::StrEnum(_) = self.types.payload(left.ty).unwrap_or(left.ty)
+                    && self.types.payload(right.ty).unwrap_or(right.ty) == ty
+                {
+                    return Ok(Self::identity_result(
+                        values,
+                        compare.ops[0] == ast::CmpOp::NotEq,
+                    ));
+                }
+                // Python StrEnum compares by its underlying str value, even
+                // against raw str or a member of another enum. A same-class
+                // equality chain can keep canonical native tags throughout.
+                if values.iter().any(|v| matches!(v.ty, Type::StrEnum(_)))
+                    && values
+                        .iter()
+                        .all(|v| matches!(v.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_)))
+                    && !values.iter().all(|v| v.ty == values[0].ty)
+                {
+                    values = values.into_iter().map(Self::string_value).collect();
+                }
                 let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
                     let (ty, right) = (pair[0].ty, pair[1].ty);
@@ -3106,7 +3187,7 @@ impl<'a> Checker<'a> {
                 (Type::Bool, ExprKind::Compare(values, ops))
             }
             ast::Expr::Subscript(subscript) => {
-                let list = self.expr(&subscript.value)?;
+                let list = Self::enum_text(self.expr(&subscript.value)?);
                 if let ast::Expr::Slice(slice) = &*subscript.slice {
                     return self.slice(list, slice);
                 }
@@ -3189,9 +3270,24 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Attribute(attribute) => {
                 if let Some(class) = self.class_reference(&attribute.value) {
+                    if let Some(member) = self.enum_member(class, attribute.attr.as_str()) {
+                        return Ok(member);
+                    }
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if let Type::StrEnum(class) = receiver.ty {
+                    match attribute.attr.as_str() {
+                        "name" => {
+                            return Ok(Expr {
+                                ty: Type::Str,
+                                kind: ExprKind::Builtin(Builtin::StrEnumName, vec![receiver]),
+                            });
+                        }
+                        "value" => return Ok(Self::enum_text(receiver)),
+                        _ => return self.class_attribute(attribute, class, Some(receiver), None),
+                    }
+                }
                 if receiver.ty == Type::Path {
                     return self.path_attribute(receiver, attribute);
                 }
@@ -3448,6 +3544,12 @@ impl<'a> Checker<'a> {
             if let Type::Class(class) = receiver.ty {
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }
+            if let Type::StrEnum(class) = receiver.ty
+                && self.classes.methods[class].contains_key(attribute.attr.as_str())
+            {
+                return self.class_method_call(call, attribute, class, Some(receiver));
+            }
+            let receiver = Self::enum_text(receiver);
             if receiver.ty == Type::Path {
                 return self.path_method(receiver, attribute, call);
             }
@@ -3704,6 +3806,23 @@ impl<'a> Checker<'a> {
                     ty: Type::None,
                     kind: ExprKind::Builtin(Builtin::Print, vec![text]),
                 }
+            });
+        }
+        if args.len() == 1
+            && matches!(args[0].ty, Type::StrEnum(_))
+            && matches!(name.id.as_str(), "str" | "print" | "len")
+        {
+            let text = Self::enum_text(args.into_iter().next().unwrap());
+            return Ok(match name.id.as_str() {
+                "str" => text,
+                "print" => Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::Print, vec![text]),
+                },
+                _ => Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(Builtin::Len, vec![text]),
+                },
             });
         }
         if name.id == "divmod" && args.len() == 2 {

@@ -7,6 +7,10 @@ pub(crate) enum Type {
     Float,
     Bool,
     Str,
+    /// A closed domain of strings with ordinary string storage and ownership.
+    StrLiteral(usize),
+    /// A nominal enum with an unboxed, nonzero canonical member tag.
+    StrEnum(usize),
     Bytes,
     ListInt,
     Class(usize),
@@ -45,6 +49,8 @@ impl std::fmt::Display for Type {
             return write!(f, "class#{id}");
         }
         match self {
+            Self::StrLiteral(id) => return write!(f, "string-literal#{id}"),
+            Self::StrEnum(id) => return write!(f, "string-enum#{id}"),
             Self::List(id) => return write!(f, "list#{id}"),
             Self::Dict(id) => return write!(f, "dict#{id}"),
             Self::Set(id) => return write!(f, "set#{id}"),
@@ -71,7 +77,9 @@ impl std::fmt::Display for Type {
             Self::CompletedProcess => "subprocess.CompletedProcess[str]",
             Self::RegexPattern => "re.Pattern[str]",
             Self::RegexMatch => "re.Match[str]",
-            Self::Class(_)
+            Self::StrLiteral(_)
+            | Self::StrEnum(_)
+            | Self::Class(_)
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
@@ -104,6 +112,8 @@ pub(crate) struct Module {
 pub(crate) struct ClassMetadata {
     pub name: String,
     pub qualified_name: String,
+    /// Canonical members of a string enum, in declaration order.
+    pub enum_members: Vec<(String, String)>,
     pub dataclass_eq: bool,
     pub dataclass_repr: bool,
     pub fields: Vec<ClassFieldMetadata>,
@@ -310,6 +320,15 @@ pub(crate) enum Compare {
 
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    StrEnumMember {
+        class: usize,
+        member: usize,
+    },
+    StrEnumName,
+    StrEnumValue,
+    StrEnumIdentity,
+    LiteralStringView,
+    StringListContains,
     /// Reads an initialized module binding with an independent owned reference.
     GlobalGet(usize),
     /// Publishes one fixed module binding after its initializer succeeds.
@@ -544,6 +563,9 @@ impl InstanceType {
     pub(crate) fn accepts(self, ty: Type) -> bool {
         match self {
             Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool),
+            Self::Exact(Type::Str) => {
+                matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
+            }
             Self::Exact(expected) => expected == ty,
             Self::List => matches!(ty, Type::ListInt | Type::List(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),

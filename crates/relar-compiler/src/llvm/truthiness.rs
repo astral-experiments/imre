@@ -41,12 +41,26 @@ impl Emitter<'_, '_> {
             }
         } else {
             match value.ty {
+                Type::StrEnum(class) => {
+                    match self.module.class_metadata[class]
+                        .enum_members
+                        .iter()
+                        .position(|(_, value)| value.is_empty())
+                    {
+                        Some(member) => self.instruction(format!(
+                            "icmp ne i64 {}, {}",
+                            value.operand,
+                            self.enum_tag(class, member)
+                        )),
+                        None => "true".to_owned(),
+                    }
+                }
                 Type::Bool => value.operand.clone(),
                 Type::Int => self.instruction(format!("icmp ne i64 {}, 1", value.operand)),
                 // Unordered-or-not-equal keeps NaN true and both signed zeros false.
                 Type::Float => self.instruction(format!("fcmp une double {}, 0.0", value.operand)),
-                Type::Str | Type::Bytes => {
-                    let family = if value.ty == Type::Str {
+                Type::Str | Type::StrLiteral(_) | Type::Bytes => {
+                    let family = if value.ty != Type::Bytes {
                         "str"
                     } else {
                         "bytes"

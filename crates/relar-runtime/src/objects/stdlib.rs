@@ -74,6 +74,7 @@ unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Vec<usize> {
                 let (left, right) = (values.values[left], values.values[right]);
                 match kind {
                     1 => left.cmp(&right),
+                    10 => super::string_enums::compare(left, right),
                     3 => (&*(left as *const Str)).cmp(&*(right as *const Str)),
                     6 => super::values::tuple_order(left as *const usize, right as *const usize),
                     8 => (&*(left as *const Bytes)).cmp(&*(right as *const Bytes)),

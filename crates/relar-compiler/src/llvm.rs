@@ -21,6 +21,7 @@ mod paths;
 mod processes;
 mod records;
 mod stdlib;
+mod string_enums;
 mod text;
 mod truthiness;
 mod unions;
@@ -28,10 +29,11 @@ mod unions;
 impl Type {
     fn llvm(self) -> &'static str {
         match self {
-            Self::Int | Self::Optional(_) | Self::Union(_) => "i64",
+            Self::Int | Self::StrEnum(_) | Self::Optional(_) | Self::Union(_) => "i64",
             Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
+            | Self::StrLiteral(_)
             | Self::Bytes
             | Self::ListInt
             | Self::Class(_)
@@ -58,6 +60,7 @@ impl Type {
             Self::Int => "1",
             Self::Float => "0.0",
             Self::Str
+            | Self::StrLiteral(_)
             | Self::Bytes
             | Self::ListInt
             | Self::Class(_)
@@ -75,7 +78,7 @@ impl Type {
             | Self::RegexMatch
             | Self::BinaryIO
             | Self::Tuple(_) => "null",
-            Self::Bool | Self::None | Self::Optional(_) | Self::Union(_) => "0",
+            Self::Bool | Self::None | Self::StrEnum(_) | Self::Optional(_) | Self::Union(_) => "0",
         }
     }
 }
@@ -150,6 +153,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
         regex_literals: BTreeMap::new(),
+        enum_members: Vec::new(),
         literal_globals: literal_globals(module),
         next_value: 0,
         next_label: 0,
@@ -175,6 +179,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         integer_regions: integer_regions::analyze(module),
         uses_sys_argv: module.uses_sys_argv(),
     };
+    emitter.prepare_enum_members();
     for (id, function) in module.functions.iter().enumerate() {
         emitter.function(function, &format!("fn_{id}"), false, &borrows[id]);
     }
@@ -209,6 +214,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         }
         output.push_str("\"\n");
     }
+    output.push_str(&emitter.enum_table());
     output.push_str(&emitter.literal_pool());
     output.push_str(&emitter.code);
     // Layout hints never replace the representation, overflow, or error guards.
@@ -224,6 +230,7 @@ struct Emitter<'a, 'module> {
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
+    enum_members: Vec<[usize; 3]>,
     literal_globals: Vec<Option<String>>,
     next_value: usize,
     next_label: usize,
@@ -413,7 +420,7 @@ impl Emitter<'_, '_> {
         let family = match ty {
             Type::Int => "int",
             Type::Union(_) => "union",
-            Type::Str => "str",
+            Type::Str | Type::StrLiteral(_) => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
             Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess => {
@@ -430,7 +437,7 @@ impl Emitter<'_, '_> {
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::BinaryIO => "object",
-            Type::Float | Type::Bool | Type::None => return,
+            Type::Float | Type::Bool | Type::StrEnum(_) | Type::None => return,
             Type::Optional(_) => unreachable!("optional types are flattened"),
         };
         let name = if value.ty == Type::Int {
@@ -458,7 +465,7 @@ impl Emitter<'_, '_> {
         if value.ty != Type::Float
             && !matches!(
                 self.module.types.payload(value.ty).unwrap_or(value.ty),
-                Type::Bool | Type::None
+                Type::Bool | Type::None | Type::StrEnum(_)
             )
             && !value.small_integer
             && !self
@@ -1710,7 +1717,10 @@ impl Emitter<'_, '_> {
                 operand: u8::from(*value).to_string(),
                 small_integer: false,
             },
-            ExprKind::Str(value) => self.literal(value, Type::Str),
+            ExprKind::Str(value) => Value {
+                ty: expression.ty,
+                ..self.literal(value, Type::Str)
+            },
             ExprKind::Bytes(value) => self.literal_bytes(value, Type::Bytes),
             ExprKind::None => none(),
             ExprKind::Local(slot) => {
@@ -2544,7 +2554,11 @@ impl Emitter<'_, '_> {
                     left.operand, right.operand
                 ))
             }
-            Type::Str => {
+            Type::StrEnum(_) => self.instruction(format!(
+                "icmp {predicate} i64 {}, {}",
+                left.operand, right.operand
+            )),
+            Type::Str | Type::StrLiteral(_) => {
                 let equal = self.instruction(format!(
                     "call i8 @relar_str_equal(ptr {}, ptr {})",
                     left.operand, right.operand
@@ -2791,6 +2805,13 @@ impl Emitter<'_, '_> {
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
+        if matches!(builtin, Builtin::LiteralStringView) {
+            let value = self.expr(&expressions[0]);
+            return Value {
+                ty: returns,
+                ..value
+            };
+        }
         if let Some(value) = self.rsplit_last(builtin, expressions) {
             return value;
         }
@@ -2821,6 +2842,36 @@ impl Emitter<'_, '_> {
             })
             .collect::<Vec<_>>();
         let result = match builtin {
+            Builtin::StrEnumMember { class, member } => Value {
+                ty: returns,
+                operand: self.enum_tag(*class, *member).to_string(),
+                small_integer: false,
+            },
+            Builtin::StrEnumName | Builtin::StrEnumValue => {
+                self.enum_text(&args[0].value, matches!(builtin, Builtin::StrEnumName))
+            }
+            Builtin::StrEnumIdentity => Value {
+                ty: Type::Bool,
+                operand: self.instruction(format!(
+                    "icmp eq i64 {}, {}",
+                    args[0].value.operand, args[1].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::LiteralStringView => {
+                unreachable!("string views transfer the operand owner directly")
+            }
+            Builtin::StringListContains => {
+                let byte = self.instruction(format!(
+                    "call i8 @relar_str_list_contains(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i8 {byte}, 0")),
+                    small_integer: false,
+                }
+            }
             Builtin::Text(operation) => self.text_builtin(*operation, &args, returns),
             Builtin::RegexCompile(pattern) => self.pooled_literal(pattern.as_bytes(), returns),
             Builtin::RegexSearch => {
@@ -3061,7 +3112,13 @@ impl Emitter<'_, '_> {
             }
             Builtin::Repr => self.value_repr(&args[0].value),
             Builtin::Str => match args[0].value.ty {
-                Type::Str => return self.own_operand(args.into_iter().next().unwrap()),
+                Type::Str | Type::StrLiteral(_) => {
+                    return Value {
+                        ty: Type::Str,
+                        ..self.own_operand(args.into_iter().next().unwrap())
+                    };
+                }
+                Type::StrEnum(_) => self.enum_text(&args[0].value, false),
                 Type::Int => self.call("relar_int_str", Type::Str, &[&args[0].value]),
                 Type::Float => self.call("relar_float_str", Type::Str, &[&args[0].value]),
                 Type::Bytes => self.call("relar_bytes_str", Type::Str, &[&args[0].value]),
@@ -3419,7 +3476,15 @@ impl Emitter<'_, '_> {
                 match args[0].value.ty {
                     Type::Int => self.void_call("relar_print_int", &[&args[0].value]),
                     Type::Float => self.void_call("relar_print_float", &[&args[0].value]),
-                    Type::Str => self.void_call("relar_print_str", &[&args[0].value]),
+                    Type::Str | Type::StrLiteral(_) => {
+                        self.void_call("relar_print_str", &[&args[0].value])
+                    }
+                    Type::StrEnum(_) => {
+                        let text = self.enum_text(&args[0].value, false);
+                        let text = self.owned(text);
+                        self.void_call("relar_print_str", &[&text]);
+                        self.release(&text);
+                    }
                     Type::Bytes => self.void_call("relar_print_bytes", &[&args[0].value]),
                     Type::Bool => {
                         let byte =
@@ -3556,11 +3621,14 @@ impl Emitter<'_, '_> {
     /// changing ownership. The slot's representation tag controls reclamation.
     fn word(&mut self, value: &Value) -> String {
         match value.ty {
-            Type::Int | Type::Optional(_) | Type::Union(_) => value.operand.clone(),
+            Type::Int | Type::StrEnum(_) | Type::Optional(_) | Type::Union(_) => {
+                value.operand.clone()
+            }
             Type::Float => self.instruction(format!("bitcast double {} to i64", value.operand)),
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
             | Type::Class(_)
@@ -3591,11 +3659,12 @@ impl Emitter<'_, '_> {
     /// Changes only the compiler view of a word, leaving its ownership unchanged.
     fn decode_word(&mut self, word: String, ty: Type) -> Value {
         let operand = match ty {
-            Type::Int | Type::Optional(_) | Type::Union(_) => word,
+            Type::Int | Type::StrEnum(_) | Type::Optional(_) | Type::Union(_) => word,
             Type::Float => self.instruction(format!("bitcast i64 {word} to double")),
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
             | Type::Class(_)
@@ -4090,7 +4159,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Bool => 1,
         Type::Int => 2,
         Type::Float => 7,
-        Type::Str => 3,
+        Type::Str | Type::StrLiteral(_) => 3,
+        Type::StrEnum(_) => 10,
         Type::Bytes => 8,
         Type::Union(_) => 9,
         Type::ListInt => 4,
@@ -4483,6 +4553,8 @@ declare void @relar_print_str(ptr)
 declare i64 @relar_str_len(ptr)
 declare i8 @relar_str_truthy(ptr)
 declare i8 @relar_bytes_truthy(ptr)
+declare i8 @relar_str_list_contains(ptr, ptr)
+declare void @relar_str_enum_table(ptr, i64)
 declare i8 @relar_str_equal(ptr, ptr)
 declare i64 @relar_int_parse(ptr)
 declare ptr @relar_input()

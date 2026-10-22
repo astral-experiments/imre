@@ -90,7 +90,7 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
                 }
             }
             match raw & !NULLABLE {
-                0 | 1 => word.hash(state),
+                0 | 1 | 10 => word.hash(state),
                 2 => IntKey::borrow(word).hash(state),
                 3 => (&*(word as *const Str)).hash(state),
                 6 => hash_tuple(word as *const usize, state),
@@ -108,6 +108,22 @@ trait ScalarKey: Clone + Eq + Hash {
     unsafe fn borrow(word: usize) -> ManuallyDrop<Self>;
     unsafe fn from_owned(word: usize) -> Self;
     fn into_word(self) -> usize;
+}
+// Enum tags are immutable scalar keys within their statically checked family.
+impl ScalarKey for usize {
+    const KIND: u32 = 10;
+    fn word(&self) -> usize {
+        *self
+    }
+    unsafe fn borrow(word: usize) -> ManuallyDrop<Self> {
+        ManuallyDrop::new(word)
+    }
+    unsafe fn from_owned(word: usize) -> Self {
+        word
+    }
+    fn into_word(self) -> usize {
+        self
+    }
 }
 impl ScalarKey for IntKey {
     const KIND: u32 = 2;
@@ -279,6 +295,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
 
 enum Tables<V> {
     Int(Table<IntKey, V>),
+    Enum(Table<usize, V>),
     Str(Table<Rc<Str>, V>),
     Bytes(Table<Rc<Bytes>, V>),
     Tuple(Table<TupleKey, V>),
@@ -288,6 +305,7 @@ macro_rules! table {
     ($self:expr, $table:ident => $body:expr) => {
         match $self {
             Tables::Int($table) => $body,
+            Tables::Enum($table) => $body,
             Tables::Str($table) => $body,
             Tables::Bytes($table) => $body,
             Tables::Tuple($table) => $body,
@@ -308,6 +326,7 @@ impl<V: Copy> Tables<V> {
     fn new(kind: u32) -> Self {
         match kind {
             2 => Self::Int(Table::new()),
+            10 => Self::Enum(Table::new()),
             3 => Self::Str(Table::new()),
             6 => Self::Tuple(Table::new()),
             8 => Self::Bytes(Table::new()),
@@ -320,6 +339,7 @@ impl<V: Copy> Tables<V> {
     fn key_kind(&self) -> u32 {
         match self {
             Self::Int(_) => 2,
+            Self::Enum(_) => 10,
             Self::Str(_) => 3,
             Self::Bytes(_) => 8,
             Self::Tuple(_) => 6,

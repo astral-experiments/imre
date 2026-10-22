@@ -382,7 +382,7 @@ class Item:
         ));
         assert!(!class.fields[2].repr);
         assert!(!class.fields[2].compare);
-        let parameters = &class.methods[class.initializer].parameters;
+        let parameters = &class.methods[class.initializer.unwrap()].parameters;
         assert_eq!(parameters.args.len(), 2);
         assert_eq!(parameters.args[1].name().as_str(), "count");
         assert_eq!(parameters.kwonlyargs[0].name().as_str(), "title");
@@ -397,7 +397,7 @@ class Item:
         .unwrap();
         let classes = Classes::collect(&graph).unwrap();
         let class = &classes.definitions[0];
-        let parameters = &class.methods[class.initializer].parameters;
+        let parameters = &class.methods[class.initializer.unwrap()].parameters;
         assert_eq!(parameters.args[0].name().as_str(), "__dataclass_self__");
         assert_eq!(parameters.args[1].name().as_str(), "self");
     }

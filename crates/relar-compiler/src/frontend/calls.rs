@@ -29,6 +29,9 @@ pub(super) fn scalar_default(
     let mut value = scalar_literal(expression, source)?;
     let ty = value.ty;
     let concrete = types.payload(expected).unwrap_or(expected);
+    if literals::accepts(types, concrete, &value) {
+        value = literals::view(value, concrete);
+    }
     if types
         .members(concrete)
         .is_some_and(|members| members.contains(&ty))

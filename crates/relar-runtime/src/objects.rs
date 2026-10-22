@@ -18,6 +18,7 @@ pub(crate) mod records;
 mod regexes;
 mod sequences;
 mod stdlib;
+mod string_enums;
 mod tempdirs;
 mod text;
 mod unions;
@@ -112,6 +113,26 @@ pub extern "C" fn relar_seq_new(kind: u32) -> *const Object {
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(
         Words::new(kind),
     )))))
+}
+
+/// Tests string membership with the list and needle rooted for the whole read.
+///
+/// # Safety
+/// The caller supplies a live string and an exact list of initialized string owners.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_list_contains(needle: *const Str, list: *const Object) -> u8 {
+    // SAFETY: the storage borrow prevents mutation and none of the compared
+    // strings can invoke user code or release its live owner during equality.
+    unsafe {
+        object(list).0.with(|storage| {
+            let words = storage.sequence();
+            debug_assert_eq!(words.kind.raw(), 3);
+            u8::from(words.values.iter().any(|&word| {
+                let item = word as *const Str;
+                item == needle || *item == *needle
+            }))
+        })
+    }
 }
 
 /// # Safety

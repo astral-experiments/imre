@@ -590,6 +590,12 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
     matches!(
         operation,
         Builtin::GlobalGet(_)
+            | Builtin::StrEnumMember { .. }
+            | Builtin::StrEnumName
+            | Builtin::StrEnumValue
+            | Builtin::StrEnumIdentity
+            | Builtin::LiteralStringView
+            | Builtin::StringListContains
             | Builtin::RegexCompile(_)
             | Builtin::RegexSearch
             | Builtin::RegexCapture { .. }

@@ -127,7 +127,7 @@ fn class_receiver_annotation(
             types,
             source,
             Some(class),
-        )? == Type::Class(class)
+        )? == classes.instance(class)
     {
         Ok(())
     } else {
@@ -233,7 +233,7 @@ impl Checker<'_> {
         });
         self.initializing = context.is_some_and(|context| {
             let declaration = &self.classes.declarations.definitions[context.class];
-            declaration.generated_initializer && declaration.initializer == context.index
+            declaration.generated_initializer && declaration.initializer == Some(context.index)
         });
     }
 
@@ -390,6 +390,16 @@ impl Checker<'_> {
     }
 
     pub(super) fn construct(&mut self, call: &ast::ExprCall, class: usize) -> Result<Expr, String> {
+        if self.classes.declarations.definitions[class]
+            .enum_members
+            .is_some()
+        {
+            return Err(error(
+                self.source,
+                call,
+                "StrEnum lookup by value is unsupported; use a declared member",
+            ));
+        }
         let signature = self.classes.methods[class]["__init__"].clone();
         let args = if self.inference.is_some() {
             self.infer_call(call, &signature, None, 1)?.1

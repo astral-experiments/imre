@@ -128,6 +128,7 @@ impl Checker<'_> {
             }
         }
         let mut value = self.expr(&branch.subject)?;
+        let exhaustive = self.enum_exhaustive(value.ty, &branch.cases);
         // A named subject stores its target before yielding the same value.
         // Track that outer target with the same narrowing rules as a bare name.
         let visible = match &*branch.subject {
@@ -232,7 +233,9 @@ impl Checker<'_> {
                 Vec::new(),
             ));
         }
-        exits.extend(pending);
+        if !exhaustive {
+            exits.extend(pending);
+        }
         let falls = !exits.is_empty();
         if let Some(mut joined) = exits.pop() {
             for exit in exits {
@@ -380,7 +383,11 @@ impl Checker<'_> {
     /// Numeric value patterns use equality: `case 1` matches True, whereas
     /// singleton `case True` only matches a bool. Literal lowering remains shared
     /// with expressions so new scalar types need no separate literal parser.
-    fn pattern_equal(&self, mut value: Expr, literal: Expr) -> Expr {
+    fn pattern_equal(&self, mut value: Expr, mut literal: Expr) -> Expr {
+        if value.ty != literal.ty {
+            value = Self::string_value(value);
+            literal = Self::string_value(literal);
+        }
         if value.ty == Type::Bool && matches!(literal.ty, Type::Int | Type::Float) {
             value = builtin(Type::Int, Builtin::Int, vec![value]);
         }
@@ -395,6 +402,9 @@ impl Checker<'_> {
     }
 
     fn pattern_literal(&mut self, literal: &ast::Expr) -> Result<Expr, String> {
+        if let Some(member) = self.qualified_member(literal) {
+            return Ok(member);
+        }
         let allowed = match literal {
             ast::Expr::NumberLiteral(_)
             | ast::Expr::StringLiteral(_)
@@ -823,6 +833,16 @@ impl Checker<'_> {
                 "class patterns require a statically resolved declared class",
             )
         })?;
+        if self.classes.declarations.definitions[id]
+            .enum_members
+            .is_some()
+        {
+            return Err(error(
+                self.source,
+                class,
+                "StrEnum patterns require qualified member names",
+            ));
+        }
         let mut pattern = Pattern::new(value.clone());
         let value = if value.ty == Type::Class(id) {
             value

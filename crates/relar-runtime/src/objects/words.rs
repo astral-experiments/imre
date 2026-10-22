@@ -18,7 +18,7 @@ pub(super) struct WordKind(u32);
 
 impl WordKind {
     pub(super) fn new(kind: u32) -> Self {
-        if kind & !NULLABLE > 9 {
+        if kind & !NULLABLE > 10 {
             fail("SystemError", "invalid concrete word representation");
         }
         Self(kind)
@@ -60,7 +60,7 @@ impl WordKind {
         let valid = match self.base() {
             0 => word == 0,
             1 => word <= if nullable { 2 } else { 1 },
-            2..=6 | 8 | 9 => word != 0 || nullable,
+            2..=6 | 8..=10 => word != 0 || nullable,
             7 => true,
             _ => unreachable!(),
         };
@@ -88,7 +88,7 @@ impl WordKind {
         // SAFETY: the caller supplies each handle's exact allocation kind.
         unsafe {
             match self.base() {
-                0 | 1 => {}
+                0 | 1 | 10 => {}
                 2 => {
                     if word & 1 == 0 {
                         Rc::increment_strong_count(word as *const num_bigint::BigInt);
@@ -117,7 +117,7 @@ impl WordKind {
         // SAFETY: the caller transfers the exact owned reference selected here.
         unsafe {
             match self.base() {
-                0 | 1 => {}
+                0 | 1 | 10 => {}
                 2 => drop(Int(word)),
                 3 => Rc::decrement_strong_count(word as *const Str),
                 4 => crate::relar_list_release(word as *const List),

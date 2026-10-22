@@ -1,6 +1,6 @@
 """Complete report rendering adapted from the pinned Ruff source in upstream/."""
 from pathlib import Path
-from conformance_report.model import DiagnosticEntry, FileStats, Statistics, TestCase, TyDiagnostic, compute_stats, diagnostic_text
+from conformance_report.model import Change, DiagnosticEntry, FileStats, Source, Statistics, TestCase, TyDiagnostic, compute_stats, diagnostic_text
 
 def signed_int(value: int) -> str:
     return '+' + str(value) if value >= 0 else str(value)
@@ -44,7 +44,7 @@ def format_int_metric(diff: int, old: int, new: int, total: int) -> str:
         return f'regressed from <b>{old}/{total}</b> to <b>{new}/{total}</b>'
     return f'held steady at <b>{old}/{total}</b>'
 
-def render_html_diff_row(tc: TestCase, base_url: str, *, source: str | None) -> list[str]:
+def render_html_diff_row(tc: TestCase, base_url: str, *, source: Source | None) -> list[str]:
     """Render a single HTML <tr> with a test-case link and a markdown diff block."""
     all_diags = [*tc.old, *tc.new] if source is None else tc.diagnostics_by_source(source)
     if all_diags:
@@ -73,7 +73,7 @@ def render_html_diff_row(tc: TestCase, base_url: str, *, source: str | None) -> 
         for d in tc.new:
             diff_lines.append(f'+{d.severity_for_display}[{d.check_name}] {d.description}')
     else:
-        sign = '-' if source == 'old' else '+'
+        sign = '-' if source == Source.OLD else '+'
         for d in tc.diagnostics_by_source(source):
             diff_lines.append(f'{sign}{d.severity_for_display}[{d.check_name}] {d.description}')
     return ['', '<tr>', '<td>', '', location, '', '</td>', '', '<td>', '', '```diff', *diff_lines, '```', '', '</td>', '</tr>']
@@ -87,31 +87,31 @@ def collect_diagnostic_entries(test_cases: list[TestCase]) -> list[DiagnosticEnt
     entries: list[DiagnosticEntry] = []
     for tc in test_cases:
         change = tc.change
-        if change == 'unchanged':
+        if change == Change.UNCHANGED:
             continue
         if tc.optional:
-            if change == 'added':
-                entries.append(DiagnosticEntry(title='Optional Diagnostics Added', test_case=tc, source='new'))
-            elif change == 'removed':
-                entries.append(DiagnosticEntry(title='Optional Diagnostics Removed', test_case=tc, source='old'))
-            elif change == 'changed':
-                entries.append(DiagnosticEntry(title='Optional Diagnostics Changed', test_case=tc, source=None))
+            if change == Change.ADDED:
+                entries.append(DiagnosticEntry(title=Change.ADDED.into_title(), test_case=tc, source=Source.NEW))
+            elif change == Change.REMOVED:
+                entries.append(DiagnosticEntry(title=Change.REMOVED.into_title(), test_case=tc, source=Source.OLD))
+            elif change == Change.CHANGED:
+                entries.append(DiagnosticEntry(title=Change.CHANGED.into_title(), test_case=tc, source=None))
             else:
                 raise AssertionError('unreachable diagnostic change')
-        elif change == 'added':
-            new_class = tc.classify('new')
-            entries.append(DiagnosticEntry(title=classification_title(new_class, 'added'), test_case=tc, source='new'))
-        elif change == 'removed':
-            old_class = tc.classify('old')
-            entries.append(DiagnosticEntry(title=classification_title(old_class, 'removed'), test_case=tc, source='old'))
-        elif change == 'changed':
-            old_class = tc.classify('old')
-            new_class = tc.classify('new')
+        elif change == Change.ADDED:
+            new_class = tc.classify(Source.NEW)
+            entries.append(DiagnosticEntry(title=new_class.into_title(verb='added'), test_case=tc, source=Source.NEW))
+        elif change == Change.REMOVED:
+            old_class = tc.classify(Source.OLD)
+            entries.append(DiagnosticEntry(title=old_class.into_title(verb='removed'), test_case=tc, source=Source.OLD))
+        elif change == Change.CHANGED:
+            old_class = tc.classify(Source.OLD)
+            new_class = tc.classify(Source.NEW)
             if old_class == new_class:
-                entries.append(DiagnosticEntry(title=classification_title(new_class, 'changed'), test_case=tc, source=None))
+                entries.append(DiagnosticEntry(title=new_class.into_title(verb='changed'), test_case=tc, source=None))
             else:
-                entries.append(DiagnosticEntry(title=classification_title(old_class, 'removed'), test_case=tc, source='old'))
-                entries.append(DiagnosticEntry(title=classification_title(new_class, 'added'), test_case=tc, source='new'))
+                entries.append(DiagnosticEntry(title=old_class.into_title(verb='removed'), test_case=tc, source=Source.OLD))
+                entries.append(DiagnosticEntry(title=new_class.into_title(verb='added'), test_case=tc, source=Source.NEW))
         else:
             raise AssertionError('unreachable diagnostic change')
     entries = sorted(entries, key=lambda e: (TITLE_PRIORITY.get(e.title, 99), e.title, e.test_case.key))
@@ -145,7 +145,7 @@ def render_test_cases(test_cases: list[TestCase], base_url: str, *, format: str=
                 else:
                     lines.extend(render_html_diff_row(tc, base_url, source=None))
             elif format == 'diff':
-                lines.append(render_diff_row(tc.diagnostics_by_source(source), removed=source == 'old'))
+                lines.append(render_diff_row(tc.diagnostics_by_source(source), removed=source == Source.OLD))
             else:
                 lines.extend(render_html_diff_row(tc, base_url, source=source))
         if format == 'diff':
@@ -218,8 +218,8 @@ def diff_format(diff: float, *, greater_is_better: bool=True, neutral: bool=Fals
             raise AssertionError('unreachable metric direction')
 
 def render_summary(test_cases: list[TestCase], file_stats: list[FileStats], base_url: str, *, force_summary_table: bool) -> str:
-    old = compute_stats(test_cases, 'old')
-    new = compute_stats(test_cases, 'new')
+    old = compute_stats(test_cases, Source.OLD)
+    new = compute_stats(test_cases, Source.NEW)
     old_files_passing = sum((1 if fs.old_passes else 0 for fs in file_stats))
     new_files_passing = sum((1 if fs.new_passes else 0 for fs in file_stats))
     total_files = len(file_stats)
@@ -233,7 +233,7 @@ def render_summary(test_cases: list[TestCase], file_stats: list[FileStats], base
     total_change = new.total_diagnostics - old.total_diagnostics
     summary_paragraph = f'The percentage of diagnostics emitted that were expected errors {format_metric(precision_change, old.precision, new.precision)}. The percentage of expected errors that received a diagnostic {format_metric(recall_change, old.recall, new.recall)}. The number of fully passing files {format_int_metric(files_passing_change, old_files_passing, new_files_passing, total_files)}.'
     base_header = f'[Typing conformance results]({base_url})'
-    if not force_summary_table and all((diag.change == 'unchanged' for diag in test_cases)):
+    if not force_summary_table and all((diag.change is Change.UNCHANGED for diag in test_cases)):
         return f'\n## {base_header}\n\n### No changes detected ✅\n\n<details>\n<summary>Current numbers</summary>\n\n<br>\n{summary_paragraph}\n\n</details>\n'
     true_pos_diff = diff_format(float(true_pos_change), greater_is_better=True)
     false_pos_diff = diff_format(float(false_pos_change), greater_is_better=False)

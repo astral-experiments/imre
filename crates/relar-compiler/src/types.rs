@@ -1,12 +1,13 @@
 //! Interns concrete container types while keeping IR type identities small and exact.
 
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
 
 use crate::ir::Type;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum Shape {
+    StringLiterals(Vec<String>),
     List(Type),
     Dict(Type, Type),
     Set(Type),
@@ -29,12 +30,32 @@ struct Storage {
 pub(crate) struct Types(RefCell<Storage>);
 
 impl Types {
+    pub(crate) fn string_literal(&self, mut values: Vec<String>) -> Type {
+        values.sort_unstable();
+        values.dedup();
+        Type::StrLiteral(self.intern(Shape::StringLiterals(values)))
+    }
+
+    pub(crate) fn literal_strings(&self, ty: Type) -> Option<Ref<'_, [String]>> {
+        let Type::StrLiteral(id) = ty else {
+            return None;
+        };
+        Some(Ref::map(self.0.borrow(), |storage| {
+            match &storage.shapes[id] {
+                Shape::StringLiterals(values) => values.as_slice(),
+                _ => unreachable!("literal type identity has a string domain"),
+            }
+        }))
+    }
+
     /// Hash keys have immutable value semantics without user-defined protocols.
     /// Tuple fields may be nullable; mutable records and containers never enter
     /// a key, even when the surrounding tuple itself is immutable.
     pub(crate) fn hashable_key(&self, ty: Type) -> bool {
-        matches!(ty, Type::Int | Type::Str | Type::Bytes)
-            || matches!(ty, Type::Tuple(_)) && self.immutable_key_field(ty)
+        matches!(
+            ty,
+            Type::Int | Type::Str | Type::StrLiteral(_) | Type::StrEnum(_) | Type::Bytes
+        ) || matches!(ty, Type::Tuple(_)) && self.immutable_key_field(ty)
     }
 
     fn immutable_key_field(&self, ty: Type) -> bool {
@@ -42,7 +63,13 @@ impl Types {
             return self.immutable_key_field(payload);
         }
         match ty {
-            Type::Int | Type::Bool | Type::Str | Type::Bytes | Type::None => true,
+            Type::Int
+            | Type::Bool
+            | Type::Str
+            | Type::StrLiteral(_)
+            | Type::StrEnum(_)
+            | Type::Bytes
+            | Type::None => true,
             Type::Tuple(_) => self
                 .fields(ty)
                 .unwrap()
@@ -57,7 +84,12 @@ impl Types {
     /// fallible comparisons or Python's observable boxed-NaN identity.
     pub(crate) fn ordered_key(&self, ty: Type) -> bool {
         match ty {
-            Type::Int | Type::Bool | Type::Str | Type::Bytes => true,
+            Type::Int
+            | Type::Bool
+            | Type::Str
+            | Type::StrLiteral(_)
+            | Type::StrEnum(_)
+            | Type::Bytes => true,
             Type::Tuple(_) => self
                 .fields(ty)
                 .unwrap()
@@ -107,6 +139,21 @@ impl Types {
         let ty = match members.as_slice() {
             [] if nullable => Type::None,
             [member] => *member,
+            choices @ [_, _, ..]
+                if choices
+                    .iter()
+                    .all(|ty| matches!(ty, Type::Str | Type::StrLiteral(_))) =>
+            {
+                if choices.contains(&Type::Str) {
+                    Type::Str
+                } else {
+                    let mut strings = Vec::new();
+                    for &ty in choices {
+                        strings.extend(self.literal_strings(ty).unwrap().iter().cloned());
+                    }
+                    self.string_literal(strings)
+                }
+            }
             [a, b] if matches!((a, b), (Type::Str, Type::Bytes) | (Type::Bytes, Type::Str)) => {
                 Type::Union(self.intern(Shape::Union(vec![Type::Str, Type::Bytes])))
             }
@@ -301,7 +348,12 @@ impl Types {
 
     pub(crate) fn describe(&self, ty: Type, class_name: &impl Fn(usize) -> String) -> String {
         match ty {
-            Type::Class(id) => class_name(id),
+            Type::StrLiteral(_) => {
+                let values = self.literal_strings(ty).unwrap();
+                let choices = values.iter().map(|s| format!("{s:?}")).collect::<Vec<_>>();
+                format!("Literal[{}]", choices.join(", "))
+            }
+            Type::Class(id) | Type::StrEnum(id) => class_name(id),
             Type::Callable(_) => {
                 let (params, returns) = self.signature(ty).unwrap();
                 format!(
