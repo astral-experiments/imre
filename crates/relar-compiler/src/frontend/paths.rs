@@ -10,6 +10,22 @@ pub(super) fn operation(kind: PathOperation, ty: Type, args: Vec<Expr>) -> Expr 
     }
 }
 
+fn parameter(name: &str, ty: Type, default: Option<Expr>) -> Parameter {
+    Parameter {
+        name: name.to_owned(),
+        ty,
+        kind: ParameterKind::PositionalOrKeyword,
+        default,
+    }
+}
+
+fn boolean(value: bool) -> Expr {
+    Expr {
+        ty: Type::Bool,
+        kind: ExprKind::Bool(value),
+    }
+}
+
 impl Checker<'_> {
     /// Path-like values are exactly strings or native paths; no user protocol runs.
     pub(super) fn path_argument(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
@@ -134,6 +150,9 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if matches!(name, "mkdir" | "unlink" | "replace") {
+            return self.path_mutation(receiver, name, call);
+        }
         if matches!(name, "iterdir" | "glob") {
             return Err(error(
                 self.source,
@@ -147,6 +166,7 @@ impl Checker<'_> {
             "is_dir" => (PathOperation::IsDir, Type::Bool, 0),
             "read_text" => (PathOperation::ReadText, Type::Str, 0),
             "write_text" => (PathOperation::WriteText, Type::Int, 1),
+            "rmdir" => (PathOperation::Rmdir, Type::None, 0),
             _ => return Err(error(self.source, call, "unsupported native Path method")),
         };
         if call.arguments.args.len() != arity {
@@ -166,6 +186,129 @@ impl Checker<'_> {
             args.push(self.expr_expected(value, Type::Str)?);
         }
         Ok(operation(kind, ty, args))
+    }
+
+    /// Method arguments retain source evaluation order even when keywords bind
+    /// a different ABI position. Every operand stays rooted through the syscall.
+    fn path_mutation(
+        &mut self,
+        receiver: Expr,
+        name: &str,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let (kind, returns, params) = match name {
+            "mkdir" => (
+                PathOperation::Mkdir,
+                Type::None,
+                vec![
+                    parameter(
+                        "mode",
+                        Type::Int,
+                        Some(Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Int("511".to_owned()),
+                        }),
+                    ),
+                    parameter("parents", Type::Bool, Some(boolean(false))),
+                    parameter("exist_ok", Type::Bool, Some(boolean(false))),
+                ],
+            ),
+            "unlink" => (
+                PathOperation::Unlink,
+                Type::None,
+                vec![parameter("missing_ok", Type::Bool, Some(boolean(false)))],
+            ),
+            "replace" => (
+                PathOperation::Replace,
+                Type::Path,
+                vec![parameter("target", Type::Str, None)],
+            ),
+            _ => unreachable!("only mutating path methods have this signature"),
+        };
+        let arguments =
+            self.arguments_with(call, &params, Some(receiver), |checker, index, value| {
+                if name == "replace" {
+                    checker.path_argument(value)
+                } else {
+                    checker.expr_expected(value, params[index].ty)
+                }
+            })?;
+        Ok(self.ordered_path_operation(kind, returns, arguments))
+    }
+
+    /// A temporary-directory manager exists only at this immediate `with`
+    /// boundary. Its owned name is retained privately for finally cleanup.
+    pub(super) fn temporary_directory(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let directory = self.types.optional(Type::Str);
+        let mut params = vec![
+            parameter(
+                "dir",
+                directory,
+                Some(Expr {
+                    ty: directory,
+                    kind: ExprKind::Absent(Box::new(Expr {
+                        ty: Type::None,
+                        kind: ExprKind::None,
+                    })),
+                }),
+            ),
+            parameter(
+                "prefix",
+                Type::Str,
+                Some(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Str("tmp".to_owned()),
+                }),
+            ),
+            parameter(
+                "suffix",
+                Type::Str,
+                Some(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Str(String::new()),
+                }),
+            ),
+        ];
+        for param in &mut params {
+            param.kind = ParameterKind::KeywordOnly;
+        }
+        let arguments = self.arguments_with(call, &params, None, |checker, index, value| {
+            if index == 0 {
+                checker.optional_path_argument(value)
+            } else {
+                checker.expr_expected(value, params[index].ty)
+            }
+        })?;
+        Ok(self.ordered_path_operation(PathOperation::TemporaryDirectory, Type::Str, arguments))
+    }
+
+    fn ordered_path_operation(
+        &mut self,
+        kind: PathOperation,
+        returns: Type,
+        arguments: ir::CallArgs,
+    ) -> Expr {
+        let mut body = Vec::new();
+        let mut clear = Vec::new();
+        for value in arguments.values {
+            let slot = self.hidden(value.ty);
+            body.push(Statement::Assign(slot, value));
+            clear.push(slot);
+        }
+        let args = arguments
+            .order
+            .iter()
+            .map(|&index| self.local(clear[index]))
+            .collect();
+        Expr {
+            ty: returns,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(operation(kind, returns, args)),
+                clear,
+            },
+        }
     }
 
     /// Bounded glob syntax has no recursive traversal or dynamic matching protocol.

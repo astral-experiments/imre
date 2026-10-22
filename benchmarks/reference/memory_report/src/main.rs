@@ -3,9 +3,13 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::ffi::{CString, c_char, c_int};
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::os::fd::IntoRawFd;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use num_bigint::{BigInt, BigUint, Sign};
@@ -685,6 +689,132 @@ struct PreparedProjects {
     projects: Vec<PreparedProject>,
 }
 
+unsafe extern "C" {
+    fn mkdtemp(template: *mut c_char) -> *mut c_char;
+    fn close(fd: c_int) -> c_int;
+}
+
+/// A private sibling workspace with explicit, fallible normal-path cleanup.
+struct Workspace {
+    path: PathBuf,
+    clean_on_drop: bool,
+}
+
+impl Workspace {
+    /// Let libc exclusively create a mode-0700 directory, subject to umask.
+    fn create(parent: &Path, prefix: &str) -> Result<Self, Failure> {
+        let template = parent.join(format!("{prefix}XXXXXX"));
+        let mut template = CString::new(template.as_os_str().as_bytes())
+            .map_err(|error| Failure("ValueError", error.to_string()))?
+            .into_bytes_with_nul();
+        // SAFETY: the writable buffer ends in six X bytes and a NUL, and remains
+        // alive while mkdtemp substitutes its same-length exclusive name.
+        if unsafe { mkdtemp(template.as_mut_ptr().cast()) }.is_null() {
+            return Err(process_error(io::Error::last_os_error()));
+        }
+        template.pop();
+        let path = PathBuf::from(std::ffi::OsString::from_vec(template));
+        Ok(Self {
+            path,
+            clean_on_drop: true,
+        })
+    }
+
+    /// Propagate cleanup failures after either successful or failed work.
+    fn finish(mut self) -> Result<(), Failure> {
+        self.clean_on_drop = false;
+        self.cleanup().map_err(process_error)
+    }
+
+    /// Recover owner access only after cleanup of this flat workspace is denied.
+    fn cleanup(&self) -> io::Result<()> {
+        match fs::symlink_metadata(&self.path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(io::Error::other("Cannot call rmtree on a symlink"));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+            Ok(_) => {}
+        }
+        match fs::remove_dir_all(&self.path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                if !fs::symlink_metadata(&self.path)?.is_dir() {
+                    return Err(error);
+                }
+                fs::set_permissions(&self.path, fs::Permissions::from_mode(0o700))?;
+                fs::remove_dir_all(&self.path)
+            }
+            result => result,
+        }
+    }
+}
+
+impl Drop for Workspace {
+    fn drop(&mut self) {
+        if self.clean_on_drop {
+            let _ = self.cleanup();
+        }
+    }
+}
+
+/// Match a with-statement: cleanup runs on both result paths and may fail itself.
+fn with_workspace<T>(
+    parent: &Path,
+    prefix: &str,
+    work: impl FnOnce(&Path) -> Result<T, Failure>,
+) -> Result<T, Failure> {
+    let workspace = Workspace::create(parent, prefix)?;
+    let result = work(&workspace.path);
+    workspace.finish()?;
+    result
+}
+
+/// Finish the write and explicitly check close before publishing its directory entry.
+fn write_text(path: &Path, text: &str) -> Result<(), Failure> {
+    let mut file = fs::File::create(path).map_err(process_error)?;
+    let written = file.write_all(text.as_bytes());
+    let descriptor = file.into_raw_fd();
+    // SAFETY: into_raw_fd transfers this live descriptor; close consumes it once.
+    if unsafe { close(descriptor) } != 0 {
+        return Err(process_error(io::Error::last_os_error()));
+    }
+    written.map_err(process_error)
+}
+
+/// Replace the report only after a complete sibling write and successful close.
+fn publish_report(target: &str, rendered: &str) -> Result<(), Failure> {
+    let target = PathBuf::from(normalize_path(target));
+    let parent = target.parent().unwrap_or(&target);
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+    with_workspace(parent, ".relar-report-", |workspace| {
+        let staged = workspace.join("report.md");
+        write_text(&staged, rendered)?;
+        fs::rename(staged, &target).map_err(process_error)
+    })
+}
+
+/// Stage both decoded streams before replacing their separate transcript entries.
+fn publish_capture(
+    workspace: &Path,
+    directory: &Path,
+    role: &str,
+    stdout: &str,
+    stderr: &str,
+) -> Result<(), Failure> {
+    let staged_stdout = workspace.join("stdout.txt");
+    let staged_stderr = workspace.join("stderr.txt");
+    write_text(&staged_stdout, stdout)?;
+    write_text(&staged_stderr, stderr)?;
+    fs::rename(staged_stdout, directory.join(format!("{role}.stdout.txt")))
+        .map_err(process_error)?;
+    fs::rename(staged_stderr, directory.join(format!("{role}.stderr.txt"))).map_err(process_error)
+}
+
 /// Map process launch failures to the same catchable operating-system categories.
 fn process_error(error: io::Error) -> Failure {
     let category = match error.kind() {
@@ -692,6 +822,7 @@ fn process_error(error: io::Error) -> Failure {
         io::ErrorKind::PermissionDenied => "PermissionError",
         io::ErrorKind::NotADirectory => "NotADirectoryError",
         io::ErrorKind::IsADirectory => "IsADirectoryError",
+        io::ErrorKind::AlreadyExists => "FileExistsError",
         io::ErrorKind::InvalidInput => "ValueError",
         _ => "OSError",
     };
@@ -715,6 +846,8 @@ fn collect_report(
     project: &PreparedProject,
     executable: &str,
     environment: &HashMap<String, String>,
+    capture: Option<(&Path, &Path)>,
+    role: &str,
 ) -> Result<Input<'static>, Failure> {
     let arguments: Vec<_> = project
         .argv
@@ -738,7 +871,10 @@ fn collect_report(
         .output()
         .map_err(process_error)?;
     let stdout = captured_text(output.stdout)?;
-    let _stderr = captured_text(output.stderr)?;
+    let stderr = captured_text(output.stderr)?;
+    if let Some((directory, workspace)) = capture {
+        publish_capture(workspace, directory, role, &stdout, &stderr)?;
+    }
     if !output.status.success() {
         return Err(Failure(
             "CalledProcessError",
@@ -754,6 +890,7 @@ fn prepared_inputs(
     path: &str,
     old_ty: &str,
     new_ty: &str,
+    capture_directory: Option<&str>,
 ) -> Result<Vec<(String, Input<'static>, Input<'static>)>, Failure> {
     if !old_ty.starts_with('/') || !new_ty.starts_with('/') {
         return Err(Failure(
@@ -761,7 +898,7 @@ fn prepared_inputs(
             "--old-ty and --new-ty must be absolute executable paths".into(),
         ));
     }
-    let text = read(path)?;
+    let text = captured_text(read(path)?.into_bytes())?;
     depth_check(&text)?;
     let manifest: PreparedProjects =
         serde_json::from_str(&text).map_err(|error| Failure("ValueError", error.to_string()))?;
@@ -809,14 +946,35 @@ fn prepared_inputs(
         .collect::<Result<HashMap<_, _>, Failure>>()?;
     environment.insert("TY_MEMORY_REPORT".into(), "json".into());
     environment.insert("TY_MAX_PARALLELISM".into(), "1".into());
-    let mut inputs = Vec::with_capacity(manifest.projects.len());
-    for project in manifest.projects {
-        let old = collect_report(&project, old_ty, &environment)?;
-        let new = collect_report(&project, new_ty, &environment)?;
-        inputs.push((project.name, old, new));
+    let collect = |capture: Option<(&Path, &Path)>| {
+        let mut inputs = Vec::with_capacity(manifest.projects.len());
+        for (index, project) in manifest.projects.into_iter().enumerate() {
+            let directory = capture.map(|(root, _)| root.join(format!("project-{index}")));
+            if let Some(directory) = &directory {
+                fs::create_dir(directory).map_err(process_error)?;
+            }
+            let capture = directory
+                .as_deref()
+                .zip(capture.map(|(_, workspace)| workspace));
+            let old = collect_report(&project, old_ty, &environment, capture, "old")?;
+            let new = collect_report(&project, new_ty, &environment, capture, "new")?;
+            inputs.push((project.name, old, new));
+        }
+        inputs.sort_by(|left, right| left.0.cmp(&right.0));
+        Ok(inputs)
+    };
+    if let Some(path) = capture_directory {
+        let directory = PathBuf::from(normalize_path(path));
+        fs::create_dir(&directory).map_err(process_error)?;
+        with_workspace(&directory, ".relar-capture-", |workspace| {
+            let staged = workspace.join("projects.json");
+            write_text(&staged, &text)?;
+            fs::rename(staged, directory.join("projects.json")).map_err(process_error)?;
+            collect(Some((&directory, workspace)))
+        })
+    } else {
+        collect(None)
     }
-    inputs.sort_by(|left, right| left.0.cmp(&right.0));
-    Ok(inputs)
 }
 
 fn run() -> Result<(), Failure> {
@@ -845,6 +1003,7 @@ fn run() -> Result<(), Failure> {
     let (mut old_path, mut new_path, mut old_directory, mut new_directory, mut output_path) =
         ("", "", "", "", None);
     let (mut projects_path, mut old_ty, mut new_ty) = ("", "", "");
+    let mut capture_directory = None;
     while index < arguments.len() {
         let flag = &arguments[index];
         let value = arguments
@@ -854,6 +1013,7 @@ fn run() -> Result<(), Failure> {
             "--projects" if run_mode => projects_path = value,
             "--old-ty" if run_mode => old_ty = value,
             "--new-ty" if run_mode => new_ty = value,
+            "--capture-dir" if run_mode => capture_directory = Some(value.as_str()),
             "--old" if !run_mode => old_path = value,
             "--new" if !run_mode => new_path = value,
             "--old-dir" if !run_mode => old_directory = value,
@@ -867,11 +1027,33 @@ fn run() -> Result<(), Failure> {
         if projects_path.is_empty() || old_ty.is_empty() || new_ty.is_empty() {
             return Err(Failure(
                 "ValueError",
-                "expected run --projects MANIFEST --old-ty ABS --new-ty ABS [--output REPORT.md]"
+                "expected run --projects MANIFEST --old-ty ABS --new-ty ABS [--capture-dir DIR] [--output REPORT.md]"
                     .into(),
             ));
         }
-        prepared_inputs(projects_path, old_ty, new_ty)?
+        if capture_directory.is_some()
+            && output_path.is_some_and(|path| {
+                Path::new(&normalize_path(path))
+                    .file_name()
+                    .is_some_and(|name| {
+                        [
+                            "projects.json",
+                            "old.stdout.txt",
+                            "old.stderr.txt",
+                            "new.stdout.txt",
+                            "new.stderr.txt",
+                        ]
+                        .iter()
+                        .any(|reserved| name == *reserved)
+                    })
+            })
+        {
+            return Err(Failure(
+                "ValueError",
+                "output basename is reserved for captured transcripts".into(),
+            ));
+        }
+        prepared_inputs(projects_path, old_ty, new_ty, capture_directory)?
     } else if !old_path.is_empty() && !new_path.is_empty() {
         vec![(
             project_name(&normalize_path(new_path)).to_owned(),
@@ -897,8 +1079,7 @@ fn run() -> Result<(), Failure> {
     }
     let rendered = render_inputs(inputs)?;
     if let Some(path) = output_path {
-        fs::write(Path::new(&normalize_path(path)), rendered)
-            .map_err(|error| Failure("OSError", error.to_string()))?;
+        publish_report(path, &rendered)?;
     } else {
         let mut output = io::stdout().lock();
         writeln!(output, "{rendered}").map_err(|error| Failure("OSError", error.to_string()))?;

@@ -3,10 +3,14 @@
 
 use std::ffi::OsString;
 use std::fs;
+use std::io;
+use std::os::unix::fs::DirBuilderExt;
 use std::rc::Rc;
 
+use num_traits::ToPrimitive;
+
 use super::exceptions::{Error, Kind, Result, finish};
-use super::{Object, Storage, StorageCell, Str, fail, files, object};
+use super::{Int, Object, Storage, StorageCell, Str, fail, files, object};
 
 impl Storage {
     pub(super) fn path(&self) -> &str {
@@ -68,6 +72,16 @@ fn name(path: &str) -> &str {
         ""
     } else {
         path.rsplit('/').next().unwrap()
+    }
+}
+
+fn parent(path: &str) -> &str {
+    match path.rfind('/') {
+        _ if matches!(path, "." | "/" | "//") => path,
+        Some(0) => "/",
+        Some(1) if path.starts_with("//") => "//",
+        Some(index) => &path[..index],
+        None => ".",
     }
 }
 
@@ -172,16 +186,9 @@ pub unsafe extern "C" fn relar_path_suffix(path: *const Object) -> *const Str {
 pub unsafe extern "C" fn relar_path_parent(path: *const Object) -> *const Object {
     // SAFETY: the new spelling is owned before the original storage borrow ends.
     let parent = unsafe {
-        object(path).0.with(|storage| {
-            let path = storage.path();
-            match path.rfind('/') {
-                _ if matches!(path, "." | "/" | "//") => Str::from(path),
-                Some(0) => Str::from("/"),
-                Some(1) if path.starts_with("//") => Str::from("//"),
-                Some(index) => Str::from(&path[..index]),
-                None => Str::from("."),
-            }
-        })
+        object(path)
+            .0
+            .with(|storage| Str::from(parent(storage.path())))
     };
     new_path(parent)
 }
@@ -252,6 +259,126 @@ pub unsafe extern "C" fn relar_path_write_text(path: *const Object, text: *const
             .with(|storage| files::write_path_text(storage.path(), &*text))
     };
     finish(result, 0)
+}
+
+fn check_nul(path: &str) -> Result<()> {
+    if path.contains('\0') {
+        Err(Error::new(Kind::ValueError, "embedded null byte"))
+    } else {
+        Ok(())
+    }
+}
+
+/// Match pathlib's retry order: create the leaf first, make missing parents with
+/// their default mode, then retry each child without creating its parents again.
+fn mkdir(path: &str, mode: u32, parents: bool, exist_ok: bool) -> io::Result<()> {
+    let mut pending = Vec::new();
+    let (mut current, mut current_mode, mut current_exists) = (path, mode, exist_ok);
+    loop {
+        match fs::DirBuilder::new().mode(current_mode).create(current) {
+            Ok(()) => break,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let next = parent(current);
+                if !parents || next == current {
+                    return Err(error);
+                }
+                pending.push((current, current_mode, current_exists));
+                (current, current_mode, current_exists) = (next, 0o777, true);
+            }
+            Err(_)
+                if current_exists
+                    && fs::metadata(current).is_ok_and(|metadata| metadata.is_dir()) =>
+            {
+                break;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    for (path, mode, exist_ok) in pending.into_iter().rev() {
+        mkdir(path, mode, false, exist_ok)?;
+    }
+    Ok(())
+}
+
+/// # Safety
+/// Root an exact Path and canonical Int mode with clear pending error state.
+/// This synchronous operation returns no value and never mutates a Path object.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_mkdir(
+    path: *const Object,
+    mode: usize,
+    parents: u8,
+    exist_ok: u8,
+) {
+    // SAFETY: both arguments stay rooted through validation and filesystem I/O.
+    let result = unsafe {
+        object(path).0.with(|storage| {
+            let path = storage.path();
+            check_nul(path)?;
+            let mode = Int::borrow(mode).big().to_i32().ok_or_else(|| {
+                Error::new(
+                    Kind::OverflowError,
+                    "Python int too large to convert to C int",
+                )
+            })?;
+            mkdir(path, mode as u32, parents != 0, exist_ok != 0).map_err(files::os_error)
+        })
+    };
+    finish(result, ());
+}
+
+/// # Safety
+/// Root an exact Path with clear pending error state. Missing-ok suppresses only
+/// a missing entry; directories and non-directory ancestors retain their errors.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_unlink(path: *const Object, missing_ok: u8) {
+    // SAFETY: unlink has no language callbacks and the immutable path stays live.
+    let result = unsafe {
+        object(path).0.with(|storage| {
+            check_nul(storage.path())?;
+            match fs::remove_file(storage.path()) {
+                Err(error) if missing_ok != 0 && error.kind() == io::ErrorKind::NotFound => Ok(()),
+                result => result.map_err(files::os_error),
+            }
+        })
+    };
+    finish(result, ());
+}
+
+/// # Safety
+/// Root an exact Path with clear pending error state. Only an empty directory is
+/// removed; symlinks are never followed by the final directory-removal operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_rmdir(path: *const Object) {
+    // SAFETY: the rooted spelling is borrowed only for synchronous I/O.
+    let result = unsafe {
+        object(path).0.with(|storage| {
+            check_nul(storage.path())?;
+            fs::remove_dir(storage.path()).map_err(files::os_error)
+        })
+    };
+    finish(result, ());
+}
+
+/// # Safety
+/// Root an exact Path and target string with clear pending error state. A
+/// successful rename transfers one new Path owner; failure returns null. Relative
+/// targets use the process cwd, and target spelling is normalized only afterward.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_replace(
+    path: *const Object,
+    target: *const Str,
+) -> *const Object {
+    // SAFETY: the roots remain live throughout rename and target normalization.
+    let result = unsafe {
+        object(path).0.with(|storage| {
+            check_nul(storage.path())?;
+            check_nul(&*target)?;
+            fs::rename(storage.path(), (&*target).as_str()).map_err(files::os_error)?;
+            Ok(new_path(normalize(&*target)))
+        })
+    };
+    finish(result, std::ptr::null())
 }
 
 pub(super) struct PathIterator {
@@ -707,6 +834,103 @@ mod tests {
             assert_eq!(relar_path_is_dir(Rc::as_ptr(&nul)), 0);
             assert!(relar_path_read_text(Rc::as_ptr(&nul)).is_null());
             take_error(Kind::ValueError);
+        }
+        assert_eq!(relar_error_pending(), 0);
+    }
+
+    #[test]
+    fn mkdir_uses_leaf_mode_and_distinguishes_existing_directories_from_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = Directory::new();
+        let leaf = path(directory.0.join("parent/leaf").to_str().unwrap());
+        let mode = Int::small(0o700).unwrap();
+        // SAFETY: exact rooted Path/Int values remain live, and every failure is taken.
+        unsafe {
+            relar_path_mkdir(Rc::as_ptr(&leaf), mode.0, 0, 0);
+            take_error(Kind::FileNotFoundError);
+            relar_path_mkdir(Rc::as_ptr(&leaf), mode.0, 1, 0);
+            assert_eq!(relar_error_pending(), 0);
+            assert_eq!(
+                fs::metadata(directory.0.join("parent/leaf"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o077,
+                0
+            );
+            assert_eq!(
+                fs::metadata(directory.0.join("parent"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                fs::metadata(&directory.0).unwrap().permissions().mode() & 0o777
+            );
+            relar_path_mkdir(Rc::as_ptr(&leaf), mode.0, 1, 0);
+            take_error(Kind::FileExistsError);
+            relar_path_mkdir(Rc::as_ptr(&leaf), mode.0, 1, 1);
+            assert_eq!(relar_error_pending(), 0);
+            symlink("parent/leaf", directory.0.join("link")).unwrap();
+            let link = path(directory.0.join("link").to_str().unwrap());
+            relar_path_mkdir(Rc::as_ptr(&link), mode.0, 0, 1);
+            assert_eq!(relar_error_pending(), 0);
+            fs::write(directory.0.join("file"), "kept").unwrap();
+            let file = path(directory.0.join("file").to_str().unwrap());
+            relar_path_mkdir(Rc::as_ptr(&file), mode.0, 1, 1);
+            take_error(Kind::FileExistsError);
+            let child = path(directory.0.join("file/child").to_str().unwrap());
+            relar_path_mkdir(Rc::as_ptr(&child), mode.0, 1, 1);
+            take_error(Kind::NotADirectoryError);
+            let huge = Int::new(num_bigint::BigInt::from(1_u8) << 100);
+            relar_path_mkdir(Rc::as_ptr(&leaf), huge.0, 1, 1);
+            take_error(Kind::OverflowError);
+            let nul = path("invalid\0path");
+            relar_path_mkdir(Rc::as_ptr(&nul), huge.0, 1, 1);
+            take_error(Kind::ValueError);
+        }
+    }
+
+    #[test]
+    fn replacements_overwrite_entries_and_unlink_never_follows_a_symlink() {
+        let directory = Directory::new();
+        let source = directory.0.join("source");
+        let outside = directory.0.join("preserved");
+        let target = directory.0.join("target");
+        fs::write(&source, "replacement").unwrap();
+        fs::write(&outside, "original").unwrap();
+        symlink(&outside, &target).unwrap();
+        let source_path = path(source.to_str().unwrap());
+        let target_text = Str::from(target.to_str().unwrap());
+        // SAFETY: exact paths/strings are rooted, and successful results transfer owners.
+        unsafe {
+            let replaced = relar_path_replace(Rc::as_ptr(&source_path), &target_text);
+            assert!(!replaced.is_null());
+            let replaced = Rc::from_raw(replaced);
+            assert_eq!(relar_error_pending(), 0);
+            assert_eq!(
+                replaced.0.with(|storage| storage.path().to_owned()),
+                target_text.as_str()
+            );
+            assert!(!source.exists());
+            assert_eq!(fs::read_to_string(&target).unwrap(), "replacement");
+            assert_eq!(fs::read_to_string(&outside).unwrap(), "original");
+            assert!(relar_path_replace(Rc::as_ptr(&source_path), &target_text).is_null());
+            take_error(Kind::FileNotFoundError);
+            relar_path_unlink(Rc::as_ptr(&replaced), 0);
+            relar_path_unlink(Rc::as_ptr(&replaced), 1);
+            assert_eq!(relar_error_pending(), 0);
+            symlink(&outside, &target).unwrap();
+            relar_path_rmdir(Rc::as_ptr(&replaced));
+            take_error(Kind::NotADirectoryError);
+            relar_path_unlink(Rc::as_ptr(&replaced), 0);
+            assert_eq!(fs::read_to_string(outside).unwrap(), "original");
+            let non_directory = path(directory.0.join("preserved/child").to_str().unwrap());
+            relar_path_unlink(Rc::as_ptr(&non_directory), 1);
+            take_error(Kind::NotADirectoryError);
+            let root = directory.path();
+            relar_path_unlink(Rc::as_ptr(&root), 1);
+            take_error(Kind::IsADirectoryError);
         }
         assert_eq!(relar_error_pending(), 0);
     }

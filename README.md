@@ -20,6 +20,7 @@ Relar supports:
 - Typed containers and arbitrary-precision integers
 - Common control flow, comprehensions, and immediately consumed iterator pipelines
 - Selected file and path operations
+- Create scoped temporary workspaces and atomically replace completed files.
 - Run native subprocesses with captured UTF-8 output, explicit arguments, working directories, and environment snapshots.
 
 But not:
@@ -68,7 +69,7 @@ with Relar and CPython, and comparing it with a Rust implementation:
 
 ## Developer tools
 
-The [memory-report comparator](examples/memory_report/README.md) compares report files and directories or runs two versions of ty over prepared projects. The [native-process comparison](benchmarks/results/2026-10-21-native-processes.md) measures complete runs at 1.00–1.61× Rust’s time and repeated report computation at 1.43–1.60× across ordinary and ThinLTO builds.
+The [memory-report comparator](examples/memory_report/README.md) compares report files and directories or runs two versions of ty over prepared projects. It can keep the child processes’ transcripts and atomically publish the Markdown report. The [native-process comparison](benchmarks/results/2026-10-21-native-processes.md) measures complete runs at 1.00–1.61× Rust’s time and repeated report computation at 1.43–1.60× across ordinary and ThinLTO builds.
 
 ## Installation
 

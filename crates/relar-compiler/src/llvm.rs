@@ -3982,6 +3982,12 @@ fn fallible(name: &str) -> bool {
                 | "relar_sys_argv"
                 | "relar_path_read_text"
                 | "relar_path_write_text"
+                | "relar_path_mkdir"
+                | "relar_path_unlink"
+                | "relar_path_rmdir"
+                | "relar_path_replace"
+                | "relar_tempdir_new"
+                | "relar_tempdir_cleanup"
                 | "relar_path_next"
                 | "relar_text_open"
                 | "relar_text_enter"
@@ -4045,6 +4051,12 @@ declare i8 @relar_path_is_dir(ptr)
 declare i8 @relar_path_equal(ptr, ptr)
 declare ptr @relar_path_read_text(ptr)
 declare i64 @relar_path_write_text(ptr, ptr)
+declare void @relar_path_mkdir(ptr, i64, i8, i8)
+declare void @relar_path_unlink(ptr, i8)
+declare void @relar_path_rmdir(ptr)
+declare ptr @relar_path_replace(ptr, ptr)
+declare ptr @relar_tempdir_new(ptr, ptr, ptr)
+declare void @relar_tempdir_cleanup(ptr)
 declare ptr @relar_path_iter(ptr, ptr)
 declare ptr @relar_path_next(ptr)
 declare i64 @relar_float_box(double)

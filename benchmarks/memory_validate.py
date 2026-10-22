@@ -35,6 +35,33 @@ BOOTSTRAP = (
     "sys.argv = ['memory_report', *sys.argv[3:]]; "
     "runpy.run_module('memory_report', run_name='__main__', alter_sys=True)"
 )
+ORIGINAL_PUBLISH = """
+import tempfile
+from pathlib import Path
+def publish_report(path, rendered):
+    with tempfile.TemporaryDirectory(dir=path.parent, prefix='.relar-report-') as name:
+        staged = Path(name) / 'report.md'
+        staged.write_text(rendered, encoding='utf-8')
+        staged.replace(path)
+"""
+ORIGINAL_COMPARE = ORIGINAL_PUBLISH + """
+import runpy, sys
+source = runpy.run_path(sys.argv[1])
+sys.argv = sys.argv[1:]
+args = source['parse_args']()
+class AtomicOutput:
+    def __init__(self, path):
+        self.path = path
+    def __str__(self):
+        return str(self.path)
+    def write_text(self, rendered, encoding='utf-8'):
+        assert encoding == 'utf-8'
+        publish_report(self.path, rendered)
+        return len(rendered)
+if args.output is not None:
+    args.output = AtomicOutput(args.output)
+source['cmd_compare'](args)
+"""
 ORIGINAL_COMPUTE = """
 import json, runpy, sys
 from pathlib import Path
@@ -68,7 +95,7 @@ def python_command(python):
 
 def original_command(python):
     # -I would ignore PYTHONHASHSEED and randomize upstream's equal-change ties.
-    return [python, "-B", str(UPSTREAM), "compare"]
+    return [python, "-B", "-P", "-s", "-c", ORIGINAL_COMPARE, str(UPSTREAM), "compare"]
 
 
 def compute_python_command(python):
@@ -239,11 +266,9 @@ def apply_output(value, expected, rendered):
         return result
     output = os.path.normpath(output)
     data = rendered.encode()
-    target = value.hardlinks.get(output, output)
-    result[target] = data
-    for name, linked in value.hardlinks.items():
-        if linked == target:
-            result[name] = data
+    # Atomic publication replaces the selected entry, leaving other hardlinks
+    # (including a report input) attached to the original inode and bytes.
+    result[output] = data
     return result
 
 
@@ -275,13 +300,32 @@ def equivalent_original(rendered, expected):
         assert [magnitudes[row] for row in selected] == [magnitude for _, magnitude in rows[:15]]
 
 
+def snapshot(directory, symlinks):
+    if not symlinks:
+        return files.snapshot(directory)
+    actual, directories, observed_links = {}, [], {}
+    for path in sorted(directory.rglob("*")):
+        name = path.relative_to(directory).as_posix()
+        if path.is_symlink():
+            observed_links[name] = str(path.readlink())
+        elif path.is_dir():
+            directories.append(name)
+        elif path.is_file():
+            actual[name] = path.read_bytes()
+        else:
+            raise AssertionError(f"unexpected filesystem entry: {name}")
+    assert observed_links == symlinks
+    return actual, directories
+
+
 def check_result(value, expected, process, directory, engine="port"):
-    actual, directories = files.snapshot(directory)
+    symlinks = expected.get("symlinks", {})
+    actual, directories = snapshot(directory, symlinks)
     stdout, stderr = process.stdout.decode(), process.stderr.decode()
     if expected["error"]:
         assert process.returncode != 0 and not stdout, (value.label, engine, process)
         category = expected["error"]
-        allowed = {"OSError": r"(?:OSError|FileNotFoundError|IsADirectoryError|NotADirectoryError)",
+        allowed = {"OSError": r"(?:OSError|FileNotFoundError|IsADirectoryError|NotADirectoryError|PermissionError|FileExistsError)",
                    "ValueError": r"(?:ValueError|UnicodeDecodeError|JSONDecodeError)"}.get(category, category)
         assert re.search(allowed + r":", stderr), (value.label, engine, stderr)
         expected_files = expected["files"]
@@ -312,7 +356,7 @@ def check_result(value, expected, process, directory, engine="port"):
     assert actual == expected_files and directories == expected["directories"], (value.label, engine, "file effects")
     return {"returncode": process.returncode, "stdout": stdout, "stderr": stderr,
             "files": {name: {"sha256": digest(data), "bytes": len(data)} for name, data in sorted(actual.items())},
-            "directories": directories}
+            "directories": directories, "symlinks": symlinks}
 
 
 def compute_case(value, rounds):

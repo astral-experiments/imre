@@ -226,6 +226,12 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
             operation,
             crate::ir::PathOperation::ReadText
                 | crate::ir::PathOperation::WriteText
+                | crate::ir::PathOperation::Mkdir
+                | crate::ir::PathOperation::Unlink
+                | crate::ir::PathOperation::Rmdir
+                | crate::ir::PathOperation::Replace
+                | crate::ir::PathOperation::TemporaryDirectory
+                | crate::ir::PathOperation::CleanupTemporaryDirectory
                 | crate::ir::PathOperation::Iterdir
                 | crate::ir::PathOperation::Next
         ),

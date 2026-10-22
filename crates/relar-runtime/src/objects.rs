@@ -17,6 +17,7 @@ mod processes;
 pub(crate) mod records;
 mod sequences;
 mod stdlib;
+mod tempdirs;
 mod unions;
 mod values;
 mod words;

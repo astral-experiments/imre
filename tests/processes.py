@@ -63,7 +63,6 @@ REJECTED = {
     "optional_result": "result: CompletedProcess[str] | None = None\nprint(result.stdout)",
     "result_subclass": "class Custom(CompletedProcess):\n    pass",
     "unsupported_import": "from subprocess import Popen\nPopen(['command'])",
-    "unsupported_mkdir": "Path('directory').mkdir(parents=True, exist_ok=True)",
 }
 for name, value in {
     "shell": "True",

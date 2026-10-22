@@ -212,10 +212,21 @@ It runs both pinned ty versions over retained inventory/Ruff source snapshots,
 then compares 64 small captures with two large captures through an identical native
 child producer. Every layout has 16,256 records per side. The timed Python baseline
 is explicitly a prepared-project adapter using upstream's unchanged models and
-renderer; the typed CPython port is also validated. Complete child execution and
-UTF-8 stdout/stderr capture are included, with a two-child empty-report control.
+renderer and matching atomic output; the typed CPython port is also validated.
+Both layouts run with and without persisted captures in fresh numeric project
+directories. Complete child execution, UTF-8 stdout/stderr capture, per-file
+staging/replacement, final atomic report publication, and workspace cleanup are
+included, with separate two-child empty-report controls. Capture trees are reset
+outside timing. The comparison baseline is also an explicit atomic-output adapter
+around the unchanged upstream comparison CLI.
+Directory comparisons of the same reports separate filesystem/report work from
+child execution.
 Separate repeated compute workloads and zero-repetition preload controls expose
-report-processing performance without ty or process-launch costs. See the
+report-processing performance without ty or process-launch costs. The default
+matrix has 13 timed rows. A separate correctness-only tee records the same actual
+ty invocation's raw streams before forwarding them, allowing exact validation of
+persisted captures despite run-to-run memory/diagnostic variation; timed real-ty
+runs still execute ty directly. See the
 [reference guide](reference/memory_report/README.md) for preparation, measurement,
 source pinning, and ordinary/ThinLTO commands. No host environment values are
 copied into the process benchmark record.
