@@ -79,6 +79,30 @@ for quoted_depth in [127, 128]:
         assert quoted_depth == 128
         print(f"quoted depth rejected {quoted_depth}")
 
+# Unknown scalars and containers follow the same depth and syntax rules after
+# successfully decoding known strings. The nesting error wins over an early type error.
+for ignored in ['null', 'true', '17', '1e9999', '"escaped\\ntext"', '"\\ud800"', '{"k":[0]}']:
+    named = decode('{"name":"shared","ignored":' + ignored + '}', Item)
+    assert named.name == 'shared'
+for depth in [127, 128]:
+    nested = repeat("[", depth) + "0" + repeat("]", depth)
+    try:
+        named = decode('{"name":"shared","ignored":' + nested + '}', Item)
+        assert depth == 127 and named.name == "shared"
+    except ValueError:
+        assert depth == 128
+try:
+    named = decode('{"name":false,"ignored":' + repeat("[", 128) + '0' + repeat("]", 128) + '}', Item)
+    print("unexpected late depth success")
+except ValueError as error:
+    print(str(error).startswith("JSON nesting exceeds 128"))
+
+shared = decode(r'["shared","shared","\u0073hared","different"]', list[str])
+changed = shared[0]
+changed += "!"
+shared[0] = changed
+print(f"{shared[0]} {shared[1]} {shared[2]} {shared[3]}")
+
 # Every failure occurs after owning long strings, BigInts, nested records, and lists.
 prefix = '{"total":1267650600228229401496703205376,"items":[{"name":"' + repeat("x", 1024) + '","amount":1267650600228229401496703205376},'
 for attempt in range(25):

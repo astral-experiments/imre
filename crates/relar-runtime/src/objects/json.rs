@@ -137,10 +137,27 @@ impl Seen {
     }
 }
 
-#[derive(Clone, Copy)]
-struct Seed<'a>(&'a Schema);
+/// Raw numeric tokens and ignored containers can bypass serde's recursion
+/// budget. Check the full document once before admitting such values.
+struct DecodeState<'a> {
+    text: &'a str,
+    checked: bool,
+    strings: [Option<Rc<Str>>; 64],
+}
 
-impl<'de> DeserializeSeed<'de> for Seed<'_> {
+impl DecodeState<'_> {
+    fn check<E: serde::de::Error>(&mut self) -> Result<(), E> {
+        if !self.checked {
+            check_depth(self.text).map_err(E::custom)?;
+            self.checked = true;
+        }
+        Ok(())
+    }
+}
+
+struct Seed<'schema, 'state, 'de>(&'schema Schema, &'state mut DecodeState<'de>);
+
+impl<'de> DeserializeSeed<'de> for Seed<'_, '_, 'de> {
     type Value = OwnedWord;
 
     fn deserialize<D: serde::Deserializer<'de>>(
@@ -148,6 +165,9 @@ impl<'de> DeserializeSeed<'de> for Seed<'_> {
         deserializer: D,
     ) -> Result<OwnedWord, D::Error> {
         let schema = self.0;
+        if matches!(schema.kind, INTEGER | FLOAT) {
+            self.1.check()?;
+        }
         let word = match schema.kind {
             INTEGER => {
                 // Borrowing the validated token preserves arbitrary precision and
@@ -200,7 +220,7 @@ impl<'de> DeserializeSeed<'de> for Seed<'_> {
     }
 }
 
-impl<'de> Visitor<'de> for Seed<'_> {
+impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
     type Value = OwnedWord;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -213,11 +233,27 @@ impl<'de> Visitor<'de> for Seed<'_> {
     }
 
     fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
-        // Compact strings store short values inline, without a temporary String
-        // allocation. The new owner copies any borrowed deserializer scratch.
-        let word = Rc::into_raw(Rc::new(Str::new(value))) as usize;
+        // Long strings bypass the table. A collision evicts just one immutable
+        // owner, keeping the cache bounded even for adversarial input.
+        let owner = if !value.is_empty() && value.len() <= 32 {
+            let bytes = value.as_bytes();
+            let index = (value.len() ^ usize::from(bytes[0]) ^ usize::from(bytes[bytes.len() - 1]))
+                % self.1.strings.len();
+            let slot = &mut self.1.strings[index];
+            if let Some(owner) = slot
+                && owner.as_str() == value
+            {
+                Rc::clone(owner)
+            } else {
+                let owner = Rc::new(Str::new(value));
+                *slot = Some(Rc::clone(&owner));
+                owner
+            }
+        } else {
+            Rc::new(Str::new(value))
+        };
         // SAFETY: deserialize_str is used only for the checked string schema.
-        Ok(unsafe { OwnedWord::from_owned(word, self.0.storage()) })
+        Ok(unsafe { OwnedWord::from_owned(Rc::into_raw(owner) as usize, self.0.storage()) })
     }
 
     fn visit_none<E: serde::de::Error>(self) -> Result<OwnedWord, E> {
@@ -229,7 +265,7 @@ impl<'de> Visitor<'de> for Seed<'_> {
         self,
         deserializer: D,
     ) -> Result<OwnedWord, D::Error> {
-        let child = Seed(self.0.child()).deserialize(deserializer)?;
+        let child = Seed(self.0.child(), self.1).deserialize(deserializer)?;
         let kind = child.kind.raw();
         let word = child.into_word();
         let word = match kind {
@@ -245,7 +281,7 @@ impl<'de> Visitor<'de> for Seed<'_> {
         let child = self.0.child();
         if self.0.word_kind == 4 {
             let mut values = Vec::new();
-            while let Some(value) = sequence.next_element_seed(Seed(child))? {
+            while let Some(value) = sequence.next_element_seed(Seed(child, self.1))? {
                 values.push(Int(value.into_word()));
             }
             // SAFETY: the schema is list[int], and every element owns an exact Int.
@@ -254,7 +290,7 @@ impl<'de> Visitor<'de> for Seed<'_> {
             });
         }
         let mut values = Words::new(child.word_kind);
-        while let Some(value) = sequence.next_element_seed(Seed(child))? {
+        while let Some(value) = sequence.next_element_seed(Seed(child, self.1))? {
             values.values.push(value.into_word());
         }
         let pointer =
@@ -268,7 +304,7 @@ impl<'de> Visitor<'de> for Seed<'_> {
             let child = self.0.child();
             let mut mapping = super::mappings::Mapping::new(3, child.word_kind);
             while let Some(key) = map.next_key_seed(Key)? {
-                let value = map.next_value_seed(Seed(child))?;
+                let value = map.next_value_seed(Seed(child, self.1))?;
                 let pointer = Rc::into_raw(Rc::new(Str::from(key.as_ref()))) as usize;
                 // SAFETY: this temporary transfers one newly allocated string owner.
                 let key = unsafe { OwnedWord::from_owned(pointer, WordKind::new(3)) };
@@ -290,7 +326,11 @@ impl<'de> Visitor<'de> for Seed<'_> {
         let mut seen = Seen::new(fields.len());
         while let Some(key) = map.next_key_seed(Key)? {
             let Some(index) = fields.iter().position(|field| field.name() == key) else {
-                map.next_value::<IgnoredAny>()?;
+                if self.1.checked {
+                    map.next_value::<IgnoredAny>()?;
+                } else {
+                    map.next_value_seed(Ignore(self.1))?;
+                }
                 continue;
             };
             if !seen.insert(index) {
@@ -300,7 +340,7 @@ impl<'de> Visitor<'de> for Seed<'_> {
                 )));
             }
             let value = map
-                .next_value_seed(Seed(fields[index].schema()))
+                .next_value_seed(Seed(fields[index].schema(), self.1))
                 .map_err(|error| {
                     A::Error::custom(format!("field {:?}: {error}", fields[index].name()))
                 })?;
@@ -315,6 +355,55 @@ impl<'de> Visitor<'de> for Seed<'_> {
             }
         }
         Ok(owner)
+    }
+}
+
+/// Skip scalars without a depth scan. Before serde can skip an arbitrary
+/// container, check the nesting of the complete document once.
+struct Ignore<'state, 'de>(&'state mut DecodeState<'de>);
+
+impl<'de> DeserializeSeed<'de> for Ignore<'_, 'de> {
+    type Value = IgnoredAny;
+
+    fn deserialize<D: serde::Deserializer<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for Ignore<'_, 'de> {
+    type Value = IgnoredAny;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON value")
+    }
+    fn visit_unit<E>(self) -> Result<IgnoredAny, E> {
+        Ok(IgnoredAny)
+    }
+    fn visit_bool<E>(self, _: bool) -> Result<IgnoredAny, E> {
+        Ok(IgnoredAny)
+    }
+    fn visit_str<E>(self, _: &str) -> Result<IgnoredAny, E> {
+        Ok(IgnoredAny)
+    }
+    fn visit_i64<E>(self, _: i64) -> Result<IgnoredAny, E> {
+        Ok(IgnoredAny)
+    }
+    fn visit_u64<E>(self, _: u64) -> Result<IgnoredAny, E> {
+        Ok(IgnoredAny)
+    }
+    fn visit_f64<E>(self, _: f64) -> Result<IgnoredAny, E> {
+        Ok(IgnoredAny)
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<IgnoredAny, A::Error> {
+        self.0.check()?;
+        IgnoredAny.visit_seq(seq)
+    }
+    fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<IgnoredAny, A::Error> {
+        self.0.check()?;
+        IgnoredAny.visit_map(map)
     }
 }
 
@@ -413,10 +502,29 @@ fn check_depth(text: &str) -> Result<(), &'static str> {
 }
 
 fn decode(text: &str, schema: &Schema) -> Result<OwnedWord, serde_json::Error> {
+    decode_with_depth(text, schema, true)
+}
+
+/// Starts with serde's recursion budget unless the caller already checked all
+/// containers. An error on the speculative path is never exposed to the caller.
+fn decode_with_depth(
+    text: &str,
+    schema: &Schema,
+    checked: bool,
+) -> Result<OwnedWord, serde_json::Error> {
     let mut deserializer = serde_json::Deserializer::from_str(text);
-    // The public entry point checks every container, including ignored ones.
-    deserializer.disable_recursion_limit();
-    let value = Seed(schema).deserialize(&mut deserializer)?;
+    if checked {
+        deserializer.disable_recursion_limit();
+    }
+    let value = Seed(
+        schema,
+        &mut DecodeState {
+            text,
+            checked,
+            strings: [const { None }; 64],
+        },
+    )
+    .deserialize(&mut deserializer)?;
     deserializer.end()?;
     Ok(value)
 }
@@ -435,9 +543,9 @@ pub unsafe extern "C" fn relar_json_decode(
 ) -> *const usize {
     // SAFETY: the caller roots the input and supplies valid static metadata.
     let (text, schema) = unsafe { (&*text, &*schema) };
-    let result = check_depth(text)
-        .map_err(|message| Error::new(Kind::ValueError, message))
-        .and_then(|()| {
+    let result = decode_with_depth(text, schema, false)
+        .or_else(|_| {
+            check_depth(text).map_err(|message| Error::new(Kind::ValueError, message))?;
             decode(text, schema).map_err(|error| {
                 Error::new(Kind::ValueError, format!("invalid typed JSON: {error}"))
             })
