@@ -12,6 +12,13 @@ for value in values:
     print(repr(urls.unquote(string=value)))
     print(repr(parse.unquote(value)))
     print(repr(decode(value)))
+    print(repr(decode(("ignored%00/λ/" + value).rsplit("/", maxsplit=1)[-1])))
+    print(repr(decode(value.rsplit("λ🙂", maxsplit=1)[-1])))
+
+try:
+    print(decode("%41".rsplit("", 1)[-1]))
+except ValueError as error:
+    print(str(error))
 
 # Every possible byte and pair exercises invalid UTF-8 replacement grouping.
 hexadecimal = "0123456789ABCDEF"

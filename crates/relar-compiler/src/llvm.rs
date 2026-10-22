@@ -2739,9 +2739,7 @@ impl Emitter<'_, '_> {
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
-        if matches!(builtin, Builtin::ListGet)
-            && let Some(value) = self.rsplit_last(expressions)
-        {
+        if let Some(value) = self.rsplit_last(builtin, expressions) {
             return value;
         }
         let args = expressions
@@ -4264,6 +4262,7 @@ declare ptr @relar_int_str_part(i64, ptr, ptr)
 declare ptr @relar_str_split_whitespace(ptr)
 declare ptr @relar_str_split(ptr, ptr, i64, i8)
 declare ptr @relar_str_rsplit_last(ptr, ptr)
+declare ptr @relar_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @relar_str_strip(ptr, ptr, i32)
 declare i8 @relar_str_affix(ptr, ptr, i8)
 declare i64 @relar_str_find(ptr, ptr, i64)
