@@ -156,6 +156,12 @@ median complete runtimes are 1.33–1.77× Rust with ThinLTO and 1.48–1.84× w
 ordinary builds. Repeated full computation also stays below 2× in both modes;
 the tables include upstream CPython, the typed CPython port, and native Codon.
 
+The [live conformance comparison](benchmarks/results/2026-10-21-live-conformance.md)
+includes configuration discovery, both actual ty processes, and atomic report
+publication. Complete runs take about 1.02× Rust's time; separate repeated report
+computation takes 1.53–1.95× across ordinary and ThinLTO builds. Every measured
+case, including startup controls, stays below 2× Rust.
+
 ## License
 
 Relar is licensed under either of
