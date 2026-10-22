@@ -1,9 +1,12 @@
 //! Fixed native records with a compact header and compiler-described payload.
 
-use std::alloc::{Layout, alloc_zeroed, dealloc, handle_alloc_error};
-use std::cell::Cell;
+use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
+use std::cell::{Cell, UnsafeCell};
+use std::rc::Rc;
 
 use super::{fail, words::WordKind};
+
+pub(super) mod strings;
 
 /// Compiler-emitted immutable metadata; every field occupies one eight-byte word.
 /// The descriptor and its kind array must outlive every allocation using them.
@@ -40,16 +43,37 @@ pub struct RecordField {
 #[repr(C)]
 struct Header {
     references: Cell<usize>,
+    /// An aligned descriptor, or a pointer to a shared block with bit zero set.
     descriptor: *const RecordDescriptor,
 }
 
 const _: () = assert!(size_of::<Header>() == 16 && align_of::<Header>() == 8);
 
 /// # Safety
-/// `payload` is rooted and was allocated with `relar_record_new`.
+/// `payload` is a rooted native record, either standalone or in a record block.
 pub(super) unsafe fn descriptor<'a>(payload: *const usize) -> &'a RecordDescriptor {
     // SAFETY: the immutable descriptor belongs to the live allocation's header.
-    unsafe { &*(*payload.cast::<Header>().sub(1)).descriptor }
+    unsafe { (*payload.cast::<Header>().sub(1)).descriptor() }
+}
+
+impl Header {
+    fn block(&self) -> Option<*const Block> {
+        if self.descriptor.addr() & 1 == 0 {
+            return None;
+        }
+        // Each tagged pointer owns a live block. Removing its tag
+        // recovers the original aligned pointer and its allocation provenance.
+        Some(self.descriptor.map_addr(|addr| addr - 1).cast::<Block>())
+    }
+
+    fn descriptor(&self) -> &RecordDescriptor {
+        // SAFETY: a tagged header owns its Rc until its last record owner drops.
+        let descriptor = self
+            .block()
+            .map_or(self.descriptor, |block| unsafe { (*block).descriptor });
+        // SAFETY: both forms carry the original immutable compiler metadata.
+        unsafe { &*descriptor }
+    }
 }
 
 fn layout(length: usize) -> Layout {
@@ -59,6 +83,71 @@ fn layout(length: usize) -> Layout {
         .unwrap_or_else(|| fail("MemoryError", "record allocation is too large"));
     Layout::from_size_align(size, align_of::<Header>())
         .unwrap_or_else(|_| fail("MemoryError", "record allocation is too large"))
+}
+
+// Each surviving record pins at most 512 bytes of slots and one small Rc header.
+// Other records in the block release their field owners at their own last drop.
+const BLOCK_WORDS: usize = 64;
+
+#[repr(C)]
+struct Block {
+    descriptor: *const RecordDescriptor,
+    slots: UnsafeCell<[usize; BLOCK_WORDS]>,
+}
+
+/// Hands out stable, independently owned records while decoding a typed array.
+/// Each full block can outlive the decoder and every other block.
+pub(super) struct RecordBatch<'a> {
+    descriptor: &'a RecordDescriptor,
+    words: usize,
+    block: Option<Rc<Block>>,
+    next: usize,
+}
+
+impl<'a> RecordBatch<'a> {
+    /// Wide records with fewer than two slots per block use individual allocations.
+    pub(super) fn new(descriptor: &'a RecordDescriptor) -> Option<Self> {
+        let words = layout(descriptor.length).size() / size_of::<usize>();
+        (words <= BLOCK_WORDS / 2).then_some(Self {
+            descriptor,
+            words,
+            block: None,
+            next: BLOCK_WORDS,
+        })
+    }
+
+    pub(super) fn accepts(&self, descriptor: *const RecordDescriptor) -> bool {
+        std::ptr::eq(self.descriptor, descriptor)
+    }
+
+    /// # Safety
+    /// The descriptor must describe valid kinds and outlive all returned record owners.
+    pub(super) unsafe fn allocate(&mut self) -> *mut usize {
+        if self.next + self.words > BLOCK_WORDS {
+            self.block = Some(Rc::new(Block {
+                descriptor: self.descriptor,
+                slots: UnsafeCell::new([0; BLOCK_WORDS]),
+            }));
+            self.next = 0;
+        }
+        let block = Rc::into_raw(Rc::clone(self.block.as_ref().unwrap()));
+        // SAFETY: the block's distinct, never-reused slots are aligned for headers
+        // and payloads. This record owns the Rc stored in its tagged header.
+        unsafe {
+            let slot = (*block)
+                .slots
+                .get()
+                .cast::<usize>()
+                .add(self.next)
+                .cast::<Header>();
+            self.next += self.words;
+            slot.write(Header {
+                references: Cell::new(1),
+                descriptor: block.cast::<RecordDescriptor>().map_addr(|addr| addr | 1),
+            });
+            slot.add(1).cast()
+        }
+    }
 }
 
 /// Creates a record with all payload words zero. Scalar zero needs no cleanup;
@@ -80,7 +169,7 @@ pub unsafe extern "C" fn relar_record_new(descriptor: *const RecordDescriptor) -
         WordKind::new(unsafe { descriptor_value.kinds.add(index).read() });
     }
     // SAFETY: layout is nonzero and correctly aligned for the header and words.
-    let allocation = unsafe { alloc_zeroed(allocation_layout) };
+    let allocation = unsafe { alloc(allocation_layout) };
     if allocation.is_null() {
         handle_alloc_error(allocation_layout);
     }
@@ -90,12 +179,16 @@ pub unsafe extern "C" fn relar_record_new(descriptor: *const RecordDescriptor) -
             references: Cell::new(1),
             descriptor,
         });
-        allocation.add(size_of::<Header>()).cast()
+        // Only the payload needs zeroing for partial-field cleanup. The ordinary
+        // allocation can reuse a freed small record without clearing its header.
+        let payload = allocation.add(size_of::<Header>()).cast::<usize>();
+        payload.write_bytes(0, descriptor_value.length);
+        payload
     }
 }
 
 /// # Safety
-/// `payload` is null or a live record payload from `relar_record_new`, used only
+/// `payload` is null or a live native record payload, used only
 /// by its execution thread. No reference into its storage may span mutation.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_record_retain(payload: *const usize) {
@@ -131,7 +224,7 @@ pub unsafe extern "C" fn relar_record_cached_result(payload: *const usize) -> *m
     } else {
         // SAFETY: a fresh record uses the cache's static descriptor; it does not
         // expose or mutate any existing tuple's observable field values.
-        unsafe { relar_record_new(header.descriptor) }
+        unsafe { relar_record_new(header.descriptor()) }
     }
 }
 
@@ -157,20 +250,40 @@ pub unsafe extern "C" fn relar_record_release(payload: *const usize) {
         return;
     }
     // SAFETY: metadata remains immutable and live even while payloads are released.
-    let descriptor = unsafe { &*header.descriptor };
+    let descriptor = header.descriptor();
+    if let Some(block) = header.block() {
+        // SAFETY: no live owner can reach this record now. Other records in
+        // the block, and an active cursor, keep their own storage alive.
+        unsafe {
+            release_fields::<true>(payload, descriptor);
+            Rc::decrement_strong_count(block);
+        }
+    } else {
+        // SAFETY: the standalone constructor already checked this exact layout,
+        // and the immutable descriptor cannot change during the record's lifetime.
+        unsafe {
+            release_fields::<false>(payload, descriptor);
+            let size = size_of::<Header>() + descriptor.length * size_of::<usize>();
+            let layout = Layout::from_size_align_unchecked(size, align_of::<Header>());
+            dealloc(payload.cast::<Header>().sub(1).cast_mut().cast(), layout);
+        }
+    }
+}
+
+/// # Safety
+/// The caller transfers the final record's fields with their original descriptor.
+unsafe fn release_fields<const PACKED: bool>(payload: *const usize, descriptor: &RecordDescriptor) {
     for index in 0..descriptor.length {
         // SAFETY: each nonzero owning word transfers the field's final reference.
         unsafe {
             let kind = WordKind::new(descriptor.kinds.add(index).read());
-            kind.release(kind.read_record_field(payload.add(index)));
+            let word = kind.read_record_field(payload.add(index));
+            if PACKED && kind.raw() & !super::words::NULLABLE == 3 && word != 0 {
+                strings::release(Rc::from_raw(word as *const crate::Str));
+            } else {
+                kind.release(word);
+            }
         }
-    }
-    // SAFETY: this is the original allocation and exact allocation layout.
-    unsafe {
-        dealloc(
-            payload.cast::<u8>().sub(size_of::<Header>()).cast_mut(),
-            layout(descriptor.length),
-        );
     }
 }
 
@@ -295,6 +408,61 @@ mod tests {
             drop(saved);
         }
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn escaped_array_record_keeps_only_its_own_fields_and_block_alive() {
+        let kinds = [3, 3];
+        let layout = RecordDescriptor {
+            length: kinds.len(),
+            kinds: kinds.as_ptr(),
+            semantics: std::ptr::null(),
+        };
+        let mut batch = RecordBatch::new(&layout).unwrap();
+        let mut rows = crate::objects::words::Words::new(6);
+        let mut blocks = Vec::new();
+        let mut fields = Vec::new();
+        // SAFETY: layout outlives the array and its escaped owner; each first
+        // field takes the declared string kind and second fields stay zero.
+        unsafe {
+            for _ in 0..100 {
+                let row = batch.allocate();
+                let block = Rc::downgrade(batch.block.as_ref().unwrap());
+                if blocks.last().is_none_or(|previous| !block.ptr_eq(previous)) {
+                    blocks.push(block);
+                }
+                let field = Rc::new(Str::new("owned field"));
+                fields.push(Rc::downgrade(&field));
+                replace(row, 0, Rc::as_ptr(&field) as usize, 3);
+                rows.values.push(row as usize);
+            }
+            assert!(blocks.len() > 1 && blocks.len() < fields.len());
+            let escaped = rows.values[20] as *mut usize;
+            relar_record_retain(escaped);
+            drop(batch);
+            drop(rows);
+            assert_eq!(
+                blocks
+                    .iter()
+                    .filter(|block| block.strong_count() > 0)
+                    .count(),
+                1
+            );
+            assert!(std::ptr::eq(descriptor(escaped), &layout));
+            assert!(
+                fields
+                    .iter()
+                    .enumerate()
+                    .all(|(index, field)| (field.strong_count() > 0) == (index == 20))
+            );
+
+            let replacement = Rc::new(Str::new("replacement"));
+            replace(escaped, 0, Rc::as_ptr(&replacement) as usize, 3);
+            assert_eq!(fields[20].strong_count(), 0);
+            relar_record_release(escaped);
+            assert_eq!(Rc::strong_count(&replacement), 1);
+            assert!(blocks.iter().all(|block| block.strong_count() == 0));
+        }
     }
 
     #[test]

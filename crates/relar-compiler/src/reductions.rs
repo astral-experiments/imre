@@ -442,7 +442,7 @@ fn bound_accumulator(body: &mut [Statement], accumulator: usize, bounds: IntRang
 }
 
 /// Counts every replacement and cleanup, including expression-owned regions.
-fn count_writes(body: &[Statement], writes: &mut [usize]) {
+pub(crate) fn count_writes(body: &[Statement], writes: &mut [usize]) {
     statement_writes(body, writes);
     walk_expressions(body, &mut |value| match &value.kind {
         ExprKind::Scope { body, clear, .. } => {
@@ -517,7 +517,7 @@ fn statement_writes(body: &[Statement], writes: &mut [usize]) {
     }
 }
 
-fn contains_continue(body: &[Statement]) -> bool {
+pub(crate) fn contains_continue(body: &[Statement]) -> bool {
     fn statements(body: &[Statement]) -> bool {
         body.iter().any(|statement| match statement {
             Statement::Continue => true,

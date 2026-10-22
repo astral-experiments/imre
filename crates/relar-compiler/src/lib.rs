@@ -4,6 +4,7 @@ mod callables;
 mod classes;
 mod effects;
 mod frontend;
+mod guarded_text;
 mod ir;
 mod list_bounds;
 mod list_specialization;
@@ -38,6 +39,7 @@ pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String>
     list_specialization::specialize(&mut module);
     range_specialization::specialize(&mut module);
     reductions::specialize(&mut module);
+    guarded_text::specialize(&mut module);
     let ranges = ranges::analyze(&module);
     Ok(llvm::emit(&module, &ranges, options.address_sanitizer))
 }
@@ -66,6 +68,7 @@ pub fn compile_file(
     list_specialization::specialize(&mut module);
     range_specialization::specialize(&mut module);
     reductions::specialize(&mut module);
+    guarded_text::specialize(&mut module);
     let ranges = ranges::analyze(&module);
     Ok(Compilation {
         llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer),

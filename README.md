@@ -77,7 +77,7 @@ The [memory-report comparator](examples/memory_report/README.md) compares report
 
 The [conformance reporter](examples/conformance_report/README.md) reads test groups from a typing checkout, runs both ty executables with timeouts, resolves diagnostic paths, and atomically publishes the Markdown or GitHub report. Captured diagnostics can also be replayed. In the [live conformance comparison](benchmarks/results/2026-10-21-live-conformance.md), complete runs take about 1.02× Rust’s time. Repeated report computation takes 1.53–1.95×.
 
-The [Python download catalog](examples/python_catalog/README.md) selects and renders 6,098 downloads from uv’s index of 58,721 release artifacts. It reads the shipped gzip index directly. Across plain and gzip inputs at 1× and 10×, complete runs take 1.29–1.46× Rust’s time and peak at 15.2–15.8 MiB. [Timings and profiles](benchmarks/results/2026-10-22-catalog-hot-paths.md).
+The [Python download catalog](examples/python_catalog/README.md) selects and renders 6,098 downloads from uv’s index of 58,721 release artifacts. It reads the shipped gzip index directly. Across plain and gzip inputs at 1× and 10×, median runs take 1.11–1.22× Rust’s time with peak RSS under 16 MiB. [Timings and allocation profiles](benchmarks/results/2026-10-22-catalog-ownership.md).
 
 The [five-engine comparison](benchmarks/results/2026-10-21-native-tools.md) runs the catalog and conformance reporter against upstream and typed CPython, Codon, and Rust. Complete runs take 1.48–1.84× Rust’s time ordinarily and 1.33–1.77× with ThinLTO. Repeated computation also stays within 2× in both modes.
 

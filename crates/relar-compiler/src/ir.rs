@@ -173,6 +173,22 @@ pub(crate) struct Expr {
     pub kind: ExprKind,
 }
 
+impl Expr {
+    /// Arguments of an explicit right split with a single split and final-field access.
+    pub(crate) fn last_rsplit_args(&self, index: &Self) -> Option<&[Expr]> {
+        let ExprKind::Builtin(Builtin::Text(TextOperation::Split(true)), args) = &self.kind else {
+            return None;
+        };
+        let [_, separator, limit] = args.as_slice() else {
+            return None;
+        };
+        (matches!(separator.kind, ExprKind::Present(_))
+            && matches!(&limit.kind, ExprKind::Int(n) if n == "1")
+            && matches!(&index.kind, ExprKind::Negate(one) if matches!(&one.kind, ExprKind::Int(n) if n == "1")))
+            .then_some(args)
+    }
+}
+
 /// Values are evaluated and rooted in source order. `order` is a permutation of
 /// their indices that supplies the native call's parameter order without
 /// reevaluation. Methods include their receiver first; constructors omit the
