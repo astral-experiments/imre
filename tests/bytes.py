@@ -41,7 +41,7 @@ REJECTED = {
     "binary_annotation": 'from typing import BinaryIO\nvalue: BinaryIO = open("out", "w", encoding="utf-8")\n',
     "binary_encoding": 'value = open("out", "wb", encoding="utf-8")\n',
     "binary_update": 'value = open("out", "wb+")\n',
-    "binary_partial_read": 'with open("input", "rb") as stream:\n    print(stream.read(1))\n',
+    "binary_bool_size": 'with open("input", "rb") as stream:\n    stream.read(True)\n',
     "binary_seek": 'with open("input", "rb") as stream:\n    stream.seek(0)\n',
     "binary_closed_write": 'with open("out", "wb") as stream:\n    stream.closed = False\n',
 }

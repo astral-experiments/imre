@@ -195,6 +195,38 @@ def first(stream: Stream) -> str:
     }
 
     #[test]
+    fn file_iterators_pull_typed_lines_and_keep_reads_in_the_loop() {
+        let source = r#"
+from gzip import open
+
+def scan(path: str) -> list[str]:
+    with open(path, "rt", encoding="utf-8") as stream:
+        return [line for line in stream if line]
+
+def first(path: str) -> bytes:
+    with open(path, "rb") as stream:
+        chunk = stream.read(1)
+        for line in stream:
+            return chunk + line
+        return chunk
+"#;
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        for operation in [
+            "gzip_open",
+            "text_readline",
+            "binary_read_size",
+            "binary_readline",
+        ] {
+            assert!(
+                llvm.contains(&format!("call ptr @relar_{operation}(")),
+                "{operation}"
+            );
+        }
+        assert!(!llvm.contains("call ptr @relar_text_read("));
+        assert!(!llvm.contains("call ptr @relar_str_splitlines("));
+    }
+
+    #[test]
     fn unused_intrinsic_import_does_not_initialize_arguments() {
         let llvm = compile("import sys\nprint(1)\n", &CompileOptions::default()).unwrap();
         assert!(llvm.contains("define i32 @main()"));

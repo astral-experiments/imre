@@ -257,6 +257,9 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::BytesValidateUtf8
         | Builtin::BinaryOpen(_)
         | Builtin::BinaryRead
+        | Builtin::BinaryReadSize
+        | Builtin::FileReadline
+        | Builtin::GzipOpen
         | Builtin::BinaryWrite
         | Builtin::Slice
         | Builtin::Pop

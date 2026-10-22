@@ -2843,6 +2843,28 @@ impl Emitter<'_, '_> {
                 small_integer: false,
             },
             Builtin::BinaryRead => self.call("relar_binary_read", Type::Bytes, &[&args[0].value]),
+            Builtin::GzipOpen => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @relar_gzip_open(ptr {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(returns == Type::BinaryIO)
+                )),
+                small_integer: false,
+            },
+            Builtin::BinaryReadSize => self.call(
+                "relar_binary_read_size",
+                Type::Bytes,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::FileReadline => {
+                let function = if returns == Type::Bytes {
+                    "relar_binary_readline"
+                } else {
+                    "relar_text_readline"
+                };
+                self.call(function, returns, &[&args[0].value])
+            }
             Builtin::BinaryWrite => self.call(
                 "relar_binary_write",
                 Type::Int,
@@ -4043,6 +4065,9 @@ fn fallible(name: &str) -> bool {
                 | "relar_bytes_validate_utf8"
                 | "relar_binary_open"
                 | "relar_binary_read"
+                | "relar_binary_read_size"
+                | "relar_binary_readline"
+                | "relar_gzip_open"
                 | "relar_binary_write"
                 | "relar_print_bool"
                 | "relar_print_none"
@@ -4061,6 +4086,7 @@ fn fallible(name: &str) -> bool {
                 | "relar_text_open"
                 | "relar_text_enter"
                 | "relar_text_read"
+                | "relar_text_readline"
                 | "relar_text_write"
                 | "relar_text_flush"
                 | "relar_text_close"
@@ -4165,6 +4191,9 @@ declare ptr @relar_bytes_decode(ptr)
 declare ptr @relar_bytes_validate_utf8(ptr)
 declare ptr @relar_binary_open(ptr, i32)
 declare ptr @relar_binary_read(ptr)
+declare ptr @relar_binary_read_size(ptr, i64)
+declare ptr @relar_binary_readline(ptr)
+declare ptr @relar_gzip_open(ptr, i32)
 declare i64 @relar_binary_write(ptr, ptr)
 
 declare i8 @relar_error_pending()
@@ -4253,6 +4282,7 @@ declare ptr @relar_none_str()
 declare ptr @relar_text_open(ptr, i32)
 declare i8 @relar_text_enter(ptr)
 declare ptr @relar_text_read(ptr)
+declare ptr @relar_text_readline(ptr)
 declare i64 @relar_text_write(ptr, ptr)
 declare i8 @relar_text_write_discard(ptr, ptr)
 declare i8 @relar_text_write_parts(ptr, ptr, i64)

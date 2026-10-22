@@ -395,7 +395,10 @@ pub(crate) enum Builtin {
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
     BinaryOpen(u32),
+    GzipOpen,
     BinaryRead,
+    BinaryReadSize,
+    FileReadline,
     BinaryWrite,
     TextEnter,
     TextRead,
