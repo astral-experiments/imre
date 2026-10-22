@@ -102,6 +102,9 @@ Make sure `~/.cargo/bin` is on your `PATH`.
 Given `totals.py`:
 
 ```python
+from sys import argv
+
+
 def total(quantities: list[int]) -> int:
     result = 0
     for quantity in quantities:
@@ -109,15 +112,21 @@ def total(quantities: list[int]) -> int:
     return result
 
 
-print(f"Total: {total([10, 20, 12])}")
+print(f"Total: {total([int(value) for value in argv[1:]])}")
 ```
 
-Compile and run the program:
+Compile and run it in one command.
+
+```console
+relar run totals.py -- 10 20 12
+# Output: Total: 42
+```
+
+Arguments after `--` go into the script’s `sys.argv`. Use `build` to keep the compiled executable.
 
 ```console
 relar build totals.py
-./totals
-# Output: Total: 42
+./totals 10 20 12
 ```
 
 ## License
