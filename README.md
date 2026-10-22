@@ -20,6 +20,8 @@ Relar supports:
 - Typed containers and arbitrary-precision integers
 - Common control flow, comprehensions, and immediately consumed iterator pipelines
 - Selected file and path operations
+- Decode external JSON into fixed records and typed containers, and serialize their layouts directly.
+- Use immutable tuple keys and sort keys, Unicode text operations, and bounded URL decoding.
 - Create scoped temporary workspaces and atomically replace completed files.
 - Run native subprocesses with captured UTF-8 output, explicit arguments, working directories, and environment snapshots.
 
@@ -70,6 +72,10 @@ with Relar and CPython, and comparing it with a Rust implementation:
 ## Developer tools
 
 The [memory-report comparator](examples/memory_report/README.md) compares report files and directories or runs two versions of ty over prepared projects. It can keep the child processes’ transcripts and atomically publish the Markdown report. The [workspace and atomic-output comparison](benchmarks/results/2026-10-21-native-workspaces.md) measures complete runs at 1.00–1.57× Rust’s time, file-only reports at 1.13–1.26×, and repeated report computation at 1.42–1.57× across ordinary and ThinLTO builds.
+
+The [conformance reporter](examples/conformance_report/README.md) scans real typing tests, groups captured ty diagnostics, and renders the Markdown or GitHub report.
+
+The [Python download catalog](examples/python_catalog/README.md) selects and renders 6,098 downloads from uv’s index of 58,721 release artifacts.
 
 ## Installation
 

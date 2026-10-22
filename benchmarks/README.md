@@ -238,6 +238,73 @@ takes 1.42–1.57×. Every row, including controls, meets the ≤2× target. The
 retains all 3,744 measured executions, exact persisted-output checks, sanitizer
 validation, and a portable replay of the evidence and statistics.
 
+## Compute-heavy developer tools
+
+The [conformance reporter](../examples/conformance_report/README.md) ports Ruff's
+offline annotation and diagnostic comparison. The
+[Python download catalog](../examples/python_catalog/README.md) ports uv's offline
+CPython release selection and rendering. Both compare complete outputs with the
+unchanged upstream algorithms through small input/output adapters. Their guides
+describe input preparation, the typed adaptations, and the accepted input domain.
+
+Build frozen compiler/runtime artifacts from a clean checkout:
+
+```sh
+python3.14 benchmarks/native_tools_build.py \
+  --target-dir target/native-tools \
+  --shared-build-dir /tmp/relar-native-tools-build-cache \
+  --output benchmarks/local/native-tools-build
+```
+
+The builder retains ordinary, ThinLTO, and AddressSanitizer runtimes, exact Cargo
+commands and artifact paths, source snapshots, and compiler identities. It uses
+the repository's pinned toolchain by default; pass `--toolchain ohm` on an Ohm
+devbox. The two Rust references have separate builders in
+[`reference/conformance_report`](reference/conformance_report/build.py) and
+[`reference/python_catalog`](reference/python_catalog/build.py). The
+[Codon guide](codon_native/README.md) records its pinned native release and every
+adapter, including its fixed-width integer and duplicate-key boundaries.
+
+`native_tools_benchmark.py --prepare-only` compiles the applications, validates
+all engines, and freezes the inputs before measurement. Use `--prepared-record`
+for the timing phase, with no concurrent builds or profilers. Its 12 workloads
+cover complete tools, four repetitions of their entire compute pipelines, and
+zero-repetition preload controls. Twenty samples cover two balanced five-engine
+order cycles. Relar and Rust use matched ordinary/ThinLTO settings; the same
+native Codon configuration is reported separately in both modes. Upstream
+CPython and the typed CPython port are separate baselines.
+
+Every measured process checks the complete rendered output and filesystem
+effects outside the timer. `native_tools_audit.py` independently reconstructs
+commands and expected outputs and recomputes the statistics from retained
+samples. `native_tools_profile.py` records Callgrind CPU instructions and DHAT
+allocations separately from uninstrumented timings.
+
+Package a passing audit with the retained sources, raw inputs, full reports,
+validation records, and pinned Codon license. Keep the measured checkout frozen
+through packaging; `--source-binding` can instead supply a previously recorded
+mapping from original source paths to unchanged snapshot files.
+
+```sh
+python3.14 benchmarks/native_tools_audit.py \
+  /tmp/native-tools-normal.json /tmp/native-tools-thinlto.json \
+  --output /tmp/native-tools-audit.json
+python3.14 benchmarks/native_tools_evidence.py package \
+  --audit /tmp/native-tools-audit.json \
+  --codon-license /path/to/codon-v0.20.4-LICENSE \
+  --output-dir /tmp/native-tools-evidence
+python3.14 -B /tmp/native-tools-evidence/native_tools_evidence.py replay \
+  /tmp/native-tools-evidence --output /tmp/native-tools-replay.json
+```
+
+The archive directory is portable: replay needs CPython 3.14+, with assertions
+enabled, and uses its indexed source/input bytes without the original checkout,
+network, or native engines. It independently reconstructs the complete upstream
+outputs and rechecks sample order, statistics, ratios, and ordinary/ThinLTO input
+parity. Native binaries and toolchains are identified by their recorded hashes
+and explicitly excluded from portable rehashing. Pass `--extra PATH` to retain
+additional validation logs or profile evidence without changing measured records.
+
 ## Callback record pipeline
 
 The [payout example](../examples/record_pipeline/README.md) selects records with

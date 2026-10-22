@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/astral-sh/versions",
+  "revision": "db0d0dbfa44ff1306ea0e571962e0b2a6211e3c9",
+  "path": "v1/python-build-standalone.ndjson",
+  "url": "https://raw.githubusercontent.com/astral-sh/versions/db0d0dbfa44ff1306ea0e571962e0b2a6211e3c9/v1/python-build-standalone.ndjson",
+  "fetched_at_utc": "2026-10-21",
+  "git_blob": "18e9cffb6ed3593a328fbbb36ef7cc984e598f45",
+  "bytes": 19870417,
+  "sha256": "e861c8ba1a18743f07395b83c4a54c9a6933ec2941637b3dc598c151ffe499f0",
+  "gzip_bytes": 2844194,
+  "gzip_sha256": "d3dcc0f4d8ceaa166eb38db9153bea40dab46afd1e984fa3e4970f7942172a3a",
+  "release_rows": 567,
+  "raw_artifacts": 58721,
+  "python_versions": 155,
+  "platforms": 31,
+  "preparation": "Lossless gzip only. Parsing every raw row and artifact, filtering, selection, sorting, and complete JSON rendering belong to the program."
+}
