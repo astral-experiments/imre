@@ -9,6 +9,8 @@ use super::*;
 pub(super) struct ModuleValues {
     definitions: RefCell<HashMap<DefinitionId, (usize, Type)>>,
     types: RefCell<Vec<Type>>,
+    pub(super) regex_literals: RefCell<HashMap<String, regex::CaptureNames>>,
+    regex_globals: RefCell<HashMap<usize, regex::CaptureNames>>,
 }
 
 impl ModuleValues {
@@ -33,6 +35,18 @@ impl ModuleValues {
     pub fn into_types(self) -> Vec<Type> {
         self.types.into_inner()
     }
+
+    pub(super) fn regex_groups(&self, pattern: &Expr) -> Option<regex::CaptureNames> {
+        match &pattern.kind {
+            ExprKind::Builtin(Builtin::RegexCompile(source), _) => {
+                self.regex_literals.borrow().get(source).cloned()
+            }
+            ExprKind::Builtin(Builtin::GlobalGet(slot), _) => {
+                self.regex_globals.borrow().get(slot).cloned()
+            }
+            _ => None,
+        }
+    }
 }
 
 struct Checkpoint {
@@ -40,6 +54,68 @@ struct Checkpoint {
     body: Range<usize>,
     initialized: usize,
     definitions: HashSet<DefinitionId>,
+}
+
+impl Checker<'_> {
+    fn initialize_global(
+        &mut self,
+        statement: &ast::Stmt,
+        definition: DefinitionId,
+    ) -> Result<Statement, String> {
+        let value = match statement {
+            ast::Stmt::Assign(assignment) => self.expr(&assignment.value)?,
+            ast::Stmt::AnnAssign(assignment) => {
+                let value = assignment.value.as_deref().ok_or_else(|| {
+                    error(
+                        self.source,
+                        statement,
+                        "module values require an initializer",
+                    )
+                })?;
+                let ty = annotation(
+                    &assignment.annotation,
+                    self.graph,
+                    self.module,
+                    &self.classes.declarations,
+                    self.types,
+                )?;
+                self.expr_expected(value, ty)?
+            }
+            _ => unreachable!(),
+        };
+        if callables::contains_callable(value.ty, self.types) {
+            return Err(error(
+                self.source,
+                statement,
+                "imported module values cannot contain callable values",
+            ));
+        }
+        let slot = self.globals.insert(definition, value.ty);
+        if let Some(groups) = self.globals.regex_groups(&value) {
+            self.globals.regex_globals.borrow_mut().insert(slot, groups);
+        }
+        Ok(Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
+        }))
+    }
+
+    /// A standalone entry script can declare fixed patterns between its imports
+    /// and definitions. Their literal initializers cannot call first-party code.
+    pub(super) fn entry_patterns(&mut self) -> Result<Vec<Statement>, String> {
+        let module = &self.graph.modules[self.module];
+        module
+            .entry_patterns
+            .iter()
+            .map(|&statement| {
+                let definition = DefinitionId {
+                    module: self.module,
+                    statement,
+                };
+                self.initialize_global(&module.parsed.syntax().body[statement], definition)
+            })
+            .collect()
+    }
 }
 
 pub(super) struct Initialization {
@@ -75,39 +151,7 @@ impl Initialization {
             let initialized = checker.globals.types.borrow().len();
             let start = body.len();
             if crate::modules::value_name(statement).is_some() {
-                let value = match statement {
-                    ast::Stmt::Assign(assignment) => checker.expr(&assignment.value)?,
-                    ast::Stmt::AnnAssign(assignment) => {
-                        let value = assignment.value.as_deref().ok_or_else(|| {
-                            error(
-                                checker.source,
-                                statement,
-                                "module values require an initializer",
-                            )
-                        })?;
-                        let ty = annotation(
-                            &assignment.annotation,
-                            checker.graph,
-                            checker.module,
-                            &checker.classes.declarations,
-                            checker.types,
-                        )?;
-                        checker.expr_expected(value, ty)?
-                    }
-                    _ => unreachable!(),
-                };
-                if callables::contains_callable(value.ty, checker.types) {
-                    return Err(error(
-                        checker.source,
-                        statement,
-                        "imported module values cannot contain callable values",
-                    ));
-                }
-                let slot = checker.globals.insert(definition, value.ty);
-                body.push(Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
-                }));
+                body.push(checker.initialize_global(statement, definition)?);
             } else {
                 body.extend(checker.statement(statement)?.0);
             }

@@ -24,6 +24,8 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
     match ty {
         Type::Exception
         | Type::TimeoutExpired
+        | Type::RegexPattern
+        | Type::RegexMatch
         | Type::TextIO
         | Type::BinaryIO
         | Type::Iterator
@@ -55,6 +57,12 @@ pub(super) fn validate(
                     "generated dataclass equality cannot compare float-containing containers; use field(compare=False) or dataclass(eq=False)",
                 ));
             }
+            if options.eq && field.compare && contains_regex(ty, types) {
+                return Err(module.error(
+                    &field.annotation,
+                    "generated dataclass equality cannot compare regex objects; use field(compare=False) or dataclass(eq=False)",
+                ));
+            }
             if options.repr && field.repr && !repr_supported(ty, types) {
                 return Err(module.error(
                     &field.annotation,
@@ -64,6 +72,14 @@ pub(super) fn validate(
         }
     }
     Ok(())
+}
+
+fn contains_regex(ty: Type, types: &Types) -> bool {
+    matches!(ty, Type::RegexPattern | Type::RegexMatch)
+        || types
+            .children(ty)
+            .into_iter()
+            .any(|child| contains_regex(child, types))
 }
 
 /// Names the entry module like CPython while keeping imported class names

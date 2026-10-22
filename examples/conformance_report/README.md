@@ -98,9 +98,9 @@ absolute identities produced by preparation. Inputs must use UTF-8 and complete
 GitLab diagnostic records with integer positions; unknown JSON fields are ignored.
 
 String tags replace enums, ordinary display helpers replace `__str__`, and
-concrete records replace dynamic JSON dictionaries. A linear scanner implements
-the upstream regex, including Unicode whitespace, scalar column offsets, first
-match behavior, and malformed-tag fallback. Assertions for no annotations and
+concrete records replace dynamic JSON dictionaries. The reporter uses Ruff’s
+original verbose regex declaration verbatim. Relar runs it with Rust’s regex
+engine and exposes the same named captures and character offsets as CPython. Assertions for no annotations and
 no new true positives remain errors; the latter omits the upstream diagnostic
 record debug dump. The adapter suppresses the upstream output-file confirmation
 and duplicated report on stderr.

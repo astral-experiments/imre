@@ -6,7 +6,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::classes::Classes;
-use crate::ir::{self, Binary, Builtin, Compare, Expr, ExprKind, Statement, Type};
+use crate::ir::{self, Binary, Builtin, Compare, Expr, ExprKind, RegexCapture, Statement, Type};
 use crate::modules::{Binding, DefinitionId, Intrinsic, ModuleId, SourceGraph};
 use crate::narrowing;
 use crate::types::Types;
@@ -26,6 +26,7 @@ mod paths;
 mod pipelines;
 mod processes;
 mod records;
+mod regex;
 mod stdlib;
 mod text;
 mod truthiness;
@@ -332,12 +333,10 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     let helpers = Helpers::new(definitions.len() + graph.modules.len() - 1);
     let globals = ModuleValues::default();
     let mut initializations = Vec::new();
+    let mut entry_patterns = Vec::new();
     let mut available = HashSet::new();
     for &module_id in &graph.initialization {
-        if module_id == graph.entry {
-            continue;
-        }
-        let checker = Checker::new(
+        let mut checker = Checker::new(
             graph,
             module_id,
             &signatures,
@@ -346,6 +345,12 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
             &helpers,
             &globals,
         );
+        if module_id == graph.entry {
+            entry_patterns = checker
+                .entry_patterns()
+                .map_err(|error| format!("{}:{error}", graph.modules[module_id].path.display()))?;
+            continue;
+        }
         initializations.push(
             Initialization::lower(checker, &mut available)
                 .map_err(|error| format!("{}:{error}", graph.modules[module_id].path.display()))?,
@@ -461,6 +466,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                     })
                 })
                 .collect::<Vec<_>>();
+            startup.append(&mut entry_patterns);
             startup.append(&mut body);
             entry = Some(ir::Function {
                 params: Vec::new(),
@@ -734,6 +740,20 @@ fn annotation_at(
         },
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
         ast::Expr::Subscript(value)
+            if let Some(Binding::Intrinsic(
+                kind @ (Intrinsic::RegexPattern | Intrinsic::RegexMatch),
+            )) = graph.resolve(module, &value.value) =>
+        {
+            if nested(&value.slice)? != Type::Str {
+                return Err(error(source, expression, "regex annotations require str"));
+            }
+            Ok(if kind == Intrinsic::RegexPattern {
+                Type::RegexPattern
+            } else {
+                Type::RegexMatch
+            })
+        }
+        ast::Expr::Subscript(value)
             if matches!(
                 graph.resolve(module, &value.value),
                 Some(Binding::Intrinsic(Intrinsic::CompletedProcess))
@@ -948,6 +968,7 @@ struct Checker<'a> {
     comprehension_depth: usize,
     comprehension_exports: HashMap<String, usize>,
     narrowed: HashMap<usize, Type>,
+    regex_guards: Vec<(usize, regex::CaptureNames)>,
     returns: Type,
     names: HashMap<String, usize>,
     locals: Vec<Type>,
@@ -986,6 +1007,7 @@ impl<'a> Checker<'a> {
             comprehension_depth: 0,
             comprehension_exports: HashMap::new(),
             narrowed: HashMap::new(),
+            regex_guards: Vec::new(),
             returns: Type::None,
             names: HashMap::new(),
             locals: Vec::new(),
@@ -1649,7 +1671,10 @@ impl<'a> Checker<'a> {
 
     /// Keeps the original container rooted and owns each item before user code runs.
     fn iteration(&mut self, loop_: &ast::StmtFor) -> Result<(Vec<Statement>, bool), String> {
-        let mut input = self.iteration_input(&loop_.iter)?;
+        let mut input = match self.unpacked_list_enumeration(loop_)? {
+            Some(input) => input,
+            None => self.iteration_input(&loop_.iter)?,
+        };
         if let Iteration::Container {
             iterable,
             items: false,
@@ -1678,6 +1703,47 @@ impl<'a> Checker<'a> {
         self.lower_iteration(&loop_.target, input, &loop_.orelse, |checker| {
             Ok(checker.block(&loop_.body)?.0)
         })
+    }
+
+    /// An unpacked enumerate over a known list needs only its live cursor.
+    /// Keep the pipeline for escaping tuples, nested iterators and complex targets.
+    fn unpacked_list_enumeration(
+        &mut self,
+        loop_: &ast::StmtFor,
+    ) -> Result<Option<Iteration>, String> {
+        let Some([ast::Expr::Name(_), ast::Expr::Name(_)]) = pattern_elements(&loop_.target) else {
+            return Ok(None);
+        };
+        let ast::Expr::Call(call) = &*loop_.iter else {
+            return Ok(None);
+        };
+        let [source @ ast::Expr::Name(name)] = call.arguments.args.as_ref() else {
+            return Ok(None);
+        };
+        if !matches!(&*call.func, ast::Expr::Name(name) if name.id == "enumerate")
+            || !call.arguments.keywords.is_empty()
+        {
+            return Ok(None);
+        }
+        let Some(&slot) = self.names.get(name.id.as_str()) else {
+            return Ok(None);
+        };
+        let ty = self
+            .narrowed
+            .get(&slot)
+            .copied()
+            .unwrap_or(self.locals[slot]);
+        if self.types.element(ty).is_none() {
+            return Ok(None);
+        }
+        Ok(Some(Iteration::Container {
+            iterable: self.expr(source)?,
+            items: false,
+            start: Some(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Int("0".into()),
+            }),
+        }))
     }
 
     /// Shares iteration snapshots and cleanup between statements and eager displays.
@@ -1808,7 +1874,9 @@ impl<'a> Checker<'a> {
             None
         };
         let mut output = vec![Statement::Assign(captured, iterable)];
-        let counter = start.map(|start| {
+        let zero_based = cursor.is_some()
+            && matches!(&start, Some(Expr { kind: ExprKind::Int(value), .. }) if value == "0");
+        let counter = start.filter(|_| !zero_based).map(|start| {
             let slot = self.hidden(Type::Int);
             output.push(Statement::Assign(slot, start));
             slot
@@ -1829,7 +1897,11 @@ impl<'a> Checker<'a> {
                 Expr {
                     ty: element,
                     kind: ExprKind::Builtin(
-                        Builtin::ListGet,
+                        if matches!(self.locals[captured], Type::List(_)) {
+                            Builtin::SequenceGetInBounds
+                        } else {
+                            Builtin::ListGet
+                        },
                         vec![self.local(captured), self.local(cursor)],
                     ),
                 },
@@ -1906,18 +1978,27 @@ impl<'a> Checker<'a> {
                 },
             )
         };
-        let item = if let Some(counter) = counter {
-            Expr {
-                ty: self.types.tuple(vec![Type::Int, element]),
-                kind: ExprKind::Tuple(vec![self.local(counter), item]),
-            }
-        } else {
-            item
-        };
-
         let mut facts = self.narrowed.clone();
         let before = self.assigned.clone();
-        let bindings = self.bind_pattern(target, item)?;
+        let bindings = if zero_based {
+            let [index, target] = pattern_elements(target).unwrap() else {
+                unreachable!()
+            };
+            vec![
+                self.assign_value(index, self.local(cursor.unwrap()))?,
+                self.assign_value(target, item)?,
+            ]
+        } else {
+            let item = if let Some(counter) = counter {
+                Expr {
+                    ty: self.types.tuple(vec![Type::Int, element]),
+                    kind: ExprKind::Tuple(vec![self.local(counter), item]),
+                }
+            } else {
+                item
+            };
+            self.bind_pattern(target, item)?
+        };
         fn remove_target_facts(
             target: &ast::Expr,
             names: &HashMap<String, usize>,
@@ -2611,7 +2692,12 @@ impl<'a> Checker<'a> {
         let before = self.assigned.clone();
         let facts = self.narrowed.clone();
         self.apply_facts(test, true);
+        let guard_depth = self.regex_guards.len();
+        if let Some(guard) = self.regex_guard(&condition, body) {
+            self.regex_guards.push(guard);
+        }
         let (yes, yes_falls) = self.block(body)?;
+        self.regex_guards.truncate(guard_depth);
         let yes_falls = yes_falls && known != Some(false);
         let yes_assigned = self.assigned.clone();
         let yes_facts = self.narrowed.clone();
@@ -2930,7 +3016,22 @@ impl<'a> Checker<'a> {
                     };
                     let mut result = Expr {
                         ty: Type::Bool,
-                        kind: ExprKind::Builtin(Builtin::IsNone, vec![value]),
+                        kind: match value.kind {
+                            ExprKind::Builtin(
+                                Builtin::RegexCapture {
+                                    operation: RegexCapture::Group,
+                                    known,
+                                },
+                                args,
+                            ) => ExprKind::Builtin(
+                                Builtin::RegexCapture {
+                                    operation: RegexCapture::Absent,
+                                    known,
+                                },
+                                args,
+                            ),
+                            _ => ExprKind::Builtin(Builtin::IsNone, vec![value]),
+                        },
                     };
                     if compare.ops[0] == ast::CmpOp::IsNot {
                         result = Expr {
@@ -2977,6 +3078,13 @@ impl<'a> Checker<'a> {
                             ));
                         }
                     };
+                    if matches!(ty, Type::RegexPattern | Type::RegexMatch) {
+                        return Err(error(
+                            self.source,
+                            expression,
+                            "regex objects do not support value comparisons in Relar",
+                        ));
+                    }
                     if matches!(
                         ty,
                         Type::ListInt
@@ -3204,6 +3312,11 @@ impl<'a> Checker<'a> {
 
     fn call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
+        match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
+            _ => {}
+        }
         if matches!(
             self.resolve(&call.func),
             Some(Binding::Intrinsic(Intrinsic::Unquote))
@@ -3340,6 +3453,9 @@ impl<'a> Checker<'a> {
             }
             if receiver.ty == Type::CompletedProcess {
                 return self.process_method(receiver, attribute, call);
+            }
+            if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
+                return self.regex_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Str {
                 match attribute.attr.as_str() {

@@ -129,7 +129,11 @@ impl Checker<'_> {
 
     /// Receivers and indices are checked after the RHS and preceding targets.
     /// SetItem/SetField preserve this same RHS-first order in generated code.
-    fn assign_value(&mut self, target: &ast::Expr, value: Expr) -> Result<Statement, String> {
+    pub(super) fn assign_value(
+        &mut self,
+        target: &ast::Expr,
+        value: Expr,
+    ) -> Result<Statement, String> {
         match target {
             ast::Expr::Name(_) => self.assign(target, value),
             ast::Expr::Subscript(subscript) => {

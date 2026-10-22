@@ -1,4 +1,4 @@
-"""Compare native text parsing and bounded URL decoding with CPython."""
+"""Compare native text parsing, fixed regexes and bounded URL decoding with CPython."""
 
 import argparse
 from pathlib import Path
@@ -31,6 +31,18 @@ REJECTED = {
     "unsupported_url_api": 'from urllib.parse import urlsplit\nurlsplit("a:b")',
     "escaped_unquote": 'from urllib.parse import unquote\ncallback = unquote',
     "unused_invalid_method": 'def unused(value: str) -> str:\n    return value.strip(chars="x")',
+    "regex_dynamic": 'import re\ndef bad(value: str) -> None:\n    re.compile(value)',
+    "regex_bytes": 'import re\nre.compile(b"x")',
+    "regex_flags": 'import re\nre.compile("x", re.IGNORECASE)',
+    "regex_search_bytes": 'import re\nre.search("x", b"x")',
+    "regex_dynamic_group": 'import re\ndef bad(index: int) -> None:\n    if m := re.search("(x)", "x"):\n        m.group(index)',
+    "regex_unchecked_match": 'import re\nre.search("x", "y").start()',
+    "regex_match_bounds": 'import re\nre.compile("x").search("text", 2)',
+    "regex_backreference": 'import re\nre.compile(r"(x)\\1")',
+    "regex_lookbehind": 'import re\nre.compile(r"(?<=x)y")',
+    "regex_end_anchor": 'import re\nre.compile("x$")',
+    "regex_nested_repeat": 'import re\nre.compile("(x?)*")',
+    "regex_invalid_unused": 'import re\ndef unused() -> None:\n    re.compile("[")',
 }
 
 

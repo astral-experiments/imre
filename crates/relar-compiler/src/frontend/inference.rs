@@ -122,14 +122,16 @@ impl Inference {
             let mut available = HashSet::new();
             let mut errors = Vec::new();
             for &module in &graph.initialization {
-                if module == graph.entry {
-                    continue;
-                }
                 let mut checker = Checker::new(
                     graph, module, signatures, classes, types, &helpers, &globals,
                 );
                 checker.inference = Some(self);
-                if let Err(diagnostic) = Initialization::lower(checker, &mut available) {
+                let result = if module == graph.entry {
+                    checker.entry_patterns().map(|_| ())
+                } else {
+                    Initialization::lower(checker, &mut available).map(|_| ())
+                };
+                if let Err(diagnostic) = result {
                     errors.push(format!(
                         "{}:{diagnostic}",
                         graph.modules[module].path.display()
