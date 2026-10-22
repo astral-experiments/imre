@@ -84,8 +84,23 @@ The [five-engine comparison](benchmarks/results/2026-10-21-native-tools.md) runs
 
 ## Installation
 
-On 64-bit Linux, install the [Rust toolchain](rust-toolchain.toml) and Clang 18,
-then build and install Relar from Git:
+Relar needs Clang 18 to compile and link programs. Release binaries target x86-64
+and ARM64 GNU/Linux and are built on Ubuntu 24.04. Run these commands in an empty
+directory to install a binary from [GitHub Releases](https://github.com/astral-sh/relar/releases).
+
+```console
+bundle="relar-$(uname -m)-unknown-linux-gnu"
+gh release download --repo astral-sh/relar --pattern "$bundle.tar.gz" --pattern "$bundle.tar.gz.sha256"
+sha256sum --check "$bundle.tar.gz.sha256"
+tar -xzf "$bundle.tar.gz"
+mkdir -p ~/.local/bin
+cp "$bundle/relar" "$bundle/librelar_runtime.a" ~/.local/bin/
+```
+
+Keep both files together and add `~/.local/bin` to your `PATH`. Programs built
+with Relar can run without the compiler, runtime archive, or Clang.
+
+To build from Git, install the [Rust toolchain](rust-toolchain.toml) and Clang 18.
 
 ```console
 git clone https://github.com/astral-sh/relar.git
@@ -96,6 +111,8 @@ cp target/release/relar target/release/librelar_runtime.a ~/.cargo/bin/
 ```
 
 Make sure `~/.cargo/bin` is on your `PATH`.
+
+Maintainers can follow the [release process](docs/releasing.md) to build and publish the archives.
 
 ## Getting started
 
