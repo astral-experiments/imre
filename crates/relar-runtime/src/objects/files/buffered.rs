@@ -108,14 +108,19 @@ impl Input {
     }
 
     pub(super) fn text_line(&mut self) -> Result<Str> {
-        let mut line = Str::default();
+        let mut line = std::mem::take(&mut self.text.line_scratch);
+        line.clear();
         loop {
             let available = &self.text.decoded[self.text.pos..];
             if let Some(newline) = memchr::memchr(b'\n', available.as_bytes()) {
                 let len = newline + 1;
-                line.push_str(&available[..len]);
                 self.text.pos += len;
-                return Ok(line);
+                if line.is_empty() {
+                    self.text.line_scratch = line;
+                    return Ok(Str::new(&available[..len]));
+                }
+                line.push_str(&available[..len]);
+                break;
             }
             line.push_str(available);
             self.text.pos = self.text.decoded.len();
@@ -125,8 +130,17 @@ impl Input {
             self.raw.consume(length);
             result?;
             if length == 0 && self.text.decoded.is_empty() {
-                return Ok(line);
+                break;
             }
+        }
+        // Keep a bounded buffer for lines that span multiple decoder chunks.
+        // An unusually long line transfers its allocation to the caller.
+        if line.capacity() > 128 * 1024 {
+            Ok(Str::from(line))
+        } else {
+            let result = Str::new(&line);
+            self.text.line_scratch = line;
+            Ok(result)
         }
     }
 }
@@ -134,6 +148,7 @@ impl Input {
 #[derive(Default)]
 struct TextBuffer {
     decoded: String,
+    line_scratch: String,
     pos: usize,
     // A trailing CR and up to three UTF-8 prefix bytes can cross a chunk boundary.
     carry: SmallVec<[u8; 4]>,

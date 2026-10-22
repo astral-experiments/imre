@@ -531,6 +531,10 @@ def seed(directory: Path, case: str) -> None:
     (directory / "truncated.txt").write_bytes(b"truncated \xf0\x9f")
     (directory / "output.txt").write_bytes(b"old data that must be truncated")
     (directory / "directory").mkdir()
+    if case == "stream_reads":
+        (directory / "long-rows.txt").write_bytes(
+            b"a" * 32768 + b"\n" + b"b" * 32769 + b"\r\n" + b"c" * 160000 + b"\rdone"
+        )
     if case.startswith("stream_"):
         # Split both a CRLF and a four-byte UTF-8 scalar at 8 KiB boundaries.
         contents = b"a" * 8191 + b"\r\n" + b"b" * 8189 + "🙂\rC\n\nD\0".encode()

@@ -3,6 +3,14 @@ from pathlib import Path
 from typing import BinaryIO, TextIO
 
 
+with open("long-rows.txt", "r", encoding="utf-8") as long_rows:
+    kept = [line for line in long_rows]
+for line in kept:
+    print(len(line))
+    print(repr(line[:2]))
+    print(repr(line[-2:]))
+
+
 def text_lines(stream: TextIO) -> None:
     alias = stream
     first = stream.readline()
