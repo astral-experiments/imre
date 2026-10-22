@@ -34,6 +34,7 @@ use std::rc::Rc;
 use words::{OwnedWord, Words};
 
 /// An opaque allocation for runtime-managed containers and resource state.
+#[repr(transparent)]
 pub struct Object(StorageCell<Storage>);
 
 enum Storage {
@@ -110,9 +111,7 @@ pub unsafe extern "C" fn relar_object_release(value: *const Object) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_seq_new(kind: u32) -> *const Object {
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(
-        Words::new(kind),
-    )))))
+    Rc::into_raw(Words::new(kind).into_object())
 }
 
 /// Tests string membership with the list and needle rooted for the whole read.
@@ -300,11 +299,13 @@ pub unsafe extern "C" fn relar_seq_append(value: *const Object, word: usize, kin
     // SAFETY: no callback or escaped buffer can overlap this mutation.
     unsafe {
         object(value).0.with_mut(|storage| {
-            let values = &mut storage.sequence_mut().values;
-            values
+            let sequence = storage.sequence_mut();
+            sequence
+                .values
                 .try_reserve(1)
                 .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
-            values.push(new.into_word());
+            sequence.values.push(new.into_word());
+            sequence.update_len();
         })
     };
 }
@@ -322,6 +323,7 @@ pub unsafe extern "C" fn relar_seq_pop(value: *const Object) -> usize {
                 .values
                 .pop()
                 .ok_or_else(|| Error::new(Kind::IndexError, "pop from empty list"))?;
+            values.update_len();
             Ok(OwnedWord::from_owned(word, values.kind))
         })
     };
@@ -385,9 +387,7 @@ pub unsafe extern "C" fn relar_seq_repeat(value: *const Object, count: usize) ->
         })
     };
     finish(
-        result.map(|values| {
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(values)))))
-        }),
+        result.map(|values| Rc::into_raw(values.into_object())),
         std::ptr::null(),
     )
 }
@@ -818,7 +818,7 @@ pub unsafe extern "C" fn relar_str_split_whitespace(value: *const Str) -> *const
             .values
             .push(Rc::into_raw(Rc::new(Str::new(part))) as usize);
     }
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(result)))))
+    Rc::into_raw(result.into_object())
 }
 
 /// Bytes in 0x20..=0x7f contain no Python line break. Reducing fixed-size
@@ -859,7 +859,7 @@ pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Objec
         .unwrap_or(value);
     if !value.is_empty() && plain_ascii_line(single.as_bytes()) {
         push(single);
-        return Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(result)))));
+        return Rc::into_raw(result.into_object());
     }
     let mut start = 0;
     let bytes = value.as_bytes();
@@ -904,7 +904,7 @@ pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Objec
     if start < value.len() {
         push(&value[start..]);
     }
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(result)))))
+    Rc::into_raw(result.into_object())
 }
 
 #[cfg(test)]

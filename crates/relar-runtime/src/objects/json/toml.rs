@@ -98,7 +98,7 @@ fn convert(value: &DeValue<'_>, schema: &Schema) -> Result<OwnedWord, String> {
                         .values
                         .push(convert(value.get_ref(), child)?.into_word());
                 }
-                Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(result))))) as usize
+                Rc::into_raw(result.into_object()) as usize
             }
         }
         (DICTIONARY, DeValue::Table(values)) => {

@@ -214,8 +214,8 @@ impl<'a> Visitor<'a> for Reads {
 }
 
 impl Checker<'_> {
-    /// Zero or one pure integer projection cannot collide. Keep the ordinary
-    /// set construction for larger inputs and for any observable projection.
+    /// Pure projections need no hashing for up to two elements. A pair uses
+    /// ordinary integer equality, including independently allocated huge values.
     pub(super) fn short_set_len(&mut self, source: &ast::Expr, set: &Expr) -> Option<Expr> {
         let ast::Expr::SetComp(display) = source else {
             return None;
@@ -247,7 +247,9 @@ impl Checker<'_> {
         if !matches!(expression, ast::Expr::Name(name) if name.id == target.id) {
             return None;
         }
-        let mut ty = self.types.element(input.ty)?;
+        let element = self.types.element(input.ty)?;
+        let mut ty = element;
+        let mut path = Vec::new();
         for name in fields.into_iter().rev() {
             let Type::Class(class) = ty else { return None };
             let field = self.classes.declarations.definitions[class]
@@ -255,6 +257,7 @@ impl Checker<'_> {
                 .iter()
                 .position(|field| field.name == name)?;
             ty = self.classes.fields[class][field];
+            path.push((field, ty));
         }
         if ty != Type::Int {
             return None;
@@ -263,26 +266,52 @@ impl Checker<'_> {
             ty: Type::Int,
             kind: ExprKind::Builtin(Builtin::Len, vec![value]),
         };
+        let project = |index| {
+            let item = Expr {
+                ty: element,
+                kind: ExprKind::Builtin(
+                    if matches!(input.ty, Type::List(_)) {
+                        Builtin::SequenceGetInBounds
+                    } else {
+                        Builtin::ListGet
+                    },
+                    vec![input.clone(), pipelines::integer(index)],
+                ),
+            };
+            path.iter().fold(item, |item, &(field, ty)| Expr {
+                ty,
+                kind: ExprKind::Field(Box::new(item), field),
+            })
+        };
+        let choose = |test, yes: Expr, no| Expr {
+            ty: yes.ty,
+            kind: ExprKind::Conditional(Box::new(test), Box::new(yes), Box::new(no)),
+        };
         let slot = self.hidden(Type::Int);
-        let saved = Expr {
-            ty: Type::Int,
-            kind: ExprKind::Bind(slot, Box::new(length(input.clone()))),
-        };
-        let one = Expr {
-            ty: Type::Int,
-            kind: ExprKind::Int("1".into()),
-        };
-        let condition = Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Compare(vec![saved, one], vec![Compare::LessEqual]),
-        };
+        let size = self.local(slot);
+        let one = pipelines::integer(1);
+        let two = pipelines::integer(2);
+        let pair = choose(
+            pipelines::compare(Compare::Equal, project(0), project(1)),
+            one.clone(),
+            two.clone(),
+        );
+        let larger = choose(
+            pipelines::compare(Compare::Equal, size.clone(), two),
+            pair,
+            length(set.clone()),
+        );
         Some(Expr {
             ty: Type::Int,
-            kind: ExprKind::Conditional(
-                Box::new(condition),
-                Box::new(self.local(slot)),
-                Box::new(length(set.clone())),
-            ),
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, length(input.clone()))],
+                value: Box::new(choose(
+                    pipelines::compare(Compare::LessEqual, size.clone(), one),
+                    size,
+                    larger,
+                )),
+                clear: vec![slot],
+            },
         })
     }
 

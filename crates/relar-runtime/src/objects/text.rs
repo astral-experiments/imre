@@ -5,7 +5,7 @@ use std::mem::ManuallyDrop;
 use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
-use super::{Int, Object, Storage, StorageCell, Str, Words, fail, python_whitespace};
+use super::{Int, Object, Str, Words, fail, python_whitespace};
 
 /// Appends an owned slice of source, retaining its allocation for a full slice.
 fn push_part(parts: &mut Words, source: &Rc<Str>, value: &str) {
@@ -156,7 +156,7 @@ pub unsafe extern "C" fn relar_str_split(
             &maxsplit,
             reverse != 0,
         )
-        .map(|parts| Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(parts)))))),
+        .map(|parts| Rc::into_raw(parts.into_object())),
         std::ptr::null(),
     )
 }

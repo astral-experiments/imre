@@ -78,10 +78,16 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i8 {byte}, 0"))
                 }
-                Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_) => {
+                Type::List(_) => {
+                    let length = self.instruction(format!(
+                        "call i32 @sequence_length_hint(ptr {})",
+                        value.operand
+                    ));
+                    self.instruction(format!("icmp ne i32 {length}, 0"))
+                }
+                Type::ListInt | Type::Dict(_) | Type::Set(_) => {
                     let family = match value.ty {
                         Type::ListInt => "list",
-                        Type::List(_) => "seq",
                         Type::Dict(_) => "dict",
                         Type::Set(_) => "set",
                         _ => unreachable!(),

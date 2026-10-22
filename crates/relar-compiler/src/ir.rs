@@ -353,8 +353,8 @@ pub(crate) enum Builtin {
         percent: bool,
     },
     ListGet,
-    /// An iterator's live-length guard proves this hidden sequence/cursor read
-    /// in bounds, with no intervening mutation or user code. Returns an owned
+    /// A live-length guard proves a private cursor or constant index is in
+    /// bounds, with no intervening mutation or user code. Returns an owned
     /// element of a generic typed list; the index is canonical and nonnegative.
     SequenceGetInBounds,
     /// Reduces an exact integer list after evaluating its source and start.

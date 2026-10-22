@@ -14,6 +14,7 @@ use super::{Bytes, Int, List, Object, Str, fail, records, unions};
 pub(super) const NULLABLE: u32 = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(transparent)]
 pub(super) struct WordKind(u32);
 
 impl WordKind {
@@ -160,7 +161,9 @@ impl Drop for OwnedWord {
 
 /// A homogeneous buffer; the descriptor is shared by all element words.
 /// Three words fit inline; spilling preserves their existing owned references.
+#[repr(C)]
 pub(super) struct Words {
+    cached_len: u32,
     pub(super) kind: WordKind,
     pub(super) values: SmallVec<[usize; 3]>,
 }
@@ -168,9 +171,23 @@ pub(super) struct Words {
 impl Words {
     pub(super) fn new(kind: u32) -> Self {
         Self {
+            cached_len: 0,
             kind: WordKind::new(kind),
             values: SmallVec::new(),
         }
+    }
+
+    /// Publish a fully initialized buffer after bulk initialization by a decoder or splitter.
+    pub(super) fn into_object(mut self) -> Rc<Object> {
+        self.update_len();
+        Rc::new(Object(super::StorageCell::new(super::Storage::Sequence(
+            self,
+        ))))
+    }
+
+    /// A saturated header defers to the full-width buffer length in the runtime.
+    pub(super) fn update_len(&mut self) {
+        self.cached_len = u32::try_from(self.values.len()).unwrap_or(u32::MAX);
     }
 
     /// Checks the private compiler/runtime contract before transferring a value.
@@ -179,6 +196,18 @@ impl Words {
             fail("SystemError", "sequence element representation changed");
         }
     }
+}
+
+/// Offset of the cached length within a rooted sequence handle. The compiler
+/// queries it once so generated code never depends on Rust's enum layout.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_seq_length_offset() -> usize {
+    // The empty example owns neither elements nor a heap buffer.
+    let storage = ManuallyDrop::new(super::Storage::Sequence(Words::new(0)));
+    let super::Storage::Sequence(words) = &*storage else {
+        unreachable!()
+    };
+    std::ptr::from_ref(&words.cached_len).addr() - std::ptr::from_ref(&*storage).addr()
 }
 
 impl Drop for Words {
@@ -215,9 +244,14 @@ mod tests {
             let word = Rc::as_ptr(&child) as usize;
             let sequence = Rc::from_raw(relar_seq_new(5));
             let alias = Rc::clone(&sequence);
+            let cached = Rc::as_ptr(&sequence)
+                .byte_add(relar_seq_length_offset())
+                .cast::<u32>();
+            assert_eq!(cached.read(), 0);
             for _ in 0..3 {
                 relar_seq_append(Rc::as_ptr(&sequence), word, 5);
             }
+            assert_eq!(cached.read(), 3);
             assert_eq!(Rc::strong_count(&child), 4);
             assert!(
                 !sequence
@@ -230,6 +264,7 @@ mod tests {
             }
 
             relar_seq_append(Rc::as_ptr(&alias), word, 5);
+            assert_eq!(cached.read(), 4);
             assert_eq!(Rc::strong_count(&child), 5);
             assert!(
                 sequence
@@ -246,6 +281,7 @@ mod tests {
             }
 
             let popped = Rc::from_raw(relar_seq_pop(Rc::as_ptr(&alias)) as *const Object);
+            assert_eq!(cached.read(), 3);
             assert!(Rc::ptr_eq(&child, &popped));
             assert_eq!(Rc::strong_count(&child), 5);
             assert_eq!(

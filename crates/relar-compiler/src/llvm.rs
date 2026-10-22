@@ -567,6 +567,7 @@ impl Emitter<'_, '_> {
     fn immediate_projection(&mut self, expression: &Expr) -> Option<Value> {
         Some(match &expression.kind {
             ExprKind::Local(slot) => self.borrow_slot(*slot),
+            ExprKind::Call(..) => self.selected_list_field(expression)?,
             ExprKind::Unwrap(inner) if let ExprKind::Local(slot) = inner.kind => {
                 let word = self.borrow_slot(slot).operand;
                 self.decode_word(word, expression.ty)
@@ -578,6 +579,18 @@ impl Emitter<'_, '_> {
             }
             _ => return None,
         })
+    }
+
+    /// Select a field address before loading its list. The receiver is a local
+    /// root and the checked unboxed predicate cannot run user code.
+    fn selected_list_field(&mut self, expression: &Expr) -> Option<Value> {
+        let getter = borrows::getters::selected(expression, &self.module.functions)?;
+        let test = self.expr(&getter.test);
+        let record = self.borrow_slot(getter.root);
+        let yes = self.field_pointer(&record, getter.yes);
+        let no = self.field_pointer(&record, getter.no);
+        let field = self.instruction(format!("select i1 {}, ptr {yes}, ptr {no}", test.operand));
+        Some(self.field_value(&field, expression.ty))
     }
 
     fn release_operand(&mut self, operand: &Operand) {
@@ -613,7 +626,7 @@ impl Emitter<'_, '_> {
     }
 
     fn can_borrow_projection(&self, expression: &Expr) -> bool {
-        borrows::projection_root(expression, &self.module.types)
+        borrows::projection_root(expression, &self.module.types, &self.module.functions)
             .is_some_and(|slot| self.rooted_locals[slot])
     }
 
@@ -623,6 +636,9 @@ impl Emitter<'_, '_> {
         debug_assert!(self.can_borrow_projection(expression));
         let mut value = match &expression.kind {
             ExprKind::Local(slot) => self.borrow_slot(*slot),
+            ExprKind::Call(..) => self
+                .selected_list_field(expression)
+                .expect("proven list getter"),
             ExprKind::Field(receiver, field) => {
                 let receiver = self.borrow_projection(receiver);
                 let pointer = self.field_pointer(&receiver, *field);
@@ -633,10 +649,11 @@ impl Emitter<'_, '_> {
                     unreachable!("proven sequence receivers are private locals")
                 };
                 let receiver = self.borrow_projection(&args[0]);
-                let ExprKind::Local(slot) = args[1].kind else {
-                    unreachable!("proven sequence cursors are private locals")
+                let index = match args[1].kind {
+                    ExprKind::Local(slot) => self.borrow_slot(slot),
+                    ExprKind::Int(_) => self.expr(&args[1]),
+                    _ => unreachable!("proven sequence indices are private cursors or constants"),
                 };
-                let index = self.borrow_slot(slot);
                 self.borrow_sequence_element(receiver_slot, &receiver, &index, expression.ty)
             }
             ExprKind::Present(inner) => {
@@ -807,7 +824,7 @@ impl Emitter<'_, '_> {
     fn list_length(&mut self, receiver: &Value) -> Value {
         let helper = match receiver.ty {
             Type::ListInt => "relar_list_len",
-            Type::List(_) => "relar_seq_len",
+            Type::List(_) => "relar_seq_len_fast",
             _ => unreachable!("only exact lists have nonallocating snapshots"),
         };
         Value {
@@ -1225,6 +1242,8 @@ impl Emitter<'_, '_> {
             ));
         }
         if entry {
+            let offset = self.instruction("call i64 @relar_seq_length_offset()".to_owned());
+            self.line(format!("store i64 {offset}, ptr @sequence_length_offset"));
             self.line("call void @relar_init_literals()");
         }
         if entry && self.uses_sys_argv {
@@ -1465,13 +1484,32 @@ impl Emitter<'_, '_> {
                     unreachable!()
                 };
                 let ty = self.module.class_fields[class][*field];
-                let old = self.get_field(&receiver.value, *field, ty);
+                // A scalar or a non-reentrant exact length read cannot replace
+                // this field. Other right-hand sides must own the original
+                // value across arbitrary mutation and exceptions.
+                let stable = matches!(expression.kind, ExprKind::Int(_) | ExprKind::Local(_))
+                    || matches!(&expression.kind, ExprKind::Builtin(Builtin::Len, values)
+                        if matches!(values.as_slice(), [list] if matches!(list.ty, Type::ListInt | Type::List(_))
+                            && (matches!(list.kind, ExprKind::Local(_))
+                                || borrows::getters::selected(list, &self.module.functions).is_some())));
+                let old = if stable && ty == Type::Int {
+                    let pointer = self.field_pointer(&receiver.value, *field);
+                    Operand {
+                        value: self.field_value(&pointer, ty),
+                        ownership: Ownership::Borrowed,
+                    }
+                } else {
+                    Operand {
+                        value: self.get_field(&receiver.value, *field, ty),
+                        ownership: Ownership::Owned,
+                    }
+                };
                 let right = self.operand(expression);
-                let value = self.binary(*op, &old, &right.value);
-                self.set_field(&receiver.value, *field, &value);
-                self.release(&value);
+                let value = self.binary(*op, &old.value, &right.value);
+                self.forget(&value);
+                self.replace_field(&receiver.value, *field, &value);
                 self.release_operand(&right);
-                self.release(&old);
+                self.release_operand(&old);
                 self.release_operand(&receiver);
             }
             // Discarded scalar literals have no effects. In particular, a
@@ -3197,7 +3235,7 @@ impl Emitter<'_, '_> {
                             Type::Str => "relar_str_len",
                             Type::Bytes => "relar_bytes_len",
                             Type::ListInt => "relar_list_len",
-                            Type::List(_) => "relar_seq_len",
+                            Type::List(_) => "relar_seq_len_fast",
                             Type::Dict(_) => "relar_dict_len",
                             Type::Set(_) => "relar_set_len",
                             _ => unreachable!("len input was checked"),
@@ -3214,11 +3252,10 @@ impl Emitter<'_, '_> {
                 self.nonnegative_index(&expressions[1]),
             ),
             Builtin::SequenceGetInBounds => {
-                debug_assert!(
-                    expressions
-                        .iter()
-                        .all(|arg| matches!(arg.kind, ExprKind::Local(_)))
-                );
+                debug_assert!(matches!(
+                    expressions[1].kind,
+                    ExprKind::Local(_) | ExprKind::Int(_)
+                ));
                 let ExprKind::Local(slot) = expressions[0].kind else {
                     unreachable!("proven sequence receivers are private locals")
                 };
@@ -4488,6 +4525,27 @@ declare void @relar_seq_set_index(ptr, i64, i64, i32)
 declare void @relar_seq_append(ptr, i64, i32)
 declare i64 @relar_seq_pop(ptr)
 declare i64 @relar_seq_len(ptr) nounwind memory(argmem: read)
+declare i64 @relar_seq_length_offset() nounwind willreturn memory(none)
+@sequence_length_offset = internal global i64 0
+define internal i32 @sequence_length_hint(ptr %sequence) alwaysinline nounwind {
+  %offset = load i64, ptr @sequence_length_offset
+  %field = getelementptr inbounds i8, ptr %sequence, i64 %offset
+  %length = load i32, ptr %field, align 4
+  ret i32 %length
+}
+define internal i64 @relar_seq_len_fast(ptr %sequence) alwaysinline nounwind {
+  %length = call i32 @sequence_length_hint(ptr %sequence)
+  %short = icmp ne i32 %length, -1
+  br i1 %short, label %cached, label %large, !prof !1
+cached:
+  %size = zext i32 %length to i64
+  %twice = shl i64 %size, 1
+  %tagged = or i64 %twice, 1
+  ret i64 %tagged
+large:
+  %full = call i64 @relar_seq_len(ptr %sequence)
+  ret i64 %full
+}
 declare ptr @relar_seq_repeat(ptr, i64)
 declare ptr @relar_dict_new(i32, i32)
 declare i64 @relar_dict_len(ptr)

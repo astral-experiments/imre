@@ -315,8 +315,7 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
                 values.values.push(value.into_word());
             }
         }
-        let pointer =
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(values))))) as usize;
+        let pointer = Rc::into_raw(values.into_object()) as usize;
         // SAFETY: this new generic sequence owns every decoded child word.
         Ok(unsafe { OwnedWord::from_owned(pointer, self.0.storage()) })
     }

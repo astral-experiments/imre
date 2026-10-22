@@ -134,6 +134,7 @@ impl Drop for Int {
 /// handle while its storage reference is live. Owned elements may escape after
 /// acquisition; storage references and buffer pointers may not escape these
 /// closures. The sequence readonly-view ABI uses a separate whole-loop proof.
+#[repr(transparent)]
 struct StorageCell<T>(UnsafeCell<T>);
 
 impl<T> StorageCell<T> {

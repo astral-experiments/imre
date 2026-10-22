@@ -1,5 +1,8 @@
 //! Borrows projections only while unchanged caller roots preserve every heap edge.
 
+pub(crate) mod getters;
+mod private;
+
 use crate::callables::Targets;
 use crate::ir::{self, Builtin, Expr, ExprKind, Function, Module, Statement, Type};
 use crate::list_specialization::readonly_builtin;
@@ -20,23 +23,32 @@ pub(crate) struct FunctionBorrows {
 /// The separate initializer summary applies only to a newly allocated receiver.
 pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
     let targets = Targets::analyze(module);
-    let (preserves, initializes) = summaries(module, true, &targets);
-    let (readonly, readonly_initializes) = summaries(module, false, &targets);
+    let private = private::analyze(module);
+    let (preserves, initializes) = summaries(module, true, &targets, &private);
+    let (readonly, readonly_initializes) = summaries(module, false, &targets, &private);
     module
         .functions
         .iter()
         .chain([&module.entry])
-        .map(|function| {
-            let mut facts =
-                if preserves_edges(function, &preserves, &initializes, false, true, &targets) {
-                    local_roots(function, &module.types)
-                } else {
-                    FunctionBorrows {
-                        rooted: vec![false; function.locals.len()],
-                        locals: vec![false; function.locals.len()],
-                        length_roots: vec![None; function.locals.len()],
-                    }
-                };
+        .zip(&private)
+        .map(|(function, private)| {
+            let mut facts = if preserves_edges(
+                function,
+                &preserves,
+                &initializes,
+                false,
+                true,
+                &targets,
+                private,
+            ) {
+                local_roots(function, &module.types, &module.functions)
+            } else {
+                FunctionBorrows {
+                    rooted: vec![false; function.locals.len()],
+                    locals: vec![false; function.locals.len()],
+                    length_roots: vec![None; function.locals.len()],
+                }
+            };
             if preserves_edges(
                 function,
                 &readonly,
@@ -44,6 +56,7 @@ pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
                 false,
                 false,
                 &targets,
+                private,
             ) {
                 facts.length_roots = length_roots(function, &facts);
             }
@@ -54,7 +67,12 @@ pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
 
 /// Edge preservation permits append; length/buffer invariance additionally
 /// excludes it and reserve, including through every ordinary or fresh call.
-fn summaries(module: &Module, append: bool, targets: &Targets) -> (Vec<bool>, Vec<bool>) {
+fn summaries(
+    module: &Module,
+    append: bool,
+    targets: &Targets,
+    private: &[Vec<bool>],
+) -> (Vec<bool>, Vec<bool>) {
     // Unknown callees and unexpected recursive cycles retain ordinary owners.
     // The checked call graph is acyclic, so proving upward loses no precision.
     let mut preserves = vec![false; module.functions.len()];
@@ -62,8 +80,24 @@ fn summaries(module: &Module, append: bool, targets: &Targets) -> (Vec<bool>, Ve
     loop {
         let mut changed = false;
         for (id, function) in module.functions.iter().enumerate() {
-            let safe = preserves_edges(function, &preserves, &initializes, false, append, targets);
-            let fresh = preserves_edges(function, &preserves, &initializes, true, append, targets);
+            let safe = preserves_edges(
+                function,
+                &preserves,
+                &initializes,
+                false,
+                append,
+                targets,
+                &private[id],
+            );
+            let fresh = preserves_edges(
+                function,
+                &preserves,
+                &initializes,
+                true,
+                append,
+                targets,
+                &private[id],
+            );
             changed |= preserves[id] != safe || initializes[id] != fresh;
             preserves[id] = safe;
             initializes[id] = fresh;
@@ -117,9 +151,14 @@ fn statements(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
 
 /// Records every local writer, including cleanup and hidden iterator outputs.
 pub(crate) fn written(function: &Function) -> Vec<bool> {
+    written_except(function, |_| false)
+}
+
+fn written_except(function: &Function, permitted: impl Fn(&Expr) -> bool) -> Vec<bool> {
     let mut written = function.expression_rebound();
     statements(&function.body, &mut |statement| match statement {
-        Statement::Assign(slot, _) | Statement::Clear(slot) => written[*slot] = true,
+        Statement::Assign(slot, value) => written[*slot] |= !permitted(value),
+        Statement::Clear(slot) => written[*slot] = true,
         Statement::Move(target, source) => {
             written[*target] = true;
             written[*source] = true;
@@ -177,6 +216,7 @@ fn preserves_edges(
     fresh: bool,
     append: bool,
     targets: &Targets,
+    private: &[bool],
 ) -> bool {
     let written = written(function);
     let receiver = function
@@ -187,11 +227,12 @@ fn preserves_edges(
     let mut safe = true;
     statements(&function.body, &mut |statement| {
         safe &= match statement {
-            Statement::SetItem(..) | Statement::AugmentItem(..) | Statement::AugmentField(..) => {
-                false
+            Statement::SetItem(..) | Statement::AugmentItem(..) => false,
+            Statement::AugmentField(value, _, _, _) => {
+                matches!(value.kind, ExprKind::Local(slot) if private[slot])
             }
             Statement::SetField(value, _, _) => {
-                matches!(value.kind, ExprKind::Local(slot) if Some(slot) == receiver)
+                matches!(value.kind, ExprKind::Local(slot) if Some(slot) == receiver || private[slot])
             }
             _ => true,
         };
@@ -211,8 +252,10 @@ fn preserves_edges(
             ExprKind::Construct { initializer, .. } => {
                 constructors.get(*initializer).copied().unwrap_or(false)
             }
-            ExprKind::Builtin(operation, _) => {
+            ExprKind::Builtin(operation, args) => {
                 readonly_builtin(operation)
+                    || (matches!(operation, Builtin::SetAdd)
+                        && matches!(args[0].kind, ExprKind::Local(slot) if private[slot]))
                     || (append
                         && matches!(
                             operation,
@@ -229,26 +272,35 @@ fn preserves_edges(
 
 /// Returns the local anchoring a nonallocating projection, independently of
 /// whether that local has a proven caller root. Optional float boxes are owned.
-pub(crate) fn projection_root(expression: &Expr, types: &Types) -> Option<usize> {
+pub(crate) fn projection_root(
+    expression: &Expr,
+    types: &Types,
+    functions: &[Function],
+) -> Option<usize> {
     if types.payload(expression.ty) == Some(Type::Float) {
         return None;
     }
     match &expression.kind {
         ExprKind::Local(slot) => Some(*slot),
-        ExprKind::Field(receiver, _) => projection_root(receiver, types),
-        ExprKind::Builtin(Builtin::SequenceGetInBounds, args) => projection_root(&args[0], types),
-        ExprKind::Present(value) if value.ty != Type::Float => projection_root(value, types),
-        ExprKind::Unwrap(value) if types.payload(value.ty) != Some(Type::Float) => {
-            projection_root(value, types)
+        ExprKind::Call(..) => Some(getters::selected(expression, functions)?.root),
+        ExprKind::Field(receiver, _) => projection_root(receiver, types, functions),
+        ExprKind::Builtin(Builtin::SequenceGetInBounds, args) => {
+            projection_root(&args[0], types, functions)
         }
-        ExprKind::Scope { value, .. } => projection_root(value, types),
+        ExprKind::Present(value) if value.ty != Type::Float => {
+            projection_root(value, types, functions)
+        }
+        ExprKind::Unwrap(value) if types.payload(value.ty) != Some(Type::Float) => {
+            projection_root(value, types, functions)
+        }
+        ExprKind::Scope { value, .. } => projection_root(value, types, functions),
         _ => None,
     }
 }
 
 /// A local is borrowed only if all its definitions preserve an incoming root.
 /// Elimination rejects mixed owned definitions; reachability rejects rootless cycles.
-fn local_roots(function: &Function, types: &Types) -> FunctionBorrows {
+fn local_roots(function: &Function, types: &Types, functions: &[Function]) -> FunctionBorrows {
     let written = written(function);
     let mut parameters = vec![false; function.locals.len()];
     let mut roots = parameters.clone();
@@ -267,7 +319,7 @@ fn local_roots(function: &Function, types: &Types) -> FunctionBorrows {
         .collect::<Vec<_>>();
     statements(&function.body, &mut |statement| match statement {
         Statement::Assign(slot, value) => {
-            if let Some(source) = projection_root(value, types) {
+            if let Some(source) = projection_root(value, types, functions) {
                 dependencies[*slot].push(source);
             } else {
                 candidates[*slot] = false;
@@ -690,8 +742,8 @@ mod tests {
             ty: optional,
             kind: ExprKind::Present(Box::new(local(0, Type::Float))),
         };
-        assert_eq!(projection_root(&boxed, &types), None);
-        assert_eq!(projection_root(&local(0, optional), &types), None);
+        assert_eq!(projection_root(&boxed, &types, &[]), None);
+        assert_eq!(projection_root(&local(0, optional), &types, &[]), None);
         let function = function(
             vec![0],
             vec![Type::Str; 3],
@@ -732,6 +784,71 @@ mod tests {
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn only_private_accumulators_preserve_incoming_list_elements() {
+        let module = lower(
+            r#"
+class Row:
+    value: int
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+def private(rows: list[Row]) -> Row:
+    acc = Row(0)
+    for row in rows:
+        acc.value += row.value
+    return acc
+
+def stored(rows: list[Row]) -> Row:
+    acc = Row(0)
+    rows.append(acc)
+    acc.value += 1
+    return acc
+
+"#,
+        );
+        let facts = analyze(&module);
+        let scans = module
+            .functions
+            .iter()
+            .zip(facts)
+            .filter(|(f, _)| f.params.len() == 1 && matches!(f.locals[f.params[0]], Type::List(_)))
+            .map(|(f, facts)| (facts.rooted[f.params[0]], facts.length_roots[f.params[0]]))
+            .collect::<Vec<_>>();
+        assert_eq!(scans, [(true, Some(0)), (false, None)]);
+    }
+
+    #[test]
+    fn a_constructor_that_publishes_its_receiver_cannot_create_private_state() {
+        let ty = Type::Class(0);
+        let initializer = function(
+            vec![0, 1],
+            vec![ty; 2],
+            vec![Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(Builtin::Append, vec![local(1, ty), local(0, ty)]),
+            })],
+        );
+        let caller = function(
+            vec![0],
+            vec![ty; 2],
+            vec![
+                Statement::Assign(
+                    1,
+                    Expr {
+                        ty,
+                        kind: ExprKind::Construct {
+                            initializer: 0,
+                            args: CallArgs::positional(vec![local(0, ty)]),
+                        },
+                    },
+                ),
+                Statement::Return(local(1, ty)),
+            ],
+        );
+        assert!(!private::analyze(&module(vec![initializer, caller]))[1][1]);
     }
 
     #[test]
