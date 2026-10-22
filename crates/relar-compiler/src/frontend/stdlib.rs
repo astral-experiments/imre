@@ -202,7 +202,10 @@ impl Checker<'_> {
             items: false,
             start: None,
         } = &input
-            && self.types.element(iterable.ty) == Some(Type::Str)
+            && matches!(
+                self.types.element(iterable.ty),
+                Some(Type::Str | Type::StrLiteral(_))
+            )
         {
             // Exact lists have no iteration callbacks; the runtime can borrow
             // their complete string buffer after both call arguments finish.
@@ -225,7 +228,7 @@ impl Checker<'_> {
             ),
         ];
         body.extend(self.expand_items(input, call, |checker, value| {
-            checker.expect(Type::Str, value.ty, call)?;
+            let value = checker.coerce(value, Type::Str, call)?;
             Ok(vec![Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::Append, vec![checker.local(parts), value]),
@@ -326,6 +329,9 @@ impl Checker<'_> {
             }
         }
         let mut value = self.expr(&field.expression)?;
+        if field.conversion != ast::ConversionFlag::Repr {
+            value = Self::enum_text(value);
+        }
         if !specification.is_empty() {
             let (precision, percent) = numeric_format(&specification).ok_or_else(|| {
                 error(

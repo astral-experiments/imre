@@ -5,19 +5,7 @@ use super::*;
 impl Emitter<'_, '_> {
     /// Returns an owned reference while the pool keeps its root until main exits.
     pub(super) fn pooled_literal(&mut self, contents: &[u8], ty: Type) -> Value {
-        let pool = match ty {
-            Type::Str => &mut self.string_literals,
-            Type::RegexPattern => &mut self.regex_literals,
-            _ => unreachable!("only strings and regexes have pooled literals"),
-        };
-        let id = if let Some(&id) = pool.get(contents) {
-            id
-        } else {
-            let id = self.strings.len();
-            self.strings.push(contents.to_vec());
-            pool.insert(contents.to_vec(), id);
-            id
-        };
+        let id = self.intern_literal(contents, ty);
         let value = Value {
             ty,
             operand: self.instruction(format!("load ptr, ptr @literal_{id}")),
@@ -25,6 +13,22 @@ impl Emitter<'_, '_> {
         };
         self.retain(&value);
         value
+    }
+
+    pub(super) fn intern_literal(&mut self, contents: &[u8], ty: Type) -> usize {
+        let pool = match ty {
+            Type::Str => &mut self.string_literals,
+            Type::RegexPattern => &mut self.regex_literals,
+            _ => unreachable!("only strings and regexes have pooled literals"),
+        };
+        if let Some(&id) = pool.get(contents) {
+            id
+        } else {
+            let id = self.strings.len();
+            self.strings.push(contents.to_vec());
+            pool.insert(contents.to_vec(), id);
+            id
+        }
     }
 
     /// Eager initialization has no user effects and bounds retention by source
@@ -70,11 +74,22 @@ impl Emitter<'_, '_> {
             )
             .unwrap();
         }
+        if !self.enum_members.is_empty() {
+            writeln!(
+                output,
+                "  call void @relar_str_enum_table(ptr @str_enum_members, i64 {})",
+                self.enum_members.len()
+            )
+            .unwrap();
+        }
         writeln!(
             output,
             "  ret void\n}}\n\ndefine internal void @relar_clear_literals(){attributes} {{\nentry:"
         )
         .unwrap();
+        if !self.enum_members.is_empty() {
+            output.push_str("  call void @relar_str_enum_table(ptr null, i64 0)\n");
+        }
         for (_, id, _, release) in literals {
             writeln!(
                 output,

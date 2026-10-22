@@ -16,10 +16,14 @@ fn adapter_name(function: usize, bound: bool) -> String {
 pub(super) fn adapters(module: &Module, sanitize: bool) -> String {
     let mut targets = BTreeSet::new();
     let mut invoked = false;
+    let mut enum_receiver = false;
     for function in module.functions.iter().chain([&module.entry]) {
         crate::ir::walk_expressions(&function.body, &mut |value| {
             if let ExprKind::Callable { function, receiver } = &value.kind {
                 targets.insert((*function, receiver.is_some()));
+                enum_receiver |= receiver
+                    .as_ref()
+                    .is_some_and(|r| matches!(r.ty, Type::StrEnum(_)));
             }
             invoked |= matches!(value.kind, ExprKind::Invoke { .. });
         });
@@ -32,6 +36,10 @@ pub(super) fn adapters(module: &Module, sanitize: bool) -> String {
          @kinds_callable = private unnamed_addr constant [2 x i32] [i32 0, i32 6]\n\
          @layout_callable = private constant { i64, ptr, ptr } { i64 2, ptr @kinds_callable, ptr null }\n",
     );
+    if enum_receiver {
+        output.push_str("@kinds_callable_enum = private unnamed_addr constant [2 x i32] [i32 0, i32 10]\n\
+             @layout_callable_enum = private constant { i64, ptr, ptr } { i64 2, ptr @kinds_callable_enum, ptr null }\n");
+    }
     for (id, bound) in targets {
         let function = &module.functions[id];
         let params = &function.params[usize::from(bound)..];
@@ -42,9 +50,10 @@ pub(super) fn adapters(module: &Module, sanitize: bool) -> String {
             .collect::<Vec<_>>();
         let mut signature = vec!["ptr %context".to_owned()];
         signature.extend(arguments.iter().cloned());
+        let scalar = bound && matches!(function.locals[function.params[0]], Type::StrEnum(_));
         let mut inputs = Vec::new();
         if bound {
-            inputs.push("ptr %context".to_owned());
+            inputs.push(if scalar { "i64 %tag" } else { "ptr %context" }.to_owned());
         }
         inputs.extend(arguments);
         let returns = function.returns.llvm();
@@ -60,6 +69,9 @@ pub(super) fn adapters(module: &Module, sanitize: bool) -> String {
             signature.join(", ")
         )
         .unwrap();
+        if scalar {
+            output.push_str("  %tag = ptrtoint ptr %context to i64\n");
+        }
         writeln!(
             output,
             "  %result = call {returns} @fn_{id}({})",
@@ -81,19 +93,27 @@ impl Emitter<'_, '_> {
         receiver: Option<&Expr>,
     ) -> Value {
         let receiver = receiver.map(|receiver| self.expr(receiver));
-        let result = self.record(ty);
+        // The hidden context is one pointer-sized ABI word. A StrEnum stores its
+        // nonowning tag in that word; only its adapter converts the bits back.
+        let scalar = receiver
+            .as_ref()
+            .is_some_and(|r| matches!(r.ty, Type::StrEnum(_)));
+        let result = self.record_with_layout(ty, if scalar { "callable_enum" } else { "callable" });
         let target = adapter_name(function, receiver.is_some());
         self.line(format!("store ptr @{target}, ptr {}", result.operand));
         let context = self.instruction(format!(
             "getelementptr %callable, ptr {}, i32 0, i32 1",
             result.operand
         ));
-        let pointer = receiver
-            .as_ref()
-            .map_or("null", |receiver| receiver.operand.as_str());
-        self.line(format!("store ptr {pointer}, ptr {context}"));
         if let Some(receiver) = receiver {
+            self.line(format!(
+                "store {} {}, ptr {context}",
+                receiver.ty.llvm(),
+                receiver.operand
+            ));
             self.forget(&receiver);
+        } else {
+            self.line(format!("store ptr null, ptr {context}"));
         }
         result
     }

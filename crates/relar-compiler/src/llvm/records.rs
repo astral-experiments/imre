@@ -28,6 +28,7 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                 metadata
             } else {
                 process = crate::ir::ClassMetadata {
+                    enum_members: Vec::new(),
                     name: "CompletedProcess".to_owned(),
                     qualified_name: "subprocess.CompletedProcess".to_owned(),
                     dataclass_eq: false,

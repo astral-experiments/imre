@@ -6,7 +6,7 @@ from pathlib import Path
 
 from relar.json import decode
 
-from conformance_report.model import ExpectedError, Location, Position, Positions, TyDiagnostic, WireDiagnostic
+from conformance_report.model import ExpectedError, Location, Position, Positions, Source, TyDiagnostic, WireDiagnostic
 
 
 CONFORMANCE_ERROR_PATTERN = re.compile(
@@ -101,7 +101,7 @@ def collect_expected_diagnostics(sources: list[SourceText]) -> list[ExpectedErro
     return errors
 
 
-def collect_ty_diagnostics(text: str, source: str, paths: dict[str, str]) -> list[TyDiagnostic]:
+def collect_ty_diagnostics(text: str, source: Source, paths: dict[str, str]) -> list[TyDiagnostic]:
     wire = decode(text, list[WireDiagnostic])
     result: list[TyDiagnostic] = []
     for diagnostic in wire:

@@ -290,6 +290,7 @@ impl Emitter<'_, '_> {
                 .iter()
                 .map(|&index| &arguments[index].value)
                 .collect::<Vec<_>>(),
+            false,
         );
         let slow_value = self.compare(operation, &left, &right.value);
         self.release(&left);

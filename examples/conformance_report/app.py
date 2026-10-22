@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from conformance_report.model import collect_file_stats, group_diagnostics_by_key
+from conformance_report.model import Source, collect_file_stats, group_diagnostics_by_key
 from conformance_report.parse import Inputs, collect_expected_diagnostics, collect_ty_diagnostics, read_inputs
 from conformance_report.render import render_file_stats_table, render_summary, render_test_cases
 
@@ -63,8 +63,8 @@ def parse_options(arguments: list[str], *, compute: bool = False) -> Options:
 
 def render_report(inputs: Inputs, format: str, force_summary_table: bool) -> str:
     expected = collect_expected_diagnostics(inputs.sources)
-    old = collect_ty_diagnostics(inputs.old, "old", inputs.paths)
-    new = collect_ty_diagnostics(inputs.new, "new", inputs.paths)
+    old = collect_ty_diagnostics(inputs.old, Source.OLD, inputs.paths)
+    new = collect_ty_diagnostics(inputs.new, Source.NEW, inputs.paths)
     grouped = group_diagnostics_by_key(old, new, expected)
     file_stats = collect_file_stats(grouped, inputs.manifest.test_files)
     base_url = f"https://github.com/python/typing/blob/{inputs.manifest.suite_revision}/conformance/"

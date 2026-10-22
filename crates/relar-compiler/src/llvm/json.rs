@@ -39,7 +39,7 @@ pub(super) fn schemas(module: &Module) -> String {
 pub(super) fn schema_name(ty: Type) -> String {
     match ty {
         Type::Int => "json_int".to_owned(),
-        Type::Str => "json_str".to_owned(),
+        Type::Str | Type::StrLiteral(_) => "json_str".to_owned(),
         Type::Bool => "json_bool".to_owned(),
         Type::Float => "json_float".to_owned(),
         Type::None => "json_none".to_owned(),
@@ -73,6 +73,11 @@ impl Schemas<'_> {
     }
 
     fn schema(&mut self, ty: Type) -> String {
+        let ty = if matches!(ty, Type::StrLiteral(_)) {
+            Type::Str
+        } else {
+            ty
+        };
         let name = schema_name(ty);
         if !self.seen.insert(ty) {
             return name;

@@ -214,6 +214,107 @@ impl<'a> Visitor<'a> for Reads {
 }
 
 impl Checker<'_> {
+    /// Pure projections need no hashing for up to two elements. A pair uses
+    /// ordinary integer equality, including independently allocated huge values.
+    pub(super) fn short_set_len(&mut self, source: &ast::Expr, set: &Expr) -> Option<Expr> {
+        let ast::Expr::SetComp(display) = source else {
+            return None;
+        };
+        let [clause] = display.generators.as_slice() else {
+            return None;
+        };
+        let ExprKind::Call(_, args) = &set.kind else {
+            return None;
+        };
+        let [input] = args.values.as_slice() else {
+            return None;
+        };
+        let (ast::Expr::Name(source), ExprKind::Local(slot)) = (&clause.iter, &input.kind) else {
+            return None;
+        };
+        if !clause.ifs.is_empty() || self.names.get(source.id.as_str()) != Some(slot) {
+            return None;
+        }
+        let ast::Expr::Name(target) = &clause.target else {
+            return None;
+        };
+        let mut expression = display.elt.as_ref();
+        let mut fields = Vec::new();
+        while let ast::Expr::Attribute(attribute) = expression {
+            fields.push(attribute.attr.as_str());
+            expression = &attribute.value;
+        }
+        if !matches!(expression, ast::Expr::Name(name) if name.id == target.id) {
+            return None;
+        }
+        let element = self.types.element(input.ty)?;
+        let mut ty = element;
+        let mut path = Vec::new();
+        for name in fields.into_iter().rev() {
+            let Type::Class(class) = ty else { return None };
+            let field = self.classes.declarations.definitions[class]
+                .fields
+                .iter()
+                .position(|field| field.name == name)?;
+            ty = self.classes.fields[class][field];
+            path.push((field, ty));
+        }
+        if ty != Type::Int {
+            return None;
+        }
+        let length = |value| Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::Len, vec![value]),
+        };
+        let project = |index| {
+            let item = Expr {
+                ty: element,
+                kind: ExprKind::Builtin(
+                    if matches!(input.ty, Type::List(_)) {
+                        Builtin::SequenceGetInBounds
+                    } else {
+                        Builtin::ListGet
+                    },
+                    vec![input.clone(), pipelines::integer(index)],
+                ),
+            };
+            path.iter().fold(item, |item, &(field, ty)| Expr {
+                ty,
+                kind: ExprKind::Field(Box::new(item), field),
+            })
+        };
+        let choose = |test, yes: Expr, no| Expr {
+            ty: yes.ty,
+            kind: ExprKind::Conditional(Box::new(test), Box::new(yes), Box::new(no)),
+        };
+        let slot = self.hidden(Type::Int);
+        let size = self.local(slot);
+        let one = pipelines::integer(1);
+        let two = pipelines::integer(2);
+        let pair = choose(
+            pipelines::compare(Compare::Equal, project(0), project(1)),
+            one.clone(),
+            two.clone(),
+        );
+        let larger = choose(
+            pipelines::compare(Compare::Equal, size.clone(), two),
+            pair,
+            length(set.clone()),
+        );
+        Some(Expr {
+            ty: Type::Int,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, length(input.clone()))],
+                value: Box::new(choose(
+                    pipelines::compare(Compare::LessEqual, size.clone(), one),
+                    size,
+                    larger,
+                )),
+                clear: vec![slot],
+            },
+        })
+    }
+
     /// Evaluates the first iterable outside the target scope and passes rooted
     /// values into a private helper. Captures are local bindings, never delayed
     /// field/index reads, so mutation through aliases remains visible in the body.

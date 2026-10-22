@@ -108,8 +108,28 @@ def optional_field_rebind() -> None:
         print(first_item(record.items, (record := Record(2, False, "new", None, [7])).items))
         print(record.items[0])
 
+    envelope = make_envelope(37)
+    print(bool(envelope.record.items))
+    print(len(envelope.record.items))
+    # A sibling argument replaces the whole nested record after its field is read.
+    print(first_item(envelope.record.items, [replace_record(envelope)]))
+    print(envelope.record.items[0])
+
+
+def published_accumulator(rows: list[Record]) -> int:
+    fresh = Record(1, False, "fresh", None, [41])
+    rows.append(fresh)
+    for row in rows:
+        original = row.items
+        fresh.items = [99]
+        return original[0]
+    return -1
+
 
 def main() -> None:
+    rows: list[Record] = []
+    print(published_accumulator(rows))
+    print(rows[0].items[0])
     optional_field_rebind()
     value = Record(1000000000000000000000000000000, True, "λ record", None, [1, 2])
     print(value.number)

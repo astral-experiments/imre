@@ -5,7 +5,7 @@ use std::ffi::{CStr, c_char};
 use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
-use super::{Object, Storage, StorageCell, Str, Words, fail};
+use super::{Object, Str, Words, fail};
 
 #[derive(Clone, Copy)]
 struct Arguments {
@@ -60,7 +60,7 @@ fn decode(arguments: Arguments) -> Result<Rc<Object>> {
             .values
             .push(Rc::into_raw(Rc::new(Str::new(text))) as usize);
     }
-    Ok(Rc::new(Object(StorageCell::new(Storage::Sequence(values)))))
+    Ok(values.into_object())
 }
 
 /// Returns an owned reference to the same mutable list on every successful call.

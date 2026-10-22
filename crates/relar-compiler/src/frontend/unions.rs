@@ -20,6 +20,10 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
+        if matches!(ty, Type::StrLiteral(_)) && matches!(value.ty, Type::Str | Type::StrLiteral(_))
+        {
+            return literals::view(value, ty);
+        }
         if self.types.payload(value.ty).unwrap_or(value.ty) == Type::Exception
             && ty == Type::TimeoutExpired
         {
@@ -67,6 +71,9 @@ impl Checker<'_> {
         if let Some(kind) = self.exception_category(expression) {
             return Ok(vec![InstanceType::Exception(kind)]);
         }
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StrEnum)) {
+            return Ok(vec![InstanceType::StrEnum]);
+        }
         if matches!(
             self.resolve(expression),
             Some(Binding::Intrinsic(Intrinsic::Path))
@@ -82,7 +89,9 @@ impl Checker<'_> {
         if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(&class) = self.classes.declarations.ids.get(&definition)
         {
-            return Ok(vec![InstanceType::Exact(Type::Class(class))]);
+            return Ok(vec![InstanceType::Exact(
+                self.classes.declarations.instance(class),
+            )]);
         }
         if let ast::Expr::Name(name) = expression {
             let ty = match name.id.as_str() {

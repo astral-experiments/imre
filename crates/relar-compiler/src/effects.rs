@@ -283,6 +283,12 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
             .first()
             .is_none_or(|arg| !matches!(arg.ty, Type::Float | Type::Bool)),
         Builtin::GlobalGet(_)
+        | Builtin::StrEnumMember { .. }
+        | Builtin::StrEnumName
+        | Builtin::StrEnumValue
+        | Builtin::StrEnumIdentity
+        | Builtin::LiteralStringView
+        | Builtin::StringListContains
         | Builtin::RegexCompile(_)
         | Builtin::RegexSearch
         | Builtin::GlobalSet(_)

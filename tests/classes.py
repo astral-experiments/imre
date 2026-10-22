@@ -1,15 +1,18 @@
 """Compare fixed-class programs with CPython and reject unsafe class shapes."""
 
 import argparse
+import ast
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "classes"
+PROJECT = FIXTURES.parents[2]
 CELL = """class Cell:
     value: int
 
@@ -24,6 +27,13 @@ CELL = """class Cell:
 
 
 REJECTED = {
+    "literal_unknown_value": 'from typing import Literal\ndef f(s: Literal["a", "b"]) -> str:\n    return s\nf("c")\n',
+    "literal_unproven_string": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    return s\n',
+    "literal_wider_domain": 'from typing import Literal\ndef f(s: Literal["a", "b"]) -> Literal["a"]:\n    return s\n',
+    "literal_invalid_default": 'from typing import Literal\ndef f(s: Literal["a"] = "b") -> str:\n    return s\n',
+    "literal_mutable_alias": 'from typing import Literal\na: list[Literal["a"]] = ["a"]\nb: list[str] = a\nb.append("b")\n',
+    "literal_non_string": 'from typing import Literal\nx: Literal["a", 7] = "a"\n',
+    "literal_invalidated_guard": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    if s == "a":\n        s = input()\n        return s\n    return "a"\n',
     "wrong_field_type": CELL + 'value = Cell(1)\nvalue.value = "wrong"\n',
     "wrong_alias_type": CELL + "value = Cell(1)\nalias = value\nalias.value = True\n",
     "ignored_field_type": CELL + 'value = Cell(1)\nvalue.value = "wrong"  # type: ignore\n',
@@ -98,6 +108,29 @@ IMPORTED_REJECTIONS = {
 }
 
 
+def verify_upstream_definitions() -> None:
+    def definitions(path: Path, names: set[str]) -> dict[str, str]:
+        source = path.read_text()
+        lines = source.splitlines(keepends=True)
+        return {
+            node.name: textwrap.dedent("".join(lines[node.lineno - 1:node.end_lineno]))
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in names
+        }
+
+    reporter = PROJECT / "examples" / "conformance_report"
+    checks = [
+        (reporter / "upstream/conformance.py", reporter / "model.py",
+         {"Source", "Classification", "Change", "compute_stats", "change", "diagnostics_by_source", "classify"}),
+        (PROJECT / "examples/python_catalog/upstream/fetch-download-metadata.py",
+         FIXTURES / "uv_variant.py", {"Variant", "variant_sort_key"}),
+    ]
+    for upstream, actual, names in checks:
+        expected = definitions(upstream, names)
+        assert expected.keys() == names
+        assert definitions(actual, names) == expected, actual
+
+
 def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
@@ -146,7 +179,8 @@ def main() -> None:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
-        for relative in ["ownership.py", "imported/main.py"]:
+        verify_upstream_definitions()
+        for relative in ["ownership.py", "imported/main.py", "string_literals.py", "string_enum_members.py", "string_enum_storage.py", "conditional_lists.py", "uv_variant.py"]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             require_success(reference)

@@ -88,3 +88,11 @@ and cleanup, although Codon's uncaught-error process exit differs from Python's.
 Ordinary and ThinLTO comparisons keep the Codon compiler flags above. Only its
 linked Rust platform library changes between those pairings; this is not a
 Codon cross-language ThinLTO build. The compute reporter has no platform calls.
+
+For the conformance reporter, Codon 0.20.4 supplies a native singleton `Enum`.
+The adapter spells out Ruff’s lowercase `auto()` values, returns the string
+payload from `__str__`, and uses `str` for the title method's closed verb
+annotation. Member comparisons, value patterns, classification, statistics, and
+title methods use the application’s original function bodies. The classification
+comparison checks both source versions, all four classifications, all four
+change kinds, and the resulting Markdown against upstream CPython.

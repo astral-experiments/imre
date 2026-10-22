@@ -21,6 +21,7 @@ mod paths;
 mod processes;
 mod records;
 mod stdlib;
+mod string_enums;
 mod text;
 mod truthiness;
 mod unions;
@@ -28,10 +29,11 @@ mod unions;
 impl Type {
     fn llvm(self) -> &'static str {
         match self {
-            Self::Int | Self::Optional(_) | Self::Union(_) => "i64",
+            Self::Int | Self::StrEnum(_) | Self::Optional(_) | Self::Union(_) => "i64",
             Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
+            | Self::StrLiteral(_)
             | Self::Bytes
             | Self::ListInt
             | Self::Class(_)
@@ -58,6 +60,7 @@ impl Type {
             Self::Int => "1",
             Self::Float => "0.0",
             Self::Str
+            | Self::StrLiteral(_)
             | Self::Bytes
             | Self::ListInt
             | Self::Class(_)
@@ -75,7 +78,7 @@ impl Type {
             | Self::RegexMatch
             | Self::BinaryIO
             | Self::Tuple(_) => "null",
-            Self::Bool | Self::None | Self::Optional(_) | Self::Union(_) => "0",
+            Self::Bool | Self::None | Self::StrEnum(_) | Self::Optional(_) | Self::Union(_) => "0",
         }
     }
 }
@@ -143,6 +146,8 @@ enum Completion {
 
 pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> String {
     let borrows = borrows::analyze(module);
+    let effects = effects::analyze(module);
+    let inline_dispatch = string_enums::inline_dispatch(module, &effects);
     let mut emitter = Emitter {
         module,
         code: String::new(),
@@ -150,6 +155,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
         regex_literals: BTreeMap::new(),
+        enum_members: Vec::new(),
         literal_globals: literal_globals(module),
         next_value: 0,
         next_label: 0,
@@ -170,11 +176,13 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         error_exit: String::new(),
         sanitize,
         ranges,
-        effects: effects::analyze(module),
+        effects,
+        inline_dispatch,
         callable_targets: crate::callables::Targets::analyze(module),
         integer_regions: integer_regions::analyze(module),
         uses_sys_argv: module.uses_sys_argv(),
     };
+    emitter.prepare_enum_members();
     for (id, function) in module.functions.iter().enumerate() {
         emitter.function(function, &format!("fn_{id}"), false, &borrows[id]);
     }
@@ -209,6 +217,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         }
         output.push_str("\"\n");
     }
+    output.push_str(&emitter.enum_table());
     output.push_str(&emitter.literal_pool());
     output.push_str(&emitter.code);
     // Layout hints never replace the representation, overflow, or error guards.
@@ -224,6 +233,7 @@ struct Emitter<'a, 'module> {
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
+    enum_members: Vec<[usize; 3]>,
     literal_globals: Vec<Option<String>>,
     next_value: usize,
     next_label: usize,
@@ -245,6 +255,7 @@ struct Emitter<'a, 'module> {
     sanitize: bool,
     ranges: &'a RangeFacts<'module>,
     effects: ExceptionEffects,
+    inline_dispatch: Vec<bool>,
     callable_targets: crate::callables::Targets,
     integer_regions: Vec<Option<integer_regions::Summary>>,
     uses_sys_argv: bool,
@@ -327,17 +338,24 @@ impl Emitter<'_, '_> {
     }
 
     fn call(&mut self, name: &str, returns: Type, args: &[&Value]) -> Value {
-        self.call_with_effect(name, returns, args, fallible(name))
+        self.call_with_effect(name, returns, args, fallible(name), false)
     }
 
     /// Uses only the final IR's conservative callee summary. Argument evaluation
     /// has already performed its own checks and rooted every completed value.
-    fn user_call(&mut self, function: usize, returns: Type, args: &[&Value]) -> Value {
+    fn user_call(
+        &mut self,
+        function: usize,
+        returns: Type,
+        args: &[&Value],
+        enum_match: bool,
+    ) -> Value {
         self.call_with_effect(
             &format!("fn_{function}"),
             returns,
             args,
             self.effects.may_raise(function),
+            enum_match && self.inline_dispatch[function],
         )
     }
 
@@ -353,13 +371,15 @@ impl Emitter<'_, '_> {
         returns: Type,
         args: &[&Value],
         may_raise: bool,
+        inline: bool,
     ) -> Value {
         let args = args
             .iter()
             .map(|value| format!("{} {}", value.ty.llvm(), value.operand))
             .collect::<Vec<_>>()
             .join(", ");
-        let instruction = format!("call {} @{name}({args})", returns.llvm());
+        let attribute = if inline { " alwaysinline" } else { "" };
+        let instruction = format!("call {} @{name}({args}){attribute}", returns.llvm());
         let operand = if may_raise {
             self.checked_instruction(instruction)
         } else {
@@ -413,7 +433,7 @@ impl Emitter<'_, '_> {
         let family = match ty {
             Type::Int => "int",
             Type::Union(_) => "union",
-            Type::Str => "str",
+            Type::Str | Type::StrLiteral(_) => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
             Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess => {
@@ -430,7 +450,7 @@ impl Emitter<'_, '_> {
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::BinaryIO => "object",
-            Type::Float | Type::Bool | Type::None => return,
+            Type::Float | Type::Bool | Type::StrEnum(_) | Type::None => return,
             Type::Optional(_) => unreachable!("optional types are flattened"),
         };
         let name = if value.ty == Type::Int {
@@ -458,7 +478,7 @@ impl Emitter<'_, '_> {
         if value.ty != Type::Float
             && !matches!(
                 self.module.types.payload(value.ty).unwrap_or(value.ty),
-                Type::Bool | Type::None
+                Type::Bool | Type::None | Type::StrEnum(_)
             )
             && !value.small_integer
             && !self
@@ -544,21 +564,49 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// A field load or literal match selector has no intervening operand
-    /// evaluation. Its local owner stays alive until the operation finishes.
+    /// A field, length, or truth read cannot run user code or replace a local.
+    /// Keep each field along the path borrowed until this immediate read ends.
     fn immediate_receiver(&mut self, expression: &Expr) -> Operand {
-        let value = match &expression.kind {
+        if let Some(value) = self.immediate_projection(expression) {
+            Operand {
+                value,
+                ownership: Ownership::Borrowed,
+            }
+        } else {
+            self.operand(expression)
+        }
+    }
+
+    fn immediate_projection(&mut self, expression: &Expr) -> Option<Value> {
+        Some(match &expression.kind {
             ExprKind::Local(slot) => self.borrow_slot(*slot),
-            ExprKind::Unwrap(inner) if let ExprKind::Local(slot) = inner.kind => {
+            ExprKind::Call(..) => self.selected_list_field(expression)?,
+            ExprKind::Unwrap(inner)
+                if let ExprKind::Local(slot) = inner.kind
+                    && !matches!(expression.ty, Type::Bool | Type::Float) =>
+            {
                 let word = self.borrow_slot(slot).operand;
                 self.decode_word(word, expression.ty)
             }
-            _ => return self.operand(expression),
-        };
-        Operand {
-            value,
-            ownership: Ownership::Borrowed,
-        }
+            ExprKind::Field(receiver, field) => {
+                let receiver = self.immediate_projection(receiver)?;
+                let pointer = self.field_pointer(&receiver, *field);
+                self.field_value(&pointer, expression.ty)
+            }
+            _ => return None,
+        })
+    }
+
+    /// Select a field address before loading its list. The receiver is a local
+    /// root and the checked unboxed predicate cannot run user code.
+    fn selected_list_field(&mut self, expression: &Expr) -> Option<Value> {
+        let getter = borrows::getters::selected(expression, &self.module.functions)?;
+        let test = self.expr(&getter.test);
+        let record = self.borrow_slot(getter.root);
+        let yes = self.field_pointer(&record, getter.yes);
+        let no = self.field_pointer(&record, getter.no);
+        let field = self.instruction(format!("select i1 {}, ptr {yes}, ptr {no}", test.operand));
+        Some(self.field_value(&field, expression.ty))
     }
 
     fn release_operand(&mut self, operand: &Operand) {
@@ -594,7 +642,7 @@ impl Emitter<'_, '_> {
     }
 
     fn can_borrow_projection(&self, expression: &Expr) -> bool {
-        borrows::projection_root(expression, &self.module.types)
+        borrows::projection_root(expression, &self.module.types, &self.module.functions)
             .is_some_and(|slot| self.rooted_locals[slot])
     }
 
@@ -604,6 +652,9 @@ impl Emitter<'_, '_> {
         debug_assert!(self.can_borrow_projection(expression));
         let mut value = match &expression.kind {
             ExprKind::Local(slot) => self.borrow_slot(*slot),
+            ExprKind::Call(..) => self
+                .selected_list_field(expression)
+                .expect("proven list getter"),
             ExprKind::Field(receiver, field) => {
                 let receiver = self.borrow_projection(receiver);
                 let pointer = self.field_pointer(&receiver, *field);
@@ -614,10 +665,11 @@ impl Emitter<'_, '_> {
                     unreachable!("proven sequence receivers are private locals")
                 };
                 let receiver = self.borrow_projection(&args[0]);
-                let ExprKind::Local(slot) = args[1].kind else {
-                    unreachable!("proven sequence cursors are private locals")
+                let index = match args[1].kind {
+                    ExprKind::Local(slot) => self.borrow_slot(slot),
+                    ExprKind::Int(_) => self.expr(&args[1]),
+                    _ => unreachable!("proven sequence indices are private cursors or constants"),
                 };
-                let index = self.borrow_slot(slot);
                 self.borrow_sequence_element(receiver_slot, &receiver, &index, expression.ty)
             }
             ExprKind::Present(inner) => {
@@ -683,7 +735,7 @@ impl Emitter<'_, '_> {
             .filter(|(_, view)| view.data.is_some());
         let Some((root, view)) = snapshot else {
             return self.instruction(format!(
-                "call i64 @relar_seq_borrow_index_proven(ptr {}, i64 {index})",
+                "call i64 @relar_seq_borrow_index_proven_fast(ptr {}, i64 {index})",
                 receiver.operand
             ));
         };
@@ -708,7 +760,7 @@ impl Emitter<'_, '_> {
         self.jump(&end);
         self.start(&fallback);
         let ordinary = self.instruction(format!(
-            "call i64 @relar_seq_borrow_index_proven(ptr {}, i64 {index})",
+            "call i64 @relar_seq_borrow_index_proven_fast(ptr {}, i64 {index})",
             receiver.operand
         ));
         self.jump(&end);
@@ -773,7 +825,7 @@ impl Emitter<'_, '_> {
                 if snapshot.data.is_none() {
                     debug_assert!(matches!(snapshot.receiver.ty, Type::List(_)));
                     let data = self.instruction(format!(
-                        "call ptr @relar_seq_data_readonly(ptr {})",
+                        "call ptr @relar_seq_data_readonly_fast(ptr {})",
                         snapshot.receiver.operand
                     ));
                     self.length_snapshots[root].as_mut().unwrap().data = Some(data);
@@ -788,7 +840,7 @@ impl Emitter<'_, '_> {
     fn list_length(&mut self, receiver: &Value) -> Value {
         let helper = match receiver.ty {
             Type::ListInt => "relar_list_len",
-            Type::List(_) => "relar_seq_len",
+            Type::List(_) => "relar_seq_len_fast",
             _ => unreachable!("only exact lists have nonallocating snapshots"),
         };
         Value {
@@ -1206,6 +1258,10 @@ impl Emitter<'_, '_> {
             ));
         }
         if entry {
+            let layout = self.instruction("call { i64, i64 } @relar_seq_layout()");
+            self.line(format!(
+                "store {{ i64, i64 }} {layout}, ptr @sequence_layout"
+            ));
             self.line("call void @relar_init_literals()");
         }
         if entry && self.uses_sys_argv {
@@ -1446,13 +1502,32 @@ impl Emitter<'_, '_> {
                     unreachable!()
                 };
                 let ty = self.module.class_fields[class][*field];
-                let old = self.get_field(&receiver.value, *field, ty);
+                // A scalar or a non-reentrant exact length read cannot replace
+                // this field. Other right-hand sides must own the original
+                // value across arbitrary mutation and exceptions.
+                let stable = matches!(expression.kind, ExprKind::Int(_) | ExprKind::Local(_))
+                    || matches!(&expression.kind, ExprKind::Builtin(Builtin::Len, values)
+                        if matches!(values.as_slice(), [list] if matches!(list.ty, Type::ListInt | Type::List(_))
+                            && (matches!(list.kind, ExprKind::Local(_))
+                                || borrows::getters::selected(list, &self.module.functions).is_some())));
+                let old = if stable && ty == Type::Int {
+                    let pointer = self.field_pointer(&receiver.value, *field);
+                    Operand {
+                        value: self.field_value(&pointer, ty),
+                        ownership: Ownership::Borrowed,
+                    }
+                } else {
+                    Operand {
+                        value: self.get_field(&receiver.value, *field, ty),
+                        ownership: Ownership::Owned,
+                    }
+                };
                 let right = self.operand(expression);
-                let value = self.binary(*op, &old, &right.value);
-                self.set_field(&receiver.value, *field, &value);
-                self.release(&value);
+                let value = self.binary(*op, &old.value, &right.value);
+                self.forget(&value);
+                self.replace_field(&receiver.value, *field, &value);
                 self.release_operand(&right);
-                self.release(&old);
+                self.release_operand(&old);
                 self.release_operand(&receiver);
             }
             // Discarded scalar literals have no effects. In particular, a
@@ -1710,7 +1785,10 @@ impl Emitter<'_, '_> {
                 operand: u8::from(*value).to_string(),
                 small_integer: false,
             },
-            ExprKind::Str(value) => self.literal(value, Type::Str),
+            ExprKind::Str(value) => Value {
+                ty: expression.ty,
+                ..self.literal(value, Type::Str)
+            },
             ExprKind::Bytes(value) => self.literal_bytes(value, Type::Bytes),
             ExprKind::None => none(),
             ExprKind::Local(slot) => {
@@ -1920,6 +1998,7 @@ impl Emitter<'_, '_> {
                         .iter()
                         .map(|&index| &values[index].value)
                         .collect::<Vec<_>>(),
+                    args.exhaustive_enum_match,
                 );
                 for arg in &values {
                     self.release_operand(arg);
@@ -1938,7 +2017,7 @@ impl Emitter<'_, '_> {
                 let object = self.record(expression.ty);
                 let mut inputs = vec![&object];
                 inputs.extend(args.order.iter().map(|&index| &values[index].value));
-                self.user_call(*initializer, Type::None, &inputs);
+                self.user_call(*initializer, Type::None, &inputs, false);
                 for arg in &values {
                     self.release_operand(arg);
                 }
@@ -2544,7 +2623,11 @@ impl Emitter<'_, '_> {
                     left.operand, right.operand
                 ))
             }
-            Type::Str => {
+            Type::StrEnum(_) => self.instruction(format!(
+                "icmp {predicate} i64 {}, {}",
+                left.operand, right.operand
+            )),
+            Type::Str | Type::StrLiteral(_) => {
                 let equal = self.instruction(format!(
                     "call i8 @relar_str_equal(ptr {}, ptr {})",
                     left.operand, right.operand
@@ -2791,6 +2874,13 @@ impl Emitter<'_, '_> {
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
+        if matches!(builtin, Builtin::LiteralStringView) {
+            let value = self.expr(&expressions[0]);
+            return Value {
+                ty: returns,
+                ..value
+            };
+        }
         if let Some(value) = self.rsplit_last(builtin, expressions) {
             return value;
         }
@@ -2813,7 +2903,12 @@ impl Emitter<'_, '_> {
             .iter()
             .enumerate()
             .map(|(index, arg)| {
-                if index == 0 && matches!(builtin, Builtin::RegexCapture { .. }) {
+                if index == 0
+                    && matches!(
+                        builtin,
+                        Builtin::Len | Builtin::Bool | Builtin::RegexCapture { .. }
+                    )
+                {
                     self.immediate_receiver(arg)
                 } else {
                     self.operand(arg)
@@ -2821,6 +2916,36 @@ impl Emitter<'_, '_> {
             })
             .collect::<Vec<_>>();
         let result = match builtin {
+            Builtin::StrEnumMember { class, member } => Value {
+                ty: returns,
+                operand: self.enum_tag(*class, *member).to_string(),
+                small_integer: false,
+            },
+            Builtin::StrEnumName | Builtin::StrEnumValue => {
+                self.enum_text(&args[0].value, matches!(builtin, Builtin::StrEnumName))
+            }
+            Builtin::StrEnumIdentity => Value {
+                ty: Type::Bool,
+                operand: self.instruction(format!(
+                    "icmp eq i64 {}, {}",
+                    args[0].value.operand, args[1].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::LiteralStringView => {
+                unreachable!("string views transfer the operand owner directly")
+            }
+            Builtin::StringListContains => {
+                let byte = self.instruction(format!(
+                    "call i8 @relar_str_list_contains(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i8 {byte}, 0")),
+                    small_integer: false,
+                }
+            }
             Builtin::Text(operation) => self.text_builtin(*operation, &args, returns),
             Builtin::RegexCompile(pattern) => self.pooled_literal(pattern.as_bytes(), returns),
             Builtin::RegexSearch => {
@@ -3061,7 +3186,13 @@ impl Emitter<'_, '_> {
             }
             Builtin::Repr => self.value_repr(&args[0].value),
             Builtin::Str => match args[0].value.ty {
-                Type::Str => return self.own_operand(args.into_iter().next().unwrap()),
+                Type::Str | Type::StrLiteral(_) => {
+                    return Value {
+                        ty: Type::Str,
+                        ..self.own_operand(args.into_iter().next().unwrap())
+                    };
+                }
+                Type::StrEnum(_) => self.enum_text(&args[0].value, false),
                 Type::Int => self.call("relar_int_str", Type::Str, &[&args[0].value]),
                 Type::Float => self.call("relar_float_str", Type::Str, &[&args[0].value]),
                 Type::Bytes => self.call("relar_bytes_str", Type::Str, &[&args[0].value]),
@@ -3123,7 +3254,7 @@ impl Emitter<'_, '_> {
                             Type::Str => "relar_str_len",
                             Type::Bytes => "relar_bytes_len",
                             Type::ListInt => "relar_list_len",
-                            Type::List(_) => "relar_seq_len",
+                            Type::List(_) => "relar_seq_len_fast",
                             Type::Dict(_) => "relar_dict_len",
                             Type::Set(_) => "relar_set_len",
                             _ => unreachable!("len input was checked"),
@@ -3140,11 +3271,10 @@ impl Emitter<'_, '_> {
                 self.nonnegative_index(&expressions[1]),
             ),
             Builtin::SequenceGetInBounds => {
-                debug_assert!(
-                    expressions
-                        .iter()
-                        .all(|arg| matches!(arg.kind, ExprKind::Local(_)))
-                );
+                debug_assert!(matches!(
+                    expressions[1].kind,
+                    ExprKind::Local(_) | ExprKind::Int(_)
+                ));
                 let ExprKind::Local(slot) = expressions[0].kind else {
                     unreachable!("proven sequence receivers are private locals")
                 };
@@ -3419,7 +3549,15 @@ impl Emitter<'_, '_> {
                 match args[0].value.ty {
                     Type::Int => self.void_call("relar_print_int", &[&args[0].value]),
                     Type::Float => self.void_call("relar_print_float", &[&args[0].value]),
-                    Type::Str => self.void_call("relar_print_str", &[&args[0].value]),
+                    Type::Str | Type::StrLiteral(_) => {
+                        self.void_call("relar_print_str", &[&args[0].value])
+                    }
+                    Type::StrEnum(_) => {
+                        let text = self.enum_text(&args[0].value, false);
+                        let text = self.owned(text);
+                        self.void_call("relar_print_str", &[&text]);
+                        self.release(&text);
+                    }
                     Type::Bytes => self.void_call("relar_print_bytes", &[&args[0].value]),
                     Type::Bool => {
                         let byte =
@@ -3556,11 +3694,14 @@ impl Emitter<'_, '_> {
     /// changing ownership. The slot's representation tag controls reclamation.
     fn word(&mut self, value: &Value) -> String {
         match value.ty {
-            Type::Int | Type::Optional(_) | Type::Union(_) => value.operand.clone(),
+            Type::Int | Type::StrEnum(_) | Type::Optional(_) | Type::Union(_) => {
+                value.operand.clone()
+            }
             Type::Float => self.instruction(format!("bitcast double {} to i64", value.operand)),
             Type::Bool => self.instruction(format!("zext i1 {} to i64", value.operand)),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
             | Type::Class(_)
@@ -3591,11 +3732,12 @@ impl Emitter<'_, '_> {
     /// Changes only the compiler view of a word, leaving its ownership unchanged.
     fn decode_word(&mut self, word: String, ty: Type) -> Value {
         let operand = match ty {
-            Type::Int | Type::Optional(_) | Type::Union(_) => word,
+            Type::Int | Type::StrEnum(_) | Type::Optional(_) | Type::Union(_) => word,
             Type::Float => self.instruction(format!("bitcast i64 {word} to double")),
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
             Type::Str
+            | Type::StrLiteral(_)
             | Type::Bytes
             | Type::ListInt
             | Type::Class(_)
@@ -3653,12 +3795,13 @@ impl Emitter<'_, '_> {
     /// The zeroed payload is safe to destroy before every initializer completes.
     /// The checked constructor cannot expose a partially initialized record.
     fn record(&mut self, ty: Type) -> Value {
+        self.record_with_layout(ty, &record_name(ty))
+    }
+
+    fn record_with_layout(&mut self, ty: Type, name: &str) -> Value {
         let value = Value {
             ty,
-            operand: self.instruction(format!(
-                "call ptr @relar_record_new(ptr @layout_{})",
-                record_name(ty)
-            )),
+            operand: self.instruction(format!("call ptr @relar_record_new(ptr @layout_{name})")),
             small_integer: false,
         };
         self.owned(value)
@@ -4090,7 +4233,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Bool => 1,
         Type::Int => 2,
         Type::Float => 7,
-        Type::Str => 3,
+        Type::Str | Type::StrLiteral(_) => 3,
+        Type::StrEnum(_) => 10,
         Type::Bytes => 8,
         Type::Union(_) => 9,
         Type::ListInt => 4,
@@ -4400,7 +4544,45 @@ declare ptr @relar_seq_data_readonly(ptr) nounwind memory(argmem: read)
 declare void @relar_seq_set_index(ptr, i64, i64, i32)
 declare void @relar_seq_append(ptr, i64, i32)
 declare i64 @relar_seq_pop(ptr)
-declare i64 @relar_seq_len(ptr)
+declare i64 @relar_seq_len(ptr) nounwind memory(argmem: read)
+declare { i64, i64 } @relar_seq_layout() nounwind willreturn memory(none)
+@sequence_layout = internal global { i64, i64 } zeroinitializer
+define internal i32 @sequence_header(ptr %sequence) alwaysinline nounwind {
+  %offset = load i64, ptr @sequence_layout
+  %field = getelementptr inbounds i8, ptr %sequence, i64 %offset
+  %length = load i32, ptr %field, align 4
+  ret i32 %length
+}
+define internal i64 @relar_seq_len_fast(ptr %sequence) alwaysinline nounwind {
+  %length = call i32 @sequence_header(ptr %sequence)
+  %short = icmp ult i32 %length, -2
+  br i1 %short, label %cached, label %large, !prof !1
+cached:
+  %size = zext i32 %length to i64
+  %tagged = or i64 %size, 1
+  ret i64 %tagged
+large:
+  %full = call i64 @relar_seq_len(ptr %sequence)
+  ret i64 %full
+}
+define internal ptr @relar_seq_data_readonly_fast(ptr %sequence) alwaysinline nounwind {
+  %header = call i32 @sequence_header(ptr %sequence)
+  %inline = trunc i32 %header to i1
+  br i1 %inline, label %small, label %spilled
+small:
+  %offset = load i64, ptr getelementptr ({ i64, i64 }, ptr @sequence_layout, i32 0, i32 1)
+  %data = getelementptr inbounds i8, ptr %sequence, i64 %offset
+  ret ptr %data
+spilled:
+  %heap = call ptr @relar_seq_data_readonly(ptr %sequence)
+  ret ptr %heap
+}
+define internal i64 @relar_seq_borrow_index_proven_fast(ptr %sequence, i64 %index) alwaysinline nounwind {
+  %data = call ptr @relar_seq_data_readonly_fast(ptr %sequence)
+  %slot = getelementptr inbounds i64, ptr %data, i64 %index
+  %word = load i64, ptr %slot
+  ret i64 %word
+}
 declare ptr @relar_seq_repeat(ptr, i64)
 declare ptr @relar_dict_new(i32, i32)
 declare i64 @relar_dict_len(ptr)
@@ -4483,6 +4665,8 @@ declare void @relar_print_str(ptr)
 declare i64 @relar_str_len(ptr)
 declare i8 @relar_str_truthy(ptr)
 declare i8 @relar_bytes_truthy(ptr)
+declare i8 @relar_str_list_contains(ptr, ptr)
+declare void @relar_str_enum_table(ptr, i64)
 declare i8 @relar_str_equal(ptr, ptr)
 declare i64 @relar_int_parse(ptr)
 declare ptr @relar_input()
@@ -4965,7 +5149,9 @@ mod tests {
             let body = function_body(&format!(
                 "def populated(values: list[{ty}]) -> bool:\n    values = values\n    return any(value for value in values)\n"
             ));
-            let (_, pull) = body.split_once("@relar_seq_borrow_index_proven(").unwrap();
+            let (_, pull) = body
+                .split_once("@relar_seq_borrow_index_proven_fast(")
+                .unwrap();
             if let Some(retain) = retain {
                 let acquired = pull.split_once("store ").unwrap().0;
                 assert!(acquired.contains(retain), "{ty}: {acquired}");

@@ -14,11 +14,12 @@ use super::{Bytes, Int, List, Object, Str, fail, records, unions};
 pub(super) const NULLABLE: u32 = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(transparent)]
 pub(super) struct WordKind(u32);
 
 impl WordKind {
     pub(super) fn new(kind: u32) -> Self {
-        if kind & !NULLABLE > 9 {
+        if kind & !NULLABLE > 10 {
             fail("SystemError", "invalid concrete word representation");
         }
         Self(kind)
@@ -60,7 +61,7 @@ impl WordKind {
         let valid = match self.base() {
             0 => word == 0,
             1 => word <= if nullable { 2 } else { 1 },
-            2..=6 | 8 | 9 => word != 0 || nullable,
+            2..=6 | 8..=10 => word != 0 || nullable,
             7 => true,
             _ => unreachable!(),
         };
@@ -88,7 +89,7 @@ impl WordKind {
         // SAFETY: the caller supplies each handle's exact allocation kind.
         unsafe {
             match self.base() {
-                0 | 1 => {}
+                0 | 1 | 10 => {}
                 2 => {
                     if word & 1 == 0 {
                         Rc::increment_strong_count(word as *const num_bigint::BigInt);
@@ -117,7 +118,7 @@ impl WordKind {
         // SAFETY: the caller transfers the exact owned reference selected here.
         unsafe {
             match self.base() {
-                0 | 1 => {}
+                0 | 1 | 10 => {}
                 2 => drop(Int(word)),
                 3 => Rc::decrement_strong_count(word as *const Str),
                 4 => crate::relar_list_release(word as *const List),
@@ -160,7 +161,10 @@ impl Drop for OwnedWord {
 
 /// A homogeneous buffer; the descriptor is shared by all element words.
 /// Three words fit inline; spilling preserves their existing owned references.
+#[repr(C)]
 pub(super) struct Words {
+    // Twice the saturated length, plus one when the buffer lives inside the handle.
+    header: u32,
     pub(super) kind: WordKind,
     pub(super) values: SmallVec<[usize; 3]>,
 }
@@ -168,9 +172,28 @@ pub(super) struct Words {
 impl Words {
     pub(super) fn new(kind: u32) -> Self {
         Self {
+            header: 1,
             kind: WordKind::new(kind),
             values: SmallVec::new(),
         }
+    }
+
+    /// Publish a fully initialized buffer after bulk initialization by a decoder or splitter.
+    pub(super) fn into_object(mut self) -> Rc<Object> {
+        self.update_header();
+        Rc::new(Object(super::StorageCell::new(super::Storage::Sequence(
+            self,
+        ))))
+    }
+
+    /// A saturated header defers to the full-width buffer length in the runtime.
+    pub(super) fn update_header(&mut self) {
+        self.header = Self::header_for(self.values.len(), !self.values.spilled());
+    }
+
+    fn header_for(length: usize, inline: bool) -> u32 {
+        let length = length.min(i32::MAX as usize) as u32;
+        (length << 1) | u32::from(inline)
     }
 
     /// Checks the private compiler/runtime contract before transferring a value.
@@ -178,6 +201,30 @@ impl Words {
         if self.kind != WordKind::new(kind) {
             fail("SystemError", "sequence element representation changed");
         }
+    }
+}
+
+#[repr(C)]
+pub struct SequenceLayout {
+    header: usize,
+    inline_words: usize,
+}
+
+/// Offsets within a rooted sequence handle. Querying this once keeps Rust's
+/// enum and inline-buffer layout on the runtime side of the ABI.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_seq_layout() -> SequenceLayout {
+    let mut sample = Words::new(0);
+    sample.values.push(0);
+    // One non-owning word fits inline and needs no destructor.
+    let storage = ManuallyDrop::new(super::Storage::Sequence(sample));
+    let super::Storage::Sequence(words) = &*storage else {
+        unreachable!()
+    };
+    let base = std::ptr::from_ref(&*storage).addr();
+    SequenceLayout {
+        header: std::ptr::from_ref(&words.header).addr() - base,
+        inline_words: words.values.as_ptr().addr() - base,
     }
 }
 
@@ -199,6 +246,13 @@ mod tests {
     fn inline_words_fit_the_existing_object_layout() {
         assert_eq!(std::mem::size_of::<Words>(), 40);
         assert_eq!(std::mem::size_of::<Object>(), 48);
+        assert_eq!(Words::header_for(0, false), 0);
+        assert_eq!(
+            Words::header_for(i32::MAX as usize - 1, false),
+            u32::MAX - 3
+        );
+        assert_eq!(Words::header_for(i32::MAX as usize, false), u32::MAX - 1);
+        assert_eq!(Words::header_for(usize::MAX, false), u32::MAX - 1);
     }
 
     #[test]
@@ -215,9 +269,13 @@ mod tests {
             let word = Rc::as_ptr(&child) as usize;
             let sequence = Rc::from_raw(relar_seq_new(5));
             let alias = Rc::clone(&sequence);
+            let layout = relar_seq_layout();
+            let cached = Rc::as_ptr(&sequence).byte_add(layout.header).cast::<u32>();
+            assert_eq!(cached.read(), 1);
             for _ in 0..3 {
                 relar_seq_append(Rc::as_ptr(&sequence), word, 5);
             }
+            assert_eq!(cached.read(), 7);
             assert_eq!(Rc::strong_count(&child), 4);
             assert!(
                 !sequence
@@ -226,10 +284,15 @@ mod tests {
             );
             {
                 let view = relar_seq_data_readonly(Rc::as_ptr(&sequence));
+                assert_eq!(
+                    view,
+                    Rc::as_ptr(&sequence).byte_add(layout.inline_words).cast()
+                );
                 assert_eq!(std::slice::from_raw_parts(view, 3), &[word; 3]);
             }
 
             relar_seq_append(Rc::as_ptr(&alias), word, 5);
+            assert_eq!(cached.read(), 8);
             assert_eq!(Rc::strong_count(&child), 5);
             assert!(
                 sequence
@@ -246,6 +309,7 @@ mod tests {
             }
 
             let popped = Rc::from_raw(relar_seq_pop(Rc::as_ptr(&alias)) as *const Object);
+            assert_eq!(cached.read(), 6); // Popping preserves spilled storage.
             assert!(Rc::ptr_eq(&child, &popped));
             assert_eq!(Rc::strong_count(&child), 5);
             assert_eq!(

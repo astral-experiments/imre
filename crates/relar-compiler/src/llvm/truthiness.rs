@@ -41,12 +41,26 @@ impl Emitter<'_, '_> {
             }
         } else {
             match value.ty {
+                Type::StrEnum(class) => {
+                    match self.module.class_metadata[class]
+                        .enum_members
+                        .iter()
+                        .position(|(_, value)| value.is_empty())
+                    {
+                        Some(member) => self.instruction(format!(
+                            "icmp ne i64 {}, {}",
+                            value.operand,
+                            self.enum_tag(class, member)
+                        )),
+                        None => "true".to_owned(),
+                    }
+                }
                 Type::Bool => value.operand.clone(),
                 Type::Int => self.instruction(format!("icmp ne i64 {}, 1", value.operand)),
                 // Unordered-or-not-equal keeps NaN true and both signed zeros false.
                 Type::Float => self.instruction(format!("fcmp une double {}, 0.0", value.operand)),
-                Type::Str | Type::Bytes => {
-                    let family = if value.ty == Type::Str {
+                Type::Str | Type::StrLiteral(_) | Type::Bytes => {
+                    let family = if value.ty != Type::Bytes {
                         "str"
                     } else {
                         "bytes"
@@ -64,10 +78,14 @@ impl Emitter<'_, '_> {
                     ));
                     self.instruction(format!("icmp ne i8 {byte}, 0"))
                 }
-                Type::ListInt | Type::List(_) | Type::Dict(_) | Type::Set(_) => {
+                Type::List(_) => {
+                    let length = self
+                        .instruction(format!("call i32 @sequence_header(ptr {})", value.operand));
+                    self.instruction(format!("icmp ugt i32 {length}, 1"))
+                }
+                Type::ListInt | Type::Dict(_) | Type::Set(_) => {
                     let family = match value.ty {
                         Type::ListInt => "list",
-                        Type::List(_) => "seq",
                         Type::Dict(_) => "dict",
                         Type::Set(_) => "set",
                         _ => unreachable!(),

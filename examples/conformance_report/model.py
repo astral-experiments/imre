@@ -1,11 +1,50 @@
-"""Concrete records and classification rules from Ruff's conformance report.
-
-The upstream source and license are retained in ``upstream/``. String tags take
-the place of StrEnum; explicit display helpers take the place of special methods.
-"""
+"""Typed conformance data and diagnostic classification."""
 
 from dataclasses import dataclass
+from enum import StrEnum, auto
 from pathlib import Path
+from typing import Literal
+
+
+class Source(StrEnum):
+    OLD = auto()
+    NEW = auto()
+
+
+class Classification(StrEnum):
+    TRUE_POSITIVE = auto()
+    FALSE_POSITIVE = auto()
+    TRUE_NEGATIVE = auto()
+    FALSE_NEGATIVE = auto()
+
+    def into_title(self, *, verb: Literal["added", "removed", "changed"]) -> str:
+        match self:
+            case Classification.TRUE_POSITIVE:
+                return f"True positives {verb}"
+            case Classification.FALSE_POSITIVE:
+                return f"False positives {verb}"
+            case Classification.TRUE_NEGATIVE:
+                return f"True negatives {verb}"
+            case Classification.FALSE_NEGATIVE:
+                return f"False negatives {verb}"
+
+
+class Change(StrEnum):
+    ADDED = auto()
+    REMOVED = auto()
+    CHANGED = auto()
+    UNCHANGED = auto()
+
+    def into_title(self) -> str:
+        match self:
+            case Change.ADDED:
+                return "Optional Diagnostics Added"
+            case Change.REMOVED:
+                return "Optional Diagnostics Removed"
+            case Change.CHANGED:
+                return "Optional Diagnostics Changed"
+            case Change.UNCHANGED:
+                return "Optional Diagnostics Unchanged"
 
 
 @dataclass(kw_only=True, slots=True)
@@ -40,7 +79,7 @@ class TyDiagnostic:
     description: str
     severity: str
     location: Location
-    source: str
+    source: Source
 
     @property
     def severity_for_display(self) -> str:
@@ -105,14 +144,17 @@ class TestCase:
     expected: list[ExpectedError]
 
     @property
-    def change(self) -> str:
+    def change(self) -> Change:
         if self.new and not self.old:
-            return "added"
-        if self.old and not self.new:
-            return "removed"
-        if self.old and self.new and not diagnostics_are_equivalent(self.old, self.new):
-            return "changed"
-        return "unchanged"
+            return Change.ADDED
+        elif self.old and not self.new:
+            return Change.REMOVED
+        elif (
+            self.old and self.new and not diagnostics_are_equivalent(self.old, self.new)
+        ):
+            return Change.CHANGED
+        else:
+            return Change.UNCHANGED
 
     @property
     def optional(self) -> bool:
@@ -132,23 +174,34 @@ class TestCase:
             return self.expected[0].location.path
         raise ValueError(f"No diagnostics in test case {self.key}")
 
-    def diagnostics_by_source(self, source: str) -> list[TyDiagnostic]:
-        return self.old if source == "old" else self.new
+    def diagnostics_by_source(self, source: Source) -> list[TyDiagnostic]:
+        return self.old if source == Source.OLD else self.new
 
-    def classify(self, source: str) -> str:
+    def classify(self, source: Source) -> Classification:
         diagnostics = self.diagnostics_by_source(source)
+
         if diagnostics:
             if self.optional:
-                return "true_positive"
+                return Classification.TRUE_POSITIVE
             if self.expected:
-                distinct_lines = len({d.location.positions.begin.line for d in diagnostics})
+                distinct_lines = len(
+                    {d.location.positions.begin.line for d in diagnostics}
+                )
                 expected_max = len(self.expected) if self.multi else 1
                 if 1 <= distinct_lines <= expected_max:
-                    return "true_positive"
-            return "false_positive"
-        if self.expected:
-            return "true_negative" if self.optional else "false_negative"
-        return "true_negative"
+                    return Classification.TRUE_POSITIVE
+                else:
+                    return Classification.FALSE_POSITIVE
+            else:
+                return Classification.FALSE_POSITIVE
+
+        elif self.expected:
+            if self.optional:
+                return Classification.TRUE_NEGATIVE
+            return Classification.FALSE_NEGATIVE
+
+        else:
+            return Classification.TRUE_NEGATIVE
 
 
 @dataclass(kw_only=True, slots=True)
@@ -175,7 +228,7 @@ class Statistics:
 class DiagnosticEntry:
     title: str
     test_case: TestCase
-    source: str | None
+    source: Source | None
 
 
 @dataclass(kw_only=True, slots=True)
@@ -201,17 +254,19 @@ class FileStats:
         )
 
 
-def compute_stats(test_cases: list[TestCase], source: str) -> Statistics:
+def compute_stats(test_cases: list[TestCase], source: Source) -> Statistics:
     stats = Statistics()
-    for case in test_cases:
-        classification = case.classify(source)
-        if classification == "true_positive":
-            stats.true_positives += 1
-        elif classification == "false_positive":
-            stats.false_positives += 1
-        elif classification == "false_negative":
-            stats.false_negatives += 1
-        stats.total_diagnostics += len(case.diagnostics_by_source(source))
+    for tc in test_cases:
+        match tc.classify(source):
+            case Classification.TRUE_POSITIVE:
+                stats.true_positives += 1
+            case Classification.FALSE_POSITIVE:
+                stats.false_positives += 1
+            case Classification.FALSE_NEGATIVE:
+                stats.false_negatives += 1
+            case Classification.TRUE_NEGATIVE:
+                pass
+        stats.total_diagnostics += len(tc.diagnostics_by_source(source))
     return stats
 
 
@@ -268,5 +323,5 @@ def collect_file_stats(test_cases: list[TestCase], test_files: list[str]) -> lis
         path_to_cases[case.path].append(case)
     result: list[FileStats] = []
     for path, cases in path_to_cases.items():
-        result.append(FileStats(path=path, old=compute_stats(cases, "old"), new=compute_stats(cases, "new")))
+        result.append(FileStats(path=path, old=compute_stats(cases, Source.OLD), new=compute_stats(cases, Source.NEW)))
     return result

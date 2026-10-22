@@ -1,4 +1,4 @@
-"""Compare six source-bound conformance scanners and their complete reports on pinned real inputs."""
+"""Compare six source-bound conformance kernels and their complete reports on pinned real inputs."""
 
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def observations(lines: list[str], pattern) -> tuple[bytes, int, int]:
     return ("\n".join(dump) + "\n").encode(), count, checksum
 
 
-def prepare(directory: Path, captures: Path) -> dict:
+def prepare(directory: Path, captures: Path, kernel: str = "scanner") -> dict:
     provenance = json.loads((captures / "preparation.json").read_bytes())
     manifest = json.loads((captures / "manifest.json").read_bytes())
     suite = Path(provenance["suite_directory"])
@@ -72,6 +72,24 @@ def prepare(directory: Path, captures: Path) -> dict:
         assert sha(file.read_bytes()) == provenance["source_sha256"][str(file.relative_to(suite))]
     for role in ("old", "new"):
         assert sha(paths[role].read_bytes()) == provenance["captures"][role]["stdout_sha256"]
+    if kernel == "classification":
+        workload = VALIDATION["Workload"](paths["manifest"], paths["old"], paths["new"])
+        helper = runpy.run_path(str(ROOT / "benchmarks/conformance_classification_upstream.py"))
+        transcript, distribution = helper["snapshot"](VALIDATION, workload)
+        path = directory / "corpus.captures"
+        path.write_bytes(transcript)
+        count, checksum = map(int, transcript.splitlines()[-1].split())
+        fixtures = {"corpus": {"arguments": [str(path) for path in paths.values()],
+                               "capture_oracle": file_id(path), "cases": count, "checksum": checksum,
+                               "distribution": distribution}}
+    else:
+        fixtures = scanner_fixtures(directory, cases)
+    return {"revision": REVISION, "suite": str(suite), "test_files": [file_id(p) for p in cases],
+            "captures": {k: file_id(p) for k, p in paths.items()},
+            "preparation": file_id(captures / "preparation.json"), "fixtures": fixtures}
+
+
+def scanner_fixtures(directory: Path, cases: list[Path]) -> dict:
     lines = [line for file in cases for line in file.read_text(encoding="utf-8").splitlines()]
     rng = random.Random(20261022)
     space = [chr(i) for i in range(sys.maxunicode + 1) if chr(i).isspace() and chr(i) != "\r"]
@@ -93,9 +111,7 @@ def prepare(directory: Path, captures: Path) -> dict:
         dump.write_bytes(stdout)
         fixtures[name] = {"input": file_id(path), "capture_oracle": file_id(dump),
                           "lines": len(values), "matches": matches, "checksum": checksum}
-    return {"revision": REVISION, "suite": str(suite), "test_files": [file_id(p) for p in cases],
-            "captures": {k: file_id(p) for k, p in paths.items()},
-            "preparation": file_id(captures / "preparation.json"), "fixtures": fixtures}
+    return fixtures
 
 
 def main() -> None:
@@ -107,7 +123,8 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cpu", type=int, required=True)
     parser.add_argument("--samples", type=int, default=12)
-    parser.add_argument("--scan-rounds", type=int, default=64)
+    parser.add_argument("--kernel", choices=("scanner", "classification"), default="scanner")
+    parser.add_argument("--scan-rounds", "--kernel-rounds", type=int, default=64)
     parser.add_argument("--report-rounds", type=int, default=4)
     parser.add_argument("--report-panels", nargs="+", choices=PANELS, default=PANELS)
     parser.add_argument("--pilot", action="store_true")
@@ -124,7 +141,9 @@ def main() -> None:
         assert file_id(Path(value["path"])) == value
     affinity = sorted(os.sched_getaffinity(0))
     os.sched_setaffinity(0, {args.cpu})
-    inputs = prepare(directory, args.captures.resolve())
+    kernel = args.kernel
+    entry = "classify" if kernel == "classification" else "scan"
+    inputs = prepare(directory, args.captures.resolve(), kernel)
     panels, full, reports = {}, {}, {}
     for panel in args.report_panels:
         location = args.captures.resolve().parents[1] / panel / "captures"
@@ -148,14 +167,14 @@ def main() -> None:
     env["PYTHONPATH"] = ""
     (directory / "home").mkdir()
     by_case, plan = {}, orders()
-    for name, rounds in (("scanner-preload", 0), ("scanner", args.scan_rounds)):
-        by_case[name] = {"executable": "scan", "rounds": rounds, "control": rounds == 0}
+    for name, rounds in ((kernel + "-preload", 0), (kernel, args.scan_rounds)):
+        by_case[name] = {"executable": entry, "rounds": rounds, "control": rounds == 0}
     for panel in args.report_panels:
         for name, executable, rounds in (("complete-report", "report", 1), ("report-preload", "compute", 0),
                                          ("repeated-report", "compute", args.report_rounds), ("live-checkout", "live", 1)):
             by_case[panel + "/" + name] = {"executable": executable, "rounds": rounds,
                                             "control": rounds == 0, "panel": panel}
-    record = {"revision": cfg["revision"], "baseline_revision": cfg["baseline_revision"],
+    record = {"kernel": kernel, "revision": cfg["revision"], "baseline_revision": cfg["baseline_revision"],
               "created_utc": datetime.now(timezone.utc).isoformat(), "completed": False,
               "config": cfg, "config_file": file_id(args.config.resolve()), "runner": file_id(Path(__file__).resolve()),
               "inputs": inputs, "panels": panels, "host": platform.uname()._asdict(),
@@ -177,7 +196,8 @@ def main() -> None:
         target = Path(fixture["capture_oracle"]["path"]).read_bytes()
         record["capture_validation"][key] = {}
         for engine, cmds in cfg["engines"].items():
-            _, stdout = run([*cmds["scan"], fixture["input"]["path"], "1", "dump"])
+            arguments = fixture["arguments"] if kernel == "classification" else [fixture["input"]["path"]]
+            _, stdout = run([*cmds[entry], *arguments, "1", "dump"])
             assert stdout == target, (key, engine, "capture mismatch")
             record["capture_validation"][key][engine] = sha(stdout)
     for name, case in by_case.items():
@@ -186,10 +206,14 @@ def main() -> None:
             operation = case["executable"]
             rounds = case["rounds"]
             cmd = cfg["engines"][engine][operation]
-            if operation == "scan":
+            if operation == entry:
                 fixture = inputs["fixtures"]["corpus"]
-                cmd = [*cmd, fixture["input"]["path"], str(rounds), "checksum"]
-                expected = f"{fixture['matches']*rounds} {fixture['checksum']*rounds}\n".encode()
+                if kernel == "classification":
+                    arguments, count = fixture["arguments"], fixture["cases"]
+                else:
+                    arguments, count = [fixture["input"]["path"]], fixture["matches"] * rounds
+                cmd = [*cmd, *arguments, str(rounds), "checksum"]
+                expected = f"{count} {fixture['checksum']*rounds}\n".encode()
             else:
                 panel = case["panel"]
                 report = reports[panel]
@@ -204,8 +228,8 @@ def main() -> None:
                 expected = f"{len(report)*rounds}\n".encode() if operation == "compute" else b""
             ns, stdout = run(cmd)
             assert stdout == expected, (name, engine, stdout[:120], expected[:120])
-            observed = stdout if operation == "scan" else output.read_bytes()
-            if operation != "scan":
+            observed = stdout if operation == entry else output.read_bytes()
+            if operation != entry:
                 assert observed == (b"" if rounds == 0 else report.encode()), (name, engine, "report bytes differ")
             return {"engine": engine, "elapsed_ns": ns, "stdout_sha256": sha(stdout), "output_sha256": sha(observed)}
         case["warmup"] = [sample(e) for e in plan[0][::-1]]
@@ -216,7 +240,7 @@ def main() -> None:
         med = {e: statistics.median(s["elapsed_ns"] for row in case["runs"] for s in row if s["engine"] == e) for e in ENGINES}
         case.update(medians_ns=med, after_over_rust=med["after"]/med["rust"], after_over_before=med["after"]/med["before"])
         print(name, {e: round(x/1e6, 2) for e, x in med.items()}, round(case["after_over_rust"], 4), flush=True)
-    pairs = [("scanner", "scanner-preload")] + [
+    pairs = [(kernel, kernel + "-preload")] + [
         (panel + "/repeated-report", panel + "/report-preload") for panel in args.report_panels
     ]
     record["per_round_ns"] = {

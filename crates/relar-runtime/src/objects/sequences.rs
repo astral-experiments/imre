@@ -371,9 +371,7 @@ pub unsafe extern "C" fn relar_seq_slice(
         })
     };
     finish(
-        result.map(|values| {
-            Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(values)))))
-        }),
+        result.map(|values| Rc::into_raw(values.into_object())),
         std::ptr::null(),
     )
 }

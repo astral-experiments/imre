@@ -58,3 +58,7 @@ if optional:
     print(optional + 1.0)
 optional = None
 print(bool(optional))
+flag: bool | None = False
+print(bool(flag))
+flag = True
+print(bool(flag))

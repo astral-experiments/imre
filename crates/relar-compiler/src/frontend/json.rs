@@ -74,7 +74,7 @@ impl Checker<'_> {
                 return Err(invalid());
             }
             if let Some(class) = self.class_reference(expression) {
-                return Ok(Type::Class(class));
+                return Ok(self.classes.declarations.instance(class));
             }
         }
         match expression {
@@ -288,7 +288,8 @@ pub(super) fn schemas(
             });
             continue;
         }
-        let initializer = &declaration.methods[declaration.initializer];
+        let initializer =
+            &declaration.methods[declaration.initializer.expect("validated record schema")];
         let parameters = &classes.methods[class]["__init__"].params[1..];
         if parameters.len() != declaration.fields.len()
             || parameters.iter().any(|parameter| {

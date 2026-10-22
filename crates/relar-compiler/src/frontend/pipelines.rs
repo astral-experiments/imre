@@ -31,7 +31,7 @@ pub(super) fn is_pipeline_expression(expression: &ast::Expr) -> bool {
                 if matches!(attribute.attr.as_str(), "iterdir" | "glob")))
 }
 
-fn integer(value: i64) -> Expr {
+pub(super) fn integer(value: i64) -> Expr {
     Expr {
         ty: Type::Int,
         kind: ExprKind::Int(value.to_string()),
@@ -52,7 +52,7 @@ fn binary(operation: Binary, left: Expr, right: Expr) -> Expr {
     }
 }
 
-fn compare(operation: Compare, left: Expr, right: Expr) -> Expr {
+pub(super) fn compare(operation: Compare, left: Expr, right: Expr) -> Expr {
     Expr {
         ty: Type::Bool,
         kind: ExprKind::Compare(vec![left, right], vec![operation]),

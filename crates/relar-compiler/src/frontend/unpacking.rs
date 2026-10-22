@@ -93,7 +93,7 @@ impl Checker<'_> {
             let value = if let Some(expected) = self.target_context(target) {
                 self.expr_expected(&assignment.value, expected)?
             } else {
-                self.expr(&assignment.value)?
+                self.typed_expr(&assignment.value)?
             };
             return Ok(vec![self.assign_value(target, value)?]);
         }

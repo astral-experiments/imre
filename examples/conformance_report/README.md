@@ -97,12 +97,15 @@ render reports for the measured program. Test paths are the already resolved
 absolute identities produced by preparation. Inputs must use UTF-8 and complete
 GitLab diagnostic records with integer positions; unknown JSON fields are ignored.
 
-String tags replace enums, ordinary display helpers replace `__str__`, and
-concrete records replace dynamic JSON dictionaries. The reporter uses Ruff’s
-original verbose regex declaration verbatim. Relar runs it with Rust’s regex
-engine and exposes the same named captures and character offsets as CPython. Assertions for no annotations and
-no new true positives remain errors; the latter omits the upstream diagnostic
-record debug dump. The adapter suppresses the upstream output-file confirmation
+The reporter compiles Ruff’s complete `Source`, `Classification`, and `Change`
+enums and its `compute_stats` function unchanged. The same applies to
+`TestCase.classify`, `TestCase.change`, and `TestCase.diagnostics_by_source`.
+Enum methods take Ruff’s original string-valued `Literal` arguments. Other
+parts of the port use display helpers and concrete records for decoded JSON.
+Ruff’s original verbose regex runs with Rust’s regex engine and exposes the
+same named captures and character offsets as CPython. Assertions for no
+annotations and no new true positives remain errors. The latter omits the
+upstream diagnostic record debug dump. The adapter suppresses the upstream output-file confirmation
 and duplicated report on stderr.
 
 `original.py` runs the unchanged upstream regex, models and renderers with the
@@ -147,6 +150,10 @@ and reproducible evidence for CPython, Relar, Codon, and Rust.
 The [fixed-regex comparison](../../benchmarks/results/2026-10-22-fixed-regex.md)
 times Ruff’s original pattern against the previous scanner on the same checkout
 and verifies the text and offsets of each captured annotation.
+The [string-enum comparison](../../benchmarks/results/2026-10-22-string-enums.md)
+measures Ruff’s original `compute_stats` over 1,269 preloaded test groups. It
+also times complete and repeated reports and includes Rust controls that
+specialize the common one- and two-diagnostic cases.
 
 `benchmarks/conformance_validate.py` compares full reports and filesystem effects
 against the unchanged upstream implementation. Its seeded checks exercise the
