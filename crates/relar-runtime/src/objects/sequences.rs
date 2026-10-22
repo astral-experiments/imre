@@ -208,7 +208,27 @@ pub unsafe extern "C" fn relar_str_slice(
         // SAFETY: a full slice may share immutable storage; acquire its new owner.
         return Rc::into_raw(unsafe { acquire_rc::<Str>(value as usize) });
     }
-    let result = if slice.reverse && slice.len() != 0 {
+    let result = if !slice.reverse && slice.stride == 1 {
+        let selected = if slice.len() == 0 {
+            ""
+        } else if length == text.len() {
+            // Equal byte and code-point counts prove that every byte is ASCII.
+            &text[slice.at..slice.at + slice.len()]
+        } else {
+            let mut boundaries = text
+                .char_indices()
+                .map(|(offset, _)| offset)
+                .chain(std::iter::once(text.len()));
+            let start = boundaries.nth(slice.at).expect("normalized slice start");
+            let end = boundaries
+                .nth(slice.len() - 1)
+                .expect("normalized slice end");
+            &text[start..end]
+        };
+        // A contiguous slice needs one copy, without decoding and appending
+        // every selected character again. The result owns its UTF-8 bytes.
+        Str::new(selected)
+    } else if slice.reverse && slice.len() != 0 {
         copy_string_slice(
             text.chars().rev(),
             length - 1 - slice.at,

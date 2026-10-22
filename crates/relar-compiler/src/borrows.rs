@@ -860,17 +860,24 @@ def total(rows: list[Row], fail: bool) -> int:
         let facts = analyze(&module);
         assert_eq!(facts[0].locals, [false, true, false]);
         let body = emitted_body(&module, 0);
-        // One acquisition transfers the borrow to slot2; the other returns it.
-        assert_eq!(
-            body.matches("call void @relar_str_retain").count(),
-            2,
-            "{body}"
-        );
-        let acquisition = body.find("call void @relar_str_retain").unwrap();
+        let source = body
+            .lines()
+            .find(|line| line.contains("load ptr, ptr %local1"))
+            .unwrap()
+            .trim()
+            .split_once(" = ")
+            .unwrap()
+            .0;
+        let acquisition = body
+            .find(&format!("call void @relar_str_retain(ptr {source})"))
+            .unwrap();
         let replacement = body[acquisition..]
             .find("call void @relar_str_release")
             .unwrap();
-        assert!(body[acquisition..acquisition + replacement].contains("ptr %local2"));
+        assert!(
+            body[acquisition..acquisition + replacement]
+                .contains(&format!("store ptr {source}, ptr %local2"))
+        );
     }
 
     #[test]

@@ -85,7 +85,7 @@ pub(crate) struct Module {
     pub class_fields: Vec<Vec<Type>>,
     /// Static names and generated value behavior; instance layouts stay unchanged.
     pub class_metadata: Vec<ClassMetadata>,
-    /// Checked structural constructors used by the explicit typed JSON boundary.
+    /// Concrete JSON field schemas; decoding additionally checks constructors.
     pub json_records: Vec<JsonRecordSchema>,
     /// Fixed module bindings own their exact storage until process cleanup.
     pub globals: Vec<Type>,
@@ -304,6 +304,7 @@ pub(crate) enum Builtin {
     SortByKeys,
     StringJoin,
     StringReplace,
+    Text(TextOperation),
     FloatFormat {
         precision: u32,
         percent: bool,
@@ -380,8 +381,10 @@ pub(crate) enum Builtin {
     SplitLines,
     RStrip,
     SysArgv,
-    /// Decodes one string into the checked structural schema of this class.
-    JsonDecode(usize),
+    /// Decodes one string into a checked record, list, or string-key dictionary.
+    JsonDecode(Type),
+    /// Encodes rooted concrete storage using immutable, compiler-emitted metadata.
+    JsonEncode(Type),
     Path(PathOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
@@ -420,6 +423,20 @@ pub(crate) enum Builtin {
     ExceptionWithCause,
     ExceptionCause,
     ExceptionSuppressContext,
+}
+
+/// Closed string operations preserve exact argument and storage types.
+#[derive(Clone, Copy)]
+pub(crate) enum TextOperation {
+    /// True splits from the right.
+    Split(bool),
+    /// 0 strips both ends, 1 the leading end, and 2 the trailing end.
+    Strip(u32),
+    StartsWith,
+    EndsWith,
+    Find,
+    Partition,
+    Unquote,
 }
 
 /// Native path operations keep their exact result types in the checked IR.

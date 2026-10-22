@@ -27,6 +27,7 @@ mod pipelines;
 mod processes;
 mod records;
 mod stdlib;
+mod text;
 mod truthiness;
 mod unions;
 mod unpacking;
@@ -799,11 +800,11 @@ fn annotation_at(
             ast::Expr::Name(name) if name.id == "list" => Ok(types.list(nested(&value.slice)?)),
             ast::Expr::Name(name) if name.id == "set" => {
                 let element = nested(&value.slice)?;
-                if !matches!(element, Type::Int | Type::Str | Type::Bytes) {
+                if !types.hashable_key(element) {
                     return Err(error(
                         source,
                         &*value.slice,
-                        "set elements must be exactly int, str, or bytes",
+                        "set elements must be int, str, bytes, or immutable scalar tuples",
                     ));
                 }
                 Ok(types.set(element))
@@ -824,11 +825,11 @@ fn annotation_at(
                     ));
                 };
                 let key_type = nested(key)?;
-                if !matches!(key_type, Type::Int | Type::Str | Type::Bytes) {
+                if !types.hashable_key(key_type) {
                     return Err(error(
                         source,
                         key,
-                        "dictionary keys must be exactly int, str, or bytes",
+                        "dictionary keys must be int, str, bytes, or immutable scalar tuples",
                     ));
                 }
                 Ok(types.dict(key_type, nested(value)?))
@@ -1507,11 +1508,11 @@ impl<'a> Checker<'a> {
                 )
             } else {
                 let key_value = self.expr(key)?;
-                if !matches!(key_value.ty, Type::Int | Type::Str | Type::Bytes) {
+                if !self.types.hashable_key(key_value.ty) {
                     return Err(error(
                         self.source,
                         key,
-                        "dictionary keys must be exactly int, str, or bytes",
+                        "dictionary keys must be int, str, bytes, or immutable scalar tuples",
                     ));
                 }
                 let value = self.expr(&item.value)?;
@@ -1554,11 +1555,11 @@ impl<'a> Checker<'a> {
             } else {
                 self.expr(value)?
             };
-            if !matches!(checked.ty, Type::Int | Type::Str | Type::Bytes) {
+            if !self.types.hashable_key(checked.ty) {
                 return Err(error(
                     self.source,
                     value,
-                    "set elements must be exactly int, str, or bytes",
+                    "set elements must be int, str, bytes, or immutable scalar tuples",
                 ));
             }
             element = Some(checked.ty);
@@ -1637,7 +1638,26 @@ impl<'a> Checker<'a> {
 
     /// Keeps the original container rooted and owns each item before user code runs.
     fn iteration(&mut self, loop_: &ast::StmtFor) -> Result<(Vec<Statement>, bool), String> {
-        let input = self.iteration_input(&loop_.iter)?;
+        let mut input = self.iteration_input(&loop_.iter)?;
+        if let Iteration::Container {
+            iterable,
+            items: false,
+            start: None,
+        } = &mut input
+            && let ExprKind::List(values) = &mut iterable.kind
+            && (1..=8).contains(&values.len())
+            && values
+                .iter()
+                .all(|value| matches!(value.kind, ExprKind::Str(_)))
+        {
+            // This fresh, unaliased list has no observable mutations or element
+            // effects. Prepared tuple iteration lets scalar replacement remove
+            // the container while retaining ordinary loop ownership and exits.
+            iterable.ty = self.types.tuple(vec![Type::Str; values.len()]);
+            iterable.kind = ExprKind::Tuple(std::mem::take(values));
+            input =
+                Iteration::Prepared(self.prepare_iteration(input, loop_.iter.as_ref(), false)?);
+        }
         self.invalidate_loop_facts(&loop_.body);
         for name in narrowing::expression_assignments(&loop_.target) {
             if let Some(slot) = self.names.get(&name) {
@@ -2912,13 +2932,16 @@ impl<'a> Checker<'a> {
                     if !numeric && !records {
                         self.expect(ty, right, expression)?;
                     }
+                    let ordered = numeric
+                        || ty == Type::Bytes
+                        || matches!(ty, Type::Tuple(_)) && self.types.ordered_key(ty);
                     let op = match op {
                         ast::CmpOp::Eq => Compare::Equal,
                         ast::CmpOp::NotEq => Compare::NotEqual,
-                        ast::CmpOp::Lt if numeric || ty == Type::Bytes => Compare::Less,
-                        ast::CmpOp::LtE if numeric || ty == Type::Bytes => Compare::LessEqual,
-                        ast::CmpOp::Gt if numeric || ty == Type::Bytes => Compare::Greater,
-                        ast::CmpOp::GtE if numeric || ty == Type::Bytes => Compare::GreaterEqual,
+                        ast::CmpOp::Lt if ordered => Compare::Less,
+                        ast::CmpOp::LtE if ordered => Compare::LessEqual,
+                        ast::CmpOp::Gt if ordered => Compare::Greater,
+                        ast::CmpOp::GtE if ordered => Compare::GreaterEqual,
                         _ => {
                             return Err(error(
                                 self.source,
@@ -2933,10 +2956,10 @@ impl<'a> Checker<'a> {
                             | Type::List(_)
                             | Type::Dict(_)
                             | Type::Set(_)
-                            | Type::Tuple(_)
                             | Type::Optional(_)
                             | Type::Union(_)
-                    ) {
+                    ) || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
+                    {
                         return Err(error(
                             self.source,
                             expression,
@@ -3151,6 +3174,12 @@ impl<'a> Checker<'a> {
         calls::reject_unpacking(call, self.source)?;
         if matches!(
             self.resolve(&call.func),
+            Some(Binding::Intrinsic(Intrinsic::Unquote))
+        ) {
+            return self.unquote_call(call);
+        }
+        if matches!(
+            self.resolve(&call.func),
             Some(Binding::Intrinsic(Intrinsic::TemporaryDirectory))
         ) {
             return Err(error(
@@ -3187,6 +3216,12 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::JsonDecode))
         ) {
             return self.json_decode(call);
+        }
+        if matches!(
+            self.resolve(&call.func),
+            Some(Binding::Intrinsic(Intrinsic::JsonEncode))
+        ) {
+            return self.json_encode(call);
         }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "open") {
             return self.open(call);
@@ -3268,6 +3303,10 @@ impl<'a> Checker<'a> {
                 match attribute.attr.as_str() {
                     "join" => return self.join_call(receiver, call),
                     "replace" => return self.replace_call(receiver, call),
+                    "split" | "rsplit" | "strip" | "lstrip" | "rstrip" | "startswith"
+                    | "endswith" | "find" | "partition" => {
+                        return self.text_method(receiver, attribute.attr.as_str(), call);
+                    }
                     _ => {}
                 }
             }
@@ -3325,32 +3364,12 @@ impl<'a> Checker<'a> {
                 }
             }
             if receiver.ty == Type::Str
-                && attribute.attr.as_str() == "rstrip"
-                && call.arguments.args.len() <= 1
-            {
-                let mut args = vec![receiver];
-                if let Some(chars) = call.arguments.args.first() {
-                    args.push(self.expr_expected(chars, self.types.optional(Type::Str))?);
-                }
-                return Ok(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::RStrip, args),
-                });
-            }
-            if receiver.ty == Type::Str
-                && matches!(attribute.attr.as_str(), "split" | "splitlines")
+                && attribute.attr.as_str() == "splitlines"
                 && call.arguments.args.is_empty()
             {
                 return Ok(Expr {
                     ty: self.types.list(Type::Str),
-                    kind: ExprKind::Builtin(
-                        if attribute.attr.as_str() == "split" {
-                            Builtin::Split
-                        } else {
-                            Builtin::SplitLines
-                        },
-                        vec![receiver],
-                    ),
+                    kind: ExprKind::Builtin(Builtin::SplitLines, vec![receiver]),
                 });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
@@ -3744,5 +3763,44 @@ impl<'a> Checker<'a> {
             ty: Type::TextIO,
             kind: ExprKind::Builtin(Builtin::TextOpen(mode), vec![self.path_argument(path)?]),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn literal_string_comprehensions_keep_inline_iteration() {
+        crate::compile(
+            "values = [outer + inner for outer in [\"a\", \"b\"] for inner in [\"1\", \"2\"]]\nprint(len(values))\n",
+            &crate::CompileOptions::default(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn small_literal_string_loops_elide_container_allocations() {
+        for length in [1, 2, 8] {
+            let values = vec!["\"value\""; length].join(", ");
+            let source = format!(
+                "def measure() -> int:\n    count = 0\n    for value in [{values}]:\n        count += len(value)\n    return count\nprint(measure())\n"
+            );
+            let llvm = crate::compile(&source, &crate::CompileOptions::default()).unwrap();
+            assert!(!llvm.contains("call ptr @relar_seq_new("));
+            assert!(!llvm.contains("call void @relar_seq_append("));
+            assert!(!llvm.contains("call ptr @relar_record_new("));
+        }
+    }
+
+    #[test]
+    fn other_string_list_loops_keep_their_containers() {
+        for source in [
+            "values = [\"a\", \"b\"]\nfor value in values:\n    print(value)\n",
+            "for value in (values := [\"a\", \"b\"]):\n    print(value)\n",
+            "suffix = \"b\"\nfor value in [\"a\", suffix]:\n    print(value)\n",
+            "for value in [\"1\", \"2\", \"3\", \"4\", \"5\", \"6\", \"7\", \"8\", \"9\"]:\n    print(value)\n",
+        ] {
+            let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+            assert!(llvm.contains("call ptr @relar_seq_new("), "{source}");
+        }
     }
 }

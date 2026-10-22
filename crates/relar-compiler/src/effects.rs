@@ -222,6 +222,10 @@ fn binary(op: Binary) -> bool {
 /// separately, including eager defaults on otherwise infallible dictionary lookups.
 fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
     match builtin {
+        Builtin::Text(operation) => matches!(
+            operation,
+            crate::ir::TextOperation::Split(_) | crate::ir::TextOperation::Partition
+        ),
         Builtin::Path(operation) => matches!(
             operation,
             crate::ir::PathOperation::ReadText
@@ -237,6 +241,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         ),
         Builtin::Process(_)
         | Builtin::JsonDecode(_)
+        | Builtin::JsonEncode(_)
         | Builtin::Print
         | Builtin::Input
         | Builtin::ListGet

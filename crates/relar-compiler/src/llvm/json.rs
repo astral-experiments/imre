@@ -2,12 +2,22 @@
 
 use std::collections::HashSet;
 
-use crate::ir::JsonDefault;
+use crate::ir::{self, JsonDefault};
 
 use super::*;
 
 pub(super) fn schemas(module: &Module) -> String {
-    if module.json_records.is_empty() {
+    let mut roots = Vec::new();
+    for function in module.functions.iter().chain([&module.entry]) {
+        ir::walk_expressions(&function.body, &mut |value| {
+            if let ExprKind::Builtin(Builtin::JsonDecode(ty) | Builtin::JsonEncode(ty), _) =
+                value.kind
+            {
+                roots.push(ty);
+            }
+        });
+    }
+    if roots.is_empty() {
         return String::new();
     }
     let mut builder = Schemas {
@@ -18,10 +28,26 @@ pub(super) fn schemas(module: &Module) -> String {
              %json_field = type { ptr, i64, ptr, i32, ptr, i64 }\n",
         ),
     };
-    for record in &module.json_records {
-        builder.schema(Type::Class(record.class));
+    for ty in roots {
+        builder.schema(ty);
     }
     builder.output
+}
+
+pub(super) fn schema_name(ty: Type) -> String {
+    match ty {
+        Type::Int => "json_int".to_owned(),
+        Type::Str => "json_str".to_owned(),
+        Type::Bool => "json_bool".to_owned(),
+        Type::Float => "json_float".to_owned(),
+        Type::None => "json_none".to_owned(),
+        Type::Class(id) => format!("json_class_{id}"),
+        Type::ListInt => "json_list_int".to_owned(),
+        Type::List(id) => format!("json_list_{id}"),
+        Type::Dict(id) => format!("json_dict_{id}"),
+        Type::Optional(id) => format!("json_optional_{id}"),
+        _ => unreachable!("JSON schemas contain only validated concrete types"),
+    }
 }
 
 struct Schemas<'a> {
@@ -45,18 +71,7 @@ impl Schemas<'_> {
     }
 
     fn schema(&mut self, ty: Type) -> String {
-        let name = match ty {
-            Type::Int => "json_int".to_owned(),
-            Type::Str => "json_str".to_owned(),
-            Type::Bool => "json_bool".to_owned(),
-            Type::Float => "json_float".to_owned(),
-            Type::None => "json_none".to_owned(),
-            Type::Class(id) => format!("json_class_{id}"),
-            Type::ListInt => "json_list_int".to_owned(),
-            Type::List(id) => format!("json_list_{id}"),
-            Type::Optional(id) => format!("json_optional_{id}"),
-            _ => unreachable!("JSON schemas contain only validated field types"),
-        };
+        let name = schema_name(ty);
         if !self.seen.insert(ty) {
             return name;
         }
@@ -73,6 +88,11 @@ impl Schemas<'_> {
             Type::Optional(_) => {
                 let child = self.schema(self.module.types.payload(ty).unwrap());
                 (8, Some(child), None, 0, None)
+            }
+            Type::Dict(_) => {
+                let (_, value) = self.module.types.mapping(ty).unwrap();
+                let child = self.schema(value);
+                (9, Some(child), None, 0, None)
             }
             Type::Class(class) => {
                 let record = self

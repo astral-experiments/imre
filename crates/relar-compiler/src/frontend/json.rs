@@ -1,32 +1,201 @@
-//! Extracts JSON schemas only from constructors proved to perform structural writes.
+//! Checks concrete JSON shapes and proves constructors used during decoding.
 
 use super::*;
 use crate::ir::{JsonDefault, JsonField, JsonRecordSchema};
 
 impl Checker<'_> {
-    /// The schema argument names a source class; no runtime type object is created.
+    /// The schema is a static type expression; no runtime type object is created.
     pub(super) fn json_decode(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         let [text, schema] = call.arguments.args.as_ref() else {
             return Err(error(
                 self.source,
                 call,
-                "decode expects text and one record class",
+                "decode expects text and one record, list, or dictionary schema",
             ));
         };
-        let class = self.class_reference(schema).ok_or_else(|| {
-            error(
+        let ty = self.json_schema(schema)?;
+        if !matches!(
+            ty,
+            Type::Class(_) | Type::ListInt | Type::List(_) | Type::Dict(_)
+        ) {
+            return Err(error(
                 self.source,
                 schema,
-                "decode schema must name a fixed record class",
-            )
-        })?;
+                "decode schema must be a fixed record, list, or string-key dictionary",
+            ));
+        }
+        check_type(ty, self.types, &mut Vec::new())
+            .map_err(|message| error(self.source, schema, message))?;
         Ok(Expr {
-            ty: Type::Class(class),
+            ty,
             kind: ExprKind::Builtin(
-                Builtin::JsonDecode(class),
+                Builtin::JsonDecode(ty),
                 vec![self.expr_expected(text, Type::Str)?],
             ),
+        })
+    }
+
+    /// Runtime schema expressions cannot use quoted annotations or resolve a
+    /// namespace through a local value. Erased class receivers still name their
+    /// exact owner where the type checker permits that expression.
+    fn json_schema(&self, expression: &ast::Expr) -> Result<Type, String> {
+        let invalid = || {
+            error(
+                self.source,
+                expression,
+                "JSON schemas require unshadowed static type expressions",
+            )
+        };
+        if matches!(expression, ast::Expr::Name(_) | ast::Expr::Attribute(_)) {
+            if !self.static_schema_name(expression) {
+                return Err(invalid());
+            }
+            if let Some(class) = self.class_reference(expression) {
+                return Ok(Type::Class(class));
+            }
+        }
+        match expression {
+            ast::Expr::Name(name) if self.resolve(expression).is_none() => match name.id.as_str() {
+                "int" => Ok(Type::Int),
+                "float" => Ok(Type::Float),
+                "bool" => Ok(Type::Bool),
+                "str" => Ok(Type::Str),
+                _ => Err(invalid()),
+            },
+            ast::Expr::NoneLiteral(_) => Ok(Type::None),
+            ast::Expr::Subscript(value)
+                if self.static_schema_name(&value.value)
+                    && self.class_reference(&value.value).is_none() =>
+            {
+                match &*value.value {
+                    ast::Expr::Name(name)
+                        if name.id == "list" && self.resolve(&value.value).is_none() =>
+                    {
+                        Ok(self.types.list(self.json_schema(&value.slice)?))
+                    }
+                    ast::Expr::Name(name)
+                        if name.id == "dict" && self.resolve(&value.value).is_none() =>
+                    {
+                        let ast::Expr::Tuple(arguments) = &*value.slice else {
+                            return Err(invalid());
+                        };
+                        let [key, value] = arguments.elts.as_slice() else {
+                            return Err(invalid());
+                        };
+                        Ok(self
+                            .types
+                            .dict(self.json_schema(key)?, self.json_schema(value)?))
+                    }
+                    _ if matches!(
+                        self.resolve(&value.value),
+                        Some(Binding::Intrinsic(Intrinsic::Union))
+                    ) =>
+                    {
+                        let members = if let ast::Expr::Tuple(arguments) = &*value.slice {
+                            arguments
+                                .elts
+                                .iter()
+                                .map(|value| self.json_schema(value))
+                                .collect::<Result<Vec<_>, _>>()?
+                        } else {
+                            vec![self.json_schema(&value.slice)?]
+                        };
+                        self.types.union(&members).ok_or_else(invalid)
+                    }
+                    _ => Err(invalid()),
+                }
+            }
+            ast::Expr::BinOp(union) if union.op == ast::Operator::BitOr => {
+                let left = self.json_schema(&union.left)?;
+                let right = self.json_schema(&union.right)?;
+                if left == Type::None && right == Type::None {
+                    return Err(invalid());
+                }
+                self.types.union(&[left, right]).ok_or_else(invalid)
+            }
+            _ => Err(invalid()),
+        }
+    }
+
+    /// Checks the lexical root before resolving a static namespace path.
+    fn static_schema_name(&self, expression: &ast::Expr) -> bool {
+        let mut root = expression;
+        while let ast::Expr::Attribute(attribute) = root {
+            root = &attribute.value;
+        }
+        matches!(root, ast::Expr::Name(name)
+            if !self.names.contains_key(name.id.as_str())
+                && !self.comprehension_targets.contains(name.id.as_str()))
+    }
+
+    /// Keep source keyword order while passing a fixed native encoding ABI.
+    pub(super) fn json_encode(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let [source] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "encode expects one positional value",
+            ));
+        };
+        let mut names = HashSet::new();
+        for keyword in &call.arguments.keywords {
+            let name = keyword.arg.as_ref().map(|name| name.as_str());
+            if !matches!(name, Some("indent" | "ensure_ascii")) || !names.insert(name) {
+                return Err(error(
+                    self.source,
+                    keyword,
+                    "encode accepts indent and ensure_ascii once each",
+                ));
+            }
+        }
+        let source = self.expr(source)?;
+        let schema = source.ty;
+        check_type(schema, self.types, &mut Vec::new())
+            .map_err(|message| error(self.source, call, message))?;
+        let slot = self.hidden(schema);
+        let mut body = vec![Statement::Assign(slot, source)];
+        let mut clear = vec![slot];
+        let optional_int = self.types.optional(Type::Int);
+        let mut indent = Expr {
+            ty: optional_int,
+            kind: ExprKind::Absent(Box::new(Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            })),
+        };
+        let mut ensure_ascii = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Bool(true),
+        };
+        for keyword in &call.arguments.keywords {
+            let is_indent = keyword.arg.as_ref().unwrap() == "indent";
+            let value = self.expr_expected(
+                &keyword.value,
+                if is_indent { optional_int } else { Type::Bool },
+            )?;
+            let slot = self.hidden(value.ty);
+            body.push(Statement::Assign(slot, value));
+            clear.push(slot);
+            if is_indent {
+                indent = self.local(slot);
+            } else {
+                ensure_ascii = self.local(slot);
+            }
+        }
+        Ok(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(
+                        Builtin::JsonEncode(schema),
+                        vec![self.local(slot), indent, ensure_ascii],
+                    ),
+                }),
+                clear,
+            },
         })
     }
 }
@@ -39,22 +208,62 @@ pub(super) fn schemas(
     functions: &[ir::Function],
     entry: &ir::Function,
 ) -> Result<Vec<JsonRecordSchema>, String> {
-    let mut pending = Vec::new();
+    let mut decoded = Vec::new();
+    let mut encoded = Vec::new();
     for function in functions.iter().chain([entry]) {
-        ir::walk_expressions(&function.body, &mut |value| {
-            if let ExprKind::Builtin(Builtin::JsonDecode(class), _) = value.kind {
-                pending.push(class);
-            }
+        ir::walk_expressions(&function.body, &mut |value| match value.kind {
+            ExprKind::Builtin(Builtin::JsonDecode(ty), _) => decoded.push(ty),
+            ExprKind::Builtin(Builtin::JsonEncode(ty), _) => encoded.push(ty),
+            _ => {}
         });
+    }
+    let mut decode_pending = Vec::new();
+    let mut encode_pending = Vec::new();
+    for (roots, pending) in [
+        (&decoded, &mut decode_pending),
+        (&encoded, &mut encode_pending),
+    ] {
+        for &ty in roots {
+            check_type(ty, types, pending).map_err(str::to_owned)?;
+        }
     }
     let mut visited = HashSet::new();
     let mut schemas = Vec::new();
-    while let Some(class) = pending.pop() {
+    // Finish all decoding roots first: encoding alone never needs constructor
+    // restrictions, but a type used in both directions must satisfy decoding.
+    while let Some((class, decoding)) = decode_pending
+        .pop()
+        .map(|class| (class, true))
+        .or_else(|| encode_pending.pop().map(|class| (class, false)))
+    {
         if !visited.insert(class) {
             continue;
         }
         let declaration = &classes.declarations.definitions[class];
         let module = &graph.modules[declaration.definition.module];
+        let pending = if decoding {
+            &mut decode_pending
+        } else {
+            &mut encode_pending
+        };
+        for (field, &ty) in declaration.fields.iter().zip(&classes.fields[class]) {
+            check_type(ty, types, pending)
+                .map_err(|message| module.error(&field.annotation, message))?;
+        }
+        if !decoding {
+            schemas.push(JsonRecordSchema {
+                class,
+                fields: declaration
+                    .fields
+                    .iter()
+                    .map(|field| JsonField {
+                        name: field.name.clone(),
+                        default: None,
+                    })
+                    .collect(),
+            });
+            continue;
+        }
         let initializer = &declaration.methods[declaration.initializer];
         let parameters = &classes.methods[class]["__init__"].params[1..];
         if parameters.len() != declaration.fields.len()
@@ -94,8 +303,6 @@ pub(super) fn schemas(
         }
         let mut fields = Vec::new();
         for (field, &ty) in declaration.fields.iter().zip(&classes.fields[class]) {
-            check_type(ty, types, &mut pending)
-                .map_err(|message| module.error(&field.annotation, message))?;
             let parameter = parameters
                 .iter()
                 .find(|parameter| parameter.name == field.name)
@@ -132,6 +339,13 @@ fn check_type(ty: Type, types: &Types, pending: &mut Vec<usize>) -> Result<(), &
     if let Some(inner) = types.payload(ty).or_else(|| types.element(ty)) {
         return check_type(inner, types, pending);
     }
+    if let Some((key, value)) = types.mapping(ty) {
+        return if key == Type::Str {
+            check_type(value, types, pending)
+        } else {
+            Err("JSON dictionaries require exact str keys")
+        };
+    }
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::Str | Type::None => Ok(()),
         Type::Class(class) => {
@@ -139,7 +353,7 @@ fn check_type(ty: Type, types: &Types, pending: &mut Vec<usize>) -> Result<(), &
             Ok(())
         }
         _ => Err(
-            "JSON fields require int, float, bool, str, None, optional, list, or structural record types",
+            "JSON values require int, float, bool, str, None, optional, list, dict[str, T], or fixed record types",
         ),
     }
 }
@@ -197,6 +411,35 @@ mod tests {
 
     fn lower(source: &str) -> Result<ir::Module, String> {
         super::super::lower(&SourceGraph::single(source)?)
+    }
+
+    #[test]
+    fn json_schemas_resolve_class_receivers_instead_of_same_named_definitions() {
+        let module = lower(include_str!(
+            "../../../../tests/fixtures/json_records/class_schemas.py"
+        ))
+        .unwrap();
+        assert_eq!(module.json_records.len(), 1);
+        assert_eq!(module.json_records[0].class, 1);
+    }
+
+    #[test]
+    fn json_schema_expressions_do_not_use_annotation_only_names() {
+        for schema in [
+            "\"Record\"",
+            "list[\"Record\"]",
+            "dict[\"str\", Record]",
+            "list[cls.Union[int, None]]",
+        ] {
+            let source = format!(
+                "import typing as cls\nfrom relar.json import decode\nclass Record:\n    value: int\n    def __init__(self, value: int) -> None:\n        self.value = value\n    @classmethod\n    def parse(cls, text: str) -> None:\n        decode(text, {schema})\n"
+            );
+            let message = lower(&source).err().expect("runtime schema was accepted");
+            assert!(
+                message.contains("unshadowed static type expressions"),
+                "{message}"
+            );
+        }
     }
 
     #[test]

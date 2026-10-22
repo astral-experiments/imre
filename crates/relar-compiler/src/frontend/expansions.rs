@@ -77,12 +77,14 @@ impl Checker<'_> {
             }
             ast::Expr::Set(_) | ast::Expr::SetComp(_) => {
                 let element = self.types.payload(element).unwrap_or(element);
-                matches!(element, Type::Int | Type::Str | Type::Bytes)
+                self.types
+                    .hashable_key(element)
                     .then(|| self.types.set(element))
             }
             ast::Expr::Dict(dict) if dict.items.is_empty() => {
                 let element = self.types.payload(element).unwrap_or(element);
-                matches!(element, Type::Int | Type::Str | Type::Bytes)
+                self.types
+                    .hashable_key(element)
                     .then(|| self.types.dict(element, Type::None))
             }
             ast::Expr::Call(call)
@@ -92,12 +94,14 @@ impl Checker<'_> {
                     ast::Expr::Name(name) if name.id == "list" => Some(self.types.list(element)),
                     ast::Expr::Name(name) if name.id == "set" => {
                         let element = self.types.payload(element).unwrap_or(element);
-                        matches!(element, Type::Int | Type::Str | Type::Bytes)
+                        self.types
+                            .hashable_key(element)
                             .then(|| self.types.set(element))
                     }
                     ast::Expr::Name(name) if name.id == "dict" => {
                         let element = self.types.payload(element).unwrap_or(element);
-                        matches!(element, Type::Int | Type::Str | Type::Bytes)
+                        self.types
+                            .hashable_key(element)
                             .then(|| self.types.dict(element, Type::None))
                     }
                     _ => None,
@@ -150,7 +154,7 @@ impl Checker<'_> {
                 let fields =
                     element.and_then(|ty| self.types.fields(self.types.payload(ty).unwrap_or(ty)));
                 let hint = fields.as_deref().and_then(|fields| match fields {
-                    [key, value] if matches!(key, Type::Int | Type::Str | Type::Bytes) => {
+                    [key, value] if self.types.hashable_key(*key) => {
                         Some(self.types.dict(*key, *value))
                     }
                     _ => None,
@@ -269,11 +273,11 @@ impl Checker<'_> {
         node: &impl Ranged,
     ) -> Result<Vec<Statement>, String> {
         let ty = *element.get_or_insert(value.ty);
-        if is_set && !matches!(ty, Type::Int | Type::Str | Type::Bytes) {
+        if is_set && !self.types.hashable_key(ty) {
             return Err(error(
                 self.source,
                 node,
-                "set elements must be exactly int, str, or bytes",
+                "set elements must be int, str, bytes, or immutable scalar tuples",
             ));
         }
         let value = self.coerce(value, ty, node)?;
@@ -334,11 +338,11 @@ impl Checker<'_> {
                 "an empty set requires a concrete set[T] context",
             )
         })?;
-        if is_set && !matches!(element, Type::Int | Type::Str | Type::Bytes) {
+        if is_set && !self.types.hashable_key(element) {
             return Err(error(
                 self.source,
                 node,
-                "set elements must be exactly int, str, or bytes",
+                "set elements must be int, str, bytes, or immutable scalar tuples",
             ));
         }
         let (ty, empty) = if is_set {
@@ -448,11 +452,11 @@ impl Checker<'_> {
                 } else {
                     self.expr(key)?
                 };
-                if !matches!(key_expr.ty, Type::Int | Type::Str | Type::Bytes) {
+                if !self.types.hashable_key(key_expr.ty) {
                     return Err(error(
                         self.source,
                         key,
-                        "dictionary keys must be exactly int, str, or bytes",
+                        "dictionary keys must be int, str, bytes, or immutable scalar tuples",
                     ));
                 }
                 let captured = self.hidden(key_expr.ty);
