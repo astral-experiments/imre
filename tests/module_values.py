@@ -9,7 +9,7 @@ from pathlib import Path
 # Validation also runs under -I; use only the trusted sibling harness directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from assignments import reference, require_result
-from comprehensions import snapshot
+from comprehensions import run as run_build, snapshot
 from imports import require_success, run, write_files
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "module_values"
@@ -102,7 +102,7 @@ def main() -> None:
                 actual_dir.mkdir()
                 binary = actual_dir / "program"
                 require_success(
-                    run(
+                    run_build(
                         [
                             compiler,
                             "build",
@@ -120,6 +120,7 @@ def main() -> None:
                             *flags,
                         ],
                         temporary,
+                        timeout=300 if args.lto_linker else 60,
                     )
                 )
                 actual = run([str(binary)], actual_dir)
