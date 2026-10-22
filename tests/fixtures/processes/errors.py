@@ -34,7 +34,7 @@ def checked(command: list[str]) -> Exception:
     raise AssertionError("child unexpectedly succeeded")
 
 
-def invalid(command: list[str], cwd: str | None, env: dict[str, str]) -> None:
+def invalid(command: list[str], cwd: str, env: dict[str, str]) -> None:
     try:
         subprocess.run(command, cwd=cwd, env=env, capture_output=True, encoding="utf-8")
     except ValueError as error:
@@ -79,9 +79,10 @@ print(outcome(command, Path("bad\0directory")))
 print(outcome(command, env={"BAD=KEY": "value"}))
 print(outcome(command, env={"BAD\0KEY": "value"}))
 print(outcome(command, env={"KEY": "bad\0value"}))
-invalid([argv[1], "bad\0argument"], None, {"A=B": "value"})
+# An explicit cwd selects fork/exec's validation order for simultaneous errors.
+invalid([argv[1], "bad\0argument"], ".", {"A=B": "value"})
 invalid([argv[1]], "bad\0directory", {"A=B": "value"})
-invalid([argv[1]], None, {"FIRST": "bad\0value", "A=B": "value"})
+invalid([argv[1]], ".", {"FIRST": "bad\0value", "A=B": "value"})
 invalid([], "bad\0directory", {"FIRST": "bad\0value", "A=B": "value"})
 print(outcome([argv[1], "-I", argv[2], "invalid", "1"]))
 print(outcome([argv[1], "-I", argv[2], "invalid", "2"]))
