@@ -28,7 +28,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: version
@@ -59,13 +59,15 @@ jobs:
       TARGET: ${{ matrix.target }}
       CARGO_PROFILE_RELEASE_DEBUG: '0'
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install Clang 18
         run: sudo apt-get update && sudo apt-get install -y clang-18
       - name: Build the compiler and runtime
         run: cargo build --workspace --release --locked
+      - name: Test the runtime on the release architecture
+        run: cargo test --release --locked -p relar-runtime
       - name: Package and run a script from the extracted archive
         run: bash scripts/package-release.sh "$TARGET" target/release dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

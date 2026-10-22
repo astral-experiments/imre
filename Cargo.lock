@@ -1041,6 +1041,7 @@ dependencies = [
  "icu_properties",
  "itoa",
  "libc",
+ "linux-raw-sys",
  "memchr",
  "num-bigint",
  "num-traits",

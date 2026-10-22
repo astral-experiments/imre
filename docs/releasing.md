@@ -1,9 +1,9 @@
 # Publishing Relar
 
 The Release workflow builds a compiler and matching runtime on native x86-64 and
-ARM64 Ubuntu 24.04 runners. Each runner unpacks its archive and uses it to
-compile and run a Python script. Pull requests that change the release workflow,
-packaging inputs, or toolchain run the same check.
+ARM64 Ubuntu 24.04 runners. Each runner tests the runtime, unpacks its archive,
+and uses it to compile and run a Python script. Pull requests that change the
+release workflow, packaging inputs, or toolchain run the same check.
 
 1. Set the same version in `crates/relar-compiler/Cargo.toml` and
    `crates/relar-runtime/Cargo.toml`. Commit the updated `Cargo.lock` and merge

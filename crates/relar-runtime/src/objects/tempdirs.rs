@@ -219,7 +219,7 @@ fn reset_permissions(descriptor: RawFd) -> io::Result<()> {
     // string is terminated and no lookup or symlink traversal is performed.
     if unsafe {
         libc::syscall(
-            libc::SYS_fchmodat2,
+            linux_raw_sys::general::__NR_fchmodat2 as libc::c_long,
             descriptor,
             c"".as_ptr(),
             0o700_u32,
