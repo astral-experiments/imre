@@ -14,7 +14,7 @@ use serde::de::{
 };
 use serde_json::value::RawValue;
 
-use super::records::{RecordDescriptor, relar_record_new};
+use super::records::{RecordBatch, RecordDescriptor, relar_record_new};
 use super::words::{OwnedWord, WordKind, Words};
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish};
 
@@ -145,6 +145,7 @@ struct DecodeState<'a> {
     text: &'a str,
     checked: bool,
     strings: Option<&'a mut StringSlots>,
+    records: Option<RecordBatch<'a>>,
 }
 
 impl DecodeState<'_> {
@@ -294,8 +295,23 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
             });
         }
         let mut values = Words::new(child.word_kind);
-        while let Some(value) = sequence.next_element_seed(Seed(child, self.1))? {
-            values.values.push(value.into_word());
+        if child.kind == RECORD {
+            // Nested arrays fill independent blocks. An error aborts the decode
+            // and drops both the suspended cursor and this array's partial owners.
+            let outer = self.1.records.take();
+            while let Some(value) = sequence.next_element_seed(Seed(child, self.1))? {
+                values.values.push(value.into_word());
+                if values.values.len() == values.values.inline_size() + 1 {
+                    // Once the array spills its inline slots, pack subsequent records.
+                    // SAFETY: the element descriptor outlives this decode and its results.
+                    self.1.records = RecordBatch::new(unsafe { &*child.record });
+                }
+            }
+            self.1.records = outer;
+        } else {
+            while let Some(value) = sequence.next_element_seed(Seed(child, self.1))? {
+                values.values.push(value.into_word());
+            }
         }
         let pointer =
             Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Sequence(values))))) as usize;
@@ -324,7 +340,12 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
         }
         let fields = self.0.fields();
         // SAFETY: emitted record metadata outlives every decoded record.
-        let pointer = unsafe { relar_record_new(self.0.record) };
+        let pointer = unsafe {
+            match &mut self.1.records {
+                Some(records) if records.accepts(self.0.record) => records.allocate(),
+                _ => relar_record_new(self.0.record),
+            }
+        };
         // SAFETY: zeroed fields are cleanup-safe while the record is incomplete.
         let owner = unsafe { OwnedWord::from_owned(pointer as usize, self.0.storage()) };
         let mut seen = Seen::new(fields.len());
@@ -545,6 +566,7 @@ fn decode_with_depth(
             text,
             checked,
             strings,
+            records: None,
         },
     )
     .deserialize(&mut deserializer)?;
