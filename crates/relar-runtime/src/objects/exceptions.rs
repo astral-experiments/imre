@@ -45,6 +45,8 @@ pub(crate) enum Kind {
     SubprocessError = 25,
     CalledProcessError = 26,
     TimeoutExpired = 27,
+    BadGzipFile = 28,
+    ZlibError = 29,
 }
 
 impl Kind {
@@ -78,6 +80,8 @@ impl Kind {
             25 => Self::SubprocessError,
             26 => Self::CalledProcessError,
             27 => Self::TimeoutExpired,
+            28 => Self::BadGzipFile,
+            29 => Self::ZlibError,
             _ => fail("SystemError", "invalid exception kind"),
         }
     }
@@ -112,6 +116,8 @@ impl Kind {
             Self::SubprocessError => "SubprocessError",
             Self::CalledProcessError => "CalledProcessError",
             Self::TimeoutExpired => "TimeoutExpired",
+            Self::BadGzipFile => "BadGzipFile",
+            Self::ZlibError => "error",
         }
     }
 
@@ -149,6 +155,7 @@ impl Kind {
                     | Self::IsADirectoryError
                     | Self::NotADirectoryError
                     | Self::FileExistsError
+                    | Self::BadGzipFile
             ),
             _ => self == expected,
         }

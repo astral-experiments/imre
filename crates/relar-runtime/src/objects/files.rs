@@ -2,7 +2,7 @@
 //! final ownership cleanup only closes resources and never changes error state.
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufWriter, Read, Write};
+use std::io::{self, BufWriter, Write};
 use std::os::fd::IntoRawFd;
 use std::rc::Rc;
 
@@ -10,6 +10,10 @@ use super::exceptions::{Error, Kind, Result, finish};
 use super::{
     Bytes, Int, Object, Storage, StorageCell, Str, StringPart, concat_parts, fail, object,
 };
+mod buffered;
+mod gzip;
+
+use buffered::Input;
 
 pub(super) struct FileState {
     stream: Option<Stream>,
@@ -21,11 +25,12 @@ pub(super) struct FileState {
 enum FileKind {
     Text,
     BinaryRead,
+    GzipBinaryRead,
     BinaryWrite,
 }
 
 enum Stream {
-    Read(File),
+    Read(Input),
     Write(BufWriter<File>),
 }
 
@@ -34,7 +39,7 @@ impl Stream {
     /// second implicit flush; a close error takes precedence over a flush error.
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
-            Self::Read(file) => (file, Ok(())),
+            Self::Read(input) => (input.into_file(), Ok(())),
             Self::Write(mut writer) => {
                 let flushed = writer.flush();
                 let (file, buffered) = writer.into_parts();
@@ -71,10 +76,10 @@ impl FileState {
     }
 
     fn read(&mut self) -> Result<Str> {
-        decode_utf8_text(self.read_bytes()?)
+        self.input()?.read_text()
     }
 
-    fn read_bytes(&mut self) -> Result<Bytes> {
+    fn input(&mut self) -> Result<&mut Input> {
         if self.kind == FileKind::BinaryWrite {
             return Err(Error::new(Kind::UnsupportedOperation, "read"));
         }
@@ -90,14 +95,44 @@ impl FileState {
         let Stream::Read(file) = stream else {
             return Err(Error::new(Kind::UnsupportedOperation, "not readable"));
         };
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).map_err(os_error)?;
-        Ok(bytes)
+        Ok(file)
+    }
+
+    fn read_size(&mut self, value: &Int) -> Result<Bytes> {
+        // GzipFile checks its own closed state before forwarding the argument
+        // to BufferedReader. A plain BufferedWriter validates a C int first.
+        if self.kind == FileKind::GzipBinaryRead {
+            self.stream()?;
+        }
+        let size = super::bytes::native_size(value)?;
+        if self.kind == FileKind::BinaryWrite {
+            i32::try_from(size).map_err(|_| {
+                Error::new(
+                    Kind::OverflowError,
+                    "Python int too large to convert to C int",
+                )
+            })?;
+            return Err(Error::new(Kind::UnsupportedOperation, "read"));
+        }
+        if size < -1 {
+            return Err(Error::new(
+                Kind::ValueError,
+                "read length must be non-negative or -1",
+            ));
+        }
+        self.input()?.read_bytes(usize::try_from(size).ok())
     }
 
     fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
         if self.kind == FileKind::BinaryRead {
             return Err(Error::new(Kind::UnsupportedOperation, "write"));
+        }
+        if self.kind == FileKind::GzipBinaryRead {
+            self.stream()?;
+            return Err(Error::new(
+                Kind::OSError,
+                "write() on read-only GzipFile object",
+            ));
         }
         let closed = if self.kind != FileKind::Text {
             "write to closed file"
@@ -173,6 +208,12 @@ impl Storage {
 }
 
 pub(super) fn os_error(error: io::Error) -> Error {
+    if let Some(gzip) = error
+        .get_ref()
+        .and_then(|error| error.downcast_ref::<gzip::GzipError>())
+    {
+        return Error::new(gzip.0, gzip.to_string());
+    }
     let kind = match error.kind() {
         io::ErrorKind::AlreadyExists => Kind::FileExistsError,
         io::ErrorKind::NotFound => Kind::FileNotFoundError,
@@ -196,7 +237,10 @@ pub unsafe extern "C" fn relar_text_open(path: *const Str, mode: u32) -> *const 
         fail("SystemError", "invalid text file mode");
     }
     // SAFETY: the caller roots the immutable path throughout opening the stream.
-    finish(open(unsafe { &*path }, mode, false), std::ptr::null())
+    finish(
+        open(unsafe { &*path }, mode, false, false),
+        std::ptr::null(),
+    )
 }
 
 /// Opens an immutable-byte stream in rb, wb, ab, or xb mode (0 through 3).
@@ -206,18 +250,34 @@ pub unsafe extern "C" fn relar_text_open(path: *const Str, mode: u32) -> *const 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_binary_open(path: *const Str, mode: u32) -> *const Object {
     // SAFETY: the caller roots the immutable path throughout opening the stream.
-    finish(open(unsafe { &*path }, mode, true), std::ptr::null())
+    finish(open(unsafe { &*path }, mode, true, false), std::ptr::null())
+}
+
+/// Opens a gzip source without consuming a header until the first read.
+///
+/// # Safety
+/// Root the UTF-8 path. The compiler passes 0 for text or 1 for binary.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_gzip_open(path: *const Str, binary: u32) -> *const Object {
+    if binary > 1 {
+        fail("SystemError", "invalid gzip mode");
+    }
+    // SAFETY: the caller roots the immutable path throughout the open.
+    finish(
+        open(unsafe { &*path }, 0, binary == 1, true),
+        std::ptr::null(),
+    )
 }
 
 /// Shares descriptor ownership and buffering while preserving text/binary access errors.
-fn open(path: &str, mode: u32, binary: bool) -> Result<*const Object> {
-    let state = open_state(path, mode, binary)?;
+fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*const Object> {
+    let state = open_state(path, mode, binary, gzip)?;
     Ok(Rc::into_raw(Rc::new(Object(StorageCell::new(
         Storage::File(Box::new(state)),
     )))))
 }
 
-fn open_state(path: &str, mode: u32, binary: bool) -> Result<FileState> {
+fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
     super::super::initialize_io();
     if path.contains('\0') {
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
@@ -238,13 +298,14 @@ fn open_state(path: &str, mode: u32, binary: bool) -> Result<FileState> {
         return Err(Error::new(Kind::IsADirectoryError, "is a directory"));
     }
     let stream = match mode {
-        0 => Stream::Read(file),
+        0 => Stream::Read(Input::new(file, gzip, binary)),
         _ => Stream::Write(BufWriter::with_capacity(8192, file)),
     };
     Ok(FileState {
         stream: Some(stream),
         kind: match (binary, mode) {
             (false, _) => FileKind::Text,
+            (true, 0) if gzip => FileKind::GzipBinaryRead,
             (true, 0) => FileKind::BinaryRead,
             (true, _) => FileKind::BinaryWrite,
         },
@@ -255,7 +316,7 @@ fn open_state(path: &str, mode: u32, binary: bool) -> Result<FileState> {
 /// stream, closing before returning even if decoding fails. A close failure
 /// replaces an earlier read failure, as a `with` statement's exit would.
 pub(super) fn read_path_text(path: &str) -> Result<Str> {
-    let mut state = open_state(path, 0, false)?;
+    let mut state = open_state(path, 0, false, false)?;
     let result = state.read();
     let closed = state.stream.take().unwrap().close().map_err(os_error);
     closed.and(result)
@@ -264,7 +325,7 @@ pub(super) fn read_path_text(path: &str) -> Result<Str> {
 /// Completes buffered output and closes the descriptor before returning the
 /// character count, so a final flush error remains a catchable language error.
 pub(super) fn write_path_text(path: &str, text: &str) -> Result<usize> {
-    let mut state = open_state(path, 1, false)?;
+    let mut state = open_state(path, 1, false, false)?;
     let result = state.write(text);
     let closed = state.stream.take().unwrap().close().map_err(os_error);
     closed.and(result)?;
@@ -281,7 +342,44 @@ pub unsafe extern "C" fn relar_binary_read(value: *const Object) -> *const Bytes
     let result = unsafe {
         object(value)
             .0
-            .with_mut(|storage| storage.file_mut().read_bytes())
+            .with_mut(|storage| storage.file_mut().input()?.read_bytes(None))
+    };
+    finish(
+        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        std::ptr::null(),
+    )
+}
+
+/// Reads at most a signed, index-sized count from the shared binary cursor.
+///
+/// # Safety
+/// Root an exact BinaryIO and the canonical size integer with clear pending state.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_binary_read_size(value: *const Object, size: usize) -> *const Bytes {
+    // SAFETY: both inputs remain rooted throughout the nonreentrant read.
+    let result = unsafe {
+        let size = Int::borrow(size);
+        object(value)
+            .0
+            .with_mut(|storage| storage.file_mut().read_size(&size))
+    };
+    finish(
+        result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
+        std::ptr::null(),
+    )
+}
+
+/// Reads through the next LF, retaining that byte. Empty bytes indicate EOF.
+///
+/// # Safety
+/// Root an exact BinaryIO with clear pending state.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_binary_readline(value: *const Object) -> *const Bytes {
+    // SAFETY: reading has no callbacks and the result is independently owned.
+    let result = unsafe {
+        object(value)
+            .0
+            .with_mut(|storage| storage.file_mut().input()?.binary_line())
     };
     finish(
         result.map(|bytes| Rc::into_raw(Rc::new(bytes))),
@@ -333,6 +431,24 @@ pub unsafe extern "C" fn relar_text_read(value: *const Object) -> *const Str {
         object(value)
             .0
             .with_mut(|storage| storage.file_mut().read())
+    };
+    finish(
+        result.map(|text| Rc::into_raw(Rc::new(text))),
+        std::ptr::null(),
+    )
+}
+
+/// Reads through one universal newline, returning an owned string or empty at EOF.
+///
+/// # Safety
+/// Root an exact TextIO with clear pending state.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_text_readline(value: *const Object) -> *const Str {
+    // SAFETY: reading has no callbacks and the decoded result is independently owned.
+    let result = unsafe {
+        object(value)
+            .0
+            .with_mut(|storage| storage.file_mut().input()?.text_line())
     };
     finish(
         result.map(|text| Rc::into_raw(Rc::new(text))),
@@ -499,6 +615,141 @@ mod tests {
             relar_object_release(error);
         }
         assert_eq!(relar_error_pending(), 0);
+    }
+
+    fn member(bytes: &[u8]) -> Vec<u8> {
+        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        gzip.write_all(bytes).unwrap();
+        gzip.finish().unwrap()
+    }
+
+    #[test]
+    fn mixed_text_reads_share_decoder_state_across_buffer_and_member_boundaries() {
+        let directory = Directory::new();
+        let path = directory.0.join("index");
+        let first = "a".repeat(8191) + "\r";
+        let second = "\nβ\r🦀\nlast";
+        for gzip in [false, true] {
+            let bytes = if gzip {
+                [
+                    member(first.as_bytes()),
+                    vec![0; 7],
+                    member(second.as_bytes()),
+                    vec![0; 9],
+                ]
+                .concat()
+            } else {
+                [first.as_bytes(), second.as_bytes()].concat()
+            };
+            std::fs::write(&path, bytes).unwrap();
+            let mut state = open_state(path.to_str().unwrap(), 0, false, gzip)
+                .ok()
+                .unwrap();
+            let input = state.input().ok().unwrap();
+            assert_eq!(
+                input.text_line().ok().unwrap().as_str(),
+                "a".repeat(8191) + "\n"
+            );
+            assert_eq!(input.text_line().ok().unwrap().as_str(), "β\n");
+            assert_eq!(input.read_text().ok().unwrap().as_str(), "🦀\nlast");
+            assert_eq!(input.text_line().ok().unwrap().as_str(), "");
+        }
+
+        // The read-ahead decoder validates the entire chunk, including bytes
+        // after a newline, and retains an incomplete multibyte prefix for retry.
+        let mut bytes = b"first\n".to_vec();
+        bytes.resize(8191, b'a');
+        bytes.extend(b"\xf0\x9f\xff");
+        std::fs::write(&path, bytes).unwrap();
+        let mut state = open_state(path.to_str().unwrap(), 0, false, false)
+            .ok()
+            .unwrap();
+        let input = state.input().ok().unwrap();
+        assert_eq!(input.text_line().ok().unwrap().as_str(), "first\n");
+        for _ in 0..2 {
+            input.text_line().unwrap_err().raise();
+            take_error(Kind::UnicodeDecodeError);
+        }
+    }
+
+    #[test]
+    fn gzip_reads_check_framing_lazily_and_accept_python_header_metadata() {
+        let directory = Directory::new();
+        let path = directory.0.join("data.gz");
+        let mut gzip = member(b"abc\ndef");
+        gzip[3] = 0xff;
+        let metadata = [
+            b"\x03\0abc".as_slice(),
+            &vec![b'x'; 70000],
+            b"\0comment\0\0\0",
+        ]
+        .concat();
+        gzip.splice(10..10, metadata);
+        std::fs::write(&path, &gzip).unwrap();
+        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
+            .ok()
+            .unwrap();
+        let input = state.input().ok().unwrap();
+        assert_eq!(input.read_bytes(Some(2)).ok().unwrap(), b"ab");
+        assert_eq!(input.binary_line().ok().unwrap(), b"c\n");
+        assert_eq!(input.read_bytes(None).ok().unwrap(), b"def");
+
+        let end = gzip.len();
+        gzip[end - 8] ^= 1;
+        std::fs::write(&path, &gzip).unwrap();
+        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
+            .ok()
+            .unwrap();
+        let input = state.input().ok().unwrap();
+        assert_eq!(input.read_bytes(Some(7)).ok().unwrap(), b"abc\ndef");
+        input.read_bytes(None).unwrap_err().raise();
+        take_error(Kind::BadGzipFile);
+
+        for (bytes, kind) in [
+            (b"x".to_vec(), Kind::BadGzipFile),
+            (b"\x1f\x8b".to_vec(), Kind::EOFError),
+            (member(b"data")[..12].to_vec(), Kind::EOFError),
+            (
+                b"\x1f\x8b\x08\0\0\0\0\0\0\xff\x07".to_vec(),
+                Kind::ZlibError,
+            ),
+            // A length/distance pair before the first literal is invalid. A
+            // lenient inflater would emit three zeros and accept this trailer.
+            (
+                b"\x1f\x8b\x08\0\0\0\0\0\0\xff\x03\x02\x00\x12\xd9\x41\xff\x03\0\0\0".to_vec(),
+                Kind::ZlibError,
+            ),
+        ] {
+            std::fs::write(&path, bytes).unwrap();
+            let mut state = open_state(path.to_str().unwrap(), 0, true, true)
+                .ok()
+                .unwrap();
+            let input = state.input().ok().unwrap();
+            assert!(input.read_bytes(Some(0)).ok().unwrap().is_empty());
+            input.read_bytes(None).unwrap_err().raise();
+            take_error(kind);
+        }
+
+        // A stored DEFLATE block followed by an invalid block. The bad byte
+        // lies beyond a text chunk but within a binary reader's read-ahead.
+        let mut invalid = member(b"")[..10].to_vec();
+        invalid.push(0);
+        invalid.extend(9000u16.to_le_bytes());
+        invalid.extend((!9000u16).to_le_bytes());
+        invalid.resize(invalid.len() + 9000, b'a');
+        invalid.push(7);
+        std::fs::write(&path, invalid).unwrap();
+        let mut state = open_state(path.to_str().unwrap(), 0, true, true)
+            .ok()
+            .unwrap();
+        state
+            .input()
+            .ok()
+            .unwrap()
+            .read_bytes(Some(1))
+            .unwrap_err()
+            .raise();
+        take_error(Kind::ZlibError);
     }
 
     #[test]

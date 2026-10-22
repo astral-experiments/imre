@@ -531,6 +531,41 @@ impl Checker<'_> {
         }
     }
 
+    /// A file is its own iterator. Acquiring it checks for closure, and pulls
+    /// share its position with every reader, including a nested loop on it.
+    pub(super) fn prepare_file_lines(&mut self, file: Expr) -> Prepared {
+        let line_type = if file.ty == Type::BinaryIO {
+            Type::Bytes
+        } else {
+            Type::Str
+        };
+        let source = self.hidden(file.ty);
+        let value = self.hidden(line_type);
+        let ready = self.hidden(Type::Bool);
+        Prepared {
+            evaluate: vec![Statement::Assign(source, file)],
+            acquire: vec![Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(Builtin::TextEnter, vec![self.local(source)]),
+            })],
+            next: vec![
+                Statement::Assign(
+                    value,
+                    Expr {
+                        ty: line_type,
+                        kind: ExprKind::Builtin(Builtin::FileReadline, vec![self.local(source)]),
+                    },
+                ),
+                Statement::Assign(ready, truth(self.local(value))),
+            ],
+            value,
+            ready,
+            elementless: false,
+            writes: HashSet::new(),
+            clear: vec![source, value, ready],
+        }
+    }
+
     /// List cursors re-read the live length; reverse cursors capture only their
     /// starting index. Dict/set/string cursors use the rooted runtime protocol.
     fn prepare_container(
@@ -540,6 +575,9 @@ impl Checker<'_> {
         node: &impl Ranged,
         reverse: bool,
     ) -> Result<Prepared, String> {
+        if !reverse && matches!(iterable.ty, Type::TextIO | Type::BinaryIO) {
+            return Ok(self.prepare_file_lines(iterable));
+        }
         let mapping = self.types.mapping(iterable.ty);
         let set_element = self.types.set_element(iterable.ty);
         let fields = self.types.fields(iterable.ty);

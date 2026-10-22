@@ -20,7 +20,7 @@ fn allocate(length: usize) -> Result<Bytes> {
 }
 
 /// Converts a Python index-sized argument without truncating large integers.
-fn native_size(value: &Int) -> Result<isize> {
+pub(super) fn native_size(value: &Int) -> Result<isize> {
     value
         .as_small()
         .map(|value| value as isize)

@@ -109,40 +109,6 @@ impl Checker<'_> {
         Ok(operation(kind, ty, vec![receiver]))
     }
 
-    /// Literal encoding makes the text boundary independent of process locale.
-    fn path_encoding(&self, call: &ast::ExprCall) -> Result<(), String> {
-        let [keyword] = call.arguments.keywords.as_ref() else {
-            return Err(error(
-                self.source,
-                call,
-                "Path text I/O requires encoding='utf-8'",
-            ));
-        };
-        if keyword.arg.as_ref().map(|name| name.as_str()) != Some("encoding") {
-            return Err(error(
-                self.source,
-                keyword,
-                "Path text I/O accepts only encoding='utf-8'",
-            ));
-        }
-        let ast::Expr::StringLiteral(value) = &keyword.value else {
-            return Err(error(
-                self.source,
-                keyword,
-                "encoding must be the literal 'utf-8'",
-            ));
-        };
-        check_string(value, self.source)?;
-        if value.value.to_str() != "utf-8" {
-            return Err(error(
-                self.source,
-                keyword,
-                "encoding must be the literal 'utf-8'",
-            ));
-        }
-        Ok(())
-    }
-
     pub(super) fn path_method(
         &mut self,
         receiver: Expr,
@@ -178,7 +144,7 @@ impl Checker<'_> {
             ));
         }
         if matches!(kind, PathOperation::ReadText | PathOperation::WriteText) {
-            self.path_encoding(call)?;
+            self.utf8_encoding(call)?;
         } else {
             self.reject_builtin_keywords(call)?;
         }
