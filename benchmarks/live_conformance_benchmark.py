@@ -62,7 +62,8 @@ def verify_build_record(path: Path, guarded: dict[str, dict]) -> dict:
             assert step["returncode"] == 0
             for name in ("log", "messages"):
                 guard(step[name], step[name + "_sha256"])
-    elif record.get("kind") == "live-conformance-program-build":
+    elif record.get("kind") in ("live-conformance-program-build", "streaming-catalog-program-build"):
+        application = "python_catalog" if record["kind"] == "streaming-catalog-program-build" else "conformance_report"
         assert record["input_guards_passed"] and record["status"] == "passed"
         core = record["core_build_record"]
         guard(core["path"], core["sha256"])
@@ -84,7 +85,7 @@ def verify_build_record(path: Path, guarded: dict[str, dict]) -> dict:
             command = step["command"]
             assert command[0] == record["compiler"]["path"] and command[1] == "build"
             entry = "compute.py" if step["name"].endswith("-compute") else "__main__.py"
-            assert command[2] == str(ROOT / "examples/conformance_report" / entry)
+            assert command[2] == str(ROOT / "examples" / application / entry)
             for flag, expected in (("--runtime", record["runtime"]["path"]),
                                    ("--clang", record["tools"]["clang"]["path"]),
                                    ("--module-root", str(ROOT / "examples")), ("--target", record["target"]),
@@ -107,9 +108,12 @@ def verify_build_record(path: Path, guarded: dict[str, dict]) -> dict:
             guard(name, expected)
         for name, expected in record["generated"].items():
             guard(Path(record["environment_overrides"]["CODON_PATH"]) / name, expected)
-        for item in [*record["libraries"].values(), *record["binaries"].values(),
-                     record["native_json"], record["native_platform"]]:
+        for item in [*record["libraries"].values(), *record["binaries"].values(), record["native_json"]]:
             guard(item["path"], item["sha256"])
+        for filename, expected in record.get("native_catalog_io", {}).items():
+            guard(filename, expected)
+        if "conformance_report" in record["binaries"]:
+            guard(record["native_platform"]["path"], record["native_platform"]["sha256"])
         for step in record["commands"]:
             assert step["returncode"] == 0
             assert all(flag in step["command"] for flag in ("-release", "-numerics=py", "-disable-native", "-exe"))
@@ -119,10 +123,11 @@ def verify_build_record(path: Path, guarded: dict[str, dict]) -> dict:
         for name, expected in record["sources"].items():
             guard(HERE / "native_platform" / name, expected)
         guard(record["library"]["path"], record["library"]["sha256"])
-    elif record.get("entrypoint") == "conformance_report":
+    elif record.get("entrypoint") in ("conformance_report", "python_catalog"):
+        application = record["entrypoint"]
         for name, expected in record["sources"].items():
-            guard(HERE / "reference/conformance_report" / name, expected)
-        guard(path.parent / "conformance-report-reference", record["binary_sha256"])
+            guard(HERE / "reference" / application / name, expected)
+        guard(path.parent / (application.replace("_", "-") + "-reference"), record["binary_sha256"])
     else:
         raise ValueError("unrecognized build record: " + str(path))
     return record

@@ -299,6 +299,35 @@ categories were checked. Auditing does not execute or rebuild native programs.
 The [checkout comparison](results/2026-10-21-live-conformance.md) contains the
 five-engine timing tables, retained evidence, and a portable audit command.
 
+### Streaming Python download catalog
+
+The catalog benchmark measures complete processes on the shipped release index
+and on ten consecutive copies. Each scale has a plain NDJSON file and a gzip
+file. The 10× archive contains ten concatenated members. All four inputs must
+produce the same 6,098-entry catalog. A separate preflight gives every member
+a unique winning download and compares the full result across engines.
+
+Build the compiler and runtimes with `native_tools_build.py` as described below.
+For each Relar program, use `live_conformance_build.py --application python_catalog`
+with the core build record and the matching `--mode` and linker. Build the
+independent `reference/python_catalog` once per native mode, and build Codon
+with `codon_native/build.py --applications python_catalog`.
+
+```sh
+python3.14 benchmarks/stream_catalog_benchmark.py prepare --directory /tmp/catalog-inputs
+python3.14 benchmarks/stream_catalog_benchmark.py run \
+  --inputs /tmp/catalog-inputs --directory /tmp/catalog-measurements \
+  --codon /path/to/codon-build/python_catalog \
+  --relar /path/to/relar-normal/python_catalog --relar-thin /path/to/relar-thin/python_catalog \
+  --rust /path/to/rust-normal/python-catalog-reference --rust-thin /path/to/rust-thin/python-catalog-reference
+```
+
+The runner verifies the build record next to each native binary. On one pinned
+Linux CPU it measures elapsed time and child peak RSS for each fresh process,
+including decompression and final output. Fourteen counterbalanced orders share
+the upstream CPython, typed CPython, and Codon baselines across the two native
+build modes. Every output is compared byte for byte outside timing.
+
 ### Captured-input developer tools
 
 The [conformance reporter](../examples/conformance_report/README.md) ports Ruff's

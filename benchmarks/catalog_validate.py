@@ -37,6 +37,8 @@ BOOTSTRAP = (
 CODON_EXCLUSIONS = {
     "duplicate-known-field": "Codon's native JSON parser keeps the last duplicate field and has no object-pairs hook.",
     "arbitrary-precision-version-and-release": "Codon's native integers are signed 64-bit values; this case requires Python arbitrary-precision integers.",
+    "gzip-missing-magic": "Codon's zlib-backed gzopen accepts uncompressed bytes transparently.",
+    "gzip-zero-padded-members": "Codon's gzread stops at zero padding before the next member.",
 }
 
 
@@ -85,6 +87,27 @@ def ndjson(records):
     return ("".join(json.dumps(record, ensure_ascii=True) + "\n" for record in records)).encode()
 
 
+def member_coverage_rows():
+    """A separate winner in every member makes premature EOF observable."""
+    return [ndjson([release([artifact(f"member-{i}")], f"3.14.{i}+20261020")]) for i in range(10)]
+
+
+def bounded_cache_members():
+    """Fill the target cache with distinct vendors that normalize to the same Linux target."""
+    aliases = [artifact("primary", platform=f"x86_64-v{i}-linux-gnu", variant="full") for i in range(520)]
+    return [
+        ndjson([release(aliases)]),
+        ndjson([release([artifact("power", platform="ppc64le-ibm-linux-gnu", variant="install_only")])]),
+        ndjson([
+            release([artifact("primary", platform="x86_64-v519-linux-gnu", sha256="1" * 64),
+                     artifact("power", platform="powerpc64le-unknown-linux-gnu", sha256="2" * 64)]),
+            # The same cached and uncached targets carry new per-release checksums.
+            release([{**aliases[0], "sha256": "3" * 64}], "3.15.0+20261020"),
+            release([{**aliases[-1], "sha256": "4" * 64}], "3.13.0+20261020"),
+        ]),
+    ]
+
+
 def case(label, records, output="catalog.json"):
     raw = records if isinstance(records, bytes) else ndjson(records)
     initial = {"index.ndjson": raw, "catalog.json": b"preserve the previous complete catalog\n"}
@@ -99,6 +122,29 @@ def cases(include_real=True):
 
     if include_real:
         add(case("real-complete-cpython-index", verify_provenance()))
+    def compressed(label, data, error=None):
+        add(Case(label, {"index.ndjson.gz": data, "catalog.json": b"previous catalog\n"},
+                 ("index.ndjson.gz", "catalog.json")), error)
+
+    rows = member_coverage_rows()
+    members = [gzip.compress(row, mtime=0) for row in rows]
+    compressed("gzip-ten-distinct-members", b"".join(members))
+    compressed("gzip-member-splits-a-record", gzip.compress(rows[0][:32], mtime=0)
+               + gzip.compress(rows[0][32:], mtime=0))
+    compressed("gzip-empty-file", b"")
+    compressed("gzip-zero-padded-members", members[0] + bytes(7) + members[1] + bytes(7))
+    compressed("gzip-missing-magic", rows[0], "BadGzipFile")
+    compressed("gzip-truncated-last-member", b"".join(members)[:-3], "EOFError")
+    damaged = bytearray(members[-1])
+    damaged[-8] ^= 0xff
+    compressed("gzip-corrupt-last-member-checksum", b"".join(members[:-1]) + damaged, "BadGzipFile")
+    malformed, padding, invalid = b"{broken}\n", b" \n" * 6000, b"\xff\n"
+    add(case("malformed-row-before-invalid-utf8", malformed + padding + invalid), "UnicodeDecodeError")
+    compressed("gzip-malformed-row-before-invalid-utf8", gzip.compress(malformed + padding + invalid, mtime=0),
+               "UnicodeDecodeError")
+    for label, first in (("malformed-row", malformed), ("invalid-utf8", invalid)):
+        compressed("gzip-" + label + "-before-incorrect-crc", gzip.compress(first + padding, mtime=0) + damaged,
+                   "BadGzipFile")
     add(case("empty-index", b"\n \t\r\n\x1c\x85".decode("latin1").encode()))
     add(case("single-release", [release([artifact()])]))
     add(case("flavor-preference-before-release-date", [
@@ -133,6 +179,9 @@ def cases(include_real=True):
                                                           for index, version in enumerate(versions)]))
     add(case("normalized-version-groups", [release([artifact("first")], "03.014.00+020261020"),
                                             release([artifact("second")], "3.14.0+20261021")]))
+    cache_members = bounded_cache_members()
+    add(case("bounded-target-cache", b"".join(cache_members)))
+    compressed("gzip-bounded-target-cache", b"".join(gzip.compress(data, mtime=0) for data in cache_members))
     add(case("stable-numeric-prerelease-ties", [
         release([artifact("filtered", variant="static+full")], "3.14.0a01+20261020"),
         release([artifact("first")], "3.14.0a1+20261020"),
@@ -234,7 +283,7 @@ def oracle(value, error=None, original=True):
             try:
                 if len(value.arguments) != 2:
                     raise ValueError("expected INPUT.ndjson OUTPUT.json")
-                text = (directory / value.arguments[0]).read_text(encoding="utf-8")
+                text = adapter["read_source"](directory / value.arguments[0])
                 adapter["run"](text, directory / value.arguments[1])
             except Exception as caught:
                 actual_error = "ValueError" if isinstance(caught, ValueError) and not isinstance(caught, UnicodeError) else type(caught).__name__
@@ -301,9 +350,13 @@ def check_result(value, expected, process, directory, engine="port"):
     assert stdout == expected.get("stdout", ""), (value.label, engine, stdout)
     if expected["error"]:
         allowed = {"ValueError", "JSONDecodeError"} if expected["error"] == "ValueError" else {expected["error"]}
+        if engine == "codon" and value.label.startswith("gzip-") and expected["error"] in ("EOFError", "BadGzipFile"):
+            # Codon's gzread/gzclose surfaces these zlib errors as OSError.
+            allowed.add("OSError")
         # Codon's native exception printer adds ANSI colors even when captured.
         plain_stderr = re.sub(r"\x1b\[[0-9;]*m", "", stderr)
-        categories = re.findall(r"^([A-Za-z_][\w.]*(?:Error|Exception)):", plain_stderr, re.MULTILINE)
+        categories = [name for name in re.findall(r"^([A-Za-z_][\w.]*):", plain_stderr, re.MULTILINE)
+                      if name.endswith(("Error", "Exception", "BadGzipFile"))]
         assert process.returncode != 0 and categories and categories[-1].rsplit(".", 1)[-1] in allowed, (value.label, engine, stderr)
         assert not any(marker in stderr for marker in ("ERROR: AddressSanitizer", "ERROR: LeakSanitizer", "runtime error:")), stderr
     else:

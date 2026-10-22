@@ -45,6 +45,14 @@ third-party runtime components. The Linux archive SHA-256 is
 The builder verifies the compiler and both Codon shared libraries against the
 official release identities; it records the native JSON module hash as well.
 
+The Python download catalog uses Codon's native plain and gzip file readers.
+The builder removes the CPython `TextIO` parameter annotation so Codon can
+specialize the same reader body for both handle types. The build records the
+identities of Codon's gzip and file modules. Its gzip reader accepts
+uncompressed input transparently and stops at zero padding between members.
+The differential suite records these two differences. The measured archive
+contains ordinary, adjacent gzip members and every engine must read them all.
+
 ```sh
 python3 benchmarks/codon_native/build.py \
   --codon /path/to/codon-deploy-linux-x86_64/bin/codon \

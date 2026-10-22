@@ -122,6 +122,15 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
             raise ValueError("typed encoder import changed")
         changed = changed.replace(before, "from .catalog import encode\n")
         edits.append({"kind": "native encoder import"})
+    if name == "python_catalog/__main__.py":
+        # Codon specializes this function for its native File[str] and gzFile[str].
+        declaration = "def read_catalog(stream: TextIO)"
+        imported = "from typing import TextIO\n"
+        if changed.count(declaration) != 1 or changed.count(imported) != 1:
+            raise ValueError("catalog text reader declaration changed")
+        changed = changed.replace(imported, "").replace(declaration, "def read_catalog(stream)")
+        edits.append({"kind": "specialize native plain and gzip text handles", "before": declaration,
+                      "after": "def read_catalog(stream)"})
     if name == "conformance_report/live.py":
         before = "from relar.json import decode\n"
         if changed.count(before) != 1:
@@ -207,6 +216,9 @@ def main() -> None:
         record["source_inputs"][str(path)] = digest(path.read_bytes())
     native_json = codon.parent.parent / "lib/codon/stdlib/json.codon"
     record["native_json"] = {"path": str(native_json), "sha256": digest(native_json.read_bytes())}
+    if "python_catalog" in args.applications:
+        record["native_catalog_io"] = {str(path): digest(path.read_bytes()) for path in (
+            native_json.with_name("gzip.codon"), native_json.parent / "internal/file.codon")}
     targets = [(app, "__main__") for app in args.applications]
     targets += [(app, "compute") for app in args.applications if "compute.py" in FILES[app]]
     entries = []

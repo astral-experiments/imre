@@ -4,11 +4,12 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::rc::Rc;
 use std::str::FromStr;
 
+use flate2::bufread::GzDecoder;
 use memchr::{memchr, memchr2, memchr3};
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -36,6 +37,46 @@ fn file_error(error: io::Error) -> Failure {
         _ => "OSError",
     };
     Failure(kind, error.to_string())
+}
+
+/// Concatenate independently decoded gzip members and accept Python's post-member zero padding.
+struct GzipMembers<R> {
+    source: Option<R>,
+    member: Option<GzDecoder<R>>,
+}
+
+impl<R: BufRead> Read for GzipMembers<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            let mut source = if let Some(member) = &mut self.member {
+                let count = member.read(buffer)?;
+                if count != 0 {
+                    return Ok(count);
+                }
+                let mut source = self.member.take().unwrap().into_inner();
+                loop {
+                    let chunk = source.fill_buf()?;
+                    let zeros = chunk.iter().take_while(|&&byte| byte == 0).count();
+                    if zeros == 0 {
+                        break;
+                    }
+                    source.consume(zeros);
+                }
+                source
+            } else if let Some(source) = self.source.take() {
+                source
+            } else {
+                return Ok(0);
+            };
+            if source.fill_buf()?.is_empty() {
+                return Ok(0);
+            }
+            self.member = Some(GzDecoder::new(source));
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -226,14 +267,10 @@ impl Arch {
 
 struct Download {
     version: Rc<Version>,
-    arch: Arch,
-    os: String,
-    libc: String,
+    target: Rc<Target>,
     url: String,
     sha256: Option<String>,
-    variant: Option<&'static str>,
-    build: String,
-    priority: (usize, i32),
+    build: Rc<str>,
     #[allow(dead_code)]
     filename: String,
 }
@@ -270,13 +307,21 @@ fn unquote(text: &str) -> String {
     }
 }
 
-fn parse_artifact(
-    version: &Rc<Version>,
-    release: &Integer,
-    artifact: Artifact,
-) -> Result<Option<Download>, Failure> {
-    let filename = unquote(artifact.url.rsplit('/').next().unwrap_or(""));
-    let mut platform = artifact.platform.as_str();
+#[derive(Eq, Hash, PartialEq)]
+struct SelectionKey {
+    os: String,
+    arch: String,
+    libc: String,
+    variant: Option<&'static str>,
+}
+
+struct Target {
+    arch: Arch,
+    key: Rc<SelectionKey>,
+    priority: (usize, i32),
+}
+
+fn parse_target(mut platform: &str, raw_variant: &str) -> Result<Option<Target>, Failure> {
     let mut options = Vec::new();
     for suffix in ["-debug", "-freethreaded"] {
         if let Some(base) = platform.strip_suffix(suffix) {
@@ -284,9 +329,9 @@ fn parse_artifact(
             options.push(&suffix[1..]);
         }
     }
-    let mut flavor = artifact.variant.as_str();
-    if artifact.variant.contains('+') {
-        let parts = artifact.variant.split('+').collect::<Vec<_>>();
+    let mut flavor = raw_variant;
+    if raw_variant.contains('+') {
+        let parts = raw_variant.split('+').collect::<Vec<_>>();
         let last = parts.last().copied().unwrap_or("");
         if ["full", "install_only", "install_only_stripped"].contains(&last) {
             options.extend_from_slice(&parts[..parts.len() - 1]);
@@ -307,9 +352,6 @@ fn parse_artifact(
     } else {
         "none"
     };
-    if *release < Integer::Small(20250311) && libc == "musl" {
-        return Ok(None);
-    }
     let variant = match (
         options.contains(&"freethreaded"),
         options.contains(&"debug"),
@@ -332,42 +374,84 @@ fn parse_artifact(
     let build_priority = -(i32::from(options.contains(&"lto"))
         + i32::from(options.contains(&"pgo"))
         + i32::from(!options.contains(&"static")));
-    Ok(Some(Download {
-        version: Rc::clone(version),
-        arch,
+    let key = Rc::new(SelectionKey {
         os,
+        arch: arch.key(),
         libc: libc.to_owned(),
-        url: artifact.url,
-        sha256: artifact.sha256,
         variant,
-        build: release.to_string(),
+    });
+    Ok(Some(Target {
+        arch,
+        key,
         priority: (flavor_priority, build_priority),
-        filename,
     }))
 }
 
-type SelectionKey = (String, String, String, Option<&'static str>);
+#[derive(Default)]
+struct TargetCache {
+    by_platform: HashMap<String, HashMap<String, Rc<Target>>>,
+    entries: usize,
+}
+
+impl TargetCache {
+    /// Borrow both raw labels on hits and cap retained normalized pairs across releases.
+    fn get(&mut self, platform: &str, variant: &str) -> Result<Option<Rc<Target>>, Failure> {
+        if let Some(target) = self
+            .by_platform
+            .get(platform)
+            .and_then(|variants| variants.get(variant))
+        {
+            return Ok(Some(Rc::clone(target)));
+        }
+        let Some(target) = parse_target(platform, variant)? else {
+            return Ok(None);
+        };
+        let target = Rc::new(target);
+        if self.entries < 512 {
+            self.by_platform
+                .entry(platform.to_owned())
+                .or_default()
+                .insert(variant.to_owned(), Rc::clone(&target));
+            self.entries += 1;
+        }
+        Ok(Some(target))
+    }
+}
 
 #[derive(Default)]
 struct Group {
-    positions: HashMap<SelectionKey, usize>,
+    positions: HashMap<Rc<SelectionKey>, usize>,
     selected: Vec<Download>,
 }
 
 impl Group {
-    fn offer(&mut self, download: Download) {
-        let key = (
-            download.os.clone(),
-            download.arch.key(),
-            download.libc.clone(),
-            download.variant,
-        );
-        if let Some(&position) = self.positions.get(&key) {
-            if download.priority < self.selected[position].priority {
-                self.selected[position] = download;
-            }
+    fn offer(
+        &mut self,
+        version: &Rc<Version>,
+        build: &Rc<str>,
+        target: Rc<Target>,
+        artifact: Artifact,
+        filename: String,
+    ) {
+        let existing = self.positions.get(&target.key).copied();
+        if let Some(i) = existing
+            && target.priority >= self.selected[i].target.priority
+        {
+            return;
+        }
+        let download = Download {
+            version: Rc::clone(version),
+            build: Rc::clone(build),
+            target,
+            url: artifact.url,
+            sha256: artifact.sha256,
+            filename,
+        };
+        if let Some(i) = existing {
+            self.selected[i] = download;
         } else {
-            self.positions.insert(key, self.selected.len());
+            self.positions
+                .insert(Rc::clone(&download.target.key), self.selected.len());
             self.selected.push(download);
         }
     }
@@ -392,37 +476,18 @@ fn line_break(character: char) -> bool {
     )
 }
 
-fn find_downloads(text: &str) -> Result<Vec<Download>, Failure> {
-    let mut positions: HashMap<Rc<Version>, usize> = HashMap::new();
-    let mut groups: Vec<Group> = Vec::new();
-    // Most release indexes use CR/LF only. The byte guards also catch the UTF-8
-    // leading bytes of NEL/LS/PS, so Unicode separators retain the scalar path.
-    let bytes = text.as_bytes();
-    let ordinary_lines = memchr3(0x0b, 0x0c, 0x1c, bytes).is_none()
-        && memchr3(0x1d, 0x1e, 0xc2, bytes).is_none()
-        && memchr(0xe2, bytes).is_none();
-    let mut remaining = text;
-    while !remaining.is_empty() {
-        let boundary = if ordinary_lines {
-            memchr2(b'\r', b'\n', remaining.as_bytes()).map(|index| (index, 1))
-        } else {
-            remaining
-                .char_indices()
-                .find(|(_, character)| line_break(*character))
-                .map(|(index, character)| (index, character.len_utf8()))
-        };
-        let line = if let Some((index, width)) = boundary {
-            let line = &remaining[..index];
-            remaining = &remaining[index + width..];
-            line
-        } else {
-            let line = remaining;
-            remaining = "";
-            line
-        };
+#[derive(Default)]
+struct Selection {
+    positions: HashMap<Rc<Version>, usize>,
+    groups: Vec<Group>,
+    targets: TargetCache,
+}
+
+impl Selection {
+    fn offer_line(&mut self, line: &str) -> Result<(), Failure> {
         let line = line.trim_matches(python_space);
         if line.is_empty() {
-            continue;
+            return Ok(());
         }
         let mut record: Release =
             serde_json::from_str(line).map_err(|error| invalid(error.to_string()))?;
@@ -432,24 +497,95 @@ fn find_downloads(text: &str) -> Result<Vec<Download>, Failure> {
             .unwrap_or((&record.version, ""));
         let version = Rc::new(Version::parse(version)?);
         let release = Integer::parse(date)?;
-        let mut position = positions.get(&version).copied();
+        let build: Rc<str> = release.to_string().into();
+        let mut position = self.positions.get(&version).copied();
         record
             .artifacts
             .sort_by(|left, right| left.url.cmp(&right.url));
         for artifact in record.artifacts {
-            let Some(download) = parse_artifact(&version, &release, artifact)? else {
+            let filename = unquote(artifact.url.rsplit('/').next().unwrap_or(""));
+            let Some(target) = self.targets.get(&artifact.platform, &artifact.variant)? else {
                 continue;
             };
+            if release < Integer::Small(20250311) && target.key.libc == "musl" {
+                continue;
+            }
             let position = *position.get_or_insert_with(|| {
-                groups.push(Group::default());
-                let position = groups.len() - 1;
-                positions.insert(Rc::clone(&version), position);
+                self.groups.push(Group::default());
+                let position = self.groups.len() - 1;
+                self.positions.insert(Rc::clone(&version), position);
                 position
             });
-            groups[position].offer(download);
+            self.groups[position].offer(&version, &build, target, artifact, filename);
+        }
+        Ok(())
+    }
+
+    fn offer_physical_line(&mut self, bytes: &[u8]) -> Result<(), Failure> {
+        let line = std::str::from_utf8(bytes)
+            .map_err(|error| Failure("UnicodeDecodeError", error.to_string()))?;
+        // Keep Python's wider str.splitlines() boundaries within each file line.
+        if memchr3(0x0b, 0x0c, 0x1c, bytes).is_some()
+            || memchr3(0x1d, 0x1e, 0xc2, bytes).is_some()
+            || memchr(0xe2, bytes).is_some()
+        {
+            for part in line.split(line_break) {
+                self.offer_line(part)?;
+            }
+            Ok(())
+        } else {
+            self.offer_line(line)
         }
     }
-    Ok(groups
+}
+
+/// Keep at most one physical row while recognizing LF, CRLF, and bare CR.
+fn find_downloads(mut reader: impl BufRead, gzip: bool) -> Result<Vec<Download>, Failure> {
+    let mut selection = Selection::default();
+    let mut partial = Vec::new();
+    let mut pending = None;
+    let mut process_line = |bytes: &[u8]| {
+        if pending.is_none() {
+            pending = selection.offer_physical_line(bytes).err();
+        } else if !matches!(pending, Some(Failure("UnicodeDecodeError", _)))
+            && let Err(error) = std::str::from_utf8(bytes)
+        {
+            // The original bulk read validates all input before parsing any record.
+            pending = Some(Failure("UnicodeDecodeError", error.to_string()));
+        }
+    };
+    loop {
+        let chunk = reader.fill_buf().map_err(|error| match error.kind() {
+            io::ErrorKind::UnexpectedEof if gzip => Failure("EOFError", error.to_string()),
+            io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData if gzip => {
+                Failure("BadGzipFile", error.to_string())
+            }
+            _ => file_error(error),
+        })?;
+        if chunk.is_empty() {
+            process_line(&partial);
+            break;
+        }
+        let count = if let Some(end) = memchr2(b'\r', b'\n', chunk) {
+            if partial.is_empty() {
+                process_line(&chunk[..end]);
+            } else {
+                partial.extend_from_slice(&chunk[..end]);
+                process_line(&partial);
+                partial.clear();
+            }
+            end + 1
+        } else {
+            partial.extend_from_slice(chunk);
+            chunk.len()
+        };
+        reader.consume(count);
+    }
+    if let Some(error) = pending {
+        return Err(error);
+    }
+    Ok(selection
+        .groups
         .into_iter()
         .flat_map(|group| group.selected)
         .collect())
@@ -470,13 +606,15 @@ fn variant_order(variant: Option<&str>) -> u8 {
         Some("freethreaded") => 1,
         Some("freethreaded+debug") => 2,
         Some("debug") => 3,
-        _ => unreachable!("variants are constructed by parse_artifact"),
+        _ => unreachable!("variants are constructed by parse_target"),
     }
 }
 
 fn download_key(download: &Download) -> String {
     let version = &download.version;
     let suffix = download
+        .target
+        .key
         .variant
         .map(|value| format!("+{value}"))
         .unwrap_or_default();
@@ -486,9 +624,9 @@ fn download_key(download: &Download) -> String {
         version.minor,
         version.patch,
         version.prerelease,
-        download.os,
-        download.arch.key(),
-        download.libc,
+        download.target.key.os,
+        download.target.key.arch,
+        download.target.key.libc,
     )
 }
 
@@ -518,16 +656,16 @@ impl Serialize for Catalog {
                 key,
                 &Entry {
                     name: "cpython",
-                    arch: &download.arch,
-                    os: &download.os,
-                    libc: &download.libc,
+                    arch: &download.target.arch,
+                    os: &download.target.key.os,
+                    libc: &download.target.key.libc,
                     major: &download.version.major,
                     minor: &download.version.minor,
                     patch: &download.version.patch,
                     prerelease: &download.version.prerelease,
                     url: &download.url,
                     sha256: &download.sha256,
-                    variant: download.variant,
+                    variant: download.target.key.variant,
                     build: &download.build,
                 },
             )?;
@@ -586,9 +724,9 @@ impl Formatter for AsciiPretty {
 }
 
 /// Preserve stable winner order and emit the complete Python-compatible JSON.
-fn generate(text: &str) -> Result<Vec<u8>, Failure> {
+fn generate(reader: impl BufRead, gzip: bool) -> Result<Vec<u8>, Failure> {
     let mut keyed = Vec::new();
-    for download in find_downloads(text)? {
+    for download in find_downloads(reader, gzip)? {
         keyed.push((prerelease_key(&download.version.prerelease)?, download));
     }
     keyed.sort_by(|(left_pre, left), (right_pre, right)| {
@@ -599,17 +737,20 @@ fn generate(text: &str) -> Result<Vec<u8>, Failure> {
             .then_with(|| right.version.minor.cmp(&left.version.minor))
             .then_with(|| right.version.patch.cmp(&left.version.patch))
             .then_with(|| right_pre.cmp(left_pre))
-            .then_with(|| variant_order(left.variant).cmp(&variant_order(right.variant)))
-            .then_with(|| left.os.cmp(&right.os))
-            .then_with(|| left.arch.family.cmp(&right.arch.family))
             .then_with(|| {
-                left.arch
+                variant_order(left.target.key.variant).cmp(&variant_order(right.target.key.variant))
+            })
+            .then_with(|| left.target.key.os.cmp(&right.target.key.os))
+            .then_with(|| left.target.arch.family.cmp(&right.target.arch.family))
+            .then_with(|| {
+                left.target
+                    .arch
                     .variant
                     .as_deref()
                     .unwrap_or("")
-                    .cmp(right.arch.variant.as_deref().unwrap_or(""))
+                    .cmp(right.target.arch.variant.as_deref().unwrap_or(""))
             })
-            .then_with(|| left.libc.cmp(&right.libc))
+            .then_with(|| left.target.key.libc.cmp(&right.target.key.libc))
     });
     let mut positions = HashMap::new();
     let mut catalog = Catalog(Vec::new());
@@ -675,17 +816,32 @@ fn run() -> Result<(), Failure> {
         BigInt::from(1)
     };
     let input_index = if repeated { 3 } else { 1 };
-    let raw = fs::read(normalized_path(&arguments[input_index])).map_err(file_error)?;
-    let text =
-        String::from_utf8(raw).map_err(|error| Failure("UnicodeDecodeError", error.to_string()))?;
-    let mut rendered = Vec::new();
+    let source = normalized_path(&arguments[input_index]);
     let mut checksum = BigInt::from(0);
-    let mut remaining = rounds;
-    while remaining > BigInt::from(0) {
-        rendered = generate(std::hint::black_box(&text))?;
-        checksum += std::hint::black_box(rendered.len());
-        remaining -= 1;
-    }
+    let rendered = if repeated {
+        let raw = fs::read(&source).map_err(file_error)?;
+        let text = String::from_utf8(raw)
+            .map_err(|error| Failure("UnicodeDecodeError", error.to_string()))?;
+        let mut remaining = rounds;
+        let mut rendered = Vec::new();
+        while remaining > BigInt::from(0) {
+            rendered = generate(std::hint::black_box(text.as_bytes()), false)?;
+            checksum += std::hint::black_box(rendered.len());
+            remaining -= 1;
+        }
+        rendered
+    } else {
+        let file = fs::File::open(&source).map_err(file_error)?;
+        if source.ends_with(".gz") {
+            let input = GzipMembers {
+                source: Some(BufReader::new(file)),
+                member: None,
+            };
+            generate(BufReader::new(input), true)?
+        } else {
+            generate(BufReader::new(file), false)?
+        }
+    };
     let output_name = normalized_path(&arguments[input_index + 1]);
     let output = Path::new(&output_name);
     if let Some(parent) = output
