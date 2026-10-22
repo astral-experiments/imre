@@ -142,8 +142,10 @@ reports, and 1.42–1.57× for repeated report computation, across ordinary and
 ThinLTO builds. Every measured workload, including controls, stays below 2× Rust.
 
 The [conformance reporter](examples/conformance_report/README.md) ports Ruff's
-typing-test comparison tool. It scans real source annotations, groups captured
-ty diagnostics, and renders the complete Markdown or GitHub report.
+typing-test comparison tool. It reads test groups from TOML in a typing checkout,
+runs two ty executables with timeouts, resolves diagnostic paths, and atomically
+publishes the complete Markdown or GitHub report. Captured diagnostics remain
+available for offline replay and separate report-computation measurements.
 The [Python download catalog](examples/python_catalog/README.md) ports uv's
 offline CPython release transformation, selecting and rendering 6,098 downloads
 from 58,721 raw release artifacts. Both guides explain the typed adaptations,

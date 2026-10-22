@@ -240,6 +240,51 @@ validation, and a portable replay of the evidence and statistics.
 
 ## Compute-heavy developer tools
 
+### Live conformance workflow
+
+The conformance reporter can also run directly from a typing checkout, including
+typed TOML configuration, path resolution, two actual ty child processes with
+timeouts, and atomic report publication. Its [application guide](../examples/conformance_report/README.md)
+shows the live CLI and captured-input replay.
+
+For this workflow, `live_conformance_build.py` builds both Relar executables from
+a retained `native_tools_build.py` compiler/runtime record. The live benchmark
+requires matching Relar-program, Rust, Codon, and native-platform build records,
+and validates full reports and filesystem effects across all five engines before
+timing. It measures changed and unchanged reports, plus four-round frozen-input
+report computation and zero-round controls. The latter keep analyzer latency
+separate from compiler performance.
+
+```sh
+python3.14 benchmarks/live_conformance_build.py \
+  --core-build-record /path/to/core/build-record.json --mode normal \
+  --clang clang-18 --output /path/to/new-relar-programs
+
+python3.14 benchmarks/live_conformance_benchmark.py \
+  --suite /path/to/pinned-typing/conformance \
+  --old-ty /path/to/ty-0.0.60 --new-ty /path/to/ty-0.0.90 \
+  --python /path/to/python-with-tomli \
+  --relar /path/to/new-relar-programs/conformance-report \
+  --relar-compute /path/to/new-relar-programs/conformance-report-compute \
+  --codon /path/to/codon-build/conformance_report \
+  --codon-compute /path/to/codon-build/conformance_report-compute \
+  --rust /path/to/rust-build/conformance-report-reference \
+  --build-record /path/to/new-relar-programs/build-record.json \
+  --build-record /path/to/codon-build/build-record.json \
+  --build-record /path/to/rust-build/build-record.json \
+  --build-record /path/to/platform-build/build-record.json \
+  --samples 20 --warmups 2 --output /path/to/new-measurements
+```
+
+Use the complete typing checkout pinned in the application guide and matching
+ordinary or ThinLTO artifacts. For ThinLTO, select `--mode thinlto` and the explicit
+`--lto-linker` when building Relar programs, and build the Rust reference and
+platform with `--thinlto`. Keep the benchmark host free of builds and profilers
+during measurement. Raw samples are retained incrementally; only a final passing
+`benchmark.json` with all input guards represents a completed comparison.
+
+### Captured-input developer tools
+
 The [conformance reporter](../examples/conformance_report/README.md) ports Ruff's
 offline annotation and diagnostic comparison. The
 [Python download catalog](../examples/python_catalog/README.md) ports uv's offline

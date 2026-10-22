@@ -1,4 +1,4 @@
-# Offline typing-conformance report
+# Typing-conformance report
 
 This is a typed port of Ruff's complete conformance comparison and reporting
 tool. It scans the Python typing conformance suite's raw annotations, decodes
@@ -10,7 +10,48 @@ The unchanged [upstream source](upstream/conformance.py), its MIT license and
 [provenance](upstream/UPSTREAM.json) are retained. The report algorithm is from
 Ruff commit `de9071547cfec12f689142a7b8ce98edc7aef909`.
 
-## Run a real comparison
+## Run directly from a checkout
+
+Build the reporter, then provide a [python/typing](https://github.com/python/typing)
+checkout and two ty executables:
+
+```sh
+relar build examples/conformance_report/__main__.py --module-root examples \
+  -o /tmp/conformance-report
+
+/tmp/conformance-report --suite /absolute/path/to/typing/conformance \
+  --old-ty /absolute/path/to/old/ty --new-ty /absolute/path/to/new/ty \
+  --timeout 15.0 --format github --output /tmp/conformance.md
+```
+
+The program decodes `src/test_groups.toml` into typed records, discovers and
+resolves test sources, invokes both analyzers with the upstream flags, resolves
+their diagnostic paths, and renders the report. Each analyzer has its own timeout
+in seconds. A sibling temporary directory holds the complete output until an
+atomic replacement publishes it. Failures leave an existing report intact and
+remove the temporary workspace. The output parent must already exist; successful
+file output is quiet. Live mode requires `--output`.
+
+The default report-link revision is the validated typing commit
+`835b70f3f795f8e061b1f7621178515b0a77a0ad`. Use `--suite-revision REVISION` when
+running another checkout. `--format diff` selects local-path diagnostic diffs;
+`--force-summary-table` includes the full metrics table for unchanged results.
+
+To run the typed port on CPython 3.14, install the TOML 1.1 compatibility parser:
+
+```sh
+python3.14 -m venv /tmp/conformance-python
+/tmp/conformance-python/bin/python -m pip install 'tomli==2.4.0'
+PYTHONPATH=examples:stdlib /tmp/conformance-python/bin/python -m conformance_report \
+  --suite /absolute/path/to/typing/conformance \
+  --old-ty /absolute/path/to/old/ty --new-ty /absolute/path/to/new/ty \
+  --timeout 15.0 --output /tmp/conformance.md
+```
+
+Native executables use the Rust TOML parser and require no Python installation.
+Python 3.15 and later use their standard-library TOML 1.1 parser.
+
+## Replay a captured comparison
 
 Prepare a checkout of [python/typing](https://github.com/python/typing) at
 `835b70f3f795f8e061b1f7621178515b0a77a0ad` and two ty executables. The preparation
@@ -47,8 +88,8 @@ PYTHONPATH=examples:stdlib python3 -m conformance_report \
 
 ## Adaptations and scope
 
-The CLI consumes a manifest and captured JSON rather than launching ty. The
-manifest contains `suite_revision`, the selected `test_files`, and
+The offline CLI accepts a manifest and captured JSON. The manifest contains
+`suite_revision`, the selected `test_files`, and
 `diagnostic_paths` entries with `raw` and canonical `path` strings. Preparation
 does test-group discovery and path resolution; it does not parse annotations,
 decode diagnostics into report records, classify cases, calculate metrics, or
@@ -75,8 +116,11 @@ output-length checksum. With `--output`, it also writes the complete final
 report once after the loop, so benchmark gates can check every byte. Zero rounds
 write an empty report and print `0`; `--rounds 0` is the matching preload/startup
 control. The upstream adapter exposes this as `--compute --rounds N`.
-Preparation and input acquisition are outside both compute and report timings;
-ordinary report timings still include all filesystem reads and output writes.
+Preparation and input acquisition are outside offline compute and report timings;
+offline report timings include all filesystem reads and output writes. Live
+timings include TOML, discovery, both actual analyzer processes, path resolution,
+report generation, atomic publication, and cleanup. Separate frozen-input
+compute timings expose report performance independently of analyzer latency.
 
 ```sh
 relar build examples/conformance_report/compute.py --module-root examples \
@@ -106,3 +150,18 @@ adapters and their explicitly bounded input domain live in
 `benchmarks/codon_native`. Parenthesized sequence patterns in the shared port
 avoid a Codon distinction between tuple and bracketed patterns; their Python
 AST is identical.
+
+`original_live.py` runs the unchanged upstream discovery, diagnostic conversion,
+grouping, statistics, and rendering functions with a bounded CLI, per-child
+timeout, typed configuration checks, and atomic publication. It is an upstream
+adapter, not the unchanged upstream CLI. The live validator checks complete
+reports, exception categories, child reaping, existing-output preservation, and
+filesystem effects across upstream Python, typed Python, Relar, Codon, and Rust.
+
+The native Codon build uses explicit TOML, subprocess, and temporary-directory
+adapters backed by the independent Rust library in `benchmarks/native_platform`.
+That library contains no report computation and links neither Python nor Relar.
+Its calls and serialization costs are included in live timings; the Rust
+reference uses the same platform library. The declared adapters accommodate
+Codon's context-manager behavior and native error representation while keeping
+the application function bodies shared.
