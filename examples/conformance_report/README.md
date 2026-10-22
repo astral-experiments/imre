@@ -144,6 +144,9 @@ The live benchmark runs ty 0.0.90 on both sides for its unchanged case and
 0.0.60 → 0.0.90 for changed reports. The [checkout comparison](../../benchmarks/results/2026-10-21-live-conformance.md)
 includes complete workflow timings, separate report-computation timings,
 and reproducible evidence for CPython, Relar, Codon, and Rust.
+The [fixed-regex comparison](../../benchmarks/results/2026-10-22-fixed-regex.md)
+times Ruff’s original pattern against the previous scanner on the same checkout
+and verifies the text and offsets of each captured annotation.
 
 `benchmarks/conformance_validate.py` compares full reports and filesystem effects
 against the unchanged upstream implementation. Its seeded checks exercise the

@@ -1,0 +1,68 @@
+{
+  "revision": "4eb4e4cd6aa81685bb42a7f1e95c1596901d3fc8",
+  "baseline_revision": "dad5a967fa7fa34cc34cddbc02e4ab35d147e0da",
+  "modes": {
+    "normal": {
+      "matrix_sha256": "fd098d39621769abc14750d128e49469eafc960b5edc84a1839117ef3e9a97bb",
+      "pilot": false,
+      "timed": 1008,
+      "warmups": 84,
+      "strict_files_checked": 81,
+      "matched_capture_transcripts": 12,
+      "real_source_files": 146,
+      "reconstructed_reports": [
+        "changed-diff",
+        "changed-github",
+        "unchanged-github"
+      ],
+      "time_target_met": true,
+      "ratios": {
+        "scanner": 1.9481668237517469,
+        "unchanged-github/complete-report": 1.5989076705086303,
+        "unchanged-github/repeated-report": 1.7743126966096998,
+        "unchanged-github/live-checkout": 1.0242700371609157,
+        "changed-github/complete-report": 1.619809486167456,
+        "changed-github/repeated-report": 1.725674532236777,
+        "changed-github/live-checkout": 1.0212100013153962,
+        "changed-diff/complete-report": 1.5922909698845187,
+        "changed-diff/repeated-report": 1.7332409480298476,
+        "changed-diff/live-checkout": 1.0189822063539282,
+        "scanner/net": 1.984466237033501,
+        "changed-diff/repeated-report/net": 1.7362733172441054,
+        "changed-github/repeated-report/net": 1.7263064721395065,
+        "unchanged-github/repeated-report/net": 1.7873582452715333
+      }
+    },
+    "thinlto": {
+      "matrix_sha256": "b2ade2e2f307c4caf0e18617d24a41a3c7a071fc5770380ad6d4fd95549a52c8",
+      "pilot": false,
+      "timed": 1008,
+      "warmups": 84,
+      "strict_files_checked": 82,
+      "matched_capture_transcripts": 12,
+      "real_source_files": 146,
+      "reconstructed_reports": [
+        "changed-diff",
+        "changed-github",
+        "unchanged-github"
+      ],
+      "time_target_met": true,
+      "ratios": {
+        "scanner": 1.773911896177736,
+        "unchanged-github/complete-report": 1.4921806299080045,
+        "unchanged-github/repeated-report": 1.5733179437567157,
+        "unchanged-github/live-checkout": 1.0253790851847073,
+        "changed-github/complete-report": 1.4818614421035345,
+        "changed-github/repeated-report": 1.5379525029061736,
+        "changed-github/live-checkout": 1.0072958273135046,
+        "changed-diff/complete-report": 1.4604934298690897,
+        "changed-diff/repeated-report": 1.5410435406690848,
+        "changed-diff/live-checkout": 1.012083560752727,
+        "scanner/net": 1.7922984743616366,
+        "unchanged-github/repeated-report/net": 1.5321555410304857,
+        "changed-diff/repeated-report/net": 1.5100848291171522,
+        "changed-github/repeated-report/net": 1.508703703664965
+      }
+    }
+  }
+}

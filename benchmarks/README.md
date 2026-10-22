@@ -298,6 +298,9 @@ retained source and artifact directories; the receipt reports which evidence
 categories were checked. Auditing does not execute or rebuild native programs.
 The [checkout comparison](results/2026-10-21-live-conformance.md) contains the
 five-engine timing tables, retained evidence, and a portable audit command.
+The [fixed-regex comparison](results/2026-10-22-fixed-regex.md) measures the
+annotation scanner separately and repeats the report and checkout workloads
+against the previous Relar scanner, CPython, Codon, and Rust.
 
 ### Streaming Python download catalog
 
