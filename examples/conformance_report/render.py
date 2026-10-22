@@ -9,14 +9,6 @@ def signed_percent(value: float) -> str:
     text = f'{value:.2%}'
     return text if text.startswith('-') else '+' + text
 
-def classification_title(classification: str, verb: str) -> str:
-    if classification == 'true_positive':
-        return f'True positives {verb}'
-    if classification == 'false_positive':
-        return f'False positives {verb}'
-    if classification == 'true_negative':
-        return f'True negatives {verb}'
-    return f'False negatives {verb}'
 GITHUB_HEADER = ['<table>', '<tr>', '<th>Test case</th>', '<th>Diff</th>', '</tr>']
 GITHUB_FOOTER = ['</table>']
 SUMMARY_NOTE = '\n    Each test case represents one expected error annotation or a group of annotations\n    sharing a tag. Counts are per test case, not per diagnostic — multiple diagnostics\n    on the same line count as one. Required annotations (`E`) are true positives when\n    ty flags the expected location and false negatives when it does not. Optional\n    annotations (`E?`) are true positives when flagged but true negatives (not false\n    negatives) when not. Tagged annotations (`E[tag]`) require ty to flag exactly one\n    of the tagged lines; tagged multi-annotations (`E[tag+]`) allow any number up to\n    the tag count. Flagging unexpected locations counts as a false positive.\n'

@@ -32,7 +32,15 @@ def main() -> None:
     raw = args.matrix.read_bytes()
     m = json.loads(raw)
     assert m["completed"] and ((not m["pilot"] and m["config"]["source_locked"]) or args.allow_pilot)
-    assert m["revision"] == m["config"]["revision"] and m["baseline_revision"] == "dad5a967fa7fa34cc34cddbc02e4ab35d147e0da"
+    kernel = m.get("kernel", "scanner")
+    assert kernel in ("scanner", "classification")
+    baseline = ("0d61459957cf483404c48150c543032d87cf91c2" if kernel == "classification"
+                else "dad5a967fa7fa34cc34cddbc02e4ab35d147e0da")
+    assert m["revision"] == m["config"]["revision"] and m["baseline_revision"] == m["config"]["baseline_revision"] == baseline
+    if kernel == "classification":
+        assert m["config"]["mode"] in ("normal", "thinlto")
+        assert all(set(commands) == {"classify", "report", "compute", "live"} for commands in m["config"]["engines"].values())
+        assert m["pilot"] or m["samples"] == 12
     orders = m["orders"]
     assert len(orders) == 6 and m["samples"] >= 6 and m["samples"] % 6 == 0
     assert all(len(row) == 6 and set(row) == ENGINES for row in orders)
@@ -59,6 +67,8 @@ def main() -> None:
     pattern = validation["upstream"]().CONFORMANCE_ERROR_PATTERN
     scores = {}
     for name, fixture in inputs["fixtures"].items():
+        if kernel == "classification":
+            continue
         text = read(fixture["input"], name + ".txt").decode().split("\0")
         if name == "corpus":
             assert text == lines and len(text) == 14_986
@@ -90,20 +100,38 @@ def main() -> None:
         def location(role):
             return args.retained/name/(role+".json") if args.retained else Path(captures[role]["path"])
         workload = validation["Workload"](location("manifest"), location("old"), location("new"), name.split("-")[1])
+        if name == "changed-github" and kernel == "classification":
+            helper = runpy.run_path(str(args.source_root / "benchmarks/conformance_classification_upstream.py"))
+            transcript, distribution = helper["snapshot"](validation, workload, texts)
+            fixture = inputs["fixtures"]["corpus"]
+            n, score = map(int, transcript.splitlines()[-1].split())
+            assert (n, score, distribution) == (fixture["cases"], fixture["checksum"], fixture["distribution"])
+            assert read(fixture["capture_oracle"], "corpus.captures") == transcript
+            assert m["capture_validation"]["corpus"] == {engine: digest(transcript) for engine in ENGINES}
+            scores["corpus"] = n, score
         original = validation["oracle"](workload, source_contents=texts).report
         assert original is not None and original.encode() == read(panel["expected_report"], name + ".md")
         assert len(original) == panel["expected_report"]["characters"]
         reports[name] = original
-    expected_cases = {"scanner", "scanner-preload"} | {
+    expected_cases = {kernel, kernel + "-preload"} | {
         p+"/"+k for p in PANELS for k in ("live-checkout", "complete-report", "repeated-report", "report-preload")
     }
     assert set(m["cases"]) == expected_cases
     times, all_ratios, timed, warmups = {}, {}, 0, 0
     for name, case in m["cases"].items():
         rounds = case["rounds"]
-        if case["executable"] == "scan":
+        if kernel == "classification":
+            role = name.split("/")[-1]
+            expected = {"classification": ("classify", None), "classification-preload": ("classify", 0),
+                        "complete-report": ("report", 1), "report-preload": ("compute", 0),
+                        "repeated-report": ("compute", None), "live-checkout": ("live", 1)}
+            entry, fixed_rounds = expected[role]
+            assert case["executable"] == entry and case["control"] == (rounds == 0)
+            assert rounds >= 2 if fixed_rounds is None else rounds == fixed_rounds
+        if case["executable"] in ("classify", "scan"):
             n, score = scores["corpus"]
-            stdout = output = f"{n*rounds} {score*rounds}\n".encode()
+            count = n if kernel == "classification" else n * rounds
+            stdout = output = f"{count} {score*rounds}\n".encode()
         else:
             report = reports[case["panel"]]
             stdout = f"{len(report)*rounds}\n".encode() if case["executable"] == "compute" else b""
@@ -125,13 +153,15 @@ def main() -> None:
             all_ratios[name] = ratio
         timed += 6 * m["samples"]
         warmups += 6
-    pairs = [("scanner", "scanner-preload")] + [(p+"/repeated-report", p+"/report-preload") for p in PANELS]
+    pairs = [(kernel, kernel + "-preload")] + [(p+"/repeated-report", p+"/report-preload") for p in PANELS]
     assert set(m["per_round_ns"]) == {case for case, _ in pairs}
     for case, control in pairs:
         net = {e: (times[case][e] - times[control][e]) / m["cases"][case]["rounds"] for e in ENGINES}
         assert net == m["per_round_ns"][case] and min(net.values()) > 0
         all_ratios[case + "/net"] = net["after"] / net["rust"]
     assert m["time_target_met"] == all(r <= 2 for r in all_ratios.values())
+    if kernel == "classification" and not m["pilot"] and not m["time_target_met"]:
+        raise SystemExit("completed classification comparison exceeds 2x Rust")
     print(json.dumps({"matrix_sha256": digest(raw), "pilot": m["pilot"], "timed": timed, "warmups": warmups,
                       "strict_files_checked": strict, "matched_capture_transcripts": len(inputs["fixtures"])*6,
                       "real_source_files": len(texts), "reconstructed_reports": sorted(reports),

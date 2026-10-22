@@ -1,3 +1,4 @@
+mod classification_benchmark;
 mod live;
 mod model;
 mod parse;
@@ -209,6 +210,9 @@ fn render_report(inputs: &Inputs, options: &Options) -> Result<String> {
 
 fn run() -> Result<()> {
     let arguments: Vec<String> = std::env::args().collect();
+    if arguments.get(1).map(String::as_str) == Some("--classify") {
+        return classification_benchmark::run(&arguments[2..]);
+    }
     if arguments.get(1).map(String::as_str) == Some("--scan") {
         return parse::scanner_benchmark::run(&arguments[2..]);
     }

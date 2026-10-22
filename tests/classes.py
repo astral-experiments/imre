@@ -121,7 +121,7 @@ def verify_upstream_definitions() -> None:
     reporter = PROJECT / "examples" / "conformance_report"
     checks = [
         (reporter / "upstream/conformance.py", reporter / "model.py",
-         {"Source", "Classification", "Change", "compute_stats"}),
+         {"Source", "Classification", "Change", "compute_stats", "change", "diagnostics_by_source", "classify"}),
         (PROJECT / "examples/python_catalog/upstream/fetch-download-metadata.py",
          FIXTURES / "uv_variant.py", {"Variant", "variant_sort_key"}),
     ]

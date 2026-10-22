@@ -96,11 +96,38 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
                 after = "@dataclass(eq=" + str(options.get("eq", True)) + ")\n"
                 lines[decorator.lineno - 1] = after
                 edits.append({"kind": "native dataclass declaration", "line": decorator.lineno, "before": before, "after": after})
+    # Codon's native Enum has singleton members, value patterns and string
+    # payloads. Spell out StrEnum's auto values and Python string display.
+    for node in tree.body:
+        if not (isinstance(node, ast.ClassDef) and any(isinstance(base, ast.Name) and base.id == "StrEnum" for base in node.bases)):
+            continue
+        members = [item for item in node.body if isinstance(item, ast.Assign)]
+        if not members:
+            raise ValueError("empty conformance StrEnum")
+        for member in members:
+            if not (len(member.targets) == 1 and isinstance(member.targets[0], ast.Name)
+                    and isinstance(member.value, ast.Call) and isinstance(member.value.func, ast.Name)
+                    and member.value.func.id == "auto" and not member.value.args and not member.value.keywords):
+                raise ValueError("unexpected conformance StrEnum member")
+            key = member.targets[0].id
+            lines[member.lineno - 1] = f"    {key} = {key.lower()!r}\n"
+        lines[node.lineno - 1] = f"class {node.name}(Enum):\n"
+        lines[members[-1].end_lineno - 1] += "\n    def __str__(self) -> str:\n        return self.value\n"
+        edits.append({"kind": "native singleton Enum with StrEnum values and display", "class": node.name,
+                      "members": [m.targets[0].id for m in members]})
     changed = "".join(lines)
     if any(node.func.id == "int" for node in calls):
         changed = "from codon_decimal import parse_int as native_python_int\n\n" + changed
     if any(node.func.id == "sorted" for node in calls):
         changed = "from codon_sort import sort_with_key as native_python_sorted\n\n" + changed
+    if "from enum import StrEnum, auto\n" in changed:
+        changed = changed.replace("from enum import StrEnum, auto\n", "from enum import Enum\n")
+        changed = changed.replace("from typing import Literal\n", "")
+        literal = 'Literal["added", "removed", "changed"]'
+        if changed.count(literal) != 1:
+            raise ValueError("unexpected conformance title annotation")
+        changed = changed.replace(literal, "str")
+        edits.append({"kind": "closed title literal annotation", "before": literal, "after": "str"})
     dataclass_import = "from dataclasses import dataclass\n"
     if dataclass_import in changed:
         if changed.count(dataclass_import) != 1:
@@ -201,6 +228,7 @@ def main() -> None:
     parser.add_argument("--applications", nargs="+", choices=FILES, default=list(FILES))
     parser.add_argument("--conformance-scanner", action="store_true", help="also compile the isolated preloaded-line scanner")
     parser.add_argument("--platform-library", type=Path, help="native benchmark platform shared library, required for conformance")
+    parser.add_argument("--conformance-classification", action="store_true")
     args = parser.parse_args()
     if "conformance_report" in args.applications and args.platform_library is None:
         parser.error("conformance_report requires --platform-library (native Rust OS/TOML boundary)")
@@ -250,6 +278,10 @@ def main() -> None:
     (source_root / "codon_sort.codon").write_bytes((HERE / "sort.py").read_bytes())
     if "conformance_report" in args.applications:
         reporter = ROOT / "examples/conformance_report"
+        if "from enum import StrEnum, auto" in (reporter / "model.py").read_text():
+            native_enum = codon.parent.parent / "lib/codon/stdlib/enum.codon"
+            record["native_enum"] = {"path": str(native_enum), "sha256": digest(native_enum.read_bytes())}
+            record["source_inputs"][str(native_enum)] = record["native_enum"]["sha256"]
         pattern = annotation_pattern((reporter / "parse.py").read_text())
         if pattern is not None:
             if pattern != annotation_pattern((reporter / "upstream/conformance.py").read_text()):
@@ -291,6 +323,19 @@ def main() -> None:
         entry.write_bytes(scanner.read_bytes())
         record["source_inputs"][str(scanner)] = digest(scanner.read_bytes())
         entries.append(("conformance_report-scanner", entry))
+    if args.conformance_classification:
+        if "conformance_report" not in args.applications:
+            parser.error("--conformance-classification requires the conformance reporter")
+        source = ROOT / "benchmarks/conformance_classification.py"
+        entry = source_root / "run_conformance_classification.py"
+        transformed, edits = adapt(source.read_text(), "conformance_classification.py")
+        entry.write_text(transformed)
+        record["source_inputs"][str(source)] = digest(source.read_bytes())
+        record["transformations"]["conformance_classification.py"] = edits
+        entries.append(("conformance_report-classification", entry))
+        probe = source_root / "run_conformance_enum_probe.py"
+        probe.write_bytes((HERE / "enum_probe.py").read_bytes())
+        entries.append(("conformance_report-enum-probe", probe))
     record["generated"] = {
         str(path.relative_to(source_root)): digest(path.read_bytes())
         for path in sorted(source_root.rglob("*")) if path.is_file()
