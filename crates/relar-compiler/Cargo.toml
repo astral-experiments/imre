@@ -18,6 +18,8 @@ ty_site_packages.workspace = true
 ty_vendored.workspace = true
 salsa.workspace = true
 salsa-macro-rules.workspace = true
+regex.workspace = true
+regex-syntax.workspace = true
 tempfile = "=3.23.0"
 
 [[bin]]

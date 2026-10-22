@@ -98,9 +98,9 @@ absolute identities produced by preparation. Inputs must use UTF-8 and complete
 GitLab diagnostic records with integer positions; unknown JSON fields are ignored.
 
 String tags replace enums, ordinary display helpers replace `__str__`, and
-concrete records replace dynamic JSON dictionaries. A linear scanner implements
-the upstream regex, including Unicode whitespace, scalar column offsets, first
-match behavior, and malformed-tag fallback. Assertions for no annotations and
+concrete records replace dynamic JSON dictionaries. The reporter uses Ruff’s
+original verbose regex declaration verbatim. Relar runs it with Rust’s regex
+engine and exposes the same named captures and character offsets as CPython. Assertions for no annotations and
 no new true positives remain errors; the latter omits the upstream diagnostic
 record debug dump. The adapter suppresses the upstream output-file confirmation
 and duplicated report on stderr.
@@ -144,6 +144,9 @@ The live benchmark runs ty 0.0.90 on both sides for its unchanged case and
 0.0.60 → 0.0.90 for changed reports. The [checkout comparison](../../benchmarks/results/2026-10-21-live-conformance.md)
 includes complete workflow timings, separate report-computation timings,
 and reproducible evidence for CPython, Relar, Codon, and Rust.
+The [fixed-regex comparison](../../benchmarks/results/2026-10-22-fixed-regex.md)
+times Ruff’s original pattern against the previous scanner on the same checkout
+and verifies the text and offsets of each captured annotation.
 
 `benchmarks/conformance_validate.py` compares full reports and filesystem effects
 against the unchanged upstream implementation. Its seeded checks exercise the

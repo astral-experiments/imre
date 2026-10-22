@@ -21,6 +21,7 @@ This is a deliberately restricted Python dialect for closed, statically typed so
 | Comprehensions | Eager list, dictionary, and set comprehensions; immediately consumed generator expressions; nested `for` clauses and truth-tested filters; isolated target bindings |
 | Tuples | Fixed length and a type per position; literals, bounded literal indexing, nested/starred unpacking into names, fields, and subscripts, and `len(...)`; immutable slots; value equality for immutable field shapes and lexicographic ordering for ordered scalar shapes |
 | Strings | Immutable UTF-8 text, literals, scalar/record f-strings and `!r`, bounded fixed/percent numeric formats, concatenation, equality/inequality, Unicode scalar length, indexing, slicing and iteration, bounded `split`/`rsplit`, `splitlines()`, stripping, prefix/suffix checks, `find`, `partition`, `isspace`, `join(iterable)`, `replace(old, new)`, input and output |
+| Regular expressions | Fixed text patterns in `re.compile` and `re.search`, named and numbered groups, character offsets, and `re.VERBOSE` |
 | Bytes | Immutable bytes; literals, construction from an integer count or `list[int]`, concatenation/repetition, all value comparisons, indexing/slicing/iteration, `len`, Python byte repr, strict UTF-8 encode/decode |
 | Paths | Native POSIX `pathlib.Path`; lexical joining and components, equality, text I/O, filesystem predicates, directory creation/removal, unlink/replace, immediately consumed directory iteration and single-component globbing |
 | Workspaces | Direct `with tempfile.TemporaryDirectory(...)` scopes with UTF-8 names, typed location/name options, and deterministic recursive cleanup |
@@ -170,6 +171,44 @@ The CPython module is `stdlib/relar/toml.py`. Add `stdlib` to the import path as
 `str.startswith(prefix)` and `str.endswith(suffix)` accept one positional string, without tuple alternatives or bounds. `str.find(sub[, start])` accepts a positional substring and an optional integer or `None` start, returning a Unicode scalar index or `-1`; an end bound and `rfind` are not yet supported. `str.partition(sep)` requires a nonempty positional string and returns a fixed `(before, separator, after)` tuple; a missing separator returns `(original, "", "")`. `str.isspace()` is false for an empty string and otherwise checks every character against Python's whitespace definition. These operations use native UTF-8 storage and do not import or call Python methods.
 
 `urllib.parse.unquote(string)` is a sealed native import for one positional or named string argument. It decodes percent escapes with the default UTF-8 replacement behavior. Byte inputs, configurable `encoding`/`errors`, and other URL parsing APIs remain unsupported.
+
+## Fixed regular expressions
+
+`re.compile` accepts a literal string and an optional flag of `0` or `re.VERBOSE`.
+`re.search(pattern, text)` accepts a literal or a compiled `re.Pattern[str]`.
+A compiled pattern also has a `search(text)` method. The compiler checks each
+literal, then the executable initializes each distinct translated pattern once.
+A module-level declaration before executable statements can be shared by
+functions and imported by other modules. Rust’s `regex` and `regex-automata`
+crates implement native matching.
+
+```python
+import re
+
+MARKER = re.compile(r"\# \s* E (?: \[ (?P<tag>[^\]]+) \] )?", re.VERBOSE)
+
+def marker(line: str) -> str | None:
+    if match := MARKER.search(line):
+        return match.group("tag")
+    return None
+```
+
+Search returns the leftmost match as `re.Match[str] | None`. Every match is
+truthy, including an empty match. `group()`, `start()` and `end()` inspect
+the whole match and also accept a literal group number or name. `group(0)`
+returns a string. Other groups return `str | None`, preserving the difference
+between an empty capture and an optional group that did not participate.
+Offsets count Unicode code points. An unmatched group's offsets are `-1`,
+and an unknown group raises `IndexError`. The match retains its original text.
+
+The supported dialect includes literals, dot, simple character classes and
+ranges, alternation, named and numbered captures, noncapturing groups, and
+greedy or lazy repetition. `\s` and `\S` use Python's Unicode whitespace.
+Verbose patterns ignore ASCII layout and comments outside character classes.
+Use `\A` or `^` for the start and `\Z` or `\z` for the strict end of the
+string. The checker rejects dynamic patterns, bytes, additional flags,
+backreferences, lookaround, `$`, word and digit shorthands, and repetitions
+whose capture or empty-match behavior falls outside this dialect.
 
 ## Bounded unions and codec primitives
 

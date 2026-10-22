@@ -240,6 +240,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
                 | crate::ir::PathOperation::Iterdir
                 | crate::ir::PathOperation::Next
         ),
+        Builtin::RegexCapture { known, .. } => !known,
         Builtin::Process(_)
         | Builtin::JsonDecode(_)
         | Builtin::TomlDecode(_)
@@ -282,6 +283,8 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
             .first()
             .is_none_or(|arg| !matches!(arg.ty, Type::Float | Type::Bool)),
         Builtin::GlobalGet(_)
+        | Builtin::RegexCompile(_)
+        | Builtin::RegexSearch
         | Builtin::GlobalSet(_)
         | Builtin::Bool
         | Builtin::UnionInject

@@ -872,7 +872,7 @@ def total(rows: list[Row], fail: bool) -> int:
             .find(&format!("call void @relar_str_retain(ptr {source})"))
             .unwrap();
         let replacement = body[acquisition..]
-            .find("call void @relar_str_release")
+            .find("call void @str_release_if_present")
             .unwrap();
         assert!(
             body[acquisition..acquisition + replacement]

@@ -1,23 +1,26 @@
-//! Program-owned immutable strings avoid allocating at each literal evaluation.
+//! Program-owned literals share immutable strings and compiled regexes between evaluations.
 
 use super::*;
 
 impl Emitter<'_, '_> {
-    /// Returns an independent owner of a string rooted until either main exit.
-    /// Pooling changes no observable identity: string `is` is unsupported, and
-    /// consuming concatenation still checks uniqueness before reusing storage.
-    pub(super) fn string_literal(&mut self, contents: &[u8]) -> Value {
-        let id = if let Some(&id) = self.string_literals.get(contents) {
+    /// Returns an owned reference while the pool keeps its root until main exits.
+    pub(super) fn pooled_literal(&mut self, contents: &[u8], ty: Type) -> Value {
+        let pool = match ty {
+            Type::Str => &mut self.string_literals,
+            Type::RegexPattern => &mut self.regex_literals,
+            _ => unreachable!("only strings and regexes have pooled literals"),
+        };
+        let id = if let Some(&id) = pool.get(contents) {
             id
         } else {
             let id = self.strings.len();
             self.strings.push(contents.to_vec());
-            self.string_literals.insert(contents.to_vec(), id);
+            pool.insert(contents.to_vec(), id);
             id
         };
         let value = Value {
-            ty: Type::Str,
-            operand: self.instruction(format!("load ptr, ptr @string_literal_{id}")),
+            ty,
+            operand: self.instruction(format!("load ptr, ptr @literal_{id}")),
             small_integer: false,
         };
         self.retain(&value);
@@ -27,10 +30,27 @@ impl Emitter<'_, '_> {
     /// Eager initialization has no user effects and bounds retention by source
     /// constants. Main releases locals/globals first, then these final roots on
     /// both successful and exceptional exits; there is no process-lifetime leak.
-    pub(super) fn string_literal_pool(&self) -> String {
+    pub(super) fn literal_pool(&self) -> String {
         let mut output = String::new();
-        for id in self.string_literals.values() {
-            writeln!(output, "@string_literal_{id} = internal global ptr null").unwrap();
+        let literals = [
+            (
+                &self.string_literals,
+                "relar_str_literal",
+                "relar_str_release",
+            ),
+            (
+                &self.regex_literals,
+                "relar_regex_compile",
+                "relar_object_release",
+            ),
+        ]
+        .into_iter()
+        .flat_map(|(pool, init, release)| {
+            pool.iter()
+                .map(move |(bytes, id)| (bytes, id, init, release))
+        });
+        for (_, id, _, _) in literals.clone() {
+            writeln!(output, "@literal_{id} = internal global ptr null").unwrap();
         }
         let attributes = if self.sanitize {
             " sanitize_address"
@@ -39,26 +59,26 @@ impl Emitter<'_, '_> {
         };
         writeln!(
             output,
-            "\ndefine internal void @relar_init_string_literals(){attributes} {{\nentry:"
+            "\ndefine internal void @relar_init_literals(){attributes} {{\nentry:"
         )
         .unwrap();
-        for (bytes, id) in &self.string_literals {
+        for (bytes, id, init, _) in literals.clone() {
             writeln!(
                 output,
-                "  %literal_{id} = call ptr @relar_str_literal(ptr @str_{id}, i64 {})\n  store ptr %literal_{id}, ptr @string_literal_{id}",
+                "  %literal_{id} = call ptr @{init}(ptr @str_{id}, i64 {})\n  store ptr %literal_{id}, ptr @literal_{id}",
                 bytes.len()
             )
             .unwrap();
         }
         writeln!(
             output,
-            "  ret void\n}}\n\ndefine internal void @relar_clear_string_literals(){attributes} {{\nentry:"
+            "  ret void\n}}\n\ndefine internal void @relar_clear_literals(){attributes} {{\nentry:"
         )
         .unwrap();
-        for id in self.string_literals.values() {
+        for (_, id, _, release) in literals {
             writeln!(
                 output,
-                "  %literal_{id} = load ptr, ptr @string_literal_{id}\n  store ptr null, ptr @string_literal_{id}\n  call void @relar_str_release(ptr %literal_{id})"
+                "  %literal_{id} = load ptr, ptr @literal_{id}\n  store ptr null, ptr @literal_{id}\n  call void @{release}(ptr %literal_{id})"
             )
             .unwrap();
         }

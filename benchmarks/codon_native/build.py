@@ -107,6 +107,10 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
             raise ValueError("unexpected dataclass import")
         changed = changed.replace(dataclass_import, "")
         edits.append({"kind": "native builtin dataclass import", "before": dataclass_import, "after": ""})
+    if name == "conformance_report/parse.py" and "import re\n" in changed:
+        changed = changed.replace("import re\n", "import codon_conformance_re as re\n")
+        edits.append({"kind": "native compiled verbose regex and Python whitespace boundary",
+                      "adapter": "conformance_re.py"})
     if name in ("conformance_report/parse.py", "python_catalog/catalog.py"):
         before = "from relar.json import decode\n"
         if changed.count(before) != 1:
@@ -150,11 +154,52 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
     return changed, edits
 
 
+def annotation_pattern(source: str) -> str | None:
+    for node in ast.parse(source).body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "CONFORMANCE_ERROR_PATTERN"):
+            call = node.value
+            if not isinstance(call, ast.Call) or ast.unparse(call.func) != "re.compile" or len(call.args) != 2 or ast.unparse(call.args[1]) != "re.VERBOSE":
+                raise ValueError("unexpected fixed annotation pattern")
+            return ast.literal_eval(call.args[0])
+    return None
+
+
+def native_verbose(pattern: str) -> str:
+    """Remove Python verbose layout and preserve escaped and bracketed literals for RE2."""
+    output = []
+    chars = iter(pattern)
+    in_class = False
+    for char in chars:
+        if char == "\\":
+            escaped = next(chars)
+            if escaped == "s":
+                if in_class:
+                    raise ValueError("unsupported whitespace escape inside bracketed literal")
+                output.append(r"[\x09-\x0d\x1c-\x20\x{85}\p{Z}]")
+            else:
+                output.extend((char, escaped))
+        elif not in_class and char == "#":
+            for char in chars:
+                if char == "\n":
+                    break
+        elif not in_class and char in " \t\n\r\v\f":
+            continue
+        else:
+            output.append(char)
+            if char == "[":
+                in_class = True
+            elif char == "]":
+                in_class = False
+    return "".join(output)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--codon", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--applications", nargs="+", choices=FILES, default=list(FILES))
+    parser.add_argument("--conformance-scanner", action="store_true", help="also compile the isolated preloaded-line scanner")
     parser.add_argument("--platform-library", type=Path, help="native benchmark platform shared library, required for conformance")
     args = parser.parse_args()
     if "conformance_report" in args.applications and args.platform_library is None:
@@ -204,6 +249,17 @@ def main() -> None:
     (source_root / "codon_decimal.codon").write_bytes((HERE / "decimal.py").read_bytes())
     (source_root / "codon_sort.codon").write_bytes((HERE / "sort.py").read_bytes())
     if "conformance_report" in args.applications:
+        reporter = ROOT / "examples/conformance_report"
+        pattern = annotation_pattern((reporter / "parse.py").read_text())
+        if pattern is not None:
+            if pattern != annotation_pattern((reporter / "upstream/conformance.py").read_text()):
+                raise ValueError("native regex boundary requires the unmodified Ruff pattern")
+            adapter = (HERE / "conformance_re.py").read_text()
+            (source_root / "codon_conformance_re.codon").write_text(
+                adapter + "\nORIGINAL = " + repr(pattern) + "\nNATIVE = " + repr(native_verbose(pattern)) + "\n"
+            )
+            native_re = codon.parent.parent / "lib/codon/stdlib/re.codon"
+            record["native_re"] = {"path": str(native_re), "sha256": digest(native_re.read_bytes())}
         for source, generated in (("live_platform.py", "codon_platform.codon"),
                                   ("live_subprocess.py", "subprocess.codon"),
                                   ("live_tempfile.py", "tempfile.codon")):
@@ -227,6 +283,14 @@ def main() -> None:
         entry = source_root / ("run_" + name + ".py")
         entry.write_text(f"import {app}.{module}\n")
         entries.append((name, entry))
+    if args.conformance_scanner:
+        if "conformance_report" not in args.applications:
+            parser.error("--conformance-scanner requires the conformance reporter")
+        scanner = ROOT / "benchmarks/conformance_scanner.py"
+        entry = source_root / "run_conformance_scanner.py"
+        entry.write_bytes(scanner.read_bytes())
+        record["source_inputs"][str(scanner)] = digest(scanner.read_bytes())
+        entries.append(("conformance_report-scanner", entry))
     record["generated"] = {
         str(path.relative_to(source_root)): digest(path.read_bytes())
         for path in sorted(source_root.rglob("*")) if path.is_file()

@@ -21,7 +21,7 @@ Relar supports:
 - Common control flow, comprehensions, and immediately consumed iterator pipelines
 - Selected file and path operations
 - Decode external JSON and TOML into fixed records and typed containers, and serialize JSON layouts directly.
-- Use immutable tuple keys and sort keys, Unicode text operations, and bounded URL decoding.
+- Use immutable tuple keys and sort keys, Unicode text operations, fixed regular expressions, and bounded URL decoding.
 - Read and write UTF-8 files, resolve native `pathlib.Path` values, and scan directories with `iterdir` and bounded `glob`.
 - Stream lines from plain or gzip files and read binary inputs in bounded chunks.
 - Create scoped temporary workspaces and atomically replace completed files.

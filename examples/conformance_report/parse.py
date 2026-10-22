@@ -1,11 +1,30 @@
-"""Read frozen inputs and scan the same annotation grammar as Ruff's regex."""
+"""Read frozen inputs and scan annotations with Ruff's conformance pattern."""
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from relar.json import decode
 
 from conformance_report.model import ExpectedError, Location, Position, Positions, TyDiagnostic, WireDiagnostic
+
+
+CONFORMANCE_ERROR_PATTERN = re.compile(
+    r"""
+    \#\s*E                  # "# E" begins each error
+    (?P<optional>\?)?       # Optional '?' (E?) indicates that an error is optional
+    (?:                     # An optional tag for errors that may appear on multiple lines at most once
+        \[
+            (?P<tag>[^+\]]+)    # identifier
+            (?P<multi>\+)?      # '+' indicates that an error may occur more than once on tagged lines
+        \]
+    )?
+    (?:
+        \s*:\s*(?P<description>.*) # optional description
+    )?
+    """,
+    re.VERBOSE,
+)
 
 
 @dataclass(slots=True)
@@ -47,39 +66,12 @@ class Annotation:
 
 
 def scan_annotation(line: str) -> Annotation | None:
-    r"""Match the first ``#\s*E...`` occurrence, including regex fallback cases."""
-    start = line.find("#")
-    while start >= 0:
-        suffix = line[start + 1:]
-        trimmed = suffix.lstrip()
-        position = start + 1 + len(suffix) - len(trimmed)
-        if trimmed.startswith("E"):
-            position += 1
-            optional = line[position:position + 1] == "?"
-            if optional:
-                position += 1
-            tag: str | None = None
-            multi = False
-            # The regex's whole tag group is optional. An invalid tag leaves
-            # the match at E (or E?), rather than rejecting the annotation.
-            if line[position:position + 1] == "[":
-                close = line.find("]", position + 1)
-                if close >= 0:
-                    candidate = line[position + 1:close]
-                    candidate_multi = candidate[-1:] == "+"
-                    if candidate_multi:
-                        candidate = candidate[:-1]
-                    if candidate and candidate.find("+") < 0:
-                        tag = candidate
-                        multi = candidate_multi
-                        position = close + 1
-            description = "Missing"
-            suffix = line[position:].lstrip()
-            if suffix.startswith(":"):
-                description = suffix[1:].lstrip() or "Missing"
-                position = len(line)
-            return Annotation(start, position, optional, tag, multi, description)
-        start = line.find("#", start + 1)
+    if match := re.search(CONFORMANCE_ERROR_PATTERN, line):
+        return Annotation(
+            match.start(), match.end(), match.group("optional") is not None,
+            match.group("tag"), match.group("multi") is not None,
+            match.group("description") or "Missing",
+        )
     return None
 
 

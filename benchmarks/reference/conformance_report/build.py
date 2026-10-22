@@ -27,7 +27,7 @@ def sources() -> dict[str, Path]:
         for path in (
             HERE / "Cargo.toml",
             HERE / "Cargo.lock",
-            *sorted((HERE / "src").glob("*.rs")),
+            *sorted((HERE / "src").rglob("*.rs")),
             HERE / "../../native_platform/Cargo.toml",
             HERE / "../../native_platform/src/lib.rs",
         )
@@ -141,7 +141,7 @@ def main() -> None:
     # The shared Ohm build directory can outlive a worktree. Force the local
     # reference package to compile and copy the executable named by this build,
     # rather than trusting a conventional target path left by a previous run.
-    for path in sorted((HERE / "src").glob("*.rs")):
+    for path in sorted((HERE / "src").rglob("*.rs")):
         path.touch()
     start = time.perf_counter_ns()
     built = run(command)

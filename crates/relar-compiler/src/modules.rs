@@ -58,6 +58,7 @@ pub(crate) enum IntrinsicModule {
     CollectionsAbc,
     Io,
     Gzip,
+    Re,
     Zlib,
     Relar,
     RelarJson,
@@ -74,6 +75,11 @@ pub(crate) enum Intrinsic {
     UnsupportedOperation,
     GzipOpen,
     BadGzipFile,
+    RegexCompile,
+    RegexSearch,
+    RegexVerbose,
+    RegexPattern,
+    RegexMatch,
     ZlibError,
     JsonDecode,
     JsonEncode,
@@ -108,6 +114,7 @@ impl IntrinsicModule {
             "collections.abc" => Some(Self::CollectionsAbc),
             "io" => Some(Self::Io),
             "gzip" => Some(Self::Gzip),
+            "re" => Some(Self::Re),
             "zlib" => Some(Self::Zlib),
             "relar" => Some(Self::Relar),
             "relar.json" => Some(Self::RelarJson),
@@ -139,6 +146,11 @@ impl IntrinsicModule {
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Gzip, "BadGzipFile") => Intrinsic::BadGzipFile,
+            (Self::Re, "compile") => Intrinsic::RegexCompile,
+            (Self::Re, "search") => Intrinsic::RegexSearch,
+            (Self::Re, "VERBOSE") => Intrinsic::RegexVerbose,
+            (Self::Re, "Pattern") => Intrinsic::RegexPattern,
+            (Self::Re, "Match") => Intrinsic::RegexMatch,
             (Self::Zlib, "error") => Intrinsic::ZlibError,
             (Self::RelarJson, "decode") => Intrinsic::JsonDecode,
             (Self::RelarJson, "encode") => Intrinsic::JsonEncode,
@@ -166,6 +178,8 @@ pub(crate) struct SourceModule {
     pub(crate) source: String,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
+    /// Fixed pattern declarations in the entry module precede ordinary executable statements.
+    pub(crate) entry_patterns: Vec<usize>,
     /// Executable entry statements, or inactive main guards that still require checking.
     pub(crate) executable: Vec<usize>,
     is_package: bool,
@@ -267,18 +281,28 @@ impl SourceGraph {
 
     /// Resolves namespace paths while leaving local-value attributes to the expression checker.
     pub(crate) fn resolve(&self, module: ModuleId, expression: &ast::Expr) -> Option<Binding> {
-        match expression {
-            ast::Expr::Name(name) => self.modules[module].bindings.get(name.id.as_str()).copied(),
-            ast::Expr::Attribute(attribute) => match self.resolve(module, &attribute.value)? {
-                Binding::Module(module) => self.modules[module]
+        resolve_binding(&self.modules, module, expression)
+    }
+}
+
+fn resolve_binding(
+    modules: &[SourceModule],
+    module: ModuleId,
+    expression: &ast::Expr,
+) -> Option<Binding> {
+    match expression {
+        ast::Expr::Name(name) => modules[module].bindings.get(name.id.as_str()).copied(),
+        ast::Expr::Attribute(attribute) => {
+            match resolve_binding(modules, module, &attribute.value)? {
+                Binding::Module(module) => modules[module]
                     .bindings
                     .get(attribute.attr.as_str())
                     .copied(),
                 Binding::IntrinsicModule(module) => module.symbol(attribute.attr.as_str()),
                 Binding::Definition(_) | Binding::Value(_) | Binding::Intrinsic(_) => None,
-            },
-            _ => None,
+            }
         }
+        _ => None,
     }
 }
 
@@ -330,6 +354,7 @@ impl Loader {
             parsed,
             is_package,
             bindings: HashMap::new(),
+            entry_patterns: Vec::new(),
             executable: Vec::new(),
         });
         Ok(id)
@@ -384,7 +409,7 @@ impl Loader {
                     )?;
                 }
                 ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) => {
-                    if executable {
+                    if executable || !self.modules[id].entry_patterns.is_empty() {
                         return Err(self.modules[id].error(
                             statement,
                             "imports must precede executable module statements",
@@ -396,8 +421,14 @@ impl Loader {
                 ast::Stmt::Expr(value)
                     if matches!(&*value.value, ast::Expr::StringLiteral(_)) && !executable => {}
                 _ => {
-                    if id != 0
-                        && let Some(name) = value_name(statement)
+                    let entry_pattern = id == 0
+                        && !executable
+                        && matches!(
+                            module_value(statement),
+                            Some(ast::Expr::Call(call)) if resolve_binding(&self.modules, id, &call.func) == Some(Binding::Intrinsic(Intrinsic::RegexCompile))
+                        );
+                    if let Some(name) = value_name(statement)
+                        && (id != 0 || entry_pattern)
                     {
                         self.bind(
                             id,
@@ -408,6 +439,10 @@ impl Loader {
                             }),
                             statement,
                         )?;
+                        if entry_pattern {
+                            self.modules[id].entry_patterns.push(index);
+                            continue;
+                        }
                     }
                     executable = true;
                     self.modules[id].executable.push(index);
@@ -696,5 +731,13 @@ pub(crate) fn value_name(statement: &ast::Stmt) -> Option<&str> {
         Some(name.id.as_str())
     } else {
         None
+    }
+}
+
+fn module_value(statement: &ast::Stmt) -> Option<&ast::Expr> {
+    match statement {
+        ast::Stmt::Assign(assignment) => Some(&assignment.value),
+        ast::Stmt::AnnAssign(assignment) => assignment.value.as_deref(),
+        _ => None,
     }
 }

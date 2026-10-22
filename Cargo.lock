@@ -1016,6 +1016,8 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 name = "relar-compiler"
 version = "0.1.0"
 dependencies = [
+ "regex",
+ "regex-syntax",
  "ruff_db",
  "ruff_python_ast",
  "ruff_python_parser",
@@ -1042,6 +1044,8 @@ dependencies = [
  "memchr",
  "num-bigint",
  "num-traits",
+ "regex-automata",
+ "regex-syntax",
  "ruff_python_literal",
  "ryu",
  "serde",

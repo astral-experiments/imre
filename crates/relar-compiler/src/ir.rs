@@ -33,6 +33,9 @@ pub(crate) enum Type {
     Path,
     /// A sealed text-process result with four concrete, readonly fields.
     CompletedProcess,
+    /// An immutable compiled text pattern or one successful search and its captures.
+    RegexPattern,
+    RegexMatch,
     None,
 }
 
@@ -66,6 +69,8 @@ impl std::fmt::Display for Type {
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
             Self::CompletedProcess => "subprocess.CompletedProcess[str]",
+            Self::RegexPattern => "re.Pattern[str]",
+            Self::RegexMatch => "re.Match[str]",
             Self::Class(_)
             | Self::List(_)
             | Self::Dict(_)
@@ -412,6 +417,14 @@ pub(crate) enum Builtin {
     TextOpen(u32),
     BinaryOpen(u32),
     GzipOpen,
+    /// The compile-time validated pattern is independent of the source spelling.
+    RegexCompile(String),
+    RegexSearch,
+    /// A proved selector is a valid numeric index for every possible receiver.
+    RegexCapture {
+        operation: RegexCapture,
+        known: bool,
+    },
     BinaryRead,
     BinaryReadSize,
     FileReadline,
@@ -447,6 +460,14 @@ pub(crate) enum Builtin {
     ExceptionWithCause,
     ExceptionCause,
     ExceptionSuppressContext,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum RegexCapture {
+    Group,
+    Absent,
+    Start,
+    End,
 }
 
 /// Closed string operations preserve exact argument and storage types.

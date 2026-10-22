@@ -25,6 +25,9 @@ num-bigint = "=0.4.8"
 num-traits = "=0.2.19"
 compact_str = "=0.10.0"
 itoa = "=1.0.18"
+regex = "=1.13.1"
+regex-automata = "=0.4.18"
+regex-syntax = "=0.8.11"
 
 [profile.release]
 debug = "line-tables-only"

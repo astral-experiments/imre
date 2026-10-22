@@ -137,6 +137,8 @@ impl Types {
             | Type::TextIO
             | Type::Path
             | Type::CompletedProcess
+            | Type::RegexPattern
+            | Type::RegexMatch
             | Type::BinaryIO => Some(true),
             Type::Optional(_) if self.truthiness(self.payload(ty).unwrap()) == Some(false) => {
                 Some(false)

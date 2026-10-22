@@ -7,7 +7,7 @@ use crate::borrows::{self, FunctionBorrows};
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
     Binary, Builtin, CallArgs, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType,
-    Module, Statement, Type,
+    Module, RegexCapture, Statement, Type,
 };
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
@@ -45,6 +45,8 @@ impl Type {
             | Self::Path
             | Self::CompletedProcess
             | Self::TextIO
+            | Self::RegexPattern
+            | Self::RegexMatch
             | Self::BinaryIO
             | Self::Tuple(_) => "ptr",
             Self::None => "i8",
@@ -69,6 +71,8 @@ impl Type {
             | Self::Path
             | Self::CompletedProcess
             | Self::TextIO
+            | Self::RegexPattern
+            | Self::RegexMatch
             | Self::BinaryIO
             | Self::Tuple(_) => "null",
             Self::Bool | Self::None | Self::Optional(_) | Self::Union(_) => "0",
@@ -145,6 +149,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         entry_allocas: String::new(),
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
+        regex_literals: BTreeMap::new(),
         literal_globals: literal_globals(module),
         next_value: 0,
         next_label: 0,
@@ -182,6 +187,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
     output.push_str(&json::schemas(module));
     output.push_str(&callables::adapters(module, sanitize));
     output.push_str(&integer_helpers());
+    output.push_str(&nullable_pointer_helpers());
     for (slot, ty) in module.globals.iter().enumerate() {
         writeln!(
             output,
@@ -203,7 +209,7 @@ pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> 
         }
         output.push_str("\"\n");
     }
-    output.push_str(&emitter.string_literal_pool());
+    output.push_str(&emitter.literal_pool());
     output.push_str(&emitter.code);
     // Layout hints never replace the representation, overflow, or error guards.
     output.push_str("\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n");
@@ -217,6 +223,7 @@ struct Emitter<'a, 'module> {
     entry_allocas: String,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
+    regex_literals: BTreeMap<Vec<u8>, usize>,
     literal_globals: Vec<Option<String>>,
     next_value: usize,
     next_label: usize,
@@ -420,6 +427,8 @@ impl Emitter<'_, '_> {
             | Type::TimeoutExpired
             | Type::Path
             | Type::TextIO
+            | Type::RegexPattern
+            | Type::RegexMatch
             | Type::BinaryIO => "object",
             Type::Float | Type::Bool | Type::None => return,
             Type::Optional(_) => unreachable!("optional types are flattened"),
@@ -428,6 +437,10 @@ impl Emitter<'_, '_> {
             format!("{operation}_int_nonzero")
         } else if ty == Type::Int {
             format!("{operation}_int")
+        } else if matches!(family, "str" | "object" | "record")
+            && (operation == "release" || value.ty != ty)
+        {
+            format!("{family}_{operation}_if_present")
         } else {
             format!("relar_{family}_{operation}")
         };
@@ -495,7 +508,13 @@ impl Emitter<'_, '_> {
     /// Earlier operands of a call or operator must survive a later `:=` write.
     /// Stable caller roots also protect projections in edge-preserving functions.
     fn operand(&mut self, expression: &Expr) -> Operand {
-        if let ExprKind::Local(slot) = &expression.kind
+        if let ExprKind::Builtin(Builtin::GlobalGet(slot), _) = &expression.kind {
+            // A checked global is published once and remains rooted until main exits.
+            Operand {
+                value: self.borrow_global(*slot, expression.ty),
+                ownership: Ownership::Borrowed,
+            }
+        } else if let ExprKind::Local(slot) = &expression.kind
             && !self.expression_rebound[*slot]
         {
             let mut value = self.borrow_slot(*slot);
@@ -514,6 +533,31 @@ impl Emitter<'_, '_> {
                 value: self.expr(expression),
                 ownership: Ownership::Owned,
             }
+        }
+    }
+
+    fn borrow_global(&mut self, slot: usize, ty: Type) -> Value {
+        Value {
+            ty,
+            operand: self.instruction(format!("load {}, ptr @module_value_{slot}", ty.llvm())),
+            small_integer: false,
+        }
+    }
+
+    /// A field load or literal match selector has no intervening operand
+    /// evaluation. Its local owner stays alive until the operation finishes.
+    fn immediate_receiver(&mut self, expression: &Expr) -> Operand {
+        let value = match &expression.kind {
+            ExprKind::Local(slot) => self.borrow_slot(*slot),
+            ExprKind::Unwrap(inner) if let ExprKind::Local(slot) = inner.kind => {
+                let word = self.borrow_slot(slot).operand;
+                self.decode_word(word, expression.ty)
+            }
+            _ => return self.operand(expression),
+        };
+        Operand {
+            value,
+            ownership: Ownership::Borrowed,
         }
     }
 
@@ -1162,7 +1206,7 @@ impl Emitter<'_, '_> {
             ));
         }
         if entry {
-            self.line("call void @relar_init_string_literals()");
+            self.line("call void @relar_init_literals()");
         }
         if entry && self.uses_sys_argv {
             self.line("call void @relar_args_init(i32 %argc, ptr %argv)");
@@ -1175,7 +1219,7 @@ impl Emitter<'_, '_> {
         self.cleanup();
         if entry {
             self.cleanup_globals();
-            self.line("call void @relar_clear_string_literals()");
+            self.line("call void @relar_clear_literals()");
             if self.uses_sys_argv {
                 self.line("call void @relar_args_clear()");
             }
@@ -1192,7 +1236,7 @@ impl Emitter<'_, '_> {
         self.cleanup();
         if entry {
             self.cleanup_globals();
-            self.line("call void @relar_clear_string_literals()");
+            self.line("call void @relar_clear_literals()");
             if self.uses_sys_argv {
                 self.line("call void @relar_args_clear()");
             }
@@ -1612,7 +1656,7 @@ impl Emitter<'_, '_> {
     /// Emits exact source bytes without routing arbitrary byte values through UTF-8.
     fn literal_bytes(&mut self, contents: &[u8], ty: Type) -> Value {
         if ty == Type::Str {
-            return self.string_literal(contents);
+            return self.pooled_literal(contents, Type::Str);
         }
         let id = self.strings.len();
         self.strings.push(contents.to_vec());
@@ -1918,7 +1962,7 @@ impl Emitter<'_, '_> {
                 value
             }
             ExprKind::Field(receiver, field) => {
-                let receiver = self.operand(receiver);
+                let receiver = self.immediate_receiver(receiver);
                 let value = self.get_field(&receiver.value, *field, expression.ty);
                 self.release_operand(&receiver);
                 value
@@ -2589,6 +2633,8 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::Optional(_)
             | Type::Callable(_)
+            | Type::RegexPattern
+            | Type::RegexMatch
             | Type::Union(_) => {
                 unreachable!("container comparison is rejected by the frontend")
             }
@@ -2748,12 +2794,81 @@ impl Emitter<'_, '_> {
         if let Some(value) = self.rsplit_last(builtin, expressions) {
             return value;
         }
+        // Truth consumes immediately and cannot rebind the slot. Transfer the
+        // RHS directly to its binding and inspect the newly established owner.
+        if matches!(builtin, Builtin::Bool)
+            && let [
+                Expr {
+                    kind: ExprKind::Bind(slot, rhs),
+                    ..
+                },
+            ] = expressions
+            && self.locals[*slot] == rhs.ty
+        {
+            let value = self.expr(rhs);
+            self.store(*slot, &value);
+            return self.truth(&value);
+        }
         let args = expressions
             .iter()
-            .map(|arg| self.operand(arg))
+            .enumerate()
+            .map(|(index, arg)| {
+                if index == 0 && matches!(builtin, Builtin::RegexCapture { .. }) {
+                    self.immediate_receiver(arg)
+                } else {
+                    self.operand(arg)
+                }
+            })
             .collect::<Vec<_>>();
         let result = match builtin {
             Builtin::Text(operation) => self.text_builtin(*operation, &args, returns),
+            Builtin::RegexCompile(pattern) => self.pooled_literal(pattern.as_bytes(), returns),
+            Builtin::RegexSearch => {
+                let pointer = self.instruction(format!(
+                    "call ptr @relar_regex_search(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!("ptrtoint ptr {pointer} to i64")),
+                    small_integer: false,
+                }
+            }
+            Builtin::RegexCapture { operation, known } => {
+                let selector = &args[1].value;
+                let group = self.word(selector);
+                let named = u8::from(selector.ty == Type::Str);
+                let receiver = &args[0].value.operand;
+                let call = match operation {
+                    RegexCapture::Absent => format!(
+                        "call i8 @relar_regex_present(ptr {receiver}, i64 {group}, i8 {named})"
+                    ),
+                    RegexCapture::Start | RegexCapture::End => format!(
+                        "call i64 @relar_regex_bound(ptr {receiver}, i64 {group}, i8 {named}, i8 {})",
+                        u8::from(*operation == RegexCapture::End)
+                    ),
+                    RegexCapture::Group => format!(
+                        "call ptr @relar_regex_group(ptr {receiver}, i64 {group}, i8 {named})"
+                    ),
+                };
+                let operand = if *known {
+                    self.instruction(call)
+                } else {
+                    self.checked_instruction(call)
+                };
+                let operand = if *operation == RegexCapture::Absent {
+                    self.instruction(format!("icmp eq i8 {operand}, 0"))
+                } else if matches!(returns, Type::Optional(_)) {
+                    self.instruction(format!("ptrtoint ptr {operand} to i64"))
+                } else {
+                    operand
+                };
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
             Builtin::JsonDecode(schema) | Builtin::TomlDecode(schema) => {
@@ -2795,12 +2910,7 @@ impl Emitter<'_, '_> {
                 self.call("relar_record_cached_result", returns, &[&args[0].value])
             }
             Builtin::GlobalGet(slot) => {
-                let value = Value {
-                    ty: returns,
-                    operand: self
-                        .instruction(format!("load {}, ptr @module_value_{slot}", returns.llvm())),
-                    small_integer: false,
-                };
+                let value = self.borrow_global(*slot, returns);
                 self.retain(&value);
                 value
             }
@@ -3327,6 +3437,8 @@ impl Emitter<'_, '_> {
                     | Type::TimeoutExpired
                     | Type::Path
                     | Type::TextIO
+                    | Type::RegexPattern
+                    | Type::RegexMatch
                     | Type::BinaryIO
                     | Type::CompletedProcess
                     | Type::Tuple(_)
@@ -3462,6 +3574,8 @@ impl Emitter<'_, '_> {
             | Type::Path
             | Type::TextIO
             | Type::BinaryIO
+            | Type::RegexPattern
+            | Type::RegexMatch
             | Type::CompletedProcess
             | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
         }
@@ -3495,6 +3609,8 @@ impl Emitter<'_, '_> {
             | Type::Path
             | Type::TextIO
             | Type::BinaryIO
+            | Type::RegexPattern
+            | Type::RegexMatch
             | Type::CompletedProcess
             | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
@@ -3987,6 +4103,8 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::TimeoutExpired
         | Type::Path
         | Type::TextIO
+        | Type::RegexPattern
+        | Type::RegexMatch
         | Type::BinaryIO => 5,
         Type::Optional(_) => 256 | representation_kind(types.payload(ty).unwrap(), types),
     }
@@ -4349,6 +4467,11 @@ declare void @relar_print_int(i64)
 declare void @relar_print_bool(i8)
 declare void @relar_print_none()
 declare ptr @relar_str_literal(ptr, i64)
+declare ptr @relar_regex_compile(ptr, i64)
+declare ptr @relar_regex_search(ptr, ptr)
+declare ptr @relar_regex_group(ptr, i64, i8)
+declare i8 @relar_regex_present(ptr, i64, i8)
+declare i64 @relar_regex_bound(ptr, i64, i8, i8)
 declare ptr @relar_str_get(ptr, i64)
 declare ptr @relar_str_slice(ptr, i64, i64, i64)
 declare ptr @relar_str_iter(ptr)
@@ -4391,6 +4514,32 @@ declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 "#;
+
+/// Expose zero-owner cleanup to LLVM even when the runtime is linked without LTO.
+/// After mem2reg, a cleared or never-filled slot needs no runtime call at all.
+fn nullable_pointer_helpers() -> String {
+    let mut output = String::new();
+    for family in ["str", "object", "record"] {
+        for operation in ["release", "retain"] {
+            writeln!(
+                output,
+                r#"
+define internal void @{family}_{operation}_if_present(ptr %value) alwaysinline {{
+entry:
+  %absent = icmp eq ptr %value, null
+  br i1 %absent, label %done, label %present
+present:
+  call void @relar_{family}_{operation}(ptr %value)
+  br label %done
+done:
+  ret void
+}}"#
+            )
+            .unwrap();
+        }
+    }
+    output
+}
 
 /// Operates on tagged integers directly. For E(x) = 2x + 1, addition and
 /// subtraction produce E(x +/- y); multiplication first produces 2xy.
@@ -4636,6 +4785,28 @@ mod tests {
     use crate::{CompileOptions, compile};
 
     #[test]
+    fn fixed_patterns_compile_once_across_search_sites() {
+        let llvm = compile(
+            "import re\n\ndef first(text: str) -> int:\n    if m := re.search('a+', text):\n        return m.start()\n    return -1\nprint(first('aa'))\nprint(bool(re.compile('a+').search('b')))\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(llvm.matches("call ptr @relar_regex_compile(").count(), 1);
+        assert_eq!(llvm.matches("call ptr @relar_regex_search(").count(), 2);
+        let cleanup = llvm
+            .split_once("define internal void @relar_clear_literals(")
+            .unwrap()
+            .1;
+        assert!(
+            cleanup
+                .split_once("\n}")
+                .unwrap()
+                .0
+                .contains("call void @relar_object_release(")
+        );
+    }
+
+    #[test]
     fn string_constants_are_rooted_once_and_cleared_on_both_main_exits() {
         let llvm = compile(
             "def text() -> str:\n    return 'shared'\nprint('shared')\nprint(text())\n",
@@ -4647,7 +4818,7 @@ mod tests {
         assert_eq!(llvm.matches("call ptr @relar_str_literal(").count(), 1);
         for operation in ["init", "clear"] {
             assert!(llvm.contains(&format!(
-                "define internal void @relar_{operation}_string_literals() sanitize_address {{"
+                "define internal void @relar_{operation}_literals() sanitize_address {{"
             )));
         }
         let body = llvm
@@ -4660,16 +4831,8 @@ mod tests {
         assert!(!body.contains("@relar_str_literal("));
         assert!(body.contains("@relar_str_retain("));
         let main = llvm.split_once("define i32 @main(").unwrap().1;
-        assert_eq!(
-            main.matches("call void @relar_init_string_literals()")
-                .count(),
-            1
-        );
-        assert_eq!(
-            main.matches("call void @relar_clear_string_literals()")
-                .count(),
-            2
-        );
+        assert_eq!(main.matches("call void @relar_init_literals()").count(), 1);
+        assert_eq!(main.matches("call void @relar_clear_literals()").count(), 2);
     }
 
     /// Classifies only assignments to a source slot, excluding its argument and
@@ -4788,7 +4951,7 @@ mod tests {
     fn proven_sequence_reads_acquire_the_static_element_without_an_error_poll() {
         for (ty, retain) in [
             ("str", Some("@relar_str_retain(")),
-            ("str | None", Some("@relar_str_retain(")),
+            ("str | None", Some("@str_retain_if_present(")),
             ("int | None", Some("@retain_int(")),
             ("float | None", Some("@relar_float_box_retain(")),
             ("list[int]", Some("@relar_list_retain(")),
