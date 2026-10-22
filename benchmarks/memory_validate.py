@@ -7,6 +7,7 @@ import os
 import random
 import re
 import runpy
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -542,6 +543,7 @@ def main():
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+    args.python = str(Path(shutil.which(args.python) or args.python).resolve(strict=True))
     commands = {"original": original_command(args.python), "port": python_command(args.python)}
     if args.binary:
         commands["relar"] = [str(args.binary.resolve(strict=True))]
