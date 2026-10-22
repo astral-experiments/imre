@@ -214,6 +214,78 @@ impl<'a> Visitor<'a> for Reads {
 }
 
 impl Checker<'_> {
+    /// Zero or one pure integer projection cannot collide. Keep the ordinary
+    /// set construction for larger inputs and for any observable projection.
+    pub(super) fn short_set_len(&mut self, source: &ast::Expr, set: &Expr) -> Option<Expr> {
+        let ast::Expr::SetComp(display) = source else {
+            return None;
+        };
+        let [clause] = display.generators.as_slice() else {
+            return None;
+        };
+        let ExprKind::Call(_, args) = &set.kind else {
+            return None;
+        };
+        let [input] = args.values.as_slice() else {
+            return None;
+        };
+        let (ast::Expr::Name(source), ExprKind::Local(slot)) = (&clause.iter, &input.kind) else {
+            return None;
+        };
+        if !clause.ifs.is_empty() || self.names.get(source.id.as_str()) != Some(slot) {
+            return None;
+        }
+        let ast::Expr::Name(target) = &clause.target else {
+            return None;
+        };
+        let mut expression = display.elt.as_ref();
+        let mut fields = Vec::new();
+        while let ast::Expr::Attribute(attribute) = expression {
+            fields.push(attribute.attr.as_str());
+            expression = &attribute.value;
+        }
+        if !matches!(expression, ast::Expr::Name(name) if name.id == target.id) {
+            return None;
+        }
+        let mut ty = self.types.element(input.ty)?;
+        for name in fields.into_iter().rev() {
+            let Type::Class(class) = ty else { return None };
+            let field = self.classes.declarations.definitions[class]
+                .fields
+                .iter()
+                .position(|field| field.name == name)?;
+            ty = self.classes.fields[class][field];
+        }
+        if ty != Type::Int {
+            return None;
+        }
+        let length = |value| Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::Len, vec![value]),
+        };
+        let slot = self.hidden(Type::Int);
+        let saved = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Bind(slot, Box::new(length(input.clone()))),
+        };
+        let one = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Int("1".into()),
+        };
+        let condition = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Compare(vec![saved, one], vec![Compare::LessEqual]),
+        };
+        Some(Expr {
+            ty: Type::Int,
+            kind: ExprKind::Conditional(
+                Box::new(condition),
+                Box::new(self.local(slot)),
+                Box::new(length(set.clone())),
+            ),
+        })
+    }
+
     /// Evaluates the first iterable outside the target scope and passes rooted
     /// values into a private helper. Captures are local bindings, never delayed
     /// field/index reads, so mutation through aliases remains visible in the body.

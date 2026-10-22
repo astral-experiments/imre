@@ -108,6 +108,13 @@ def optional_field_rebind() -> None:
         print(first_item(record.items, (record := Record(2, False, "new", None, [7])).items))
         print(record.items[0])
 
+    envelope = make_envelope(37)
+    print(bool(envelope.record.items))
+    print(len(envelope.record.items))
+    # A sibling argument replaces the whole nested record after its field is read.
+    print(first_item(envelope.record.items, [replace_record(envelope)]))
+    print(envelope.record.items[0])
+
 
 def main() -> None:
     optional_field_rebind()

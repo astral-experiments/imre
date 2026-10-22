@@ -71,6 +71,9 @@ impl Checker<'_> {
         if let Some(kind) = self.exception_category(expression) {
             return Ok(vec![InstanceType::Exception(kind)]);
         }
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StrEnum)) {
+            return Ok(vec![InstanceType::StrEnum]);
+        }
         if matches!(
             self.resolve(expression),
             Some(Binding::Intrinsic(Intrinsic::Path))

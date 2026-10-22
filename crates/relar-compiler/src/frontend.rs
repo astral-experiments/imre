@@ -3896,6 +3896,12 @@ impl<'a> Checker<'a> {
                 });
             }
         }
+        if name.id.as_str() == "len"
+            && let ([source], [set]) = (call.arguments.args.as_ref(), args.as_slice())
+            && let Some(length) = self.short_set_len(source, set)
+        {
+            return Ok(length);
+        }
         let (builtin, ty) = match name.id.as_str() {
             "input" if args.is_empty() => (Builtin::Input, Type::Str),
             "str" if args.is_empty() => {

@@ -551,21 +551,33 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// A field load or literal match selector has no intervening operand
-    /// evaluation. Its local owner stays alive until the operation finishes.
+    /// A field, length, or truth read cannot run user code or replace a local.
+    /// Keep each field along the path borrowed until this immediate read ends.
     fn immediate_receiver(&mut self, expression: &Expr) -> Operand {
-        let value = match &expression.kind {
+        if let Some(value) = self.immediate_projection(expression) {
+            Operand {
+                value,
+                ownership: Ownership::Borrowed,
+            }
+        } else {
+            self.operand(expression)
+        }
+    }
+
+    fn immediate_projection(&mut self, expression: &Expr) -> Option<Value> {
+        Some(match &expression.kind {
             ExprKind::Local(slot) => self.borrow_slot(*slot),
             ExprKind::Unwrap(inner) if let ExprKind::Local(slot) = inner.kind => {
                 let word = self.borrow_slot(slot).operand;
                 self.decode_word(word, expression.ty)
             }
-            _ => return self.operand(expression),
-        };
-        Operand {
-            value,
-            ownership: Ownership::Borrowed,
-        }
+            ExprKind::Field(receiver, field) => {
+                let receiver = self.immediate_projection(receiver)?;
+                let pointer = self.field_pointer(&receiver, *field);
+                self.field_value(&pointer, expression.ty)
+            }
+            _ => return None,
+        })
     }
 
     fn release_operand(&mut self, operand: &Operand) {
@@ -2834,7 +2846,12 @@ impl Emitter<'_, '_> {
             .iter()
             .enumerate()
             .map(|(index, arg)| {
-                if index == 0 && matches!(builtin, Builtin::RegexCapture { .. }) {
+                if index == 0
+                    && matches!(
+                        builtin,
+                        Builtin::Len | Builtin::Bool | Builtin::RegexCapture { .. }
+                    )
+                {
                     self.immediate_receiver(arg)
                 } else {
                     self.operand(arg)
@@ -4470,7 +4487,7 @@ declare ptr @relar_seq_data_readonly(ptr) nounwind memory(argmem: read)
 declare void @relar_seq_set_index(ptr, i64, i64, i32)
 declare void @relar_seq_append(ptr, i64, i32)
 declare i64 @relar_seq_pop(ptr)
-declare i64 @relar_seq_len(ptr)
+declare i64 @relar_seq_len(ptr) nounwind memory(argmem: read)
 declare ptr @relar_seq_repeat(ptr, i64)
 declare ptr @relar_dict_new(i32, i32)
 declare i64 @relar_dict_len(ptr)

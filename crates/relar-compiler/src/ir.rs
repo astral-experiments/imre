@@ -552,6 +552,7 @@ pub(crate) enum ProcessOperation {
 #[derive(Clone, Copy)]
 pub(crate) enum InstanceType {
     Exact(Type),
+    StrEnum,
     List,
     Dict,
     Set,
@@ -567,6 +568,7 @@ impl InstanceType {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
             Self::Exact(expected) => expected == ty,
+            Self::StrEnum => matches!(ty, Type::StrEnum(_)),
             Self::List => matches!(ty, Type::ListInt | Type::List(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),

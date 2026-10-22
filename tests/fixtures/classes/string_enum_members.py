@@ -17,6 +17,7 @@ def observe(value: Status | None, other: Status | None) -> None:
     print(value is other)
     print(value == other)
     print(value is not Other.READY)
+    print(isinstance(value, enum.StrEnum))
     if value is not None:
         print(value.name)
         print(repr(value))
@@ -37,3 +38,4 @@ for member in [Status.READY, Status.ALIAS, Status.SAME, Status.EMPTY, Status.LAB
     print(echo(member.value))
     print(echo(str(member)))
 observe(None, None)
+print(isinstance("ready", enum.StrEnum))
