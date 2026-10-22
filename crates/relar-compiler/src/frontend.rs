@@ -1120,6 +1120,15 @@ impl<'a> Checker<'a> {
         if value.ty == expected {
             return Ok(value);
         }
+        if value.ty == Type::TimeoutExpired && expected == Type::Exception {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(
+                    Builtin::Process(ir::ProcessOperation::ExceptionView),
+                    vec![value],
+                ),
+            });
+        }
         if let Some(payload) = self.types.payload(expected) {
             if let Some(actual) = self.types.payload(value.ty)
                 && self
@@ -2347,7 +2356,7 @@ impl<'a> Checker<'a> {
     /// Class-form raises construct a new instance, just like an explicit call.
     fn raised_exception(&mut self, value: &ast::Expr) -> Result<Expr, String> {
         if let Some(kind) = self.exception_category(value) {
-            if matches!(kind, 0 | 18 | 25 | 26) {
+            if matches!(kind, 0 | 18 | 25 | 26 | 27) {
                 return Err(error(
                     self.source,
                     value,
@@ -2374,6 +2383,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::UnsupportedOperation)) => Some(19),
             Some(Binding::Intrinsic(Intrinsic::SubprocessError)) => Some(25),
             Some(Binding::Intrinsic(Intrinsic::CalledProcessError)) => Some(26),
+            Some(Binding::Intrinsic(Intrinsic::TimeoutExpired)) => Some(27),
             Some(_) => None,
             None => match expression {
                 ast::Expr::Name(name) => exception_kind(name.id.as_str()),
@@ -2456,6 +2466,9 @@ impl<'a> Checker<'a> {
                     let slot = self.declare(name.as_str(), Type::Exception, handler)?;
                     self.assigned.insert(slot);
                     self.narrowed.remove(&slot);
+                    if !kinds.is_empty() && kinds.iter().all(|kind| *kind == 27) {
+                        self.narrowed.insert(slot, Type::TimeoutExpired);
+                    }
                     Ok::<_, String>(slot)
                 })
                 .transpose()?;
@@ -3063,8 +3076,13 @@ impl<'a> Checker<'a> {
                 if receiver.ty == Type::CompletedProcess {
                     return self.process_attribute(receiver, attribute);
                 }
-                if receiver.ty == Type::Exception {
-                    if let Some(value) = self.process_error_attribute(&receiver, attribute) {
+                if matches!(receiver.ty, Type::Exception | Type::TimeoutExpired) {
+                    let field = if receiver.ty == Type::TimeoutExpired {
+                        self.timeout_error_attribute(&receiver, attribute)
+                    } else {
+                        self.process_error_attribute(&receiver, attribute)
+                    };
+                    if let Some(value) = field {
                         return Ok(value);
                     }
                     let (ty, builtin) = match attribute.attr.as_str() {
@@ -3219,6 +3237,12 @@ impl<'a> Checker<'a> {
         }
         if matches!(
             self.resolve(&call.func),
+            Some(Binding::Intrinsic(Intrinsic::TomlDecode))
+        ) {
+            return self.toml_decode(call);
+        }
+        if matches!(
+            self.resolve(&call.func),
             Some(Binding::Intrinsic(Intrinsic::JsonEncode))
         ) {
             return self.json_encode(call);
@@ -3231,7 +3255,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(kind) = self.exception_category(&call.func) {
             self.reject_builtin_keywords(call)?;
-            if matches!(kind, 0 | 18 | 25 | 26) {
+            if matches!(kind, 0 | 18 | 25 | 26 | 27) {
                 return Err(error(
                     self.source,
                     call,
@@ -3574,7 +3598,10 @@ impl<'a> Checker<'a> {
                 },
             });
         }
-        if name.id == "print" && args.len() == 1 && args[0].ty == Type::Exception {
+        if name.id == "print"
+            && args.len() == 1
+            && matches!(args[0].ty, Type::Exception | Type::TimeoutExpired)
+        {
             return Ok(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(
@@ -3628,6 +3655,7 @@ impl<'a> Checker<'a> {
                             | Type::Bytes
                             | Type::None
                             | Type::Exception
+                            | Type::TimeoutExpired
                     ) =>
             {
                 (Builtin::Str, Type::Str)

@@ -44,6 +44,7 @@ pub(crate) enum Kind {
     FileExistsError = 24,
     SubprocessError = 25,
     CalledProcessError = 26,
+    TimeoutExpired = 27,
 }
 
 impl Kind {
@@ -76,6 +77,7 @@ impl Kind {
             24 => Self::FileExistsError,
             25 => Self::SubprocessError,
             26 => Self::CalledProcessError,
+            27 => Self::TimeoutExpired,
             _ => fail("SystemError", "invalid exception kind"),
         }
     }
@@ -109,6 +111,7 @@ impl Kind {
             Self::FileExistsError => "FileExistsError",
             Self::SubprocessError => "SubprocessError",
             Self::CalledProcessError => "CalledProcessError",
+            Self::TimeoutExpired => "TimeoutExpired",
         }
     }
 
@@ -132,7 +135,10 @@ impl Kind {
             ),
             Self::UnicodeError => matches!(self, Self::UnicodeError | Self::UnicodeDecodeError),
             Self::SubprocessError => {
-                matches!(self, Self::SubprocessError | Self::CalledProcessError)
+                matches!(
+                    self,
+                    Self::SubprocessError | Self::CalledProcessError | Self::TimeoutExpired
+                )
             }
             Self::OSError => matches!(
                 self,
@@ -155,6 +161,7 @@ pub(super) struct Exception {
     cause: Option<Rc<Object>>,
     suppress_context: bool,
     process: Option<Box<super::processes::ProcessError>>,
+    timeout: Option<Box<super::processes::TimeoutError>>,
 }
 
 impl Drop for Exception {
@@ -233,6 +240,7 @@ fn new_exception(kind: Kind, message: Rc<Str>) -> Rc<Object> {
         cause: None,
         suppress_context: false,
         process: None,
+        timeout: None,
     }))))
 }
 
@@ -246,6 +254,22 @@ pub(super) fn raise_process(error: super::processes::ProcessError) {
             cause: None,
             suppress_context: false,
             process: Some(Box::new(error)),
+            timeout: None,
+        },
+    ))))));
+}
+
+/// Publishes the immutable deadline snapshot after the child has been reaped.
+#[cold]
+pub(super) fn raise_timeout(error: super::processes::TimeoutError) {
+    replace_pending(Some(Rc::new(Object(StorageCell::new(Storage::Exception(
+        Exception {
+            kind: Kind::TimeoutExpired,
+            message: Rc::new(Str::new("")),
+            cause: None,
+            suppress_context: false,
+            process: None,
+            timeout: Some(Box::new(error)),
         },
     ))))));
 }
@@ -303,6 +327,9 @@ impl Storage {
 
     fn exception_message(&self) -> Rc<Str> {
         let exception = self.exception();
+        if let Some(timeout) = &exception.timeout {
+            return Rc::new(timeout.message());
+        }
         exception.process.as_ref().map_or_else(
             || exception.message.clone(),
             |process| Rc::new(process.message()),
@@ -327,6 +354,11 @@ pub unsafe extern "C" fn relar_subprocess_error_field(value: *const Object, fiel
     let result = unsafe {
         object(value).0.with(|storage| {
             let exception = storage.exception();
+            if field == 0
+                && let Some(timeout) = &exception.timeout
+            {
+                return Ok(timeout.field(0));
+            }
             exception.process.as_ref().map_or_else(
                 || {
                     let name = ["cmd", "returncode", "stdout", "stderr", "output"][field as usize];
@@ -343,6 +375,26 @@ pub unsafe extern "C" fn relar_subprocess_error_field(value: *const Object, fiel
         })
     };
     finish(result, 0)
+}
+
+/// Acquires a field from a proved TimeoutExpired view without changing its type.
+///
+/// # Safety
+/// `value` is a rooted TimeoutExpired and `field` is 0 through 4. The returned
+/// owned word has exact kind 5, 7, 264, 264, or 264 respectively; pending is clear.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_subprocess_timeout_field(value: *const Object, field: u32) -> usize {
+    // SAFETY: the checker establishes an exact TimeoutExpired before projection.
+    unsafe {
+        object(value).0.with(|storage| {
+            storage
+                .exception()
+                .timeout
+                .as_ref()
+                .unwrap_or_else(|| fail("SystemError", "expected TimeoutExpired storage"))
+                .field(field)
+        })
+    }
 }
 
 #[unsafe(no_mangle)]

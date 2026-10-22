@@ -23,6 +23,8 @@ pub(crate) enum Type {
     Iterator,
     /// A sealed builtin exception with an immutable category and owned payload.
     Exception,
+    /// A proved catch-only timeout with readonly float and nullable bytes fields.
+    TimeoutExpired,
     /// A sealed UTF-8 text stream; aliases share its open/closed state.
     TextIO,
     /// A sealed byte stream; aliases share its open/closed state.
@@ -59,6 +61,7 @@ impl std::fmt::Display for Type {
             Self::None => "None",
             Self::Iterator => "iterator",
             Self::Exception => "Exception",
+            Self::TimeoutExpired => "subprocess.TimeoutExpired",
             Self::TextIO => "typing.TextIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
@@ -383,6 +386,8 @@ pub(crate) enum Builtin {
     SysArgv,
     /// Decodes one string into a checked record, list, or string-key dictionary.
     JsonDecode(Type),
+    /// Decodes a complete TOML table into a checked record or string-key dictionary.
+    TomlDecode(Type),
     /// Encodes rooted concrete storage using immutable, compiler-emitted metadata.
     JsonEncode(Type),
     Path(PathOperation),
@@ -449,6 +454,8 @@ pub(crate) enum PathOperation {
     Stem,
     Suffix,
     Parent,
+    IsAbsolute,
+    Resolve,
     Exists,
     IsFile,
     IsDir,
@@ -470,10 +477,15 @@ pub(crate) enum PathOperation {
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
     Run,
+    RunTimeout,
     EnvironCopy,
     CheckReturnCode,
+    /// Reinterprets the same owned exception after a category proof or widening.
+    ExceptionView,
     /// Fixed guarded exception fields; output has its own alias index.
     ErrorField(u32),
+    /// Exact TimeoutExpired fields use a distinct bytes-safe projection.
+    TimeoutField(u32),
 }
 
 /// Sealed Python runtime categories; parameterized container annotations are
@@ -497,7 +509,7 @@ impl InstanceType {
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
             Self::Tuple => matches!(ty, Type::Tuple(_)),
-            Self::Exception(_) => ty == Type::Exception,
+            Self::Exception(_) => matches!(ty, Type::Exception | Type::TimeoutExpired),
         }
     }
 }

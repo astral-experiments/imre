@@ -20,10 +20,11 @@ Relar supports:
 - Typed containers and arbitrary-precision integers
 - Common control flow, comprehensions, and immediately consumed iterator pipelines
 - Selected file and path operations
-- Decode external JSON into fixed records and typed containers, and serialize their layouts directly.
+- Decode external JSON and TOML into fixed records and typed containers, and serialize JSON layouts directly.
 - Use immutable tuple keys and sort keys, Unicode text operations, and bounded URL decoding.
+- Read and write UTF-8 files, resolve native `pathlib.Path` values, and scan directories with `iterdir` and bounded `glob`.
 - Create scoped temporary workspaces and atomically replace completed files.
-- Run native subprocesses with captured UTF-8 output, explicit arguments, working directories, and environment snapshots.
+- Run native subprocesses with captured UTF-8 output, deadlines, explicit arguments, working directories, and environment snapshots.
 
 But not:
 

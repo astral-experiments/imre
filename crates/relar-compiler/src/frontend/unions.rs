@@ -20,6 +20,25 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
+        if self.types.payload(value.ty).unwrap_or(value.ty) == Type::Exception
+            && ty == Type::TimeoutExpired
+        {
+            let value = if value.ty == Type::Exception {
+                value
+            } else {
+                Expr {
+                    ty: Type::Exception,
+                    kind: ExprKind::Unwrap(Box::new(value)),
+                }
+            };
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(
+                    Builtin::Process(ir::ProcessOperation::ExceptionView),
+                    vec![value],
+                ),
+            };
+        }
         let source = self.types.payload(value.ty).unwrap_or(value.ty);
         let target = self.types.payload(ty).unwrap_or(ty);
         let kind = if self
@@ -129,6 +148,14 @@ impl Checker<'_> {
         let mut unknown = false;
         for &class in classes {
             if let InstanceType::Exception(kind) = class
+                && ty == Type::TimeoutExpired
+            {
+                if matches!(kind, 0 | 1 | 25 | 27) {
+                    return Some(true);
+                }
+                continue;
+            }
+            if let InstanceType::Exception(kind) = class
                 && ty == Type::Exception
                 && !matches!(kind, 0 | 1)
             {
@@ -231,6 +258,20 @@ impl Checker<'_> {
                     Self::instance_member_matches(ty, classes)
                         .is_none_or(|matches| matches == *truth)
                 });
+                // A positive exact timeout category test establishes the byte
+                // payload contract even when the value was stored as Exception.
+                if *truth
+                    && !classes.is_empty()
+                    && classes
+                        .iter()
+                        .all(|class| matches!(class, InstanceType::Exception(27)))
+                {
+                    for member in &mut members {
+                        if *member == Type::Exception {
+                            *member = Type::TimeoutExpired;
+                        }
+                    }
+                }
             }
             if members.is_empty() {
                 // A known-dead branch is still checked against a valid member

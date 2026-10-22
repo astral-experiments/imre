@@ -1,4 +1,4 @@
-"""Compare sealed synchronous processes, captured text, errors, and ownership."""
+"""Compare sealed synchronous processes, deadline byte snapshots, and ownership."""
 
 import argparse
 import fcntl
@@ -18,7 +18,7 @@ import files
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "processes"
 IMPORTS = """import os
 import subprocess
-from subprocess import run, CompletedProcess, CalledProcessError, SubprocessError
+from subprocess import run, CompletedProcess, CalledProcessError, SubprocessError, TimeoutExpired
 from pathlib import Path
 """
 CALL = "run(['command'], capture_output=True, encoding='utf-8')"
@@ -54,6 +54,16 @@ REJECTED = {
     "construct_result": "CompletedProcess(['command'], 0, '', '')",
     "construct_failure": "CalledProcessError(1, ['command'])",
     "construct_parent_error": "SubprocessError('message')",
+    "construct_timeout": "TimeoutExpired(['command'], 1.0)",
+    "raise_timeout_class": "raise TimeoutExpired",
+    "timeout_annotation": "def seconds(error: TimeoutExpired) -> float:\n    return error.timeout",
+    "integer_timeout": "run(['command'], capture_output=True, encoding='utf-8', timeout=1)",
+    "boolean_timeout": "run(['command'], capture_output=True, encoding='utf-8', timeout=True)",
+    "string_timeout": "run(['command'], capture_output=True, encoding='utf-8', timeout='1.0')",
+    "optional_integer_timeout": "def launch(duration: int | None) -> None:\n    run(['command'], capture_output=True, encoding='utf-8', timeout=duration)",
+    "timeout_text_projection": "try:\n    " + CALL + "\nexcept TimeoutExpired as error:\n    text: str = error.stdout",
+    "timeout_returncode": "try:\n    " + CALL + "\nexcept TimeoutExpired as error:\n    print(error.returncode)",
+    "write_timeout_field": "try:\n    " + CALL + "\nexcept TimeoutExpired as error:\n    error.timeout = 1.0",
     "failure_annotation": "def code(error: CalledProcessError) -> int:\n    return error.returncode",
     "bytes_result": "result: CompletedProcess[bytes] = " + CALL,
     "extra_type_arguments": "result: CompletedProcess[str, int] = " + CALL,
@@ -66,7 +76,6 @@ REJECTED = {
 }
 for name, value in {
     "shell": "True",
-    "timeout": "1",
     "input": "'data'",
     "stdin": "0",
     "stdout": "1",
@@ -184,7 +193,7 @@ def main() -> None:
                 project = temporary / name
                 reference_dir = project / "cpython" / "work"
                 seed(reference_dir, python)
-                options = {"limited": name in {"cleanup", "stdin_fds"}, "descriptor": descriptor if name == "stdin_fds" else None}
+                options = {"limited": name in {"cleanup", "stdin_fds", "timeouts"}, "descriptor": descriptor if name == "stdin_fds" else None}
                 reference = run([python, "-E", "-B", str(source), *arguments], reference_dir, **options)
                 files.check_result(reference, None, f"CPython {name}")
                 expected_files = snapshot(reference_dir)
@@ -207,6 +216,8 @@ def main() -> None:
             result = files.run([compiler, "check", str(path)], temporary)
             assert result.returncode > 0 and result.stderr, (name, result)
             assert b"panicked" not in result.stderr and b"Sanitizer" not in result.stderr, (name, result.stderr)
+            if name in {"integer_timeout", "boolean_timeout", "optional_integer_timeout"}:
+                assert b"float | None" in result.stderr and b"15.0" in result.stderr, (name, result.stderr)
             checks += 1
         for module in ["subprocess", "os"]:
             shadow = temporary / f"shadow-{module}"

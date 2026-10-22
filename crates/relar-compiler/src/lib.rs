@@ -159,6 +159,22 @@ mod tests {
     }
 
     #[test]
+    fn deadline_exceptions_keep_exact_byte_fields_through_category_proofs() {
+        let llvm = compile(
+            include_str!("../../../tests/fixtures/processes/timeouts.py"),
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert!(llvm.contains("call ptr @relar_subprocess_run_timeout"));
+        assert!(llvm.contains("call i64 @relar_subprocess_timeout_field"));
+        compile(
+            include_str!("../../../tests/fixtures/processes/timeout_arguments.py"),
+            &CompileOptions::default(),
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn sealed_imports_work_without_filesystem_modules() {
         let source = r#"
 import sys as process

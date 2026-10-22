@@ -66,7 +66,7 @@ impl Emitter<'_, '_> {
                     }
                 }
             } else if let InstanceType::Exception(kind) = class
-                && value.ty == Type::Exception
+                && matches!(value.ty, Type::Exception | Type::TimeoutExpired)
             {
                 let matched = self.instruction(format!(
                     "call i8 @relar_exception_matches(ptr {}, i32 {kind})",

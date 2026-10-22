@@ -51,7 +51,14 @@ impl Session {
             .fs()
             .write_file_all(
                 intrinsic.join("__init__.pyi"),
-                "from . import json as json\n",
+                "from . import json as json, toml as toml\n",
+            )
+            .map_err(|error| error.to_string())?;
+        system
+            .fs()
+            .write_file_all(
+                intrinsic.join("toml.pyi"),
+                "from typing import TypeVar\n_T = TypeVar(\"_T\")\ndef decode(text: str, schema: type[_T], /) -> _T: ...\n",
             )
             .map_err(|error| error.to_string())?;
         system

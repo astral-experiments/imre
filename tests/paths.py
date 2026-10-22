@@ -55,7 +55,13 @@ REJECTED = {
     "read_errors": "Path('a').read_text(encoding='utf-8', errors='ignore')",
     "write_newline": "Path('a').write_text('data', encoding='utf-8', newline='')",
     "read_argument": "Path('a').read_text(1, encoding='utf-8')",
-    "unsupported_method": "Path('.').resolve()",
+    "unsupported_method": "Path('.').expanduser()",
+    "resolve_integer_strict": "Path('.').resolve(strict=1)",
+    "resolve_optional_strict": "strict: bool | None = None\nPath('.').resolve(strict=strict)",
+    "resolve_extra_argument": "Path('.').resolve(True, False)",
+    "resolve_extra_keyword": "Path('.').resolve(missing_ok=True)",
+    "resolve_duplicate_strict": "Path('.').resolve(True, strict=False)",
+    "absolute_argument": "Path('.').is_absolute(True)",
     "builtin_class_pattern": "match Path('a'):\n    case Path():\n        print(1)",
     "unsupported_import": "from pathlib import PureWindowsPath\nPureWindowsPath('a')",
 }
@@ -105,6 +111,15 @@ def seed(directory: Path) -> None:
     (directory / "file-link").symlink_to("input.txt")
     (directory / "directory-link").symlink_to("tree", target_is_directory=True)
     (directory / "dangling-link").symlink_to("missing")
+    (directory / "loop-a").symlink_to("loop-b")
+    (directory / "loop-b").symlink_to("loop-a")
+    for index in range(64):
+        (directory / f"chain-{index}").symlink_to(
+            "input.txt" if index == 63 else f"chain-{index + 1}"
+        )
+    (directory / "repeated-link").symlink_to("directory-link/../directory-link")
+    (directory / "trailing-link").symlink_to("input.txt/")
+    (directory / "absolute-link").symlink_to("/tmp", target_is_directory=True)
     (directory / "denied").mkdir()
     (directory / "denied" / "secret.json").write_text("secret")
     (directory / "denied").chmod(0)

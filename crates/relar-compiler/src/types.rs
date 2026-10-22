@@ -133,6 +133,7 @@ impl Types {
             | Type::Callable(_)
             | Type::Iterator
             | Type::Exception
+            | Type::TimeoutExpired
             | Type::TextIO
             | Type::Path
             | Type::CompletedProcess

@@ -19,6 +19,7 @@ use super::words::{OwnedWord, WordKind, Words};
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish};
 
 mod encode;
+mod toml;
 
 const INTEGER: u32 = 1;
 const STRING: u32 = 2;
@@ -31,7 +32,7 @@ const OPTIONAL: u32 = 8;
 const DICTIONARY: u32 = 9;
 const MAX_DEPTH: usize = 128;
 
-/// Compiler-owned metadata. `kind` selects JSON syntax; `word_kind` selects the
+/// Compiler-owned metadata. `kind` selects the scalar/container schema; `word_kind` selects the
 /// independently checked native ownership representation.
 #[repr(C)]
 pub struct Schema {
