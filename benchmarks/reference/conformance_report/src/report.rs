@@ -228,7 +228,7 @@ fn count_metric(old: i64, new: i64, greater_is_better: bool) -> String {
     )
 }
 
-pub fn file_stats(files: &[FileStats<'_>], base: &str) -> String {
+pub fn file_stats(files: &[FileStats], base: &str) -> String {
     let mut old = Statistics::default();
     let mut new = Statistics::default();
     let mut passing = 0;
@@ -248,7 +248,7 @@ pub fn file_stats(files: &[FileStats<'_>], base: &str) -> String {
     if changed.is_empty() {
         return String::new();
     }
-    changed.sort_by_key(|file| (-file.total_change(), filename(file.path)));
+    changed.sort_by_key(|file| (-file.total_change(), filename(&file.path)));
     let mut lines = vec![
         "### Test file breakdown".into(),
         String::new(),
@@ -280,7 +280,7 @@ pub fn file_stats(files: &[FileStats<'_>], base: &str) -> String {
                 "➡️ Neutral"
             }
         };
-        let name = filename(file.path);
+        let name = filename(&file.path);
         lines.push(format!(
             "| [{name}]({base}tests/{name}) | {} | {} | {} | {status} |",
             count_metric(file.old.true_positives, file.new.true_positives, true),
@@ -351,12 +351,7 @@ fn outcome(difference: f64, greater_is_better: bool, neutral: bool) -> &'static 
     }
 }
 
-pub fn summary(
-    cases: &[TestCase],
-    files: &[FileStats<'_>],
-    base: &str,
-    force: bool,
-) -> Result<String> {
+pub fn summary(cases: &[TestCase], files: &[FileStats], base: &str, force: bool) -> Result<String> {
     let old = compute_stats(cases, Side::Old);
     let new = compute_stats(cases, Side::New);
     if new.true_positives == 0 {

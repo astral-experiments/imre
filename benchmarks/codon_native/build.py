@@ -54,6 +54,7 @@ def bodies(source: str, *, restore_calls: bool = False) -> dict[str, str]:
 def adapt(source: str, name: str) -> tuple[str, list[dict]]:
     """Apply declared boundaries, checking all remaining function-body AST nodes."""
     edits = []
+    grouping_edits = []
     lines = source.splitlines(keepends=True)
     tree = ast.parse(source)
     calls = [node for node in ast.walk(tree)
@@ -116,6 +117,25 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
         edits.append({"kind": "native singleton Enum with StrEnum values and display", "class": node.name,
                       "members": [m.targets[0].id for m in members]})
     changed = "".join(lines)
+    if name == "conformance_report/model.py" and "from collections.abc import Sequence\n" in changed:
+        changed = changed.replace("from collections.abc import Sequence\n", "")
+        grouping_edits.append(("test_files: Sequence[Path]", "test_files: list[Path]"))
+        for value in ("TyDiagnostic", "ExpectedError"):
+            before = f": defaultdict[str, list[{value}]] = defaultdict(list)"
+            after = f" = defaultdict(list[{value}])"
+            grouping_edits.append((before, after))
+        for mapping in ("old_by_key", "new_by_key", "expected_by_key"):
+            keys = f"{mapping}.keys()"
+            grouping_edits.append((keys, f"set({keys})"))
+        grouping_edits.append((
+            "(e.location.path.name, e.location.positions.begin.line): e.tag",
+            "(e.location.path.name, e.location.positions.begin.line): str(e.tag)",
+        ))
+        for before, after in grouping_edits:
+            if before not in changed:
+                raise ValueError(f"unexpected grouping boundary: {before}")
+            changed = changed.replace(before, after)
+            edits.append({"kind": "native concrete sequence, default factory, or dictionary keys", "before": before, "after": after})
     if any(node.func.id == "int" for node in calls):
         changed = "from codon_decimal import parse_int as native_python_int\n\n" + changed
     if any(node.func.id == "sorted" for node in calls):
@@ -179,7 +199,10 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
         changed += "\n\n" + addition
         edits.append({"kind": "native typed TOML boundary", "adapter": "conformance_toml.py", "adapter_sha256": digest(addition.encode())})
         edits.append({"kind": "native live typed JSON import", "adapter": "conformance_json.py"})
-    original_bodies, generated_bodies = bodies(source), bodies(changed, restore_calls=True)
+    restored = changed
+    for before, after in reversed(grouping_edits):
+        restored = restored.replace(after, before)
+    original_bodies, generated_bodies = bodies(source), bodies(restored, restore_calls=True)
     if any(generated_bodies.get(name) != body for name, body in original_bodies.items()):
         raise ValueError("adapter changed an application function body beyond declared native calls")
     return changed, edits
@@ -233,6 +256,7 @@ def main() -> None:
     parser.add_argument("--conformance-scanner", action="store_true", help="also compile the isolated preloaded-line scanner")
     parser.add_argument("--platform-library", type=Path, help="native benchmark platform shared library, required for conformance")
     parser.add_argument("--conformance-classification", action="store_true")
+    parser.add_argument("--conformance-grouping", action="store_true")
     args = parser.parse_args()
     if "conformance_report" in args.applications and args.platform_library is None:
         parser.error("conformance_report requires --platform-library (native Rust OS/TOML boundary)")
@@ -340,6 +364,16 @@ def main() -> None:
         probe = source_root / "run_conformance_enum_probe.py"
         probe.write_bytes((HERE / "enum_probe.py").read_bytes())
         entries.append(("conformance_report-enum-probe", probe))
+    if args.conformance_grouping:
+        if "conformance_report" not in args.applications:
+            parser.error("--conformance-grouping requires the conformance reporter")
+        source = ROOT / "benchmarks/conformance_grouping.py"
+        entry = source_root / "run_conformance_grouping.py"
+        transformed, edits = adapt(source.read_text(), "conformance_grouping.py")
+        entry.write_text(transformed)
+        record["source_inputs"][str(source)] = digest(source.read_bytes())
+        record["transformations"]["conformance_grouping.py"] = edits
+        entries.append(("conformance_report-grouping", entry))
     record["generated"] = {
         str(path.relative_to(source_root)): digest(path.read_bytes())
         for path in sorted(source_root.rglob("*")) if path.is_file()

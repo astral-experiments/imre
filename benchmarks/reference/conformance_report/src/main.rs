@@ -1,4 +1,5 @@
 mod classification_benchmark;
+mod grouping_benchmark;
 mod live;
 mod model;
 mod parse;
@@ -160,27 +161,36 @@ fn options() -> Result<Options> {
     Ok(result)
 }
 
-fn collect_file_stats<'a>(cases: &[TestCase], inputs: &'a Inputs) -> Result<Vec<FileStats<'a>>> {
-    let mut by_path: HashMap<&str, Vec<&TestCase>> = inputs
-        .sources
-        .iter()
-        .map(|source| (&*source.path, Vec::new()))
-        .collect();
+fn collect_file_stats(cases: &[TestCase], inputs: &Inputs) -> Result<Vec<FileStats>> {
+    let mut by_path = HashMap::new();
+    let mut order = Vec::new();
+    for source in &inputs.sources {
+        let input = Path::new(&*source.path);
+        let path = input
+            .canonicalize()
+            .or_else(|_| relar_benchmark_platform::resolve(input))?;
+        let path = path
+            .into_os_string()
+            .into_string()
+            .map_err(|_| Error::value("non-UTF-8 path"))?;
+        if by_path.insert(path.clone(), Vec::new()).is_none() {
+            order.push(path);
+        }
+    }
     for case in cases {
         by_path
             .get_mut(case.path())
             .ok_or_else(|| Error::key(case.path()))?
             .push(case);
     }
-    Ok(inputs
-        .sources
-        .iter()
-        .map(|source| {
-            let cases = &by_path[&*source.path];
+    Ok(order
+        .into_iter()
+        .map(|path| {
+            let cases = &by_path[&path];
             FileStats {
-                path: &source.path,
                 old: compute_stats(cases.iter().copied(), Side::Old),
                 new: compute_stats(cases.iter().copied(), Side::New),
+                path,
             }
         })
         .collect())
@@ -210,6 +220,9 @@ fn render_report(inputs: &Inputs, options: &Options) -> Result<String> {
 
 fn run() -> Result<()> {
     let arguments: Vec<String> = std::env::args().collect();
+    if arguments.get(1).is_some_and(|s| s == "--grouping") {
+        return grouping_benchmark::run(&arguments[2..]);
+    }
     if let Some(mode @ ("--classify" | "--entries")) = arguments.get(1).map(String::as_str) {
         return classification_benchmark::run(&arguments[2..], mode == "--entries");
     }
