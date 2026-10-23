@@ -169,7 +169,7 @@ def main() -> None:
     parser.add_argument("--opt-levels", nargs="+", choices=["0", "1", "2", "3"], default=["0", "3"])
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
-    build_flags = []
+    build_flags = ["--quiet"]
     if args.lto_linker is not None:
         build_flags += ["--lto-linker", str(args.lto_linker.absolute())]
     if args.target is not None:

@@ -28,7 +28,7 @@ def main() -> None:
     parser.add_argument("--opt-levels", nargs="+", default=["0", "3"])
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    flags = ["--runtime", str(args.runtime.resolve()), "--clang", args.clang]
+    flags = ["--quiet", "--runtime", str(args.runtime.resolve()), "--clang", args.clang]
     if args.target:
         flags += ["--target", args.target]
     if args.lto_linker:

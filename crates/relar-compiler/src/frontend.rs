@@ -232,6 +232,12 @@ fn pattern_elements(target: &ast::Expr) -> Option<&[ast::Expr]> {
 
 /// Resolves the project-wide call graph without changing source-level namespaces.
 pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
+    lower_with_owners(graph).map(|(module, _)| module)
+}
+
+pub(crate) fn lower_with_owners(
+    graph: &SourceGraph,
+) -> Result<(ir::Module, Vec<ModuleId>), String> {
     let types = Types::default();
     let mut classes = ClassInfo::new(graph, &types)?;
     dataclass_values::validate(&classes, graph, &types)?;
@@ -363,6 +369,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
         );
     }
     let mut functions = Vec::new();
+    let mut owners = Vec::new();
     let mut call_graph = Vec::new();
     let mut recursion_errors = Vec::new();
     for (module_id, definition, signature) in &definitions {
@@ -418,6 +425,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
         })();
         let (function, calls) =
             result.map_err(|error| format!("{}:{error}", module.path.display()))?;
+        owners.push(*module_id);
         functions.push(function);
         call_graph.push(calls);
         recursion_errors.push(module.error(
@@ -484,6 +492,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
         }
     }
     for initialization in &initializations {
+        owners.push(initialization.module);
         functions.push(ir::Function {
             params: Vec::new(),
             returns: Type::None,
@@ -498,6 +507,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     // Entry code and inactive module guards can create helpers too. Validate the
     // complete graph only after every source expression has been lowered.
     for helper in helpers.into_functions() {
+        owners.push(helper.module);
         functions.push(helper.function);
         call_graph.push(helper.calls);
         recursion_errors.push(helper.recursion_error);
@@ -526,15 +536,18 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
         initialization.validate(graph, &functions, &callable_definitions, &callable_targets)?;
     }
     let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
-    Ok(ir::Module {
-        types,
-        class_metadata: dataclass_values::metadata(&classes, graph),
-        class_fields: classes.fields,
-        json_records,
-        globals: globals.into_types(),
-        functions,
-        entry,
-    })
+    Ok((
+        ir::Module {
+            types,
+            class_metadata: dataclass_values::metadata(&classes, graph),
+            class_fields: classes.fields,
+            json_records,
+            globals: globals.into_types(),
+            functions,
+            entry,
+        },
+        owners,
+    ))
 }
 
 fn signature(

@@ -4,10 +4,16 @@ use std::path::PathBuf;
 
 use relar_compiler::CompileOptions;
 
+use super::build_output::Verbosity;
 use super::{Allocator, USAGE};
 
 #[derive(Default)]
 pub(super) struct BuildOptions {
+    pub source_path: Option<PathBuf>,
+    pub help: bool,
+    pub no_cache: bool,
+    pub whole_program: bool,
+    pub verbosity: Verbosity,
     pub output: Option<PathBuf>,
     pub runtime: Option<PathBuf>,
     pub llvm_path: Option<PathBuf>,
@@ -50,7 +56,7 @@ impl BuildOptions {
         if command != "check" {
             options.read(command, &mut environment_flags()?.into_iter(), false)?;
         }
-        options.read(command, args, command == "run")?;
+        options.read(command, args, true)?;
         Ok(options)
     }
 
@@ -58,9 +64,19 @@ impl BuildOptions {
         &mut self,
         command: &OsStr,
         args: &mut impl Iterator<Item = OsString>,
-        program_arguments: bool,
+        command_line: bool,
     ) -> Result<(), String> {
         while let Some(flag) = args.next() {
+            if command_line && !flag.as_encoded_bytes().starts_with(b"-") {
+                if self.source_path.replace(flag.into()).is_some() {
+                    return Err(USAGE.to_owned());
+                }
+                continue;
+            }
+            if command_line && (flag == "--help" || flag == "-h") {
+                self.help = true;
+                break;
+            }
             if command == "check" && flag != "--module-root" {
                 return Err(USAGE.to_owned());
             }
@@ -69,7 +85,11 @@ impl BuildOptions {
                     .ok_or_else(|| format!("{} requires a value", flag.display()))
             };
             match flag.to_str() {
-                Some("--") if program_arguments => break,
+                Some("--") if command_line && command == "run" => break,
+                Some("-q" | "--quiet") => self.verbosity = Verbosity::Quiet,
+                Some("-v" | "--verbose") => self.verbosity = Verbosity::Verbose,
+                Some("--no-cache") => self.no_cache = true,
+                Some("--whole-program") => self.whole_program = true,
                 Some("--module-root") => self.module_root = Some(value()?.into()),
                 Some("-o") if command == "build" => self.output = Some(value()?.into()),
                 Some("--runtime") => self.runtime = Some(value()?.into()),
@@ -141,4 +161,22 @@ fn environment_flags() -> Result<Vec<OsString>, String> {
         }
     }
     Ok(Vec::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_is_positional_only_on_the_command_line() {
+        let mut options = BuildOptions::default();
+        let command = OsStr::new("build");
+        let args = || ["-q", "main.py", "-v"].map(OsString::from).into_iter();
+        let error = options.read(command, &mut args(), false).unwrap_err();
+        assert!(error.contains("Unknown option: main.py"));
+        assert!(options.source_path.is_none());
+        options.read(command, &mut args(), true).unwrap();
+        assert_eq!(options.source_path, Some(PathBuf::from("main.py")));
+        assert!(options.verbosity == Verbosity::Verbose);
+    }
 }

@@ -137,6 +137,11 @@ relar run totals.py -- 10 20 12
 
 Arguments after `--` go into the script’s `sys.argv`. Use `build` to keep the compiled executable.
 
+On native Linux x86-64 with the distribution Clang 18 and GNU BFD, `build` and
+`run` share cached executables and module objects by default. The build summary
+goes to stderr. Pass `-v` to see each module decision or `-q` to suppress
+progress. [Build cache and code generation](docs/subset.md#incremental-builds)
+
 ```console
 relar build totals.py
 ./totals 10 20 12

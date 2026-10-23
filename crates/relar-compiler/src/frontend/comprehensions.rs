@@ -47,6 +47,7 @@ fn preserves_field(value: &Expr) -> bool {
 }
 
 pub(super) struct Helper {
+    pub module: ModuleId,
     pub function: ir::Function,
     pub calls: HashSet<usize>,
     pub recursion_error: String,
@@ -625,6 +626,7 @@ impl Checker<'_> {
         self.helpers.finish(
             id,
             Helper {
+                module: self.module,
                 function: ir::Function {
                     params,
                     returns: ty,

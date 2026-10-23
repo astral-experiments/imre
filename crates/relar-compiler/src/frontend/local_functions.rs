@@ -207,6 +207,7 @@ impl Checker<'_> {
         self.helpers.finish(
             signature.id,
             comprehensions::Helper {
+                module: self.module,
                 function: ir::Function {
                     params,
                     returns: signature.returns,

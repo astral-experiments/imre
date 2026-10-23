@@ -762,6 +762,34 @@ RELARFLAGS='--no-gc-sections' relar build totals.py --gc-sections
 These variables apply to `build` and `run`. Use `--` on the `run` command line to pass
 arguments to the compiled program.
 
+## Incremental builds
+
+`relar build` and `relar run` share a per-user cache on native x86-64 Debian/Ubuntu
+with distribution Clang 18, GNU BFD, and an ordinary runtime archive. Both commands
+reuse the last executable when its sources, import lookups, build options, compiler,
+runtime, and native link inputs are still current. Program arguments and the output
+path can change between invocations.
+
+After a source edit, Relar checks and lowers the entire import graph. It recompiles
+the modules whose emitted LLVM changed and relinks the program. Changing a public
+signature or a shared layout can also recompile a caller. Changing only section GC
+or RELRO relinks with the existing objects. `--verbose-link` performs the link and
+prints its actual command, including when all the module objects are cached.
+
+Build status goes to stderr. Use `-v` or `--verbose` to see each compiled and
+reused module, or `-q` or `--quiet` to suppress progress. Set `NO_COLOR` for plain
+terminal output. `--whole-program` optimizes all modules together and uses a
+separate executable cache. `--no-cache` bypasses cache reads and writes while
+preserving the selected code generation mode. These options also work in
+`RELARFLAGS` and `RELAR_ENCODED_FLAGS`.
+
+Custom Clang drivers and raw `-C link-arg` arguments, explicit targets, emitted
+LLVM, sanitizers, ThinLTO, and unsupported toolchains use the whole-program
+backend without caching. By default, cache data lives under
+`$XDG_CACHE_HOME/relar/v1` or `~/.cache/relar/v1`. An absolute `RELAR_CACHE_DIR`
+overrides the parent directory. Older objects stay available for reverts until
+that cache directory is cleared.
+
 ## Build and validate
 
 Install the Rust toolchain specified in `rust-toolchain.toml`, Clang 18, and CPython 3.12 or later. Build the compiler and runtime together:
