@@ -728,6 +728,36 @@ Standard output uses bounded buffering for pipes and files, and flushes each pri
 
 Before creating file writers or initializing standard output, the runtime ignores `SIGPIPE` once so disconnected pipes produce catchable I/O errors. The sealed runtime has no user signal handlers or signal API.
 
+## Link options
+
+`relar build` and `relar run` remove unreachable code and data at every optimization level.
+Relar passes `-dead_strip` to the macOS linker and `--gc-sections` to the Linux linker.
+Use `--no-gc-sections` to keep unused code. On Linux, Relar also enables full RELRO so the
+loader can make the global offset table read-only after resolving dynamic symbols at startup.
+Select `-C relro-level=partial` for lazy binding or `-C relro-level=off` to disable RELRO.
+
+Pass `-C link-arg=ARG` once for each extra argument to Clang, in command-line order.
+Use Clang's `-Wl,` syntax for linker options. For example, this Linux build writes a link map
+and prints the Clang invocation to standard error.
+
+```sh
+relar build totals.py -C link-arg=-Wl,-Map=totals.map --verbose-link
+```
+
+Set `RELARFLAGS` to whitespace-separated build options. For arguments containing spaces,
+set `RELAR_ENCODED_FLAGS` to UTF-8 arguments separated by ASCII unit separators (`0x1f`).
+When set, the encoded variable replaces `RELARFLAGS`, even when empty. Relar reads these
+options before the command line. The last value wins for individual settings, and
+repeated linker arguments accumulate in order. For example, this command enables section
+GC for one build.
+
+```sh
+RELARFLAGS='--no-gc-sections' relar build totals.py --gc-sections
+```
+
+These variables apply to `build` and `run`. Use `--` on the `run` command line to pass
+arguments to the compiled program.
+
 ## Build and validate
 
 Install the Rust toolchain specified in `rust-toolchain.toml`, Clang 18, and CPython 3.12 or later. Build the compiler and runtime together:
