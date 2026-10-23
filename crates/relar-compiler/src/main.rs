@@ -8,7 +8,16 @@ use std::os::unix::process::{CommandExt, ExitStatusExt};
 
 use relar_compiler::CompileOptions;
 
-const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY]\n       relar build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]\n       relar run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]\n\nBuild options:\n  --module-root DIRECTORY  --runtime LIBRARY.a  --emit-llvm FILE.ll\n  --clang CLANG  --opt-level 0|1|2|3  --sanitize\n  --target TRIPLE  --lto-linker PATH\n\nBuild writes the executable to the current directory using the source filename without its extension.\nRun compiles a temporary executable and passes arguments after -- to the program.\nThinLTO (--lto-linker) requires explicit --runtime and --target.";
+#[derive(Clone, Copy, Default)]
+enum Allocator {
+    #[default]
+    System,
+    Jemalloc,
+}
+
+const JEMALLOC_RUNTIME: &str = "librelar_runtime_jemalloc.a";
+
+const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY]\n       relar build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]\n       relar run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]\n\nBuild options:\n  --module-root DIRECTORY  --runtime LIBRARY.a  --emit-llvm FILE.ll\n  --clang CLANG  --opt-level 0|1|2|3  --sanitize\n  --target TRIPLE  --lto-linker PATH  --allocator system|jemalloc\n\nBuild writes the executable to the current directory using the source filename without its extension.\nRun compiles a temporary executable and passes arguments after -- to the program.\nThinLTO (--lto-linker) requires explicit --runtime and --target.";
 
 fn main() -> ExitCode {
     match run() {
@@ -50,6 +59,7 @@ fn run() -> Result<ExitCode, String> {
     let mut module_root = None;
     let mut lto_linker = None;
     let mut target = None;
+    let mut allocator = None;
     let mut clang = cfg!(target_os = "macos").then(|| OsString::from("clang"));
     let mut optimization = OsString::from("3");
     let mut options = CompileOptions::default();
@@ -73,6 +83,13 @@ fn run() -> Result<ExitCode, String> {
             Some("--clang") => clang = Some(value),
             Some("--lto-linker") => lto_linker = Some(PathBuf::from(value)),
             Some("--target") => target = Some(value),
+            Some("--allocator") => {
+                allocator = Some(match value.to_str() {
+                    Some("system") => Allocator::System,
+                    Some("jemalloc") => Allocator::Jemalloc,
+                    _ => return Err("--allocator expects system or jemalloc".to_owned()),
+                });
+            }
             Some("--opt-level") if matches!(value.to_str(), Some("0" | "1" | "2" | "3")) => {
                 optimization = value
             }
@@ -125,11 +142,8 @@ fn run() -> Result<ExitCode, String> {
             })
         })
         .transpose()?;
-    let runtime = runtime.unwrap_or(
-        std::env::current_exe()
-            .map_err(|error| error.to_string())?
-            .with_file_name("librelar_runtime.a"),
-    );
+    let linux = cfg!(target_os = "linux") && target.as_deref().is_none_or(linux_target);
+    let runtime = runtime_archive(runtime, allocator, linux, options.address_sanitizer)?;
     if !runtime.is_file() {
         return Err(format!(
             "Runtime not found: {}. Build the workspace or pass --runtime.",
@@ -253,6 +267,56 @@ fn program_exit_code(status: ExitStatus) -> ExitCode {
     ExitCode::from(code.unwrap_or(1) as u8)
 }
 
+fn runtime_archive(
+    runtime: Option<PathBuf>,
+    allocator: Option<Allocator>,
+    linux: bool,
+    sanitize: bool,
+) -> Result<PathBuf, String> {
+    if let Some(path) = runtime {
+        if allocator.is_some() {
+            return Err("--runtime already selects the allocator. Omit --allocator.".to_owned());
+        }
+        if sanitize && path.file_name() == Some(OsStr::new(JEMALLOC_RUNTIME)) {
+            return Err("--sanitize requires a system-allocator runtime".to_owned());
+        }
+        return Ok(path);
+    }
+    let allocator = match allocator {
+        Some(Allocator::Jemalloc) if sanitize => {
+            return Err("--allocator jemalloc is incompatible with --sanitize".to_owned());
+        }
+        Some(Allocator::Jemalloc) if !linux => {
+            return Err("--allocator jemalloc requires a Linux target and host".to_owned());
+        }
+        _ if sanitize || !linux => Allocator::System,
+        requested => requested.unwrap_or_default(),
+    };
+    let filename = match allocator {
+        Allocator::System => "librelar_runtime.a",
+        Allocator::Jemalloc => JEMALLOC_RUNTIME,
+    };
+    Ok(std::env::current_exe()
+        .map_err(|error| error.to_string())?
+        .with_file_name(filename))
+}
+
+fn linux_target(target: &OsStr) -> bool {
+    let Some(target) = target.to_str() else {
+        return false;
+    };
+    // Clang accepts both arch-vendor-linux-env and arch-linux-env.
+    let mut parts = target.split('-').skip(1);
+    match (parts.next(), parts.next()) {
+        (_, Some("linux")) => !parts.next().is_some_and(|abi| abi.starts_with("android")),
+        (Some("linux"), None) => true,
+        (Some("linux"), Some(abi)) => {
+            abi.starts_with("gnu") || abi.starts_with("musl") || abi.starts_with("uclibc")
+        }
+        _ => false,
+    }
+}
+
 fn identity(path: &Path) -> Result<PathBuf, String> {
     if path.exists() {
         return path.canonicalize().map_err(|error| error.to_string());
@@ -276,4 +340,25 @@ fn same_file(left: &Path, right: &Path) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allocator_selects_the_sibling_runtime() {
+        for (allocator, linux, sanitize, filename) in [
+            (None, true, false, "librelar_runtime.a"),
+            (Some(Allocator::System), true, false, "librelar_runtime.a"),
+            (Some(Allocator::Jemalloc), true, false, JEMALLOC_RUNTIME),
+            (None, false, false, "librelar_runtime.a"),
+            (None, true, true, "librelar_runtime.a"),
+        ] {
+            assert_eq!(
+                runtime_archive(None, allocator, linux, sanitize).unwrap(),
+                std::env::current_exe().unwrap().with_file_name(filename)
+            );
+        }
+    }
 }

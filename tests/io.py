@@ -181,7 +181,7 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
     scratch.mkdir()
     env = {**environment(), "RELAR_RUN_TEST": "inherited environment", "TMPDIR": str(scratch)}
     path = "./scripts/show args.py"
-    program_args = ["--opt-level", "", "two words", "--", "--help"]
+    program_args = ["--opt-level", "", "two words", "--", "--help", "--allocator", "jemalloc"]
     result = subprocess.run(
         [compiler, "run", path, *flags, "--", *program_args], input=b"from stdin\n",
         cwd=directory, env=env, capture_output=True, timeout=60,
@@ -190,6 +190,17 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
     expected = [path, *program_args, "current working directory", "inherited environment", "from stdin"]
     same_output(result.stdout, ("\n".join(expected) + "\n").encode(), "relar run argv and I/O")
     assert not list(scratch.iterdir()) and not (directory / source.stem).exists()
+    rejected = [
+        (["--allocator", "other"], b"--allocator expects system or jemalloc"),
+        (["--allocator", "jemalloc", "--sanitize"], b"incompatible with --sanitize"),
+        (["--target", "aarch64-apple-darwin", "--allocator", "jemalloc"], b"requires a Linux target"),
+        (["--allocator", "jemalloc", "--target", "aarch64-linux-android"], b"requires a Linux target"),
+        (["--allocator", "system", "--runtime", "custom.a"], b"--runtime already selects the allocator"),
+        (["--runtime", "librelar_runtime_jemalloc.a", "--sanitize"], b"requires a system-allocator runtime"),
+    ]
+    for arguments, message in rejected:
+        result = run([compiler, "build", path, *arguments], cwd=directory, input=b"")
+        assert result.returncode and message in result.stderr, result
 
     source.write_text("raise ValueError('script failed')\n", encoding="utf-8")
     compiled = [compiler, "run", path, *flags]
@@ -199,7 +210,7 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
     before = source.read_bytes()
     collision = run([*compiled, "--emit-llvm", path], cwd=directory, input=b"")
     assert collision.returncode and b"distinct paths" in collision.stderr and source.read_bytes() == before
-    return 4
+    return 4 + len(rejected)
 
 
 def main() -> None:

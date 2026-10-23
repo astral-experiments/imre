@@ -776,7 +776,13 @@ target/release/relar build examples/dependency_planner/__main__.py \
 
 All native test harnesses accept the same `--lto-linker` and `--target` options.
 
-Linux executables use jemalloc for runtime objects. It is linked into the executable. macOS uses its system allocator. With `--sanitize`, both platforms use the system heap so AddressSanitizer can check the lifetime of objects read by generated code.
+`relar build` and `relar run` use the system allocator by default. On Linux,
+`--allocator jemalloc` selects the statically linked jemalloc heap for runtime
+objects. `--allocator system` selects the platform heap explicitly. macOS and
+`--sanitize` use the system heap. The compiler looks beside its executable
+for `librelar_runtime.a` (system) or `librelar_runtime_jemalloc.a` (jemalloc).
+An explicit `--runtime` selects the allocator through the archive itself.
+Pass a system-allocator archive when supplying a custom runtime to `--sanitize`.
 
 `--sanitize` marks generated functions for AddressSanitizer and links its runtime. On macOS, use `--clang` to select a Clang with a matching sanitizer runtime when you also instrument the Rust archive. To instrument Rust runtime code, build a separate sanitizer archive. The test suites accept `--sanitize --opt-levels 1` to exercise this configuration, including leak checks on normal exits.
 

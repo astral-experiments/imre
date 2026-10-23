@@ -67,6 +67,9 @@ relar run examples/conformance_report/__main__.py --module-root examples -- \
   --format github --output "$workdir/report.md"
 ```
 
+On Linux, add `--allocator jemalloc` before the `--` in the `relar run` command
+to use the allocator measured in the grouping benchmarks.
+
 To capture a new comparison, prepare a checkout of [python/typing](https://github.com/python/typing) at
 `835b70f3f795f8e061b1f7621178515b0a77a0ad` and two ty executables. The preparation
 step runs ty with the upstream flags and records the source/binary hashes,
