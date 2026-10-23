@@ -9,6 +9,7 @@ def segment(value: str) -> str:
 for text in ["", ".", "./", "././", "/", "//", "///", "////", "a//b/./c/", "a/../b", "../..", "//host//share/file.tar.gz", "///host/file", ".hidden", "..hidden", ".hidden.ext", "...", "..", "α/λ🙂.json", "a\\b.txt", "a\0b"]:
     path = Path(text)
     print(str(path))
+    print(path.as_posix())
     print(path.name)
     print(path.stem)
     print(path.suffix)

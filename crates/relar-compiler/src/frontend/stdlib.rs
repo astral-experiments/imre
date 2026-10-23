@@ -487,6 +487,37 @@ impl Checker<'_> {
                 vec![value],
             ));
         }
+        if self.types.payload(value.ty) == Some(Type::Str) {
+            let slot = self.hidden(value.ty);
+            let local = self.local(slot);
+            let absent = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::IsNone, vec![local.clone()]),
+            };
+            let present = Expr {
+                ty: Type::Str,
+                kind: ExprKind::Unwrap(Box::new(local)),
+            };
+            let none = Expr {
+                ty: Type::Str,
+                kind: ExprKind::Str("None".into()),
+            };
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Assign(slot, value)],
+                    value: Box::new(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Conditional(
+                            Box::new(absent),
+                            Box::new(none),
+                            Box::new(present),
+                        ),
+                    }),
+                    clear: vec![slot],
+                },
+            });
+        }
         if !matches!(
             value.ty,
             Type::Int

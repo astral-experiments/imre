@@ -127,6 +127,7 @@ impl Checker<'_> {
             ));
         }
         let (kind, ty, arity) = match name {
+            "as_posix" => (PathOperation::Text, Type::Str, 0),
             "exists" => (PathOperation::Exists, Type::Bool, 0),
             "is_file" => (PathOperation::IsFile, Type::Bool, 0),
             "is_dir" => (PathOperation::IsDir, Type::Bool, 0),

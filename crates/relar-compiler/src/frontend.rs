@@ -30,6 +30,7 @@ mod processes;
 mod projected_equality;
 mod records;
 mod regex;
+mod sequences;
 mod stdlib;
 mod text;
 mod truthiness;
@@ -583,7 +584,25 @@ fn signature(
         } else {
             parameter
                 .annotation()
-                .map(|value| annotation_in_class(value, graph, module, classes, types, owner))
+                .map(|value| {
+                    if let ast::Expr::Subscript(sequence) = value
+                        && graph.resolve(module, &sequence.value)
+                            == Some(Binding::Intrinsic(Intrinsic::Sequence))
+                    {
+                        sequences::check_reads(function, parameter.name().as_str(), source)?;
+                        let element = annotation_in_class(
+                            &sequence.slice,
+                            graph,
+                            module,
+                            classes,
+                            types,
+                            owner,
+                        )?;
+                        Ok(types.list(element))
+                    } else {
+                        annotation_in_class(value, graph, module, classes, types, owner)
+                    }
+                })
                 .transpose()?
                 .or(parameter
                     .default

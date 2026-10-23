@@ -10,6 +10,42 @@ use super::*;
 
 mod slices;
 
+/// Only a stored field of the same local can be read again under its guard.
+fn local_field(value: &Expr) -> Option<(usize, usize)> {
+    if let ExprKind::Field(receiver, field) = &value.kind
+        && let ExprKind::Local(local) = receiver.kind
+    {
+        Some((local, *field))
+    } else {
+        None
+    }
+}
+
+fn present_field(condition: &Expr) -> Option<(usize, usize)> {
+    if let ExprKind::Not(inner) = &condition.kind
+        && let ExprKind::Builtin(Builtin::IsNone, args) = &inner.kind
+        && let [value] = args.as_slice()
+    {
+        local_field(value)
+    } else {
+        None
+    }
+}
+
+/// Evaluating the dict key precedes the value. A call, property or assignment
+/// could change the guarded field through an alias during that interval.
+fn preserves_field(value: &Expr) -> bool {
+    match &value.kind {
+        ExprKind::Local(_) | ExprKind::Int(_) | ExprKind::Bool(_) | ExprKind::Str(_) => true,
+        ExprKind::Field(receiver, _) => preserves_field(receiver),
+        ExprKind::Tuple(items) => items.iter().all(preserves_field),
+        ExprKind::Builtin(Builtin::Path(ir::PathOperation::Name) | Builtin::Len, args) => {
+            args.iter().all(preserves_field)
+        }
+        _ => false,
+    }
+}
+
 pub(super) struct Helper {
     pub function: ir::Function,
     pub calls: HashSet<usize>,
@@ -722,7 +758,8 @@ impl Checker<'_> {
                 checker.apply_facts(condition, true);
             }
             let mut body = if index + 1 == display.clauses.len() {
-                checker.comprehension_leaf(display.value, expected, result)?
+                let guarded = conditions.last().and_then(present_field);
+                checker.comprehension_leaf(display.value, expected, result, guarded)?
             } else {
                 checker.comprehension_clause(display, index + 1, None, expected, result)?
             };
@@ -741,6 +778,7 @@ impl Checker<'_> {
         value: Yield<'_>,
         expected: Option<Type>,
         result: usize,
+        guarded: Option<(usize, usize)>,
     ) -> Result<Vec<Statement>, String> {
         match value {
             Yield::Sum(expression) => {
@@ -767,11 +805,7 @@ impl Checker<'_> {
                         self.types.element(ty)
                     }
                 });
-                let value = if let Some(element) = element {
-                    self.expr_expected(expression, element)?
-                } else {
-                    self.expr(expression)?
-                };
+                let value = self.guarded_element(expression, element, guarded)?;
                 if is_set && !self.types.hashable_key(value.ty) {
                     return Err(error(
                         self.source,
@@ -811,11 +845,8 @@ impl Checker<'_> {
                     ));
                 }
                 let captured = self.hidden(key_value.ty);
-                let value = if let Some((_, value_type)) = expected {
-                    self.expr_expected(value, value_type)?
-                } else {
-                    self.expr(value)?
-                };
+                let guarded = guarded.filter(|_| preserves_field(&key_value));
+                let value = self.guarded_element(value, expected.map(|(_, ty)| ty), guarded)?;
                 self.locals[result] = self.types.dict(key_value.ty, value.ty);
                 Ok(vec![Statement::Scope {
                     body: vec![
@@ -825,6 +856,35 @@ impl Checker<'_> {
                     clear: vec![captured],
                 }])
             }
+        }
+    }
+
+    fn guarded_element(
+        &mut self,
+        expression: &ast::Expr,
+        expected: Option<Type>,
+        guarded: Option<(usize, usize)>,
+    ) -> Result<Expr, String> {
+        if let Some(field) = guarded
+            && matches!(expression, ast::Expr::Attribute(_))
+        {
+            let mut value = self.expr(expression)?;
+            if local_field(&value) == Some(field)
+                && let Some(payload) = self.types.payload(value.ty)
+            {
+                value = Expr {
+                    ty: payload,
+                    kind: ExprKind::Unwrap(Box::new(value)),
+                };
+            }
+            return match expected {
+                Some(ty) => self.coerce(value, ty, expression),
+                None => Ok(value),
+            };
+        }
+        match expected {
+            Some(ty) => self.expr_expected(expression, ty),
+            None => self.expr(expression),
         }
     }
 }
