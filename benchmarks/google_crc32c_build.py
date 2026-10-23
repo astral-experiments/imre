@@ -59,8 +59,6 @@ def main():
         core,
         "-B",
         build,
-        "-G",
-        "Ninja",
         "-DCMAKE_BUILD_TYPE=Release",
         f"-DCMAKE_C_COMPILER={args.cc}",
         f"-DCMAKE_CXX_COMPILER={args.cxx}",

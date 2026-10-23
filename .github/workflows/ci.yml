@@ -71,7 +71,7 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup show
       - name: Install LLVM 18 and the CRC32C build tools
-        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 cmake ninja-build
+        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 cmake
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
