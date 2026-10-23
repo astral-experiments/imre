@@ -316,6 +316,27 @@ def first(stream: Stream) -> str:
     }
 
     #[test]
+    fn context_manager_depth_counts_flat_and_nested_items() {
+        let managers = |n| vec!["f"; n].join(", ");
+        let file = "f = open('/dev/null', 'rb')\n";
+        let flat = format!("{file}with {}:\n    pass\n", managers(10_000));
+        let nested = format!(
+            "{file}with {}:\n    with {}:\n        pass\n",
+            managers(60),
+            managers(60)
+        );
+        for source in [flat, nested] {
+            let error = super::check(&source).unwrap_err();
+            assert!(
+                error.contains("context manager nesting exceeds 96 levels"),
+                "{error}"
+            );
+        }
+        let sequential = format!("{file}{}", "with f, f:\n    pass\n".repeat(100));
+        super::check(&sequential).unwrap();
+    }
+
+    #[test]
     fn file_iterators_pull_typed_lines_and_keep_reads_in_the_loop() {
         let source = r#"
 from gzip import open
