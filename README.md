@@ -112,7 +112,7 @@ cp target/release/relar target/release/librelar_runtime.a ~/.cargo/bin/
 
 Make sure `~/.cargo/bin` is on your `PATH`.
 
-Maintainers can follow the [release process](docs/releasing.md) to build and publish the archives.
+Maintainers use the **Prepare release** and **Release** GitHub Actions workflows to prepare the changelog and publish the archives. [Release guide](docs/releasing.md).
 
 ## Getting started
 

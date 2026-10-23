@@ -2,35 +2,24 @@
 
 ## Prepare the release
 
-Start from a clean, full checkout with the latest `main` and tags. Install uv,
-Python 3.11 or newer, the pinned Rust toolchain, and authenticate the GitHub CLI
-so Rooster can read the merged pull requests.
+Run **Prepare release** from `main` in GitHub Actions, or use the CLI.
 
 ```sh
-git switch main
-git pull --ff-only --tags origin main
-./scripts/release.sh
-git show HEAD
+gh workflow run release-prepare.yml --repo astral-sh/relar --ref main
 ```
 
-Rooster writes the original PR titles and links to `CHANGELOG.md`, grouping them
-by label. Unlabeled PRs appear under **Other changes**. The first release uses
-the existing Cargo version, `0.1.0`. Later releases default to a patch bump,
-or a minor bump when a PR has the `breaking` label. You can choose a version
-explicitly with `./scripts/release.sh --version 0.2.0-rc.1`.
+The workflow runs Rooster and opens a `release/<version>` pull request against
+`main`. Rooster groups the original PR titles and links by label in
+`CHANGELOG.md`. Version bumps update both Cargo manifests and `Cargo.lock`.
+Unlabeled PRs appear under **Other changes**. The first release uses the
+existing Cargo version, `0.1.0`. Later releases default to a patch bump, or a
+minor bump when a PR has the `breaking` label. To choose a version, fill in the
+workflow’s optional `version` input or add `-f version=0.2.0-rc.1` to the command.
 
-The script commits the changelog and any version changes in both Cargo manifests
-and `Cargo.lock` on a local `release/<version>` branch. Review the diff, push
-the branch, open a pull request, and merge it into `main`.
-
-```sh
-git push origin HEAD
-gh pr create --base main --fill
-```
-
-The `release` dependency group pins Rooster. When that pin changes, regenerate
-the hash-checked tool dependencies with
-`uv pip compile --group release --python-version 3.12 --universal --generate-hashes --no-header --no-annotate -o scripts/requirements-release.txt`.
+Open the PR linked in the workflow summary. Select **Approve workflows to run**
+to start CI on the bot-created PR, review the changelog, and merge it. Running
+**Prepare release** again for the same version regenerates the branch from
+`main` and updates the open PR. Make any manual changelog edits after the last run.
 
 ## Build and publish the binaries
 

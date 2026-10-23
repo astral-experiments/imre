@@ -46,14 +46,8 @@ jobs:
           version=$(python3 scripts/release-version.py -- "$RELEASE_TAG")
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [[ "$RELEASE_TAG" != dry-run ]]; then
-            python3 scripts/release-version.py --notes -- "$RELEASE_TAG" > "$RUNNER_TEMP/release-notes.md"
+            python3 scripts/release-version.py --notes -- "$RELEASE_TAG" > /dev/null
           fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: github.event_name == 'workflow_dispatch' && inputs.tag != 'dry-run'
-        with:
-          name: release-notes
-          path: ${{ runner.temp }}/release-notes.md
-          if-no-files-found: error
 
   package:
     name: Package ${{ matrix.target }}
@@ -100,7 +94,7 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
-  publish:
+  release:
     needs: [plan, package]
     if: github.event_name == 'workflow_dispatch' && github.repository == 'astral-sh/relar' && github.ref == 'refs/heads/main' && inputs.tag == needs.plan.outputs.version
     runs-on: ubuntu-24.04
@@ -108,22 +102,26 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: release-notes
-          path: ${{ runner.temp }}
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: relar-*-unknown-linux-gnu
           path: dist
           merge-multiple: true
       - name: Publish verified archives to GitHub Releases
-        working-directory: dist
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.plan.outputs.version }}
         run: |
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$GITHUB_SHA"
+          fi
+          python3 scripts/release-version.py --notes -- "$TAG" > "$RUNNER_TEMP/release-notes.md"
+          cd dist
           assets=()
           for arch in x86_64 aarch64; do
             archive="relar-$arch-unknown-linux-gnu.tar.gz"
@@ -137,15 +135,6 @@ jobs:
           if grep -Fxq -- "$TAG" <<< "$releases"; then
             echo "Release $TAG already exists." >&2
             exit 1
-          fi
-          refs=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG" --jq '.[].ref')
-          if grep -Fxq -- "refs/tags/$TAG" <<< "$refs"; then
-            # The commits endpoint peels annotated tags to the underlying commit.
-            commit=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$TAG" --jq .sha)
-            if [[ "$commit" != "$GITHUB_SHA" ]]; then
-              echo "Tag $TAG points to $commit, expected $GITHUB_SHA." >&2
-              exit 1
-            fi
           fi
           flags=()
           if [[ ${TAG%%+*} == *-* ]]; then

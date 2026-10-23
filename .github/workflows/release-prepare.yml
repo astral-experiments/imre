@@ -1,0 +1,61 @@
+name: Prepare release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version to set (overrides detection)
+        required: false
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare-release:
+    if: github.repository == 'astral-sh/relar' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.5"
+          checksum: f68d291c75783122dad58ab77def0e13f3233f358731db5d6d7e8715603b928f
+          enable-cache: false
+
+      - name: Prepare version and changelog
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if [[ -n $INPUT_VERSION ]]; then
+            ./scripts/release.sh --version "$INPUT_VERSION"
+          else
+            ./scripts/release.sh
+          fi
+
+      - name: Create or update release pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh auth setup-git
+          branch=$(git branch --show-current)
+          git push --force-with-lease origin "HEAD:refs/heads/$branch"
+
+          pr=$(gh pr list --base main --head "$branch" --state open --json url --jq '.[0].url')
+          if [[ -z $pr ]]; then
+            pr=$(gh pr create --base main --head "$branch" --fill-first)
+          fi
+          echo "Release pull request: $pr" >> "$GITHUB_STEP_SUMMARY"

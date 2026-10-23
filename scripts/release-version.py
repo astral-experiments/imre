@@ -27,7 +27,7 @@ def main() -> None:
 
     changelog = root / "CHANGELOG.md"
     if not changelog.is_file():
-        parser.error("run scripts/release.sh and merge the changelog before publishing")
+        parser.error("run the Prepare release workflow and merge its pull request before publishing")
     sections = re.split(r"^## ([^\n]+)\n", changelog.read_text(encoding="utf-8"), flags=re.M)
     notes = [
         body.strip("\n")
