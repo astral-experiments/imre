@@ -162,6 +162,52 @@ def terminal_message(command: list[str], timeout: float) -> bytes:
     return output
 
 
+def check_link_options(directory: Path, compiler: str, runtime: str) -> int:
+    source = directory / "link.py"
+    source.write_text("print(1)\n")
+    driver = directory / "record clang args"
+    driver.write_text("#!/bin/sh\nprintf '%s\\0' \"$@\"\n")
+    driver.chmod(0o755)
+    base = [compiler, "build", str(source), "--runtime", runtime, "--clang", str(driver)]
+    clean_env = os.environ.copy()
+    clean_env.pop("RELARFLAGS", None)
+    clean_env.pop("RELAR_ENCODED_FLAGS", None)
+
+    def link(*flags: str, **env: str) -> list[bytes]:
+        result = subprocess.run(
+            [*base, *flags], cwd=directory, env=clean_env | env,
+            capture_output=True, check=True, timeout=60,
+        )
+        assert (os.fsencode(driver) in result.stderr) == ("--verbose-link" in flags), result.stderr
+        return result.stdout.split(b"\0")[:-1]
+
+    linux = ["--target", "x86_64-unknown-linux-gnu"]
+    macos = ["--target", "aarch64-apple-darwin"]
+    elf = link(*linux, "--opt-level", "0")
+    assert b"-Wl,--gc-sections" in elf and b"-Wl,-z,relro,-z,now" in elf
+    assert b"-Wl,-dead_strip" not in elf and b"-liconv" not in elf
+    macho = link(*macos)
+    assert b"-Wl,-dead_strip" in macho and b"-liconv" in macho
+    assert not any(b"relro" in arg or b"gc-sections" in arg for arg in macho)
+    assert b"-Wl,-dead_strip" not in link(*macos, RELARFLAGS="--no-gc-sections")
+
+    elf = link(*linux, RELARFLAGS="--no-gc-sections\t-C relro-level=off")
+    assert b"-Wl,--no-gc-sections" in elf and b"-Wl,-z,norelro" in elf
+    args = link(
+        *linux, "--gc-sections", "-Crelro-level=partial", "-C", "link-arg=-lm", "--verbose-link",
+        RELARFLAGS="--invalid", RELAR_ENCODED_FLAGS="--no-gc-sections\x1f-Clink-arg=one argument",
+    )
+    assert b"-Wl,--gc-sections" in args and b"-Wl,-z,relro,-z,lazy" in args
+    assert args[args.index(b"one argument") + 1] == b"-lm"
+    assert b"-Wl,--gc-sections" in link(*linux, RELARFLAGS="--invalid", RELAR_ENCODED_FLAGS="")
+    missing = subprocess.run(
+        [*base, "--gc-sections"], env=clean_env | {"RELARFLAGS": "-C"},
+        capture_output=True, timeout=60,
+    )
+    assert missing.returncode and b"-C requires a value" in missing.stderr
+    return 7
+
+
 def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
     help_text = run([compiler, "run", "--help"], cwd=directory, input=b"")
     require_success(help_text, "relar run --help")
@@ -197,6 +243,7 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
         (["--allocator", "jemalloc", "--target", "aarch64-linux-android"], b"requires a Linux target"),
         (["--allocator", "system", "--runtime", "custom.a"], b"--runtime already selects the allocator"),
         (["--runtime", "librelar_runtime_jemalloc.a", "--sanitize"], b"requires a system-allocator runtime"),
+        (["-C", "relro-level=other"], b"relro-level expects full, partial, or off"),
     ]
     for arguments, message in rejected:
         result = run([compiler, "build", path, *arguments], cwd=directory, input=b"")
@@ -238,6 +285,7 @@ def main() -> None:
         flags = ["--runtime", runtime, "--clang", args.clang, "--opt-level", args.opt_levels[0], *build_flags]
         if args.sanitize:
             flags.append("--sanitize")
+        passed += check_link_options(temporary, compiler, runtime)
         passed += check_run_command(temporary, compiler, flags)
         sources = {}
         for name, source in PROGRAMS.items():

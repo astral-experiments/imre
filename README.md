@@ -146,6 +146,9 @@ relar build totals.py
 `--allocator jemalloc` to use jemalloc for the compiled program's heap.
 For ThinLTO, select the allocator with `--runtime`. [ThinLTO build instructions](docs/subset.md#build-and-validate)
 
+Relar removes unused code when linking executables. Pass `--no-gc-sections` to keep it,
+or `--verbose-link` to see the Clang command. [Link options and environment variables](docs/subset.md#link-options)
+
 ## Releasing
 
 Run **Prepare release** on `main` to open the version and changelog PR. Approve its CI and merge it.

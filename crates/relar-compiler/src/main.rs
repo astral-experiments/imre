@@ -6,7 +6,9 @@ use std::process::{Command, ExitCode, ExitStatus};
 #[cfg(unix)]
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 
-use relar_compiler::CompileOptions;
+mod cli;
+
+use cli::{BuildOptions, Relro};
 
 #[derive(Clone, Copy, Default)]
 enum Allocator {
@@ -17,7 +19,23 @@ enum Allocator {
 
 const JEMALLOC_RUNTIME: &str = "librelar_runtime_jemalloc.a";
 
-const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY]\n       relar build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]\n       relar run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]\n\nBuild options:\n  --module-root DIRECTORY  --runtime LIBRARY.a  --emit-llvm FILE.ll\n  --clang CLANG  --opt-level 0|1|2|3  --sanitize\n  --target TRIPLE  --lto-linker PATH  --allocator system|jemalloc\n\nBuild writes the executable to the current directory using the source filename without its extension.\nRun compiles a temporary executable and passes arguments after -- to the program.\nThinLTO (--lto-linker) requires explicit --runtime and --target.";
+const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY]
+       relar build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]
+       relar run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]
+
+Build options:
+  --module-root DIRECTORY  --runtime LIBRARY.a  --emit-llvm FILE.ll
+  --clang CLANG  --opt-level 0|1|2|3  --sanitize
+  --target TRIPLE  --lto-linker PATH  --allocator system|jemalloc
+  --gc-sections (default)  --no-gc-sections  --verbose-link
+  -C relro-level=full|partial|off (Linux, default full)
+  -C link-arg=ARG (repeatable, passes one argument to Clang)
+
+Build writes the executable to the current directory using the source filename without its extension.
+Run compiles a temporary executable and passes arguments after -- to the program.
+ThinLTO (--lto-linker) requires explicit --runtime and --target.
+Build and run read RELARFLAGS (whitespace-separated) before command-line options.
+RELAR_ENCODED_FLAGS (ASCII 0x1f-separated) takes precedence over RELARFLAGS.";
 
 fn main() -> ExitCode {
     match run() {
@@ -53,54 +71,19 @@ fn run() -> Result<ExitCode, String> {
         return Ok(ExitCode::SUCCESS);
     }
     let source_path = PathBuf::from(source);
-    let mut output = None;
-    let mut runtime = None;
-    let mut llvm_path = None;
-    let mut module_root = None;
-    let mut lto_linker = None;
-    let mut target = None;
-    let mut allocator = None;
-    let mut clang = cfg!(target_os = "macos").then(|| OsString::from("clang"));
-    let mut optimization = OsString::from("3");
-    let mut options = CompileOptions::default();
-    while let Some(flag) = args.next() {
-        if execute && flag == "--" {
-            break;
-        }
-        if command == "check" && flag != "--module-root" {
-            return Err(USAGE.to_owned());
-        }
-        if flag == "--sanitize" {
-            options.address_sanitizer = true;
-            continue;
-        }
-        let value = args.next().ok_or(USAGE)?;
-        match flag.to_str() {
-            Some("--module-root") => module_root = Some(PathBuf::from(value)),
-            Some("-o") if !execute => output = Some(PathBuf::from(value)),
-            Some("--runtime") => runtime = Some(PathBuf::from(value)),
-            Some("--emit-llvm") => llvm_path = Some(PathBuf::from(value)),
-            Some("--clang") => clang = Some(value),
-            Some("--lto-linker") => lto_linker = Some(PathBuf::from(value)),
-            Some("--target") => target = Some(value),
-            Some("--allocator") => {
-                allocator = Some(match value.to_str() {
-                    Some("system") => Allocator::System,
-                    Some("jemalloc") => Allocator::Jemalloc,
-                    _ => return Err("--allocator expects system or jemalloc".to_owned()),
-                });
-            }
-            Some("--opt-level") if matches!(value.to_str(), Some("0" | "1" | "2" | "3")) => {
-                optimization = value
-            }
-            _ => {
-                return Err(format!(
-                    "Unknown option or invalid value: {}\n{USAGE}",
-                    flag.to_string_lossy()
-                ));
-            }
-        }
-    }
+    let BuildOptions {
+        output,
+        runtime,
+        llvm_path,
+        module_root,
+        lto_linker,
+        target,
+        allocator,
+        clang,
+        optimization,
+        compile: options,
+        link,
+    } = BuildOptions::parse(&command, &mut args)?;
     if command == "check" {
         relar_compiler::check_file(&source_path, module_root.as_deref())?;
         return Ok(ExitCode::SUCCESS);
@@ -142,7 +125,8 @@ fn run() -> Result<ExitCode, String> {
             })
         })
         .transpose()?;
-    let linux = cfg!(target_os = "linux") && target.as_deref().is_none_or(linux_target);
+    let target_os = target_os(target.as_deref());
+    let linux = cfg!(target_os = "linux") && target_os == "linux";
     let runtime = runtime_archive(runtime, allocator, linux, options.address_sanitizer)?;
     if !runtime.is_file() {
         return Err(format!(
@@ -195,13 +179,28 @@ fn run() -> Result<ExitCode, String> {
         .arg(format!("-O{}", optimization.to_string_lossy()))
         .arg("-Wno-override-module")
         .arg(temporary.path())
-        .arg(&runtime)
-        .arg("-o")
-        .arg(&output);
-    if cfg!(target_os = "macos") {
-        linker.arg("-liconv");
-    } else {
-        linker.args(["-ldl", "-lpthread", "-lm", "-lrt", "-lutil"]);
+        .arg(&runtime);
+    match target_os {
+        "macos" => {
+            linker.arg("-liconv");
+            if !link.keep_dead_code {
+                linker.arg("-Wl,-dead_strip");
+            }
+        }
+        "linux" => {
+            linker.args(["-ldl", "-lpthread", "-lm", "-lrt", "-lutil"]);
+            linker.arg(if link.keep_dead_code {
+                "-Wl,--no-gc-sections"
+            } else {
+                "-Wl,--gc-sections"
+            });
+            linker.arg(match link.relro {
+                Relro::Full => "-Wl,-z,relro,-z,now",
+                Relro::Partial => "-Wl,-z,relro,-z,lazy",
+                Relro::Off => "-Wl,-z,norelro",
+            });
+        }
+        _ => {}
     }
     if options.address_sanitizer {
         linker.args(["-fsanitize=address", "-fno-omit-frame-pointer"]);
@@ -221,10 +220,17 @@ fn run() -> Result<ExitCode, String> {
         argument.push(target);
         linker.arg(argument);
     }
-    let status = match linker.status() {
+    linker.args(&link.args).arg("-o").arg(&output);
+    let invoke = |driver: &mut Command| {
+        if link.verbose {
+            eprintln!("{driver:?}");
+        }
+        driver.status()
+    };
+    let status = match invoke(&mut linker) {
         Err(error) if clang.is_none() && error.kind() == ErrorKind::NotFound => {
             let mut fallback = Command::new("clang");
-            fallback.args(linker.get_args()).status().map_err(|error| {
+            invoke(fallback.args(linker.get_args())).map_err(|error| {
                 format!(
                     "Could not run clang-18 or clang: {error}. Install Clang 18 or pass --clang PATH."
                 )
@@ -314,6 +320,24 @@ fn linux_target(target: &OsStr) -> bool {
             abi.starts_with("gnu") || abi.starts_with("musl") || abi.starts_with("uclibc")
         }
         _ => false,
+    }
+}
+
+fn target_os(target: Option<&OsStr>) -> &'static str {
+    let Some(target) = target else {
+        return std::env::consts::OS;
+    };
+    if linux_target(target) {
+        "linux"
+    } else if target.to_str().is_some_and(|triple| {
+        triple
+            .split('-')
+            .skip(1)
+            .any(|part| part.starts_with("darwin") || part.starts_with("macos"))
+    }) {
+        "macos"
+    } else {
+        "unknown"
     }
 }
 
