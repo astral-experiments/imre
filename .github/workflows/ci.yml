@@ -65,7 +65,8 @@ jobs:
             --output "$RUNNER_TEMP/conformance-inputs" --check-reporter "$RUNNER_TEMP/conformance-report"
       - name: Compare native suites with CPython
         run: |
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-ordinary --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes \
+          python3 -m pip install --no-deps tomli==2.5.0
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-ordinary --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes \
             -- --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Validate the independent Rust Base45 reference
         run: |
