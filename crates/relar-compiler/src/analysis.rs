@@ -246,13 +246,34 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
     let mut lexer = lex(source, Mode::Module);
     let mut parents = Vec::new();
     let mut group = Group::default();
-    let mut indent = 0_usize;
+    let mut indents = Vec::new();
+    let mut elif_depth = 0;
+    let mut statement_start = true;
     loop {
-        match lexer.next_token() {
+        let token = lexer.next_token();
+        if statement_start
+            && !matches!(
+                token,
+                Indent | Dedent | Newline | Comment | NonLogicalNewline
+            )
+        {
+            // Each elif adds a nested false branch. Its suite inherits that
+            // depth, while a new statement starts a fresh chain at this indent.
+            match token {
+                Elif => elif_depth += 1,
+                Else => {}
+                _ => elif_depth = indents.last().copied().unwrap_or(0),
+            }
+            statement_start = false;
+        }
+        match token {
             EndOfFile => return Ok(()),
-            Indent => indent += 1,
-            Dedent => indent = indent.saturating_sub(1),
-            Newline | Semi if parents.is_empty() => group = Group::default(),
+            Indent => indents.push(elif_depth),
+            Dedent => elif_depth = indents.pop().unwrap_or(0),
+            Newline | Semi if parents.is_empty() => {
+                group = Group::default();
+                statement_start = token == Newline;
+            }
             Lpar | Lsqb | Lbrace | FStringStart | TStringStart => {
                 group.operators += 1;
                 parents.push(std::mem::take(&mut group));
@@ -276,7 +297,7 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
             | FStringMiddle | TStringMiddle | Comment | NonLogicalNewline => continue,
             _ => group.operators += 1,
         }
-        if indent + parents.len() + group.depth() > LIMIT {
+        if indents.len() + elif_depth + parents.len() + group.depth() > LIMIT {
             return Err("Relar: source exceeds the syntax complexity limit");
         }
     }

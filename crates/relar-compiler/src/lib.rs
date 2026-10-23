@@ -243,6 +243,21 @@ mod tests {
     }
 
     #[test]
+    fn elif_chains_count_toward_branch_depth() {
+        let flat = format!("if False: pass\n{}", "elif False: pass\n".repeat(10_000));
+        let nested = format!(
+            "if False: pass\n{}else:\n    if False: pass\n{}",
+            "elif False: pass\n".repeat(60),
+            "    elif False: pass\n".repeat(60)
+        );
+        for source in [flat, nested] {
+            let error = super::check(&source).unwrap_err();
+            assert!(error.contains("syntax complexity limit"), "{error}");
+        }
+        super::check(&"if False: pass\nelif False: pass\n".repeat(128)).unwrap();
+    }
+
+    #[test]
     fn sealed_exception_fields_keep_runtime_guards_and_reject_unknown_attributes() {
         let llvm = compile(
             "def fields(error: Exception) -> tuple[int, list[str], str, str, str]:\n    return error.returncode, error.cmd, error.stdout, error.output, error.stderr\n",
