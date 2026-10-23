@@ -324,6 +324,33 @@ impl Binary {
     }
 }
 
+/// A native symbol, its borrowed inputs, and the convention for consuming its result.
+pub(crate) struct RuntimeCall<R, const N: usize> {
+    pub(crate) symbol: &'static str,
+    pub(crate) params: [Type; N],
+    pub(crate) result: R,
+}
+
+/// A successful call transfers one integer word. Raw zero signals a pending error.
+pub(crate) struct OwnedIntOrError;
+pub(crate) struct InfallibleVoid;
+
+pub(crate) const LIST_GET: RuntimeCall<OwnedIntOrError, 2> = RuntimeCall {
+    symbol: "relar_list_get",
+    params: [Type::ListInt, Type::Int],
+    result: OwnedIntOrError,
+};
+pub(crate) const LIST_APPEND: RuntimeCall<InfallibleVoid, 2> = RuntimeCall {
+    symbol: "relar_list_append",
+    params: [Type::ListInt, Type::Int],
+    result: InfallibleVoid,
+};
+pub(crate) const LIST_POP: RuntimeCall<OwnedIntOrError, 1> = RuntimeCall {
+    symbol: "relar_list_pop",
+    params: [Type::ListInt],
+    result: OwnedIntOrError,
+};
+
 /// Error checks for the emitter's generic native call helpers. Specialized
 /// lowerings that emit checked instructions directly retain their own control flow.
 /// This list follows the runtime's pending-error contract. Proven integer
@@ -396,13 +423,11 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_int_true_divide"
                 | "relar_assert_fail"
                 | "relar_range_step_zero"
-                | "relar_list_get"
                 | "relar_list_set"
                 | "relar_list_get_index"
                 | "relar_list_set_index"
                 | "relar_list_borrow_index"
                 | "relar_list_copy_index"
-                | "relar_list_pop"
                 | "relar_list_repeat"
                 | "relar_list_slice"
                 | "relar_list_slice_sum"
