@@ -97,23 +97,25 @@ render reports for the measured program. Test paths are the already resolved
 absolute identities produced by preparation. Inputs must use UTF-8 and complete
 GitLab diagnostic records with integer positions; unknown JSON fields are ignored.
 
-The reporter compiles Ruff’s complete `Source`, `Classification`, and `Change`
-enums and its `compute_stats` and `collect_diagnostic_entries` functions
-unchanged. The latter checks that every change is handled and stably sorts
-entries by title priority, title, and test-case key. The same source check
-covers `TestCase.classify`, `TestCase.change`, and `TestCase.diagnostics_by_source`.
-Enum methods take Ruff’s original string-valued `Literal` arguments. Other
-parts of the port use display helpers and concrete records for decoded JSON.
+Relar compiles Ruff’s `group_diagnostics_by_key`, `diagnostics_are_equivalent`,
+`collect_file_stats`, `compute_stats`, and `collect_diagnostic_entries` directly.
+These functions group diagnostics by path and tag, compare fingerprints, include
+files with no cases in the statistics, and sort the final entries. Their source
+is checked against the pinned script, along with `ExpectedError.key`,
+`TestCase.classify`, `TestCase.change`, `TestCase.diagnostics_by_source`, and
+the complete `Source`, `Classification`, and `Change` enums. JSON decoding
+uses a separate wire record for the original path string. Each diagnostic and
+expected error carries a native `Path` into the analysis.
 Ruff’s original verbose regex runs with Rust’s regex engine and exposes the
 same named captures and character offsets as CPython. Assertions for no
 annotations and no new true positives remain errors. The latter omits the
 upstream diagnostic record debug dump. The adapter suppresses the upstream output-file confirmation
 and duplicated report on stderr.
 
-`original.py` runs the unchanged upstream regex, models and renderers with the
-same offline inputs and quiet file-output adapter. It is explicitly an upstream
-**adapter**, not the unchanged upstream CLI. Its preloaded source wrapper and
-canonical paths remove repeated discovery and path resolution for all engines.
+`original.py` runs the upstream regex, models, analysis and renderers with
+the same offline inputs. The adapter preloads the source text and raw JSON.
+Ruff’s file-statistics function resolves every test path on every report pass,
+including files with no diagnostics.
 
 `compute.py` repeats the complete annotation scan, JSON decode, grouping,
 classification, sorting and rendering over preloaded raw text, then prints an
