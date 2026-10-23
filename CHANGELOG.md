@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.1.1
+
+Released on 2026-10-23.
+
+### Enhancements
+
+- Default `Path.read_text()` to UTF-8 regardless of the system locale.
+  ([#121](https://github.com/astral-sh/relar/pull/121))
+- Add booleans to integer counters, format signed integers with `f"{delta:+}"`,
+  and infer an empty list’s scalar element type from `append`. These changes let
+  Ruff’s per-file statistics table compile unchanged.
+  ([#115](https://github.com/astral-sh/relar/pull/115))
+- Run Ruff’s original annotation collector in the live conformance reporter. It
+  reads each test file once before starting either ty process. On the 146-file
+  checkout, the complete report matched Ruff on CPython byte for byte and took
+  1.02× Rust’s elapsed time with the default allocator.
+  ([#121](https://github.com/astral-sh/relar/pull/121))
+
+### Performance
+
+- Reuse native executables and module objects across `relar build` and
+  `relar run` on x86-64 Debian and Ubuntu with Clang 18 and GNU BFD. An
+  unchanged build of the seven-module Ruff reporter fell from 1.81 s to 15 ms.
+  Editing its renderer recompiled one module and reused the other six.
+  ([#120](https://github.com/astral-sh/relar/pull/120))
+- Discard unused runtime code when linking. An unstripped Fibonacci executable
+  on Apple Silicon shrank from 6.29 MiB to 815 KiB. Linux executables now use
+  full RELRO by default. Use `--verbose-link` to inspect the linker command.
+  ([#119](https://github.com/astral-sh/relar/pull/119))
+- Vectorize sums of squares when Relar can prove that the inputs and subtotal
+  fit in machine integers. Summing the squares of 4,096 digits in an existing
+  list ran 21× faster on x86-64-v3, or 2.25× faster when the program also parsed
+  the digits from text. ([#124](https://github.com/astral-sh/relar/pull/124))
+
+### Bug fixes
+
+- Reject malformed TOML integers and line breaks around `=`, including in fields
+  the schema ignores. Accept a leading UTF-8 byte order mark in the CPython TOML
+  decoder. ([#114](https://github.com/astral-sh/relar/pull/114),
+  [#116](https://github.com/astral-sh/relar/pull/116),
+  [#123](https://github.com/astral-sh/relar/pull/123))
+- Match the literal hyphen after a regex range, as in `[a-b-c]`.
+  ([#109](https://github.com/astral-sh/relar/pull/109))
+- Report a compiler error for excessively deep expressions and long operator
+  chains before indexing the module.
+  ([#111](https://github.com/astral-sh/relar/pull/111))
+- Detect when the executable and LLVM output point to the same file through a
+  dangling symlink, even before the output exists.
+  ([#107](https://github.com/astral-sh/relar/pull/107))
+
+[Full history for 0.1.1](https://github.com/astral-sh/relar/compare/0.1.0...0.1.1)
+
 ## 0.1.0
 
 Released on 2026-10-23.
