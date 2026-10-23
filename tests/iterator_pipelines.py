@@ -9,6 +9,13 @@ from assignments import main
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "iterator_pipelines"
 
 REJECTED = {
+    "groupby_stored": "from itertools import groupby\nruns = groupby([1])\n",
+    "groupby_group_escapes": "from itertools import groupby\nfor key, group in groupby([1]):\n    members = list(group)\n    saved = group\n",
+    "groupby_group_delayed": "from itertools import groupby\nfor key, group in groupby([1]):\n    print(key)\n    members = list(group)\n",
+    "groupby_group_reused": "from itertools import groupby\nfor key, group in groupby([1]):\n    members = list(group)\n    remainder = list(group)\n",
+    "groupby_ambiguous_target": "from itertools import groupby\nfor group, group in groupby([1]):\n    members = list(group)\n",
+    "groupby_float_key": "from itertools import groupby\nfor key, group in groupby([0.0]):\n    members = list(group)\n",
+    "groupby_file_source": 'from itertools import groupby\nwith open("source", "r", encoding="utf-8") as stream:\n    for key, group in groupby(stream):\n        members = list(group)\n',
     "generator_escaped": "values = (value for value in range(3))\n",
     "generator_returned": "def values():\n    return (value for value in range(3))\nprint(1)\n",
     "generator_stored": "values = [(value for value in range(3))]\n",

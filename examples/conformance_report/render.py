@@ -1,4 +1,6 @@
 """Complete report rendering adapted from the pinned Ruff source in upstream/."""
+from itertools import groupby
+from typing import Literal
 from typing import assert_never
 from conformance_report.model import Change, DiagnosticEntry, FileStats, Source, Statistics, TestCase, TyDiagnostic, compute_stats, diagnostic_text
 
@@ -28,7 +30,7 @@ def format_int_metric(diff: int, old: int, new: int, total: int) -> str:
         return f'regressed from <b>{old}/{total}</b> to <b>{new}/{total}</b>'
     return f'held steady at <b>{old}/{total}</b>'
 
-def render_html_diff_row(tc: TestCase, base_url: str, *, source: Source | None) -> list[str]:
+def render_html_diff_row_at(tc: TestCase, base_url: str, *, source: Source | None) -> list[str]:
     """Render a single HTML <tr> with a test-case link and a markdown diff block."""
     all_diags = [*tc.old, *tc.new] if source is None else tc.diagnostics_by_source(source)
     if all_diags:
@@ -153,44 +155,70 @@ def collect_diagnostic_entries(test_cases: list[TestCase]) -> list[DiagnosticEnt
     )
     return entries
 
-def render_test_cases(test_cases: list[TestCase], base_url: str, *, format: str='diff') -> str:
-    entries = collect_diagnostic_entries(test_cases)
-    if not entries:
-        return ''
-    lines: list[str] = []
-    position = 0
-    while position < len(entries):
-        title = entries[position].title
-        end = position + 1
-        while end < len(entries) and entries[end].title == title:
-            end += 1
-        group_list = entries[position:end]
-        n = len(group_list)
-        lines.append(f'### {title} ({n})')
-        lines.extend(['', '<details>', f"<summary>{n} {('diagnostic' if n == 1 else 'diagnostics')}</summary>", ''])
-        if format == 'diff':
-            lines.append('```diff')
-        else:
-            lines.extend(GITHUB_HEADER)
-        for entry in group_list:
-            tc, source = (entry.test_case, entry.source)
-            if source is None:
-                if format == 'diff':
-                    lines.append(render_diff_row(tc.old, removed=True))
-                    lines.append(render_diff_row(tc.new, removed=False))
-                else:
-                    lines.extend(render_html_diff_row(tc, base_url, source=None))
-            elif format == 'diff':
-                lines.append(render_diff_row(tc.diagnostics_by_source(source), removed=source == Source.OLD))
+def render_cases(test_cases: list[TestCase], base_url: str, *, format: str = "diff") -> str:
+    def render_html_diff_row(tc: TestCase, *, source: Source | None) -> list[str]:
+        return render_html_diff_row_at(tc, base_url, source=source)
+
+    def render_test_cases(
+        test_cases: list[TestCase],
+        *,
+        format: Literal["diff", "github"] = "diff",
+    ) -> str:
+        entries = collect_diagnostic_entries(test_cases)
+        if not entries:
+            return ""
+
+        lines = []
+        for title, group in groupby(entries, key=lambda e: e.title):
+            group_list = list(group)
+            n = len(group_list)
+
+            lines.append(f"### {title} ({n})")
+            lines.extend(
+                [
+                    "",
+                    "<details>",
+                    f"<summary>{n} {'diagnostic' if n == 1 else 'diagnostics'}</summary>",
+                    "",
+                ]
+            )
+
+            if format == "diff":
+                lines.append("```diff")
             else:
-                lines.extend(render_html_diff_row(tc, base_url, source=source))
-        if format == 'diff':
-            lines.append('```')
-        else:
-            lines.extend(GITHUB_FOOTER)
-        lines.extend(['</details>', ''])
-        position = end
-    return '\n'.join(lines)
+                lines.extend(GITHUB_HEADER)
+
+            for entry in group_list:
+                tc, source = entry.test_case, entry.source
+                if source is None:
+                    if format == "diff":
+                        lines.append(render_diff_row(tc.old, removed=True))
+                        lines.append(render_diff_row(tc.new, removed=False))
+                    else:
+                        lines.extend(render_html_diff_row(tc, source=None))
+                else:
+                    if format == "diff":
+                        lines.append(
+                            render_diff_row(
+                                tc.diagnostics_by_source(source),
+                                removed=source == Source.OLD,
+                            )
+                        )
+                    else:
+                        lines.extend(render_html_diff_row(tc, source=source))
+
+            if format == "diff":
+                lines.append("```")
+            else:
+                lines.extend(GITHUB_FOOTER)
+            lines.extend(["</details>", ""])
+
+        return "\n".join(lines)
+
+    if format == "diff":
+        return render_test_cases(test_cases)
+    return render_test_cases(test_cases, format="github")
+
 
 def render_file_stats(file_stats: list[FileStats], CONFORMANCE_DIR_WITH_README: str) -> str:
     # Bind Ruff's report URL to this checkout for the duration of the call.

@@ -4,6 +4,8 @@
 
 use super::*;
 
+mod groupby;
+
 /// `evaluate` evaluates an iterable expression; `acquire` obtains its iterator.
 /// Constructor expressions fold their own acquisition into `evaluate`. Every
 /// successful `next` owns `value`, and its consumer clears that transient owner.
@@ -341,6 +343,23 @@ impl Checker<'_> {
         }
     }
 
+    /// A file or any of its transitive owners has an observable final drop.
+    /// Opaque callables may also own a bound receiver that contains a file.
+    fn may_own_file(&self, ty: Type, opaque_callables: bool) -> bool {
+        match ty {
+            Type::TextIO | Type::BinaryIO => true,
+            Type::Callable(_) if opaque_callables => true,
+            Type::Class(class) => self.classes.fields[class]
+                .iter()
+                .any(|ty| self.may_own_file(*ty, opaque_callables)),
+            _ => self
+                .types
+                .children(ty)
+                .into_iter()
+                .any(|ty| self.may_own_file(ty, opaque_callables)),
+        }
+    }
+
     /// Only file resources have observable final drops in the sealed language.
     /// Their transitive owners retain CPython's iterator tuple cache, including
     /// shared-result behavior; other exact tuples can be scalar-replaced.
@@ -350,20 +369,7 @@ impl Checker<'_> {
         evaluate: &mut Vec<Statement>,
         clear: &mut Vec<usize>,
     ) -> Option<usize> {
-        fn owns_file(checker: &Checker<'_>, ty: Type) -> bool {
-            match ty {
-                Type::TextIO | Type::BinaryIO => true,
-                Type::Class(class) => checker.classes.fields[class]
-                    .iter()
-                    .any(|ty| owns_file(checker, *ty)),
-                _ => checker
-                    .types
-                    .children(ty)
-                    .into_iter()
-                    .any(|ty| owns_file(checker, ty)),
-            }
-        }
-        if !owns_file(self, ty) {
+        if !self.may_own_file(ty, false) {
             return None;
         }
         let cache = self.hidden(ty);
@@ -1293,64 +1299,18 @@ impl Checker<'_> {
         let source = self.expansion_input(source, input_hint)?;
         let mut input = self.prepare_iteration(source, call, false)?;
         let input_type = self.locals[input.value];
-        let callback = if let ast::Expr::Lambda(lambda) = callback {
-            self.lambda_value(
-                lambda,
-                Some(vec![input_type]),
-                if filter { None } else { element },
-            )?
-        } else if let Some(signature) = definition {
-            if signature.params.len() == 1
-                && let Some(inference) = self.inference
-            {
-                inference.learn_parameter(signature.id, 0, input_type);
-            }
-            self.callable_value(&signature, None, None, callback)?
-        } else {
-            checked.expect("ordinary callback was checked before its source")
-        };
+        let callback = self.item_callback(
+            callback,
+            input_type,
+            if filter { None } else { element },
+            checked,
+        )?;
         let operation = if filter && callback.ty == Type::None {
             input.evaluate.insert(0, Statement::Expr(callback));
             self.local(input.value)
         } else {
-            let (params, returns) = self.types.signature(callback.ty).ok_or_else(|| {
-                error(
-                    self.source,
-                    call,
-                    "map/filter require an exact Callable; only filter also accepts None",
-                )
-            })?;
-            let [parameter] = params.as_slice() else {
-                return Err(error(
-                    self.source,
-                    call,
-                    "map/filter callbacks require one positional parameter",
-                ));
-            };
-            let args = ir::CallArgs::positional(vec![self.coerce(
-                self.local(input.value),
-                *parameter,
-                call,
-            )?]);
-            // An immediately consumed function or noncapturing lambda has no
-            // context to acquire. Only dynamic or bound callbacks need an owner.
-            let kind = if let ExprKind::Callable {
-                function,
-                receiver: None,
-            } = callback.kind
-            {
-                self.calls.insert(function);
-                ExprKind::Call(function, args)
-            } else {
-                let slot = self.hidden(callback.ty);
-                input.evaluate.insert(0, Statement::Assign(slot, callback));
-                input.clear.push(slot);
-                ExprKind::Invoke {
-                    callable: Box::new(self.local(slot)),
-                    args,
-                }
-            };
-            Expr { ty: returns, kind }
+            self.apply_item_callback(&mut input, callback, 0, "map/filter", call)?
+                .0
         };
         input.evaluate.append(&mut input.acquire);
         if filter {
@@ -1400,6 +1360,92 @@ impl Checker<'_> {
             input.clear.push(value);
         }
         Ok(input)
+    }
+
+    /// Infer the parameter of a fixed unary function or noncapturing lambda from the
+    /// pulled item. A caller may already have checked a dynamic callback to preserve
+    /// its position among the constructor arguments.
+    fn item_callback(
+        &mut self,
+        expression: &ast::Expr,
+        item: Type,
+        returns: Option<Type>,
+        checked: Option<Expr>,
+    ) -> Result<Expr, String> {
+        if let Some(value) = checked {
+            return Ok(value);
+        }
+        if let ast::Expr::Lambda(lambda) = expression {
+            return self.lambda_value(lambda, Some(vec![item]), returns);
+        }
+        if let Some(Binding::Definition(definition)) = self.resolve(expression)
+            && let Some(signature) = self.functions.get(&definition)
+        {
+            if signature.params.len() == 1
+                && let Some(inference) = self.inference
+            {
+                inference.learn_parameter(signature.id, 0, item);
+            }
+            return self.callable_value(signature, None, None, expression);
+        }
+        if let Some(binding) = self.local_function_binding(expression) {
+            return binding.target(self.source, expression)?.callback(
+                self.types,
+                self.source,
+                expression,
+            );
+        }
+        self.expr(expression)
+    }
+
+    /// Invokes fixed functions directly and captures a dynamic or bound callable
+    /// once, at its position in the constructor's argument evaluation.
+    fn apply_item_callback(
+        &mut self,
+        input: &mut Prepared,
+        callback: Expr,
+        evaluation_index: usize,
+        consumer: &str,
+        call: &ast::ExprCall,
+    ) -> Result<(Expr, Option<usize>), String> {
+        let message = || {
+            error(
+                self.source,
+                call,
+                &format!("{consumer} requires a callable with one positional parameter"),
+            )
+        };
+        let (params, returns) = self.types.signature(callback.ty).ok_or_else(message)?;
+        let [parameter] = params.as_slice() else {
+            return Err(message());
+        };
+        let args = ir::CallArgs::positional(vec![self.coerce(
+            self.local(input.value),
+            *parameter,
+            call,
+        )?]);
+        let (kind, captured) = if let ExprKind::Callable {
+            function,
+            receiver: None,
+        } = callback.kind
+        {
+            self.calls.insert(function);
+            (ExprKind::Call(function, args), None)
+        } else {
+            let slot = self.hidden(callback.ty);
+            input
+                .evaluate
+                .insert(evaluation_index, Statement::Assign(slot, callback));
+            input.clear.push(slot);
+            (
+                ExprKind::Invoke {
+                    callable: Box::new(self.local(slot)),
+                    args,
+                },
+                Some(slot),
+            )
+        };
+        Ok((Expr { ty: returns, kind }, captured))
     }
 
     /// A source loop owns its complete pipeline across break, return, and error.

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from conformance_report.model import ExpectedError, Source, TyDiagnostic, collect_file_stats, group_diagnostics_by_key
 from conformance_report.parse import Inputs, collect_frozen_diagnostics, collect_ty_diagnostics, read_inputs
-from conformance_report.render import render_file_stats, render_summary, render_test_cases
+from conformance_report.render import render_cases, render_file_stats, render_summary
 
 
 @dataclass(slots=True)
@@ -81,7 +81,7 @@ def render_diagnostics(
     sections = [
         render_summary(grouped, file_stats, base_url, force_summary_table=force_summary_table),
         render_file_stats(file_stats, base_url),
-        render_test_cases(grouped, base_url, format=format),
+        render_cases(grouped, base_url, format=format),
     ]
     return "\n\n".join(section for section in sections if section)
 

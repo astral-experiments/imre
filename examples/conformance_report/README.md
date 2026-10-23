@@ -188,6 +188,11 @@ Ruff’s original `render_file_stats_table` renders the per-file breakdown.
 The enclosing function supplies the report URL for the selected typing revision.
 [Full-report benchmarks](../../benchmarks/results/2026-10-23-file-stats-table.md)
 
+Ruff’s original `render_test_cases` groups consecutive entries by title with
+`itertools.groupby` and renders each section in GitHub or diff format. The
+GitHub rows link to the same revision as the per-file breakdown.
+[Test-case renderer benchmarks](../../benchmarks/results/2026-10-23-render-test-cases.md)
+
 The [expected diagnostics comparison](../../benchmarks/results/2026-10-23-expected-diagnostics.md)
 measures the live reporter with real ty and replayed analyzer output. It also
 counts source reads across repeated frozen reports.
