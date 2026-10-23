@@ -1,5 +1,6 @@
 def checked_sums(text: str) -> None:
     digits = list(map(int, text))
+    print(sum([digit * digit for digit in digits]))
     # The length guard permits at most one term for these near-limit values.
     # Two terms reach the small-int boundary; three require BigInt fallback.
     print(sum([2305843009213693951 for digit in digits]))
@@ -79,7 +80,7 @@ def progress_before_continue(text: str) -> int:
     return total
 
 
-for text in ["", "0", "01", "012", "019"]:
+for text in ["", "0", "01", "012", "019", "123456789012345６７"]:
     checked_sums(text)
     print(nonzero_start(text))
     print(progress_before_continue(text))

@@ -56,9 +56,11 @@ const _: () = assert!(size_of::<usize>() == 8 && align_of::<BigInt>() >= 2);
 pub const MAX_LIST_LEN: usize = (isize::MAX as usize) / 8;
 
 /// Owns exactly one integer reference; small integers require no allocation.
+#[repr(transparent)]
 struct Int(usize);
 
-const _: () = assert!(size_of::<Int>() >= 8 && MAX_LIST_LEN <= MAX_SMALL as usize);
+const _: () =
+    assert!(size_of::<Int>() == 8 && align_of::<Int>() == 8 && MAX_LIST_LEN <= MAX_SMALL as usize);
 
 impl Int {
     fn from_usize(value: usize) -> Self {
@@ -133,7 +135,7 @@ impl Drop for Int {
 /// Access remains unsafe: a closure could otherwise reenter through an aliased
 /// handle while its storage reference is live. Owned elements may escape after
 /// acquisition; storage references and buffer pointers may not escape these
-/// closures. The sequence readonly-view ABI uses a separate whole-loop proof.
+/// closures. Readonly loop views use a separate whole-loop proof.
 #[repr(transparent)]
 struct StorageCell<T>(UnsafeCell<T>);
 
@@ -166,7 +168,7 @@ impl<T> StorageCell<T> {
     }
 }
 
-/// An opaque, nonmoving list allocation. Its resizable buffer stays inside Rust.
+/// An opaque, nonmoving list allocation. Only a proven readonly loop borrows its buffer.
 pub struct List(StorageCell<Vec<Int>>);
 
 // An unallocated Vec never reads, writes, or frees this address. A real push
@@ -929,6 +931,20 @@ pub unsafe extern "C" fn relar_list_borrow_index_proven(list: *const List, at: u
     // SAFETY: the caller proves the index is in bounds and roots its element.
     // Only its borrowed word escapes this nonreentrant storage access.
     unsafe { (&*list).0.with(|values| values.get_unchecked(at).0) }
+}
+
+/// Borrows the contiguous, eight-byte-aligned tagged words in an integer list.
+///
+/// # Safety
+/// Keep `list` rooted on its owning thread and exclude mutation through every
+/// alias until the last read. The pointer is private to the proven loop and
+/// must not cross a callback. Read only indices below the unchanged length.
+/// Each word borrows its element. An empty list provides no readable words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_list_data_readonly(list: *const List) -> *const usize {
+    // SAFETY: the whole-loop proof keeps these initialized elements live and
+    // in place. Int is transparent over usize, so the pointer and stride agree.
+    unsafe { (&*(*list).0.0.get()).as_ptr().cast() }
 }
 
 /// Returns one after replacement, or zero with a pending error and no mutation.
@@ -2111,13 +2127,14 @@ mod tests {
     }
 
     #[test]
-    fn proven_indices_borrow_boundary_values_without_acquiring_owners() {
+    fn proven_list_reads_borrow_boundary_values_without_acquiring_owners() {
         let big = Rc::new(BigInt::from(1_u128 << 100));
         let weak = Rc::downgrade(&big);
         let list = relar_list_new();
-        // SAFETY: the exact indices are in bounds after all three appends.
-        // Every borrowed word is consumed before the list is released.
+        // SAFETY: the empty view is never dereferenced. All later reads are
+        // in bounds and finish before the list or any element is released.
         unsafe {
+            assert!(relar_list_data_readonly(list).is_aligned());
             relar_list_append(list, Int::small(MIN_SMALL).unwrap().0);
             relar_list_append(list, Rc::as_ptr(&big) as usize);
             relar_list_append(list, Int::small(MAX_SMALL).unwrap().0);
@@ -2137,6 +2154,14 @@ mod tests {
                 Int::borrow(relar_list_borrow_index_proven(list, 2)).as_small(),
                 Some(MAX_SMALL)
             );
+            let words = relar_list_data_readonly(list);
+            for index in 0..3 {
+                assert_eq!(
+                    *words.add(index),
+                    relar_list_borrow_index_proven(list, index)
+                );
+            }
+            assert_eq!(weak.strong_count(), 1);
             relar_list_release(list);
         }
         assert!(weak.upgrade().is_none());
