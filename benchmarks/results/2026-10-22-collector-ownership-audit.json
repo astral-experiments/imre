@@ -1,0 +1,262 @@
+{
+  "revision": "b12109581c90c5608fb52c26bcf6eb3e4c7adece",
+  "baseline_revision": "53172f1c02e282b51af8436262ea38fb5751b1ae",
+  "indexed_files": 829,
+  "validated_build_sources": 241,
+  "timed": 2744,
+  "warmups": 196,
+  "groups": 1269,
+  "distribution": {
+    "entries": 249,
+    "titles": {
+      "True positives added": 102,
+      "False positives removed": 41,
+      "True positives changed": 98,
+      "False positives changed": 2,
+      "False positives added": 2,
+      "Optional Diagnostics Added": 3,
+      "Optional Diagnostics Removed": 1
+    },
+    "sources": {
+      "new": 107,
+      "old": 42,
+      "none": 100
+    }
+  },
+  "boundary_counts": {
+    "application": 156,
+    "compute": 196,
+    "stdout": 5,
+    "output-error": 10
+  },
+  "specified_rust_time_target_met": true,
+  "profiles": {
+    "before": {
+      "0": {
+        "instructions": 146505361,
+        "allocated_blocks": 101700,
+        "allocated_bytes": 13885294
+      },
+      "64": {
+        "instructions": 614544252,
+        "allocated_blocks": 803332,
+        "allocated_bytes": 38756783
+      }
+    },
+    "after": {
+      "0": {
+        "instructions": 146489171,
+        "allocated_blocks": 101698,
+        "allocated_bytes": 13895218
+      },
+      "64": {
+        "instructions": 282469473,
+        "allocated_blocks": 166210,
+        "allocated_bytes": 17476147
+      }
+    },
+    "rust": {
+      "0": {
+        "instructions": 88255719,
+        "allocated_blocks": 56268,
+        "allocated_bytes": 11218686
+      },
+      "64": {
+        "instructions": 194816544,
+        "allocated_blocks": 236876,
+        "allocated_bytes": 25597120
+      }
+    }
+  },
+  "modes": {
+    "normal": {
+      "matrix_sha256": "088856c3ffe18874115998914b53104503132fe157fc6dfb2cff70b72b921500",
+      "pilot": false,
+      "timed": 1372,
+      "warmups": 98,
+      "strict_files_checked": 0,
+      "matched_capture_transcripts": 7,
+      "real_source_files": 146,
+      "reconstructed_reports": [
+        "changed-diff",
+        "changed-github",
+        "unchanged-github"
+      ],
+      "time_target_met": true,
+      "ratios": {
+        "entry-ownership": 1.4559205198305354,
+        "unchanged-github/complete-report": 1.509816285167191,
+        "unchanged-github/repeated-report": 1.615617325684498,
+        "unchanged-github/live-checkout": 1.0102621617332397,
+        "changed-github/complete-report": 1.4974571915607966,
+        "changed-github/repeated-report": 1.595112179538607,
+        "changed-github/live-checkout": 1.014705765911613,
+        "changed-diff/complete-report": 1.5074659894276552,
+        "changed-diff/repeated-report": 1.5650468225516931,
+        "changed-diff/live-checkout": 1.0192738747523509,
+        "entry-ownership/net": 1.445344909232749,
+        "changed-github/repeated-report/net": 1.5637207436741998,
+        "changed-diff/repeated-report/net": 1.5386483535491922,
+        "unchanged-github/repeated-report/net": 1.588918217173691
+      }
+    },
+    "thinlto": {
+      "matrix_sha256": "3c902c6c92e89d2b34ac4b30343c8a5129462aed0de308ea8c5e80ab58bcce88",
+      "pilot": false,
+      "timed": 1372,
+      "warmups": 98,
+      "strict_files_checked": 0,
+      "matched_capture_transcripts": 7,
+      "real_source_files": 146,
+      "reconstructed_reports": [
+        "changed-diff",
+        "changed-github",
+        "unchanged-github"
+      ],
+      "time_target_met": true,
+      "ratios": {
+        "entry-ownership": 1.4771279550982725,
+        "unchanged-github/complete-report": 1.4325307110047796,
+        "unchanged-github/repeated-report": 1.4910999312350763,
+        "unchanged-github/live-checkout": 1.0110477242792693,
+        "changed-github/complete-report": 1.450989551940375,
+        "changed-github/repeated-report": 1.4613864148481996,
+        "changed-github/live-checkout": 1.0099881243949358,
+        "changed-diff/complete-report": 1.4332582007498436,
+        "changed-diff/repeated-report": 1.4696612118112737,
+        "changed-diff/live-checkout": 1.0232238413688626,
+        "entry-ownership/net": 1.509644618666957,
+        "changed-diff/repeated-report/net": 1.4253633154251788,
+        "unchanged-github/repeated-report/net": 1.4358656782171597,
+        "changed-github/repeated-report/net": 1.4086550856226738
+      }
+    }
+  },
+  "serial": {
+    "ratios": {
+      "unchanged-github/complete": {
+        "normal": 1.5133156673386505,
+        "thinlto": 1.450000958721774
+      },
+      "changed-github/complete": {
+        "normal": 1.540071578396795,
+        "thinlto": 1.4604588457371253
+      },
+      "changed-diff/complete": {
+        "normal": 1.5138768764538832,
+        "thinlto": 1.437506199393163
+      },
+      "entries/512": {
+        "normal": 1.4430885150623223,
+        "thinlto": 1.5320850684633853
+      },
+      "unchanged-github/repeated": {
+        "normal": 1.5802882946550958,
+        "thinlto": 1.4966174577938653
+      },
+      "changed-diff/repeated": {
+        "normal": 1.5484890846562493,
+        "thinlto": 1.4056244802898146
+      },
+      "changed-github/repeated": {
+        "normal": 1.5489947604721503,
+        "thinlto": 1.4118530814072145
+      }
+    },
+    "timed": 352,
+    "warmups": 44,
+    "time_target_met": true,
+    "cpu": 31,
+    "raw_sha256": "1632fb8a02df6e0b083f39a68c30e990c0e2470bec980aef4145fe2ac370cbdf"
+  },
+  "allocation_profile": {
+    "before": {
+      "per_pass": {
+        "instructions": 7313107.671875,
+        "blocks": 10963.0,
+        "bytes": 388617.015625
+      },
+      "by_site": {
+        "diagnostic equivalence": {
+          "blocks": 10192.0,
+          "bytes": 347704.0
+        },
+        "inlined collector and sort keys": {
+          "blocks": 515.0,
+          "bytes": 28208.0
+        },
+        "classification": {
+          "blocks": 8.0,
+          "bytes": 600.0
+        },
+        "entry sort": {
+          "blocks": 3.0,
+          "bytes": 2305.0
+        },
+        "title strings": {
+          "blocks": 245.0,
+          "bytes": 9800.0
+        },
+        "other": {
+          "blocks": 0.0,
+          "bytes": 0.015625
+        }
+      }
+    },
+    "after": {
+      "per_pass": {
+        "instructions": 2124692.21875,
+        "blocks": 1008.0,
+        "bytes": 55952.015625
+      },
+      "by_site": {
+        "diagnostic equivalence": {
+          "blocks": 238.0,
+          "bytes": 15232.0
+        },
+        "inlined collector and sort keys": {
+          "blocks": 515.0,
+          "bytes": 28208.0
+        },
+        "classification": {
+          "blocks": 8.0,
+          "bytes": 600.0
+        },
+        "entry sort": {
+          "blocks": 2.0,
+          "bytes": 2112.0
+        },
+        "title strings": {
+          "blocks": 245.0,
+          "bytes": 9800.0
+        },
+        "other": {
+          "blocks": 0.0,
+          "bytes": 0.015625
+        }
+      }
+    },
+    "rust": {
+      "per_pass": {
+        "instructions": 1665012.890625,
+        "blocks": 2822.0,
+        "bytes": 224663.03125
+      },
+      "by_site": {
+        "Rust native": {
+          "blocks": 2822.0,
+          "bytes": 224663.03125
+        }
+      }
+    }
+  },
+  "real_equivalence_group_lengths": {
+    "1": 972,
+    "2": 37,
+    "3": 2
+  },
+  "local_qa": {
+    "sha256": "bc06e85369226cdbcb1dbdef8225b0a0f69bd9712d77b1f6f7100c9b169a16b5",
+    "indexed": 87
+  }
+}

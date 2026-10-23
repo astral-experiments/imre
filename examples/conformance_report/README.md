@@ -159,6 +159,10 @@ specialize the common one- and two-diagnostic cases.
 The [in-place sort comparison](../../benchmarks/results/2026-10-22-entry-sort.md)
 measures Ruff’s unchanged diagnostic entry collector and full reports against
 the previous Relar port, CPython, native Codon, and Rust.
+In 972 pairs, each side has a single diagnostic. Relar compares the six
+fingerprint fields directly in these pairs, avoiding two temporary tuples and
+two sorted lists per pair. The [collector profiles and timings](../../benchmarks/results/2026-10-22-collector-ownership.md)
+measure the effect across all 1,269 groups.
 
 `benchmarks/conformance_validate.py` compares full reports and filesystem effects
 against the unchanged upstream implementation. Its seeded checks exercise the
