@@ -181,6 +181,25 @@ pub(super) fn free_reads(expression: &ast::Expr, bound: HashSet<String>) -> Hash
     reads.names
 }
 
+pub(super) fn function_reads(function: &ast::StmtFunctionDef) -> HashSet<String> {
+    let mut bound = narrowing::assigned_names(&function.body);
+    bound.extend(
+        function
+            .parameters
+            .iter_non_variadic_params()
+            .map(|p| p.name().to_string()),
+    );
+    let mut reads = Reads {
+        names: HashSet::new(),
+        bound: vec![bound],
+        nested_lambdas: true,
+    };
+    for statement in &function.body {
+        reads.visit_stmt(statement);
+    }
+    reads.names
+}
+
 impl<'a> Visitor<'a> for Reads {
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
         if let ast::Expr::Lambda(lambda) = expression {
@@ -412,6 +431,10 @@ impl Checker<'_> {
         }
         if !narrowing::expression_assignments(expression).is_empty()
             || pipelines::is_pipeline_expression(&display.clauses[0].iter)
+            || !self.local_functions.is_empty()
+                && free_reads(expression, HashSet::new())
+                    .iter()
+                    .any(|name| self.local_functions.contains_key(name))
         {
             return self.inline_comprehension(expression, display, expected);
         }

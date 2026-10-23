@@ -170,6 +170,7 @@ impl Inference {
                             checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
                         checker.assigned.insert(slot);
                     }
+                    checker.collect_local_functions(&function.body)?;
                     let (_, falls_through) = checker.block(&function.body)?;
                     if let Some(mut returns) = checker.inferred_returns.take() {
                         if falls_through || returns.is_empty() {

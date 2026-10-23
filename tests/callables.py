@@ -11,6 +11,15 @@ IMPORT = "from typing import Callable\n"
 FUNCTION = "def identity(value: int) -> int:\n    return value\n"
 
 REJECTED = {
+    "local_callback_escape": IMPORT + "def outer(x: int) -> Callable[[int], int]:\n    def add(y: int) -> int:\n        return x + y\n    return add\n",
+    "local_callback_captured_map": "def outer(x: int) -> int:\n    def add(y: int) -> int:\n        return x + y\n    return sum(map(add, [1]))\n",
+    "local_recursive": "def outer(x: int) -> int:\n    def inner(y: int) -> int:\n        return inner(y)\n    return inner(x)\n",
+    "local_recursive_via_outer": "def outer(x: int) -> int:\n    def inner(y: int) -> int:\n        return outer(y)\n    return inner(x)\n",
+    "local_forward": "def outer() -> int:\n    value = inner()\n    def inner() -> int:\n        return 1\n    return value\n",
+    "local_conditional": "def outer(flag: bool) -> int:\n    if flag:\n        def inner() -> int:\n            return 1\n    return inner()\n",
+    "local_uninitialized_capture": "def outer(flag: bool) -> int:\n    x: int\n    def get() -> int:\n        return x\n    if flag:\n        x = 1\n    return get()\n",
+    "local_nonlocal": "def outer(x: int) -> int:\n    def inner() -> int:\n        nonlocal x\n        x += 1\n        return x\n    return inner()\n",
+    "local_rebound": "def outer() -> int:\n    def f() -> int:\n        return 1\n    f = 1\n    return f\n",
     "ellipsis_signature": IMPORT + "def use(fn: Callable[..., int]) -> int:\n    return fn(1)\n",
     "wrong_parameter": IMPORT + FUNCTION + "def run() -> None:\n    fn: Callable[[str], int] = identity\nrun()\n",
     "wrong_return": IMPORT + FUNCTION + "def run() -> None:\n    fn: Callable[[int], str] = identity\nrun()\n",

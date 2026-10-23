@@ -3,7 +3,7 @@
 use super::*;
 
 struct Mapped<'a> {
-    target: &'a str,
+    target: Option<&'a str>,
     mapper: &'a ast::Expr,
     source: &'a str,
 }
@@ -23,14 +23,20 @@ fn mapped(statement: &ast::Stmt) -> Option<Mapped<'_>> {
     let [target] = assign.targets.as_slice() else {
         return None;
     };
-    let [inner] = arguments(&assign.value, "sorted")? else {
+    let mut projection = mapped_value(&assign.value)?;
+    projection.target = Some(name(target)?);
+    Some(projection)
+}
+
+fn mapped_value(value: &ast::Expr) -> Option<Mapped<'_>> {
+    let [inner] = arguments(value, "sorted")? else {
         return None;
     };
     let [mapper, source] = arguments(inner, "map")? else {
         return None;
     };
     Some(Mapped {
-        target: name(target)?,
+        target: None,
         mapper,
         source: name(source)?,
     })
@@ -55,6 +61,7 @@ fn return_bool(stmt: &ast::Stmt) -> Option<bool> {
 struct Answers {
     equal: bool,
     empty: bool,
+    different_lengths: Option<bool>,
 }
 
 fn zipped_comparison(
@@ -80,6 +87,24 @@ fn zipped_comparison(
 /// The result is terminal, so neither sorted list nor either zip target escapes.
 /// Other lengths retain the complete reduction, including zip truncation.
 fn tail(stmts: &[ast::Stmt]) -> Option<(usize, Mapped<'_>, Mapped<'_>, Answers)> {
+    if let [.., ast::Stmt::Return(ret)] = stmts
+        && let Some(compare) = ret.value.as_deref()?.as_compare_expr()
+        && let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = compare.ops.as_ref()
+        && let [left, right] = compare.operands.as_ref()
+        && let (Some(a), Some(b)) = (mapped_value(left), mapped_value(right))
+    {
+        let equal = *op == ast::CmpOp::Eq;
+        return Some((
+            stmts.len() - 1,
+            a,
+            b,
+            Answers {
+                equal,
+                empty: equal,
+                different_lengths: Some(!equal),
+            },
+        ));
+    }
     if let [.., a, b, ast::Stmt::Return(ret)] = stmts
         && let (Some(a), Some(b), Some(value)) = (mapped(a), mapped(b), ret.value.as_deref())
         && let Some(call) = value.as_call_expr()
@@ -93,8 +118,8 @@ fn tail(stmts: &[ast::Stmt]) -> Option<(usize, Mapped<'_>, Mapped<'_>, Answers)>
             &clause.iter,
             &clause.target,
             &generator.elt,
-            a.target,
-            b.target,
+            a.target?,
+            b.target?,
         )
     {
         return Some((
@@ -104,6 +129,7 @@ fn tail(stmts: &[ast::Stmt]) -> Option<(usize, Mapped<'_>, Mapped<'_>, Answers)>
             Answers {
                 equal: op == ast::CmpOp::Eq,
                 empty: reducer == "all",
+                different_lengths: None,
             },
         ));
     }
@@ -120,7 +146,7 @@ fn tail(stmts: &[ast::Stmt]) -> Option<(usize, Mapped<'_>, Mapped<'_>, Answers)>
     if loop_.is_async || !loop_.orelse.is_empty() || !test.elif_else_clauses.is_empty() {
         return None;
     }
-    let op = zipped_comparison(&loop_.iter, &loop_.target, &test.test, a.target, b.target)?;
+    let op = zipped_comparison(&loop_.iter, &loop_.target, &test.test, a.target?, b.target?)?;
     let (hit, empty) = (return_bool(found)?, return_bool(result)?);
     (hit != empty).then_some((
         stmts.len() - 4,
@@ -129,6 +155,7 @@ fn tail(stmts: &[ast::Stmt]) -> Option<(usize, Mapped<'_>, Mapped<'_>, Answers)>
         Answers {
             equal: if op == ast::CmpOp::Eq { hit } else { empty },
             empty,
+            different_lengths: None,
         },
     ))
 }
@@ -147,6 +174,7 @@ impl Checker<'_> {
         &mut self,
         stmts: &[ast::Stmt],
     ) -> Result<(Vec<Statement>, bool), String> {
+        self.collect_local_functions(stmts)?;
         if self.returns != Type::Bool {
             return self.block(stmts);
         }
@@ -156,9 +184,9 @@ impl Checker<'_> {
         let (mut body, prefix_falls) = self.block(&stmts[..at])?;
         let reachable = self.reachable;
         self.reachable &= prefix_falls;
-        if a.target != b.target
-            && !self.names.contains_key(a.target)
-            && !self.names.contains_key(b.target)
+        if (a.target.is_none() || a.target != b.target)
+            && a.target.is_none_or(|name| !self.names.contains_key(name))
+            && b.target.is_none_or(|name| !self.names.contains_key(name))
             && let (Some(a), Some(b)) = (self.projected_input(a), self.projected_input(b))
             && a.result == b.result
             && a.fields.len() == b.fields.len()
@@ -178,15 +206,22 @@ impl Checker<'_> {
         }
         let list = self.local(list);
         let item = self.types.element(list.ty)?;
-        let Binding::Definition(id) = self.resolve(mapped.mapper)? else {
-            return None;
+        let (signature, def) = if let Some(local) = self.local_function_binding(mapped.mapper) {
+            let function = local.target(self.source, mapped.mapper).ok()?;
+            (&function.signature, function.definition.as_ref())
+        } else {
+            let Binding::Definition(id) = self.resolve(mapped.mapper)? else {
+                return None;
+            };
+            (
+                self.functions.get(&id)?,
+                self.graph.modules[id.module].parsed.syntax().body[id.statement]
+                    .as_function_def_stmt()?,
+            )
         };
-        let signature = self.functions.get(&id)?;
         let [param] = signature.params.as_slice() else {
             return None;
         };
-        let def = self.graph.modules[id.module].parsed.syntax().body[id.statement]
-            .as_function_def_stmt()?;
         let [ast::Stmt::Return(ret)] = def.body.as_slice() else {
             return None;
         };
@@ -201,7 +236,12 @@ impl Checker<'_> {
         let mut fields = Vec::new();
         for value in values {
             let mut chain = Vec::new();
-            let mut current = value;
+            let text = arguments(value, "str");
+            let mut current = match text {
+                Some([arg]) => arg,
+                Some(_) => return None,
+                None => value,
+            };
             while let ast::Expr::Attribute(attr) = current {
                 chain.push(attr.attr.as_str());
                 current = &attr.value;
@@ -222,7 +262,12 @@ impl Checker<'_> {
             }
             // Exclude projections with callbacks, nullable access, coercions,
             // floats (boxed NaN identity), or structural comparisons.
-            if !self.types.ordered_key(ty) || matches!(ty, Type::Tuple(_)) {
+            if text.is_some() {
+                if !matches!(ty, Type::Path | Type::Str) {
+                    return None;
+                }
+                ty = Type::Str;
+            } else if !self.types.ordered_key(ty) || matches!(ty, Type::Tuple(_)) {
                 return None;
             }
             fields.push((ty, path));
@@ -246,15 +291,27 @@ impl Checker<'_> {
         a: Input,
         b: Input,
         answers: Answers,
-    ) -> [Statement; 2] {
+    ) -> Vec<Statement> {
+        let length = |list: &Expr| Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::Len, vec![list.clone()]),
+        };
+        let mut branches = Vec::new();
+        if let Some(result) = answers.different_lengths {
+            branches.push(Statement::If(
+                pipelines::compare(Compare::NotEqual, length(&a.list), length(&b.list)),
+                vec![Statement::Return(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Bool(result),
+                })],
+                vec![],
+            ));
+        }
         let both_len = |n| {
             let checks = [&a, &b]
                 .into_iter()
                 .map(|v| {
-                    let len = Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Builtin(Builtin::Len, vec![v.list.clone()]),
-                    };
+                    let len = length(&v.list);
                     pipelines::compare(Compare::Equal, len, pipelines::integer(n))
                 })
                 .collect();
@@ -299,7 +356,22 @@ impl Checker<'_> {
         let equal = left
             .into_iter()
             .zip(right)
-            .map(|(l, r)| pipelines::compare(Compare::Equal, l, r))
+            .map(|(l, r)| {
+                // Native POSIX paths compare by the exact text returned by str().
+                // Only materialize a projection when the opposite leaf is a str.
+                let text = |v: Expr| {
+                    if v.ty == Type::Path {
+                        paths::operation(ir::PathOperation::Text, Type::Str, vec![v])
+                    } else {
+                        v
+                    }
+                };
+                if l.ty == r.ty {
+                    pipelines::compare(Compare::Equal, l, r)
+                } else {
+                    pipelines::compare(Compare::Equal, text(l), text(r))
+                }
+            })
             .collect();
         let mut value = Expr {
             ty: Type::Bool,
@@ -318,7 +390,7 @@ impl Checker<'_> {
                 kind: ExprKind::Not(Box::new(value)),
             };
         }
-        [
+        branches.extend([
             Statement::If(both_one, vec![Statement::Return(value)], vec![]),
             Statement::If(
                 both_empty,
@@ -328,6 +400,7 @@ impl Checker<'_> {
                 })],
                 vec![],
             ),
-        ]
+        ]);
+        branches
     }
 }

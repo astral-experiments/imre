@@ -2639,9 +2639,14 @@ impl Emitter<'_, '_> {
                 };
                 self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
             }
-            Type::Path => {
+            Type::Path | Type::List(_) => {
+                let operation = if left.ty == Type::Path {
+                    "path"
+                } else {
+                    "sequence"
+                };
                 let equal = self.instruction(format!(
-                    "call i32 @relar_path_equal(ptr {}, ptr {})",
+                    "call i32 @relar_{operation}_equal(ptr {}, ptr {})",
                     left.operand, right.operand
                 ));
                 let predicate = if matches!(op, Compare::Equal) {
@@ -2710,7 +2715,6 @@ impl Emitter<'_, '_> {
                 right.operand
             )),
             Type::ListInt
-            | Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
             | Type::Iterator
@@ -4540,6 +4544,7 @@ declare ptr @relar_record_cached_result(ptr)
 declare void @relar_record_retain(ptr)
 declare void @relar_record_release(ptr)
 declare i32 @relar_record_equal(ptr, ptr) nounwind memory(read)
+declare i32 @relar_sequence_equal(ptr, ptr) nounwind memory(read)
 declare i32 @relar_tuple_compare(ptr, ptr) nounwind memory(read)
 declare ptr @relar_value_repr(i64, i32)
 declare void @relar_object_retain(ptr)

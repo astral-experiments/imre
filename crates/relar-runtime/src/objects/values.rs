@@ -168,6 +168,17 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
     }
 }
 
+/// Compares lists of the same checked immutable tuple type in element order.
+///
+/// # Safety
+/// Both inputs are rooted sequence objects of the same concrete type. Element
+/// comparisons have no user callbacks and neither list changes during this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_sequence_equal(left: *const Object, right: *const Object) -> u32 {
+    // SAFETY: the compiler verified both sequence layouts before calling.
+    u32::from(unsafe { object_equal(left, right) })
+}
+
 unsafe fn object_equal(left: *const Object, right: *const Object) -> bool {
     if left == right {
         return true;

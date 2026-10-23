@@ -22,6 +22,7 @@ mod inference;
 mod iterables;
 mod json;
 mod literals;
+mod local_functions;
 mod matching;
 mod module_values;
 mod paths;
@@ -999,6 +1000,7 @@ struct Checker<'a> {
     regex_guards: Vec<(usize, regex::CaptureNames)>,
     returns: Type,
     names: HashMap<String, usize>,
+    local_functions: HashMap<String, local_functions::Binding>,
     locals: Vec<Type>,
     assigned: HashSet<usize>,
     calls: HashSet<usize>,
@@ -1039,6 +1041,7 @@ impl<'a> Checker<'a> {
             regex_guards: Vec::new(),
             returns: Type::None,
             names: HashMap::new(),
+            local_functions: HashMap::new(),
             locals: Vec::new(),
             assigned: HashSet::new(),
             calls: HashSet::new(),
@@ -1056,6 +1059,7 @@ impl<'a> Checker<'a> {
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
         if reserved(name)
             || self.graph.modules[self.module].bindings.contains_key(name)
+            || self.local_functions.contains_key(name)
             || self.class_receiver.as_deref() == Some(name)
         {
             return Err(error(
@@ -2168,6 +2172,10 @@ impl<'a> Checker<'a> {
 
     fn statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
         let result = match statement {
+            ast::Stmt::FunctionDef(function) => {
+                self.define_local_function(function)?;
+                None
+            }
             ast::Stmt::Assign(assign) => {
                 return Ok((self.assignment_statement(assign)?, true));
             }
@@ -2880,6 +2888,13 @@ impl<'a> Checker<'a> {
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         self.reject_class_receiver_value(expression)?;
+        if self.local_function_binding(expression).is_some() {
+            return Err(error(
+                self.source,
+                expression,
+                "local functions require a direct call or a noncapturing map/filter callback",
+            ));
+        }
         if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(signature) = self.functions.get(&definition).cloned()
         {
@@ -3198,15 +3213,15 @@ impl<'a> Checker<'a> {
                             "regex objects do not support value comparisons in Relar",
                         ));
                     }
-                    if matches!(
-                        ty,
-                        Type::ListInt
-                            | Type::List(_)
-                            | Type::Dict(_)
-                            | Type::Set(_)
-                            | Type::Optional(_)
-                            | Type::Union(_)
-                    ) || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
+                    let tuple_list = self.types.element(ty).is_some_and(|item| {
+                        matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
+                    });
+                    if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
+                        || matches!(
+                            ty,
+                            Type::Dict(_) | Type::Set(_) | Type::Optional(_) | Type::Union(_)
+                        )
+                        || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
                     {
                         return Err(error(
                             self.source,
@@ -3440,6 +3455,10 @@ impl<'a> Checker<'a> {
 
     fn call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
+        if let Some(binding) = self.local_function_binding(&call.func) {
+            let function = binding.target(self.source, &*call.func)?.clone();
+            return self.call_local_function(call, &function);
+        }
         match self.resolve(&call.func) {
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
