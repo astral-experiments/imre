@@ -24,6 +24,12 @@ def left(source: dict[str, int], log: list[str]) -> dict[str, int]:
     return source
 
 
+def checked_key(fail: bool) -> str:
+    if fail:
+        raise ValueError("key failed")
+    return "checked"
+
+
 class FirstParty:
     def __init__(self) -> None:
         pass
@@ -34,6 +40,11 @@ class FirstParty:
 
 def main() -> None:
     rows: groups[str, list[Row]] = groups(list)
+    try:
+        rows[checked_key(True)]
+    except ValueError as error:
+        print(str(error))
+        print(len(rows))
     print(rows.get("missing") is None)
     print("missing" in rows)
     print(len(rows.keys() | rows.keys()))

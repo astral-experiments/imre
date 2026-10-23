@@ -4087,10 +4087,14 @@ impl Emitter<'_, '_> {
     fn get_item(&mut self, list: &Value, index: &Value, returns: Type, nonnegative: bool) -> Value {
         if matches!(list.ty, Type::Dict(_)) {
             let key = self.word(index);
-            let word = self.checked_instruction(format!(
-                "call i64 @relar_dict_get(ptr {}, i64 {key})",
-                list.operand
-            ));
+            let lookup = format!("call i64 @relar_dict_get(ptr {}, i64 {key})", list.operand);
+            // A sealed list factory supplies every missing subscription. The
+            // receiver and key have already completed their own error checks.
+            let word = if self.module.types.is_default_list_dict(list.ty) {
+                self.instruction(lookup)
+            } else {
+                self.checked_instruction(lookup)
+            };
             return self.unpack_word(word, returns);
         }
         let family = if list.ty == Type::ListInt {
@@ -5159,6 +5163,21 @@ mod tests {
         .unwrap();
         assert_eq!(llvm.matches("call ptr @relar_sorted_string_keys(").count(), 1);
         assert_eq!(llvm.matches("call ptr @relar_key_union(").count(), 2);
+    }
+
+    #[test]
+    fn only_a_sealed_list_factory_eliminates_subscription_errors() {
+        let factory = function_body(
+            "from collections import defaultdict\ndef get(d: defaultdict[str, list[int]], key: str) -> list[int]:\n    return d[key]\n",
+        );
+        let ordinary = function_body(
+            "def get(d: dict[str, list[int]], key: str) -> list[int]:\n    return d[key]\n",
+        );
+        for body in [&factory, &ordinary] {
+            assert!(body.contains("call i64 @relar_dict_get("));
+        }
+        assert!(!factory.contains("call i32 @relar_error_pending()"));
+        assert!(ordinary.contains("call i32 @relar_error_pending()"));
     }
 
     #[test]
