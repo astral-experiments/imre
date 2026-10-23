@@ -117,9 +117,14 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
         edits.append({"kind": "native singleton Enum with StrEnum values and display", "class": node.name,
                       "members": [m.targets[0].id for m in members]})
     changed = "".join(lines)
-    if name == "conformance_report/model.py" and "from collections.abc import Sequence\n" in changed:
+    if name in ("conformance_report/model.py", "conformance_report/parse.py") and "from collections.abc import Sequence\n" in changed:
         changed = changed.replace("from collections.abc import Sequence\n", "")
-        grouping_edits.append(("test_files: Sequence[Path]", "test_files: list[Path]"))
+        before, after = "test_files: Sequence[Path]", "test_files: list[Path]"
+        if changed.count(before) != 1:
+            raise ValueError("unexpected conformance sequence annotation")
+        changed = changed.replace(before, after)
+        edits.append({"kind": "native concrete sequence declaration", "before": before, "after": after})
+    if name == "conformance_report/model.py" and "from collections import defaultdict\n" in changed:
         for value in ("TyDiagnostic", "ExpectedError"):
             before = f": defaultdict[str, list[{value}]] = defaultdict(list)"
             after = f" = defaultdict(list[{value}])"
@@ -135,7 +140,7 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
             if before not in changed:
                 raise ValueError(f"unexpected grouping boundary: {before}")
             changed = changed.replace(before, after)
-            edits.append({"kind": "native concrete sequence, default factory, or dictionary keys", "before": before, "after": after})
+            edits.append({"kind": "native grouping default factory or dictionary keys", "before": before, "after": after})
     if any(node.func.id == "int" for node in calls):
         changed = "from codon_decimal import parse_int as native_python_int\n\n" + changed
     if any(node.func.id == "sorted" for node in calls):

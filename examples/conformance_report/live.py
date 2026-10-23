@@ -9,9 +9,9 @@ from pathlib import Path
 from relar.json import decode
 from relar.toml import decode as decode_toml
 
-from conformance_report.app import render_report
-from conformance_report.model import WireDiagnostic
-from conformance_report.parse import Inputs, Manifest, PathAlias, SourceText, collect_expected_diagnostics
+from conformance_report.app import render_diagnostics
+from conformance_report.model import Source, WireDiagnostic
+from conformance_report.parse import collect_expected_diagnostics, collect_ty_diagnostics
 
 
 @dataclass(slots=True)
@@ -77,23 +77,22 @@ def parse_live_options(arguments: list[str]) -> LiveOptions:
     return LiveOptions(suite, old_ty, new_ty, output, revision, format, force_summary_table, timeout)
 
 
-def discover_sources(suite: Path) -> list[SourceText]:
+def discover_test_files(suite: Path) -> list[Path]:
     groups = decode_toml((suite / "src" / "test_groups.toml").read_text(encoding="utf-8"), dict[str, TestGroup])
     tests = suite / "tests"
-    sources: list[SourceText] = []
+    test_files: list[Path] = []
     # Upstream discovers Python sources before stubs and excludes support files.
     candidates = list(tests.glob("*.py"))
     candidates.extend(list(tests.glob("*.pyi")))
     for path in candidates:
         if path.name.split("_")[0] in groups:
-            canonical = path.resolve(strict=True)
-            sources.append(SourceText(canonical, canonical.read_text(encoding="utf-8")))
-    if not sources:
+            test_files.append(path.resolve(strict=True))
+    if not test_files:
         raise ValueError("no conformance test files discovered")
-    return sources
+    return test_files
 
 
-def analyzer_arguments(suite: Path, sources: list[SourceText]) -> list[str]:
+def analyzer_arguments(suite: Path, test_files: list[Path]) -> list[str]:
     return [
         "check", "--python-version=3.12", "--output-format=gitlab",
         "--ignore=assert-type-unspellable-subtype",
@@ -102,7 +101,7 @@ def analyzer_arguments(suite: Path, sources: list[SourceText]) -> list[str]:
         "--error=invalid-named-tuple-override", "--error=deprecated",
         "--error=redundant-final-classvar", "--exit-zero",
         "--extra-search-path=" + str(suite / "tests"),
-        *[str(source.path) for source in sources],
+        *[str(path) for path in test_files],
     ]
 
 
@@ -131,19 +130,20 @@ def live_main(arguments: list[str]) -> None:
     output = Path(options.output)
     with tempfile.TemporaryDirectory(dir=output.parent, prefix=".relar-conformance-") as name:
         workspace = Path(name)
-        sources = discover_sources(suite)
-        collect_expected_diagnostics(sources)
-        command = analyzer_arguments(suite, sources)
+        test_files = discover_test_files(suite)
+        expected = collect_expected_diagnostics(test_files)
+        command = analyzer_arguments(suite, test_files)
         environment = os.environ.copy()
         paths: dict[str, Path] = {}
         old = run_analyzer(old_ty, command, suite, environment, options.timeout)
         resolve_diagnostic_paths(old, suite, paths)
         new = run_analyzer(new_ty, command, suite, environment, options.timeout)
         resolve_diagnostic_paths(new, suite, paths)
-        aliases = [PathAlias(raw, str(canonical)) for raw, canonical in paths.items()]
-        manifest = Manifest(options.suite_revision, [str(source.path) for source in sources], aliases)
-        inputs = Inputs(manifest, paths, sources, old, new)
-        rendered = render_report(inputs, options.format, options.force_summary_table)
+        rendered = render_diagnostics(
+            expected, collect_ty_diagnostics(old, Source.OLD, paths),
+            collect_ty_diagnostics(new, Source.NEW, paths), test_files,
+            options.suite_revision, options.format, options.force_summary_table,
+        )
         staged = workspace / "report.md"
         staged.write_text(rendered, encoding="utf-8")
         staged.replace(output)

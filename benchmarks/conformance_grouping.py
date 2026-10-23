@@ -15,7 +15,7 @@ from conformance_report.model import (
     group_diagnostics_by_key,
 )
 from conformance_report.parse import (
-    collect_expected_diagnostics,
+    collect_frozen_diagnostics,
     collect_ty_diagnostics,
     read_inputs,
 )
@@ -140,7 +140,7 @@ def main() -> None:
     inputs = read_inputs(argv[2], argv[3], argv[4])
     old = collect_ty_diagnostics(inputs.old, Source.OLD, inputs.paths)
     new = collect_ty_diagnostics(inputs.new, Source.NEW, inputs.paths)
-    expected = collect_expected_diagnostics(inputs.sources)
+    expected = collect_frozen_diagnostics(inputs.sources)
     paths = [Path(path) for path in inputs.manifest.test_files]
     observe(argv[1], old, new, expected, paths, int(argv[5]))
 

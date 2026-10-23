@@ -125,6 +125,10 @@ def validation(record: dict, path: Path, evidence: Evidence) -> dict | None:
     errors.update({"fixture-" + name: "ValueError" for name in
                    ("toml-syntax", "toml-duplicate", "toml-schema", "toml-type", "no-cases")})
     expected_cases = {*BASES, "fixture-ok", "fixture-relative-symlinks", *errors}
+    assert value["schema"] in (1, 2)
+    if value["schema"] == 2:
+        errors.update({"fixture-source-utf8": "UnicodeDecodeError", "fixture-no-annotations": "AssertionError"})
+        expected_cases.update({"fixture-mutate-source", *errors})
     cases = {}
     for row in value["records"]:
         key = (row["case"], row["engine"])

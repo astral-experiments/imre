@@ -144,10 +144,10 @@ impl Checker<'_> {
                 &format!("Path.{name} requires {arity} positional arguments"),
             ));
         }
-        if matches!(kind, PathOperation::ReadText | PathOperation::WriteText) {
-            self.utf8_encoding(call)?;
-        } else {
-            self.reject_builtin_keywords(call)?;
+        match kind {
+            PathOperation::ReadText if call.arguments.keywords.is_empty() => {}
+            PathOperation::ReadText | PathOperation::WriteText => self.utf8_encoding(call)?,
+            _ => self.reject_builtin_keywords(call)?,
         }
         let mut args = vec![receiver];
         if let Some(value) = call.arguments.args.first() {
