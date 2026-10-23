@@ -33,6 +33,8 @@ Booleans have a separate exact type: use `int(flag)` to store one in an integer 
 
 Indentation must use spaces; tabs and form feeds remain valid inside string data. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
 
+The compiler bounds syntax complexity before parsing each module. Deeply nested blocks, delimiters, or long chains of operators can exceed the limit. Splitting a long expression into intermediate assignments reduces its depth.
+
 Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, generator functions, escaping iterator values, async, slice assignment/deletion, tuple display expansion, call argument expansion, variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and arbitrary object identity comparisons are currently rejected. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
 
 ## Inferred function signatures and iterable consumers

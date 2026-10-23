@@ -141,6 +141,21 @@ mod tests {
     use super::{CompileOptions, compile};
 
     #[test]
+    fn deep_source_returns_a_diagnostic_but_wide_displays_compile() {
+        for expression in [
+            format!("{}1", "-".repeat(4096)),
+            format!("{}1", "1+".repeat(4096)),
+            format!("{}1{}", "[".repeat(2048), "]".repeat(2048)),
+            format!("x{}", ".x".repeat(4096)),
+        ] {
+            let error = super::check(&format!("print({expression})\n")).unwrap_err();
+            assert!(error.contains("syntax complexity limit"), "{error}");
+        }
+        let flat = format!("print(len([{}]))\n", "(1 + 2),".repeat(256));
+        compile(&flat, &CompileOptions::default()).unwrap();
+    }
+
+    #[test]
     fn sealed_exception_fields_keep_runtime_guards_and_reject_unknown_attributes() {
         let llvm = compile(
             "def fields(error: Exception) -> tuple[int, list[str], str, str, str]:\n    return error.returncode, error.cmd, error.stdout, error.output, error.stderr\n",
