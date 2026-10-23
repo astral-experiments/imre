@@ -320,7 +320,7 @@ impl Checker<'_> {
             |checker, index, argument| {
                 let index = index + skip;
                 let value = if let Some(ty) = inference.parameter(signature.id, index) {
-                    checker.expr_expected(argument, ty)?
+                    checker.direct_argument(argument, ty, signature.params[index].sign_only)?
                 } else {
                     checker.expr(argument)?
                 };

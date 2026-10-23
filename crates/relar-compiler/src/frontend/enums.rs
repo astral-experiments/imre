@@ -3,26 +3,29 @@
 use super::*;
 
 impl Checker<'_> {
-    pub(super) fn assert_never(&mut self, call: &ast::ExprCall) -> Result<Statement, String> {
-        let [arg @ ast::Expr::Name(name)] = call.arguments.args.as_ref() else {
+    pub(super) fn assert_never(
+        &mut self,
+        call: &ast::ExprCall,
+        exhausted_pair: bool,
+    ) -> Result<Statement, String> {
+        let [arg] = call.arguments.args.as_ref() else {
             return Err(error(
                 self.source,
                 call,
-                "assert_never requires one StrEnum local",
+                "assert_never requires one exhausted argument",
             ));
         };
         let val = self.expr(arg)?;
-        if !call.arguments.keywords.is_empty()
-            || !self.names.contains_key(name.id.as_str())
-            || !matches!(
+        let enum_local = matches!(arg, ast::Expr::Name(name) if self.names.contains_key(name.id.as_str()))
+            && matches!(
                 self.types.payload(val.ty).unwrap_or(val.ty),
                 Type::StrEnum(_)
-            )
-        {
+            );
+        if !call.arguments.keywords.is_empty() || !(enum_local || exhausted_pair) {
             return Err(error(
                 self.source,
                 call,
-                "assert_never requires one StrEnum local",
+                "assert_never requires a StrEnum local or an exhausted boolean pair",
             ));
         }
         // A finally suite also receives pending returns, breaks and exceptions.
@@ -34,7 +37,7 @@ impl Checker<'_> {
                 "assert_never inside finally is unsupported",
             ));
         }
-        if !self.graph.session.is_never(self.module, arg) {
+        if !exhausted_pair && !self.graph.session.is_never(self.module, arg) {
             return Err(error(
                 self.source,
                 arg,

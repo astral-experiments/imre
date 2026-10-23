@@ -1,34 +1,14 @@
 """Complete report rendering adapted from the pinned Ruff source in upstream/."""
 from itertools import groupby
+from textwrap import dedent
 from typing import Literal
 from typing import assert_never
 from conformance_report.model import Change, DiagnosticEntry, FileStats, Source, Statistics, TestCase, TyDiagnostic, compute_stats
-
-def signed_int(value: int) -> str:
-    return '+' + str(value) if value >= 0 else str(value)
-
-def signed_percent(value: float) -> str:
-    text = f'{value:.2%}'
-    return text if text.startswith('-') else '+' + text
 
 GITHUB_HEADER = ['<table>', '<tr>', '<th>Test case</th>', '<th>Diff</th>', '</tr>']
 GITHUB_FOOTER = ['</table>']
 SUMMARY_NOTE = '\n    Each test case represents one expected error annotation or a group of annotations\n    sharing a tag. Counts are per test case, not per diagnostic — multiple diagnostics\n    on the same line count as one. Required annotations (`E`) are true positives when\n    ty flags the expected location and false negatives when it does not. Optional\n    annotations (`E?`) are true positives when flagged but true negatives (not false\n    negatives) when not. Tagged annotations (`E[tag]`) require ty to flag exactly one\n    of the tagged lines; tagged multi-annotations (`E[tag+]`) allow any number up to\n    the tag count. Flagging unexpected locations counts as a false positive.\n'
 TITLE_PRIORITY: dict[str, int] = {'True positives added': 0, 'False positives removed': 1, 'True positives changed': 2, 'False positives changed': 3, 'False positives added': 4, 'True positives removed': 5, 'Optional Diagnostics Added': 6, 'Optional Diagnostics Removed': 7, 'Optional Diagnostics Changed': 8}
-
-def format_metric(diff: float, old: float, new: float) -> str:
-    if diff > 0:
-        return f'increased from <b>{old:.2%}</b> to <b>{new:.2%}</b>'
-    if diff < 0:
-        return f'decreased from <b>{old:.2%}</b> to <b>{new:.2%}</b>'
-    return f'held steady at <b>{old:.2%}</b>'
-
-def format_int_metric(diff: int, old: int, new: int, total: int) -> str:
-    if diff > 0:
-        return f'improved from <b>{old}/{total}</b> to <b>{new}/{total}</b>'
-    if diff < 0:
-        return f'regressed from <b>{old}/{total}</b> to <b>{new}/{total}</b>'
-    return f'held steady at <b>{old}/{total}</b>'
 
 def render_diff_row(diagnostics: list[TyDiagnostic], *, removed: bool = False) -> str:
     sign = "-" if removed else "+"
@@ -327,56 +307,161 @@ def render_file_stats(file_stats: list[FileStats], CONFORMANCE_DIR_WITH_README: 
 
     return render_file_stats_table(file_stats)
 
-def diff_format(diff: float, *, greater_is_better: bool=True, neutral: bool=False) -> str:
+def diff_format(
+    diff: float,
+    *,
+    greater_is_better: bool = True,
+    neutral: bool = False,
+) -> str:
     if diff == 0:
-        return ''
+        return ""
+
     increased = diff > 0
-    good = ' (✅)' if not neutral else ''
-    bad = ' (❌)' if not neutral else ''
-    up = '⏫'
-    down = '⏬'
+    good = " (✅)" if not neutral else ""
+    bad = " (❌)" if not neutral else ""
+    up = "⏫"
+    down = "⏬"
+
     match (greater_is_better, increased):
         case (True, True):
-            return f'{up}{good}'
+            return f"{up}{good}"
         case (False, True):
-            return f'{up}{bad}'
+            return f"{up}{bad}"
         case (True, False):
-            return f'{down}{bad}'
+            return f"{down}{bad}"
         case (False, False):
-            return f'{down}{good}'
+            return f"{down}{good}"
         case _:
-            raise AssertionError('unreachable metric direction')
+            assert_never((greater_is_better, increased))
 
-def render_summary(test_cases: list[TestCase], file_stats: list[FileStats], base_url: str, *, force_summary_table: bool) -> str:
-    old = compute_stats(test_cases, Source.OLD)
-    new = compute_stats(test_cases, Source.NEW)
-    old_files_passing = sum((1 if fs.old_passes else 0 for fs in file_stats))
-    new_files_passing = sum((1 if fs.new_passes else 0 for fs in file_stats))
-    total_files = len(file_stats)
-    files_passing_change = new_files_passing - old_files_passing
-    assert new.true_positives > 0, 'Expected ty to have at least one true positive.'
-    precision_change = new.precision - old.precision
-    recall_change = new.recall - old.recall
-    true_pos_change = new.true_positives - old.true_positives
-    false_pos_change = new.false_positives - old.false_positives
-    false_neg_change = new.false_negatives - old.false_negatives
-    total_change = new.total_diagnostics - old.total_diagnostics
-    summary_paragraph = f'The percentage of diagnostics emitted that were expected errors {format_metric(precision_change, old.precision, new.precision)}. The percentage of expected errors that received a diagnostic {format_metric(recall_change, old.recall, new.recall)}. The number of fully passing files {format_int_metric(files_passing_change, old_files_passing, new_files_passing, total_files)}.'
-    base_header = f'[Typing conformance results]({base_url})'
-    if not force_summary_table and all((diag.change is Change.UNCHANGED for diag in test_cases)):
-        return f'\n## {base_header}\n\n### No changes detected ✅\n\n<details>\n<summary>Current numbers</summary>\n\n<br>\n{summary_paragraph}\n\n</details>\n'
-    true_pos_diff = diff_format(float(true_pos_change), greater_is_better=True)
-    false_pos_diff = diff_format(float(false_pos_change), greater_is_better=False)
-    false_neg_diff = diff_format(float(false_neg_change), greater_is_better=False)
-    precision_diff = diff_format(precision_change, greater_is_better=True)
-    recall_diff = diff_format(recall_change, greater_is_better=True)
-    total_diff = diff_format(float(total_change), neutral=True)
-    passing_diff = diff_format(float(files_passing_change), greater_is_better=True)
-    if precision_change > 0 and recall_change >= 0 and (files_passing_change >= 0) or (recall_change > 0 and precision_change >= 0 and (files_passing_change >= 0)) or (files_passing_change > 0 and precision_change >= 0 and (recall_change >= 0)):
-        header = f'{base_header} improved 🎉'
-    elif precision_change < 0 and recall_change <= 0 and (files_passing_change <= 0) or (recall_change < 0 and precision_change <= 0 and (files_passing_change <= 0)) or (files_passing_change < 0 and precision_change <= 0 and (recall_change <= 0)):
-        header = f'{base_header} regressed ❌'
-    else:
-        header = base_header
-    summary_note = ' '.join(SUMMARY_NOTE.split())
-    return f'\n## {header}\n\n{summary_paragraph}\n\n### Summary\n\n<details>\n<summary>How are test cases classified?</summary>\n\n<br>\n\n{summary_note}\n\n</details>\n\n| Metric | Old | New | Diff | Outcome |\n|--------|-----|-----|------|---------|\n| True Positives  | {old.true_positives} | {new.true_positives} | {signed_int(true_pos_change)} | {true_pos_diff} |\n| False Positives | {old.false_positives} | {new.false_positives} | {signed_int(false_pos_change)} | {false_pos_diff} |\n| False Negatives | {old.false_negatives} | {new.false_negatives} | {signed_int(false_neg_change)} | {false_neg_diff} |\n| Total Diagnostics | {old.total_diagnostics} | {new.total_diagnostics} | {signed_int(total_change)} | {total_diff} |\n| Precision | {old.precision:.2%} | {new.precision:.2%} | {signed_percent(precision_change)} | {precision_diff} |\n| Recall | {old.recall:.2%} | {new.recall:.2%} | {signed_percent(recall_change)} | {recall_diff} |\n| Passing Files | {old_files_passing}/{total_files} | {new_files_passing}/{total_files} | {signed_int(files_passing_change)} | {passing_diff} |\n\n'
+
+def summary_for_checkout(
+    test_cases: list[TestCase], file_stats: list[FileStats], CONFORMANCE_DIR_WITH_README: str,
+    *, force_summary_table: bool,
+) -> str:
+    def render_summary(
+        test_cases: list[TestCase],
+        file_stats: list[FileStats],
+        *,
+        force_summary_table: bool,
+    ) -> str:
+        def format_metric(diff: float, old: float, new: float) -> str:
+            if diff > 0:
+                return f"increased from <b>{old:.2%}</b> to <b>{new:.2%}</b>"
+            if diff < 0:
+                return f"decreased from <b>{old:.2%}</b> to <b>{new:.2%}</b>"
+            return f"held steady at <b>{old:.2%}</b>"
+
+        def format_int_metric(diff: int, old: int, new: int, total: int) -> str:
+            if diff > 0:
+                return f"improved from <b>{old}/{total}</b> to <b>{new}/{total}</b>"
+            if diff < 0:
+                return f"regressed from <b>{old}/{total}</b> to <b>{new}/{total}</b>"
+            return f"held steady at <b>{old}/{total}</b>"
+
+        old = compute_stats(test_cases, Source.OLD)
+        new = compute_stats(test_cases, Source.NEW)
+
+        old_files_passing = sum(fs.old_passes for fs in file_stats)
+        new_files_passing = sum(fs.new_passes for fs in file_stats)
+        total_files = len(file_stats)
+        files_passing_change = new_files_passing - old_files_passing
+
+        assert new.true_positives > 0, (
+            "Expected ty to have at least one true positive.\n"
+            f"Sample of grouped diagnostics: {test_cases[:5]}"
+        )
+
+        precision_change = new.precision - old.precision
+        recall_change = new.recall - old.recall
+        true_pos_change = new.true_positives - old.true_positives
+        false_pos_change = new.false_positives - old.false_positives
+        false_neg_change = new.false_negatives - old.false_negatives
+        total_change = new.total_diagnostics - old.total_diagnostics
+
+        summary_paragraph = (
+            f"The percentage of diagnostics emitted that were expected errors "
+            f"{format_metric(precision_change, old.precision, new.precision)}. "
+            f"The percentage of expected errors that received a diagnostic "
+            f"{format_metric(recall_change, old.recall, new.recall)}. "
+            f"The number of fully passing files "
+            f"{format_int_metric(files_passing_change, old_files_passing, new_files_passing, total_files)}."
+        )
+
+        base_header = f"[Typing conformance results]({CONFORMANCE_DIR_WITH_README})"
+
+        if not force_summary_table and all(
+            diag.change is Change.UNCHANGED for diag in test_cases
+        ):
+            return dedent(
+                f"""
+            ## {base_header}
+
+            ### No changes detected ✅
+
+            <details>
+            <summary>Current numbers</summary>
+
+            <br>
+            {summary_paragraph}
+
+            </details>
+            """
+            )
+
+        true_pos_diff = diff_format(true_pos_change, greater_is_better=True)
+        false_pos_diff = diff_format(false_pos_change, greater_is_better=False)
+        false_neg_diff = diff_format(false_neg_change, greater_is_better=False)
+        precision_diff = diff_format(precision_change, greater_is_better=True)
+        recall_diff = diff_format(recall_change, greater_is_better=True)
+        total_diff = diff_format(total_change, neutral=True)
+        passing_diff = diff_format(files_passing_change, greater_is_better=True)
+
+        if (
+            (precision_change > 0 and recall_change >= 0 and files_passing_change >= 0)
+            or (recall_change > 0 and precision_change >= 0 and files_passing_change >= 0)
+            or (files_passing_change > 0 and precision_change >= 0 and recall_change >= 0)
+        ):
+            header = f"{base_header} improved 🎉"
+        elif (
+            (precision_change < 0 and recall_change <= 0 and files_passing_change <= 0)
+            or (recall_change < 0 and precision_change <= 0 and files_passing_change <= 0)
+            or (files_passing_change < 0 and precision_change <= 0 and recall_change <= 0)
+        ):
+            header = f"{base_header} regressed ❌"
+        else:
+            header = base_header
+
+        summary_note = " ".join(SUMMARY_NOTE.split())
+
+        return dedent(
+            f"""
+        ## {header}
+
+        {summary_paragraph}
+
+        ### Summary
+
+        <details>
+        <summary>How are test cases classified?</summary>
+
+        <br>
+
+        {summary_note}
+
+        </details>
+
+        | Metric | Old | New | Diff | Outcome |
+        |--------|-----|-----|------|---------|
+        | True Positives  | {old.true_positives} | {new.true_positives} | {true_pos_change:+} | {true_pos_diff} |
+        | False Positives | {old.false_positives} | {new.false_positives} | {false_pos_change:+} | {false_pos_diff} |
+        | False Negatives | {old.false_negatives} | {new.false_negatives} | {false_neg_change:+} | {false_neg_diff} |
+        | Total Diagnostics | {old.total_diagnostics} | {new.total_diagnostics} | {total_change:+} | {total_diff} |
+        | Precision | {old.precision:.2%} | {new.precision:.2%} | {precision_change:+.2%} | {precision_diff} |
+        | Recall | {old.recall:.2%} | {new.recall:.2%} | {recall_change:+.2%} | {recall_diff} |
+        | Passing Files | {old_files_passing}/{total_files} | {new_files_passing}/{total_files} | {files_passing_change:+} | {passing_diff} |
+
+        """
+        )
+
+    return render_summary(test_cases, file_stats, force_summary_table=force_summary_table)

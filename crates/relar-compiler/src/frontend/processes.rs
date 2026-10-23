@@ -56,6 +56,7 @@ impl Checker<'_> {
                 ParameterKind::KeywordOnly
             },
             default,
+            sign_only: false,
         })
         .collect::<Vec<_>>();
         let supplied = self.arguments_with(call, &params, None, |checker, index, argument| {

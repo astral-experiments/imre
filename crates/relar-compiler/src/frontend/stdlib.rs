@@ -531,7 +531,12 @@ impl Checker<'_> {
                 }
                 return Ok(self.formatted_integer(value, sign));
             }
-            let (precision, percent) = numeric_format(&specification).ok_or_else(|| {
+            let (positive_sign, unsigned) = match specification.as_bytes().first() {
+                Some(&sign @ (b'+' | b' ')) => (sign, &specification[1..]),
+                Some(b'-') => (0, &specification[1..]),
+                _ => (0, specification.as_str()),
+            };
+            let (precision, percent) = numeric_format(unsigned).ok_or_else(|| {
                 error(
                     self.source,
                     field,
@@ -555,7 +560,14 @@ impl Checker<'_> {
             }
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::FloatFormat { precision, percent }, vec![value]),
+                kind: ExprKind::Builtin(
+                    Builtin::FloatFormat {
+                        precision,
+                        percent,
+                        positive_sign,
+                    },
+                    vec![value],
+                ),
             });
         }
         if field.conversion != ast::ConversionFlag::Repr
@@ -563,7 +575,7 @@ impl Checker<'_> {
         {
             return Ok(self.record_text(value));
         }
-        if field.conversion == ast::ConversionFlag::Repr {
+        if field.conversion == ast::ConversionFlag::Repr || self.types.element(value.ty).is_some() {
             if !dataclass_values::repr_supported(value.ty, self.types) {
                 return Err(error(
                     self.source,
@@ -628,7 +640,7 @@ impl Checker<'_> {
             return Err(error(
                 self.source,
                 field,
-                "f-string fields require exactly int, float, bool, str, bytes, None, or Exception",
+                "unsupported value type for default f-string conversion",
             ));
         }
         Ok(if value.ty == Type::Str {

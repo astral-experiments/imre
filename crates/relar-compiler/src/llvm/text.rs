@@ -85,6 +85,9 @@ impl Emitter<'_, '_> {
                 ));
                 return result;
             }
+            TextOperation::Dedent => {
+                self.instruction(format!("call ptr @relar_str_dedent(ptr {source})"))
+            }
             TextOperation::Unquote => {
                 self.instruction(format!("call ptr @relar_str_unquote(ptr {source})"))
             }

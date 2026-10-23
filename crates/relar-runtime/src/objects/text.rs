@@ -7,6 +7,42 @@ use std::rc::Rc;
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Str, Words, fail, python_whitespace};
 
+/// Removes the common space/tab prefix after the caller has evaluated its text.
+/// Python 3.14 normalizes whitespace-only lines, including Unicode whitespace.
+///
+/// # Safety
+/// The caller roots the immutable string until this independently owned result returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_dedent(text: *const Str) -> *const Str {
+    // SAFETY: the input stays live and no user code runs while it is borrowed.
+    let text = unsafe { &*text };
+    let blank = |line: &str| line.chars().all(python_whitespace);
+    let mut lines = text.split('\n').filter(|line| !blank(line));
+    let first = lines.next().unwrap_or("");
+    let mut margin = &first.as_bytes()[..first.len() - first.trim_start_matches([' ', '\t']).len()];
+    for line in lines {
+        if margin.is_empty() {
+            break;
+        }
+        let common = margin
+            .iter()
+            .zip(line.as_bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        margin = &margin[..common];
+    }
+    let mut result = Str::with_capacity(text.len());
+    for (index, line) in text.split('\n').enumerate() {
+        if index != 0 {
+            result.push('\n');
+        }
+        if !blank(line) {
+            result.push_str(&line[margin.len()..]);
+        }
+    }
+    Rc::into_raw(Rc::new(result))
+}
+
 /// Appends an owned slice of source, retaining its allocation for a full slice.
 fn push_part(parts: &mut Words, source: &Rc<Str>, value: &str) {
     parts
@@ -464,6 +500,21 @@ mod tests {
             assert_eq!(relar_exception_matches(Rc::as_ptr(&error), kind as u32), 1);
             let actual = Rc::from_raw(relar_exception_message(Rc::as_ptr(&error)));
             assert_eq!(actual.as_str(), message);
+        }
+    }
+
+    #[test]
+    fn dedent_preserves_content_and_normalizes_whitespace_only_lines() {
+        for (source, expected) in [
+            ("  x\r\n \t\u{a0}\u{1c}\r\n   y\r\n", "x\r\n\n y\r\n"),
+            ("\tx\n \ty\n\u{2003}\n", "\tx\n \ty\n\n"),
+            ("\t\u{a0}x\n\t x", "\u{a0}x\n x"),
+            ("\n\u{2002}\n\u{85}", "\n\n"),
+        ] {
+            let source = Str::from(source);
+            // SAFETY: the input lives through the call and the result transfers one owner.
+            let result = unsafe { Rc::from_raw(relar_str_dedent(&source)) };
+            assert_eq!(result.as_str(), expected);
         }
     }
 

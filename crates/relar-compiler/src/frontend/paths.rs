@@ -16,6 +16,7 @@ fn parameter(name: &str, ty: Type, default: Option<Expr>) -> Parameter {
         ty,
         kind: ParameterKind::PositionalOrKeyword,
         default,
+        sign_only: false,
     }
 }
 

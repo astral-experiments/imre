@@ -41,7 +41,6 @@ REJECTED = {
     "excessive_precision_spec": 'print(f"{1:.1001f}")\n',
     "numeric_string_conversion": 'print(f"{1!s:.2f}")\n',
     "numeric_string_field": "print(f\"{'text':.2f}\")\n",
-    "list_field": 'print(f"{[1]}")\n',
     "dict_field": 'values = {1: 2}\nprint(f"{values}")\n',
     "set_field": 'values = {1}\nprint(f"{values}")\n',
     "tuple_field": 'print(f"{(1, 2)}")\n',
@@ -56,7 +55,7 @@ REJECTED = {
     "tab_expression_indentation": 'print(f"""{\n\t1\n}""")\n',
     "form_feed_expression_indentation": 'print(f"""{\n\f1\n}""")\n',
     "tab_code_indentation": 'if True:\n\tprint(f"{1}")\n',
-    "unused_unsupported_field": 'def unused() -> str:\n    return f"{[1]}"\nprint(1)\n',
+    "unused_unsupported_field": 'def unused() -> str:\n    return f"{(1, 2)}"\nprint(1)\n',
     "unused_dynamic_field": "def unused() -> str:\n    return f\"{eval('1')}\"\nprint(1)\n",
 }
 
@@ -93,7 +92,7 @@ def rejection_message(name: str) -> str:
         return "indentation must use spaces, not tabs or form feeds"
     if name == "unused_dynamic_field":
         return ""
-    return "f-string fields require exactly int, float, bool, str, bytes, None, or Exception"
+    return "unsupported value type for default f-string conversion"
 
 
 def cases(project: Path) -> list[tuple[str, Path, str | None]]:

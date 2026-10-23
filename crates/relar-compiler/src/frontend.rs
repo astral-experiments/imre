@@ -32,6 +32,7 @@ mod projected_equality;
 mod records;
 mod regex;
 mod sequences;
+mod sign_parameters;
 mod sorted_rows;
 mod stdlib;
 mod text;
@@ -651,6 +652,9 @@ fn signature(
             ty,
             kind,
             default,
+            sign_only: ty == Type::Float
+                && parameter.annotation().is_some()
+                && sign_parameters::only_compares_zero(function, parameter.name().as_str()),
         });
     }
     let returns = function
@@ -2361,7 +2365,7 @@ impl<'a> Checker<'a> {
                 if let ast::Expr::Call(call) = &*expression.value
                     && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::AssertNever))
                 {
-                    return Ok((vec![self.assert_never(call)?], false));
+                    return Ok((vec![self.assert_never(call, false)?], false));
                 }
                 Some(Statement::Expr(self.expr(&expression.value)?))
             }
@@ -3629,13 +3633,13 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
+            Some(Binding::Intrinsic(Intrinsic::Dedent)) => {
+                return self.text_function(call, "text", ir::TextOperation::Dedent);
+            }
+            Some(Binding::Intrinsic(Intrinsic::Unquote)) => {
+                return self.text_function(call, "string", ir::TextOperation::Unquote);
+            }
             _ => {}
-        }
-        if matches!(
-            self.resolve(&call.func),
-            Some(Binding::Intrinsic(Intrinsic::Unquote))
-        ) {
-            return self.unquote_call(call);
         }
         if matches!(
             self.resolve(&call.func),

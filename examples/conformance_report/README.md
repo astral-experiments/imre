@@ -125,10 +125,10 @@ the complete `Source`, `Classification`, and `Change` enums. JSON decoding
 uses a separate wire record for the original path string. Each diagnostic and
 expected error carries a native `Path` into the analysis.
 Ruff’s original verbose regex runs with Rust’s regex engine and exposes the
-same named captures and character offsets as CPython. Assertions for no
-annotations and no new true positives remain errors. The latter omits the
-upstream diagnostic record debug dump. The adapter suppresses the upstream output-file confirmation
-and duplicated report on stderr.
+same named captures and character offsets as CPython. When the new run has no
+true positives, Ruff’s assertion includes the first five grouped test cases and
+their nested diagnostics. An existing output file survives that failure.
+The adapter suppresses the upstream output-file confirmation and duplicated report on stderr.
 
 `original.py` runs the upstream regex, models, analysis and renderers with
 the same offline inputs. The adapter preloads the source text and raw JSON.
@@ -198,6 +198,12 @@ formats each `TyDiagnostic` using its original `__str__` and severity labels.
 `render_html_diff_row` links to a single line or to the range between the
 lowest and highest line numbers in the group.
 [Diagnostic row benchmarks](../../benchmarks/results/2026-10-23-diagnostic-rows.md)
+
+Ruff’s `render_summary` and `diff_format` produce the compact no-change summary
+and the full metrics table. The enclosing function supplies the selected typing
+revision’s URL. Each signed percentage and change marker comes from Ruff’s
+original formatting code.
+[Summary benchmarks](../../benchmarks/results/2026-10-23-conformance-summary.md)
 
 The [expected diagnostics comparison](../../benchmarks/results/2026-10-23-expected-diagnostics.md)
 measures the live reporter with real ty and replayed analyzer output. It also

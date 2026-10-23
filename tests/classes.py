@@ -2,13 +2,14 @@
 
 import argparse
 import ast
+import io
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
-import textwrap
+import tokenize
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "classes"
@@ -123,22 +124,33 @@ def verify_upstream_definitions() -> None:
         nodes.extend((f"{cls.name}.{method.name}", method)
                      for cls in tree.body if isinstance(cls, ast.ClassDef)
                      for method in cls.body if isinstance(method, ast.FunctionDef))
-        return {
-            name: textwrap.dedent("".join(lines[
-                min([node.lineno, *(d.lineno for d in node.decorator_list)]) - 1:node.end_lineno
-            ]))
-            for name, node in nodes if name in names
-        }
+        # A surrounding function indents Python code but must preserve multiline string contents.
+        literal_lines = set()
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            if tokenize.tok_name[token.type] in {"STRING", "FSTRING_MIDDLE"}:
+                literal_lines.update(range(token.start[0] + 1, token.end[0] + 1))
+
+        result = {}
+        for name, node in nodes:
+            if name in names:
+                start = min([node.lineno, *(d.lineno for d in node.decorator_list)])
+                indent = " " * node.col_offset
+                result[name] = "".join(
+                    lines[i - 1] if i in literal_lines else lines[i - 1].removeprefix(indent)
+                    for i in range(start, node.end_lineno + 1)
+                )
+        return result
 
     reporter = PROJECT / "examples" / "conformance_report"
     checks = [
         (reporter / "upstream/conformance.py", reporter / "model.py",
          {"Source", "Classification", "Change", "compute_stats", "change", "diagnostics_by_source",
           "classify", "key", "diagnostics_are_equivalent", "group_diagnostics_by_key", "collect_file_stats",
-          "TyDiagnostic.__str__", "TyDiagnostic.severity_for_display"}),
+          "TyDiagnostic.__str__", "TyDiagnostic.severity_for_display", "Statistics"}),
         (reporter / "upstream/conformance.py", reporter / "parse.py", {"collect_expected_diagnostics"}),
         (reporter / "upstream/conformance.py", reporter / "render.py",
-         {"collect_diagnostic_entries", "render_file_stats_table", "render_test_cases", "render_html_diff_row", "render_diff_row"}),
+         {"collect_diagnostic_entries", "render_file_stats_table", "render_test_cases", "render_html_diff_row", "render_diff_row",
+          "diff_format", "render_summary"}),
         (PROJECT / "examples/python_catalog/upstream/fetch-download-metadata.py",
          FIXTURES / "uv_variant.py", {"Variant", "variant_sort_key"}),
     ]
