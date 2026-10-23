@@ -465,19 +465,6 @@ pub(crate) fn lower_with_owners(
             "recursive calls are unsupported in this prototype",
         ));
     }
-    fn visit(id: usize, graph: &[HashSet<usize>], states: &mut [u8]) -> bool {
-        if states[id] != 0 {
-            return states[id] == 2;
-        }
-        states[id] = 1;
-        for &callee in &graph[id] {
-            if !visit(callee, graph, states) {
-                return false;
-            }
-        }
-        states[id] = 2;
-        true
-    }
     let mut entry = None;
     for (module_id, module) in graph.modules.iter().enumerate() {
         if module_id != graph.entry {
@@ -559,11 +546,8 @@ pub(crate) fn lower_with_owners(
     for function in functions.iter().chain([&entry]) {
         callables::validate_storage(function, &types)?;
     }
-    let mut states = vec![0; functions.len()];
-    for (id, diagnostic) in recursion_errors.into_iter().enumerate() {
-        if !visit(id, &call_graph, &mut states) {
-            return Err(diagnostic);
-        }
+    if let Some(id) = recursive_call_root(&call_graph) {
+        return Err(recursion_errors.swap_remove(id));
     }
     for initialization in &initializations {
         initialization.validate(
@@ -741,6 +725,34 @@ fn signature(
         returns: returns.unwrap_or(Type::None),
         method,
     })
+}
+
+fn recursive_call_root(graph: &[HashSet<usize>]) -> Option<usize> {
+    let mut states = vec![0; graph.len()];
+    let mut path = Vec::new();
+    for root in 0..graph.len() {
+        if states[root] != 0 {
+            continue;
+        }
+        states[root] = 1;
+        path.push((root, graph[root].iter()));
+        while let Some((id, callees)) = path.last_mut() {
+            let Some(&callee) = callees.next() else {
+                states[*id] = 2;
+                path.pop();
+                continue;
+            };
+            match states[callee] {
+                1 => return Some(root),
+                2 => {}
+                _ => {
+                    states[callee] = 1;
+                    path.push((callee, graph[callee].iter()));
+                }
+            }
+        }
+    }
+    None
 }
 
 fn error(source: &str, node: &impl Ranged, message: &str) -> String {
@@ -4595,6 +4607,17 @@ impl<'a> Checker<'a> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn long_call_chains_can_be_checked_with_or_without_a_cycle() {
+        use std::collections::HashSet;
+
+        let mut graph: Vec<_> = (1..=40_000).map(|id| HashSet::from([id])).collect();
+        graph.push(HashSet::new());
+        assert_eq!(super::recursive_call_root(&graph), None);
+        graph.last_mut().unwrap().insert(0);
+        assert_eq!(super::recursive_call_root(&graph), Some(0));
+    }
+
     #[test]
     fn literal_string_comprehensions_keep_inline_iteration() {
         crate::compile(
