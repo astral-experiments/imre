@@ -27,6 +27,9 @@ PROPERTY = ITEM + "    @property\n    def double(self) -> int:\n        return s
 ITEMS_METHOD = ITEM + "    def items(self, value: int) -> list[int]:\n        return [value]\n"
 
 REJECTED = {
+    "post_init_parameter": ITEM + "    def __post_init__(self, argument: int) -> None:\n        pass\n",
+    "post_init_return": ITEM + "    def __post_init__(self) -> int:\n        return 1\n",
+    "post_init_static": ITEM + "    @staticmethod\n    def __post_init__(self: int) -> None:\n        pass\n",
     "wrong_default": IMPORT + "@dataclass\nclass Item:\n    value: int = True\n",
     "wrong_field_assignment": ITEM + "item = Item(1)\nitem.value = False\n",
     "wrong_constructor": ITEM + "item = Item(True)\n",

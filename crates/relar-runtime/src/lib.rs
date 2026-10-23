@@ -378,6 +378,24 @@ fn output(write: impl FnOnce(&mut BufWriter<io::Stdout>) -> io::Result<()>) {
     }
 }
 
+/// Writes a UTF-8 line through the native standard-error handle.
+///
+/// # Safety
+/// The caller roots the immutable string until the write returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_stderr_line(text: *const Str) {
+    // SAFETY: the caller owns the text for this call.
+    let text = unsafe { &*text };
+    let mut writer = io::stderr().lock();
+    if writer
+        .write_all(text.as_bytes())
+        .and_then(|()| writer.write_all(b"\n"))
+        .is_err()
+    {
+        Error::new(Kind::OSError, "could not write standard error").raise();
+    }
+}
+
 /// Writes already encoded text without the general formatting machinery.
 fn output_bytes(value: &[u8]) {
     output(|writer| writer.write_all(value));

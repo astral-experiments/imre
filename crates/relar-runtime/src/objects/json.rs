@@ -19,6 +19,8 @@ use super::words::{OwnedWord, WordKind, Words};
 use super::{Error, Int, Kind, Object, Storage, StorageCell, Str, finish};
 
 mod encode;
+pub(super) mod readonly;
+mod syntax;
 mod toml;
 
 const INTEGER: u32 = 1;

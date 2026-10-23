@@ -15,6 +15,18 @@ from imports import require_success, run, write_files
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "module_values"
 ERRORS = {"initialization_error": "ValueError", "entry_error": "ValueError"}
 REJECTED = {
+    "entry_call_before_definition": {"main.py": "VALUE = make()\ndef make() -> int:\n    return 1\n"},
+    "entry_early_read": {"main.py": "def read() -> int:\n    return SECOND\nFIRST = read()\nSECOND = 2\ndef last() -> None:\n    pass\n"},
+    "early_class_entry_enum": {
+        "main.py": 'from enum import StrEnum\ndef read() -> str:\n    return Later.ITEM.value\nVALUE = read()\nclass Later(StrEnum):\n    ITEM = "item"\nprint(VALUE)\n',
+    },
+    "early_class_imported_comprehension": {
+        "library.py": "from dataclasses import dataclass\ndef read() -> list[bool]:\n    return [isinstance(item, Later) for item in range(2)]\nVALUE = read()\n@dataclass\nclass Later:\n    value: int\n",
+    },
+    "early_class_imported_pattern": {
+        "library.py": "from dataclasses import dataclass\ndef matches(item: int) -> bool:\n    match item:\n        case Later():\n            return True\n    return False\ndef relay() -> bool:\n    return matches(1)\nVALUE = relay()\n@dataclass\nclass Later:\n    value: int\n",
+    },
+    "entry_import_after_value": {"main.py": "VALUE = 1\nimport os\ndef last() -> None:\n    pass\n"},
     "duplicate_binding": {"library.py": "VALUE = 1\nVALUE = 2\n"},
     "annotation_without_initializer": {"library.py": "VALUE: int\n"},
     "direct_early_read": {"library.py": "FIRST = SECOND\nSECOND = 2\n"},
@@ -145,6 +157,8 @@ def main() -> None:
             actual = run([compiler, "check", str(case / "main.py")], temporary)
             assert actual.returncode != 0, (name, actual.stdout, actual.stderr)
             assert "panicked" not in actual.stderr, (name, actual.stderr)
+            if name.startswith("early_class_"):
+                assert "references a class before it is available" in actual.stderr, actual.stderr
             checks += 1
     print(
         f"Passed {checks} module value checks ({len(REJECTED)} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})"

@@ -19,7 +19,7 @@ use super::files::{decode_utf8_text, os_error};
 use super::mappings::{relar_dict_contains, relar_dict_new, relar_dict_set};
 use super::records::{RecordDescriptor, relar_record_new};
 use super::words::WordKind;
-use super::{Bytes, Object, Storage, Str, acquire_rc, fail, object};
+use super::{Bytes, Int, Object, Storage, Str, acquire_rc, fail, object};
 
 #[cfg(target_os = "linux")]
 unsafe extern "C" {
@@ -72,21 +72,29 @@ impl ProcessError {
     }
 }
 
+enum Deadline {
+    Integer(Int),
+    Float(f64),
+}
+
 /// A deadline failure owns the original argv and undecoded pipe snapshots.
 /// Empty streams distinguish an observed EOF from no data observed before expiry.
 pub(super) struct TimeoutError {
     cmd: Rc<Object>,
-    timeout: f64,
+    timeout: Deadline,
     stdout: Option<Rc<Bytes>>,
     stderr: Option<Rc<Bytes>>,
 }
 
 impl TimeoutError {
-    /// Fields use exact word kinds [5, 7, 264, 264, 264].
+    /// The compiler proves the numeric field's exact kind at every read.
     pub(super) fn field(&self, field: u32) -> usize {
         match field {
             0 => Rc::into_raw(self.cmd.clone()) as usize,
-            1 => self.timeout.to_bits() as usize,
+            1 => match &self.timeout {
+                Deadline::Integer(seconds) => seconds.clone().into_raw(),
+                Deadline::Float(seconds) => seconds.to_bits() as usize,
+            },
             2 | 4 => self
                 .stdout
                 .as_ref()
@@ -106,10 +114,11 @@ impl TimeoutError {
         unsafe {
             super::values::write_repr(&mut cmd, Rc::as_ptr(&self.cmd) as usize, WordKind::new(5));
         }
-        Str::from(format!(
-            "Command '{cmd}' timed out after {} seconds",
-            crate::floats::render(self.timeout)
-        ))
+        let seconds = match &self.timeout {
+            Deadline::Integer(seconds) => Str::from(seconds.big().to_string()),
+            Deadline::Float(seconds) => crate::floats::render(*seconds),
+        };
+        Str::from(format!("Command '{cmd}' timed out after {seconds} seconds"))
     }
 }
 
@@ -466,11 +475,15 @@ enum Captured {
 
 /// Matches POSIX communicate: poll fairly, snapshot before post-deadline reads,
 /// then kill/reap the direct child without an unbounded post-timeout pipe drain.
-fn capture_timeout(child: Child, timeout: f64) -> Result<Captured> {
+fn capture_timeout(child: Child, deadline: &Deadline) -> Result<Captured> {
     let started = Instant::now();
     let mut child = ChildGuard {
         child,
         reaped: false,
+    };
+    let timeout = match deadline {
+        Deadline::Integer(seconds) => crate::floats::int_to_float(seconds)?,
+        Deadline::Float(seconds) => *seconds,
     };
     let mut stdout = child
         .child
@@ -698,13 +711,79 @@ fn capture(child: Child) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
     Ok((status, stdout, stderr))
 }
 
+/// Borrows the POSIX environment, which the language runtime never mutates.
+fn native_environ() -> *const *const libc::c_char {
+    // SAFETY: the OS stores a live null-terminated environment for this process.
+    unsafe {
+        #[cfg(target_os = "macos")]
+        {
+            (*libc::_NSGetEnviron()).cast()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            environ
+        }
+    }
+}
+
+/// # Safety
+/// The array (possibly null) and its C strings must be live and immutable for `'a`.
+unsafe fn environment_entries<'a>(
+    mut entries: *const *const libc::c_char,
+) -> impl Iterator<Item = (&'a [u8], &'a [u8])> {
+    std::iter::from_fn(move || {
+        loop {
+            // SAFETY: each live entry has a successor; the terminating pointer is null.
+            let entry = unsafe { entries.as_ref().copied()? };
+            if entry.is_null() {
+                return None;
+            }
+            // SAFETY: the non-null C string and the next pointer belong to the array.
+            let bytes = unsafe {
+                entries = entries.add(1);
+                CStr::from_ptr(entry).to_bytes()
+            };
+            if let Some(split) = bytes.iter().position(|&byte| byte == b'=') {
+                return Some((&bytes[..split], &bytes[split + 1..]));
+            }
+        }
+    })
+}
+
+/// Returns the first matching value or the explicit string default.
+///
+/// # Safety
+/// `key` and `default` are rooted strings. Success transfers a single owned string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_environ_get(key: *const Str, default: *const Str) -> *const Str {
+    // SAFETY: environment entries live until the call returns and the caller owns the key.
+    let found = unsafe {
+        environment_entries(native_environ()).find(|(name, _)| *name == (*key).as_bytes())
+    };
+    if let Some((_, bytes)) = found {
+        let result = std::str::from_utf8(bytes)
+            .map(|text| Rc::into_raw(Rc::new(Str::from(text))))
+            .map_err(|_| {
+                Error::new(
+                    Kind::UnicodeDecodeError,
+                    "environment contains non-UTF-8 text",
+                )
+            });
+        finish(result, std::ptr::null())
+    } else {
+        // SAFETY: return an independent owner of the live default.
+        unsafe { Rc::increment_strong_count(default) };
+        default
+    }
+}
+
 /// Copies native entries in order, preserving empty names and the first duplicate.
 /// Entries without '=' are ignored, as in CPython's POSIX environment snapshot.
 ///
 /// # Safety
 /// `entries` is null or a live null-terminated array of C-string pointers. The array
 /// and strings remain immutable until this function returns.
-unsafe fn environment_snapshot(mut entries: *const *const libc::c_char) -> Result<Rc<Object>> {
+unsafe fn environment_snapshot(entries: *const *const libc::c_char) -> Result<Rc<Object>> {
     // SAFETY: new transfers one fresh exact dict[str, str] owner.
     let result = unsafe { Rc::from_raw(relar_dict_new(3, 3)) };
     let decode = |bytes: &[u8]| {
@@ -715,25 +794,12 @@ unsafe fn environment_snapshot(mut entries: *const *const libc::c_char) -> Resul
             )
         })
     };
-    while !entries.is_null() {
-        // SAFETY: the live array has a terminating null pointer.
-        let entry = unsafe { entries.read() };
-        if entry.is_null() {
-            break;
-        }
-        // SAFETY: this nonnull entry is a terminated C string, and the following
-        // array element exists until the terminating null entry is reached.
-        let bytes = unsafe {
-            entries = entries.add(1);
-            CStr::from_ptr(entry).to_bytes()
-        };
-        let Some(split) = bytes.iter().position(|&byte| byte == b'=') else {
-            continue;
-        };
-        let key = Rc::new(decode(&bytes[..split])?);
+    // SAFETY: the caller roots the terminated environment for this iteration.
+    for (name, value) in unsafe { environment_entries(entries) } {
+        let key = Rc::new(decode(name)?);
         // SAFETY: both the new dictionary and exact string key remain rooted.
         if unsafe { relar_dict_contains(Rc::as_ptr(&result), Rc::as_ptr(&key) as usize) } == 0 {
-            let value = Rc::new(decode(&bytes[split + 1..])?);
+            let value = Rc::new(decode(value)?);
             // SAFETY: insertion acquires both rooted strings; no language alias
             // can observe this new acyclic dictionary before it is complete.
             unsafe {
@@ -755,11 +821,7 @@ pub extern "C" fn relar_environ_copy() -> *const Object {
     // SAFETY: the OS supplies a terminated environment, and this standalone runtime
     // has no environment mutation or language threads. Rust vars_os omits empty
     // names, so the raw POSIX entries are required for Python-compatible copies.
-    let result = unsafe {
-        #[cfg(target_os = "macos")]
-        let environ = (*libc::_NSGetEnviron()).cast();
-        environment_snapshot(environ)
-    };
+    let result = unsafe { environment_snapshot(native_environ()) };
     finish(result.map(Rc::into_raw), std::ptr::null())
 }
 
@@ -800,7 +862,41 @@ pub unsafe extern "C" fn relar_subprocess_run_timeout(
     descriptor: *const RecordDescriptor,
 ) -> *mut usize {
     // SAFETY: the nullable timeout and all process inputs remain rooted.
-    unsafe { run_process(args, cwd, env, check, timeout.as_ref().copied(), descriptor) }
+    unsafe {
+        run_process(
+            args,
+            cwd,
+            env,
+            check,
+            timeout.as_ref().copied().map(Deadline::Float),
+            descriptor,
+        )
+    }
+}
+
+/// # Safety
+/// Process inputs follow the ordinary run contract. `timeout` is a rooted
+/// integer word. The deadline retains its exact original value if it expires.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_subprocess_run_timeout_int(
+    args: *const Object,
+    cwd: *const Str,
+    env: *const Object,
+    check: u32,
+    timeout: usize,
+    descriptor: *const RecordDescriptor,
+) -> *mut usize {
+    // SAFETY: the caller roots all arguments and the exact integer across this call.
+    unsafe {
+        run_process(
+            args,
+            cwd,
+            env,
+            check,
+            Some(Deadline::Integer(Int::clone(&Int::borrow(timeout)))),
+            descriptor,
+        )
+    }
 }
 
 /// Shares launch validation and successful records without changing no-timeout IO.
@@ -809,7 +905,7 @@ unsafe fn run_process(
     cwd: *const Str,
     env: *const Object,
     check: u32,
-    timeout: Option<f64>,
+    timeout: Option<Deadline>,
     descriptor: *const RecordDescriptor,
 ) -> *mut usize {
     // SAFETY: only independent native strings escape the exact input storage.
@@ -865,7 +961,7 @@ unsafe fn run_process(
         .spawn(cwd.as_ref())
         .map_err(os_error)
         .and_then(|child| {
-            if let Some(timeout) = timeout {
+            if let Some(timeout) = &timeout {
                 capture_timeout(child, timeout)
             } else {
                 capture(child)
@@ -1231,7 +1327,9 @@ mod tests {
         let stdout = child.stdout.as_mut().unwrap();
         stdout.read_exact(&mut ready).unwrap();
         assert_eq!(ready, [b'!']);
-        let Ok(Captured::TimedOut(Some(stdout), Some(stderr))) = capture_timeout(child, 1.0) else {
+        let Ok(Captured::TimedOut(Some(stdout), Some(stderr))) =
+            capture_timeout(child, &Deadline::Float(1.0))
+        else {
             panic!("expected a timeout with both output streams");
         };
         assert_eq!(stdout.len(), 262_144);

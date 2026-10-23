@@ -61,7 +61,15 @@ This infers `checksum(str) -> int`. Every function has one exact signature, and 
 
 `sum(source[, start])`, including `start=`, consumes exact integers and defaults to zero. Its source can be any supported concrete iterable whose yielded values are integers, including fixed tuples such as `divmod(...)`. An immediate generator may also yield exact booleans. For example, `sum(file.passes for file in files)` counts the true values. The generator acquires its outer iterator before `start` runs, then evaluates each projection once. The start and the result are exact, arbitrary-precision integers, including for an empty generator.
 
+`map(str, source)` supports scalar values, paths, and records with a checked string conversion. Conversion happens as each item is pulled.
+
 An immediate `map(int, source)` converts each item using the ordinary checked `int` conversion. Inputs may yield exact integers, floats, booleans, or strings. Conversion proceeds lazily as the enclosing consumer iterates; input expressions, iterator creation, the optional sum start, and conversion failures retain Python evaluation order. Mutable sources remain live and keep the existing dictionary/set mutation checks. User callbacks follow the exact callable contract below. A map cannot escape into storage, and user-defined iteration protocols remain unsupported.
+
+`itertools.chain` accepts a fixed number of positional iterables with one exact
+element type. A loop, comprehension, or immediate consumer can use the chain.
+It evaluates source expressions left to right, then acquires each iterator on
+reaching its source. A second `Path.glob` sees directory changes made while
+consuming the first glob.
 
 `itertools.groupby(source, key=...)` groups consecutive items with equal keys. In a
 `for key, group` loop, the first statement must assign `list(group)` to a separate
@@ -140,6 +148,19 @@ A generator expression evaluates its leftmost iterable and acquires that iterato
 
 ## Typed JSON boundaries
 
+`json.loads(text)` accepts a Unicode string containing a JSON array. Iteration
+preserves input order. A function can receive a decoded object as
+`dict[str, Any]` and read nested literal string keys. Selecting into an
+annotated `str`, `int`, or another object checks that exact type at the read,
+including the nullable forms. Integers retain their full precision. A missing
+key raises `KeyError`; a value of the wrong type raises `TypeError`. Duplicate
+keys use the last value. Comparing a selected value with a string literal
+supports filters such as `if row["severity"] == "major"`. The object view is
+read-only. Dynamic keys, decoder options, and general `Any` annotations are
+outside this boundary. Malformed JSON raises `json.JSONDecodeError` (a
+`ValueError`), and nesting is limited to 128 containers. Strings use Unicode
+scalar values, and numeric literals follow the standard JSON grammar.
+
 `from relar.json import decode, encode` exposes explicit Relar APIs. `decode(text, Schema)` takes a string and a statically resolved record class, `list[T]`, or `dict[str, T]`, returning that exact type. Scalar and optional roots are not accepted by the decoder. Import aliases and first-party re-exports preserve the intrinsic identity. The native decoder constructs existing typed records, lists, and dictionaries directly, without exposing unknown values or `Any`.
 
 ```python
@@ -174,6 +195,14 @@ Integer fields accept integer tokens of arbitrary precision, excluding booleans,
 The checked CPython implementation lives in `stdlib/relar/json.py`. Add `stdlib` to Python's import path when running the same source, for example `PYTHONPATH=stdlib python3 program.py` from this repository. The native compiler recognizes the sealed import without executing that module. It rejects a first-party file that shadows the intrinsic namespace.
 
 ## Typed TOML boundary
+
+`tomllib.load(stream).keys()` accepts a binary file at its current position. It
+reads through EOF and validates the entire document under the TOML 1.0 grammar
+used by CPython 3.14. The result can be annotated `collections.abc.Set[str]`.
+It supports string membership, length, truth testing, and iteration in source
+insertion order after the stream is closed. Invalid UTF-8 raises
+`UnicodeDecodeError`. Syntax errors raise `tomllib.TOMLDecodeError`, a
+`ValueError` subclass. The native reader bounds TOML nesting at 64 containers.
 
 `from relar.toml import decode` provides `decode(text, Schema)` for complete TOML 1.1 documents. The schema is a statically resolved record class or `dict[str, T]`; TOML's document root is always a table. Import aliases, module imports, and first-party re-exports work as they do for typed JSON. The result uses ordinary concrete records and containers, with no exposed dynamic TOML value type.
 
@@ -275,6 +304,14 @@ def first_or_zero(values: list[int] | None) -> int:
 ```
 
 A true optional local is narrowed to its payload. A false optional number or container may still be present, so falsity does not prove `None`; use an explicit None check when that distinction matters. Truth testing never changes storage requirements: assigning an integer or container to a `bool` annotation still fails.
+
+A loop can search a fixed tuple of up to eight differently typed fields. The tuple evaluates once before the first test. Relar checks the fresh loop variable at the corresponding field type each time.
+
+```python
+for group in (old_diagnostics, new_diagnostics, expected_errors):
+    if group:
+        return group[0].location.path
+```
 
 ## Assignment and container expansion
 
@@ -378,7 +415,7 @@ String loops, comprehensions, and loop-head `enumerate` capture the original imm
 
 For example, `import package.operations` binds `package`, `import package.operations as operations` binds the child module, and `from package.operations import solve as run` binds the same function under `run`. Module-qualified calls and imported calls resolve to their defining module's namespace. Imports precede executable initialization. Imported-module definitions may follow value assignments; calls made during initialization must only reach definitions and globals already initialized at that point, including through methods, constructors, and comprehension helpers. Fixed module, definition, and exported value bindings cannot be reassigned or shadowed by parameters or locals.
 
-Imported modules, including package `__init__.py` files, run their typed top-level code once before their importer continues. Dependencies initialize in import order, and each initializer follows source order. Direct unconditional `NAME = expression` and `NAME: T = expression` assignments create typed exported value bindings. Aliases and re-exports share the same storage, so mutations to an imported dictionary remain visible in the defining module. Chained, unpacked, or conditional initializer locals are not exported. The entry's ordinary top-level variables remain entry locals. Initialized global owners are released on normal and exceptional process exits.
+Imported modules, including package `__init__.py` files, run their typed top-level code once before their importer continues. Dependencies initialize in import order, and each initializer follows source order. Direct unconditional `NAME = expression` and `NAME: T = expression` assignments create typed exported value bindings. Aliases and re-exports share the same storage, so mutations to an imported dictionary remain visible in the defining module. Chained, unpacked, or conditional initializer locals are not exported. A single-name assignment in the entry module before a later function or class creates a fixed global. Its initializer runs once in source order. Subsequent executable statements use entry locals. A module can import postponed annotations and read its own module docstring through `__doc__`. Initialized global owners are released on normal and exceptional process exits.
 
 An optional `if __name__ == "__main__":` guard without an `else` is supported. Every loaded module is type-checked and lowered for validation, including unused functions and inactive guards. The fixed `__name__` string is `"__main__"` in the entry and the qualified module name in imported code.
 
@@ -456,7 +493,7 @@ for path in sorted(root.glob("*.json"), key=lambda path: path.name):
 
 `mkdir(mode=0o777, parents=False, exist_ok=False)` creates a directory. The mode is an exact integer within the signed C-int range; larger values raise `OverflowError`. Boolean options require exact booleans. The process umask applies, and missing parents use mode `0o777` independently of the leaf mode. `exist_ok=True` accepts an existing directory, including a symlink to one, without changing its permissions. `unlink(missing_ok=False)` removes a file or symlink; its flag suppresses only `FileNotFoundError`. `rmdir()` removes an empty directory. These methods return `None` and preserve their normal filesystem error categories.
 
-`is_absolute()` checks the lexical anchor without accessing the filesystem. `resolve(strict=False)` returns a new absolute path, resolves symbolic links, and removes `..` components in filesystem order. Its `strict` argument is an exact boolean and may be positional or named. With `strict=True`, missing components, non-directory traversal, permission failures, and symlink loops retain their operating-system exception categories. The default resolves as far as possible, appending unresolved components while still normalizing parents. Acyclic symlink chains are not limited by the kernel's per-system-call symlink count. Argument evaluation precedes filesystem access. Resolution requires UTF-8 paths and symlink targets; `absolute`, `relative_to`, user expansion, and general path protocols remain unsupported.
+`absolute()` prefixes a relative path with the working directory and preserves symlinks and `..` components. `is_absolute()` checks the lexical anchor without accessing the filesystem. `resolve(strict=False)` returns a new absolute path, resolves symbolic links, and removes `..` components in filesystem order. Its `strict` argument is an exact boolean and may be positional or named. With `strict=True`, missing components, non-directory traversal, permission failures, and symlink loops retain their operating-system exception categories. The default resolves as far as possible, appending unresolved components while still normalizing parents. Acyclic symlink chains are not limited by the kernel's per-system-call symlink count. Argument evaluation precedes filesystem access. Resolution requires UTF-8 paths and symlink targets; `absolute`, `relative_to`, user expansion, and general path protocols remain unsupported.
 
 `replace(target)` accepts a string or native path, performs POSIX replacement, and returns the destination `Path`. Relative targets refer to the process working directory. The original path value remains unchanged. A string target reaches the filesystem before its returned path is normalized, so a trailing slash retains its operating-system meaning. Existing files or empty directories can be replaced, subject to normal type and filesystem restrictions; cross-filesystem replacement fails. The rename is atomic on one filesystem, but does not promise durable storage. All mutation arguments evaluate in source order before the operation; positional and keyword calls follow the corresponding Python signatures.
 
@@ -507,11 +544,36 @@ Final reference release closes a file best-effort without callbacks or a new pen
 
 Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueError`. Embedded NULs in paths raise `ValueError`. Missing files, permission failures, directories opened as files, and non-directory path components use `FileNotFoundError`, `PermissionError`, `IsADirectoryError`, and `NotADirectoryError`; exclusive-create collisions use `FileExistsError`, also an `OSError`; other operating-system errors use `OSError`. Runtime-generated message text is not a CPython compatibility promise.
 
-`sys.argv` is one lazily initialized mutable `list[str]`, shared across aliases and modules. Its first element identifies the invoked native executable, corresponding to the script identity under CPython. Element writes and list mutation are supported; rebinding the module attribute or imported name is not. Native arguments must be valid UTF-8. Invalid Unix argument bytes raise `UnicodeDecodeError` when the list is first accessed; CPython's surrogateescaped strings are outside this runtime's string domain. Programs that do not use `sys.argv` emit no argument initialization or shutdown calls.
+`sys.argv` is one lazily initialized mutable `list[str]`, shared across aliases and modules. Its first element identifies the invoked native executable, corresponding to the script identity under CPython. Element writes and list mutation are supported; rebinding the module attribute or imported name is not. Native arguments must be valid UTF-8. Invalid Unix argument bytes raise `UnicodeDecodeError` when the list is first accessed; CPython's surrogateescaped strings are outside this runtime's string domain. Programs that never read process arguments emit no argument initialization or shutdown calls.
+
+## Command-line options
+
+A function can declare an `argparse.ArgumentParser`, add literal long options in order, and return the result of `parse_args()`. Relar derives a read-only namespace with a concrete field for each option. Hyphens become underscores in field names. A choice of strings gives the field a string `Literal` type. A value option without a default or `required=True` produces an optional field.
+
+```python
+from argparse import ArgumentParser
+from pathlib import Path
+
+def options():
+    parser = ArgumentParser(description="Check a file")
+    parser.add_argument("--input", type=Path, required=True)
+    parser.add_argument("--mode", choices=["brief", "full"], default="brief")
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--verbose", action="store_true")
+    return parser.parse_args()
+
+args = options()
+if args.output:
+    args.output.write_text(args.input.read_text())
+```
+
+The accepted declarations use one ASCII long option per `add_argument`, `str` or `Path` conversion, a matching literal default, `None`, `required`, `nargs="+"`, or `action="store_true"`. A list or tuple supplies constant string choices. Constructor options include a literal `prog`, a literal description or `__doc__`, and `RawDescriptionHelpFormatter`. In the default configuration the displayed program name is the entry script's basename. The parser reads the current `sys.argv[1:]` and handles repeated options, unique long-option abbreviations, and `--`. Help layout and coloring follow CPython 3.14. Help and usage errors follow the native exception cleanup path and raise catch-only `SystemExit` with status 0 or 2.
+
+Keep the builder local, with its declarations immediately followed by an assignment or return of `parse_args()`. Positionals, user-defined actions, subparsers, and dynamically assembled options are outside this grammar.
 
 ## Synchronous subprocesses
 
-The runtime supports a sealed `subprocess.run` boundary with exact `list[str]` arguments. `capture_output=True` and `encoding="utf-8"` are required literals; optional `text=True` must also be literal. `check` is a boolean expression, defaulting to false. `cwd` accepts a string, native `Path`, or a nullable form of either, and `env` accepts `dict[str, str]` or `None`. Arguments may be positional or named `args`; the other parameters are keyword-only. All supplied expressions evaluate once in source order before launching the child, even when keyword order differs from parameter order.
+The runtime supports a sealed `subprocess.run` boundary with exact `list[str]` arguments. Capture requires literal `capture_output=True` and either `text=True` or `encoding="utf-8"`. Both forms decode strict UTF-8. `check` is a boolean expression, defaulting to false. `cwd` accepts a string, native `Path`, or a nullable form of either, and `env` accepts `dict[str, str]` or `None`. Arguments may be positional or named `args`; the other parameters are keyword-only. All supplied expressions evaluate once in source order before launching the child, even when keyword order differs from parameter order.
 
 ```python
 import os
@@ -527,7 +589,7 @@ result = subprocess.run(
     check=True,
     cwd=Path("."),
     env=environment,
-    timeout=15.0,
+    timeout=15,
 )
 print(result.stdout)
 ```
@@ -538,9 +600,11 @@ The result has the exact type `subprocess.CompletedProcess[str]`; bare `Complete
 
 `check=True` or a failing `check_returncode()` raises the catch-only `subprocess.CalledProcessError`, which matches `subprocess.SubprocessError` and `Exception`. It exposes read-only `returncode: int`, `cmd: list[str]`, and `stdout`, `output`, and `stderr` strings; `stdout` and `output` expose the same capture. `cmd` aliases the original argument list, and the diagnostic reflects its current contents. These fixed getters raise `AttributeError` on unrelated exception instances. Missing executables and invalid working directories retain their ordinary operating-system error categories; they are not subprocess status errors.
 
+`os.environ.get(key, default)` reads one environment variable. Both arguments must be strings. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
+
 `os.environ.copy()` returns an independent `dict[str, str]` snapshot. Passing a dictionary as `env` replaces the child's environment; use a snapshot to preserve inherited variables before making overrides. `env=None` inherits the existing environment. Snapshotting undecodable Unix names or values raises `UnicodeDecodeError`; surrogateescaped strings remain outside Relar's string domain. NUL-containing arguments, directories, or environment entries, and environment keys containing `=`, raise `ValueError`. Relar accepts an empty environment name through `execve`, as does CPython's fork/exec path. CPython's `posix_spawn` path raises `ValueError` for that name.
 
-The optional `timeout` keyword accepts exact `float | None` seconds; use `15.0`, not `15`. `None` waits without a deadline. A deadline expiry kills and reaps the direct child, closes the capture pipes, and raises catch-only `subprocess.TimeoutExpired`, which matches `SubprocessError` and `Exception`. Its read-only fields are `cmd: list[str]`, `timeout: float`, and `stdout`, `output`, and `stderr: bytes | None`. Partial captures remain bytes even in text mode, so incomplete UTF-8 is preserved. During pipe capture, an observed empty stream is `b""`; a stream not observed before the deadline is `None`. If both pipes close and waiting for the child itself expires, all capture fields are `None`, even after earlier reads, matching CPython. The runtime does not wait indefinitely for descendants holding inherited pipes. This API terminates the direct child and does not manage a process group.
+The optional `timeout` keyword accepts signed integer literals or expressions of exact type `float | None` in seconds. `None` waits without a deadline. A deadline expiry kills and reaps the direct child, closes the capture pipes, and raises catch-only `subprocess.TimeoutExpired`, which matches `SubprocessError` and `Exception`. Its read-only fields include `cmd: list[str]` and `stdout`, `output`, and `stderr: bytes | None`. The exception retains the original integer or float for its message and `.timeout` field. A program can read `.timeout` when all its deadline sites agree on a numeric type. Partial captures remain bytes even in text mode, so incomplete UTF-8 is preserved. During pipe capture, an observed empty stream is `b""`; a stream not observed before the deadline is `None`. If both pipes close and waiting for the child itself expires, all capture fields are `None`, even after earlier reads, matching CPython. The runtime does not wait indefinitely for descendants holding inherited pipes. This API terminates the direct child and does not manage a process group.
 
 An `except subprocess.TimeoutExpired as error` binding has these exact field types. Stored generic exception values can be narrowed with `isinstance(error, subprocess.TimeoutExpired)` before accessing timeout fields. `cmd` retains the original list and `stdout` aliases `output`. Launch precedes timeout validation, so a missing executable takes precedence over an invalid timeout. Zero and negative timeouts, including negative infinity, launch the child and expire immediately; NaN raises `ValueError`, while positive infinity or an unrepresentable polling duration raises `OverflowError`. Exceptions can be retained and re-raised through the existing sealed exception storage; constructing or annotating a `TimeoutExpired` value directly is unsupported.
 
@@ -651,7 +715,7 @@ print(snapshot.count)
 
 Dataclass fields may use exact scalar literal defaults or `field(default_factory=list)`, `dict`, or `set`. Each omitted factory field gets a fresh container; explicit arguments retain their identity. Optional container factories preserve the distinction between an omitted value and explicit `None`. `kw_only` works at class and field level, including a field override. Fields also accept `compare` and `repr` flags. Flags require literal booleans; custom factories and mutable literal defaults are rejected.
 
-Class options `init`, `eq`, `repr`, `frozen`, `kw_only`, and `slots` are supported. A mutable dataclass may retain an explicit initializer under the ordinary constructor rules; `init=False` requires one. Both values of `slots` keep the language's fixed-layout contract. Frozen records reject field assignments at compile time; their referenced containers remain mutable. Explicit frozen initializers, `__post_init__`, `InitVar`, `ClassVar`, `field(init=False)`, custom metadata, generated ordering, custom hashes, and weak-reference slots are unsupported. `match_args` is accepted without adding positional class patterns or runtime `__match_args__` access. Frozen records do not add class-valued dictionary keys or set members.
+Class options `init`, `eq`, `repr`, `frozen`, `kw_only`, and `slots` are supported. A mutable dataclass may retain an explicit initializer under the ordinary constructor rules; `init=False` requires one. Both values of `slots` keep the language's fixed-layout contract. Frozen records reject field assignments at compile time; their referenced containers remain mutable. The generated initializer calls an instance method `__post_init__(self) -> None` after assigning every field and default factory. An explicit initializer controls its own calls. Explicit frozen initializers, `InitVar`, `ClassVar`, `field(init=False)`, custom metadata, generated ordering, custom hashes, and weak-reference slots are unsupported. `match_args` is accepted without adding positional class patterns or runtime `__match_args__` access. Frozen records do not add class-valued dictionary keys or set members.
 
 Generated equality follows modern CPython: an object equals itself; otherwise instances of the same dataclass compare selected fields in declaration order. `eq=False` preserves identity equality. Distinct records containing the same scalar NaN compare unequal. Compared container fields containing floats are rejected because native unboxed floats cannot preserve Python container NaN identity; use `field(compare=False)` or `@dataclass(eq=False)` for such storage. Nested record fields preserve their own identity and equality behavior.
 
@@ -666,9 +730,11 @@ Fixed classes reserve field names beginning with `__`. Their supported special m
 `list[T]` has one concrete element type, such as `list[str]`, `list[Counter]`, or `list[list[int]]`. Types are invariant: an existing `list[str]` cannot become `list[str | None]` through assignment or a call. Every append and indexed write checks the exact element type. Repetition copies references to the same elements, so `[row] * 3` shares `row` across all three positions. `list[int]` retains its specialized tagged-integer storage and runtime calls; other lists use owned runtime slots.
 
 An unquoted `Sequence[T]` parameter from `collections.abc` or `typing` accepts
-an exact `list[T]`. Its body may iterate the parameter, call `len`, or read
-by index or slice. It shares the caller’s list, so mutations through the
-caller’s existing aliases are visible during iteration.
+an exact `list[T]` or an omitted `()` default. Its body may iterate the
+parameter, apply `map(str, parameter)`, or call `len`. Parameters without a
+tuple default also support read-only indexing and slicing.
+It shares the caller’s list, so mutations through existing aliases remain visible.
+A function returning `Sequence[T]` can return an exact `list[T]`.
 
 `dict[K, V]` accepts exact `int`, `str`, `bytes`, `Path`, or immutable fixed-tuple keys and one concrete value type. Tuple keys may recursively contain `int`, `bool`, `str`, `bytes`, `Path`, `None`, and nullable forms of those immutable fields. Floats, records, mutable containers, and the `str | bytes` union are excluded from keys. Keys use value equality under one exact type; booleans cannot stand in for integer keys, and a bare `bool` is not a key type. Nonempty literals infer these types from their first entry; `{}` and `dict()` require a concrete contextual type. Duplicate keys keep the first insertion position and the last value. Replacing a value keeps its position, while deletion and reinsertion move the key to the end. `mapping[key]`, assignment, `del mapping[key]`, integer augmented assignment, `len`, and single `in`/`not in` comparisons are supported. Missing required reads and deletes report `KeyError`.
 

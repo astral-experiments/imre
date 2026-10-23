@@ -41,7 +41,7 @@ fn is_normalized(path: &str) -> bool {
 
 /// POSIX normalization removes empty and dot components while retaining `..`
 /// and exactly two leading slashes, which may have implementation-defined meaning.
-fn normalize(path: &str) -> Str {
+pub(super) fn normalize(path: &str) -> Str {
     let root = if path.starts_with("//") && !path.starts_with("///") {
         "//"
     } else if path.starts_with('/') {
@@ -357,6 +357,29 @@ pub unsafe extern "C" fn relar_path_is_absolute(path: *const Object) -> u32 {
             .0
             .with(|storage| u32::from(storage.path().starts_with('/')))
     }
+}
+
+/// Anchors a relative path to the working directory, preserving symlinks and `..`.
+///
+/// # Safety
+/// The input remains rooted for the call. Success returns an owned path.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_absolute(path: *const Object) -> *const Object {
+    // SAFETY: the input stays live while its immutable spelling is borrowed.
+    let result = unsafe {
+        object(path).0.with(|storage| {
+            if storage.path().starts_with('/') {
+                Rc::increment_strong_count(path);
+                return Ok(path);
+            }
+            let cwd = std::env::current_dir().map_err(files::os_error)?;
+            Ok(new_path(join(
+                &path_utf8(cwd.into_os_string())?,
+                storage.path(),
+            )))
+        })
+    };
+    finish(result, std::ptr::null())
 }
 
 /// # Safety

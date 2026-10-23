@@ -131,6 +131,16 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(value)?;
+        if matches!(
+            self.types.payload(value.ty).unwrap_or(value.ty),
+            Type::JsonValue | Type::JsonObject
+        ) {
+            return Err(error(
+                self.source,
+                call,
+                "isinstance on readonly JSON is unsupported; select into an exact type",
+            ));
+        }
         let classes = self.instance_types(classes)?;
         Ok(Expr {
             ty: Type::Bool,

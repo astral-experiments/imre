@@ -44,6 +44,7 @@ impl Type {
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
+            | Self::StringKeys
             | Self::Iterator
             | Self::Exception
             | Self::TimeoutExpired
@@ -51,6 +52,8 @@ impl Type {
             | Self::CompletedProcess
             | Self::TextIO
             | Self::RegexPattern
+            | Self::JsonValue
+            | Self::JsonObject
             | Self::RegexMatch
             | Self::BinaryIO
             | Self::Tuple(_) => "ptr",
@@ -71,6 +74,7 @@ impl Type {
             | Self::List(_)
             | Self::Dict(_)
             | Self::Set(_)
+            | Self::StringKeys
             | Self::Iterator
             | Self::Exception
             | Self::TimeoutExpired
@@ -78,6 +82,8 @@ impl Type {
             | Self::CompletedProcess
             | Self::TextIO
             | Self::RegexPattern
+            | Self::JsonValue
+            | Self::JsonObject
             | Self::RegexMatch
             | Self::BinaryIO
             | Self::Tuple(_) => "null",
@@ -474,12 +480,15 @@ impl Emitter<'_, '_> {
             Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
+            | Type::StringKeys
             | Type::Iterator
             | Type::Exception
             | Type::TimeoutExpired
             | Type::Path
             | Type::TextIO
             | Type::RegexPattern
+            | Type::JsonValue
+            | Type::JsonObject
             | Type::RegexMatch
             | Type::BinaryIO => "object",
             Type::Float | Type::Bool | Type::StrEnum(_) | Type::None => return,
@@ -2842,10 +2851,13 @@ impl Emitter<'_, '_> {
             Type::ListInt
             | Type::Dict(_)
             | Type::Set(_)
+            | Type::StringKeys
             | Type::Iterator
             | Type::Optional(_)
             | Type::Callable(_)
             | Type::RegexPattern
+            | Type::JsonValue
+            | Type::JsonObject
             | Type::RegexMatch
             | Type::Union(_) => {
                 unreachable!("container comparison is rejected by the frontend")
@@ -3136,6 +3148,16 @@ impl Emitter<'_, '_> {
             }
             Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
+            Builtin::JsonLoads => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call ptr @relar_json_loads(ptr {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::JsonSelect(path) => self.json_select(path, returns, &args),
+            Builtin::TomlKeys => self.call("relar_toml_keys", Type::StringKeys, &[&args[0].value]),
             Builtin::JsonDecode(schema) | Builtin::TomlDecode(schema) => {
                 let format = if matches!(builtin, Builtin::TomlDecode(_)) {
                     "toml"
@@ -3209,6 +3231,22 @@ impl Emitter<'_, '_> {
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("relar_input", Type::Str, &[]),
             Builtin::SysArgv => self.call("relar_sys_argv", returns, &[]),
+            Builtin::ParseArgs => {
+                let Type::Class(class) = returns else {
+                    unreachable!()
+                };
+                let [schema, description, argv] = args.as_slice() else {
+                    unreachable!()
+                };
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @relar_argparse_parse(ptr @layout_class_{class}, ptr {}, ptr {}, ptr {})",
+                        schema.value.operand, description.value.operand, argv.value.operand,
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::TextOpen(mode) => Value {
                 ty: Type::TextIO,
                 operand: self.checked_instruction(format!(
@@ -3416,7 +3454,7 @@ impl Emitter<'_, '_> {
                             Type::ListInt => "relar_list_len",
                             Type::List(_) => "relar_seq_len_fast",
                             Type::Dict(_) => "relar_dict_len",
-                            Type::Set(_) => "relar_set_len",
+                            Type::Set(_) | Type::StringKeys => "relar_set_len",
                             _ => unreachable!("len input was checked"),
                         },
                         Type::Int,
@@ -3756,6 +3794,13 @@ impl Emitter<'_, '_> {
             Builtin::IsNone => Value {
                 ty: Type::Bool,
                 operand: match args[0].value.ty {
+                    Type::JsonValue => {
+                        let bit = self.instruction(format!(
+                            "call i32 @relar_json_null(ptr {})",
+                            args[0].value.operand
+                        ));
+                        self.instruction(format!("icmp ne i32 {bit}, 0"))
+                    }
                     Type::Optional(_) => {
                         self.instruction(format!("icmp eq i64 {}, 0", args[0].value.operand))
                     }
@@ -3764,6 +3809,10 @@ impl Emitter<'_, '_> {
                 },
                 small_integer: false,
             },
+            Builtin::StderrLine => {
+                self.void_call("relar_stderr_line", &[&args[0].value]);
+                none()
+            }
             Builtin::Print => {
                 match args[0].value.ty {
                     Type::Int => self.void_call("relar_print_int", &[&args[0].value]),
@@ -3789,12 +3838,15 @@ impl Emitter<'_, '_> {
                     | Type::List(_)
                     | Type::Dict(_)
                     | Type::Set(_)
+                    | Type::StringKeys
                     | Type::Iterator
                     | Type::Exception
                     | Type::TimeoutExpired
                     | Type::Path
                     | Type::TextIO
                     | Type::RegexPattern
+                    | Type::JsonValue
+                    | Type::JsonObject
                     | Type::RegexMatch
                     | Type::BinaryIO
                     | Type::CompletedProcess
@@ -3957,6 +4009,7 @@ impl Emitter<'_, '_> {
             | Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
+            | Type::StringKeys
             | Type::Iterator
             | Type::Exception
             | Type::TimeoutExpired
@@ -3964,6 +4017,8 @@ impl Emitter<'_, '_> {
             | Type::TextIO
             | Type::BinaryIO
             | Type::RegexPattern
+            | Type::JsonValue
+            | Type::JsonObject
             | Type::RegexMatch
             | Type::CompletedProcess
             | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
@@ -3993,6 +4048,7 @@ impl Emitter<'_, '_> {
             | Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
+            | Type::StringKeys
             | Type::Iterator
             | Type::Exception
             | Type::TimeoutExpired
@@ -4000,6 +4056,8 @@ impl Emitter<'_, '_> {
             | Type::TextIO
             | Type::BinaryIO
             | Type::RegexPattern
+            | Type::JsonValue
+            | Type::JsonObject
             | Type::RegexMatch
             | Type::CompletedProcess
             | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
@@ -4494,12 +4552,15 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::List(_)
         | Type::Dict(_)
         | Type::Set(_)
+        | Type::StringKeys
         | Type::Iterator
         | Type::Exception
         | Type::TimeoutExpired
         | Type::Path
         | Type::TextIO
         | Type::RegexPattern
+        | Type::JsonValue
+        | Type::JsonObject
         | Type::RegexMatch
         | Type::BinaryIO => 5,
         Type::Optional(_) => 256 | representation_kind(types.payload(ty).unwrap(), types),
@@ -4608,11 +4669,14 @@ fn fallible(name: &str) -> bool {
                 | "relar_flush_stdout"
                 | "relar_subprocess_run"
                 | "relar_subprocess_run_timeout"
+                | "relar_subprocess_run_timeout_int"
+                | "relar_environ_get"
                 | "relar_environ_copy"
                 | "relar_subprocess_check"
                 | "relar_subprocess_error_field"
                 | "relar_print_int"
                 | "relar_print_float"
+                | "relar_stderr_line"
                 | "relar_print_str"
                 | "relar_print_bytes"
                 | "relar_bytes_count"
@@ -4623,6 +4687,7 @@ fn fallible(name: &str) -> bool {
                 | "relar_bytes_concat"
                 | "relar_bytes_repeat"
                 | "relar_bytes_decode"
+                | "relar_toml_keys"
                 | "relar_bytes_validate_utf8"
                 | "relar_binary_open"
                 | "relar_binary_read"
@@ -4640,6 +4705,7 @@ fn fallible(name: &str) -> bool {
                 | "relar_path_unlink"
                 | "relar_path_rmdir"
                 | "relar_path_replace"
+                | "relar_path_absolute"
                 | "relar_path_resolve"
                 | "relar_tempdir_new"
                 | "relar_tempdir_cleanup"
@@ -4694,7 +4760,9 @@ fn fallible(name: &str) -> bool {
 const DECLARATIONS: &str = r#"
 declare ptr @relar_subprocess_run(ptr, ptr, ptr, i32, ptr)
 declare ptr @relar_subprocess_run_timeout(ptr, ptr, ptr, i32, ptr, ptr)
+declare ptr @relar_subprocess_run_timeout_int(ptr, ptr, ptr, i32, i64, ptr)
 declare ptr @relar_environ_copy()
+declare ptr @relar_environ_get(ptr, ptr)
 declare void @relar_subprocess_check(ptr)
 declare i64 @relar_subprocess_error_field(ptr, i32)
 declare i64 @relar_subprocess_timeout_field(ptr, i32)
@@ -4706,6 +4774,7 @@ declare ptr @relar_path_stem(ptr)
 declare ptr @relar_path_suffix(ptr)
 declare ptr @relar_path_parent(ptr)
 declare i32 @relar_path_is_absolute(ptr)
+declare ptr @relar_path_absolute(ptr)
 declare ptr @relar_path_resolve(ptr, i32)
 declare i32 @relar_path_exists(ptr)
 declare i32 @relar_path_is_file(ptr)
@@ -4780,7 +4849,12 @@ declare void @relar_flush_stdout()
 declare ptr @relar_record_new(ptr)
 declare ptr @relar_tuple_probe(ptr, ptr)
 declare ptr @relar_json_decode(ptr, ptr)
+declare ptr @relar_json_loads(ptr)
+declare i64 @relar_json_select(ptr, ptr, i64, i32, ptr)
+declare i32 @relar_json_truth(ptr)
+declare i32 @relar_json_null(ptr)
 declare ptr @relar_toml_decode(ptr, ptr)
+declare ptr @relar_toml_keys(ptr)
 declare ptr @relar_json_encode(i64, ptr, i64, i32)
 declare ptr @relar_record_cached_result(ptr)
 declare void @relar_record_retain(ptr)
@@ -4903,6 +4977,7 @@ declare i32 @relar_text_flush(ptr)
 declare i32 @relar_text_close(ptr)
 declare i32 @relar_text_closed(ptr)
 declare void @relar_args_init(i32, ptr)
+declare ptr @relar_argparse_parse(ptr, ptr, ptr, ptr)
 declare ptr @relar_sys_argv()
 declare void @relar_args_clear()
 declare void @relar_int_retain(i64)
@@ -4927,6 +5002,7 @@ declare ptr @relar_str_int_list(ptr)
 declare void @relar_str_retain(ptr)
 declare void @relar_str_release(ptr)
 declare void @relar_print_str(ptr)
+declare void @relar_stderr_line(ptr)
 declare i64 @relar_str_len(ptr)
 declare i32 @relar_str_truthy(ptr)
 declare i32 @relar_bytes_truthy(ptr)

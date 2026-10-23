@@ -164,6 +164,122 @@ fn decode_toml(text: &str, schema: &Schema) -> Result<OwnedWord, String> {
     convert(&value, schema)
 }
 
+/// CPython 3.14 reads TOML 1.0. The native parser also accepts four 1.1
+/// extensions; inspect its tokens so punctuation inside a string or comment
+/// cannot alter which grammar is accepted.
+fn tomllib_syntax(text: &str) -> Result<(), &'static str> {
+    use toml_parser::lexer::TokenKind::*;
+    if text.starts_with('\u{feff}') {
+        return Err("unexpected byte order mark");
+    }
+    let source = toml_parser::Source::new(text);
+    let mut brackets = Vec::new();
+    let mut previous = None;
+    for token in source.lex() {
+        let kind = token.kind();
+        let raw = &text[token.span().start()..token.span().end()];
+        match kind {
+            LeftCurlyBracket | LeftSquareBracket => brackets.push(kind),
+            RightCurlyBracket | RightSquareBracket => {
+                if kind == RightCurlyBracket && previous == Some(Comma) {
+                    return Err("trailing comma in inline table");
+                }
+                brackets.pop();
+            }
+            Newline if brackets.last() == Some(&LeftCurlyBracket) => {
+                return Err("newline in inline table");
+            }
+            BasicString | MlBasicString => {
+                let mut bytes = raw.bytes();
+                while let Some(byte) = bytes.next() {
+                    if byte == b'\\' && matches!(bytes.next(), Some(b'e' | b'x')) {
+                        return Err("invalid string escape");
+                    }
+                }
+            }
+            Atom => {
+                let time = raw.rsplit(['T', 't']).next().unwrap().as_bytes();
+                if time.get(2) == Some(&b':') && time.get(5) != Some(&b':') {
+                    return Err("time requires seconds");
+                }
+            }
+            Whitespace | Comment => continue,
+            _ => {}
+        }
+        previous = Some(kind);
+    }
+    Ok(())
+}
+
+/// Report an unfinished header at the first missing delimiter, after inline
+/// whitespace. An array header expects both closing brackets at once.
+fn tomllib_parse_error(text: &str, error: ::toml::de::Error) -> String {
+    let Some(span) = error.span() else {
+        return error.to_string();
+    };
+    let (message, mut at) = match error.message() {
+        "unclosed table, expected `]`" => {
+            ("Expected ']' at the end of a table declaration", span.start)
+        }
+        "unclosed array table, expected `]]`" => (
+            "Expected ']]' at the end of an array declaration",
+            span.start,
+        ),
+        "unclosed array table, expected `]`" => (
+            "Expected ']]' at the end of an array declaration",
+            span.start.saturating_sub(1),
+        ),
+        _ => return error.to_string(),
+    };
+    while matches!(text.as_bytes().get(at), Some(b' ' | b'\t')) {
+        at += 1;
+    }
+    if at == text.len() {
+        return format!("{message} (at end of document)");
+    }
+    let prefix = &text[..at];
+    let line = 1 + memchr::memchr_iter(b'\n', prefix.as_bytes()).count();
+    let column = 1 + prefix
+        .rsplit('\n')
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .count();
+    format!("{message} (at line {line}, column {column})")
+}
+
+/// Parse all values, including those under keys that callers never inspect.
+/// The root dictionary cannot escape this projection, so its immutable view
+/// needs only an insertion-ordered native key table.
+///
+/// # Safety
+/// The caller roots the exact UTF-8 string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_toml_keys(text: *const Str) -> *const Object {
+    // SAFETY: the compiler checked and rooted the input.
+    let text = unsafe { &*text };
+    let result = (|| {
+        let table = DeTable::parse(text).map_err(|err| tomllib_parse_error(text, err))?;
+        tomllib_syntax(text)?;
+        let value = DeValue::Table(table.into_inner());
+        validate(&value, 1, text)?;
+        let DeValue::Table(table) = value else {
+            unreachable!()
+        };
+        let keys = super::super::mappings::relar_set_new(3);
+        for (name, _) in table {
+            let string = Rc::new(Str::new(name.get_ref()));
+            // SAFETY: the set has string key storage and insertion retains the rooted key.
+            unsafe { super::super::mappings::relar_set_add(keys, Rc::as_ptr(&string) as usize) };
+        }
+        Ok(keys)
+    })();
+    finish(
+        result.map_err(|error: String| Error::new(Kind::TomlDecodeError, error)),
+        std::ptr::null(),
+    )
+}
+
 /// Decode TOML 1.1 into an exact compiler-proved record or dictionary schema.
 ///
 /// # Safety

@@ -24,10 +24,11 @@ pub(super) struct Prepared {
 
 /// These constructors have observable acquisition timing and cannot be passed
 /// into an eager comprehension helper as ordinary captured container values.
-pub(super) fn is_pipeline_expression(expression: &ast::Expr) -> bool {
+pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Expr) -> bool {
     matches!(expression, ast::Expr::Generator(_))
         || matches!(expression, ast::Expr::Call(call)
-            if matches!(&*call.func, ast::Expr::Name(name)
+            if checker.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain))
+            || matches!(&*call.func, ast::Expr::Name(name)
                 if matches!(name.id.as_str(), "zip" | "reversed" | "map" | "filter" | "enumerate"))
             || matches!(&*call.func, ast::Expr::Attribute(attribute)
                 if matches!(attribute.attr.as_str(), "iterdir" | "glob")))
@@ -121,6 +122,9 @@ impl Checker<'_> {
         let ast::Expr::Call(call) = expression else {
             return Ok(None);
         };
+        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Chain)) {
+            return Ok(Some(Iteration::Prepared(self.chain_input(call, element)?)));
+        }
         if self.resolve(&call.func).is_some() {
             return Ok(None);
         }
@@ -170,25 +174,43 @@ impl Checker<'_> {
                 input
             }
             "map" => {
-                if !matches!(call.arguments.args.as_ref(), [ast::Expr::Name(name), _] if name.id == "int")
-                {
+                let [ast::Expr::Name(converter), source] = call.arguments.args.as_ref() else {
+                    return Ok(Some(Iteration::Prepared(
+                        self.callback_input(call, element, false)?,
+                    )));
+                };
+                if !matches!(converter.id.as_str(), "int" | "str") {
                     return Ok(Some(Iteration::Prepared(
                         self.callback_input(call, element, false)?,
                     )));
                 }
-                if !call.arguments.keywords.is_empty()
-                    || !matches!(call.arguments.args.as_ref(), [ast::Expr::Name(name), _] if name.id == "int")
-                {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "map requires the builtin int converter and one concrete iterable",
-                    ));
-                }
-                let source = self.expansion_input(&call.arguments.args[1], None)?;
+                self.reject_builtin_keywords(call)?;
+                let source = self.expansion_input(source, None)?;
                 let mut input = self.prepare_iteration(source, call, false)?;
-                let value = self.hidden(Type::Int);
-                let converted = self.consumer_value(self.local(input.value), true, call)?;
+                let item = self.local(input.value);
+                let converted = if converter.id == "int" {
+                    self.consumer_value(item, true, call)?
+                } else {
+                    match item.ty {
+                        Type::Path => {
+                            paths::operation(ir::PathOperation::Text, Type::Str, vec![item])
+                        }
+                        Type::Str => item,
+                        Type::Class(_) | Type::CompletedProcess => self.record_text(item),
+                        Type::Int | Type::Bool | Type::Float | Type::None | Type::Bytes => Expr {
+                            ty: Type::Str,
+                            kind: ExprKind::Builtin(Builtin::Str, vec![item]),
+                        },
+                        _ => {
+                            return Err(error(
+                                self.source,
+                                call,
+                                "map(str, ...) requires values with a supported string conversion",
+                            ));
+                        }
+                    }
+                };
+                let value = self.hidden(converted.ty);
                 input.next.push(Statement::If(
                     self.local(input.ready),
                     vec![
@@ -281,6 +303,90 @@ impl Checker<'_> {
             _ => return Ok(None),
         };
         Ok(Some(Iteration::Prepared(input)))
+    }
+
+    /// Evaluate chain's arguments at construction, but acquire each iterator
+    /// only when its predecessor is exhausted and the consumer wants another item.
+    fn chain_input(
+        &mut self,
+        call: &ast::ExprCall,
+        hint: Option<Type>,
+    ) -> Result<Prepared, String> {
+        self.reject_builtin_keywords(call)?;
+        let mut inputs = Vec::new();
+        let mut element = None;
+        for arg in &call.arguments.args {
+            let input = self.expansion_input(arg, hint)?;
+            let input = self.prepare_iteration(input, arg, false)?;
+            if !input.elementless {
+                let ty = self.locals[input.value];
+                if let Some(previous) = element {
+                    self.expect(previous, ty, arg)?;
+                }
+                element = Some(ty);
+            }
+            inputs.push(input);
+        }
+        let value = self.hidden(element.or(hint).unwrap_or(Type::Int));
+        let ready = self.hidden(Type::Bool);
+        let active = self.hidden(Type::Int);
+        let acquired = self.hidden(Type::Bool);
+        let mut evaluate = vec![
+            Statement::Assign(active, integer(0)),
+            Statement::Assign(acquired, boolean(false)),
+        ];
+        let mut next = vec![
+            Statement::Clear(value),
+            Statement::Assign(ready, boolean(false)),
+        ];
+        let mut clear = vec![value, ready, active, acquired];
+        let mut writes = HashSet::new();
+        for (index, mut input) in inputs.into_iter().enumerate() {
+            evaluate.append(&mut input.evaluate);
+            clear.extend(input.clear);
+            writes.extend(input.writes);
+            input
+                .acquire
+                .push(Statement::Assign(acquired, boolean(true)));
+            let mut pull = vec![Statement::If(
+                not(self.local(acquired)),
+                input.acquire,
+                Vec::new(),
+            )];
+            pull.append(&mut input.next);
+            let yielded = if input.elementless {
+                Vec::new()
+            } else {
+                vec![
+                    Statement::Assign(value, self.local(input.value)),
+                    Statement::Clear(input.value),
+                    Statement::Assign(ready, boolean(true)),
+                ]
+            };
+            pull.push(Statement::If(
+                self.local(input.ready),
+                yielded,
+                vec![
+                    Statement::Assign(active, integer(index as i64 + 1)),
+                    Statement::Assign(acquired, boolean(false)),
+                ],
+            ));
+            next.push(Statement::If(
+                compare(Compare::Equal, self.local(active), integer(index as i64)),
+                pull,
+                Vec::new(),
+            ));
+        }
+        Ok(Prepared {
+            evaluate,
+            acquire: Vec::new(),
+            next,
+            value,
+            ready,
+            elementless: element.is_none(),
+            writes,
+            clear,
+        })
     }
 
     /// Method evaluation creates the iterator at Python's observable point.
@@ -595,7 +701,10 @@ impl Checker<'_> {
             return Ok(self.prepare_file_lines(iterable));
         }
         let mapping = self.types.mapping(iterable.ty);
-        let set_element = self.types.set_element(iterable.ty);
+        let set_element = self
+            .types
+            .set_element(iterable.ty)
+            .or((iterable.ty == Type::StringKeys).then_some(Type::Str));
         let fields = self.types.fields(iterable.ty);
         if fields.as_ref().is_some_and(Vec::is_empty) {
             let source = self.hidden(iterable.ty);

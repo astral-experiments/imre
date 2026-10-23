@@ -155,6 +155,16 @@ impl Checker<'_> {
         if let Some(slot) = original {
             value = self.coerce(value, self.locals[slot], &*branch.subject)?;
         }
+        if matches!(
+            self.types.payload(value.ty).unwrap_or(value.ty),
+            Type::JsonValue | Type::JsonObject
+        ) {
+            return Err(error(
+                self.source,
+                &*branch.subject,
+                "match requires an exact type selected from JSON",
+            ));
+        }
         let subject = self.hidden(value.ty);
         let selected = self.hidden(Type::Bool);
         let mut body = vec![

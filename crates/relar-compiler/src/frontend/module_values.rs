@@ -54,6 +54,7 @@ struct Checkpoint {
     body: Range<usize>,
     initialized: usize,
     definitions: HashSet<DefinitionId>,
+    class_reads: HashSet<DefinitionId>,
 }
 
 impl Checker<'_> {
@@ -99,23 +100,6 @@ impl Checker<'_> {
             kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
         }))
     }
-
-    /// A standalone entry script can declare fixed patterns between its imports
-    /// and definitions. Their literal initializers cannot call first-party code.
-    pub(super) fn entry_patterns(&mut self) -> Result<Vec<Statement>, String> {
-        let module = &self.graph.modules[self.module];
-        module
-            .entry_patterns
-            .iter()
-            .map(|&statement| {
-                let definition = DefinitionId {
-                    module: self.module,
-                    statement,
-                };
-                self.initialize_global(&module.parsed.syntax().body[statement], definition)
-            })
-            .collect()
-    }
 }
 
 pub(super) struct Initialization {
@@ -148,6 +132,11 @@ impl Initialization {
                 ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) => continue,
                 _ => {}
             }
+            if checker.module == checker.graph.entry
+                && module.entry_globals.binary_search(&index).is_err()
+            {
+                continue;
+            }
             let initialized = checker.globals.types.borrow().len();
             let start = body.len();
             if crate::modules::value_name(statement).is_some() {
@@ -160,6 +149,7 @@ impl Initialization {
                 body: start..body.len(),
                 initialized,
                 definitions: available.clone(),
+                class_reads: std::mem::take(checker.class_reads.get_mut()),
             });
         }
         Ok(Self {
@@ -181,6 +171,7 @@ impl Initialization {
         &self,
         graph: &SourceGraph,
         functions: &[ir::Function],
+        class_reads: &[HashSet<DefinitionId>],
         callables: &[DefinitionId],
         targets: &HashMap<Type, HashSet<usize>>,
     ) -> Result<(), String> {
@@ -190,6 +181,7 @@ impl Initialization {
             let mut calls = Vec::new();
             let mut references = Vec::new();
             let mut visited = HashSet::new();
+            let mut required_classes = checkpoint.class_reads.clone();
             collect(
                 &self.function.body[checkpoint.body.clone()],
                 &mut reads,
@@ -209,6 +201,7 @@ impl Initialization {
                         "module initialization calls a definition before it is available",
                     ));
                 }
+                required_classes.extend(&class_reads[id]);
                 collect(
                     &functions[id].body,
                     &mut reads,
@@ -216,6 +209,12 @@ impl Initialization {
                     &mut references,
                     targets,
                 );
+            }
+            if !required_classes.is_subset(&checkpoint.definitions) {
+                return Err(module.error(
+                    &module.parsed.syntax().body[checkpoint.statement],
+                    "module initialization references a class before it is available",
+                ));
             }
             if references.iter().any(|&id| {
                 callables

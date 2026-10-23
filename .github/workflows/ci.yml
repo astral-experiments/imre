@@ -32,11 +32,13 @@ jobs:
           target/release/relar build tests/programs/control_flow.py -o "$RUNNER_TEMP/control_flow"
           lipo "$RUNNER_TEMP/control_flow" -verify_arch arm64
           python3 tests/run_suites.py --workers 3 --log-dir "$RUNNER_TEMP/relar-suites" \
-            --suites differential io files bytes paths processes workspaces base45 containers comprehensions tuple_keys callables \
+            --suites differential io files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
             -- --compiler target/release/relar --runtime target/release/librelar_runtime.a --opt-levels 3
 
       - name: Compare Ruff’s conformance reports with CPython
         run: |
+          target/release/relar build examples/conformance_report/upstream/conformance.py -o "$RUNNER_TEMP/ruff-conformance"
+          python3 tests/ruff_program.py --binary "$RUNNER_TEMP/ruff-conformance"
           target/release/relar build examples/conformance_report/__main__.py --module-root examples -o "$RUNNER_TEMP/conformance-report"
           python3 benchmarks/conformance_grouping_inputs.py \
             --archive benchmarks/results/2026-10-22-collector-ownership-study.tar.xz \
@@ -76,6 +78,8 @@ jobs:
           done
       - name: Compare Ruff’s conformance reports with CPython
         run: |
+          target/release/relar build examples/conformance_report/upstream/conformance.py -o "$RUNNER_TEMP/ruff-conformance"
+          python3 tests/ruff_program.py --binary "$RUNNER_TEMP/ruff-conformance"
           target/release/relar build examples/conformance_report/__main__.py --module-root examples -o "$RUNNER_TEMP/conformance-report"
           python3 benchmarks/conformance_grouping_inputs.py \
             --archive benchmarks/results/2026-10-22-collector-ownership-study.tar.xz \
@@ -83,7 +87,7 @@ jobs:
       - name: Compare native suites with CPython
         run: |
           python3 -m pip install --no-deps tomli==2.5.0
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-ordinary --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes \
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-ordinary --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
             -- --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Validate the independent Rust Base45 reference
         run: |
@@ -103,9 +107,9 @@ jobs:
       - name: Check generated code and runtime with AddressSanitizer
         run: |
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-asan-o1 --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes \
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-asan-o1 --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
             -- --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 1
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-asan-o0 --suites containers tuple_keys fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions files paths processes \
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-asan-o0 --suites containers tuple_keys fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions files paths processes argparse_cli \
             -- --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 0
       - name: Validate the route planner against an independent oracle
         run: |
@@ -185,7 +189,7 @@ jobs:
               inference iterables iterator_pipelines callables json_records dataclass_records
               expressions floats bytes matching assignments truthiness loop_else unpacking primitives
               string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files
-              paths processes
+              paths processes argparse_cli
             )
           fi
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-thinlto --suites "${suites[@]}" \

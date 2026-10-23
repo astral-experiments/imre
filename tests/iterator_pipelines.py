@@ -9,6 +9,9 @@ from assignments import main
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "iterator_pipelines"
 
 REJECTED = {
+    "chain_heterogeneous": "from itertools import chain\nitems = list(chain([1], ['s']))\n",
+    "chain_escaped": "from itertools import chain\nitems = chain([1], [2])\n",
+    "chain_keyword": "from itertools import chain\nitems = list(chain(source=[1]))\n",
     "min_float_generator": "print(min(float(i) for i in range(2)))\n",
     "max_generator_default": "print(max((i for i in range(2)), default=0))\n",
     "min_positional_values": "print(min(1, 2))\n",

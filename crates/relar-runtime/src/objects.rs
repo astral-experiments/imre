@@ -6,6 +6,7 @@
 //! except for compiler-proven readonly loop views; displaced owners are dropped
 //! only after mutable storage access ends.
 
+mod argparse;
 mod args;
 mod bytes;
 pub(crate) mod exceptions;
@@ -53,6 +54,7 @@ enum Storage {
     PathIterator(Box<paths::PathIterator>),
     RegexPattern(Box<regexes::Pattern>),
     RegexMatch(regexes::Match),
+    Json(json::readonly::View),
 }
 
 /// Acquires a reference without consuming the caller's live Rc handle.

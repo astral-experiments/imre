@@ -92,13 +92,20 @@ pub(crate) fn render(value: f64) -> Str {
 pub unsafe extern "C" fn relar_int_float(value: usize) -> f64 {
     // SAFETY: this helper borrows the caller's rooted Int.
     let value = unsafe { Int::borrow(value) };
+    crate::finish(int_to_float(&value), 0.0)
+}
+
+pub(super) fn int_to_float(value: &Int) -> Result<f64> {
     let converted = value
         .as_small()
         .map_or_else(|| value.big().to_f64().unwrap(), |value| value as f64);
     if converted.is_infinite() {
-        Error::new(Kind::OverflowError, "int too large to convert to float").returning(0.0)
+        Err(Error::new(
+            Kind::OverflowError,
+            "int too large to convert to float",
+        ))
     } else {
-        converted
+        Ok(converted)
     }
 }
 

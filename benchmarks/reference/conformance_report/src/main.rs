@@ -12,8 +12,10 @@ use std::io::Write;
 use std::os::fd::IntoRawFd;
 use std::path::{Path, PathBuf};
 
-use model::{ExpectedError, FileStats, Side, TestCase, compute_stats, group_diagnostics};
-use parse::Inputs;
+use model::{
+    Diagnostic, ExpectedError, FileStats, Side, TestCase, compute_stats, group_diagnostics,
+};
+use parse::{Inputs, SourceText};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -161,10 +163,10 @@ fn options() -> Result<Options> {
     Ok(result)
 }
 
-fn collect_file_stats(cases: &[TestCase], inputs: &Inputs) -> Result<Vec<FileStats>> {
+fn collect_file_stats(cases: &[TestCase], sources: &[SourceText]) -> Result<Vec<FileStats>> {
     let mut by_path = HashMap::new();
     let mut order = Vec::new();
-    for source in &inputs.sources {
+    for source in sources {
         let input = Path::new(&*source.path);
         let path = input
             .canonicalize()
@@ -197,26 +199,36 @@ fn collect_file_stats(cases: &[TestCase], inputs: &Inputs) -> Result<Vec<FileSta
 }
 
 fn render_report(inputs: &Inputs, options: &Options) -> Result<String> {
-    render_diagnostics(inputs, options, parse::collect_expected(&inputs.sources)?)
+    let expected = parse::collect_expected(&inputs.sources)?;
+    let old = parse::collect_diagnostics(&inputs.old, &inputs.paths)?;
+    let new = parse::collect_diagnostics(&inputs.new, &inputs.paths)?;
+    render_diagnostics(
+        &inputs.sources,
+        &inputs.revision,
+        &options.format,
+        options.force_summary_table,
+        expected,
+        old,
+        new,
+    )
 }
 
 fn render_diagnostics(
-    inputs: &Inputs,
-    options: &Options,
+    sources: &[SourceText],
+    revision: &str,
+    format: &str,
+    force_summary_table: bool,
     expected: Vec<ExpectedError>,
+    old: Vec<Diagnostic>,
+    new: Vec<Diagnostic>,
 ) -> Result<String> {
-    let old = parse::collect_diagnostics(&inputs.old, &inputs.paths)?;
-    let new = parse::collect_diagnostics(&inputs.new, &inputs.paths)?;
     let grouped = group_diagnostics(old, new, expected);
-    let files = collect_file_stats(&grouped, inputs)?;
-    let base = format!(
-        "https://github.com/python/typing/blob/{}/conformance/",
-        inputs.revision
-    );
+    let files = collect_file_stats(&grouped, sources)?;
+    let base = format!("https://github.com/python/typing/blob/{revision}/conformance/");
     let sections = [
-        report::summary(&grouped, &files, &base, options.force_summary_table)?,
+        report::summary(&grouped, &files, &base, force_summary_table)?,
         report::file_stats(&files, &base),
-        report::test_cases(&grouped, &base, &options.format),
+        report::test_cases(&grouped, &base, format),
     ];
     Ok(sections
         .into_iter()

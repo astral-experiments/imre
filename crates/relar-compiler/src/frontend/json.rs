@@ -3,7 +3,76 @@
 use super::*;
 use crate::ir::{JsonDefault, JsonField, JsonRecordSchema};
 
+/// Folds successive literal subscripts into one traversal. The keys have no
+/// evaluation effects; the first failing lookup still determines the exception.
+pub(super) fn select(value: Expr, ty: Type, key: Option<String>, literal: Option<Expr>) -> Expr {
+    let (mut path, mut args) = match value {
+        Expr {
+            ty: Type::JsonValue,
+            kind: ExprKind::Builtin(Builtin::JsonSelect(path), args),
+        } => (path, args),
+        value => (Vec::new(), vec![value]),
+    };
+    path.extend(key);
+    args.extend(literal);
+    Expr {
+        ty,
+        kind: ExprKind::Builtin(Builtin::JsonSelect(path), args),
+    }
+}
+
+pub(super) fn compare(
+    values: Vec<Expr>,
+    ops: &[ast::CmpOp],
+    source: &str,
+    node: &ast::Expr,
+) -> Result<Expr, String> {
+    let invalid = || {
+        error(
+            source,
+            node,
+            "readonly JSON comparisons require == or != with a literal string",
+        )
+    };
+    let [left, right]: [Expr; 2] = values.try_into().map_err(|_| invalid())?;
+    let [op @ (ast::CmpOp::Eq | ast::CmpOp::NotEq)] = ops else {
+        return Err(invalid());
+    };
+    let (value, literal) = if matches!(left.kind, ExprKind::Str(_)) {
+        (right, left)
+    } else if matches!(right.kind, ExprKind::Str(_)) {
+        (left, right)
+    } else {
+        return Err(invalid());
+    };
+    let result = select(value, Type::Bool, None, Some(literal));
+    Ok(if *op == ast::CmpOp::Eq {
+        result
+    } else {
+        Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Not(Box::new(result)),
+        }
+    })
+}
+
 impl Checker<'_> {
+    pub(super) fn json_loads(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let [text] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "json.loads requires one UTF-8 string containing an array",
+            ));
+        };
+        let text = self.expr_expected(text, Type::Str)?;
+        Ok(Expr {
+            ty: self.types.list(Type::JsonValue),
+            kind: ExprKind::Builtin(Builtin::JsonLoads, vec![text]),
+        })
+    }
+
     /// TOML shares concrete field layouts and defaults, but its document root
     /// is always a table rather than an arbitrary JSON value.
     pub(super) fn toml_decode(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -287,6 +356,13 @@ pub(super) fn schemas(
                     .collect(),
             });
             continue;
+        }
+        if declaration.generated_initializer && classes.methods[class].contains_key("__post_init__")
+        {
+            return Err(module.error(
+                &declaration.node,
+                "typed record decoding requires an initializer without __post_init__",
+            ));
         }
         let initializer =
             &declaration.methods[declaration.initializer.expect("validated record schema")];

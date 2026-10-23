@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::ir::{PathOperation, ProcessOperation};
+use ruff_python_ast::visitor::{Visitor, walk_expr};
 
 fn operation(operation: ProcessOperation, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
@@ -27,6 +28,65 @@ fn absent(ty: Type) -> Expr {
     }
 }
 
+fn integer_deadline(value: &ast::Expr) -> bool {
+    let value = match value {
+        ast::Expr::UnaryOp(unary)
+            if matches!(unary.op, ast::UnaryOp::USub | ast::UnaryOp::UAdd) =>
+        {
+            &*unary.operand
+        }
+        other => other,
+    };
+    matches!(value, ast::Expr::NumberLiteral(number) if matches!(number.value, ast::Number::Int(_)))
+}
+
+/// A caught timeout can outlive the function that raised it. Its seconds
+/// field has an exact layout only if every possible deadline agrees in kind.
+fn timeout_field_type(graph: &SourceGraph) -> Option<Type> {
+    struct Deadlines<'a> {
+        graph: &'a SourceGraph,
+        module: ModuleId,
+        int: bool,
+        float: bool,
+    }
+    impl<'ast> Visitor<'ast> for Deadlines<'_> {
+        fn visit_expr(&mut self, expr: &'ast ast::Expr) {
+            if let ast::Expr::Call(call) = expr
+                && self.graph.resolve(self.module, &call.func)
+                    == Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
+                && let Some(keyword) = call
+                    .arguments
+                    .keywords
+                    .iter()
+                    .find(|kw| kw.arg.as_ref().is_some_and(|name| name == "timeout"))
+                && !matches!(keyword.value, ast::Expr::NoneLiteral(_))
+            {
+                if integer_deadline(&keyword.value) {
+                    self.int = true;
+                } else {
+                    self.float = true;
+                }
+            }
+            walk_expr(self, expr);
+        }
+    }
+    let mut deadlines = Deadlines {
+        graph,
+        module: graph.entry,
+        int: false,
+        float: false,
+    };
+    for (id, module) in graph.modules.iter().enumerate() {
+        deadlines.module = id;
+        deadlines.visit_body(&module.parsed.syntax().body);
+    }
+    match (deadlines.int, deadlines.float) {
+        (true, true) => None,
+        (true, false) => Some(Type::Int),
+        _ => Some(Type::Float),
+    }
+}
+
 impl Checker<'_> {
     /// Literal mode arguments establish a text-only result. Dynamic values are
     /// rooted in source order before their permutation into the runtime ABI.
@@ -35,13 +95,25 @@ impl Checker<'_> {
         let directory = self.types.optional(Type::Str);
         let environment = self.types.optional(self.types.dict(Type::Str, Type::Str));
         let timeout = self.types.optional(Type::Float);
+        let text_mode = call
+            .arguments
+            .keywords
+            .iter()
+            .any(|kw| kw.arg.as_ref().is_some_and(|name| name == "text"));
         let params = [
             ("args", strings, None),
             ("cwd", directory, Some(absent(directory))),
             ("env", environment, Some(absent(environment))),
             ("check", Type::Bool, Some(boolean(false))),
             ("capture_output", Type::Bool, None),
-            ("encoding", Type::Str, None),
+            (
+                "encoding",
+                Type::Str,
+                text_mode.then(|| Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Str("utf-8".to_owned()),
+                }),
+            ),
             ("text", Type::Bool, Some(boolean(true))),
             ("timeout", timeout, Some(absent(timeout))),
         ]
@@ -76,8 +148,11 @@ impl Checker<'_> {
                 }
                 7 => {
                     let value = checker.expr(argument)?;
+                    if integer_deadline(argument) && value.ty == Type::Int {
+                        return Ok(value);
+                    }
                     if !matches!(value.ty, Type::Float | Type::None) && value.ty != timeout {
-                        return Err(error(checker.source, argument, "process timeout requires float | None; write e.g. 15.0 for float seconds"));
+                        return Err(error(checker.source, argument, "process timeout requires an integer literal or float | None seconds"));
                     }
                     checker.coerce(value, timeout, argument)
                 }
@@ -187,17 +262,29 @@ impl Checker<'_> {
         self.coerce(value, expected, expression)
     }
 
-    pub(super) fn environ_copy(
-        &self,
+    pub(super) fn environ_method(
+        &mut self,
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
+        if attribute.attr.as_str() == "get"
+            && let [key, default] = call.arguments.args.as_slice()
+        {
+            return Ok(operation(
+                ProcessOperation::EnvironGet,
+                Type::Str,
+                vec![
+                    self.expr_expected(key, Type::Str)?,
+                    self.expr_expected(default, Type::Str)?,
+                ],
+            ));
+        }
         if attribute.attr.as_str() != "copy" || !call.arguments.args.is_empty() {
             return Err(error(
                 self.source,
                 call,
-                "os.environ supports only copy() without arguments",
+                "os.environ accepts copy() or get(key, string_default)",
             ));
         }
         Ok(operation(
@@ -279,19 +366,28 @@ impl Checker<'_> {
         &self,
         receiver: &Expr,
         attribute: &ast::ExprAttribute,
-    ) -> Option<Expr> {
+    ) -> Result<Option<Expr>, String> {
         let (field, ty) = match attribute.attr.as_str() {
             "cmd" => (0, self.types.list(Type::Str)),
-            "timeout" => (1, Type::Float),
+            "timeout" => (
+                1,
+                timeout_field_type(self.graph).ok_or_else(|| {
+                    error(
+                        self.source,
+                        attribute,
+                        "TimeoutExpired.timeout has both int and float deadlines in this program",
+                    )
+                })?,
+            ),
             "stdout" => (2, self.types.optional(Type::Bytes)),
             "stderr" => (3, self.types.optional(Type::Bytes)),
             "output" => (4, self.types.optional(Type::Bytes)),
-            _ => return None,
+            _ => return Ok(None),
         };
-        Some(operation(
+        Ok(Some(operation(
             ProcessOperation::TimeoutField(field),
             ty,
             vec![receiver.clone()],
-        ))
+        )))
     }
 }

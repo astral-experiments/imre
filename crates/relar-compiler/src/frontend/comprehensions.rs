@@ -50,6 +50,7 @@ pub(super) struct Helper {
     pub module: ModuleId,
     pub function: ir::Function,
     pub calls: HashSet<usize>,
+    pub class_reads: HashSet<DefinitionId>,
     pub recursion_error: String,
 }
 
@@ -445,7 +446,7 @@ impl Checker<'_> {
             ));
         }
         if !narrowing::expression_assignments(expression).is_empty()
-            || pipelines::is_pipeline_expression(&display.clauses[0].iter)
+            || pipelines::is_pipeline_expression(self, &display.clauses[0].iter)
             || !self.local_functions.is_empty()
                 && free_reads(expression, HashSet::new())
                     .iter()
@@ -634,6 +635,7 @@ impl Checker<'_> {
                     body,
                 },
                 calls: helper.calls,
+                class_reads: helper.class_reads.into_inner(),
                 recursion_error: self.graph.modules[self.module].error(
                     expression,
                     "recursive calls are unsupported in this prototype",

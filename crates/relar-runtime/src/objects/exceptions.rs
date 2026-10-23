@@ -47,6 +47,9 @@ pub(crate) enum Kind {
     TimeoutExpired = 27,
     BadGzipFile = 28,
     ZlibError = 29,
+    TomlDecodeError = 30,
+    JsonDecodeError = 31,
+    SystemExit = 32,
 }
 
 impl Kind {
@@ -82,6 +85,9 @@ impl Kind {
             27 => Self::TimeoutExpired,
             28 => Self::BadGzipFile,
             29 => Self::ZlibError,
+            30 => Self::TomlDecodeError,
+            31 => Self::JsonDecodeError,
+            32 => Self::SystemExit,
             _ => fail("SystemError", "invalid exception kind"),
         }
     }
@@ -118,13 +124,16 @@ impl Kind {
             Self::TimeoutExpired => "TimeoutExpired",
             Self::BadGzipFile => "BadGzipFile",
             Self::ZlibError => "error",
+            Self::TomlDecodeError => "TOMLDecodeError",
+            Self::JsonDecodeError => "JSONDecodeError",
+            Self::SystemExit => "SystemExit",
         }
     }
 
     fn matches(self, expected: Self) -> bool {
         match expected {
             Self::BaseException => true,
-            Self::Exception => self != Self::BaseException,
+            Self::Exception => !matches!(self, Self::BaseException | Self::SystemExit),
             Self::ArithmeticError => matches!(
                 self,
                 Self::ArithmeticError | Self::ZeroDivisionError | Self::OverflowError
@@ -135,6 +144,8 @@ impl Kind {
             Self::ValueError => matches!(
                 self,
                 Self::ValueError
+                    | Self::JsonDecodeError
+                    | Self::TomlDecodeError
                     | Self::UnicodeError
                     | Self::UnicodeDecodeError
                     | Self::UnsupportedOperation
@@ -388,7 +399,8 @@ pub unsafe extern "C" fn relar_subprocess_error_field(value: *const Object, fiel
 ///
 /// # Safety
 /// `value` is a rooted TimeoutExpired and `field` is 0 through 4. The returned
-/// owned word has exact kind 5, 7, 264, 264, or 264 respectively; pending is clear.
+/// owned word has kind 5, integer or float, 264, 264, or 264 respectively.
+/// A seconds read requires a program-wide proof of its numeric kind.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_subprocess_timeout_field(value: *const Object, field: u32) -> usize {
     // SAFETY: the checker establishes an exact TimeoutExpired before projection.
@@ -608,6 +620,12 @@ pub extern "C" fn relar_error_unhandled() -> i32 {
                 )
             })
         };
+        if chain.is_empty() && kind == Kind::SystemExit {
+            // The sealed argparse exit action supplies its scalar status. The
+            // generated error edge has already run finally, with, and cleanup.
+            let _ = crate::flush_stdout();
+            return message.parse().expect("argparse exit status");
+        }
         chain.push((kind, message));
         current = cause;
     }

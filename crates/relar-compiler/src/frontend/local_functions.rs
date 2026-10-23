@@ -215,6 +215,7 @@ impl Checker<'_> {
                     body,
                 },
                 calls: helper.calls,
+                class_reads: helper.class_reads.into_inner(),
                 recursion_error: self.graph.modules[self.module]
                     .error(definition, "recursive local function calls are unsupported"),
             },

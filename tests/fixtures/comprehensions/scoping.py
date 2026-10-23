@@ -10,6 +10,13 @@ def rows(limit: int) -> list[list[int]]:
     return [[inner + outer for inner in range(outer)] for outer in range(limit)]
 
 
+offsets = [2]
+
+
+def offset_values() -> list[int]:
+    return [offsets[0] + value for value in range(2)]
+
+
 def scoped() -> None:
     value = "enclosing string"
     numbers = [value + 10 for value in [1, 2, 3]]
@@ -60,4 +67,5 @@ entry = [7, 8]
 entry_result = [entry + 1 for entry in entry]
 show(entry_result)
 show(entry)
+show(offset_values())
 scoped()

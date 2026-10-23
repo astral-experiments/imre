@@ -35,3 +35,5 @@ for text in ["1x", "2²", "3\t", "4\u0301", "5'"]:
         except ValueError as error:
             if turn == 7:
                 print(error)
+
+print("|".join(map(str, [1, -23, 456])))

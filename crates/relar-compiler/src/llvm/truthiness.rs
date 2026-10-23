@@ -41,6 +41,11 @@ impl Emitter<'_, '_> {
             }
         } else {
             match value.ty {
+                Type::JsonValue | Type::JsonObject => {
+                    let byte = self
+                        .instruction(format!("call i32 @relar_json_truth(ptr {})", value.operand));
+                    self.instruction(format!("icmp ne i32 {byte}, 0"))
+                }
                 Type::StrEnum(class) => {
                     match self.module.class_metadata[class]
                         .enum_members
@@ -83,11 +88,11 @@ impl Emitter<'_, '_> {
                         .instruction(format!("call i32 @sequence_header(ptr {})", value.operand));
                     self.instruction(format!("icmp ugt i32 {length}, 1"))
                 }
-                Type::ListInt | Type::Dict(_) | Type::Set(_) => {
+                Type::ListInt | Type::Dict(_) | Type::Set(_) | Type::StringKeys => {
                     let family = match value.ty {
                         Type::ListInt => "list",
                         Type::Dict(_) => "dict",
-                        Type::Set(_) => "set",
+                        Type::Set(_) | Type::StringKeys => "set",
                         _ => unreachable!(),
                     };
                     // These containers have at least one word per entry, so

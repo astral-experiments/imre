@@ -17,6 +17,8 @@ pub(crate) enum Type {
     List(usize),
     Dict(usize),
     Set(usize),
+    /// The immutable top-level string keys of a private TOML document.
+    StringKeys,
     Tuple(usize),
     /// An exact positional signature carried by an owned callable record.
     Callable(usize),
@@ -40,6 +42,9 @@ pub(crate) enum Type {
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
     RegexMatch,
+    /// Immutable selections from decoded JSON. Only the object form has a source annotation.
+    JsonValue,
+    JsonObject,
     None,
 }
 
@@ -66,6 +71,7 @@ impl std::fmt::Display for Type {
             Self::Bool => "bool",
             Self::Str => "str",
             Self::Bytes => "bytes",
+            Self::StringKeys => "collections.abc.Set[str]",
             Self::ListInt => "list[int]",
             Self::None => "None",
             Self::Iterator => "iterator",
@@ -77,6 +83,8 @@ impl std::fmt::Display for Type {
             Self::CompletedProcess => "subprocess.CompletedProcess[str]",
             Self::RegexPattern => "re.Pattern[str]",
             Self::RegexMatch => "re.Match[str]",
+            Self::JsonValue => "JSON value",
+            Self::JsonObject => "dict[str, Any]",
             Self::StrLiteral(_)
             | Self::StrEnum(_)
             | Self::Class(_)
@@ -337,6 +345,7 @@ pub(crate) enum Builtin {
     /// Publishes one fixed module binding after its initializer succeeds.
     GlobalSet(usize),
     Print,
+    StderrLine,
     Input,
     Int,
     Float,
@@ -435,10 +444,16 @@ pub(crate) enum Builtin {
     SplitLines,
     RStrip,
     SysArgv,
+    ParseArgs,
     /// Decodes one string into a checked record, list, or string-key dictionary.
     JsonDecode(Type),
+    JsonLoads,
+    /// A literal-key path rooted in a readonly JSON owner. The result type selects
+    /// an owned view, an exact scalar, or comparison with a supplied string literal.
+    JsonSelect(Vec<String>),
     /// Decodes a complete TOML table into a checked record or string-key dictionary.
     TomlDecode(Type),
+    TomlKeys,
     /// Encodes rooted concrete storage using immutable, compiler-emitted metadata.
     JsonEncode(Type),
     Path(PathOperation),
@@ -539,6 +554,7 @@ pub(crate) enum PathOperation {
     Suffix,
     Parent,
     IsAbsolute,
+    Absolute,
     Resolve,
     Exists,
     IsFile,
@@ -563,6 +579,7 @@ pub(crate) enum ProcessOperation {
     Run,
     RunTimeout,
     EnvironCopy,
+    EnvironGet,
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,
