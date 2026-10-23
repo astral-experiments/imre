@@ -776,7 +776,9 @@ target/release/relar build examples/dependency_planner/__main__.py \
 
 All native test harnesses accept the same `--lto-linker` and `--target` options.
 
-`--sanitize` marks generated functions for AddressSanitizer and links its runtime. On macOS, use `--clang` to select a Clang with a matching sanitizer runtime when you also instrument the Rust archive. This instruments generated code; it does not retroactively instrument a prebuilt Rust static library. Instrumenting Rust runtime code requires a separate sanitizer build of that library. The test suites accept `--sanitize --opt-levels 1` to exercise this configuration, including leak checks on normal exits.
+Linux executables use jemalloc for runtime objects. It is linked into the executable. macOS uses its system allocator. With `--sanitize`, both platforms use the system heap so AddressSanitizer can check the lifetime of objects read by generated code.
+
+`--sanitize` marks generated functions for AddressSanitizer and links its runtime. On macOS, use `--clang` to select a Clang with a matching sanitizer runtime when you also instrument the Rust archive. To instrument Rust runtime code, build a separate sanitizer archive. The test suites accept `--sanitize --opt-levels 1` to exercise this configuration, including leak checks on normal exits.
 
 The differential suite compares full stdout with CPython at `-O0` and `-O3`, covering 260 integer pairs, aliases, ownership across calls and replacement, evaluation order, short-circuiting, loops, and runtime errors. Separate rejection cases cover type violations, ignored errors, unsupported dynamic operations, and recursive calls. These are correctness checks, not performance measurements.
 
