@@ -188,6 +188,10 @@ Ruff’s original `render_file_stats_table` renders the per-file breakdown.
 The enclosing function supplies the report URL for the selected typing revision.
 [Full-report benchmarks](../../benchmarks/results/2026-10-23-file-stats-table.md)
 
+The [expected diagnostics comparison](../../benchmarks/results/2026-10-23-expected-diagnostics.md)
+measures the live reporter with real ty and replayed analyzer output. It also
+counts source reads across repeated frozen reports.
+
 The diagnostic grouping study compares ordered groups, fingerprint equivalence,
 per-file statistics, and complete reports on 146 and 1,460 source files.
 [Timings, memory, and checkout-path sensitivity](../../benchmarks/results/2026-10-23-diagnostic-grouping.md)
