@@ -179,6 +179,9 @@ In 972 pairs, each side has a single diagnostic. Relar compares the six
 fingerprint fields directly in these pairs, avoiding two temporary tuples and
 two sorted lists per pair. The [collector profiles and timings](../../benchmarks/results/2026-10-22-collector-ownership.md)
 measure the effect across all 1,269 groups.
+The diagnostic grouping study compares ordered groups, fingerprint equivalence,
+per-file statistics, and complete reports on 146 and 1,460 source files.
+[Timings, memory, and checkout-path sensitivity](../../benchmarks/results/2026-10-23-diagnostic-grouping.md)
 
 `benchmarks/conformance_validate.py` compares full reports and filesystem effects
 against the unchanged upstream implementation. Its seeded checks exercise the
