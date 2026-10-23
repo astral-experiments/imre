@@ -525,14 +525,23 @@ def report_differentials(directory: Path, count: int = 100) -> int:
         workload = materialize_case(case, directory / case.name)
         inputs = read_inputs(str(workload.manifest), str(workload.old), str(workload.new))
         original_inputs = original.read_inputs(str(workload.manifest), str(workload.old), str(workload.new))
+        reports = {}
         for format in ("github", "diff"):
             for force in (False, True):
                 selected = Workload(workload.manifest, workload.old, workload.new, format, force)
                 expected = oracle(selected)
                 assert expected.error is None, expected
-                assert render_report(inputs, format, force) == expected.report, (index, format, force)
-                assert original.render_report(original.load_upstream(), original_inputs, format, force) == expected.report
+                reports[format, force] = expected.report
+        # Each render must use the same snapshot after all input files disappear.
+        fixture = workload.manifest.parent
+        hidden = fixture.rename(fixture.with_suffix(".hidden"))
+        try:
+            for (format, force), report in reports.items():
+                assert render_report(inputs, format, force) == report, (index, format, force)
+                assert original.render_report(original.load_upstream(), original_inputs, format, force) == report
                 checks += 1
+        finally:
+            hidden.rename(fixture)
     return checks
 
 

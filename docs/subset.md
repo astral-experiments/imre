@@ -417,10 +417,10 @@ from pathlib import Path
 root = Path("reports")
 for path in sorted(root.glob("*.json"), key=lambda path: path.name):
     print(path.stem)
-    print(path.read_text(encoding="utf-8"))
+    print(path.read_text())
 ```
 
-`exists()`, `is_file()`, and `is_dir()` follow symlinks and return false for failed filesystem queries, matching Python 3.14, including invalid NUL-containing paths. `read_text(encoding="utf-8")` reads and closes a file with strict UTF-8 decoding and universal-newline translation. `write_text(text, encoding="utf-8")` creates or truncates, writes UTF-8, closes, and returns the Unicode scalar count. Both require the literal encoding keyword. Their access and close failures use the same catchable exception categories as `open`; file operations accept native paths directly. Argument evaluation completes before opening a file, so an argument failure cannot truncate the output.
+`exists()`, `is_file()`, and `is_dir()` follow symlinks and return false for failed filesystem queries, matching Python 3.14, including invalid NUL-containing paths. `read_text()` reads and closes a file with strict UTF-8 decoding and universal-newline translation, regardless of the process locale. An explicit `encoding="utf-8"` has the same effect. `write_text(text, encoding="utf-8")` requires the literal encoding keyword and creates or truncates the file, writes UTF-8, closes, and returns the Unicode scalar count. Both methods use the same catchable exception categories as `open` for access and close failures. Argument evaluation completes before opening a file, so an argument failure cannot truncate the output.
 
 `mkdir(mode=0o777, parents=False, exist_ok=False)` creates a directory. The mode is an exact integer within the signed C-int range; larger values raise `OverflowError`. Boolean options require exact booleans. The process umask applies, and missing parents use mode `0o777` independently of the leaf mode. `exist_ok=True` accepts an existing directory, including a symlink to one, without changing its permissions. `unlink(missing_ok=False)` removes a file or symlink; its flag suppresses only `FileNotFoundError`. `rmdir()` removes an empty directory. These methods return `None` and preserve their normal filesystem error categories.
 

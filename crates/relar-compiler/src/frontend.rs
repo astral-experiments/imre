@@ -4230,7 +4230,7 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// All native file and path operations use an explicit, literal UTF-8 encoding.
+    /// Validate an explicit encoding for native text I/O.
     fn utf8_encoding(&self, call: &ast::ExprCall) -> Result<(), String> {
         let [encoding] = call.arguments.keywords.as_ref() else {
             return Err(error(

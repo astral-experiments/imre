@@ -4,7 +4,7 @@ from sys import argv
 
 from conformance_report.model import Source, Statistics, TestCase, compute_stats, group_diagnostics_by_key
 from conformance_report.render import collect_diagnostic_entries
-from conformance_report.parse import collect_expected_diagnostics, collect_ty_diagnostics, read_inputs
+from conformance_report.parse import collect_frozen_diagnostics, collect_ty_diagnostics, read_inputs
 
 
 def cases_key(case: TestCase) -> str:
@@ -13,7 +13,7 @@ def cases_key(case: TestCase) -> str:
 
 def load_cases(manifest: str, old_path: str, new_path: str) -> list[TestCase]:
     inputs = read_inputs(manifest, old_path, new_path)
-    expected = collect_expected_diagnostics(inputs.sources)
+    expected = collect_frozen_diagnostics(inputs.sources)
     old = collect_ty_diagnostics(inputs.old, Source.OLD, inputs.paths)
     new = collect_ty_diagnostics(inputs.new, Source.NEW, inputs.paths)
     return sorted(group_diagnostics_by_key(old, new, expected), key=cases_key)

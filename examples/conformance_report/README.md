@@ -24,9 +24,10 @@ relar build examples/conformance_report/__main__.py --module-root examples \
   --timeout 15.0 --format github --output /tmp/conformance.md
 ```
 
-The program decodes `src/test_groups.toml` into typed records, discovers and
-resolves test sources, invokes both analyzers with the upstream flags, resolves
-their diagnostic paths, and renders the report. Each analyzer has its own timeout
+The program decodes `src/test_groups.toml` into typed records and discovers the
+test files. Ruff's original `collect_expected_diagnostics` reads each file as
+UTF-8 and collects its annotations before either analyzer starts. The report
+uses those records even if a source changes while ty is running. Each analyzer has a timeout
 in seconds. A sibling temporary directory holds the complete output until an
 atomic replacement publishes it. Failures leave an existing report intact and
 remove the temporary workspace. The output parent must already exist; successful
@@ -134,9 +135,10 @@ the same offline inputs. The adapter preloads the source text and raw JSON.
 Ruff’s file-statistics function resolves every test path on every report pass,
 including files with no diagnostics.
 
-`compute.py` repeats the complete annotation scan, JSON decode, grouping,
-classification, sorting and rendering over preloaded raw text, then prints an
-output-length checksum. With `--output`, it also writes the complete final
+`compute.py` reads each source and both JSON captures once. Each round repeats
+the annotation scan, JSON decode, grouping, classification, sorting and rendering
+over that snapshot. The program prints the sum of the report lengths across all rounds.
+With `--output`, it also writes the complete final
 report once after the loop, so benchmark gates can check every byte. Zero rounds
 write an empty report and print `0`; `--rounds 0` is the matching preload/startup
 control. The upstream adapter exposes this as `--compute --rounds N`.
@@ -185,6 +187,10 @@ measure the effect across all 1,269 groups.
 Ruff’s original `render_file_stats_table` renders the per-file breakdown.
 The enclosing function supplies the report URL for the selected typing revision.
 [Full-report benchmarks](../../benchmarks/results/2026-10-23-file-stats-table.md)
+
+The [expected diagnostics comparison](../../benchmarks/results/2026-10-23-expected-diagnostics.md)
+measures the live reporter with real ty and replayed analyzer output. It also
+counts source reads across repeated frozen reports.
 
 The diagnostic grouping study compares ordered groups, fingerprint equivalence,
 per-file statistics, and complete reports on 146 and 1,460 source files.

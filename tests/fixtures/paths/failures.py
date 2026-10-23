@@ -15,7 +15,7 @@ for turn in range(4):
     except NotADirectoryError:
         print("parent is file")
     try:
-        Path("invalid.txt").read_text(encoding="utf-8")
+        Path("invalid.txt").read_text()
     except UnicodeDecodeError:
         print("decode failure")
     try:

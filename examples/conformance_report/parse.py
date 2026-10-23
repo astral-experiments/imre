@@ -1,6 +1,7 @@
 """Read frozen inputs and scan annotations with Ruff's conformance pattern."""
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -75,7 +76,46 @@ def scan_annotation(line: str) -> Annotation | None:
     return None
 
 
-def collect_expected_diagnostics(sources: list[SourceText]) -> list[ExpectedError]:
+def collect_expected_diagnostics(test_files: Sequence[Path]) -> list[ExpectedError]:
+    errors: list[ExpectedError] = []
+    for file in test_files:
+        for idx, line in enumerate(file.read_text().splitlines(), 1):
+            if match := re.search(CONFORMANCE_ERROR_PATTERN, line):
+                prefix = line[: match.start()].lstrip()
+                if not prefix or prefix.startswith("#"):
+                    continue
+
+                errors.append(
+                    ExpectedError(
+                        description=(match.group("description") or "Missing"),
+                        location=Location(
+                            path=file,
+                            positions=Positions(
+                                begin=Position(
+                                    line=idx,
+                                    column=match.start(),
+                                ),
+                                end=Position(
+                                    line=idx,
+                                    column=match.end(),
+                                ),
+                            ),
+                        ),
+                        optional=match.group("optional") is not None,
+                        tag=(
+                            f"{file.name}:{match.group('tag')}"
+                            if match.group("tag")
+                            else None
+                        ),
+                        multi=match.group("multi") is not None,
+                    )
+                )
+
+    assert errors, "Failed to discover any expected diagnostics!"
+    return errors
+
+
+def collect_frozen_diagnostics(sources: list[SourceText]) -> list[ExpectedError]:
     errors: list[ExpectedError] = []
     for source in sources:
         for number, line in enumerate(source.text.splitlines(), 1):

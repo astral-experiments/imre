@@ -148,7 +148,9 @@ def make_fixture(directory: Path, python: str | Path) -> tuple[Path, Path]:
     (suite / "src").mkdir(parents=True)
     (suite / "tests").mkdir()
     (suite / "src" / "test_groups.toml").write_text('[cases]\nname = "Cases # literal"\nhref = "https://example.invalid/cases"\n', encoding="utf-8")
-    (suite / "tests" / "cases_main.py").write_text('value: int = "x"  # E: incompatible\n', encoding="utf-8")
+    (suite / "tests" / "cases_main.py").write_bytes(
+        'value: int = "🦀"  # E?[café+]: incompatible\r\n# E: comment only\r'.encode()
+    )
     (suite / "tests" / "cases_types.pyi").write_text('other: int = "x"  # E: stub\n', encoding="utf-8")
     (suite / "tests" / "support.py").write_text("support = True\n", encoding="utf-8")
     analyzer = directory / "fixture-ty"
@@ -163,6 +165,8 @@ assert sys.argv[1:13] == expected, sys.argv
 suite = pathlib.Path.cwd()
 assert sys.argv[13] == "--extra-search-path=" + str(suite / "tests"), sys.argv
 assert [pathlib.Path(p).name for p in sys.argv[14:]] == ["cases_main.py", "cases_types.pyi"], sys.argv
+if mode == "mutate-source":
+    pathlib.Path(sys.argv[14]).write_bytes(b"\\xff")
 if mode == "exit":
     print("intentional failure", file=sys.stderr)
     sys.exit(7)
@@ -221,6 +225,13 @@ def validate(commands: dict[str, list[str]], suite: Path, old_ty: Path, new_ty: 
         shutil.copytree(fixture_suite, malformed)
         (malformed / "src/test_groups.toml").write_bytes(contents)
         malformed_suites.append((name, malformed, error))
+    for name, contents, error in (("source-utf8", b"\xff", "UnicodeDecodeError"),
+                                  ("no-annotations", b"# E: comment only\n", "AssertionError")):
+        malformed = fixture_root / name
+        shutil.copytree(fixture_suite, malformed)
+        for source in (malformed / "tests").glob("cases_*"):
+            source.write_bytes(contents)
+        malformed_suites.append((name, malformed, error))
     fixture_before = tree_identity(fixture_root)
     pid_directory = artifact / "timeout-pids"
     pid_directory.mkdir()
@@ -256,6 +267,21 @@ def validate(commands: dict[str, list[str]], suite: Path, old_ty: Path, new_ty: 
     for engine, command in commands.items():
         records.append({"case": "fixture-relative-symlinks", "engine": engine,
                         **run_checked(command, arguments, directory, expected)})
+    directory = artifact / "fixture-mutate-source"
+    directory.mkdir()
+    (directory / "home").mkdir()
+    arguments = live_arguments(fixture_suite, analyzer, analyzer, directory / "report.md")
+    expected = expected_report(oracle, arguments, directory)
+    source = fixture_suite / "tests/cases_main.py"
+    original_bytes = source.read_bytes()
+    for engine, command in commands.items():
+        try:
+            records.append({"case": "fixture-mutate-source", "engine": engine,
+                            **run_checked(command, arguments, directory, expected,
+                                          extra_environment={"RELAR_LIVE_FIXTURE": "mutate-source"})})
+            assert source.read_bytes() == b"\xff", (engine, "fixture analyzer never ran")
+        finally:
+            source.write_bytes(original_bytes)
     for name, malformed, error in malformed_suites:
         directory = artifact / ("fixture-" + name)
         directory.mkdir()
@@ -263,7 +289,8 @@ def validate(commands: dict[str, list[str]], suite: Path, old_ty: Path, new_ty: 
         arguments = live_arguments(malformed, analyzer, analyzer, directory / "report.md")
         for engine, command in commands.items():
             records.append({"case": "fixture-" + name, "engine": engine,
-                            **run_checked(command, arguments, directory, error)})
+                            **run_checked(command, arguments, directory, error,
+                                          extra_environment={"RELAR_LIVE_FIXTURE": "exit"})})
     directory = artifact / "fixture-publication-error"
     directory.mkdir()
     (directory / "home").mkdir()
@@ -275,7 +302,7 @@ def validate(commands: dict[str, list[str]], suite: Path, old_ty: Path, new_ty: 
     assert tree_identity(fixture_root) == fixture_before, "fixtures changed"
     assert tree_identity(suite) == sources_before, "typing checkout changed"
     assert {str(path): sha256(path.read_bytes()) for path in (old_ty, new_ty)} == binaries_before, "ty binaries changed"
-    return {"schema": 1, "kind": "live-conformance-validation", "status": "passed",
+    return {"schema": 2, "kind": "live-conformance-validation", "status": "passed",
             "suite": str(suite), "suite_revision": REVISION, "suite_files": sources_before,
             "ty_sha256": binaries_before, "records": records, "input_guards_passed": True}
 

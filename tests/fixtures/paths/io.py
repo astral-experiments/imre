@@ -12,7 +12,7 @@ def remove_owner(paths: list[Path]) -> str:
 
 
 path = Path("input.txt")
-print(path.read_text(encoding="utf-8"))
+print(path.read_text())
 print(path.exists())
 print(path.is_file())
 print(path.is_dir())
