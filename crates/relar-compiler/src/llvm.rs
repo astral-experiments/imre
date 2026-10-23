@@ -5161,7 +5161,10 @@ mod tests {
             &CompileOptions::default(),
         )
         .unwrap();
-        assert_eq!(llvm.matches("call ptr @relar_sorted_string_keys(").count(), 1);
+        assert_eq!(
+            llvm.matches("call ptr @relar_sorted_string_keys(").count(),
+            1
+        );
         assert_eq!(llvm.matches("call ptr @relar_key_union(").count(), 2);
     }
 
