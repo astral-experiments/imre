@@ -15,6 +15,17 @@ The validator checked the four project names, eight captures, progress on stderr
 
 A separate Relar execution started with an empty project directory and a populated uv download cache. Cloning the four projects, installing their dependencies, running both ty versions, and writing the report took **56.36 s**. Its 5,759-byte Markdown file matched CPython’s output for those captures (SHA-256 `8cda2e4dc4a2be53524e5c7497943f7206fbf976df463ddffe8ab066f13602e3`).
 
+## Where the time goes
+
+In one additional run per engine, GNU `time` measured each external command separately. The eight ty checks took 33.15 s under either reporter. Ruff also asks uv for each project’s ty command. These four calls accounted for 0.64 s in Relar and 0.56 s in CPython. Together the child processes occupied more than 99% of each run’s wall time. [Child timings and capture hashes](2026-10-23-original-memory-profile.json.gz)
+
+| Four prepared projects | Whole command | Eight ty checks | Four uv helpers |
+| --- | ---: | ---: | ---: |
+| Relar | 33.92 s | 33.15 s | 0.64 s |
+| CPython | 33.89 s | 33.15 s | 0.56 s |
+
+Running `compare` alone on all eight captures from the fresh run took 8.10 ms in Relar, 81.18 ms in CPython, 15.12 ms in Codon, and 5.94 ms in Rust. Each median covers 24 executions. The Rust reference decodes JSON directly into `MemoryItem` structs. Ruff declares the rows as `dict[str, Any]` and reads their fields by name. On these files, DHAT counted 16,058 allocations in Relar and 3,049 in Rust. Callgrind counted 23.90 million instructions in Relar and 13.96 million in Rust. [Four-project measurements](2026-10-23-original-memory-profile.json.gz) · [Rust reference](../reference/memory_report/src/main.rs)
+
 ## Reproduce
 
 Use a Ruff checkout containing the setup script and its lockfile. Build once before timing. The first invocation prepares the four projects. Use absolute paths for `OLD_TY` and `NEW_TY`. [Ruff setup helper](https://github.com/astral-sh/ruff/blob/601192dfdb7ac4a636dec0d7e2daf14ba179cfc8/scripts/setup_primer_project.py)
