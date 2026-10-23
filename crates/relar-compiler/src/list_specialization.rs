@@ -609,6 +609,7 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
             | Builtin::Len
             | Builtin::Abs
             | Builtin::StringJoin
+            | Builtin::StringFormat
             | Builtin::StringReplace
             | Builtin::FloatFormat { .. }
             | Builtin::JsonDecode(_)

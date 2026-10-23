@@ -1,4 +1,4 @@
-"""Time changed conformance reports and check every output against pinned Ruff."""
+"""Time conformance reports and check every output against pinned Ruff."""
 
 import argparse
 import gzip
@@ -52,6 +52,8 @@ def main():
     for flag in ("fixtures", "python", "previous", "relar", "codon", "rust", "output"):
         parser.add_argument("--" + flag, type=Path, required=True)
     parser.add_argument("--cpu", type=int, required=True)
+    parser.add_argument("--full-matrix", action="store_true",
+                        help="also time unchanged captures and both formats on the live checkout")
     parser.add_argument("--live", nargs=3, type=Path, metavar=("SUITE", "OLD_TY", "NEW_TY"))
     parser.add_argument("--live-cpus", type=int, nargs="+")
     args = parser.parse_args()
@@ -76,24 +78,31 @@ def main():
     with tempfile.TemporaryDirectory(prefix="relar-render-cases-") as tmp:
         output = Path(tmp) / "report.md"
         for scale in (1, 10):
-            panel_name = f"{scale}x/changed"
-            panel = args.fixtures.resolve() / panel_name
-            paths = [panel / (role + ".json") for role in ("manifest", "old", "new")]
-            if {p.stem: digest(p.read_bytes()) for p in paths} != provenance["panels"][panel_name]["inputs"]:
-                raise ValueError(f"{panel_name} capture differs from its manifest")
-            inputs[panel_name] = workload_metadata(Workload(*paths))
-            for fmt in ("github", "diff"):
-                workload = Workload(*paths, fmt)
-                expected = oracle(workload).report.encode()
-                name = f"{panel_name}-{fmt}"
-                cases[name] = measure(commands, workload.arguments(), expected, {args.cpu}, output, live=False)
-                print(name, cases[name]["median_ms"], flush=True)
-                if args.live and scale == 1 and fmt == "github":
-                    live_commands = {**commands, "cpython": [str(python), "-E", "-s", "-B", str(APP / "original_live.py")]}
-                    argv = ["--suite", str(suite), "--old-ty", str(old_ty), "--new-ty", str(new_ty),
-                            "--timeout", "30", "--format", fmt, "--force-summary-table"]
-                    cases["live/github"] = measure(live_commands, argv, expected, set(args.live_cpus), output, live=True)
-                    print("live/github", cases["live/github"]["median_ms"], flush=True)
+            for state in (("changed", "unchanged") if args.full_matrix else ("changed",)):
+                panel_name = f"{scale}x/{state}"
+                panel = args.fixtures.resolve() / panel_name
+                paths = [panel / (role + ".json") for role in ("manifest", "old", "new")]
+                if {p.stem: digest(p.read_bytes()) for p in paths} != provenance["panels"][panel_name]["inputs"]:
+                    raise ValueError(f"{panel_name} capture differs from its manifest")
+                inputs[panel_name] = workload_metadata(Workload(*paths))
+                for fmt in ("github", "diff"):
+                    workload = Workload(*paths, fmt)
+                    expected = oracle(workload).report.encode()
+                    name = f"{panel_name}-{fmt}"
+                    cases[name] = measure(commands, workload.arguments(), expected, {args.cpu}, output, live=False)
+                    print(name, cases[name]["median_ms"], flush=True)
+        if args.live:
+            live_commands = {**commands, "cpython": [str(python), "-E", "-s", "-B", str(APP / "original_live.py")]}
+            for fmt in (("github", "diff") if args.full_matrix else ("github",)):
+                argv = ["--suite", str(suite), "--old-ty", str(old_ty), "--new-ty", str(new_ty),
+                        "--timeout", "30", "--format", fmt, "--force-summary-table"]
+                # The live diff includes checkout paths that differ from the captured fixtures.
+                subprocess.run([*live_commands["cpython"], *argv, "--output", str(output)],
+                               cwd=output.parent, env=environment(output.parent), capture_output=True,
+                               timeout=180, check=True)
+                case = f"live/{fmt}"
+                cases[case] = measure(live_commands, argv, output.read_bytes(), set(args.live_cpus), output, live=True)
+                print(case, cases[case]["median_ms"], flush=True)
     if [file_id(p) for p in files] != artifacts:
         raise ValueError("benchmark binaries or oracle changed during measurement")
     record = {"schema": 1, "invocation": sys.argv, "host": platform.uname()._asdict(),

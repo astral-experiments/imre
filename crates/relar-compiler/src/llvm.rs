@@ -3081,6 +3081,7 @@ impl Emitter<'_, '_> {
             | Builtin::ListExtendUnhinted
             | Builtin::SortRestore
             | Builtin::StringJoin
+            | Builtin::StringFormat
             | Builtin::StringReplace
             | Builtin::FloatFormat { .. }
             | Builtin::Abs => self.stdlib_builtin(builtin, &args),
@@ -4778,6 +4779,7 @@ declare ptr @relar_sort_detach(ptr, i32)
 declare void @relar_sort_restore(ptr, i32, ptr, i32)
 declare void @relar_sort_by_keys(ptr, i32, ptr, i32, i32)
 declare ptr @relar_str_join(ptr, ptr)
+declare ptr @relar_str_format(ptr, ptr, i64)
 declare ptr @relar_str_replace(ptr, ptr, ptr)
 declare ptr @relar_float_format(double, i32, i32)
 declare double @llvm.fabs.f64(double)

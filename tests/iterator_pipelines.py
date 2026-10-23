@@ -9,6 +9,9 @@ from assignments import main
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "iterator_pipelines"
 
 REJECTED = {
+    "min_float_generator": "print(min(float(i) for i in range(2)))\n",
+    "max_generator_default": "print(max((i for i in range(2)), default=0))\n",
+    "min_positional_values": "print(min(1, 2))\n",
     "groupby_stored": "from itertools import groupby\nruns = groupby([1])\n",
     "groupby_group_escapes": "from itertools import groupby\nfor key, group in groupby([1]):\n    members = list(group)\n    saved = group\n",
     "groupby_group_delayed": "from itertools import groupby\nfor key, group in groupby([1]):\n    print(key)\n    members = list(group)\n",
@@ -17,6 +20,7 @@ REJECTED = {
     "groupby_float_key": "from itertools import groupby\nfor key, group in groupby([0.0]):\n    members = list(group)\n",
     "groupby_file_source": 'from itertools import groupby\nwith open("source", "r", encoding="utf-8") as stream:\n    for key, group in groupby(stream):\n        members = list(group)\n',
     "generator_escaped": "values = (value for value in range(3))\n",
+    "min_rebound": "def f(min: int) -> int:\n    return min\nprint(f(2))\n",
     "generator_returned": "def values():\n    return (value for value in range(3))\nprint(1)\n",
     "generator_stored": "values = [(value for value in range(3))]\n",
     "generator_argument": "def take(value: int) -> int:\n    return value\nprint(take(value for value in range(3)))\n",

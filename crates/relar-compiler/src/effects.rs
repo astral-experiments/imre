@@ -252,6 +252,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::ListGetBounded { .. }
         | Builtin::ListSliceSum
         | Builtin::StringGet
+        | Builtin::StringFormat
         | Builtin::StringIntList
         | Builtin::BytesGet
         | Builtin::Decode

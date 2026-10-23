@@ -469,6 +469,7 @@ REJECTED = {
                     index, (value, again) = (index, (None, True))
     """,
     "mixed_elements": 'values = ["text", 1]\n',
+    "concat_mixed_lists": 'values = [1] + ["text"]\n',
     "wrong_string_append": "values: list[str] = []\nvalues.append(1)\n",
     "wrong_string_replace": 'values: list[str] = ["x"]\nvalues[0] = False\n',
     "bool_is_not_int": "values: list[bool] = []\nvalues.append(1)\n",
