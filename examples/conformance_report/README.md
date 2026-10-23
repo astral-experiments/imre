@@ -186,6 +186,10 @@ The diagnostic grouping study compares ordered groups, fingerprint equivalence,
 per-file statistics, and complete reports on 146 and 1,460 source files.
 [Timings, memory, and checkout-path sensitivity](../../benchmarks/results/2026-10-23-diagnostic-grouping.md)
 
+On Linux, `relar build script.py --allocator jemalloc` selects a separate archive.
+The [allocator comparison](../../benchmarks/results/2026-10-23-diagnostic-allocator.md)
+measures grouping and complete reports against Rust using both allocator choices.
+
 `benchmarks/conformance_validate.py` compares full reports and filesystem effects
 against the unchanged upstream implementation. Its seeded checks exercise the
 annotation scanner independently and cover every diagnostic classification,

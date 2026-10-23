@@ -1,0 +1,314 @@
+{
+  "status": "passed",
+  "revision": "aa24071e3bd7d2ad7b0051a7d873d0b405ac70e5",
+  "indexed_files": 244,
+  "unchanged_application_and_reference_sources": 56,
+  "previous_original_revision": "7178431490cd6d8838b67daca89ccbdf03e7ce34",
+  "previous_real_oracle_streams": 32,
+  "canonical_outputs_rechecked": 32,
+  "seeded_oracle_streams": 211,
+  "seeded_replayed": true,
+  "primary": {
+    "normal": {
+      "mode": "normal",
+      "revision": "aa24071e3bd7d2ad7b0051a7d873d0b405ac70e5",
+      "baseline_revision": "17845276508a0431276b2606f4f076dcd58ecf37",
+      "cases": 16,
+      "observations": 1872,
+      "parity_streams": 8,
+      "time_target_met": true,
+      "largest_ratio": 1.5445622721206074,
+      "results_sha256": "dc7ad5a46f8763f71b7d8a6b787736dc76a03f7d88e80362bc9c9101e2eb122c"
+    },
+    "thinlto": {
+      "mode": "thinlto",
+      "revision": "aa24071e3bd7d2ad7b0051a7d873d0b405ac70e5",
+      "baseline_revision": "17845276508a0431276b2606f4f076dcd58ecf37",
+      "cases": 16,
+      "observations": 1872,
+      "parity_streams": 8,
+      "time_target_met": true,
+      "largest_ratio": 1.5055683826500423,
+      "results_sha256": "9b22f2171e40523214ff7e2a0c0684aaa8f8956f2fcbe5dce07dd85edc55d4b4"
+    }
+  },
+  "matched_rust": {
+    "normal": {
+      "mode": "normal",
+      "observations": 936,
+      "cases": 16,
+      "time_target_met": true,
+      "worst_system": 1.5311140253701625,
+      "worst_matched": 1.5649937857450011,
+      "sha256": "17106be2c46aa5c6c0f68596b3864ee83033b626f27b2a3965fe9dfc97d4015c"
+    },
+    "thinlto": {
+      "mode": "thinlto",
+      "observations": 936,
+      "cases": 16,
+      "time_target_met": true,
+      "worst_system": 1.5137307051861466,
+      "worst_matched": 1.5376383719262234,
+      "sha256": "cc386ca7b1f5dacc1ff0be464f2c451ea9099f732a46ab3f1da9835ad5e76dc7"
+    }
+  },
+  "admission": {
+    "admitted": true,
+    "kernel_gate": true,
+    "full_gate": true,
+    "observations": 1088,
+    "preflight_processes": 128,
+    "revision": "aa24071e3bd7d2ad7b0051a7d873d0b405ac70e5",
+    "raw_sha256": "86ec6de98c9675c20d6603f06ed76d9cb5a221370fa1d6a8ce01474414b07cbb",
+    "ratios": {
+      "normal/group": {
+        "long": {
+          "candidate_over_rust": 0.9767902135305634,
+          "candidate_over_base": 0.4927446761395413,
+          "candidate_over_matched_rust": 1.1692982253015947,
+          "matched_rust_over_system_rust": 0.8353644881985705,
+          "base_over_rust": 1.9823455449246585
+        },
+        "short": {
+          "candidate_over_rust": 1.0275568745675898,
+          "candidate_over_base": 0.4841337820151802,
+          "candidate_over_matched_rust": 1.1721565268265064,
+          "matched_rust_over_system_rust": 0.8766379327764311,
+          "base_over_rust": 2.122464725122963
+        }
+      },
+      "normal/changed-github": {
+        "long": {
+          "candidate_over_rust": 1.1847766835208124,
+          "candidate_over_base": 0.870293540927339,
+          "candidate_over_matched_rust": 1.2817948753779365,
+          "matched_rust_over_system_rust": 0.9243106726975187,
+          "base_over_rust": 1.3613529548413938
+        },
+        "short": {
+          "candidate_over_rust": 1.177168001678654,
+          "candidate_over_base": 0.8751563097418982,
+          "candidate_over_matched_rust": 1.2680571012012876,
+          "matched_rust_over_system_rust": 0.9283241271733504,
+          "base_over_rust": 1.3450945717637863
+        }
+      },
+      "normal/unchanged-github": {
+        "long": {
+          "candidate_over_rust": 1.1976111964708223,
+          "candidate_over_base": 0.8875107300968997,
+          "candidate_over_matched_rust": 1.2849364739706992,
+          "matched_rust_over_system_rust": 0.9320392258536914,
+          "base_over_rust": 1.3494047518051588
+        },
+        "short": {
+          "candidate_over_rust": 1.1848834881620984,
+          "candidate_over_base": 0.8800960607626975,
+          "candidate_over_matched_rust": 1.2560224569970018,
+          "matched_rust_over_system_rust": 0.9433617062827141,
+          "base_over_rust": 1.3463115459638235
+        }
+      },
+      "thinlto/group": {
+        "long": {
+          "candidate_over_rust": 0.9010910415513183,
+          "candidate_over_base": 0.4356219135779256,
+          "candidate_over_matched_rust": 1.0663232216156384,
+          "matched_rust_over_system_rust": 0.8450449388001051,
+          "base_over_rust": 2.06851632910365
+        },
+        "short": {
+          "candidate_over_rust": 0.9549324339763846,
+          "candidate_over_base": 0.4394374793890408,
+          "candidate_over_matched_rust": 1.1115055508090732,
+          "matched_rust_over_system_rust": 0.8591342016072543,
+          "base_over_rust": 2.173079172272805
+        }
+      },
+      "thinlto/changed-github": {
+        "long": {
+          "candidate_over_rust": 1.106909229808537,
+          "candidate_over_base": 0.8496047296739762,
+          "candidate_over_matched_rust": 1.1954450678215642,
+          "matched_rust_over_system_rust": 0.925939016023242,
+          "base_over_rust": 1.302852010055662
+        },
+        "short": {
+          "candidate_over_rust": 1.093604605596328,
+          "candidate_over_base": 0.8407312269708085,
+          "candidate_over_matched_rust": 1.1680867763202176,
+          "matched_rust_over_system_rust": 0.9362357555672977,
+          "base_over_rust": 1.3007779067950567
+        }
+      },
+      "thinlto/unchanged-github": {
+        "long": {
+          "candidate_over_rust": 1.113805990520085,
+          "candidate_over_base": 0.851091246861538,
+          "candidate_over_matched_rust": 1.1898998626619923,
+          "matched_rust_over_system_rust": 0.9360501883144408,
+          "base_over_rust": 1.3086798796572368
+        },
+        "short": {
+          "candidate_over_rust": 1.100060974562036,
+          "candidate_over_base": 0.8384894352156598,
+          "candidate_over_matched_rust": 1.1578417329873432,
+          "matched_rust_over_system_rust": 0.9500961515040338,
+          "base_over_rust": 1.3119556769121365
+        }
+      }
+    }
+  },
+  "path_sensitivity": {
+    "normal/1": {
+      "long": 0.9028566126867884,
+      "short": 0.9562124825850673
+    },
+    "normal/10": {
+      "long": 0.9967517833633286,
+      "short": 1.0554051341128625
+    },
+    "thinlto/1": {
+      "long": 0.7861671746449221,
+      "short": 0.839693182662125
+    },
+    "thinlto/10": {
+      "long": 0.9313473383749058,
+      "short": 0.9607378127204069
+    }
+  },
+  "full_report_peak_kib": {
+    "normal/1": {
+      "before": 9712.0,
+      "after": 10496.0,
+      "rust": 7912.0,
+      "codon": 19968.0,
+      "upstream": 27624.0,
+      "cpython": 24416.0
+    },
+    "normal/10": {
+      "before": 47824.0,
+      "after": 45568.0,
+      "rust": 56060.0,
+      "codon": 117760.0,
+      "upstream": 93862.0,
+      "cpython": 75922.0
+    },
+    "thinlto/1": {
+      "before": 10456.0,
+      "after": 11776.0,
+      "rust": 8420.0,
+      "codon": 19968.0,
+      "upstream": 27624.0,
+      "cpython": 24416.0
+    },
+    "thinlto/10": {
+      "before": 48568.0,
+      "after": 47104.0,
+      "rust": 56568.0,
+      "codon": 117760.0,
+      "upstream": 93862.0,
+      "cpython": 75898.0
+    }
+  },
+  "matched_native_peak": {
+    "observations": 84,
+    "median_kib": {
+      "normal/1": {
+        "after": 10368.0,
+        "rust": 7912.0,
+        "matched_rust": 9216.0
+      },
+      "normal/10": {
+        "after": 45696.0,
+        "rust": 56060.0,
+        "matched_rust": 61952.0
+      },
+      "thinlto/1": {
+        "after": 11776.0,
+        "rust": 8416.0,
+        "matched_rust": 9728.0
+      },
+      "thinlto/10": {
+        "after": 47104.0,
+        "rust": 56568.0,
+        "matched_rust": 60234.0
+      }
+    }
+  },
+  "callgrind": {
+    "relar": {
+      "instructions_per_group": 143359872.0,
+      "grouping_calls_zero_four": [
+        0,
+        4
+      ]
+    },
+    "rust": {
+      "instructions_per_group": 145405521.75,
+      "grouping_calls_zero_four": [
+        0,
+        4
+      ]
+    }
+  },
+  "matched_rust_source_edits": [
+    "Cargo.lock",
+    "Cargo.toml",
+    "src/main.rs"
+  ],
+  "native": {
+    "normal": {
+      "kernel_sha256": "2599b7d07090da5349bea431d3575d6c2c3ff619531bfa6fd493754fbb1ab2c5",
+      "runtime_sha256": "c45e8a1f47e66542d10bf46e05bec3eee9b16b2ee658a29c736fa1616d1a1bf6",
+      "matched_rust_sha256": "0b45ec371c189bb0583df51f5ea8da30610c249b95e7855d6b1d43d0eda172d7"
+    },
+    "thinlto": {
+      "kernel_sha256": "5a7583499421a6c3b1a599b994d4334a22c0c9264cd136a9faf53e80cc620d85",
+      "runtime_sha256": "6198e696de7729f2017a2854811470d58f4826a2f415d39e18c9f3b3e8ed7624",
+      "matched_rust_sha256": "13423c7fc5da6bedfaad6bd95a35d49dac305695c1ff30c18644dfd775f0f65d"
+    }
+  },
+  "source_and_intermediates": {
+    "intermediate_selector": {
+      "normal_raw_sha256": "e1149422eb7eedd57343b58a499f41da392b2c412a4675cd2f97658b1b62aa88",
+      "ordinary_observations": 1872,
+      "two_mode_admission_observations": 1088,
+      "excluded_unmeasured_panels": [
+        "six-engine ThinLTO",
+        "six-engine process RSS",
+        "all-workload matched-Rust supplement"
+      ]
+    },
+    "collateral_capsule_sha256": "e4c0b1af12bc9783f167548cb553e73d15e63e3cfca21cb97d9ab26152027298",
+    "unchanged_system_mapped_payloads": 6,
+    "final_cli_matching_elf_files": 15,
+    "final_cli_revision": "e78c84acecc568ae3267aea07cab243ae2647f4f",
+    "additional_held_out_seed_streams": 192,
+    "build_and_cli_replay": "Verified 15 full ELF and raw LLVM bindings, 200 workload transcripts, 3 CLI reporter runs, 60 I/O/sanitizer controls and 57 file hashes."
+  },
+  "quality": {
+    "ordinary-integrated": {
+      "application": 96,
+      "compute": 120,
+      "stdout": 3,
+      "output-error": 6
+    },
+    "asan-integrated": {
+      "application": 96,
+      "compute": 120,
+      "stdout": 3,
+      "output-error": 6
+    },
+    "live_programs": 4,
+    "live_source": "e78c84acecc568ae3267aea07cab243ae2647f4f",
+    "live_observations": 52,
+    "live_median_ms": {
+      "upstream": 781.6142115,
+      "system": 724.208705,
+      "jemalloc": 716.744281,
+      "rust": 711.4396505
+    }
+  },
+  "time_target_met": true
+}
