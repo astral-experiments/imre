@@ -66,17 +66,17 @@ impl Emitter<'_, '_> {
                         "bytes"
                     };
                     let byte = self.instruction(format!(
-                        "call i8 @relar_{family}_truthy(ptr {})",
+                        "call i32 @relar_{family}_truthy(ptr {})",
                         value.operand
                     ));
-                    self.instruction(format!("icmp ne i8 {byte}, 0"))
+                    self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
                 Type::Union(_) => {
                     let byte = self.instruction(format!(
-                        "call i8 @relar_union_truthy(i64 {})",
+                        "call i32 @relar_union_truthy(i64 {})",
                         value.operand
                     ));
-                    self.instruction(format!("icmp ne i8 {byte}, 0"))
+                    self.instruction(format!("icmp ne i32 {byte}, 0"))
                 }
                 Type::List(_) => {
                     let length = self

@@ -307,16 +307,18 @@ def main() -> None:
                 ("large", b"OSError"),
                 ("division_error", b"ZeroDivisionError"),
             ]:
-                with open("/dev/full", "wb", buffering=0) as sink:
+                reader, writer = os.pipe()
+                os.close(reader)
+                with os.fdopen(writer, "wb", buffering=0) as sink:
                     result = subprocess.run(
                         [binaries[name]], stdin=subprocess.DEVNULL, stdout=sink,
                         stderr=subprocess.PIPE, timeout=60, check=False, env=environment(),
                     )
                 assert result.returncode == 1 and result.stderr.startswith(category + b":"), (
-                    "/dev/full", name, level, result.returncode, result.stderr[:2000],
+                    "broken pipe", name, level, result.returncode, result.stderr[:2000],
                 )
                 assert result.stderr.count(b"\n") == 1 and result.stderr.endswith(b"\n"), (
-                    "/dev/full", name, level, result.stderr[:2000],
+                    "broken pipe", name, level, result.stderr[:2000],
                 )
                 passed += 1
     print(f"Passed {passed} I/O checks (optimization levels {args.opt_levels}; ASan={args.sanitize})")

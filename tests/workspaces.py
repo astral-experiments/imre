@@ -73,7 +73,7 @@ ENVIRONMENTS = {
 
 def seed(directory: Path) -> None:
     directory.mkdir()
-    for name in ("scratch", "temp-default", "temp-second", "temp-third", "relative-temp", "existing", "empty", "nonempty", "outside", "readonly-tree", "readonly-tree/blocked", "scratch/locked-root", "denied"):
+    for name in ("scratch", "temp-default", "temp-second", "temp-third", "relative-temp", "existing", "empty", "nonempty", "outside", "readonly-tree", "readonly-tree/blocked", "denied"):
         (directory / name).mkdir()
     for name, content in {
         "plain-file": b"plain file",
@@ -83,7 +83,6 @@ def seed(directory: Path) -> None:
         "nonempty/child.txt": b"nonempty",
         "outside/keep.txt": b"outside the workspace",
         "readonly-tree/blocked/locked.txt": b"read-only descendant",
-        "scratch/locked-root/locked.txt": b"read-only root",
         "hard-a": b"shared inode",
     }.items():
         (directory / name).write_bytes(content)
@@ -97,14 +96,11 @@ def seed(directory: Path) -> None:
     }.items():
         (directory / name).symlink_to(target)
     invalid = os.fsencode(directory / "readonly-tree" / "blocked") + b"/invalid-\xff"
-    with open(invalid, "wb") as stream:
-        stream.write(b"raw Unix filename")
+    files.write_non_utf8_filename(invalid)
     (directory / "outside" / "keep.txt").chmod(0o400)
     (directory / "outside").chmod(0o500)
     (directory / "readonly-tree" / "blocked" / "locked.txt").chmod(0)
     (directory / "readonly-tree" / "blocked").chmod(0)
-    (directory / "scratch" / "locked-root" / "locked.txt").chmod(0)
-    (directory / "scratch" / "locked-root").chmod(0)
     (directory / "denied").chmod(0)
 
 

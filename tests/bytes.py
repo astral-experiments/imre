@@ -10,6 +10,7 @@ from pathlib import Path
 # Validation also runs under -I; use only the trusted sibling harness directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comprehensions import BOOTSTRAP, require_result, run, snapshot, write_files
+from files import run_with_failing_output
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "bytes"
 
@@ -81,7 +82,7 @@ def cases(project: Path) -> list[tuple[str, Path, str | None]]:
 
 
 def reference(
-    python: str, source: Path, cwd: Path, error: str | None
+    python: str, source: Path, cwd: Path, error: str | None, runner
 ) -> subprocess.CompletedProcess[str]:
     # Like exceptions.py, exercise intentional finally returns on Python 3.14+.
     result = run(
@@ -97,6 +98,7 @@ def reference(
             str(source),
         ],
         cwd,
+        runner=runner,
     )
     require_result(result, error)
     return result
@@ -136,7 +138,8 @@ def main() -> None:
         for name, source, error in cases(project):
             reference_dir = temporary / name / "reference"
             reference_dir.mkdir(parents=True)
-            expected = reference(python, source, reference_dir, error)
+            runner = run_with_failing_output if name == "file_failures" else subprocess.run
+            expected = reference(python, source, reference_dir, error, runner)
             expected_files = snapshot(reference_dir)
             for level in args.opt_levels:
                 actual_dir = temporary / name / ("O" + level)
@@ -167,7 +170,7 @@ def main() -> None:
                     built.stdout,
                     built.stderr,
                 )
-                actual = run([str(binary)], actual_dir)
+                actual = run([str(binary)], actual_dir, runner=runner)
                 require_result(actual, error)
                 assert actual.stdout == expected.stdout, (
                     name,

@@ -147,7 +147,7 @@ mod tests {
             &CompileOptions::default(),
         ).unwrap();
         assert!(llvm.contains("call i64 @relar_subprocess_error_field"));
-        assert!(llvm.contains("call i8 @relar_error_pending"));
+        assert!(llvm.contains("call i32 @relar_error_pending"));
         for source in [
             "def field(error: Exception) -> int:\n    return error.pid\n",
             "def field(text: str) -> str:\n    return text.stdout\n",

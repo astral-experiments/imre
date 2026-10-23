@@ -12,9 +12,9 @@ impl Emitter<'_, '_> {
     ) -> Value {
         match operation {
             PathOperation::Resolve => {
-                let strict = self.instruction(format!("zext i1 {} to i8", args[1].value.operand));
+                let strict = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
                 let operand = self.checked_instruction(format!(
-                    "call ptr @relar_path_resolve(ptr {}, i8 {strict})",
+                    "call ptr @relar_path_resolve(ptr {}, i32 {strict})",
                     args[0].value.operand,
                 ));
                 self.owned(Value {
@@ -24,19 +24,20 @@ impl Emitter<'_, '_> {
                 })
             }
             PathOperation::Mkdir => {
-                let parents = self.instruction(format!("zext i1 {} to i8", args[2].value.operand));
-                let exist_ok = self.instruction(format!("zext i1 {} to i8", args[3].value.operand));
+                let parents = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
+                let exist_ok =
+                    self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
                 self.checked_line(format!(
-                    "call void @relar_path_mkdir(ptr {}, i64 {}, i8 {parents}, i8 {exist_ok})",
+                    "call void @relar_path_mkdir(ptr {}, i64 {}, i32 {parents}, i32 {exist_ok})",
                     args[0].value.operand, args[1].value.operand,
                 ));
                 none()
             }
             PathOperation::Unlink => {
                 let missing_ok =
-                    self.instruction(format!("zext i1 {} to i8", args[1].value.operand));
+                    self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
                 self.checked_line(format!(
-                    "call void @relar_path_unlink(ptr {}, i8 {missing_ok})",
+                    "call void @relar_path_unlink(ptr {}, i32 {missing_ok})",
                     args[0].value.operand,
                 ));
                 none()
@@ -75,12 +76,12 @@ impl Emitter<'_, '_> {
                     _ => unreachable!(),
                 };
                 let byte = self.instruction(format!(
-                    "call i8 @relar_path_{name}(ptr {})",
+                    "call i32 @relar_path_{name}(ptr {})",
                     args[0].value.operand
                 ));
                 Value {
                     ty: Type::Bool,
-                    operand: self.instruction(format!("icmp ne i8 {byte}, 0")),
+                    operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
                     small_integer: false,
                 }
             }

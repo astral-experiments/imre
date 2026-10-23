@@ -194,7 +194,7 @@ print(apply(increment, 4))
             .unwrap()
             .0;
         assert!(body.contains("call i64 @callable_0_plain("), "{body}");
-        assert!(!body.contains("call i8 @relar_error_pending("), "{body}");
+        assert!(!body.contains("call i32 @relar_error_pending("), "{body}");
         assert!(!body.contains("call void @relar_record_retain("), "{body}");
     }
 

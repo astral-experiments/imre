@@ -50,7 +50,7 @@ fn run() -> Result<ExitCode, String> {
     let mut module_root = None;
     let mut lto_linker = None;
     let mut target = None;
-    let mut clang = None;
+    let mut clang = cfg!(target_os = "macos").then(|| OsString::from("clang"));
     let mut optimization = OsString::from("3");
     let mut options = CompileOptions::default();
     while let Some(flag) = args.next() {
@@ -88,8 +88,11 @@ fn run() -> Result<ExitCode, String> {
         relar_compiler::check_file(&source_path, module_root.as_deref())?;
         return Ok(ExitCode::SUCCESS);
     }
-    if !cfg!(all(target_os = "linux", target_pointer_width = "64")) {
-        return Err("The prototype currently supports 64-bit Linux hosts".to_owned());
+    if !cfg!(any(
+        all(target_os = "linux", target_pointer_width = "64"),
+        all(target_os = "macos", target_arch = "aarch64"),
+    )) {
+        return Err("Relar supports 64-bit Linux and Apple Silicon macOS hosts".to_owned());
     }
     let run_directory = execute
         .then(tempfile::tempdir)
@@ -179,9 +182,13 @@ fn run() -> Result<ExitCode, String> {
         .arg("-Wno-override-module")
         .arg(temporary.path())
         .arg(&runtime)
-        .args(["-ldl", "-lpthread", "-lm", "-lrt", "-lutil"])
         .arg("-o")
         .arg(&output);
+    if cfg!(target_os = "macos") {
+        linker.arg("-liconv");
+    } else {
+        linker.args(["-ldl", "-lpthread", "-lm", "-lrt", "-lutil"]);
+    }
     if options.address_sanitizer {
         linker.args(["-fsanitize=address", "-fno-omit-frame-pointer"]);
     }

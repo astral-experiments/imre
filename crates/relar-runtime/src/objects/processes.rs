@@ -1,4 +1,4 @@
-//! Sealed synchronous Linux processes with captured strict UTF-8 text.
+//! Sealed synchronous Unix processes with captured strict UTF-8 text.
 //!
 //! Native launch data owns its bytes before fork. The child performs only
 //! async-signal-safe descriptor, signal, and exec operations; language owners
@@ -21,6 +21,7 @@ use super::records::{RecordDescriptor, relar_record_new};
 use super::words::WordKind;
 use super::{Bytes, Object, Storage, Str, acquire_rc, fail, object};
 
+#[cfg(target_os = "linux")]
 unsafe extern "C" {
     static environ: *const *const libc::c_char;
 }
@@ -112,50 +113,59 @@ impl TimeoutError {
     }
 }
 
-/// Uses Python's canonical Linux enum names, including real-time endpoints only.
+/// Python formats a child's terminating signal with the host's signal number.
 fn signal_name(signal: i32) -> Option<&'static str> {
-    const NAMES: [&str; 31] = [
-        "SIGHUP",
-        "SIGINT",
-        "SIGQUIT",
-        "SIGILL",
-        "SIGTRAP",
-        "SIGABRT",
-        "SIGBUS",
-        "SIGFPE",
-        "SIGKILL",
-        "SIGUSR1",
-        "SIGSEGV",
-        "SIGUSR2",
-        "SIGPIPE",
-        "SIGALRM",
-        "SIGTERM",
-        "SIGSTKFLT",
-        "SIGCHLD",
-        "SIGCONT",
-        "SIGSTOP",
-        "SIGTSTP",
-        "SIGTTIN",
-        "SIGTTOU",
-        "SIGURG",
-        "SIGXCPU",
-        "SIGXFSZ",
-        "SIGVTALRM",
-        "SIGPROF",
-        "SIGWINCH",
-        "SIGIO",
-        "SIGPWR",
-        "SIGSYS",
-    ];
-    if signal == libc::SIGRTMIN() {
-        Some("SIGRTMIN")
-    } else if signal == libc::SIGRTMAX() {
-        Some("SIGRTMAX")
-    } else {
-        usize::try_from(signal - 1)
-            .ok()
-            .and_then(|index| NAMES.get(index).copied())
-    }
+    Some(match signal {
+        libc::SIGHUP => "SIGHUP",
+        libc::SIGINT => "SIGINT",
+        libc::SIGQUIT => "SIGQUIT",
+        libc::SIGILL => "SIGILL",
+        libc::SIGTRAP => "SIGTRAP",
+        libc::SIGABRT => "SIGABRT",
+        libc::SIGBUS => "SIGBUS",
+        libc::SIGFPE => "SIGFPE",
+        libc::SIGKILL => "SIGKILL",
+        libc::SIGUSR1 => "SIGUSR1",
+        libc::SIGSEGV => "SIGSEGV",
+        libc::SIGUSR2 => "SIGUSR2",
+        libc::SIGPIPE => "SIGPIPE",
+        libc::SIGALRM => "SIGALRM",
+        libc::SIGTERM => "SIGTERM",
+        libc::SIGCHLD => "SIGCHLD",
+        libc::SIGCONT => "SIGCONT",
+        libc::SIGSTOP => "SIGSTOP",
+        libc::SIGTSTP => "SIGTSTP",
+        libc::SIGTTIN => "SIGTTIN",
+        libc::SIGTTOU => "SIGTTOU",
+        libc::SIGURG => "SIGURG",
+        libc::SIGXCPU => "SIGXCPU",
+        libc::SIGXFSZ => "SIGXFSZ",
+        libc::SIGVTALRM => "SIGVTALRM",
+        libc::SIGPROF => "SIGPROF",
+        libc::SIGWINCH => "SIGWINCH",
+        libc::SIGIO => "SIGIO",
+        libc::SIGSYS => "SIGSYS",
+        #[cfg(target_os = "macos")]
+        libc::SIGEMT => "SIGEMT",
+        #[cfg(target_os = "macos")]
+        libc::SIGINFO => "SIGINFO",
+        #[cfg(all(
+            target_os = "linux",
+            not(any(
+                target_arch = "mips64",
+                target_arch = "mips64r6",
+                target_arch = "sparc64"
+            ))
+        ))]
+        libc::SIGSTKFLT => "SIGSTKFLT",
+        #[cfg(target_os = "linux")]
+        libc::SIGPWR => "SIGPWR",
+        #[cfg(target_os = "linux")]
+        value if value == libc::SIGRTMIN() => "SIGRTMIN",
+        #[cfg(target_os = "linux")]
+        value if value == libc::SIGRTMAX() => "SIGRTMAX",
+        _ => return None,
+    })
 }
 
 fn exit_word(returncode: i32) -> usize {
@@ -191,16 +201,18 @@ impl CStrings {
 }
 
 enum Descriptors {
+    #[cfg(target_os = "linux")]
     Range,
     Snapshot(Vec<RawFd>),
 }
 
 impl Descriptors {
-    /// Probe without touching a real descriptor. Older or restricted kernels use
-    /// a pre-fork /proc snapshot, including open fds above a lowered RLIMIT_NOFILE.
+    /// Snapshot open descriptors before fork when close_range is unavailable.
+    /// The snapshot includes open fds above a lowered RLIMIT_NOFILE.
     fn prepare() -> io::Result<Self> {
         // SAFETY: UINT_MAX exceeds every valid signed RawFd, so the probe changes
         // no descriptor. Only support for the CLOEXEC flag is being tested.
+        #[cfg(target_os = "linux")]
         if unsafe {
             libc::syscall(
                 libc::SYS_close_range,
@@ -213,7 +225,12 @@ impl Descriptors {
             return Ok(Self::Range);
         }
         let mut descriptors = Vec::new();
-        for entry in fs::read_dir("/proc/self/fd")? {
+        let fd_dir = if cfg!(target_os = "macos") {
+            "/dev/fd"
+        } else {
+            "/proc/self/fd"
+        };
+        for entry in fs::read_dir(fd_dir)? {
             let name = entry?.file_name();
             if let Some(fd) = name.to_str().and_then(|name| name.parse::<RawFd>().ok())
                 && fd >= 3
@@ -231,6 +248,7 @@ impl Descriptors {
     /// allocator operation may run before exec; the snapshot remains immutable.
     unsafe fn apply(&self) -> io::Result<()> {
         match self {
+            #[cfg(target_os = "linux")]
             Self::Range => {
                 // SAFETY: child descriptors >=3 must close on successful exec;
                 // retaining them until then preserves spawn's error reporting.
@@ -336,7 +354,7 @@ impl Launch {
     unsafe fn exec_child(&self) -> io::Result<()> {
         for signal in [libc::SIGPIPE, libc::SIGXFSZ] {
             // SAFETY: restore_signals resets dispositions Python ignores; signal
-            // is async-signal-safe and both arguments are valid Linux constants.
+            // is async-signal-safe and both arguments are valid signal constants.
             if unsafe { libc::signal(signal, libc::SIG_DFL) } == libc::SIG_ERR {
                 return Err(io::Error::last_os_error());
             }
@@ -734,10 +752,14 @@ unsafe fn environment_snapshot(mut entries: *const *const libc::c_char) -> Resul
 /// The sealed runtime never changes environ; diagnostics omit inherited values.
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_environ_copy() -> *const Object {
-    // SAFETY: Linux supplies a terminated environment, and this standalone runtime
+    // SAFETY: the OS supplies a terminated environment, and this standalone runtime
     // has no environment mutation or language threads. Rust vars_os omits empty
     // names, so the raw POSIX entries are required for Python-compatible copies.
-    let result = unsafe { environment_snapshot(environ) };
+    let result = unsafe {
+        #[cfg(target_os = "macos")]
+        let environ = (*libc::_NSGetEnviron()).cast();
+        environment_snapshot(environ)
+    };
     finish(result.map(Rc::into_raw), std::ptr::null())
 }
 
@@ -755,7 +777,7 @@ pub unsafe extern "C" fn relar_subprocess_run(
     args: *const Object,
     cwd: *const Str,
     env: *const Object,
-    check: u8,
+    check: u32,
     descriptor: *const RecordDescriptor,
 ) -> *mut usize {
     // SAFETY: this public entrypoint forwards its exact rooted input contract.
@@ -773,7 +795,7 @@ pub unsafe extern "C" fn relar_subprocess_run_timeout(
     args: *const Object,
     cwd: *const Str,
     env: *const Object,
-    check: u8,
+    check: u32,
     timeout: *const f64,
     descriptor: *const RecordDescriptor,
 ) -> *mut usize {
@@ -786,7 +808,7 @@ unsafe fn run_process(
     args: *const Object,
     cwd: *const Str,
     env: *const Object,
-    check: u8,
+    check: u32,
     timeout: Option<f64>,
     descriptor: *const RecordDescriptor,
 ) -> *mut usize {
@@ -1047,7 +1069,7 @@ mod tests {
                 Rc::as_ptr(args),
                 cwd.as_ref().map_or(std::ptr::null(), |cwd| cwd),
                 env.map_or(std::ptr::null(), Rc::as_ptr),
-                u8::from(check),
+                u32::from(check),
                 &*descriptor,
             );
             if payload.is_null() {
@@ -1132,9 +1154,9 @@ mod tests {
     #[test]
     fn timeout_preserves_raw_bytes_and_reaps_the_direct_child() {
         let args = args(&[
-            "/usr/bin/python3",
+            "/bin/sh",
             "-c",
-            "import os,time; os.write(1,b'raw\\r\\n\\xff\\xe2\\x82'); os.write(2,str(os.getpid()).encode()); time.sleep(10)",
+            r#"printf 'raw\r\n\377\342\202'; printf %s "$$" >&2; exec sleep 10"#,
         ]);
         let weak = Rc::downgrade(&args);
         let error = timeout_failure(&args, 0.5);
@@ -1182,11 +1204,7 @@ mod tests {
 
     #[test]
     fn timeout_does_not_wait_for_descendant_pipe_owners() {
-        let argv = args(&[
-            "/usr/bin/python3",
-            "-c",
-            "import os,time\npid=os.fork()\nif pid == 0:\n time.sleep(2)\n os._exit(0)\nos.write(1,b'parent finished')\nos._exit(0)",
-        ]);
+        let argv = args(&["/bin/sh", "-c", "sleep 2 & printf 'parent finished'"]);
         let started = Instant::now();
         let error = timeout_failure(&argv, 0.4);
         assert_kind(&error, Kind::TimeoutExpired);
@@ -1199,15 +1217,23 @@ mod tests {
 
     #[test]
     fn deadline_capture_drains_both_full_pipes_before_expiry() {
-        let argv = args(&[
-            "/usr/bin/python3",
-            "-c",
-            "import os,time\nfor _ in range(4):\n os.write(1,b'O'*65536)\n os.write(2,b'E'*65536)\ntime.sleep(10)",
-        ]);
-        let error = timeout_failure(&argv, 0.5);
-        assert_kind(&error, Kind::TimeoutExpired);
-        let stdout = timeout_bytes(&error, 2).unwrap();
-        let stderr = timeout_bytes(&error, 3).unwrap();
+        let mut child = Command::new("python3")
+            .args([
+                "-c",
+                "import os,time\nos.write(1,b'!')\nfor _ in range(4):\n os.write(1,b'O'*65536)\n os.write(2,b'E'*65536)\ntime.sleep(10)",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Start the capture deadline after interpreter startup, before draining either pipe.
+        let mut ready = [0];
+        let stdout = child.stdout.as_mut().unwrap();
+        stdout.read_exact(&mut ready).unwrap();
+        assert_eq!(ready, [b'!']);
+        let Ok(Captured::TimedOut(Some(stdout), Some(stderr))) = capture_timeout(child, 1.0) else {
+            panic!("expected a timeout with both output streams");
+        };
         assert_eq!(stdout.len(), 262_144);
         assert_eq!(stderr.len(), 262_144);
         assert!(stdout.iter().all(|byte| *byte == b'O'));
@@ -1216,7 +1242,7 @@ mod tests {
 
     #[test]
     fn timeout_boundaries_and_failed_validation_leave_no_direct_children() {
-        let argv = args(&["/usr/bin/python3", "-c", "import time; time.sleep(10)"]);
+        let argv = args(&["sleep", "10"]);
         for timeout in [0.0, -0.0, -0.5, f64::NEG_INFINITY] {
             let error = timeout_failure(&argv, timeout);
             assert_kind(&error, Kind::TimeoutExpired);
@@ -1248,7 +1274,7 @@ mod tests {
         for _ in 0..32 {
             drop(timeout_failure(&argv, 0.0));
         }
-        assert_eq!(success(&args(&["/bin/true"]), None, None).code(), 0);
+        assert_eq!(success(&args(&["/usr/bin/true"]), None, None).code(), 0);
     }
 
     #[test]
@@ -1367,24 +1393,22 @@ mod tests {
     #[test]
     fn replacement_environment_path_and_cwd_do_not_use_a_shell() {
         let directory = Directory::new();
-        std::os::unix::fs::symlink("/usr/bin/python3", directory.0.join("controlled-child"))
-            .unwrap();
+        std::os::unix::fs::symlink("/usr/bin/env", directory.0.join("controlled-child")).unwrap();
         let controlled = environment(&[
             ("PATH", ""),
             ("RELAR_TEST_VALUE", "controlled"),
             ("LC_ALL", "C.UTF-8"),
         ]);
         let result = success(
-            &args(&[
-                "controlled-child",
-                "-c",
-                "import os; print(os.environ['RELAR_TEST_VALUE']); print(len(os.environ))",
-            ]),
+            &args(&["controlled-child"]),
             directory.0.to_str(),
             Some(&controlled),
         );
         assert_eq!(result.code(), 0);
-        assert_eq!(result.text(2), "controlled\n3\n");
+        assert_eq!(
+            result.text(2),
+            "PATH=\nRELAR_TEST_VALUE=controlled\nLC_ALL=C.UTF-8\n"
+        );
 
         let empty = environment(&[]);
         let result = success(&args(&["env"]), None, Some(&empty));
@@ -1418,25 +1442,25 @@ mod tests {
                 Kind::FileNotFoundError,
             ),
             (
-                args(&["/bin/true", "a\0b"]),
+                args(&["/usr/bin/true", "a\0b"]),
                 None,
                 empty.clone(),
                 Kind::ValueError,
             ),
             (
-                args(&["/bin/true"]),
+                args(&["/usr/bin/true"]),
                 Some("a\0b"),
                 empty.clone(),
                 Kind::ValueError,
             ),
             (
-                args(&["/bin/true"]),
+                args(&["/usr/bin/true"]),
                 None,
                 environment(&[("bad=key", "value")]),
                 Kind::ValueError,
             ),
             (
-                args(&["/bin/true"]),
+                args(&["/usr/bin/true"]),
                 None,
                 environment(&[("key", "bad\0value")]),
                 Kind::ValueError,
@@ -1446,9 +1470,9 @@ mod tests {
         }
         let invalid = environment(&[("early", "null\0value"), ("bad=key", "value")]);
         for (argv, cwd) in [
-            (args(&["/bin/true", "null\0arg"]), None),
-            (args(&["/bin/true"]), Some("null\0cwd")),
-            (args(&["/bin/true"]), None),
+            (args(&["/usr/bin/true", "null\0arg"]), None),
+            (args(&["/usr/bin/true"]), Some("null\0cwd")),
+            (args(&["/usr/bin/true"]), None),
         ] {
             let error = failure(&argv, cwd, Some(&invalid), false);
             assert_kind(&error, Kind::ValueError);

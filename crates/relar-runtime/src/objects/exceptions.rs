@@ -405,8 +405,8 @@ pub unsafe extern "C" fn relar_subprocess_timeout_field(value: *const Object, fi
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn relar_error_pending() -> u8 {
-    u8::from(PENDING_PRESENT.get())
+pub extern "C" fn relar_error_pending() -> u32 {
+    u32::from(PENDING_PRESENT.get())
 }
 
 /// Transfers the pending reference to the caller and clears pending state.
@@ -463,10 +463,10 @@ pub unsafe extern "C" fn relar_exception_release(value: *const Object) {
 /// # Safety
 /// `value` is a rooted exception and `expected_kind` is a supported builtin kind.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_exception_matches(value: *const Object, expected_kind: u32) -> u8 {
+pub unsafe extern "C" fn relar_exception_matches(value: *const Object, expected_kind: u32) -> u32 {
     let expected = Kind::from_raw(expected_kind);
     // SAFETY: the rooted exception is read without reentry or escaped references.
-    u8::from(unsafe {
+    u32::from(unsafe {
         object(value)
             .0
             .with(|storage| storage.exception_kind().matches(expected))
@@ -529,12 +529,12 @@ pub unsafe extern "C" fn relar_exception_cause(value: *const Object) -> *const O
 /// # Safety
 /// `value` is a rooted exception.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_exception_suppress_context(value: *const Object) -> u8 {
+pub unsafe extern "C" fn relar_exception_suppress_context(value: *const Object) -> u32 {
     // SAFETY: only immutable metadata escapes storage access.
     unsafe {
         object(value)
             .0
-            .with(|storage| u8::from(storage.exception().suppress_context))
+            .with(|storage| u32::from(storage.exception().suppress_context))
     }
 }
 
@@ -828,7 +828,7 @@ mod tests {
                 let value = Rc::from_raw(relar_exception_new(actual as u32, std::ptr::null()));
                 assert_eq!(
                     relar_exception_matches(Rc::as_ptr(&value), expected as u32),
-                    u8::from(matches)
+                    u32::from(matches)
                 );
             }
         }

@@ -108,9 +108,9 @@ pub unsafe extern "C" fn relar_bytes_len(value: *const Bytes) -> usize {
 /// # Safety
 /// The immutable bytes value remains rooted throughout this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_bytes_truthy(value: *const Bytes) -> u8 {
+pub unsafe extern "C" fn relar_bytes_truthy(value: *const Bytes) -> u32 {
     // SAFETY: the input's allocation cannot change while rooted.
-    u8::from(!unsafe { &*value }.is_empty())
+    u32::from(!unsafe { &*value }.is_empty())
 }
 
 /// Returns a signed ordering result (-1, 0, 1) for unsigned byte lexicographic order.

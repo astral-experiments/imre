@@ -11,7 +11,7 @@ def greet(name: str) -> str:
 print(greet("world"))
 ```
 
-On 64-bit Linux, build and run the executable.
+On Apple Silicon macOS or 64-bit Linux, build and run the executable.
 
 ```console
 $ relar build hello.py
@@ -91,8 +91,9 @@ with Relar and CPython, and comparing it with a Rust implementation:
 
 ## Installation
 
-On 64-bit Linux, install the [Rust toolchain](rust-toolchain.toml) and Clang 18,
-then build and install Relar from Git:
+Install the [Rust toolchain](rust-toolchain.toml). On 64-bit Linux, install Clang 18.
+On Apple Silicon macOS, install Apple Clang with `xcode-select --install`.
+Then build and install Relar from Git.
 
 ```console
 git clone https://github.com/astral-sh/relar.git

@@ -616,7 +616,7 @@ pub unsafe extern "C" fn relar_print_int(value: usize) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn relar_print_bool(value: u8) {
+pub extern "C" fn relar_print_bool(value: u32) {
     output_bytes(if value == 0 { b"False" } else { b"True" });
 }
 
@@ -643,7 +643,7 @@ pub unsafe extern "C" fn relar_int_str(value: usize) -> *const Str {
 
 /// Returns an owned Python spelling for a compiler-validated boolean.
 #[unsafe(no_mangle)]
-pub extern "C" fn relar_bool_str(value: u8) -> *const Str {
+pub extern "C" fn relar_bool_str(value: u32) -> *const Str {
     Rc::into_raw(Rc::new(Str::new(if value == 0 { "False" } else { "True" })))
 }
 
@@ -702,17 +702,17 @@ pub unsafe extern "C" fn relar_str_len(value: *const Str) -> usize {
 /// # Safety
 /// The argument must be a live string handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_str_truthy(value: *const Str) -> u8 {
+pub unsafe extern "C" fn relar_str_truthy(value: *const Str) -> u32 {
     // SAFETY: the caller roots this immutable string for the duration of the call.
-    u8::from(!unsafe { &*value }.is_empty())
+    u32::from(!unsafe { &*value }.is_empty())
 }
 
 /// # Safety
 /// Both arguments must be live string handles.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_str_equal(a: *const Str, b: *const Str) -> u8 {
+pub unsafe extern "C" fn relar_str_equal(a: *const Str, b: *const Str) -> u32 {
     // SAFETY: both immutable strings are rooted by the caller.
-    u8::from(unsafe { *a == *b })
+    u32::from(unsafe { *a == *b })
 }
 
 /// Parses Python's base-ten text grammar with Unicode 16.0 decimal digits.
@@ -936,7 +936,7 @@ pub unsafe extern "C" fn relar_list_borrow_index_proven(list: *const List, at: u
 /// # Safety
 /// The arguments must be live list and integer handles.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_list_set(list: *const List, at: usize, value: usize) -> u8 {
+pub unsafe extern "C" fn relar_list_set(list: *const List, at: usize, value: usize) -> u32 {
     // SAFETY: the caller roots both integers; conversion and acquisition cannot reenter.
     let (at, value) = unsafe { (Int::borrow(at), Int::borrow(value)) };
     let at = match decode_index(&at) {
@@ -968,7 +968,7 @@ pub unsafe extern "C" fn relar_list_set(list: *const List, at: usize, value: usi
 /// checked at this call, including after any intervening mutation through an
 /// alias. The replacement is acquired before the displaced owner is released.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_list_set_index(list: *const List, at: usize, value: usize) -> u8 {
+pub unsafe extern "C" fn relar_list_set_index(list: *const List, at: usize, value: usize) -> u32 {
     // SAFETY: the caller roots both handles for the operation.
     let value = unsafe { Int::borrow(value) };
     // SAFETY: replacement cannot reenter and returns the displaced owner.
@@ -1000,7 +1000,7 @@ pub unsafe extern "C" fn relar_list_copy_index(
     list: *const List,
     destination: usize,
     source: usize,
-) -> u8 {
+) -> u32 {
     let mut copied = None;
     // SAFETY: the caller roots the list; cloning cannot reenter, and only the
     // displaced owner escapes this exclusive access. Self-copy acquires first.
@@ -1228,7 +1228,7 @@ pub unsafe extern "C" fn relar_list_all_i32(
     start: usize,
     stop: usize,
     step: usize,
-) -> u8 {
+) -> u32 {
     if list.is_null() {
         return 0;
     }
@@ -1250,7 +1250,7 @@ pub unsafe extern "C" fn relar_list_all_i32(
             }) == 0
         })
     };
-    u8::from(valid)
+    u32::from(valid)
 }
 
 /// # Safety

@@ -8,9 +8,9 @@ impl Emitter<'_, '_> {
             Builtin::SortByKeys => {
                 let element = self.module.types.element(args[0].value.ty).unwrap();
                 let key = self.module.types.element(args[1].value.ty).unwrap();
-                let reverse = self.instruction(format!("zext i1 {} to i8", args[2].value.operand));
+                let reverse = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
                 self.line(format!(
-                    "call void @relar_sort_by_keys(ptr {}, i32 {}, ptr {}, i32 {}, i8 {reverse})",
+                    "call void @relar_sort_by_keys(ptr {}, i32 {}, ptr {}, i32 {}, i32 {reverse})",
                     args[0].value.operand,
                     representation_kind(element, &self.module.types),
                     args[1].value.operand,
@@ -41,9 +41,9 @@ impl Emitter<'_, '_> {
                     }
                 } else {
                     let completed =
-                        self.instruction(format!("zext i1 {} to i8", args[2].value.operand));
+                        self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
                     self.checked_line(format!(
-                        "call void @relar_sort_restore(ptr {}, i32 {kind}, ptr {}, i8 {completed})",
+                        "call void @relar_sort_restore(ptr {}, i32 {kind}, ptr {}, i32 {completed})",
                         list.operand, args[1].value.operand
                     ));
                     none()
@@ -62,7 +62,7 @@ impl Emitter<'_, '_> {
             Builtin::FloatFormat { precision, percent } => Value {
                 ty: Type::Str,
                 operand: self.instruction(format!(
-                    "call ptr @relar_float_format(double {}, i32 {precision}, i8 {})",
+                    "call ptr @relar_float_format(double {}, i32 {precision}, i32 {})",
                     args[0].value.operand,
                     u8::from(*percent),
                 )),

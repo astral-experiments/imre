@@ -155,7 +155,7 @@ pub unsafe extern "C" fn relar_sort_restore(
     list: *const (),
     kind: u32,
     saved: *const (),
-    completed: u8,
+    completed: u32,
 ) {
     let modified = if kind == 2 {
         // SAFETY: the caller proves distinct handles and no reentrant access.
@@ -203,7 +203,7 @@ pub unsafe extern "C" fn relar_sort_by_keys(
     element_kind: u32,
     keys: *const (),
     key_kind: u32,
-    reverse: u8,
+    reverse: u32,
 ) {
     // SAFETY: both exact list owners remain rooted throughout this operation.
     let mut order = unsafe { key_order(keys, key_kind, reverse != 0) };
@@ -308,7 +308,7 @@ pub unsafe extern "C" fn relar_str_replace(
 /// Percent scaling is binary64 multiplication, before rounding. Rust's fixed
 /// formatter uses ties-to-even; Python's lowercase nonfinite spellings are explicit.
 #[unsafe(no_mangle)]
-pub extern "C" fn relar_float_format(value: f64, precision: u32, percent: u8) -> *const Str {
+pub extern "C" fn relar_float_format(value: f64, precision: u32, percent: u32) -> *const Str {
     if precision > 1000 {
         fail("SystemError", "unchecked float format precision");
     }

@@ -33,6 +33,8 @@ def main() -> None:
         Path("raw-source").replace("raw-target/")
     except NotADirectoryError:
         print("string target retains trailing separator")
+    except FileNotFoundError:
+        print("string target with trailing separator does not exist")
     print(Path("raw-source").exists())
     print(Path("raw-source").replace(Path("raw-target/")))
 

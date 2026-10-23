@@ -51,7 +51,7 @@ impl Emitter<'_, '_> {
                 let separator =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
                 self.checked_instruction(format!(
-                    "call ptr @relar_str_split(ptr {source}, ptr {separator}, i64 {}, i8 {})",
+                    "call ptr @relar_str_split(ptr {source}, ptr {separator}, i64 {}, i32 {})",
                     args[2].value.operand,
                     u8::from(reverse),
                 ))
@@ -65,11 +65,11 @@ impl Emitter<'_, '_> {
             }
             TextOperation::StartsWith | TextOperation::EndsWith => {
                 let byte = self.instruction(format!(
-                    "call i8 @relar_str_affix(ptr {source}, ptr {}, i8 {})",
+                    "call i32 @relar_str_affix(ptr {source}, ptr {}, i32 {})",
                     args[1].value.operand,
                     u8::from(matches!(operation, TextOperation::EndsWith)),
                 ));
-                self.instruction(format!("icmp ne i8 {byte}, 0"))
+                self.instruction(format!("icmp ne i32 {byte}, 0"))
             }
             TextOperation::Find => self.instruction(format!(
                 "call i64 @relar_str_find(ptr {source}, ptr {}, i64 {})",

@@ -3,6 +3,7 @@
 import argparse
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -186,11 +187,12 @@ def main() -> None:
         sources = [*sorted(FIXTURES.glob("*.py")), FIXTURES / "imported/main.py"]
         for source in sources:
             name = source.stem if source.parent == FIXTURES else "imported"
+            runner = files.run_with_failing_output if name == "failures" else subprocess.run
             project = temporary / name
             project.mkdir()
             reference_dir = project / "cpython"
             seed(reference_dir)
-            reference = files.run([args.python, "-E", "-B", str(source)], reference_dir, limit_descriptors=name == "cleanup")
+            reference = files.run([args.python, "-E", "-B", str(source)], reference_dir, limit_descriptors=name == "cleanup", runner=runner)
             files.check_result(reference, None, f"CPython {name}")
             stdout = reference.stdout
             expected_files = snapshot(reference_dir)
@@ -200,28 +202,25 @@ def main() -> None:
                 assert built.returncode == 0 and not built.stderr, (name, level, built.stderr.decode())
                 native_dir = project / f"relar-O{level}"
                 seed(native_dir)
-                actual = files.run([str(binary)], native_dir, limit_descriptors=name == "cleanup")
+                actual = files.run([str(binary)], native_dir, limit_descriptors=name == "cleanup", runner=runner)
                 files.check_result(actual, None, f"Relar {name} O{level}")
                 assert actual.stdout == stdout, (name, level, actual.stdout, stdout)
                 assert snapshot(native_dir) == expected_files, (name, level, "filesystem effects differ")
                 checks += 1
         source = temporary / "invalid_names.py"
         source.write_text(INVALID_NAMES)
-        for level in args.opt_levels:
-            binary = temporary / f"invalid-names-O{level}"
-            built = files.run([compiler, "build", str(source), "-o", str(binary), "--opt-level", level, *flags], temporary)
-            assert built.returncode == 0 and not built.stderr, built.stderr.decode()
-            native_dir = temporary / f"invalid-names-dir-O{level}"
-            seed(native_dir)
-            bad = native_dir / "invalid-names"
-            bad.mkdir()
-            with open(os.fsencode(bad) + b"/\xff.json", "wb") as stream:
-                stream.write(b"invalid filename")
-            actual = files.run([str(binary)], native_dir, limit_descriptors=True)
-            files.check_result(actual, None, "invalid filename boundary")
-            assert actual.stdout == (b"invalid directory entry\ninvalid glob entry\n" * 4 + b"True\n"), actual.stdout
-            snapshot(native_dir)
-            checks += 1
+        bad = temporary / "invalid-names"
+        bad.mkdir()
+        if files.write_non_utf8_filename(os.fsencode(bad) + b"/\xff.json"):
+            (temporary / "input.txt").touch()
+            for level in args.opt_levels:
+                binary = temporary / f"invalid-names-O{level}"
+                built = files.run([compiler, "build", str(source), "-o", str(binary), "--opt-level", level, *flags], temporary)
+                assert built.returncode == 0 and not built.stderr, built.stderr.decode()
+                actual = files.run([str(binary)], temporary, limit_descriptors=True)
+                files.check_result(actual, None, "invalid filename boundary")
+                assert actual.stdout == (b"invalid directory entry\ninvalid glob entry\n" * 4 + b"True\n"), actual.stdout
+                checks += 1
     print(f"Passed {checks} path checks ({len(REJECTED) + 1} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize}; CPython 3.14+ oracle)")
 
 

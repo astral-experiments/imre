@@ -1,7 +1,7 @@
 # ruff: noqa: SIM115
 # Explicit operations distinguish flush failures, close state, and final cleanup.
 
-full = open("/dev/full", "wb")
+full = open("failing-output", "wb")
 alias = full
 print(full.write(b"\0\xffbuffered"))
 try:
@@ -16,7 +16,7 @@ print(alias.closed)
 alias.close()
 
 outer = open("outer-cleanup.bin", "wb")
-full = open("/dev/full", "wb")
+full = open("failing-output", "wb")
 try:
     with outer, full:
         outer.write(b"saved\0\xff")
@@ -28,7 +28,7 @@ print(outer.closed)
 print(full.closed)
 
 try:
-    with open("/dev/full", "wb") as large:
+    with open("failing-output", "wb") as large:
         large.write(b"\0\xff" * 1000000)
 except OSError:
     print("large write failed")
