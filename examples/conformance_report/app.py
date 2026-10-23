@@ -66,7 +66,7 @@ def render_report(inputs: Inputs, format: str, force_summary_table: bool) -> str
     old = collect_ty_diagnostics(inputs.old, Source.OLD, inputs.paths)
     new = collect_ty_diagnostics(inputs.new, Source.NEW, inputs.paths)
     grouped = group_diagnostics_by_key(old, new, expected)
-    file_stats = collect_file_stats(grouped, inputs.manifest.test_files)
+    file_stats = collect_file_stats(grouped, [source.path for source in inputs.sources])
     base_url = f"https://github.com/python/typing/blob/{inputs.manifest.suite_revision}/conformance/"
     sections = [
         render_summary(grouped, file_stats, base_url, force_summary_table=force_summary_table),
