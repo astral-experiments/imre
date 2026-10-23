@@ -826,7 +826,7 @@ def transform(data: list[int], cursor: int, output: list[int]) -> None:
             }
         });
         assert_eq!(guards, 1);
-        let llvm = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        let llvm = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
         assert!(llvm.contains("call i64 @relar_list_get("));
     }
 
