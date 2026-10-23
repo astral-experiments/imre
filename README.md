@@ -103,6 +103,8 @@ curl --proto '=https' --tlsv1.2 -LsSf https://labs.astral.sh/relar/install.sh | 
 
 To compile programs, install Clang 18 on Linux or the Xcode Command Line Tools
 on macOS (`xcode-select --install`). The Linux binaries require glibc 2.39 or later.
+The x86-64 Linux release includes LLD 18 for faster native links. For a source
+build on Debian or Ubuntu, install `lld-18` alongside `clang-18` to use it.
 To install a specific version, use `https://labs.astral.sh/relar/releases/<version>/install.sh`.
 
 To build from source, use the [Rust toolchain](rust-toolchain.toml).
@@ -141,7 +143,7 @@ relar run totals.py -- 10 20 12
 
 Arguments after `--` go into the script’s `sys.argv`. Use `build` to keep the compiled executable.
 
-On native Linux x86-64 with the distribution Clang 18 and GNU BFD, `build` and
+On native x86-64 Debian and Ubuntu with the standard Clang 18 toolchain, `build` and
 `run` share cached executables and module objects by default. The build summary
 goes to stderr. Pass `-v` to see each module decision or `-q` to suppress
 progress. [Build cache and code generation](docs/subset.md#incremental-builds)

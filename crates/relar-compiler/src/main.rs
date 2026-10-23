@@ -163,12 +163,13 @@ fn run() -> Result<ExitCode, String> {
         && !options.address_sanitizer
         && link.args.is_empty()
     {
-        build_cache::native_clang(&runtime)
+        build_cache::native_toolchain(&runtime)
     } else {
         None
     };
     let split = native.is_some() && !whole_program;
-    let cache = native.as_deref().filter(|_| !no_cache).and_then(|native| {
+    let native_lld = native.as_ref().and_then(|tools| tools.lld.as_deref());
+    let cache = native.as_ref().filter(|_| !no_cache).and_then(|native| {
         build_cache::Cache::open(
             &source_path,
             module_root.as_deref(),
@@ -192,7 +193,7 @@ fn run() -> Result<ExitCode, String> {
                 &runtime,
                 &output,
                 None,
-                None,
+                native_lld,
             )?;
             build_cache::materialize(&file, &output).map_err(|e| e.to_string())?;
             build_cache::trace("hit");
@@ -224,7 +225,7 @@ fn run() -> Result<ExitCode, String> {
         &runtime,
         &output,
         llvm_path.as_deref(),
-        lto_linker.as_deref(),
+        lto_linker.as_deref().or(native_lld),
     )?;
     let stage = cache.as_ref().and_then(|c| c.stage());
     let staged_output = stage.as_ref().map(|s| s.path().join("program"));
@@ -255,9 +256,10 @@ fn run() -> Result<ExitCode, String> {
                 .expect("unit compilation has a staging directory");
             let objects = build_cache::compile_objects(
                 &units,
-                native
-                    .as_deref()
-                    .expect("native toolchain for module objects"),
+                &native
+                    .as_ref()
+                    .expect("native toolchain for module objects")
+                    .clang,
                 &optimization,
                 dir.path(),
                 stage.as_ref().and(cache.as_ref()),
@@ -268,6 +270,11 @@ fn run() -> Result<ExitCode, String> {
         }
     };
     let mut linker = Command::new(clang.as_deref().unwrap_or(OsStr::new("clang-18")));
+    if let Some(lld) = native_lld {
+        let mut argument = OsString::from("--ld-path=");
+        argument.push(lld);
+        linker.arg(argument);
+    }
     linker
         .arg(format!("-O{}", optimization.to_string_lossy()))
         .arg("-Wno-override-module")
@@ -280,6 +287,11 @@ fn run() -> Result<ExitCode, String> {
             .env("TMPDIR", stage.path())
             .arg("-Xlinker")
             .arg(depfile);
+        if native_lld.is_some()
+            && let Ok(trace) = std::fs::File::create(stage.path().join("link.trace"))
+        {
+            linker.arg("-Wl,--trace").stdout(trace);
+        }
     }
     match target_os {
         "macos" => {
@@ -352,7 +364,10 @@ fn run() -> Result<ExitCode, String> {
     }
     if let (Some(cache), Some(stage), Some(file)) = (&cache, &stage, &staged_output) {
         build_cache::materialize(file, &output).map_err(|e| e.to_string())?;
-        if cache.publish(sources, stage.path(), file).is_some() {
+        if cache
+            .publish(sources, stage.path(), file, &output)
+            .is_some()
+        {
             build_cache::trace("store");
         }
     }
@@ -374,14 +389,14 @@ fn validate_paths<'a>(
     runtime: &'a Path,
     output: &'a Path,
     llvm_path: Option<&'a Path>,
-    lto_linker: Option<&'a Path>,
+    linker: Option<&'a Path>,
 ) -> Result<(), String> {
     let mut paths = sources.collect::<Vec<_>>();
     paths.extend([runtime, output]);
     if let Some(path) = llvm_path {
         paths.push(path);
     }
-    if let Some(path) = lto_linker {
+    if let Some(path) = linker {
         paths.push(path);
     }
     let identities = paths
@@ -394,7 +409,7 @@ fn validate_paths<'a>(
             .any(|previous| previous == path || same_file(previous, path))
         {
             return Err(
-                "All source modules, runtime, ThinLTO linker, executable, and LLVM output must have distinct paths"
+                "All source modules, runtime, linker, executable, and LLVM output must have distinct paths"
                     .to_owned(),
             );
         }

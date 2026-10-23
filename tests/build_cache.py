@@ -23,7 +23,7 @@ def main():
     assert __debug__, "run without -O"
     compiler = args.compiler.resolve()
     checks = []
-    with TemporaryDirectory(prefix="relar cache verification ") as temp:
+    with TemporaryDirectory(prefix="relar cache #$ verification ") as temp:
         root = Path(temp)
         project = root / "src"
         project.mkdir()
@@ -69,6 +69,52 @@ def main():
         other.write_bytes(b"caller-owned replacement")
         ok(cli("run"), HIT, expected("alpha"))
         checks.append("Program arguments, argv[0], working directory and materialized outputs are independent of cache identity")
+        # GCC's linker script searches for this unqualified library in the working directory.
+        shadow = project / "libgcc_s.so.1"
+        system_library = next(Path(path) for path, _ in json.loads(record.read_bytes())["native"]
+                              if Path(path).is_absolute() and Path(path).name == shadow.name)
+        shadow.symlink_to(system_library)
+        ok(cli("build"), MISS)
+        ok(cli("build"), HIT)
+        # The other working directory has a different file under the same name.
+        other_shadow = root / shadow.name
+        other_shadow.write_text("invalid linker input\n")
+        failed(cli("build", cwd=root), ["relar cache miss"], shadow.name)
+        failed(cli("build", "--no-cache", cwd=root), BYPASS, shadow.name)
+        other_shadow.unlink()
+        shadow.unlink()
+        ok(cli("build"), MISS)
+        ok(cli("build", cwd=root), HIT)
+        checks.append("Adding, changing, or removing a working-directory linker-script input invalidated the executable")
+        collision = dict(env, RELAR_CACHE_DIR=str(root / "shadow-cache"))
+        shadow.symlink_to("placed-program")
+        ok(cli("build", output=project / "placed-program", e=collision), ["relar cache miss"])
+        failed(cli("build", e=collision), ["relar cache miss"], shadow.name)
+        shadow.unlink()
+        checks.append("A build output that became a linker-script input was kept out of the executable cache")
+        verbose = cli("build", "--verbose-link")
+        assert verbose[0] == 0 and verbose[2] == ["relar cache relink", "relar cache store"], verbose
+        lld = any("--ld-path=" in line for line in verbose[3])
+        plain_miss = ["relar cache miss"]
+        unusual = dict(env, RELAR_CACHE_DIR=str(root / r"cache\ directory"))
+        ok(cli("run", e=unusual), plain_miss if lld else MISS, expected("alpha"))
+        ok(cli("run", e=unusual), plain_miss if lld else HIT, expected("alpha"))
+        checks.append("Backslash staging paths preserved program stdout and cache safety with either linker")
+        # LLD normalizes backslashes in its depfile and omits text scripts from --trace.
+        # The other spelling must exist to expose a stale hit after the real INCLUDE changes.
+        definitions = root / r"native\symbols.ld"
+        alias = root / "native/symbols.ld"
+        alias.parent.mkdir()
+        alias.write_text("alias_symbol = 123;\n")
+        definitions.write_text("actual_symbol = 123;\n")
+        shadow.write_text(f'GROUP ( "{system_library}" )\nINCLUDE "{definitions}"\n')
+        custom = dict(env, RELAR_CACHE_DIR=str(root / "script-cache"))
+        ok(cli("build", e=custom), plain_miss if lld else MISS)
+        definitions.write_text('ASSERT(0, "changed nested script")\n')
+        failed(cli("build", e=custom), plain_miss, "changed nested script")
+        failed(cli("build", "--no-cache", e=custom), BYPASS, "changed nested script")
+        shadow.unlink()
+        checks.append("A changed nested script with an existing normalized alias reran the actual linker")
         ok(cli("run", e=dict(env, RELAR_CACHE_TRACE="0")), [], expected("alpha"))
         bad_run = cli("run", arg="fail")
         bad_direct = cli("run", "--no-cache", arg="fail")

@@ -47,8 +47,21 @@ pub struct Cache {
     pub root: PathBuf,
     manifest: PathBuf,
     object_recipe: blake3::Hash,
-    clang: PathBuf,
+    toolchain: NativeToolchain,
+    runtime: PathBuf,
     previous: Option<Manifest>,
+}
+
+#[derive(Clone)]
+pub struct NativeToolchain {
+    pub clang: PathBuf,
+    pub lld: Option<PathBuf>,
+}
+
+impl NativeToolchain {
+    fn linker(&self) -> &Path {
+        self.lld.as_deref().unwrap_or(Path::new("/usr/bin/ld"))
+    }
 }
 
 pub fn trace_enabled() -> bool {
@@ -73,6 +86,29 @@ fn ordinary_archive(path: &Path) -> bool {
         .and_then(|mut f| f.read_exact(&mut header))
         .is_ok()
         && &header == b"!<arch>\n"
+}
+
+/// LLD quotes dependency filenames for Make. BFD writes the filenames literally.
+fn lld_dependency_name(name: &str) -> Option<String> {
+    let mut path = String::with_capacity(name.len());
+    let mut chars = name.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            ' ' => {
+                // Each preceding literal backslash is doubled before the space's escape.
+                let slashes = path.len() - path.trim_end_matches('\\').len();
+                if slashes.is_multiple_of(2) {
+                    return None;
+                }
+                path.truncate(path.len() - slashes.div_ceil(2));
+            }
+            '#' if path.pop() != Some('\\') => return None,
+            '$' if chars.next() != Some('$') => return None,
+            _ => {}
+        }
+        path.push(c);
+    }
+    Some(path)
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -194,7 +230,7 @@ pub fn materialize(from: &Path, output: &Path) -> io::Result<()> {
 }
 
 /// Decide native codegen independently of whether the user permits cache writes.
-pub fn native_clang(runtime: &Path) -> Option<PathBuf> {
+pub fn native_toolchain(runtime: &Path) -> Option<NativeToolchain> {
     if !cfg!(all(target_os = "linux", target_arch = "x86_64")) || !ordinary_archive(runtime) {
         return None;
     }
@@ -238,7 +274,19 @@ pub fn native_clang(runtime: &Path) -> Option<PathBuf> {
     {
         return None;
     }
-    Some(PathBuf::from("/usr/bin/clang-18"))
+    let compiler = env::current_exe().ok()?;
+    // The release archive installs its private ELF linker beside the compiler.
+    // Source builds can use the matching distribution package instead.
+    let lld = [
+        compiler.with_file_name("relar-ld.lld"),
+        PathBuf::from("/usr/bin/ld.lld-18"),
+    ]
+    .into_iter()
+    .find(|path| path.is_file());
+    Some(NativeToolchain {
+        clang: PathBuf::from("/usr/bin/clang-18"),
+        lld,
+    })
 }
 
 impl Cache {
@@ -247,7 +295,7 @@ impl Cache {
         module_root: Option<&Path>,
         opt: &OsStr,
         runtime: &Path,
-        clang: &Path,
+        toolchain: &NativeToolchain,
         module_objects: bool,
         link: &crate::cli::LinkOptions,
     ) -> Option<Self> {
@@ -256,6 +304,7 @@ impl Cache {
             Some(p) => Some(p.canonicalize().ok()?),
             None => None,
         };
+        let runtime = Stamp::read(runtime)?;
         let recipe = serde_json::to_vec(&(
             3,
             module_objects,
@@ -264,9 +313,8 @@ impl Cache {
             opt.to_str()?,
             path.to_str()?,
             Stamp::read(&env::current_exe().ok()?)?,
-            Stamp::read(runtime)?,
-            Stamp::read(clang)?,
-            Stamp::read(Path::new("/usr/bin/ld"))?,
+            &runtime,
+            Stamp::read(&toolchain.clang)?,
             Stamp::read(Path::new("/var/lib/dpkg/status"))?,
             Stamp::read(Path::new("/etc/ld.so.cache"))?,
         ))
@@ -302,10 +350,10 @@ impl Cache {
             crate::cli::Relro::Partial => 1,
             crate::cli::Relro::Off => 2,
         };
-        let link_recipe = blake3::keyed_hash(
-            object_recipe.as_bytes(),
-            &[u8::from(link.keep_dead_code), relro],
-        );
+        let link_inputs =
+            serde_json::to_vec(&(Stamp::read(toolchain.linker())?, link.keep_dead_code, relro))
+                .ok()?;
+        let link_recipe = blake3::keyed_hash(object_recipe.as_bytes(), &link_inputs);
         let manifest = root.join(format!("{}.json", link_recipe.to_hex()));
         let previous = fs::read(&manifest)
             .ok()
@@ -315,7 +363,8 @@ impl Cache {
             root,
             manifest,
             object_recipe,
-            clang: clang.to_owned(),
+            toolchain: toolchain.clone(),
+            runtime: runtime.resolved,
             previous,
         })
     }
@@ -338,21 +387,19 @@ impl Cache {
 
     pub fn stage(&self) -> Option<TempDir> {
         if self.previous.is_none() {
-            let linker = Command::new(&self.clang)
-                .arg("-print-prog-name=ld")
-                .output()
-                .ok()?;
-            let linker = Path::new(std::str::from_utf8(&linker.stdout).ok()?.trim());
-            if linker.canonicalize().ok()? != Path::new("/usr/bin/ld").canonicalize().ok()? {
-                return None;
+            let linker = self.toolchain.linker();
+            if self.toolchain.lld.is_none() {
+                let probe = Command::new(&self.toolchain.clang)
+                    .arg("-print-prog-name=ld")
+                    .output()
+                    .ok()?;
+                let selected = Path::new(std::str::from_utf8(&probe.stdout).ok()?.trim());
+                if selected.canonicalize().ok()? != linker.canonicalize().ok()? {
+                    return None;
+                }
             }
             let help = Command::new(linker).arg("--help").output().ok()?;
-            if !linker
-                .canonicalize()
-                .ok()?
-                .file_name()?
-                .to_str()?
-                .ends_with("ld.bfd")
+            if !help.status.success()
                 || !String::from_utf8_lossy(&help.stdout).contains("--dependency-file")
             {
                 return None;
@@ -364,14 +411,37 @@ impl Cache {
             .ok()
     }
 
-    pub fn publish(&self, sources: SourceInputs, stage: &Path, file: &Path) -> Option<()> {
-        // GNU ld's first stanza lists one input per continued line. Only the
+    pub fn publish(
+        &self,
+        sources: SourceInputs,
+        stage: &Path,
+        file: &Path,
+        materialized_output: &Path,
+    ) -> Option<()> {
+        // LLD's Make depfile normalizes POSIX backslashes into separators.
+        // Its object trace preserves those names, including archive members.
+        let lld = self.toolchain.lld.is_some();
+        let cwd = env::current_dir().ok()?;
+        if lld
+            && (cwd.as_os_str().as_encoded_bytes().contains(&b'\\')
+                || fs::read(stage.join("link.trace")).ok()?.contains(&b'\\'))
+        {
+            return None;
+        }
+        // Both linkers list one input per continued line in their first stanza. Only the
         // compiler's private staging objects may disappear after linking.
         let deps = fs::read_to_string(stage.join("link.d")).ok()?;
         let mut paths = BTreeSet::new();
         let mut temporary_object = false;
         for line in deps.split("\n\n").next()?.lines().skip(1) {
-            let p = std::path::absolute(line.trim().trim_end_matches('\\').trim_end()).ok()?;
+            let name = line.trim_start();
+            let name = name.strip_suffix(" \\").unwrap_or(name);
+            let p = if lld {
+                std::path::absolute(lld_dependency_name(name)?)
+            } else {
+                std::path::absolute(name)
+            }
+            .ok()?;
             if p.starts_with(stage) && p.extension().and_then(OsStr::to_str) == Some("o") {
                 temporary_object = true;
                 continue;
@@ -379,6 +449,23 @@ impl Cache {
             if !p.is_file() || (p.extension() == Some(OsStr::new("a")) && !ordinary_archive(&p)) {
                 return None;
             }
+            // LLD omits linker scripts and INCLUDEs from its object trace. A
+            // custom script can introduce a dependency whose name was normalized.
+            if lld {
+                let resolved = p.canonicalize().ok()?;
+                let distro = |path: &Path| {
+                    ["/usr/lib", "/lib", "/lib64"]
+                        .iter()
+                        .any(|dir| path.starts_with(dir))
+                };
+                let cwd_symlink = p.parent() == Some(cwd.as_path()) && p.is_symlink();
+                if resolved != self.runtime && !(distro(&resolved) && (distro(&p) || cwd_symlink)) {
+                    return None;
+                }
+            }
+            // Linker scripts can look up a bare filename in the caller's working
+            // directory before finding the library recorded in the depfile.
+            paths.insert(PathBuf::from(p.file_name()?));
             paths.insert(p);
         }
         if !temporary_object || paths.is_empty() {
@@ -389,7 +476,7 @@ impl Cache {
         let search_dirs = match &self.previous {
             Some(previous) => previous.search_dirs.clone(),
             None => {
-                let search = Command::new(&self.clang)
+                let search = Command::new(&self.toolchain.clang)
                     .arg("-print-search-dirs")
                     .output()
                     .ok()?;
@@ -402,13 +489,17 @@ impl Cache {
         };
         paths.extend(search_dirs.iter().cloned());
         paths.insert(PathBuf::from("/usr/lib/gcc/x86_64-linux-gnu"));
-        let native = paths
-            .into_iter()
-            .map(|p| {
-                let stamp = Stamp::read(&p);
-                (p, stamp)
-            })
-            .collect();
+        let output = materialized_output.canonicalize().ok()?;
+        let mut native = Vec::with_capacity(paths.len());
+        for path in paths {
+            let stamp = Stamp::read(&path);
+            // Installing the output can itself create a working-directory
+            // shadow. Its post-link stamp cannot describe this build.
+            if stamp.as_ref().is_some_and(|s| s.resolved == output) {
+                return None;
+            }
+            native.push((path, stamp));
+        }
         if !sources.fresh() {
             return None;
         }
