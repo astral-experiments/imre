@@ -49,6 +49,15 @@ show(retained("é🙂"))
 for line in ["# E", "# E:", "# E?:  ", "# E[tag++]", "x # no #\x1cE", "#\u00a0E", "#\x1fE", "#\u200bE", "# E:\nA", ""]:
     show(first(MARKER, line))
 
+for text in ["", "a", "aaaa"]:
+    greedy = re.search(r"a{,2}", text)
+    lazy = re.search(r"a{,2}?", text)
+    unbounded = re.search(r"a{,}", text)
+    if greedy and lazy and unbounded:
+        print(greedy.group())
+        print(lazy.group())
+        print(unbounded.group())
+
 # Empty matches are true, including a match at the end of an empty string.
 for text in ["ab", ""]:
     if empty := re.search(r"a*?", text):
