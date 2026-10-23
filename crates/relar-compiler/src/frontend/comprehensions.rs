@@ -1011,7 +1011,7 @@ mod tests {
             "mapping: dict[str, int] = {'x': 1}\ndef gather(data: bytes) -> list[int]:\n    return [mapping[c] for c in data.decode()]\n",
         )
         .unwrap();
-        let graph = crate::modules::SourceGraph::load(&entry, Some(directory.path())).unwrap();
+        let graph = crate::modules::SourceGraph::load(&entry, Some(directory.path()), &[]).unwrap();
         let module = crate::frontend::lower(&graph).unwrap();
         let mut helper = None;
         walk_expressions(&module.functions[0].body, &mut |value| {

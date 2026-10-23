@@ -251,9 +251,18 @@ pub(crate) struct SourceModule {
     /// Executable entry statements, or inactive main guards that still require checking.
     pub(crate) executable: Vec<usize>,
     is_package: bool,
+    root_index: usize,
+    /// A rebuilt module is declared by a .pyi beside its platform-specific archive.
+    pub(crate) archive: Option<PathBuf>,
 }
 
 impl SourceModule {
+    /// A type-only import in a native stub does not add a member to the C module.
+    fn export(&self, name: &str) -> Option<Binding> {
+        let binding = *self.bindings.get(name)?;
+        (self.archive.is_none() || matches!(binding, Binding::Definition(_))).then_some(binding)
+    }
+
     pub(crate) fn error(&self, node: &impl Ranged, message: &str) -> String {
         let prefix = &self.source[..usize::from(node.start())];
         let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
@@ -294,7 +303,7 @@ impl SourceGraph {
     /// An isolated source API supports sealed imports only; first-party imports
     /// require the path API and its filesystem search root.
     pub(crate) fn single(source: &str) -> Result<Self, String> {
-        let mut loader = Loader::new(PathBuf::from("/"))?;
+        let mut loader = Loader::new(PathBuf::from("/"), &[])?;
         loader.allow_imports = false;
         let filename = PathBuf::from("/input.py");
         let entry = loader.add(
@@ -308,7 +317,11 @@ impl SourceGraph {
         loader.finish(entry, filename)
     }
 
-    pub(crate) fn load(entry: &Path, module_root: Option<&Path>) -> Result<Self, String> {
+    pub(crate) fn load(
+        entry: &Path,
+        module_root: Option<&Path>,
+        extension_paths: &[PathBuf],
+    ) -> Result<Self, String> {
         // __file__ preserves the invoked spelling, including symlinks and '..'.
         // Use the canonical path below for import resolution and containment.
         let filename = std::env::current_dir()
@@ -358,7 +371,7 @@ impl SourceGraph {
             .join(".");
         let source = std::fs::read_to_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
-        let mut loader = Loader::new(root)?;
+        let mut loader = Loader::new(root, extension_paths)?;
         if inferred {
             loader.inputs.missing.push(loader.root.join("__init__.py"));
         }
@@ -392,10 +405,7 @@ fn resolve_binding(
         ast::Expr::Name(name) => modules[module].bindings.get(name.id.as_str()).copied(),
         ast::Expr::Attribute(attribute) => {
             match resolve_binding(modules, module, &attribute.value)? {
-                Binding::Module(module) => modules[module]
-                    .bindings
-                    .get(attribute.attr.as_str())
-                    .copied(),
+                Binding::Module(module) => modules[module].export(attribute.attr.as_str()),
                 Binding::IntrinsicModule(module) => module.symbol(attribute.attr.as_str()),
                 Binding::Definition(_) | Binding::Value(_) | Binding::Intrinsic(_) => None,
             }
@@ -407,6 +417,7 @@ fn resolve_binding(
 struct Loader {
     inputs: crate::SourceInputs,
     root: PathBuf,
+    extension_roots: Vec<PathBuf>,
     session: Session,
     modules: Vec<SourceModule>,
     by_name: HashMap<String, ModuleId>,
@@ -417,9 +428,25 @@ struct Loader {
 }
 
 impl Loader {
-    fn new(root: PathBuf) -> Result<Self, String> {
+    fn new(root: PathBuf, extension_paths: &[PathBuf]) -> Result<Self, String> {
+        let mut extension_roots = Vec::new();
+        for path in extension_paths {
+            let directory = path
+                .canonicalize()
+                .map_err(|e| format!("invalid extension path {}: {e}", path.display()))?;
+            if !directory.is_dir() {
+                return Err(format!(
+                    "extension path must be a directory: {}",
+                    path.display()
+                ));
+            }
+            if !extension_roots.contains(&directory) {
+                extension_roots.push(directory);
+            }
+        }
         Ok(Self {
-            session: Session::new(&root)?,
+            session: Session::new(&root, &extension_roots)?,
+            extension_roots,
             inputs: crate::SourceInputs::default(),
             root,
             modules: Vec::new(),
@@ -458,6 +485,8 @@ impl Loader {
             source,
             parsed,
             is_package,
+            root_index: 0,
+            archive: None,
             bindings: HashMap::new(),
             entry_globals: Vec::new(),
             executable: Vec::new(),
@@ -489,6 +518,10 @@ impl Loader {
         });
         let mut executable = false;
         for (index, statement) in parsed.syntax().body.iter().enumerate() {
+            if self.modules[id].archive.is_some() && !native_declaration(statement) {
+                return Err(self.modules[id].error(statement,
+                    "native stubs allow type-only imports and fully annotated, required positional-only methods with an ellipsis body"));
+            }
             match statement {
                 ast::Stmt::FunctionDef(function) => {
                     if executable && id == 0 {
@@ -653,33 +686,30 @@ impl Loader {
                     _ => self.load_module(&name)?,
                 };
                 for alias in &import.names {
-                    let binding = if let Some(binding) = self.modules[target]
-                        .bindings
-                        .get(alias.name.as_str())
-                        .copied()
-                    {
-                        if self.loading.contains(&target)
-                            && matches!(binding, Binding::Definition(_) | Binding::Value(_))
-                        {
-                            return Err(format!("cyclic import through {name:?}"));
-                        }
-                        if let Binding::Module(child) = binding
-                            && self.loading.contains(&child)
-                        {
+                    let binding =
+                        if let Some(binding) = self.modules[target].export(alias.name.as_str()) {
+                            if self.loading.contains(&target)
+                                && matches!(binding, Binding::Definition(_) | Binding::Value(_))
+                            {
+                                return Err(format!("cyclic import through {name:?}"));
+                            }
+                            if let Binding::Module(child) = binding
+                                && self.loading.contains(&child)
+                            {
+                                return Err(format!(
+                                    "cyclic import through {:?}",
+                                    self.modules[child].name
+                                ));
+                            }
+                            binding
+                        } else if self.modules[target].is_package {
+                            Binding::Module(self.load_module(&format!("{name}.{}", alias.name))?)
+                        } else {
                             return Err(format!(
-                                "cyclic import through {:?}",
-                                self.modules[child].name
+                                "module {name:?} has no static binding {:?}",
+                                alias.name.as_str()
                             ));
-                        }
-                        binding
-                    } else if self.modules[target].is_package {
-                        Binding::Module(self.load_module(&format!("{name}.{}", alias.name))?)
-                    } else {
-                        return Err(format!(
-                            "module {name:?} has no static binding {:?}",
-                            alias.name.as_str()
-                        ));
-                    };
+                        };
                     let local = alias.asname.as_ref().unwrap_or(&alias.name);
                     self.bind(id, local.as_str(), binding, alias)?;
                 }
@@ -777,25 +807,81 @@ impl Loader {
             }
             return Ok(id);
         }
-        let base = self.root.join(name.replace('.', "/"));
-        let package = base.join("__init__.py");
-        let (path, is_package) = if package.is_file() {
-            (package, true)
-        } else {
-            self.inputs.missing.push(package);
-            (base.with_extension("py"), false)
-        };
-        if !path.is_file() {
+        // A package owns its entire subtree, even when another search root contains
+        // a directory with the same name. Only top-level imports search all roots.
+        let relative = name.replace('.', "/");
+        let parent_root = parent.map(|(id, _)| self.modules[id].root_index);
+        let roots = std::iter::once(&self.root).chain(&self.extension_roots);
+        let mut resolved = None;
+        for (root_index, root) in roots.enumerate() {
+            if parent_root.is_some_and(|index| index != root_index) {
+                continue;
+            }
+            let base = root.join(&relative);
+            let package = base.join("__init__.py");
+            let source = base.with_extension("py");
+            let stub = base.with_extension("pyi");
+            let (path, is_package, archive) = if package.is_file() {
+                (package, true, None)
+            } else {
+                self.inputs.missing.push(package);
+                let archive = base.with_extension("relar.a");
+                let installed = self.extension_roots.contains(root);
+                if installed && archive.is_file() {
+                    if !stub.is_file() {
+                        return Err(format!(
+                            "native module {name:?} requires a typed declaration at {}",
+                            stub.display()
+                        ));
+                    }
+                    let archive = archive.canonicalize().map_err(|e| e.to_string())?;
+                    if !archive.starts_with(root) {
+                        return Err(format!(
+                            "archive for native module {name:?} resolves outside its extension path"
+                        ));
+                    }
+                    (stub, false, Some(archive))
+                } else if source.is_file() {
+                    (source, false, None)
+                } else if installed && stub.is_file() {
+                    return Err(format!(
+                        "native module {name:?} requires a rebuilt archive at {}",
+                        archive.display()
+                    ));
+                } else {
+                    self.inputs.missing.push(source);
+                    continue;
+                }
+            };
+            let identity = path.canonicalize().map_err(|error| error.to_string())?;
+            if !identity.starts_with(root) {
+                return Err(format!(
+                    "module {name:?} resolves outside the first-party module root or extension path"
+                ));
+            }
+            resolved = Some((path, identity, is_package, root_index, archive));
+            break;
+        }
+        let Some((path, identity, is_package, root_index, archive)) = resolved else {
             return Err(format!(
                 "cannot resolve first-party module {name:?} under {}; external and namespace-package imports are unsupported",
                 self.root.display()
             ));
-        }
-        let identity = path.canonicalize().map_err(|error| error.to_string())?;
-        if !identity.starts_with(&self.root) {
-            return Err(format!(
-                "module {name:?} resolves outside the first-party module root"
-            ));
+        };
+        if archive.is_some() {
+            let leaf = name.rsplit('.').next().unwrap();
+            if !leaf.is_ascii() {
+                return Err(format!(
+                    "native module {name:?} requires an ASCII initialization symbol"
+                ));
+            }
+            if self.modules.iter().any(|module| {
+                module.archive.is_some() && module.name.rsplit('.').next() == Some(leaf)
+            }) {
+                return Err(format!(
+                    "native modules share the initialization symbol PyInit_{leaf}"
+                ));
+            }
         }
         if let Some(&previous) = self.by_path.get(&identity) {
             return Err(format!(
@@ -809,6 +895,8 @@ impl Loader {
         // ty resolves logical import paths; canonical identities enforce containment
         // and uniqueness without breaking a single internal symlink's import name.
         let id = self.add(path, identity, name.to_owned(), is_package, &source)?;
+        self.modules[id].root_index = root_index;
+        self.modules[id].archive = archive;
         self.scan(id)?;
         if let Some((parent, child)) = parent {
             let binding = Binding::Module(id);
@@ -824,6 +912,44 @@ impl Loader {
                 .insert(child.to_owned(), binding);
         }
         Ok(id)
+    }
+}
+
+/// The rebuilt C interface supports METH_VARARGS. Its stub contains signatures
+/// and their type imports; no Python statements in the stub run at import time.
+fn native_declaration(statement: &ast::Stmt) -> bool {
+    match statement {
+        ast::Stmt::Import(import) => import
+            .names
+            .iter()
+            .all(|a| matches!(a.name.as_str(), "typing" | "collections.abc")),
+        ast::Stmt::ImportFrom(import) => {
+            import.level == 0
+                && import.names.iter().all(|a| {
+                    matches!(
+                        (import.module.as_ref().map(|m| m.as_str()), a.name.as_str()),
+                        (Some("typing" | "collections.abc"), "Callable")
+                            | (Some("__future__"), "annotations")
+                    )
+                })
+        }
+        ast::Stmt::Expr(doc) => matches!(&*doc.value, ast::Expr::StringLiteral(_)),
+        ast::Stmt::FunctionDef(f) => {
+            !f.is_async
+                && f.type_params.is_none()
+                && f.decorator_list.is_empty()
+                && f.returns.is_some()
+                && f.parameters.args.is_empty()
+                && f.parameters.kwonlyargs.is_empty()
+                && f.parameters.vararg.is_none()
+                && f.parameters.kwarg.is_none()
+                && f.parameters
+                    .posonlyargs
+                    .iter()
+                    .all(|p| p.annotation().is_some() && p.default.is_none())
+                && matches!(f.body.as_slice(), [ast::Stmt::Expr(s)] if matches!(&*s.value, ast::Expr::EllipsisLiteral(_)))
+        }
+        _ => false,
     }
 }
 
@@ -846,5 +972,121 @@ fn module_value(statement: &ast::Stmt) -> Option<&ast::Expr> {
         ast::Stmt::Assign(assignment) => Some(&assignment.value),
         ast::Stmt::AnnAssign(assignment) => assignment.value.as_deref(),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod native_tests {
+    use std::fs;
+
+    #[test]
+    fn native_declarations_follow_package_ownership_and_preserve_initializers() {
+        let workspace = tempfile::tempdir().unwrap();
+        let app = workspace.path().join("app");
+        let wheel = workspace.path().join("wheel");
+        fs::create_dir_all(&app).unwrap();
+        fs::create_dir_all(wheel.join("pkg")).unwrap();
+        let entry = app.join("program.py");
+        fs::write(&entry, "from pkg import combine\nprint(combine(b'a'))\n").unwrap();
+        fs::write(
+            wheel.join("pkg/__init__.py"),
+            "from .native import combine\n",
+        )
+        .unwrap();
+        let stub = wheel.join("pkg/native.pyi");
+        let archive = wheel.join("pkg/native.relar.a");
+        fs::write(&stub, "def combine(data: bytes, /) -> int: ...\n").unwrap();
+        let options = crate::CompileOptions {
+            extension_paths: vec![wheel.clone()],
+            ..Default::default()
+        };
+        assert!(
+            crate::compile_file(&entry, None, &options)
+                .err()
+                .unwrap()
+                .contains("requires a rebuilt archive")
+        );
+        fs::write(&archive, []).unwrap();
+        let compiled = crate::compile_file(&entry, None, &options).unwrap();
+        assert_eq!(compiled.extension_archives, [archive]);
+        assert_eq!(
+            compiled
+                .llvm_ir
+                .matches("call void @relar_extension_import(ptr @PyInit_native)")
+                .count(),
+            1
+        );
+        assert_eq!(
+            compiled
+                .llvm_ir
+                .matches("call void @relar_extension_clear()")
+                .count(),
+            2
+        );
+
+        fs::write(&stub, "def combine(data: str, /) -> int: ...\n").unwrap();
+        assert!(
+            crate::compile_file(&entry, None, &options)
+                .err()
+                .unwrap()
+                .contains("native declarations currently support")
+        );
+
+        for invalid in [
+            "def combine(data: bytes) -> int: ...",
+            "def combine(data: bytes = b'', /) -> int: ...",
+            "def combine(*data: bytes) -> int: ...",
+            "async def combine(data: bytes, /) -> int: ...",
+            "@staticmethod\ndef combine(data: bytes, /) -> int: ...",
+            "from elsewhere import value as combine",
+        ] {
+            fs::write(&stub, invalid).unwrap();
+            let error =
+                crate::check_file_with_extensions(&entry, None, std::slice::from_ref(&wheel))
+                    .unwrap_err();
+            assert!(
+                error.contains("native stubs allow type-only imports"),
+                "{error}"
+            );
+        }
+        fs::write(
+            &stub,
+            "from typing import Callable as Callback\ndef combine(data: bytes, /) -> int: ...\n",
+        )
+        .unwrap();
+        fs::write(&entry, "from pkg.native import Callback\n").unwrap();
+        let error = crate::check_file_with_extensions(&entry, None, std::slice::from_ref(&wheel))
+            .unwrap_err();
+        assert!(error.contains("no static binding"), "{error}");
+
+        fs::create_dir(app.join("pkg")).unwrap();
+        fs::write(app.join("pkg/__init__.py"), "").unwrap();
+        fs::write(&entry, "from pkg.native import combine\n").unwrap();
+        assert!(
+            crate::compile_file(&entry, None, &options)
+                .err()
+                .unwrap()
+                .contains("cannot resolve first-party module")
+        );
+    }
+
+    #[test]
+    fn distinct_packages_cannot_supply_the_same_static_module_initializer() {
+        let workspace = tempfile::tempdir().unwrap();
+        let wheel = workspace.path().join("wheel");
+        for package in ["left", "right"] {
+            let path = wheel.join(package);
+            fs::create_dir_all(&path).unwrap();
+            fs::write(path.join("__init__.py"), "").unwrap();
+            fs::write(path.join("_core.pyi"), "def read() -> int: ...\n").unwrap();
+            fs::write(path.join("_core.relar.a"), []).unwrap();
+        }
+        let entry = workspace.path().join("program.py");
+        fs::write(&entry, "import left._core\nimport right._core\n").unwrap();
+        let error = crate::check_file_with_extensions(&entry, None, &[wheel]).unwrap_err();
+        assert!(
+            error.contains("share the initialization symbol PyInit__core"),
+            "{error}"
+        );
     }
 }

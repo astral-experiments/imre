@@ -167,7 +167,7 @@ The scriptc failures that motivated this project were failures of lifetime and m
 
 ## Room for extensions
 
-The initial implementation does not emulate CPython or load extension modules. Future extension support targets selected extensions rebuilt against our headers; unchanged CPython wheels are not an initial compatibility promise.
+Relar can link [native modules rebuilt for its extension ABI](extensions.md). A module uses a supported subset of `Python.h`, exports its usual `PyInit_*` entry point, and ships typed signatures with its native archive in a platform wheel. The signatures let the compiler check calls. The runtime also checks returned values and writes to shared typed lists.
 
 Keep the internal native calling convention separate from any future boxed C-facing convention. Keep reference ownership and object identity explicit. Keep allocation, ownership, and errors behind runtime interfaces while allowing compiler-proved native field access. These choices allow later checked adapters and callable wrappers without putting C-API calls in every optimized operation today.
 

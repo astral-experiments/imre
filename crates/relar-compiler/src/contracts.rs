@@ -55,6 +55,8 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            // Even a zero-argument call may mutate a retained native list or reenter Python.
+            Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
                 match operation {
                     TextOperation::Split(_)

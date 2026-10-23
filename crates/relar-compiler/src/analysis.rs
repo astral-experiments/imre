@@ -39,7 +39,7 @@ pub(crate) struct Session {
 }
 
 impl Session {
-    pub(crate) fn new(root: &Path) -> Result<Self, String> {
+    pub(crate) fn new(root: &Path, extension_roots: &[std::path::PathBuf]) -> Result<Self, String> {
         let root = root.to_str().ok_or("module paths must be valid UTF-8")?;
         let system = InMemorySystem::default();
         system
@@ -74,10 +74,18 @@ impl Session {
         let vendored = ty_vendored::file_system().clone();
         let mut settings = ProgramSettings::empty(&vendored);
         settings.python_version.version = ruff_python_ast::PythonVersion::PY312;
-        settings.search_paths =
-            ty_module_resolver::SearchPathSettings::new(vec![SystemPathBuf::from(root)])
-                .to_search_paths(&system, &vendored, &ty_module_resolver::FallibleStrategy)
+        let mut roots = vec![SystemPathBuf::from(root)];
+        for path in extension_roots {
+            let path = path.to_str().ok_or("extension paths must be valid UTF-8")?;
+            system
+                .fs()
+                .create_directory_all(path)
                 .map_err(|error| error.to_string())?;
+            roots.push(SystemPathBuf::from(path));
+        }
+        settings.search_paths = ty_module_resolver::SearchPathSettings::new(roots)
+            .to_search_paths(&system, &vendored, &ty_module_resolver::FallibleStrategy)
+            .map_err(|error| error.to_string())?;
         let db = Database {
             storage: salsa::Storage::default(),
             files: Files::default(),

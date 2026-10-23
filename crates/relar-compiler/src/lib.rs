@@ -26,6 +26,8 @@ use std::path::{Path, PathBuf};
 pub struct CompileOptions {
     /// Marks generated functions for LLVM's AddressSanitizer pass.
     pub address_sanitizer: bool,
+    /// Explicit installation roots containing rebuilt native modules and their type stubs.
+    pub extension_paths: Vec<PathBuf>,
 }
 
 /// Checks source syntax, ty diagnostics, and Relar's exact type contract.
@@ -46,6 +48,8 @@ pub struct Compilation {
     pub llvm_ir: String,
     pub input_paths: Vec<PathBuf>,
     pub source_inputs: SourceInputs,
+    /// Native archives reached by the static import graph, in link order.
+    pub extension_archives: Vec<PathBuf>,
 }
 
 /// Files and failed import lookups observed by the source loader.
@@ -70,7 +74,21 @@ impl SourceInputs {
 
 /// Checks a closed first-party module graph, inferring its package root when omitted.
 pub fn check_file(path: &Path, module_root: Option<&Path>) -> Result<(), String> {
-    frontend::lower(&modules::SourceGraph::load(path, module_root)?).map(|_| ())
+    check_file_with_extensions(path, module_root, &[])
+}
+
+/// Checks first-party code against the declarations in explicitly installed extension wheels.
+pub fn check_file_with_extensions(
+    path: &Path,
+    module_root: Option<&Path>,
+    extension_paths: &[PathBuf],
+) -> Result<(), String> {
+    frontend::lower(&modules::SourceGraph::load(
+        path,
+        module_root,
+        extension_paths,
+    )?)
+    .map(|_| ())
 }
 
 /// Compiles one entry module and its statically resolved first-party dependencies.
@@ -79,12 +97,17 @@ pub fn compile_file(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
-    let graph = modules::SourceGraph::load(path, module_root)?;
+    let graph = modules::SourceGraph::load(path, module_root, &options.extension_paths)?;
     let mut module = frontend::lower(&graph)?;
     specialize(&mut module);
     let ranges = ranges::analyze(&module);
     Ok(Compilation {
         llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer),
+        extension_archives: graph
+            .modules
+            .iter()
+            .filter_map(|m| m.archive.clone())
+            .collect(),
         source_inputs: graph.inputs,
         input_paths: graph
             .modules
@@ -103,6 +126,8 @@ pub struct UnitCompilation {
     pub units: Vec<CodegenUnit>,
     pub input_paths: Vec<PathBuf>,
     pub source_inputs: SourceInputs,
+    /// Native archives reached by the static import graph, in link order.
+    pub extension_archives: Vec<PathBuf>,
 }
 
 /// Keeps whole-program checking and specialization, then partitions native code by source owner.
@@ -111,7 +136,7 @@ pub fn compile_file_units(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<UnitCompilation, String> {
-    let graph = modules::SourceGraph::load(path, module_root)?;
+    let graph = modules::SourceGraph::load(path, module_root, &options.extension_paths)?;
     let (mut module, owners) = frontend::lower_with_owners(&graph)?;
     specialize(&mut module);
     let ranges = ranges::analyze(&module);
@@ -129,6 +154,11 @@ pub fn compile_file_units(
             &names,
             graph.entry,
         )?,
+        extension_archives: graph
+            .modules
+            .iter()
+            .filter_map(|m| m.archive.clone())
+            .collect(),
         input_paths: graph.modules.into_iter().map(|m| m.path).collect(),
         source_inputs: graph.inputs,
     })

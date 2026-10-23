@@ -9,16 +9,17 @@
 //! their respective types. ABI arguments borrow these handles; results transfer
 //! one owned reference unless an entry point explicitly documents a borrowed
 //! result. Release functions consume one reference. Generated code
-//! must never forge, confuse, or reuse released handles. There are no callbacks
-//! or user-defined finalizers, so a container access cannot reenter user code.
+//! must never forge, confuse, or reuse released handles. Container operations
+//! run without calling user code. Rebuilt C extensions can invoke callbacks
+//! after the individual container operation has released all storage borrows.
 //! Final resource release may close a file, but never installs a language error.
 //! Handles belong to one execution thread. An operation must finish before
 //! another operation accesses the same mutable storage; no storage reference may
 //! escape. Buffer addresses stay private except for explicitly documented readonly
 //! loop views whose compiler proof keeps the owner rooted and prevents all storage
 //! mutation. Such views never enter language values or escape the loop. Aliased
-//! handles are allowed and observe sequential mutations. Future callback or threaded
-//! extension boundaries must uphold these invariants before entering this ABI.
+//! handles are allowed and observe sequential mutations. Python.h APIs and
+//! callbacks run on the same thread as the originating extension call.
 //!
 //! Recoverable calls enter with pending state clear. Language errors install an
 //! owned thread-local exception; generated code checks the entry point's error
@@ -31,6 +32,7 @@
 //! Cleanup/error-state entry points remain valid while pending. Invalid ABI
 //! inputs and allocator exhaustion remain fatal; neither uses Rust unwinding.
 
+mod extensions;
 mod floats;
 mod integer_text;
 mod objects;
