@@ -11,22 +11,28 @@ use super::*;
 const MAX_TOML_DEPTH: usize = 64;
 
 /// Validate the entire document, including fields that the schema will ignore.
-fn validate(value: &DeValue<'_>, depth: usize) -> Result<(), String> {
+fn validate(value: &DeValue<'_>, depth: usize, text: &str) -> Result<(), String> {
     match value {
         DeValue::Array(values) => {
             if depth > MAX_TOML_DEPTH {
                 return Err("TOML nesting exceeds 64 containers".to_owned());
             }
             for value in values {
-                validate(value.get_ref(), depth + 1)?;
+                validate(value.get_ref(), depth + 1, text)?;
             }
         }
         DeValue::Table(values) => {
             if depth > MAX_TOML_DEPTH {
                 return Err("TOML nesting exceeds 64 containers".to_owned());
             }
-            for value in values.values() {
-                validate(value.get_ref(), depth + 1)?;
+            for (key, value) in values {
+                // Only assigned values start after the key. Table headers and
+                // implicit dotted tables have spans that overlap the key.
+                let gap = key.span().end..value.span().start;
+                if text.get(gap).is_some_and(|gap| gap.contains('\n')) {
+                    return Err("TOML key and value must start on the same line".to_owned());
+                }
+                validate(value.get_ref(), depth + 1, text)?;
             }
         }
         DeValue::Integer(value) => {
@@ -154,7 +160,7 @@ fn convert(value: &DeValue<'_>, schema: &Schema) -> Result<OwnedWord, String> {
 fn decode_toml(text: &str, schema: &Schema) -> Result<OwnedWord, String> {
     let table = DeTable::parse(text).map_err(|error| error.to_string())?;
     let value = DeValue::Table(table.into_inner());
-    validate(&value, 1)?;
+    validate(&value, 1, text)?;
     convert(&value, schema)
 }
 

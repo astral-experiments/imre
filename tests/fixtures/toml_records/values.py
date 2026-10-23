@@ -95,3 +95,5 @@ for invalid_bom in ['\ufeff\ufeffvalue=1', 'value=1\ufeff']:
         assert False, "unexpected byte order mark"
     except ValueError:
         print("invalid byte order mark")
+
+print(repr(decode('table={\n "a=b" = [\n1,\n2], # =\n}', dict[str, dict[str, list[int]]])))
