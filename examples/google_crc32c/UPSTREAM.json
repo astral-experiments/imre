@@ -1,0 +1,43 @@
+{
+  "python": {
+    "repository": "https://github.com/googleapis/python-crc32c",
+    "tag": "v1.8.0",
+    "commit": "9652503fb296eef101d84b9b631f454cc7c1d538",
+    "license": "Apache-2.0",
+    "files": {
+      "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "_crc32c.c": "9e4db34e452344101407c81f0b2613b2bb37be6cc29fde5198d119838ef590f4",
+      "google_crc32c/__config__.py": "da2d0aa4aa3eca998c4bf3fd8b7a8e6c05b679e9825adae6bbf3c95e4b631cef",
+      "google_crc32c/__init__.py": "0ee9fa5611b143ef1fc9d191fe15f853d2b79fc5cf6170832a6a080406ada733",
+      "google_crc32c/_checksum.py": "3ffd402cdb19a686131d6adf32a103c11c0a749ff2d447f1c1591775d559d359",
+      "google_crc32c/cext.py": "a05ecd16929650e128c9895b546200255a3c48d0e25914ff558c82235e3ee63a",
+      "google_crc32c/python.py": "f73cba001001fca33c24945c6671386faf15aa7384151366086b9fae371beea7",
+      "test___init__.py": "8dc0c3b1b1b22b50c29bbbdd254d39d39d3d0e5847ed89f4d1eb4294e2340068"
+    }
+  },
+  "core": {
+    "repository": "https://github.com/google/crc32c",
+    "tag": "1.1.2",
+    "commit": "02e65f4fd3065d27b2e29324800ca6d04df16126",
+    "license": "BSD-3-Clause",
+    "files": {
+      "Crc32cConfig.cmake.in": "9d620a3c876398b483f1e1e8b363325d447909885a8b473ee613483a5213bd7f",
+      "CMakeLists.txt": "ffa6051411a9ec2e35ae5dc274c2b245b8cea94dbfc66e8b546effb4d56daeb8",
+      "LICENSE": "a1f30b77c01e0995fa32a00119e00749e8731ee8a3c4c3549bce74083c72b0b6",
+      "include/crc32c/crc32c.h": "2ad42dff3ba9ea9f8059564fa5731111443ba9da52680d04de89611172fb565f",
+      "src/crc32c.cc": "9ace7edb4f9922998bc6e680c3da520413096debd07899875e462209056d6e10",
+      "src/crc32c_arm64.cc": "47a475d2e963249cee095c31ea015b22cb486024d0359e74b3fde2a4641ad0ac",
+      "src/crc32c_arm64.h": "042e9a7f8f3f8db06c74ea27c61b6d4e0b821bf488e7788d2626a5f7db8611e6",
+      "src/crc32c_arm64_check.h": "930175a891b27f914aeb1d09d5b6cc331267595282a2c1b2fc23179c3185ae62",
+      "src/crc32c_config.h.in": "731974d827378afeeeccd1976aaef95cbc0a784bf2a43d8bd766c0bb14058369",
+      "src/crc32c_internal.h": "dba07781152dba13480241637c1d19e6205de7f2dcfc4943800d8ea01904fcc2",
+      "src/crc32c_portable.cc": "5e9d2cbbbe30c271d6587371aade8078b96390c7c72d9dfda66ee1983c5c51f9",
+      "src/crc32c_prefetch.h": "e7fd601e05044adfd77a757af6678ab7035ccd9d9fea7b720b15dd2385c67377",
+      "src/crc32c_read_le.h": "20a2752d6aa715dfdf860cf8ddd6a35a4e7f4440e203b2158f4785c0d7eff37d",
+      "src/crc32c_round_up.h": "a5ce3474b5783717da0dce4e6879ed4a7bf40755b84c06c6a69502e4b7182a35",
+      "src/crc32c_sse42.cc": "0f8186879b9309a0664fcd48264d30fd7b8d31182dea9fab89b02ec3ee461911",
+      "src/crc32c_sse42.h": "ef3a4bc0d4b42369e1d3abc2d4295994da8766b01ea7c7feee42351e920db9c3",
+      "src/crc32c_sse42_check.h": "b79accf74020c65acbb119dd4fd8c01d73e82465c0347d964de2d9152091b4ee"
+    }
+  }
+}
