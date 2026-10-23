@@ -227,7 +227,9 @@ fn class(input: &mut Input<'_>, output: &mut String) -> Result<(), String> {
         output.push('^');
     }
     let mut first = true;
-    let mut range_left = false;
+    // Only a standalone atom can begin a range. Once both endpoints are
+    // consumed, a following hyphen starts a new atom and is literal.
+    let mut left_atom: Option<bool> = None;
     let mut range_pending = false;
     while let Some(c) = input.next() {
         if c == ']' && !first {
@@ -237,12 +239,15 @@ fn class(input: &mut Input<'_>, output: &mut String) -> Result<(), String> {
         if c == '[' || matches!(c, '&' | '~' | '|' | '-') && input.peek() == Some(&c) {
             return Err("nested or ambiguous regex character class is not supported".into());
         }
-        if c == '-' && !first && input.peek() != Some(&']') {
-            if !range_left {
+        if c == '-'
+            && let Some(scalar) = left_atom
+            && input.peek() != Some(&']')
+        {
+            if !scalar {
                 return Err("regex range requires scalar endpoints".into());
             }
             output.push('-');
-            range_left = false;
+            left_atom = None;
             range_pending = true;
             continue;
         }
@@ -255,7 +260,7 @@ fn class(input: &mut Input<'_>, output: &mut String) -> Result<(), String> {
         if range_pending && !scalar {
             return Err("regex range requires scalar endpoints".into());
         }
-        range_left = scalar && !range_pending;
+        left_atom = (!range_pending).then_some(scalar);
         range_pending = false;
         first = false;
     }
@@ -302,6 +307,15 @@ mod tests {
         }
         assert!(translate("a#comment\\", true).is_err());
         assert!(translate("(?:){4294967295}", false).is_err());
+    }
+
+    #[test]
+    fn hyphen_after_a_complete_range_is_literal() {
+        for (pattern, expected) in [(r"[a-b-c]", "abc-"), (r"[^a-b-c]", "dx")] {
+            let regex = Regex::new(&translate(pattern, false).unwrap().source).unwrap();
+            let matched: String = regex.find_iter("abc-dx").map(|m| m.as_str()).collect();
+            assert_eq!(matched, expected);
+        }
     }
 
     #[test]
