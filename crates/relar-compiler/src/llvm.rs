@@ -2903,11 +2903,22 @@ impl Emitter<'_, '_> {
             self.store(*slot, &value);
             return self.truth(&value);
         }
+        let probe_index = match builtin {
+            Builtin::DictGetDefault | Builtin::DictTryGet(_) => Some(1),
+            Builtin::DictContains | Builtin::SetContains => Some(0),
+            _ => None,
+        };
+        let mut probe_fields = Vec::new();
         let args = expressions
             .iter()
             .enumerate()
             .map(|(index, arg)| {
-                if index == 0
+                if probe_index == Some(index)
+                    && let ExprKind::Tuple(fields) = &arg.kind
+                    && (1..=16).contains(&fields.len())
+                {
+                    self.tuple_probe(arg.ty, fields, &mut probe_fields)
+                } else if index == 0
                     && matches!(
                         builtin,
                         Builtin::Len | Builtin::Bool | Builtin::RegexCapture { .. }
@@ -3621,7 +3632,36 @@ impl Emitter<'_, '_> {
         for arg in &args {
             self.release_operand(arg);
         }
+        for field in &probe_fields {
+            self.release(field);
+        }
         result
+    }
+
+    /// Read-only lookups never take ownership of the key, even on a miss in a
+    /// defaultdict. Keep the field owners across subsequent arguments and errors.
+    fn tuple_probe(&mut self, ty: Type, fields: &[Expr], roots: &mut Vec<Value>) -> Operand {
+        let scratch = self.entry_alloca(format!("[{} x i64]", fields.len() + 2));
+        let payload = self.instruction(format!(
+            "call ptr @relar_tuple_probe(ptr {scratch}, ptr @layout_{})",
+            record_name(ty)
+        ));
+        let value = Value {
+            ty,
+            operand: payload,
+            small_integer: false,
+        };
+        for (index, field) in fields.iter().enumerate() {
+            let field = self.expr(field);
+            let pointer = self.field_pointer(&value, index);
+            let word = self.word(&field);
+            self.line(format!("store i64 {word}, ptr {pointer}"));
+            roots.push(field);
+        }
+        Operand {
+            value,
+            ownership: Ownership::Borrowed,
+        }
     }
 
     /// Uses word-sized scratch storage only on the successful lookup edge. A
@@ -4555,6 +4595,7 @@ declare void @relar_exception_raise(ptr)
 declare void @relar_exception_reraise()
 declare void @relar_flush_stdout()
 declare ptr @relar_record_new(ptr)
+declare ptr @relar_tuple_probe(ptr, ptr)
 declare ptr @relar_json_decode(ptr, ptr)
 declare ptr @relar_toml_decode(ptr, ptr)
 declare ptr @relar_json_encode(i64, ptr, i64, i32)
@@ -5081,6 +5122,15 @@ mod tests {
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn read_only_tuple_lookups_use_scratch_and_subscriptions_own_their_keys() {
+        let body = function_body(
+            "def probe(d: dict[tuple[str, int], int], x: str) -> int:\n    d.get((x, 1))\n    d.get((x, 2), 3)\n    if (x, 4) in d:\n        return d[(x, 5)]\n    return 0\n",
+        );
+        assert_eq!(body.matches("call ptr @relar_tuple_probe(").count(), 3);
+        assert_eq!(body.matches("call ptr @relar_record_new(").count(), 1);
     }
 
     #[test]
