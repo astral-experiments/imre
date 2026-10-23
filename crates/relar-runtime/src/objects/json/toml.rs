@@ -10,8 +10,7 @@ use super::*;
 
 const MAX_TOML_DEPTH: usize = 64;
 
-/// Match the compatibility parser's representable calendar range even in ignored
-/// fields. Datetimes never become strings or synthetic dictionaries during decoding.
+/// Validate the entire document, including fields that the schema will ignore.
 fn validate(value: &DeValue<'_>, depth: usize) -> Result<(), String> {
     match value {
         DeValue::Array(values) => {
@@ -28,6 +27,14 @@ fn validate(value: &DeValue<'_>, depth: usize) -> Result<(), String> {
             }
             for value in values.values() {
                 validate(value.get_ref(), depth + 1)?;
+            }
+        }
+        DeValue::Integer(value) => {
+            // The parser can return empty digits or non-decimal digits after an underscore.
+            let number = value.as_str();
+            let digits = number.strip_prefix(['+', '-']).unwrap_or(number);
+            if digits.is_empty() || !digits.chars().all(|c| c.is_digit(value.radix())) {
+                return Err("invalid TOML integer".to_owned());
             }
         }
         DeValue::Datetime(value)
@@ -62,15 +69,13 @@ fn convert(value: &DeValue<'_>, schema: &Schema) -> Result<OwnedWord, String> {
     }
     let word = match (schema.kind, value) {
         (INTEGER, DeValue::Integer(value)) => {
-            let integer = i64::from_str_radix(value.as_str(), value.radix())
+            let digits = value.as_str();
+            let radix = value.radix();
+            let integer = i64::from_str_radix(digits, radix)
                 .ok()
                 .and_then(Int::small)
-                .unwrap_or_else(|| {
-                    Int::new(
-                        num_bigint::BigInt::parse_bytes(value.as_str().as_bytes(), value.radix())
-                            .expect("parser validated and normalized the TOML integer"),
-                    )
-                });
+                .or_else(|| num_bigint::BigInt::parse_bytes(digits.as_bytes(), radix).map(Int::new))
+                .ok_or("invalid TOML integer")?;
             integer.into_raw()
         }
         (STRING, DeValue::String(value)) => Rc::into_raw(Rc::new(Str::new(value))) as usize,
