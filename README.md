@@ -156,6 +156,7 @@ relar build totals.py
 
 `build` and `run` use the system allocator by default. On Linux, pass
 `--allocator jemalloc` to use jemalloc for the compiled program's heap.
+For ThinLTO, select the allocator with `--runtime`. [ThinLTO build instructions](docs/subset.md#build-and-validate)
 
 ## Releasing
 

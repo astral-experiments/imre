@@ -782,6 +782,8 @@ objects. `--allocator system` selects the platform heap explicitly. macOS and
 `--sanitize` use the system heap. The compiler looks beside its executable
 for `librelar_runtime.a` (system) or `librelar_runtime_jemalloc.a` (jemalloc).
 An explicit `--runtime` selects the allocator through the archive itself.
+For a Linux ThinLTO build with jemalloc, use `-p relar-runtime-jemalloc` in
+the Cargo command above and pass `--runtime target/lto/release/librelar_runtime_jemalloc.a`.
 Pass a system-allocator archive when supplying a custom runtime to `--sanitize`.
 
 `--sanitize` marks generated functions for AddressSanitizer and links its runtime. On macOS, use `--clang` to select a Clang with a matching sanitizer runtime when you also instrument the Rust archive. To instrument Rust runtime code, build a separate sanitizer archive. The test suites accept `--sanitize --opt-levels 1` to exercise this configuration, including leak checks on normal exits.

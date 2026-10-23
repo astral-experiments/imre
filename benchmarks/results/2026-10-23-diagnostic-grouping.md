@@ -2,9 +2,9 @@
 
 Relar compiles Ruff’s three original analysis functions, a total of 2,768 bytes of Python. The real changed run produced 1,269 ordered groups from 146 typing-conformance files. The larger run produced 12,690 groups from 1,460 distinct files. All six implementations matched the fields of every grouped record, both sets of per-file statistics, and every byte of both report formats. [Pinned Ruff source](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/conformance.py#L549) · [Relar application](../../examples/conformance_report/model.py)
 
-Relar took 1.20–1.83× Rust’s time for grouping and 1.30–1.38× for complete report invocations. The largest median on the canonical checkout path across the 32 ordinary and ThinLTO workloads was 1.83× Rust.
+With the default system allocator, Relar took 1.20–1.83× Rust’s time for grouping and 1.30–1.38× for complete report invocations. The largest median on the canonical checkout path across the 32 ordinary and ThinLTO workloads was 1.83× Rust.
 
-A separate native-only control reached 2.28× Rust for 10× grouping on a short checkout path and 2.13× on the canonical path with ThinLTO.
+A separate native-only control reached 2.28× Rust for 10× grouping on a short checkout path and 2.13× on the canonical path with ThinLTO. With `--allocator jemalloc`, the same grouping code took 1.07–1.17× Rust’s time across both paths and link modes when Rust also used jemalloc. [Linux allocator comparison](2026-10-23-diagnostic-allocator.md)
 
 ## Isolated analysis
 
