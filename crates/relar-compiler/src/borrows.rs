@@ -5,7 +5,6 @@ mod private;
 
 use crate::callables::Targets;
 use crate::ir::{self, Builtin, Expr, ExprKind, Function, Module, Statement, Type};
-use crate::list_specialization::readonly_builtin;
 use crate::types::Types;
 
 #[derive(Default)]
@@ -253,14 +252,11 @@ fn preserves_edges(
                 constructors.get(*initializer).copied().unwrap_or(false)
             }
             ExprKind::Builtin(operation, args) => {
-                readonly_builtin(operation)
+                let contract = operation.contract(args);
+                contract.preserves_list_storage()
                     || (matches!(operation, Builtin::SetAdd)
                         && matches!(args[0].kind, ExprKind::Local(slot) if private[slot]))
-                    || (append
-                        && matches!(
-                            operation,
-                            Builtin::Append | Builtin::ListReserveRange | Builtin::SortByKeys
-                        ))
+                    || (append && contract.preserves_owners())
             }
             // A binding can replace an earlier borrowed operand during evaluation.
             ExprKind::Bind(..) => false,
