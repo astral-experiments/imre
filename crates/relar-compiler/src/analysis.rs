@@ -9,6 +9,8 @@ use ruff_db::parsed::ParsedModuleRef;
 use ruff_db::system::{InMemorySystem, System, SystemPathBuf};
 use ruff_db::vendored::VendoredFileSystem;
 use ruff_python_ast::token::{TokenKind, Tokens};
+use ruff_python_ast::visitor::{Visitor, walk_stmt};
+use ruff_python_ast::{Expr, Stmt};
 use ruff_python_parser::{Mode, lexer::lex};
 use ruff_text_size::{Ranged, TextSize};
 use ty_python_core::program::ProgramSettings;
@@ -117,6 +119,13 @@ impl Session {
         }
         check_handler_count(parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
         check_indentation(source, parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
+        let mut managers = WithDepth::default();
+        managers.visit_body(&parsed.syntax().body);
+        if managers.exceeded {
+            return Err(format!(
+                "{path}: Relar: context manager nesting exceeds {MAX_WITH_DEPTH} levels"
+            ));
+        }
         self.files.push(file);
         Ok(parsed)
     }
@@ -219,6 +228,36 @@ impl Session {
     }
 }
 
+const MAX_WITH_DEPTH: usize = 96;
+
+/// Each manager contributes a nested protected scope, even when several
+/// managers share one statement. Expressions cannot contain a with statement.
+#[derive(Default)]
+struct WithDepth {
+    active: usize,
+    exceeded: bool,
+}
+
+impl<'a> Visitor<'a> for WithDepth {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        if self.exceeded {
+            return;
+        }
+        if let Stmt::With(scope) = stmt {
+            self.active += scope.items.len();
+            self.exceeded = self.active > MAX_WITH_DEPTH;
+            if !self.exceeded {
+                self.visit_body(&scope.body);
+            }
+            self.active -= scope.items.len();
+        } else {
+            walk_stmt(self, stmt);
+        }
+    }
+
+    fn visit_expr(&mut self, _expr: &'a Expr) {}
+}
+
 /// Ruff indexes the AST recursively as soon as the database parses a module.
 /// Bound the depth before that happens, including chains with no parentheses.
 fn check_source_complexity(source: &str) -> Result<(), &'static str> {
@@ -247,13 +286,34 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
     let mut lexer = lex(source, Mode::Module);
     let mut parents = Vec::new();
     let mut group = Group::default();
-    let mut indent = 0_usize;
+    let mut indents = Vec::new();
+    let mut elif_depth = 0;
+    let mut statement_start = true;
     loop {
-        match lexer.next_token() {
+        let token = lexer.next_token();
+        if statement_start
+            && !matches!(
+                token,
+                Indent | Dedent | Newline | Comment | NonLogicalNewline
+            )
+        {
+            // Each elif adds a nested false branch. Its suite inherits that
+            // depth, while a new statement starts a fresh chain at this indent.
+            match token {
+                Elif => elif_depth += 1,
+                Else => {}
+                _ => elif_depth = indents.last().copied().unwrap_or(0),
+            }
+            statement_start = false;
+        }
+        match token {
             EndOfFile => return Ok(()),
-            Indent => indent += 1,
-            Dedent => indent = indent.saturating_sub(1),
-            Newline | Semi if parents.is_empty() => group = Group::default(),
+            Indent => indents.push(elif_depth),
+            Dedent => elif_depth = indents.pop().unwrap_or(0),
+            Newline | Semi if parents.is_empty() => {
+                group = Group::default();
+                statement_start = token == Newline;
+            }
             Lpar | Lsqb | Lbrace | FStringStart | TStringStart => {
                 group.operators += 1;
                 parents.push(std::mem::take(&mut group));
@@ -277,7 +337,7 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
             | FStringMiddle | TStringMiddle | Comment | NonLogicalNewline => continue,
             _ => group.operators += 1,
         }
-        if indent + parents.len() + group.depth() > LIMIT {
+        if indents.len() + elif_depth + parents.len() + group.depth() > LIMIT {
             return Err("Relar: source exceeds the syntax complexity limit");
         }
     }

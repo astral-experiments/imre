@@ -41,7 +41,7 @@ pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String>
     let mut module = frontend::lower(&modules::SourceGraph::single(source)?)?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
-    Ok(llvm::emit(&module, &ranges, options.address_sanitizer))
+    llvm::emit(&module, &ranges, options.address_sanitizer)
 }
 
 /// The generated IR and every source file that must be protected from output writes.
@@ -88,7 +88,7 @@ pub fn compile_file(
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     Ok(Compilation {
-        llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer),
+        llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer)?,
         source_inputs: graph.inputs,
         input_paths: graph
             .modules
@@ -243,6 +243,21 @@ mod tests {
     }
 
     #[test]
+    fn elif_chains_count_toward_branch_depth() {
+        let flat = format!("if False: pass\n{}", "elif False: pass\n".repeat(10_000));
+        let nested = format!(
+            "if False: pass\n{}else:\n    if False: pass\n{}",
+            "elif False: pass\n".repeat(60),
+            "    elif False: pass\n".repeat(60)
+        );
+        for source in [flat, nested] {
+            let error = super::check(&source).unwrap_err();
+            assert!(error.contains("syntax complexity limit"), "{error}");
+        }
+        super::check(&"if False: pass\nelif False: pass\n".repeat(128)).unwrap();
+    }
+
+    #[test]
     fn limits_exception_handlers_per_try_statement() {
         let handler = "except ValueError:\n    pass\n";
         let chain = |count| format!("try:\n    pass\n{}", handler.repeat(count));
@@ -250,6 +265,11 @@ mod tests {
         let error = super::check(&chain(97)).unwrap_err();
         assert!(error.contains("exception handler limit"), "{error}");
         super::check(&chain(2).repeat(100)).unwrap();
+        let inner: String = chain(96)
+            .lines()
+            .map(|line| format!("    {line}\n"))
+            .collect();
+        super::check(&format!("try:\n{inner}{}", handler.repeat(96))).unwrap();
     }
 
     #[test]
@@ -311,6 +331,27 @@ def first(stream: Stream) -> str:
     }
 
     #[test]
+    fn context_manager_depth_counts_flat_and_nested_items() {
+        let managers = |n| vec!["f"; n].join(", ");
+        let file = "f = open('/dev/null', 'rb')\n";
+        let flat = format!("{file}with {}:\n    pass\n", managers(10_000));
+        let nested = format!(
+            "{file}with {}:\n    with {}:\n        pass\n",
+            managers(60),
+            managers(60)
+        );
+        for source in [flat, nested] {
+            let error = super::check(&source).unwrap_err();
+            assert!(
+                error.contains("context manager nesting exceeds 96 levels"),
+                "{error}"
+            );
+        }
+        let sequential = format!("{file}{}", "with f, f:\n    pass\n".repeat(100));
+        super::check(&sequential).unwrap();
+    }
+
+    #[test]
     fn file_iterators_pull_typed_lines_and_keep_reads_in_the_loop() {
         let source = r#"
 from gzip import open
@@ -348,6 +389,31 @@ def first(path: str) -> bytes:
         assert!(llvm.contains("define i32 @main()"));
         assert!(!llvm.contains("call void @relar_args_init"));
         assert!(!llvm.contains("call void @relar_args_clear"));
+    }
+
+    #[test]
+    fn nested_finally_emission_stays_bounded() {
+        fn indent(body: &str) -> String {
+            body.lines().map(|line| format!("    {line}\n")).collect()
+        }
+        fn program(depth: usize, nested_cleanup: bool) -> String {
+            let mut body = "pass\n".to_owned();
+            for _ in 0..depth {
+                let nested = indent(&body);
+                body = if nested_cleanup {
+                    format!("try:\n    int(text)\nfinally:\n{nested}")
+                } else {
+                    format!("try:\n{nested}finally:\n    int(text)\n")
+                };
+            }
+            format!("def f(text: str) -> None:\n{}f('1')\n", indent(&body))
+        }
+        let options = CompileOptions::default();
+        let shallow = compile(&program(8, false), &options).unwrap();
+        let deep = compile(&program(12, false), &options).unwrap();
+        assert!(deep.len() < 2 * shallow.len());
+        let error = compile(&program(14, true), &options).unwrap_err();
+        assert!(error.contains("finally cleanup expansion"), "{error}");
     }
 
     #[test]
