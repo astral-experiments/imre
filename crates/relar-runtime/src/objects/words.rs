@@ -178,6 +178,18 @@ impl Words {
         }
     }
 
+    /// An empty inline buffer normally has header 1. Publishing length zero
+    /// without its inline flag lets a later append/pop remain observable to sort.
+    pub(super) fn sorting_empty(kind: u32) -> Self {
+        let mut empty = Self::new(kind);
+        empty.header = 0;
+        empty
+    }
+
+    pub(super) fn is_sorting_empty(&self) -> bool {
+        self.header == 0 && !self.values.spilled()
+    }
+
     /// Publish a fully initialized buffer after bulk initialization by a decoder or splitter.
     pub(super) fn into_object(mut self) -> Rc<Object> {
         self.update_header();

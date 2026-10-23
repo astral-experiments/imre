@@ -15,6 +15,10 @@ Calls to `sorted(..., key=...)` use a native helper that materializes the input,
 computes every key once in input order, and sorts decorated entries with an
 ordinal tie breaker. This preserves eager key errors for single-item inputs and
 stable ties in both sort directions; stock Codon calls keys during comparisons.
+The Ruff diagnostic-entry collector uses stock Codon's keyed in-place list sort.
+Its key reads a priority and two string fields. The benchmark verifies every
+ordered title, case key, and source against Ruff. Codon supplies an
+`AssertionError` for the collector's unreachable `typing.assert_never` branches.
 The builder retains both original and generated function-body hashes and checks
 that those declared call replacements are the only function-body AST changes.
 Generated modules use `.codon` filenames and an explicit `CODON_PATH` for Codon's

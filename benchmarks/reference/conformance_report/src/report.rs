@@ -5,10 +5,10 @@ use crate::{Error, Result};
 
 const SUMMARY_NOTE: &str = "Each test case represents one expected error annotation or a group of annotations sharing a tag. Counts are per test case, not per diagnostic — multiple diagnostics on the same line count as one. Required annotations (`E`) are true positives when ty flags the expected location and false negatives when it does not. Optional annotations (`E?`) are true positives when flagged but true negatives (not false negatives) when not. Tagged annotations (`E[tag]`) require ty to flag exactly one of the tagged lines; tagged multi-annotations (`E[tag+]`) allow any number up to the tag count. Flagging unexpected locations counts as a false positive.";
 
-struct Entry<'a> {
-    title: String,
-    case: &'a TestCase,
-    source: Option<Side>,
+pub(crate) struct Entry<'a> {
+    pub(crate) title: String,
+    pub(crate) case: &'a TestCase,
+    pub(crate) source: Option<Side>,
 }
 
 fn priority(title: &str) -> u8 {
@@ -26,7 +26,7 @@ fn priority(title: &str) -> u8 {
     }
 }
 
-fn entries(cases: &[TestCase]) -> Vec<Entry<'_>> {
+pub(crate) fn entries(cases: &[TestCase]) -> Vec<Entry<'_>> {
     let mut result = Vec::new();
     for case in cases {
         let change = case.change();

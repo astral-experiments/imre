@@ -40,6 +40,7 @@ options: list[list[str]] = [
     ["freethreaded"], ["debug", "debug"], ["freethreaded", "debug"],
 ]
 variants: list[Variant | None] = [Variant.from_build_options(item) for item in options]
-for variant in sorted(variants, key=variant_sort_key):
+variants.sort(key=variant_sort_key)
+for variant in variants:
     print(variant_sort_key(variant))
     print("none" if variant is None else variant.value)

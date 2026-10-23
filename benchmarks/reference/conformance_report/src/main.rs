@@ -210,8 +210,8 @@ fn render_report(inputs: &Inputs, options: &Options) -> Result<String> {
 
 fn run() -> Result<()> {
     let arguments: Vec<String> = std::env::args().collect();
-    if arguments.get(1).map(String::as_str) == Some("--classify") {
-        return classification_benchmark::run(&arguments[2..]);
+    if let Some(mode @ ("--classify" | "--entries")) = arguments.get(1).map(String::as_str) {
+        return classification_benchmark::run(&arguments[2..], mode == "--entries");
     }
     if arguments.get(1).map(String::as_str) == Some("--scan") {
         return parse::scanner_benchmark::run(&arguments[2..]);

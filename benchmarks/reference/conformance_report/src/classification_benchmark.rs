@@ -16,10 +16,10 @@ fn score(s: &Statistics) -> i64 {
     s.true_positives + 3 * s.false_positives + 5 * s.false_negatives + 7 * s.total_diagnostics
 }
 
-pub(crate) fn run(args: &[String]) -> Result<()> {
+pub(crate) fn run(args: &[String], entries_mode: bool) -> Result<()> {
     let [manifest, old, new, rounds, mode] = args else {
         return Err(Error::value(
-            "expected --classify MANIFEST OLD NEW ROUNDS checksum|dump",
+            "expected MANIFEST OLD NEW ROUNDS checksum|dump",
         ));
     };
     let inputs = parse::read_inputs(manifest, old, new)?;
@@ -31,6 +31,28 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
     let rounds: usize = rounds.parse().map_err(|_| Error::value("invalid rounds"))?;
     let dump = mode == "dump";
     let mut out = io::stdout().lock();
+    if entries_mode {
+        let mut checksum = 0;
+        for _ in 0..rounds {
+            if cases.len() > 1 {
+                let last = cases.len() - 1;
+                cases.swap(0, last);
+            }
+            for (index, e) in crate::report::entries(black_box(&cases)).iter().enumerate() {
+                let (source, label) = match e.source {
+                    None => (0, "none"),
+                    Some(Side::Old) => (1, "old"),
+                    Some(Side::New) => (2, "new"),
+                };
+                checksum += (index + 1)
+                    * (e.title.chars().count() + 3 * e.case.key.chars().count() + 7 * source);
+                if dump {
+                    writeln!(out, "{}\t{}\t{label}", e.title, e.case.key).map_err(Error::io)?;
+                }
+            }
+        }
+        return writeln!(out, "{} {checksum}", cases.len()).map_err(Error::io);
+    }
     if dump {
         for case in &cases {
             let change = match case.change() {

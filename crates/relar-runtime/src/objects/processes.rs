@@ -854,8 +854,8 @@ unsafe fn run_process(
     let (status, stdout, stderr) = match captured {
         Ok(Captured::Completed(status, stdout, stderr)) => (status, stdout, stderr),
         Ok(Captured::TimedOut(stdout, stderr)) => {
-            // SAFETY: the original argv stays rooted across launch and capture.
             raise_timeout(TimeoutError {
+                // SAFETY: the original argv stays rooted across launch and capture.
                 cmd: unsafe { acquire_rc(args as usize) },
                 timeout: timeout.expect("only a deadline produces a timeout"),
                 stdout: stdout.map(Rc::new),

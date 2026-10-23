@@ -130,10 +130,21 @@ def snapshot(directory: Path) -> dict:
     return result
 
 
-def run(command: list[str], directory: Path, *, descriptor: int | None = None, limited: bool = False, invalid: tuple[bytes, bytes] | None = None):
+def run(
+    command: list[str],
+    directory: Path,
+    *,
+    descriptor: int | None = None,
+    limited: bool = False,
+    empty_name: bool = False,
+    invalid: tuple[bytes, bytes] | None = None,
+):
     environment = files.environment()
     environment.update(RELAR_PROCESS_PARENT="inherited λ", RELAR_PROCESS_OVERRIDE="parent")
-    environment[""] = "inherited empty name λ"
+    if empty_name:
+        environment[""] = "inherited empty name λ"
+    else:
+        environment.pop("", None)
     environment.pop("RELAR_PROCESS_EMPTY", None)
     if invalid is not None:
         environment = {os.fsencode(key): os.fsencode(value) for key, value in environment.items()}
@@ -193,7 +204,11 @@ def main() -> None:
                 project = temporary / name
                 reference_dir = project / "cpython" / "work"
                 seed(reference_dir, python)
-                options = {"limited": name in {"cleanup", "stdin_fds", "timeouts"}, "descriptor": descriptor if name == "stdin_fds" else None}
+                options = {
+                    "limited": name in {"cleanup", "stdin_fds", "timeouts"},
+                    "descriptor": descriptor if name == "stdin_fds" else None,
+                    "empty_name": name == "environment",
+                }
                 reference = run([python, "-E", "-B", str(source), *arguments], reference_dir, **options)
                 files.check_result(reference, None, f"CPython {name}")
                 expected_files = snapshot(reference_dir)

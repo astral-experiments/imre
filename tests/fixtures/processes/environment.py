@@ -19,7 +19,8 @@ changed = subprocess.run(command, capture_output=True, encoding="utf-8", env=fir
 print(changed.stdout)
 empty = subprocess.run(command, capture_output=True, encoding="utf-8", env={})
 print(empty.stdout)
-empty_name = subprocess.run(command, capture_output=True, encoding="utf-8", env={"": "allowed"})
+# An explicit cwd selects CPython's fork/exec path, which accepts an empty name.
+empty_name = subprocess.run(command, capture_output=True, encoding="utf-8", env={"": "allowed"}, cwd=".")
 print(empty_name.returncode)
 print(empty_name.stdout)
 

@@ -91,6 +91,7 @@ pub(crate) enum Intrinsic {
     Dataclass,
     DataclassField,
     SelfType,
+    AssertNever,
     Path,
     TemporaryDirectory,
     SubprocessRun,
@@ -148,6 +149,7 @@ impl IntrinsicModule {
             (Self::Typing, "Union") => Intrinsic::Union,
             (Self::Typing, "Literal") => Intrinsic::Literal,
             (Self::Typing, "Self") => Intrinsic::SelfType,
+            (Self::Typing, "assert_never") => Intrinsic::AssertNever,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
@@ -203,6 +205,7 @@ impl SourceModule {
 }
 
 pub(crate) struct SourceGraph {
+    pub(crate) session: Session,
     pub(crate) modules: Vec<SourceModule>,
     pub(crate) entry: ModuleId,
     /// Imports precede executable statements, so dependency completion order
@@ -371,6 +374,7 @@ impl Loader {
     fn finish(self, entry: ModuleId) -> Result<SourceGraph, String> {
         self.session.check()?;
         Ok(SourceGraph {
+            session: self.session,
             modules: self.modules,
             entry,
             initialization: self.initialization,

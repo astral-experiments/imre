@@ -14,7 +14,9 @@ use ty_python_core::program::ProgramSettings;
 use ty_python_core::{Program, ProgramFile};
 use ty_python_semantic::dependency::DependencyMetadata;
 use ty_python_semantic::lint::{LintRegistry, RuleSelection};
-use ty_python_semantic::{AnalysisSettings, Db, check_file_unwrap, default_lint_registry};
+use ty_python_semantic::{
+    AnalysisSettings, Db, HasType, SemanticModel, check_file_unwrap, default_lint_registry,
+};
 use ty_site_packages::PythonVersionWithSource;
 
 #[salsa::db]
@@ -114,6 +116,14 @@ impl Session {
         check_indentation(source, parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
         self.files.push(file);
         Ok(parsed)
+    }
+
+    pub(crate) fn is_never(&self, module: usize, value: &ruff_python_ast::Expr) -> bool {
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        matches!(
+            value.inferred_type(&model),
+            Some(ty_python_semantic::types::Type::Never)
+        )
     }
 
     /// Checks every loaded file, including unused functions and inactive main guards.

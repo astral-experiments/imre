@@ -169,6 +169,20 @@ impl<T> StorageCell<T> {
 /// An opaque, nonmoving list allocation. Its resizable buffer stays inside Rust.
 pub struct List(StorageCell<Vec<Int>>);
 
+// An unallocated Vec never reads, writes, or frees this address. A real push
+// replaces it with an allocation, even if a later pop empties the list again.
+static SORTING_EMPTY: Int = Int(1);
+
+fn sorting_empty_ints() -> Vec<Int> {
+    let marker = std::ptr::from_ref(&SORTING_EMPTY).cast_mut();
+    // SAFETY: a zero-capacity Vec only requires a nonnull pointer aligned for Int.
+    unsafe { Vec::from_raw_parts(marker, 0, 0) }
+}
+
+fn is_sorting_empty_ints(values: &[Int]) -> bool {
+    std::ptr::eq(values.as_ptr(), &SORTING_EMPTY)
+}
+
 const MAX_REUSED_LIST_CAPACITY: usize = 32_768;
 
 thread_local! {
@@ -1181,7 +1195,8 @@ pub unsafe extern "C" fn relar_list_reserve_range(
     // address or storage borrow escapes, and existing elements are untouched.
     let displaced = unsafe {
         (&*list).0.with_mut(|values| {
-            if !values.is_empty() || values.capacity() >= capacity {
+            if !values.is_empty() || values.capacity() >= capacity || is_sorting_empty_ints(values)
+            {
                 return Vec::new();
             }
             let buffer = take_list_buffer(capacity);
