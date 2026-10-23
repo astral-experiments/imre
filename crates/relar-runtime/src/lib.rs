@@ -32,8 +32,6 @@
 //! inputs and allocator exhaustion remain fatal; neither uses Rust unwinding.
 
 mod floats;
-#[cfg(target_os = "linux")]
-mod heap;
 mod integer_text;
 mod objects;
 
@@ -51,14 +49,6 @@ use std::sync::{LazyLock, Mutex, Once};
 const MIN_SMALL: i64 = -(1_i64 << 62);
 const MAX_SMALL: i64 = (1_i64 << 62) - 1;
 const _: () = assert!(size_of::<usize>() == 8 && align_of::<BigInt>() >= 2);
-
-/// Select the native executable's allocator before creating its first object.
-/// Sanitized entry points use the system heap intercepted by AddressSanitizer.
-#[unsafe(no_mangle)]
-pub extern "C" fn relar_init_native_heap() {
-    #[cfg(target_os = "linux")]
-    heap::select_jemalloc();
-}
 
 /// Lists use nonzero elements at least eight bytes wide, and a Vec allocation
 /// cannot exceed `isize::MAX` bytes. The compiler shares this inclusive bound

@@ -1055,8 +1055,15 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
- "tikv-jemallocator",
  "toml",
+]
+
+[[package]]
+name = "relar-runtime-jemalloc"
+version = "0.1.0"
+dependencies = [
+ "relar-runtime",
+ "tikv-jemallocator",
 ]
 
 [[package]]
