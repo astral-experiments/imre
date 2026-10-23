@@ -42,6 +42,14 @@ impl Reads<'_, '_> {
 
 impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
     fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
+        if let ast::Stmt::FunctionDef(nested) = stmt
+            && !comprehensions::function_reads(nested).contains(self.parameter)
+        {
+            // Defaults belong to the enclosing scope even when the body
+            // binds its own local with the outer parameter's spelling.
+            self.visit_parameters(&nested.parameters);
+            return;
+        }
         if let ast::Stmt::For(loop_) = stmt {
             self.allow(&loop_.iter);
         }
@@ -54,6 +62,34 @@ impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
     }
 
     fn visit_expr(&mut self, expr: &'ast ast::Expr) {
+        let clauses = match expr {
+            ast::Expr::ListComp(value) => Some(value.generators.as_slice()),
+            ast::Expr::SetComp(value) => Some(value.generators.as_slice()),
+            ast::Expr::DictComp(value) => Some(value.generators.as_ref()),
+            ast::Expr::Generator(value) => Some(value.generators.as_slice()),
+            _ => None,
+        };
+        if let Some(clauses) = clauses {
+            let mut targets = HashSet::new();
+            for clause in clauses {
+                comprehensions::target_names(&clause.target, &mut targets);
+            }
+            if targets.contains(self.parameter) {
+                // Only the first iterable is evaluated outside the
+                // comprehension's private scope.
+                self.allow(&clauses[0].iter);
+                self.visit_expr(&clauses[0].iter);
+                return;
+            }
+        }
+        if let ast::Expr::Lambda(lambda) = expr
+            && !comprehensions::free_reads(expr, HashSet::new()).contains(self.parameter)
+        {
+            if let Some(parameters) = &lambda.parameters {
+                self.visit_parameters(parameters);
+            }
+            return;
+        }
         match expr {
             ast::Expr::Name(name)
                 if name.id == self.parameter && !self.allowed.remove(&expr.range()) =>
@@ -72,5 +108,25 @@ impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
             _ => {}
         }
         walk_expr(self, expr);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::check;
+
+    #[test]
+    fn shadowing_still_checks_outer_iterables_and_free_captures() {
+        let prefix = "from typing import Sequence\ndef mutate(values: list[int]) -> list[int]:\n    values.append(3)\n    return values\ndef use(xs: Sequence[int]) -> list[int]:\n";
+        for body in [
+            "    return [xs for xs in mutate(xs)]\n",
+            "    def inner() -> list[int]:\n        return mutate(xs)\n    return inner()\n",
+        ] {
+            assert!(
+                check(&format!("{prefix}{body}"))
+                    .unwrap_err()
+                    .contains("a Sequence parameter supports")
+            );
+        }
     }
 }
