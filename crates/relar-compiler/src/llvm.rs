@@ -1494,9 +1494,9 @@ impl Emitter<'_, '_> {
                     return;
                 }
                 if !self.loops.is_empty()
-                    && let ExprKind::Tuple(fields) = &expression.kind
+                    && let Some(fields) = records::replacement_fields(self.module, expression)
                 {
-                    self.assign_loop_tuple(*slot, fields);
+                    self.assign_loop_record(*slot, fields);
                     return;
                 }
                 let previous_small = self.assignment_replaces_small(*slot, expression);
@@ -4114,10 +4114,10 @@ impl Emitter<'_, '_> {
         self.owned(value)
     }
 
-    /// An unaliased tuple local can reuse its allocation on the next iteration.
+    /// An unaliased record local can reuse its allocation on the next iteration.
     /// Finish every RHS effect first, including rebinding the destination, and
     /// root each field across the remaining evaluations and all replacements.
-    fn assign_loop_tuple(&mut self, slot: usize, fields: &[Expr]) {
+    fn assign_loop_record(&mut self, slot: usize, fields: &[Expr]) {
         let fields: Vec<_> = fields.iter().map(|field| self.expr(field)).collect();
         let previous = self.borrow_slot(slot);
         let empty = self.instruction(format!("icmp eq ptr {}, null", previous.operand));
