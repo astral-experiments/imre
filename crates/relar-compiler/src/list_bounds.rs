@@ -5,7 +5,7 @@
 //! site supplies a known interval without intervening argument effects.
 
 use crate::ir::{Builtin, CallArgs, Expr, ExprKind, Module, Statement, Type, walk_expressions};
-use crate::list_specialization::{mark_writes, readonly_builtin};
+use crate::list_specialization::mark_writes;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Bounds {
@@ -262,7 +262,7 @@ impl Analysis<'_> {
                     .iter_mut()
                     .map(|arg| self.expression(arg, state))
                     .collect::<Vec<_>>();
-                if !readonly_builtin(operation) {
+                if !operation.contract(args).preserves_list_storage() {
                     state.fill(None);
                     return None;
                 }
@@ -446,7 +446,7 @@ fn readonly(expression: &Expr) -> bool {
         ExprKind::Call(..) | ExprKind::Construct { .. } | ExprKind::Invoke { .. } => false,
         ExprKind::Callable { receiver, .. } => receiver.as_deref().is_none_or(readonly),
         ExprKind::Builtin(operation, args) => {
-            readonly_builtin(operation) && args.iter().all(readonly)
+            operation.contract(args).preserves_list_storage() && args.iter().all(readonly)
         }
         ExprKind::Scope { body, value, .. } => block_readonly(body) && readonly(value),
         ExprKind::List(values)
