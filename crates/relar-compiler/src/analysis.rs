@@ -9,6 +9,7 @@ use ruff_db::parsed::ParsedModuleRef;
 use ruff_db::system::{InMemorySystem, System, SystemPathBuf};
 use ruff_db::vendored::VendoredFileSystem;
 use ruff_python_ast::token::{TokenKind, Tokens};
+use ruff_python_parser::{Mode, lexer::lex};
 use ruff_text_size::{Ranged, TextSize};
 use ty_python_core::program::ProgramSettings;
 use ty_python_core::{Program, ProgramFile};
@@ -99,6 +100,7 @@ impl Session {
     /// Parses a normalized source once; semantic checks wait until every import is present.
     pub(crate) fn add(&mut self, path: &Path, source: &str) -> Result<ParsedModuleRef, String> {
         let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
+        check_source_complexity(source).map_err(|error| format!("{path}: {error}"))?;
         self.db
             .system
             .fs()
@@ -169,6 +171,70 @@ impl Session {
             Ok(())
         } else {
             Err(errors.join("\n"))
+        }
+    }
+}
+
+/// Ruff indexes the AST recursively as soon as the database parses a module.
+/// Bound the depth before that happens, including chains with no parentheses.
+fn check_source_complexity(source: &str) -> Result<(), &'static str> {
+    const LIMIT: usize = 96;
+    if source.len() < LIMIT {
+        return Ok(());
+    }
+
+    #[derive(Default)]
+    struct Group {
+        operators: usize,
+        child_depth: usize,
+        longest_item: usize,
+        // A comma in lambda parameters or a comprehension target does not
+        // separate independent expressions at this delimiter level.
+        keep_commas: bool,
+    }
+
+    impl Group {
+        fn depth(&self) -> usize {
+            self.longest_item.max(self.operators + self.child_depth)
+        }
+    }
+
+    use TokenKind::*;
+    let mut lexer = lex(source, Mode::Module);
+    let mut parents = Vec::new();
+    let mut group = Group::default();
+    let mut indent = 0_usize;
+    loop {
+        match lexer.next_token() {
+            EndOfFile => return Ok(()),
+            Indent => indent += 1,
+            Dedent => indent = indent.saturating_sub(1),
+            Newline | Semi if parents.is_empty() => group = Group::default(),
+            Lpar | Lsqb | Lbrace | FStringStart | TStringStart => {
+                group.operators += 1;
+                parents.push(std::mem::take(&mut group));
+            }
+            Rpar | Rsqb | Rbrace | FStringEnd | TStringEnd => {
+                if let Some(mut parent) = parents.pop() {
+                    parent.child_depth = parent.child_depth.max(group.depth());
+                    group = parent;
+                }
+            }
+            Comma if !group.keep_commas => {
+                group.longest_item = group.depth();
+                group.operators = 0;
+                group.child_depth = 0;
+            }
+            Lambda | For => {
+                group.keep_commas = true;
+                group.operators += 1;
+            }
+            Name | Int | Float | Complex | String | True | False | None | Ellipsis
+            | FStringMiddle | TStringMiddle | Comment | NonLogicalNewline => continue,
+            _ => group.operators += 1,
+        }
+        if indent + parents.len() + group.depth() > LIMIT {
+            return Err("Relar: source exceeds the syntax complexity limit");
         }
     }
 }
