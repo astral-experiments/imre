@@ -26,6 +26,12 @@ pub(crate) struct IntRange {
     pub max: i64,
 }
 
+impl IntRange {
+    pub(crate) fn fits_u32(self) -> bool {
+        self.min >= 0 && self.max <= i64::from(u32::MAX)
+    }
+}
+
 /// Expression identities remain valid while this immutable module borrow lives.
 /// Missing facts, including unreachable or arbitrary-precision expressions, must
 /// use the ordinary checked lowering path.
@@ -931,9 +937,6 @@ impl Analyzer {
                         _ => Interval::UNKNOWN,
                     },
                     Builtin::BytesGet => Interval::bounded(0, 255),
-                    Builtin::ListReduce(crate::ir::ReductionPlan::SumSquares { max }) => {
-                        Interval::bounded(0, i128::from(*max))
-                    }
                     Builtin::ListGetI32 => {
                         Interval::bounded(i128::from(i32::MIN), i128::from(i32::MAX))
                     }

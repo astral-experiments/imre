@@ -74,7 +74,12 @@ REJECTED = {
     "constructor_return": CELL.replace("self.value = value", "self.value = value\n        return"),
     "inheritance": CELL + "class Child(Cell):\n    def __init__(self, value: int) -> None:\n        self.value = value\n",
     "metaclass": CELL.replace("class Cell:", "class Cell(metaclass=type):"),
-    "magic_method": CELL + '    def __str__(self) -> str:\n        return "Cell"\n',
+    "magic_method": CELL + '    def __repr__(self) -> str:\n        return "Cell"\n',
+    "str_extra_parameter": CELL + '    def __str__(self, detail: bool = False) -> str:\n        return "Cell"\n',
+    "str_static_method": CELL + '    @staticmethod\n    def __str__() -> str:\n        return "Cell"\n',
+    "str_wrong_result": CELL + '    def __str__(self) -> int:\n        return self.value\n',
+    "str_wrong_body": CELL + '    def __str__(self):\n        return self.value\n',
+    "recursive_str": CELL + '    def __str__(self) -> str:\n        return str(self)\n',
     "finalizer": CELL + "    def __del__(self) -> None:\n        pass\n",
     "private_mangling": CELL.replace("value", "__value"),
     "class_surrogate_docstring": CELL.replace("class Cell:\n", 'class Cell:\n    "\\ud800"\n'),
@@ -112,21 +117,28 @@ def verify_upstream_definitions() -> None:
     def definitions(path: Path, names: set[str]) -> dict[str, str]:
         source = path.read_text()
         lines = source.splitlines(keepends=True)
+        tree = ast.parse(source)
+        nodes = [(node.name, node) for node in ast.walk(tree)
+                 if isinstance(node, (ast.ClassDef, ast.FunctionDef))]
+        nodes.extend((f"{cls.name}.{method.name}", method)
+                     for cls in tree.body if isinstance(cls, ast.ClassDef)
+                     for method in cls.body if isinstance(method, ast.FunctionDef))
         return {
-            node.name: textwrap.dedent("".join(lines[
+            name: textwrap.dedent("".join(lines[
                 min([node.lineno, *(d.lineno for d in node.decorator_list)]) - 1:node.end_lineno
             ]))
-            for node in ast.walk(ast.parse(source))
-            if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in names
+            for name, node in nodes if name in names
         }
 
     reporter = PROJECT / "examples" / "conformance_report"
     checks = [
         (reporter / "upstream/conformance.py", reporter / "model.py",
          {"Source", "Classification", "Change", "compute_stats", "change", "diagnostics_by_source",
-          "classify", "key", "diagnostics_are_equivalent", "group_diagnostics_by_key", "collect_file_stats"}),
+          "classify", "key", "diagnostics_are_equivalent", "group_diagnostics_by_key", "collect_file_stats",
+          "TyDiagnostic.__str__", "TyDiagnostic.severity_for_display"}),
         (reporter / "upstream/conformance.py", reporter / "parse.py", {"collect_expected_diagnostics"}),
-        (reporter / "upstream/conformance.py", reporter / "render.py", {"collect_diagnostic_entries", "render_file_stats_table", "render_test_cases"}),
+        (reporter / "upstream/conformance.py", reporter / "render.py",
+         {"collect_diagnostic_entries", "render_file_stats_table", "render_test_cases", "render_html_diff_row", "render_diff_row"}),
         (PROJECT / "examples/python_catalog/upstream/fetch-download-metadata.py",
          FIXTURES / "uv_variant.py", {"Variant", "variant_sort_key"}),
     ]

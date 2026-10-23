@@ -609,6 +609,7 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
             | Builtin::Len
             | Builtin::Abs
             | Builtin::StringJoin
+            | Builtin::StringFormat
             | Builtin::StringReplace
             | Builtin::FloatFormat { .. }
             | Builtin::JsonDecode(_)
@@ -621,7 +622,6 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
             | Builtin::ListGetBoundedInBounds { .. }
             | Builtin::IntBounded { .. }
             | Builtin::ListSum
-            | Builtin::ListReduce(_)
             | Builtin::ListSliceSum
             | Builtin::StringIntList
             | Builtin::StringGet

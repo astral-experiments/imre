@@ -386,6 +386,55 @@ impl Checker<'_> {
         })
     }
 
+    /// The receiver and keyword values are evaluated once in call order, even
+    /// when the template skips or repeats a name. Only exact scalar text enters
+    /// the formatter, so looking up a field never invokes Python code.
+    pub(super) fn named_format_call(
+        &mut self,
+        receiver: Expr,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        if !call.arguments.args.is_empty() {
+            return Err(error(
+                self.source,
+                call,
+                "str.format requires named arguments",
+            ));
+        }
+        let mut args = vec![receiver];
+        let mut names = HashSet::new();
+        for keyword in &call.arguments.keywords {
+            let name = keyword.arg.as_ref().expect("unpacking was rejected");
+            if !names.insert(name.as_str()) {
+                return Err(error(self.source, keyword, "repeated str.format keyword"));
+            }
+            let value = Self::string_value(self.expr(&keyword.value)?);
+            let text = match value.ty {
+                Type::Str => value,
+                Type::Int => Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::Str, vec![value]),
+                },
+                _ => {
+                    return Err(error(
+                        self.source,
+                        keyword,
+                        "str.format fields require str or int",
+                    ));
+                }
+            };
+            args.push(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Str(name.to_string()),
+            });
+            args.push(text);
+        }
+        Ok(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::StringFormat, args),
+        })
+    }
+
     pub(super) fn replace_call(
         &mut self,
         receiver: Expr,
@@ -509,9 +558,12 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::FloatFormat { precision, percent }, vec![value]),
             });
         }
-        if field.conversion == ast::ConversionFlag::Repr
-            || matches!(value.ty, Type::Class(_) | Type::CompletedProcess)
+        if field.conversion != ast::ConversionFlag::Repr
+            && matches!(value.ty, Type::Class(_) | Type::CompletedProcess)
         {
+            return Ok(self.record_text(value));
+        }
+        if field.conversion == ast::ConversionFlag::Repr {
             if !dataclass_values::repr_supported(value.ty, self.types) {
                 return Err(error(
                     self.source,

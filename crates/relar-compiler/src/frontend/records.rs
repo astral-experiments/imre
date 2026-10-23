@@ -300,6 +300,23 @@ impl Checker<'_> {
         }
     }
 
+    /// Fixed record types resolve `__str__` to an ordinary native method call.
+    /// Records without an override use their existing Python representation.
+    pub(super) fn record_text(&mut self, value: Expr) -> Expr {
+        let kind = if let Type::Class(class) = value.ty
+            && let Some(method) = self.classes.methods[class].get("__str__")
+        {
+            self.calls.insert(method.id);
+            ExprKind::Call(method.id, ir::CallArgs::positional(vec![value]))
+        } else {
+            ExprKind::Builtin(Builtin::Repr, vec![value])
+        };
+        Expr {
+            ty: Type::Str,
+            kind,
+        }
+    }
+
     pub(super) fn class_attribute(
         &mut self,
         attribute: &ast::ExprAttribute,
@@ -307,7 +324,7 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
-        if attribute.attr.as_str().starts_with("__") {
+        if attribute.attr.as_str().starts_with("__") && attribute.attr.as_str() != "__str__" {
             return Err(error(
                 self.source,
                 attribute,
@@ -353,7 +370,7 @@ impl Checker<'_> {
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
-        if attribute.attr.as_str().starts_with("__") {
+        if attribute.attr.as_str().starts_with("__") && attribute.attr.as_str() != "__str__" {
             return Err(error(
                 self.source,
                 call,

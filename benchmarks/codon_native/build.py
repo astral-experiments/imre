@@ -158,15 +158,26 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
         edits.append({"kind": "closed title literal annotation", "before": literal, "after": "str"})
     if name == "conformance_report/render.py" and "from itertools import groupby\n" in changed:
         changed = changed.replace("from typing import Literal\n", "")
-        # Codon can capture the revision URL directly, but cannot relay it
-        # through two nested functions.
-        before = "lines.extend(render_html_diff_row(tc, source="
-        after = "lines.extend(render_html_diff_row_at(tc, base_url, source="
-        if changed.count(before) != 2:
-            raise ValueError("unexpected diagnostic row calls")
+        # Codon passes the two module-level URL bindings through the nested row renderer.
+        for before, after, count in (
+            ("def render_html_diff_row(tc: TestCase, source:", "def render_html_diff_row(tc: TestCase, CONFORMANCE_URL: str, CONFORMANCE_DIR_WITH_README: str, source:", 1),
+            ("lines.extend(render_html_diff_row(tc, source=", "lines.extend(render_html_diff_row(tc, CONFORMANCE_URL, CONFORMANCE_DIR_WITH_README, source=", 2),
+        ):
+            if changed.count(before) != count:
+                raise ValueError("unexpected diagnostic row signature or calls")
+            changed = changed.replace(before, after)
+            body_edits.append((before, after))
+            edits.append({"kind": "pass checkout URLs directly to the HTML row helper", "before": before, "after": after})
+        before = "                url = CONFORMANCE_URL.format(filename=filename, line=min_line)"
+        after = """                fields: dict[str, str | int] = {}
+                fields["filename"] = filename
+                fields["line"] = min_line
+                url = CONFORMANCE_URL.format_map(fields)"""
+        if changed.count(before) != 1:
+            raise ValueError("unexpected diagnostic URL template")
         changed = changed.replace(before, after)
         body_edits.append((before, after))
-        edits.append({"kind": "pass checkout URL directly to the HTML row helper", "before": before, "after": after})
+        edits.append({"kind": "native named formatting with format_map", "before": before, "after": after})
     if name == "conformance_report/render.py" and "from typing import assert_never\n" in changed:
         changed = changed.replace("from typing import assert_never\n",
                                   'def assert_never(value):\n    raise AssertionError(f"Expected code to be unreachable, but got: {value!r}")\n')

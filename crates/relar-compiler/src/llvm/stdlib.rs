@@ -49,6 +49,24 @@ impl Emitter<'_, '_> {
                     none()
                 }
             }
+            Builtin::StringFormat => {
+                let (template, fields) = args.split_first().unwrap();
+                let handles = self.entry_alloca(format!("[{} x ptr]", fields.len()));
+                for (index, field) in fields.iter().enumerate() {
+                    let slot =
+                        self.instruction(format!("getelementptr ptr, ptr {handles}, i64 {index}"));
+                    self.line(format!("store ptr {}, ptr {slot}", field.value.operand));
+                }
+                Value {
+                    ty: Type::Str,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @relar_str_format(ptr {}, ptr {handles}, i64 {})",
+                        template.value.operand,
+                        fields.len() / 2
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::StringJoin => self.call(
                 "relar_str_join",
                 Type::Str,
@@ -110,6 +128,9 @@ print(f"{abs(-0.125):.2%}")
             "print(f'{1.0:.1001f}')",
             "precision = 2\nprint(f'{1.0:.{precision}f}')",
             "print(','.join([1, 2]))",
+            "print('{x}'.format('positional'))",
+            "print('{x}'.format(x=[1]))",
+            "print('{x}'.format(x='first', x='second'))",
         ] {
             assert!(
                 crate::compile(source, &crate::CompileOptions::default()).is_err(),
