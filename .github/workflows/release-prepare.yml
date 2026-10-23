@@ -13,7 +13,7 @@ permissions: {}
 jobs:
   prepare-release:
     if: github.repository == 'astral-sh/relar' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository == 'astral-sh/relar' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     permissions:
       contents: write
       pull-requests: write
