@@ -213,15 +213,22 @@ pub fn collect_diagnostics(
     text: &str,
     paths: &HashMap<String, Arc<str>>,
 ) -> Result<Vec<Diagnostic>> {
+    collect_resolved(text, |raw| {
+        paths.get(raw).cloned().ok_or_else(|| Error::key(raw))
+    })
+}
+
+pub fn collect_resolved(
+    text: &str,
+    resolve: impl Fn(&str) -> Result<Arc<str>>,
+) -> Result<Vec<Diagnostic>> {
     let wire: Vec<WireDiagnostic> = decode(text)?;
     let mut result = Vec::new();
     for diagnostic in wire {
         if diagnostic.severity != "major" {
             continue;
         }
-        let path = paths
-            .get(&diagnostic.location.path)
-            .ok_or_else(|| Error::key(&diagnostic.location.path))?;
+        let path = resolve(&diagnostic.location.path)?;
         let description = diagnostic
             .description
             .replace(&format!("{}: ", diagnostic.check_name), "");
@@ -229,7 +236,7 @@ pub fn collect_diagnostics(
             check_name: diagnostic.check_name,
             description,
             severity: diagnostic.severity,
-            path: Arc::clone(path),
+            path,
             positions: diagnostic.location.positions,
         });
     }

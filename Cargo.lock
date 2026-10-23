@@ -1078,6 +1078,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "toml",
+ "toml_parser",
 ]
 
 [[package]]

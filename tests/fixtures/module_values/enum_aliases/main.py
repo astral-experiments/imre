@@ -1,5 +1,5 @@
 import api
-from states import State
+from states import READY, State
 
 
 def label(value: api.Mode) -> str:
@@ -11,5 +11,6 @@ def label(value: api.Mode) -> str:
 
 
 print(api.DEFAULT is State.ACTIVE)
+print(READY)
 print(label(api.DEFAULT))
 print(label(api.Mode.DONE))

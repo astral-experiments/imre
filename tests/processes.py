@@ -57,7 +57,7 @@ REJECTED = {
     "construct_timeout": "TimeoutExpired(['command'], 1.0)",
     "raise_timeout_class": "raise TimeoutExpired",
     "timeout_annotation": "def seconds(error: TimeoutExpired) -> float:\n    return error.timeout",
-    "integer_timeout": "run(['command'], capture_output=True, encoding='utf-8', timeout=1)",
+    "mixed_timeout_field": "try:\n    run(['command'], capture_output=True, text=True, timeout=1)\n    run(['command'], capture_output=True, text=True, timeout=1.0)\nexcept TimeoutExpired as error:\n    print(error.timeout)",
     "boolean_timeout": "run(['command'], capture_output=True, encoding='utf-8', timeout=True)",
     "string_timeout": "run(['command'], capture_output=True, encoding='utf-8', timeout='1.0')",
     "optional_integer_timeout": "def launch(duration: int | None) -> None:\n    run(['command'], capture_output=True, encoding='utf-8', timeout=duration)",
@@ -230,8 +230,10 @@ def main() -> None:
             result = files.run([compiler, "check", str(path)], temporary)
             assert result.returncode > 0 and result.stderr, (name, result)
             assert b"panicked" not in result.stderr and b"Sanitizer" not in result.stderr, (name, result.stderr)
-            if name in {"integer_timeout", "boolean_timeout", "optional_integer_timeout"}:
-                assert b"float | None" in result.stderr and b"15.0" in result.stderr, (name, result.stderr)
+            if name in {"boolean_timeout", "optional_integer_timeout"}:
+                assert b"integer literal or float | None" in result.stderr, (name, result.stderr)
+            if name == "mixed_timeout_field":
+                assert b"both int and float deadlines" in result.stderr, (name, result.stderr)
             checks += 1
         for module in ["subprocess", "os"]:
             shadow = temporary / f"shadow-{module}"

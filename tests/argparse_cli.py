@@ -1,0 +1,162 @@
+"""Compare native argparse namespace values, help, usage, and unwinding with CPython."""
+
+import argparse
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
+CASES = {
+    "reader": [
+        [],
+        ["--help"],
+        ["--it"],
+        ["--in"],
+        ["--items"],
+        ["--items", "red", "green"],
+        ["--items=red", "green"],
+        ["--items", "-0.125", "-.９", "--verbose"],
+        ["--item-kind=blue", "--items", "red"],
+        ["--items", "red", "--", "tail"],
+        ["--help=none"],
+        ["-hhh=x"],
+        ["-hh-x"],
+        ["-hx"],
+        ["--label", "--items", "a"],
+        ["--unknown", "red", "--help"],
+        ["--items", "one", "--items=two", "--verbose", "--verbose"],
+        [
+            "--items",
+            "red",
+            "--output",
+            "dir/file",
+            "--label",
+            "☃",
+            "--input-path",
+            ".//x/",
+            "--item-kind",
+            "long-blue",
+        ],
+        ["--verbose=x", "--items", "red"],
+        ["--items", "a", "--debug", "--locations", ".", "foo//bar"],
+        ["--items", "a", "--locations=/foo/./bar"],
+    ],
+    "two": [[], ["--help"], ["--mo=lar"], ["--flag"], ["--paths", "one", "two"]],
+}
+REJECTED = {
+    "computed_flag": 'parser.add_argument("--" + "item")',
+    "positional": 'parser.add_argument("input")',
+    "foreign_converter": 'parser.add_argument("--number", type=int)',
+    "choice_expression": 'parser.add_argument("--key", choices=list("ab"))',
+    "duplicate_destination": 'parser.add_argument("--a-b")\n    parser.add_argument("--a_b")',
+    "escaped_builder": "copy = parser",
+    "bad_template": 'parser.add_argument("--key", help="%(value)s")',
+}
+
+
+def result(command, env):
+    completed = subprocess.run(
+        command, env=env, capture_output=True, timeout=30, check=False
+    )
+    return completed.returncode, completed.stdout, completed.stderr
+
+
+def main():
+    options = argparse.ArgumentParser(description=__doc__)
+    options.add_argument("--compiler", required=True, type=Path)
+    options.add_argument("--runtime", required=True, type=Path)
+    options.add_argument("--python", default=sys.executable)
+    options.add_argument("--clang", default="clang")
+    options.add_argument("--target")
+    options.add_argument("--lto-linker", type=Path)
+    options.add_argument("--opt-levels", nargs="+", default=["0", "3"])
+    options.add_argument("--sanitize", action="store_true")
+    args = options.parse_args()
+    compile_flags = [
+        "--quiet",
+        "--clang",
+        args.clang,
+        "--runtime",
+        args.runtime.resolve(),
+    ]
+    if args.target:
+        compile_flags += ["--target", args.target]
+    if args.lto_linker:
+        compile_flags += ["--lto-linker", args.lto_linker.absolute()]
+    if args.sanitize:
+        compile_flags += ["--sanitize"]
+    checks = 0
+    with tempfile.TemporaryDirectory(prefix="relar-argparse-") as directory:
+        for name, cases in CASES.items():
+            source = FIXTURES / (name + ".py")
+            native = Path(directory) / name
+            samples = [(arguments, 80, False) for arguments in cases]
+            for width in (16, 34, 55, 111):
+                for arguments in (["--help"], ["--not-an-option"]):
+                    samples.extend((arguments, width, color) for color in (False, True))
+            for level in args.opt_levels:
+                subprocess.run(
+                    [
+                        args.compiler,
+                        "build",
+                        source,
+                        "-o",
+                        native,
+                        "--opt-level",
+                        level,
+                        *compile_flags,
+                    ],
+                    check=True,
+                )
+                for arguments, width, color in samples:
+                    env = {
+                        **os.environ,
+                        "COLUMNS": str(width),
+                        "PYTHON_COLORS": "1" if color else "0",
+                        "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+                    }
+                    expected = result([args.python, source, *arguments], env)
+                    actual = result([native, *arguments], env)
+                    if expected != actual:
+                        raise AssertionError(
+                            (name, arguments, width, color, expected, actual)
+                        )
+                    checks += 1
+        for name, declaration in REJECTED.items():
+            source = Path(directory) / (name + ".py")
+            source.write_text(
+                "from argparse import ArgumentParser\ndef read():\n    parser = ArgumentParser()\n"
+                f"    {declaration}\n    return parser.parse_args()\nread()\n"
+            )
+            check = subprocess.run(
+                [args.compiler, "check", source], capture_output=True, check=False
+            )
+            if (
+                check.returncode == 0
+                or b"argparse" not in check.stderr.lower()
+                and b"add_argument" not in check.stderr
+            ):
+                raise AssertionError((name, check.returncode, check.stderr))
+        # The successful guard relies on a stable receiver and a read-only field.
+        source = Path(directory) / "bad_field.py"
+        prelude = "from argparse import ArgumentParser\nfrom pathlib import Path\ndef read():\n    p = ArgumentParser()\n    p.add_argument('--out', type=Path)\n    return p.parse_args()\na = read()\n"
+        for statement in [
+            "a.out = Path('else')",
+            "print(a.out.name)",
+            "if a.out:\n    a = read()\n    print(a.out.name)",
+        ]:
+            source.write_text(prelude + statement + "\n")
+            check = subprocess.run(
+                [args.compiler, "check", source], capture_output=True, check=False
+            )
+            if check.returncode == 0:
+                raise AssertionError(statement)
+    print(
+        f"Validated {checks} argparse process comparisons and {len(REJECTED) + 3} compile-time rejections"
+    )
+
+
+if __name__ == "__main__":
+    main()

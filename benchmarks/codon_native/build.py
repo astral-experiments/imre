@@ -311,6 +311,7 @@ def main() -> None:
     parser.add_argument("--platform-library", type=Path, help="native benchmark platform shared library, required for conformance")
     parser.add_argument("--conformance-classification", action="store_true")
     parser.add_argument("--conformance-grouping", action="store_true")
+    parser.add_argument("--conformance-stdout", action="store_true")
     args = parser.parse_args()
     if "conformance_report" in args.applications and args.platform_library is None:
         parser.error("conformance_report requires --platform-library (native Rust OS/TOML boundary)")
@@ -398,6 +399,14 @@ def main() -> None:
         entry = source_root / ("run_" + name + ".py")
         entry.write_text(f"import {app}.{module}\n")
         entries.append((name, entry))
+    if args.conformance_stdout:
+        if "conformance_report" not in args.applications:
+            parser.error("--conformance-stdout requires conformance_report")
+        original = Path(__file__).with_name("conformance_stdout.py")
+        entry = source_root / "conformance_stdout.py"
+        entry.write_bytes(original.read_bytes())
+        record["source_inputs"][str(original)] = digest(original.read_bytes())
+        entries.insert(0, ("conformance_report-stdout", entry))
     if args.conformance_scanner:
         if "conformance_report" not in args.applications:
             parser.error("--conformance-scanner requires the conformance reporter")

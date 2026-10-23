@@ -18,12 +18,19 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
                 let check = self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
                 let operand = if matches!(operation, ProcessOperation::RunTimeout) {
-                    let timeout =
-                        self.instruction(format!("inttoptr i64 {} to ptr", args[4].value.operand));
-                    self.checked_instruction(format!(
+                    if args[4].value.ty == Type::Int {
+                        self.checked_instruction(format!(
+                            "call ptr @relar_subprocess_run_timeout_int(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, i64 {}, ptr @layout_completed_process)",
+                            args[0].value.operand, args[4].value.operand
+                        ))
+                    } else {
+                        let timeout = self
+                            .instruction(format!("inttoptr i64 {} to ptr", args[4].value.operand));
+                        self.checked_instruction(format!(
                         "call ptr @relar_subprocess_run_timeout(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, ptr {timeout}, ptr @layout_completed_process)",
                         args[0].value.operand
                     ))
+                    }
                 } else {
                     self.checked_instruction(format!(
                         "call ptr @relar_subprocess_run(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, ptr @layout_completed_process)",
@@ -36,6 +43,11 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
+            ProcessOperation::EnvironGet => self.call(
+                "relar_environ_get",
+                Type::Str,
+                &[&args[0].value, &args[1].value],
+            ),
             ProcessOperation::EnvironCopy => {
                 let operand = self.checked_instruction("call ptr @relar_environ_copy()");
                 self.owned(Value {

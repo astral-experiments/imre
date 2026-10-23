@@ -17,6 +17,12 @@ import files
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "paths"
 IMPORT = "from pathlib import Path\n"
 REJECTED = {
+    "tomllib_document_escape": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    value = tomllib.load(f)",
+    "tomllib_text_file": "import tomllib\nwith open(Path('x'), 'r', encoding='utf-8') as f:\n    value = tomllib.load(f).keys()",
+    "tomllib_mutable_keys": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys()\nkeys.add('x')",
+    "tomllib_key_repr": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys()\nprint(repr(keys))",
+    "tomllib_key_equality": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys()\nprint(keys == keys)",
+    "tomllib_key_argument": "import tomllib\nwith open(Path('x'), 'rb') as f:\n    keys = tomllib.load(f).keys('x')",
     "integer_segment": "Path(1)",
     "bytes_segment": "Path(b'file')",
     "keyword_segment": "Path(path='file')",

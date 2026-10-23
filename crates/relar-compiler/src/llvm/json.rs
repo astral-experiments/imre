@@ -6,6 +6,37 @@ use crate::ir::{self, JsonDefault};
 
 use super::*;
 
+impl Emitter<'_, '_> {
+    pub(super) fn json_select(&mut self, path: &[String], result: Type, args: &[Operand]) -> Value {
+        // Each literal has its UTF-8 byte length followed by its bytes, so
+        // empty names and embedded NULs need no escaping or runtime allocation.
+        let mut bytes = Vec::new();
+        for name in path {
+            bytes.extend(
+                u32::try_from(name.len())
+                    .expect("a literal fits Ruff's source range")
+                    .to_le_bytes(),
+            );
+            bytes.extend(name.as_bytes());
+        }
+        let id = self.strings.len();
+        let size = bytes.len();
+        self.strings.push(bytes);
+        let payload = self.module.types.payload(result);
+        let mode = match payload.unwrap_or(result) {
+            Type::JsonValue => 0,
+            Type::JsonObject => 1,
+            Type::Str => 2,
+            Type::Int => 3,
+            Type::Bool => 4,
+            _ => unreachable!("checked JSON selection"),
+        } | if payload.is_some() { 256 } else { 0 };
+        let literal = args.get(1).map_or("null", |arg| arg.value.operand.as_str());
+        let word = self.checked_instruction(format!("call i64 @relar_json_select(ptr {}, ptr @str_{id}, i64 {size}, i32 {mode}, ptr {literal})", args[0].value.operand));
+        self.decode_word(word, result)
+    }
+}
+
 pub(super) fn schemas(module: &Module) -> String {
     let mut roots = Vec::new();
     for function in module.functions.iter().chain([&module.entry]) {

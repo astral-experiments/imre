@@ -23,6 +23,9 @@ fn has_container_float(ty: Type, inside: bool, types: &Types) -> bool {
 pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
     match ty {
         Type::Exception
+        | Type::JsonValue
+        | Type::JsonObject
+        | Type::StringKeys
         | Type::TimeoutExpired
         | Type::RegexPattern
         | Type::RegexMatch
@@ -57,10 +60,10 @@ pub(super) fn validate(
                     "generated dataclass equality cannot compare float-containing containers; use field(compare=False) or dataclass(eq=False)",
                 ));
             }
-            if options.eq && field.compare && contains_regex(ty, types) {
+            if options.eq && field.compare && contains_opaque(ty, types) {
                 return Err(module.error(
                     &field.annotation,
-                    "generated dataclass equality cannot compare regex objects; use field(compare=False) or dataclass(eq=False)",
+                    "generated dataclass equality cannot compare regex, readonly JSON objects, or TOML key views; use field(compare=False) or dataclass(eq=False)",
                 ));
             }
             if options.repr && field.repr && !repr_supported(ty, types) {
@@ -74,12 +77,18 @@ pub(super) fn validate(
     Ok(())
 }
 
-fn contains_regex(ty: Type, types: &Types) -> bool {
-    matches!(ty, Type::RegexPattern | Type::RegexMatch)
-        || types
-            .children(ty)
-            .into_iter()
-            .any(|child| contains_regex(child, types))
+fn contains_opaque(ty: Type, types: &Types) -> bool {
+    matches!(
+        ty,
+        Type::RegexPattern
+            | Type::RegexMatch
+            | Type::JsonValue
+            | Type::JsonObject
+            | Type::StringKeys
+    ) || types
+        .children(ty)
+        .into_iter()
+        .any(|child| contains_opaque(child, types))
 }
 
 /// Names the entry module like CPython while keeping imported class names

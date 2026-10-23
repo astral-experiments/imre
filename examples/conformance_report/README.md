@@ -1,19 +1,41 @@
 # Typing-conformance report
 
-This is a typed port of Ruff's complete conformance comparison and reporting
-tool. It scans the Python typing conformance suite's raw annotations, decodes
-two ty GitLab JSON outputs, groups required/optional/tagged/multi annotations,
-classifies diagnostics, computes all per-case and per-file metrics, and renders
-the same Markdown or GitHub HTML report as the pinned upstream implementation.
-
-The unchanged [upstream source](upstream/conformance.py), its MIT license and
-[provenance](upstream/UPSTREAM.json) are retained. The report algorithm is from
-Ruff commit `de9071547cfec12f689142a7b8ce98edc7aef909`.
+Relar compiles Ruff's complete conformance reporter directly to a native executable.
+It discovers the files in a typing conformance checkout, runs two versions of ty,
+compares their diagnostics, and renders a Markdown or GitHub HTML report.
+The [upstream source](upstream/conformance.py) is pinned to Ruff commit
+`de9071547cfec12f689142a7b8ce98edc7aef909`. Its license and source hash are
+recorded in [UPSTREAM.json](upstream/UPSTREAM.json).
 
 ## Run directly from a checkout
 
-Build the reporter, then provide a [python/typing](https://github.com/python/typing)
-checkout and two ty executables:
+From the Relar repository root, run the original script with a
+[python/typing](https://github.com/python/typing) checkout and two ty executables.
+
+```sh
+relar run examples/conformance_report/upstream/conformance.py -- \
+  --tests-path /absolute/path/to/typing/conformance \
+  --old-ty /absolute/path/to/old/ty --new-ty /absolute/path/to/new/ty
+```
+
+You can pass a Ruff checkout's `scripts/conformance.py` at the pinned revision
+as the source. Use `relar build scripts/conformance.py -o conformance` to keep
+the executable. Run `./conformance --help` for the original CLI. Each ty command
+can contain multiple words, such as `--old-ty uvx ty@0.0.60`.
+
+The default format is `github`. Use `--format diff` for local-path diffs, or
+`--force-summary-table` to expand an unchanged comparison. Ruff prints the
+report to stdout by default. With `--output report.md`, it writes the file and
+prints a confirmation followed by the report to stderr. Set
+`CONFORMANCE_SUITE_COMMIT` to use a specific revision in report links.
+
+Running ty 0.0.60 and 0.0.90 on 146 files, the original program took 583–588 ms
+in Relar and 569–572 ms in Rust. [Full CLI comparison](../../benchmarks/results/2026-10-23-original-conformance.md)
+
+## Run the typed port
+
+The port also supports atomic output and replaying captured diagnostics. To use its live mode,
+build its entry point and pass the suite and two ty executables.
 
 ```sh
 relar build examples/conformance_report/__main__.py --module-root examples \

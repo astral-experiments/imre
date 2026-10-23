@@ -19,6 +19,12 @@ IMPORT = "from relar.json import decode\n"
 ITEM = "class Item:\n    value: int\n    def __init__(self, value: int) -> None:\n        self.value = value\n"
 
 REJECTED = {
+    "dynamic_json_key": 'import json\nkey = "field"\nrows = json.loads("[]")\nvalue = rows[0][key]\n',
+    "write_json_object": 'from typing import Any\ndef write(row: dict[str, Any]) -> None:\n    row["field"] = 1\n',
+    "general_any": "from typing import Any\ndef identity(value: Any) -> Any:\n    return value\n",
+    "json_comparison": 'import json\nrows = json.loads("[]")\nprint(rows[0] == rows[1])\n',
+    "json_instances": 'import json\nfor value in json.loads("[]"):\n    print(isinstance(value, str))\n',
+    "json_options": 'import json\njson.loads("[]", strict=False)\n',
     "unknown_intrinsic": "from relar.json import loads\n",
     "bytes_input": IMPORT + ITEM + 'item = decode(b"{}", Item)\n',
     "missing_schema": IMPORT + 'item = decode("{}")\n',

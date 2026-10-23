@@ -254,7 +254,14 @@ impl Checker<'_> {
         if self.is_class_receiver(root) {
             None
         } else {
-            self.graph.resolve(self.module, expression)
+            let binding = self.graph.resolve(self.module, expression);
+            if let Some(Binding::Definition(definition)) = binding
+                && self.classes.declarations.ids.contains_key(&definition)
+            {
+                // Static dispatch and constant folding can erase the class name from the IR.
+                self.class_reads.borrow_mut().insert(definition);
+            }
+            binding
         }
     }
 
@@ -324,7 +331,9 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
-        if attribute.attr.as_str().starts_with("__") && attribute.attr.as_str() != "__str__" {
+        if attribute.attr.starts_with("__")
+            && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
+        {
             return Err(error(
                 self.source,
                 attribute,
@@ -370,7 +379,9 @@ impl Checker<'_> {
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
-        if attribute.attr.as_str().starts_with("__") && attribute.attr.as_str() != "__str__" {
+        if attribute.attr.starts_with("__")
+            && !matches!(attribute.attr.as_str(), "__str__" | "__post_init__")
+        {
             return Err(error(
                 self.source,
                 call,

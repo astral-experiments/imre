@@ -165,11 +165,13 @@ fn collect_class(
                         "StrEnum methods cannot override member metadata or special behavior",
                     ));
                 }
-                if name.starts_with("__") && !matches!(name, "__init__" | "__str__") {
-                    return Err(module.error(
-                        method,
-                        "method names starting with '__' are reserved except '__init__' and '__str__'",
-                    ));
+                if name.starts_with("__")
+                    && !matches!(name, "__init__" | "__str__")
+                    && !(name == "__post_init__" && dataclass.is_some())
+                {
+                    return Err(
+                        module.error(method, "unsupported special method on a fixed-layout class")
+                    );
                 }
                 let kind = method_kind(graph, definition.module, method, &class_bindings)?;
                 if !names.insert(name.to_owned()) {
@@ -200,14 +202,14 @@ fn collect_class(
                 {
                     return Err(module.error(method, "a property getter must take only self"));
                 }
-                if name == "__str__"
+                if matches!(name, "__str__" | "__post_init__")
                     && (kind != MethodKind::Instance
                         || method.parameters.len() != 1
                         || first.is_none_or(|parameter| parameter.default.is_some()))
                 {
                     return Err(module.error(
                         method,
-                        "__str__ must be an instance method taking only self",
+                        &format!("{name} must be an instance method taking only self"),
                     ));
                 }
                 if name == "__init__" {

@@ -45,6 +45,8 @@ pub(crate) enum Binding {
 /// Sealed namespaces expose only compiler-known symbols, never module values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
+    Argparse,
+    Future,
     Sys,
     Typing,
     Dataclasses,
@@ -63,13 +65,19 @@ pub(crate) enum IntrinsicModule {
     Re,
     Enum,
     Zlib,
+    Json,
     Relar,
     RelarJson,
     RelarToml,
+    Tomllib,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
+    ArgumentParser,
+    RawDescriptionHelpFormatter,
+    FutureAnnotations,
+    Stderr,
     Argv,
     TextIO,
     BinaryIO,
@@ -89,10 +97,17 @@ pub(crate) enum Intrinsic {
     EnumAuto,
     DefaultDict,
     GroupBy,
+    Chain,
+    AbstractSet,
+    TomllibLoad,
+    TomlDecodeError,
     Dedent,
     ZlibError,
     JsonDecode,
     JsonEncode,
+    JsonLoads,
+    JsonDecodeError,
+    Any,
     TomlDecode,
     Dataclass,
     DataclassField,
@@ -112,6 +127,8 @@ pub(crate) enum Intrinsic {
 impl IntrinsicModule {
     fn named(name: &str) -> Option<Self> {
         match name {
+            "__future__" => Some(Self::Future),
+            "argparse" => Some(Self::Argparse),
             "sys" => Some(Self::Sys),
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
@@ -130,9 +147,11 @@ impl IntrinsicModule {
             "re" => Some(Self::Re),
             "enum" => Some(Self::Enum),
             "zlib" => Some(Self::Zlib),
+            "json" => Some(Self::Json),
             "relar" => Some(Self::Relar),
             "relar.json" => Some(Self::RelarJson),
             "relar.toml" => Some(Self::RelarToml),
+            "tomllib" => Some(Self::Tomllib),
             _ => None,
         }
     }
@@ -151,12 +170,19 @@ impl IntrinsicModule {
             return Some(Binding::IntrinsicModule(Self::RelarToml));
         }
         let symbol = match (self, name) {
+            (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
+            (Self::Sys, "stderr") => Intrinsic::Stderr,
+            (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
+            (Self::Argparse, "RawDescriptionHelpFormatter") => {
+                Intrinsic::RawDescriptionHelpFormatter
+            }
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
             (Self::Typing, "Union") => Intrinsic::Union,
             (Self::Typing, "Literal") => Intrinsic::Literal,
             (Self::Typing, "Self") => Intrinsic::SelfType,
+            (Self::Typing, "Any") => Intrinsic::Any,
             (Self::Typing, "assert_never") => Intrinsic::AssertNever,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
             (Self::Typing | Self::CollectionsAbc, "Sequence") => Intrinsic::Sequence,
@@ -172,9 +198,15 @@ impl IntrinsicModule {
             (Self::Enum, "auto") => Intrinsic::EnumAuto,
             (Self::Collections, "defaultdict") => Intrinsic::DefaultDict,
             (Self::Itertools, "groupby") => Intrinsic::GroupBy,
+            (Self::Itertools, "chain") => Intrinsic::Chain,
+            (Self::CollectionsAbc, "Set") => Intrinsic::AbstractSet,
+            (Self::Tomllib, "load") => Intrinsic::TomllibLoad,
+            (Self::Tomllib, "TOMLDecodeError") => Intrinsic::TomlDecodeError,
             (Self::Textwrap, "dedent") => Intrinsic::Dedent,
             (Self::Zlib, "error") => Intrinsic::ZlibError,
             (Self::RelarJson, "decode") => Intrinsic::JsonDecode,
+            (Self::Json, "loads") => Intrinsic::JsonLoads,
+            (Self::Json, "JSONDecodeError") => Intrinsic::JsonDecodeError,
             (Self::RelarJson, "encode") => Intrinsic::JsonEncode,
             (Self::RelarToml, "decode") => Intrinsic::TomlDecode,
             (Self::Dataclasses, "dataclass") => Intrinsic::Dataclass,
@@ -201,7 +233,7 @@ pub(crate) struct SourceModule {
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
     /// Fixed pattern declarations in the entry module precede ordinary executable statements.
-    pub(crate) entry_patterns: Vec<usize>,
+    pub(crate) entry_globals: Vec<usize>,
     /// Executable entry statements, or inactive main guards that still require checking.
     pub(crate) executable: Vec<usize>,
     is_package: bool,
@@ -227,6 +259,14 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// The entry needs its own initializer when it declares globals for later definitions.
+    pub(crate) fn initializer_modules(&self) -> impl Iterator<Item = ModuleId> + '_ {
+        self.initialization
+            .iter()
+            .copied()
+            .filter(|&id| id != self.entry || !self.modules[id].entry_globals.is_empty())
+    }
+
     /// An isolated source API supports sealed imports only; first-party imports
     /// require the path API and its filesystem search root.
     pub(crate) fn single(source: &str) -> Result<Self, String> {
@@ -389,7 +429,7 @@ impl Loader {
             parsed,
             is_package,
             bindings: HashMap::new(),
-            entry_patterns: Vec::new(),
+            entry_globals: Vec::new(),
             executable: Vec::new(),
         });
         Ok(id)
@@ -410,6 +450,12 @@ impl Loader {
 
     fn scan(&mut self, id: ModuleId) -> Result<(), String> {
         let parsed = self.modules[id].parsed.clone();
+        let last_definition = parsed.syntax().body.iter().rposition(|statement| {
+            matches!(
+                statement,
+                ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)
+            )
+        });
         let mut executable = false;
         for (index, statement) in parsed.syntax().body.iter().enumerate() {
             match statement {
@@ -448,7 +494,7 @@ impl Loader {
                     )?;
                 }
                 ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) => {
-                    if executable || !self.modules[id].entry_patterns.is_empty() {
+                    if executable || !self.modules[id].entry_globals.is_empty() {
                         return Err(self.modules[id].error(
                             statement,
                             "imports must precede executable module statements",
@@ -460,14 +506,15 @@ impl Loader {
                 ast::Stmt::Expr(value)
                     if matches!(&*value.value, ast::Expr::StringLiteral(_)) && !executable => {}
                 _ => {
-                    let entry_pattern = id == 0
+                    let entry_global = id == 0
                         && !executable
-                        && matches!(
-                            module_value(statement),
-                            Some(ast::Expr::Call(call)) if resolve_binding(&self.modules, id, &call.func) == Some(Binding::Intrinsic(Intrinsic::RegexCompile))
-                        );
+                        && (last_definition.is_some_and(|last| index < last)
+                            || matches!(
+                                module_value(statement),
+                                Some(ast::Expr::Call(call)) if resolve_binding(&self.modules, id, &call.func) == Some(Binding::Intrinsic(Intrinsic::RegexCompile))
+                            ));
                     if let Some(name) = value_name(statement)
-                        && (id != 0 || entry_pattern)
+                        && (id != 0 || entry_global)
                     {
                         self.bind(
                             id,
@@ -478,8 +525,8 @@ impl Loader {
                             }),
                             statement,
                         )?;
-                        if entry_pattern {
-                            self.modules[id].entry_patterns.push(index);
+                        if entry_global {
+                            self.modules[id].entry_globals.push(index);
                             continue;
                         }
                     }

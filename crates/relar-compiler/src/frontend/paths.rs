@@ -37,6 +37,7 @@ impl Checker<'_> {
     fn path_text(&self, value: Expr, node: &impl Ranged) -> Result<Expr, String> {
         match value.ty {
             Type::Str => Ok(value),
+            Type::JsonValue => self.coerce(value, Type::Str, node),
             Type::Path => Ok(operation(PathOperation::Text, Type::Str, vec![value])),
             _ => Err(error(
                 self.source,
@@ -128,6 +129,7 @@ impl Checker<'_> {
             ));
         }
         let (kind, ty, arity) = match name {
+            "absolute" => (PathOperation::Absolute, Type::Path, 0),
             "as_posix" => (PathOperation::Text, Type::Str, 0),
             "exists" => (PathOperation::Exists, Type::Bool, 0),
             "is_file" => (PathOperation::IsFile, Type::Bool, 0),

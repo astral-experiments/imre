@@ -117,6 +117,7 @@ impl Emitter<'_, '_> {
             }
             _ => {
                 let name = match operation {
+                    PathOperation::Absolute => "relar_path_absolute",
                     PathOperation::New => "relar_path_new",
                     PathOperation::Join => "relar_path_join",
                     PathOperation::Text => "relar_path_text",

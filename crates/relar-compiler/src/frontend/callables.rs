@@ -200,6 +200,7 @@ impl Checker<'_> {
                     body: vec![Statement::Return(body)],
                 },
                 calls: helper.calls,
+                class_reads: helper.class_reads.into_inner(),
                 recursion_error: self.graph.modules[self.module]
                     .error(lambda, "recursive calls are unsupported in this prototype"),
             },

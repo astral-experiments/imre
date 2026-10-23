@@ -127,7 +127,7 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
     } else {
         let mut cases = group_diagnostics(old, new, expected);
         if mode == "dump" {
-            return dump(&cases, &collect_file_stats(&cases, &inputs)?).map_err(Error::io);
+            return dump(&cases, &collect_file_stats(&cases, &inputs.sources)?).map_err(Error::io);
         }
         for _ in 0..rounds {
             if cases.len() > 1 {
@@ -141,7 +141,7 @@ pub(crate) fn run(args: &[String]) -> Result<()> {
                     }
                 }
             } else if mode == "files" {
-                for (i, f) in collect_file_stats(black_box(&cases), &inputs)?
+                for (i, f) in collect_file_stats(black_box(&cases), &inputs.sources)?
                     .iter()
                     .enumerate()
                 {

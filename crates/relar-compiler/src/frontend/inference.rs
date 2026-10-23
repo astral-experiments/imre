@@ -159,21 +159,16 @@ impl Inference {
                 }
             }
             let before = self.revision.get();
-            let helpers = Helpers::new(definitions.len() + graph.modules.len() - 1);
+            let helpers = Helpers::new(definitions.len() + graph.initializer_modules().count());
             let globals = ModuleValues::default();
             let mut available = HashSet::new();
             let mut errors = Vec::new();
-            for &module in &graph.initialization {
+            for module in graph.initializer_modules() {
                 let mut checker = Checker::new(
                     graph, module, signatures, classes, types, &helpers, &globals,
                 );
                 checker.inference = Some(self);
-                let result = if module == graph.entry {
-                    checker.entry_patterns().map(|_| ())
-                } else {
-                    Initialization::lower(checker, &mut available).map(|_| ())
-                };
-                if let Err(diagnostic) = result {
+                if let Err(diagnostic) = Initialization::lower(checker, &mut available) {
                     errors.push(format!(
                         "{}:{diagnostic}",
                         graph.modules[module].path.display()

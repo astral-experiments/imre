@@ -7,10 +7,12 @@ use super::*;
 pub(super) fn check_reads(
     function: &ast::StmtFunctionDef,
     parameter: &str,
+    empty_tuple_default: bool,
     source: &str,
 ) -> Result<(), String> {
     let mut reads = Reads {
         parameter,
+        empty_tuple_default,
         allowed: HashSet::new(),
         invalid: None,
     };
@@ -19,7 +21,11 @@ pub(super) fn check_reads(
         Err(error(
             source,
             expr,
-            "a Sequence parameter supports iteration, len, and read-only indexing",
+            if empty_tuple_default {
+                "a Sequence parameter with an empty tuple default supports iteration, map(str, ...), and len"
+            } else {
+                "a Sequence parameter supports iteration, map(str, ...), len, and read-only indexing"
+            },
         ))
     } else {
         Ok(())
@@ -28,6 +34,7 @@ pub(super) fn check_reads(
 
 struct Reads<'a, 'ast> {
     parameter: &'a str,
+    empty_tuple_default: bool,
     allowed: HashSet<TextRange>,
     invalid: Option<&'ast ast::Expr>,
 }
@@ -96,12 +103,21 @@ impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
             {
                 self.invalid.get_or_insert(expr);
             }
-            ast::Expr::Subscript(subscript) if subscript.ctx == ast::ExprContext::Load => {
+            ast::Expr::Subscript(subscript)
+                if subscript.ctx == ast::ExprContext::Load && !self.empty_tuple_default =>
+            {
                 self.allow(&subscript.value);
             }
             ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "len")
                     && let [arg] = call.arguments.args.as_ref() =>
+            {
+                self.allow(arg);
+            }
+            ast::Expr::Call(call)
+                if matches!(&*call.func, ast::Expr::Name(name) if name.id == "map")
+                    && let [ast::Expr::Name(convert), arg] = call.arguments.args.as_ref()
+                    && convert.id == "str" =>
             {
                 self.allow(arg);
             }
