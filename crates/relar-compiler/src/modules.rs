@@ -382,6 +382,7 @@ struct Loader {
     by_name: HashMap<String, ModuleId>,
     by_path: HashMap<PathBuf, ModuleId>,
     loading: HashSet<ModuleId>,
+    import_depth: usize,
     allow_imports: bool,
     initialization: Vec<ModuleId>,
 }
@@ -396,6 +397,7 @@ impl Loader {
             by_name: HashMap::new(),
             by_path: HashMap::new(),
             loading: HashSet::new(),
+            import_depth: 0,
             allow_imports: true,
             initialization: Vec::new(),
         })
@@ -717,6 +719,18 @@ impl Loader {
             }
             return Ok(id);
         }
+        // Both scanning an import and resolving a dotted package parent can
+        // re-enter the loader. Count active calls, including unresolved parents.
+        if self.import_depth >= 96 {
+            return Err("first-party import nesting exceeds 96 levels".into());
+        }
+        self.import_depth += 1;
+        let result = self.load_new_module(name);
+        self.import_depth -= 1;
+        result
+    }
+
+    fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
         let vendored = ty_vendored::file_system();
         if INTRINSIC_MODULES.contains(&first)
