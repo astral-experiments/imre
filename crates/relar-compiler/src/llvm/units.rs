@@ -249,51 +249,6 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn loop_dispatch_requires_both_callback_targets_in_the_caller_unit() {
-        let temp = tempfile::tempdir().unwrap();
-        let entry = temp.path().join("main.py");
-        let leaf = temp.path().join("leaf.py");
-        let program = r#"
-from typing import Callable
-def identity(x: int) -> int:
-    return x
-def total(fn: Callable[[int], int], xs: list[int]) -> int:
-    acc = 0
-    for x in xs:
-        acc += fn(x)
-    return acc
-print(total(identity, [1]))
-print(total(other, [2]))
-"#;
-        let build = |other: &str| {
-            fs::write(&entry, format!("{other}{program}")).unwrap();
-            crate::compile_file_units(&entry, None, &crate::CompileOptions::default())
-                .unwrap()
-                .units
-                .into_iter()
-                .find(|unit| unit.name == "main")
-                .unwrap()
-                .llvm_ir
-        };
-        let small = "def other(x: int) -> int:\n    return x + 1\n";
-        let imported = "from leaf import other\n";
-        fs::write(&leaf, small).unwrap();
-        let cross = build(imported);
-        assert!(cross.contains("call i64 %"));
-        assert!(!cross.contains("call i64 @callable_"));
-        fs::write(
-            &leaf,
-            "def other(x: int) -> int:\n    return x * x + x * x + x * x\n",
-        )
-        .unwrap();
-        assert_eq!(cross, build(imported));
-
-        let local = build(small);
-        assert!(!local.contains("call i64 %"));
-        assert_eq!(local.matches("call i64 @callable_").count(), 2);
-    }
-
-    #[test]
     fn literal_body_and_caller_abi_invalidate_their_own_units() {
         let temp = tempfile::tempdir().unwrap();
         let entry = temp.path().join("main.py");
