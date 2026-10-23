@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 
-use ruff_python_ast::visitor::{Visitor, walk_expr};
+use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 
 use super::*;
 
@@ -182,25 +182,39 @@ pub(super) fn free_reads(expression: &ast::Expr, bound: HashSet<String>) -> Hash
 }
 
 pub(super) fn function_reads(function: &ast::StmtFunctionDef) -> HashSet<String> {
-    let mut bound = narrowing::assigned_names(&function.body);
-    bound.extend(
-        function
-            .parameters
-            .iter_non_variadic_params()
-            .map(|p| p.name().to_string()),
-    );
     let mut reads = Reads {
         names: HashSet::new(),
-        bound: vec![bound],
+        bound: Vec::new(),
         nested_lambdas: true,
     };
-    for statement in &function.body {
-        reads.visit_stmt(statement);
-    }
+    reads.visit_function(function);
     reads.names
 }
 
+impl Reads {
+    fn visit_function(&mut self, function: &ast::StmtFunctionDef) {
+        let mut bound = narrowing::assigned_names(&function.body);
+        bound.extend(
+            function
+                .parameters
+                .iter_non_variadic_params()
+                .map(|p| p.name().to_string()),
+        );
+        self.bound.push(bound);
+        self.visit_body(&function.body);
+        self.bound.pop();
+    }
+}
+
 impl<'a> Visitor<'a> for Reads {
+    fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
+        if let ast::Stmt::FunctionDef(function) = statement {
+            self.visit_function(function);
+        } else {
+            walk_stmt(self, statement);
+        }
+    }
+
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
         if let ast::Expr::Lambda(lambda) = expression {
             if self.nested_lambdas {

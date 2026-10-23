@@ -1469,11 +1469,7 @@ impl<'a> Checker<'a> {
                 } else {
                     self.expr_expected(&binary.right, Type::Int)?
                 };
-                let (op, ty) = self.binary_op(binary.op, left.ty, right.ty, expression)?;
-                Expr {
-                    ty,
-                    kind: ExprKind::Binary(op, Box::new(left), Box::new(right)),
-                }
+                self.binary_expr(binary.op, left, right, expression)?
             }
             _ => self.typed_expr(expression)?,
         };
@@ -2214,7 +2210,17 @@ impl<'a> Checker<'a> {
         let mut body = Vec::new();
         let mut falls_through = true;
         let reachable = self.reachable;
-        for statement in statements {
+        for (index, statement) in statements.iter().enumerate() {
+            if let ast::Stmt::Assign(assignment) = statement
+                && let [ast::Expr::Name(name)] = assignment.targets.as_slice()
+                && !self.names.contains_key(name.id.as_str())
+                && matches!(&*assignment.value, ast::Expr::List(list) if list.elts.is_empty())
+                && let Some(value) =
+                    inference::first_append(name.id.as_str(), &statements[index + 1..])
+                && let Some(element) = self.graph.session.scalar_type(self.module, value)
+            {
+                self.declare(name.id.as_str(), self.types.list(element), name)?;
+            }
             self.reachable = reachable && falls_through;
             let (lowered, continues) = self.statement(statement)?;
             body.extend(lowered);
@@ -2278,6 +2284,7 @@ impl<'a> Checker<'a> {
                     }
                     let index = self.expr_expected(&target.slice, key)?;
                     let value = self.expr(&assign.value)?;
+                    let value = Self::integer_addend(assign.op, value, element);
                     let (op, result) = self.binary_op(assign.op, element, value.ty, statement)?;
                     self.expect(element, result, statement)?;
                     Some(Statement::AugmentItem(list, index, op, value))
@@ -2291,6 +2298,7 @@ impl<'a> Checker<'a> {
                         ));
                     }
                     let value = self.expr(&assign.value)?;
+                    let value = Self::integer_addend(assign.op, value, ty);
                     let (op, result) = self.binary_op(assign.op, ty, value.ty, statement)?;
                     self.expect(ty, result, statement)?;
                     // AugmentField keeps its old value implicit. Expose the
@@ -2308,18 +2316,14 @@ impl<'a> Checker<'a> {
                 } else if let ast::Expr::Name(_) = &*assign.target {
                     let left = self.expr(&assign.target)?;
                     let right = self.expr(&assign.value)?;
-                    let (op, ty) = self.binary_op(assign.op, left.ty, right.ty, statement)?;
-                    if self.types.element(ty).is_some() {
+                    let value = self.binary_expr(assign.op, left, right, statement)?;
+                    if self.types.element(value.ty).is_some() {
                         return Err(error(
                             self.source,
                             statement,
                             "in-place list operations are unsupported",
                         ));
                     }
-                    let value = Expr {
-                        ty,
-                        kind: ExprKind::Binary(op, Box::new(left), Box::new(right)),
-                    };
                     Some(self.assign(&assign.target, value)?)
                 } else {
                     return Err(error(
@@ -2876,6 +2880,36 @@ impl<'a> Checker<'a> {
         Ok(Statement::Assign(slot, value))
     }
 
+    fn integer_addend(op: ast::Operator, value: Expr, other: Type) -> Expr {
+        if op == ast::Operator::Add
+            && value.ty == Type::Bool
+            && matches!(other, Type::Int | Type::Bool)
+        {
+            Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+            }
+        } else {
+            value
+        }
+    }
+
+    fn binary_expr(
+        &self,
+        op: ast::Operator,
+        left: Expr,
+        right: Expr,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let left = Self::integer_addend(op, left, right.ty);
+        let right = Self::integer_addend(op, right, left.ty);
+        let (op, ty) = self.binary_op(op, left.ty, right.ty, node)?;
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Binary(op, Box::new(left), Box::new(right)),
+        })
+    }
+
     fn binary_op(
         &self,
         op: ast::Operator,
@@ -3092,8 +3126,7 @@ impl<'a> Checker<'a> {
                 {
                     return self.path_join(left, right, binary);
                 }
-                let (op, ty) = self.binary_op(binary.op, left.ty, right.ty, expression)?;
-                (ty, ExprKind::Binary(op, Box::new(left), Box::new(right)))
+                return self.binary_expr(binary.op, left, right, expression);
             }
             ast::Expr::UnaryOp(unary) => {
                 let value = if unary.op == ast::UnaryOp::Not {

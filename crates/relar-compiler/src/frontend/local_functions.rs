@@ -187,7 +187,7 @@ impl Checker<'_> {
                 helper.local_functions.insert(read, binding);
             }
         }
-        let (mut body, falls) = helper.block(&definition.body)?;
+        let (mut body, falls) = helper.function_body(&definition.body)?;
         if falls && self.types.payload(signature.returns).is_some() {
             body.push(Statement::Return(helper.coerce(
                 Expr {

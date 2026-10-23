@@ -38,6 +38,28 @@ def unwound_integer(value: int) -> int:
     return value + kept
 
 
+class Counter:
+    total: int
+
+    def __init__(self, total: int) -> None:
+        self.total = total
+
+
+def count(value: int, flag: bool) -> None:
+    counter = Counter(value)
+    items = [value]
+    mapping = {"total": value}
+    counter.total += flag
+    items[0] += flag
+    mapping["total"] += flag
+    print(value + flag)
+    print(flag + value)
+    print(flag + flag)
+    value += flag
+    assert value == counter.total == items[0] == mapping["total"]
+    print(value)
+
+
 boundary = 1 << 62
 huge = 1 << 150
 # The existing input-driven arithmetic matrix omits right-hand zero so it can
@@ -77,6 +99,10 @@ for left, right in [
 transitions(boundary - 1, 1)
 transitions(-boundary, -1)
 transitions(0, huge)
+
+for value in [0, boundary - 1, huge]:
+    count(value, False)
+    count(value, True)
 
 for value in [-huge, 0, huge]:
     print(unwound_integer(value))

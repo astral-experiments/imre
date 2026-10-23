@@ -31,9 +31,10 @@ REJECTED = {
     "debug_field": 'value = 1\nprint(f"{value=}")\n',
     "debug_str_conversion": 'value = 1\nprint(f"{value=!s}")\n',
     "debug_empty_spec": 'value = 1\nprint(f"{value=:}")\n',
-    "integer_format_spec": 'print(f"{1:d}")\n',
+    "integer_width_spec": 'print(f"{1:+5d}")\n',
+    "decimal_float": 'print(f"{1.5:+}")\n',
+    "decimal_conversion": 'print(f"{1!r:+d}")\n',
     "string_format_spec": "print(f\"{'text':s}\")\n",
-    "whitespace_format_spec": 'print(f"{1: }")\n',
     "dynamic_empty_format_spec": 'spec = ""\nprint(f"{1:{spec}}")\n',
     "literal_empty_dynamic_spec": "print(f\"{1:{''}}\")\n",
     "nested_empty_dynamic_spec": "print(f\"{1:{f''}}\")\n",
@@ -72,6 +73,8 @@ ERRORS = {
 
 
 def rejection_message(name: str) -> str:
+    if name in ("decimal_float", "decimal_conversion"):
+        return "decimal integer formats require an unconverted int or bool"
     if name in ("numeric_string_conversion", "numeric_string_field"):
         return "numeric format specifications require an unconverted int, float, or bool"
     if name == "builtin_rebinding":
@@ -83,7 +86,7 @@ def rejection_message(name: str) -> str:
     if name.endswith("_spec"):
         if "dynamic" in name:
             return "f-string format specifications must be literal"
-        return "numeric formats support f or % with literal precision from 0 through 1000"
+        return "numeric formats support signed decimal integers or f and % with literal precision from 0 through 1000"
     if name.startswith("surrogate_"):
         return "surrogate string escapes are unsupported"
     if name.endswith("_indentation"):

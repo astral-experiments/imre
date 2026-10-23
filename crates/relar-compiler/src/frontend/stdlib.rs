@@ -428,8 +428,8 @@ impl Checker<'_> {
         })
     }
 
-    /// Accepts literal fixed-point/percentage precision, retaining Python's
-    /// checked integer-to-float conversion before the formatting operation.
+    /// Decimal integer fields keep their full precision. Fixed-point and
+    /// percentage fields use Python's checked integer-to-float conversion.
     pub(super) fn formatted_scalar(
         &mut self,
         field: &ast::InterpolatedElement,
@@ -469,11 +469,24 @@ impl Checker<'_> {
             value = Self::enum_text(value);
         }
         if !specification.is_empty() {
+            let sign = specification.strip_suffix('d').unwrap_or(&specification);
+            if matches!(sign, "" | "-" | "+" | " ") {
+                if field.conversion != ast::ConversionFlag::None
+                    || !matches!(value.ty, Type::Int | Type::Bool)
+                {
+                    return Err(error(
+                        self.source,
+                        field,
+                        "decimal integer formats require an unconverted int or bool",
+                    ));
+                }
+                return Ok(self.formatted_integer(value, sign));
+            }
             let (precision, percent) = numeric_format(&specification).ok_or_else(|| {
                 error(
                     self.source,
                     field,
-                    "numeric formats support f or % with literal precision from 0 through 1000",
+                    "numeric formats support signed decimal integers or f and % with literal precision from 0 through 1000",
                 )
             })?;
             if field.conversion != ast::ConversionFlag::None
@@ -574,6 +587,44 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::Str, vec![value]),
             }
         })
+    }
+
+    fn formatted_integer(&mut self, mut value: Expr, sign: &str) -> Expr {
+        if value.ty == Type::Bool {
+            value = Expr {
+                ty: Type::Int,
+                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+            };
+        }
+        let digits = |value| Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::Str, vec![value]),
+        };
+        if matches!(sign, "" | "-") {
+            return digits(value);
+        }
+        // Evaluate the field once even when deciding whether to add a sign.
+        let slot = self.hidden(Type::Int);
+        let local = self.local(slot);
+        let nonnegative =
+            pipelines::compare(Compare::GreaterEqual, local.clone(), pipelines::integer(0));
+        let digits = digits(local);
+        let prefixed = unpacking::concat(unpacking::string(sign), digits.clone());
+        Expr {
+            ty: Type::Str,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, value)],
+                value: Box::new(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Conditional(
+                        Box::new(nonnegative),
+                        Box::new(prefixed),
+                        Box::new(digits),
+                    ),
+                }),
+                clear: vec![slot],
+            },
+        }
     }
 }
 

@@ -202,6 +202,10 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
     restored = changed
     for before, after in reversed(grouping_edits):
         restored = restored.replace(after, before)
+    # A local function's declaration is part of its enclosing function's body.
+    for edit in edits:
+        if edit["kind"] == "native function declaration":
+            restored = restored.replace(edit["after"], edit["before"])
     original_bodies, generated_bodies = bodies(source), bodies(restored, restore_calls=True)
     if any(generated_bodies.get(name) != body for name, body in original_bodies.items()):
         raise ValueError("adapter changed an application function body beyond declared native calls")

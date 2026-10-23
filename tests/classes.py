@@ -125,7 +125,7 @@ def verify_upstream_definitions() -> None:
         (reporter / "upstream/conformance.py", reporter / "model.py",
          {"Source", "Classification", "Change", "compute_stats", "change", "diagnostics_by_source",
           "classify", "key", "diagnostics_are_equivalent", "group_diagnostics_by_key", "collect_file_stats"}),
-        (reporter / "upstream/conformance.py", reporter / "render.py", {"collect_diagnostic_entries"}),
+        (reporter / "upstream/conformance.py", reporter / "render.py", {"collect_diagnostic_entries", "render_file_stats_table"}),
         (PROJECT / "examples/python_catalog/upstream/fetch-download-metadata.py",
          FIXTURES / "uv_variant.py", {"Variant", "variant_sort_key"}),
     ]

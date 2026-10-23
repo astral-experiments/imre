@@ -47,7 +47,23 @@ def trace(left: list[int], right: list[int]) -> bool:
     return sorted(map(emit, left)) != sorted(map(emit, right))
 
 
+def nested(label: str, offset: int) -> str:
+    def table() -> str:
+        def cell(offset: str) -> str:
+            return label + offset
+
+        def suffix() -> str:
+            offset = "!"
+            return offset
+
+        return cell(str(offset)) + suffix()
+
+    label = "updated"
+    return table()
+
+
 def main() -> None:
+    print(nested("initial", 7))
     lookups({7: "old"})
     print(late(3))
     a = Row(Path("p/./x"), 4)

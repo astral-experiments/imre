@@ -118,6 +118,49 @@ impl Session {
         Ok(parsed)
     }
 
+    /// Get a scalar layout hint for an append operand in its own lexical scope.
+    pub(crate) fn scalar_type(
+        &self,
+        module: usize,
+        value: &ruff_python_ast::Expr,
+    ) -> Option<crate::ir::Type> {
+        use crate::ir::Type;
+        use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
+
+        let file = self.db.program_file(self.files[module]);
+        let ty = value.inferred_type(&SemanticModel::new(&self.db, file))?;
+        if !matches!(
+            ty,
+            Ty::LiteralValue(_) | Ty::NominalInstance(_) | Ty::Union(_)
+        ) {
+            return None;
+        }
+        let env = ProgramEnvironment::from_file(file);
+        // ty expands a float annotation to float | int. Match that annotation
+        // after the narrower bool and int cases; Relar checks the exact operand.
+        [
+            (KnownClass::Bool, Type::Bool),
+            (KnownClass::Int, Type::Int),
+            (KnownClass::Float, Type::Float),
+            (KnownClass::Str, Type::Str),
+            (KnownClass::Bytes, Type::Bytes),
+        ]
+        .into_iter()
+        .find(|(class, _)| {
+            let mut instance = class.to_instance(&self.db, &env);
+            if matches!(class, KnownClass::Float) {
+                instance = ty_python_semantic::types::UnionType::from_two_elements(
+                    &self.db,
+                    &env,
+                    instance,
+                    KnownClass::Int.to_instance(&self.db, &env),
+                );
+            }
+            ty.is_assignable_to(&self.db, &env, instance)
+        })
+        .map(|(_, ty)| ty)
+    }
+
     pub(crate) fn is_never(&self, module: usize, value: &ruff_python_ast::Expr) -> bool {
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
         matches!(
