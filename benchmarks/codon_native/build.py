@@ -54,7 +54,7 @@ def bodies(source: str, *, restore_calls: bool = False) -> dict[str, str]:
 def adapt(source: str, name: str) -> tuple[str, list[dict]]:
     """Apply declared boundaries, checking all remaining function-body AST nodes."""
     edits = []
-    grouping_edits = []
+    body_edits = []
     lines = source.splitlines(keepends=True)
     tree = ast.parse(source)
     calls = [node for node in ast.walk(tree)
@@ -78,11 +78,14 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
                       "callee_before": original, "callee_after": replacement})
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.args.kwonlyargs and node.args.vararg is None:
-            before = lines[node.lineno - 1]
-            if before.count("*, ") != 1 or node.body[0].lineno != node.lineno + 1:
-                raise ValueError("expected one-line keyword-only function declaration")
-            after = before.replace("*, ", "")
-            lines[node.lineno - 1] = after
+            start, stop = node.lineno - 1, node.body[0].lineno - 1
+            before = "".join(lines[start:stop])
+            if before.count("*,") != 1:
+                raise ValueError("expected one keyword-only separator")
+            after = before.replace("*, ", "").replace("*,\n", "\n")
+            if name == "conformance_report/render.py" and node.name == "render_test_cases":
+                after = after.replace('Literal["diff", "github"]', "str")
+            lines[start:stop] = after.splitlines(keepends=True)
             edits.append({"kind": "native function declaration", "line": node.lineno, "before": before, "after": after})
         if not isinstance(node, ast.ClassDef):
             continue
@@ -128,15 +131,15 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
         for value in ("TyDiagnostic", "ExpectedError"):
             before = f": defaultdict[str, list[{value}]] = defaultdict(list)"
             after = f" = defaultdict(list[{value}])"
-            grouping_edits.append((before, after))
+            body_edits.append((before, after))
         for mapping in ("old_by_key", "new_by_key", "expected_by_key"):
             keys = f"{mapping}.keys()"
-            grouping_edits.append((keys, f"set({keys})"))
-        grouping_edits.append((
+            body_edits.append((keys, f"set({keys})"))
+        body_edits.append((
             "(e.location.path.name, e.location.positions.begin.line): e.tag",
             "(e.location.path.name, e.location.positions.begin.line): str(e.tag)",
         ))
-        for before, after in grouping_edits:
+        for before, after in body_edits:
             if before not in changed:
                 raise ValueError(f"unexpected grouping boundary: {before}")
             changed = changed.replace(before, after)
@@ -153,6 +156,17 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
             raise ValueError("unexpected conformance title annotation")
         changed = changed.replace(literal, "str")
         edits.append({"kind": "closed title literal annotation", "before": literal, "after": "str"})
+    if name == "conformance_report/render.py" and "from itertools import groupby\n" in changed:
+        changed = changed.replace("from typing import Literal\n", "")
+        # Codon can capture the revision URL directly, but cannot relay it
+        # through two nested functions.
+        before = "lines.extend(render_html_diff_row(tc, source="
+        after = "lines.extend(render_html_diff_row_at(tc, base_url, source="
+        if changed.count(before) != 2:
+            raise ValueError("unexpected diagnostic row calls")
+        changed = changed.replace(before, after)
+        body_edits.append((before, after))
+        edits.append({"kind": "pass checkout URL directly to the HTML row helper", "before": before, "after": after})
     if name == "conformance_report/render.py" and "from typing import assert_never\n" in changed:
         changed = changed.replace("from typing import assert_never\n",
                                   'def assert_never(value):\n    raise AssertionError(f"Expected code to be unreachable, but got: {value!r}")\n')
@@ -205,7 +219,7 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
         edits.append({"kind": "native typed TOML boundary", "adapter": "conformance_toml.py", "adapter_sha256": digest(addition.encode())})
         edits.append({"kind": "native live typed JSON import", "adapter": "conformance_json.py"})
     restored = changed
-    for before, after in reversed(grouping_edits):
+    for before, after in reversed(body_edits):
         restored = restored.replace(after, before)
     # A local function's declaration is part of its enclosing function's body.
     for edit in edits:

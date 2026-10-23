@@ -1798,6 +1798,11 @@ impl<'a> Checker<'a> {
 
     /// Keeps the original container rooted and owns each item before user code runs.
     fn iteration(&mut self, loop_: &ast::StmtFor) -> Result<(Vec<Statement>, bool), String> {
+        if let ast::Expr::Call(call) = loop_.iter.as_ref()
+            && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::GroupBy))
+        {
+            return self.groupby_iteration(loop_, call);
+        }
         let mut input = match self.unpacked_list_enumeration(loop_)? {
             Some(input) => input,
             None => self.iteration_input(&loop_.iter)?,
@@ -3598,6 +3603,13 @@ impl<'a> Checker<'a> {
             return self.call_local_function(call, &function);
         }
         match self.resolve(&call.func) {
+            Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "groupby requires direct for iteration with an immediate list(group)",
+                ));
+            }
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
             _ => {}

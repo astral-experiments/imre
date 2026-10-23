@@ -61,6 +61,28 @@ This infers `checksum(str) -> int`. Every function has one exact signature, and 
 
 An immediate `map(int, source)` converts each item using the ordinary checked `int` conversion. Inputs may yield exact integers, floats, booleans, or strings. Conversion proceeds lazily as the enclosing consumer iterates; input expressions, iterator creation, the optional sum start, and conversion failures retain Python evaluation order. Mutable sources remain live and keep the existing dictionary/set mutation checks. User callbacks follow the exact callable contract below. A map cannot escape into storage, and user-defined iteration protocols remain unsupported.
 
+`itertools.groupby(source, key=...)` groups consecutive items with equal keys. In a
+`for key, group` loop, the first statement must assign `list(group)` to a separate
+local. That list can be stored or mutated. The grouper name must be fresh and its
+only supported use is this immediate conversion.
+
+```python
+from itertools import groupby
+
+for title, group in groupby(["alpha", "apple", "beta", "again"], key=lambda word: word[0]):
+    words = list(group)
+    print(f"{title} {len(words)}")  # a 2, then b 1, then a 1
+```
+
+Omitting the key or passing `None` groups by the items themselves. A typed key
+function runs once for each item pulled. Filling one group reads the first item of
+the following group and keeps its key for the next iteration. Key equality supports
+integers, booleans, strings and string enums, bytes, paths, `None`, and fixed tuples
+of supported immutable fields.
+The compiler rejects source iterators that could keep an open file or a dynamically
+bound callback alive through the grouper. A bound key function can own a file
+itself and retains it for the lifetime of the last bound group.
+
 ## Callable values and callbacks
 
 `typing.Callable[[int, str], bool]` and `collections.abc.Callable[[int, str], bool]` describe the same exact parameter sequence and return type. Module functions, bound/unbound instance methods, class methods, and static methods can be assigned to local variables, passed as arguments, and returned. A bound method owns its receiver, so rebinding the original variable does not invalidate the method, while mutations of that same receiver remain visible. `Callable[[], R]` supports zero arguments. Optional callable locals and parameters require a successful `None` check before invocation.
@@ -354,7 +376,7 @@ Imported modules, including package `__init__.py` files, run their typed top-lev
 
 An optional `if __name__ == "__main__":` guard without an `else` is supported. Every loaded module is type-checked and lowered for validation, including unused functions and inactive guards. The fixed `__name__` string is `"__main__"` in the entry and the qualified module name in imported code.
 
-Imports are resolved statically from `.py` files and packages with `__init__.py`. Wildcards, dynamic or function-local imports, namespace packages, import cycles, dependencies outside the module root, and general standard-library imports or shadowing are rejected. The compiler recognizes sealed bindings for `enum.StrEnum`, `enum.auto`, `typing.Literal`, `typing.assert_never`, `typing.TextIO`, `typing.BinaryIO`, `typing.Union`, `typing.Callable`, `typing.Self`, `collections.abc.Callable`, `dataclasses.dataclass`, `dataclasses.field`, `pathlib.Path`, `tempfile.TemporaryDirectory`, `subprocess.run`, `subprocess.CompletedProcess`, `subprocess.SubprocessError`, `subprocess.CalledProcessError`, `subprocess.TimeoutExpired`, `os.environ` for `copy()`, `sys.argv`, `io.UnsupportedOperation`, `urllib.parse.unquote`, `relar.json.decode`/`encode`, and `relar.toml.decode`; these do not execute standard-library Python code. Their import aliases and first-party re-exports preserve identity. A package can re-export definitions from its children; reading an unfinished parent's definitions through a circular import is rejected. Symlinks cannot escape the module root or give one source file multiple module identities. The source-string library APIs accept sealed bindings but remain isolated from filesystem imports, which use the path-based APIs.
+Imports are resolved statically from `.py` files and packages with `__init__.py`. Wildcards, dynamic or function-local imports, namespace packages, import cycles, dependencies outside the module root, and general standard-library imports or shadowing are rejected. The compiler recognizes sealed bindings for `itertools.groupby`, `enum.StrEnum`, `enum.auto`, `typing.Literal`, `typing.assert_never`, `typing.TextIO`, `typing.BinaryIO`, `typing.Union`, `typing.Callable`, `typing.Self`, `collections.abc.Callable`, `dataclasses.dataclass`, `dataclasses.field`, `pathlib.Path`, `tempfile.TemporaryDirectory`, `subprocess.run`, `subprocess.CompletedProcess`, `subprocess.SubprocessError`, `subprocess.CalledProcessError`, `subprocess.TimeoutExpired`, `os.environ` for `copy()`, `sys.argv`, `io.UnsupportedOperation`, `urllib.parse.unquote`, `relar.json.decode`/`encode`, and `relar.toml.decode`; these do not execute standard-library Python code. Their import aliases and first-party re-exports preserve identity. A package can re-export definitions from its children; reading an unfinished parent's definitions through a circular import is rejected. Symlinks cannot escape the module root or give one source file multiple module identities. The source-string library APIs accept sealed bindings but remain isolated from filesystem imports, which use the path-based APIs.
 
 The I/O surface is intentionally small. `input()` reads a UTF-8 line and removes its trailing LF. A preceding CR remains part of the value, matching CPython's piped input on both hosts. `int(str)` accepts signed decimal digits, optional underscores between digits, and surrounding Python numeric whitespace. Decimal classification is pinned to Unicode 16, matching CPython 3.14; mixed decimal digit families are accepted, while superscripts and other numeric lookalikes are rejected. Other bases remain unsupported. Surrogate escapes in non-raw string literals are rejected: Ruff's analysis AST substitutes replacement characters for them, which is unsuitable for executable semantics. Strings support `+` and local `+=`; `text.split()` groups Python whitespace and omits empty fields, returning `list[str]`. `text.splitlines()` recognizes LF, CR, CRLF, vertical tab, form feed, U+001C through U+001E, U+0085, U+2028, and U+2029. It returns no elements for empty input and no extra element for a final line break; U+001F remains ordinary text. Additional string operations and their accepted signatures are listed under [native text operations](#native-text-operations). Retained line endings, general formatting protocols, and arbitrary codecs remain unsupported. CPython's configurable integer conversion digit limit is not reproduced.
 
