@@ -1,21 +1,33 @@
 //! Select one allocator for the process, including when native code is sanitized.
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use tikv_jemallocator::Jemalloc;
 
-type Backend = &'static (dyn GlobalAlloc + Sync);
-static BACKEND: OnceLock<Backend> = OnceLock::new();
+const UNSELECTED: u8 = 0;
+const SYSTEM: u8 = 1;
+const JEMALLOC: u8 = 2;
+static BACKEND: AtomicU8 = AtomicU8::new(UNSELECTED);
 
 pub(super) fn select_jemalloc() {
     // An earlier runtime allocation can already have selected the system heap.
     // All later reallocations and frees must stay with that original allocator.
-    let _ = BACKEND.set(&Jemalloc);
+    let _ = BACKEND.compare_exchange(UNSELECTED, JEMALLOC, Ordering::Relaxed, Ordering::Relaxed);
 }
 
-fn backend() -> Backend {
-    *BACKEND.get_or_init(|| &System)
+fn backend() -> &'static (dyn GlobalAlloc + Sync) {
+    // Publishing an allocator choice shares no other state. Both backends are
+    // static, and every allocation sees the same choice once it has been set.
+    let use_jemalloc = match BACKEND.load(Ordering::Relaxed) {
+        JEMALLOC => true,
+        SYSTEM => false,
+        _ => {
+            BACKEND.compare_exchange(UNSELECTED, SYSTEM, Ordering::Relaxed, Ordering::Relaxed)
+                == Err(JEMALLOC)
+        }
+    };
+    if use_jemalloc { &Jemalloc } else { &System }
 }
 
 struct Heap;
@@ -24,7 +36,7 @@ struct Heap;
 static HEAP: Heap = Heap;
 
 // SAFETY: the backend never changes after the first selection or allocation.
-// Selecting a backend uses only static references and does not allocate.
+// Selection uses only atomic operations and does not allocate.
 unsafe impl GlobalAlloc for Heap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: forward the caller's layout to the selected allocator.
