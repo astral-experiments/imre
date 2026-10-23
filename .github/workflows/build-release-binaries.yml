@@ -15,11 +15,11 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-24.04
+            runner: ${{ github.repository == 'astral-sh/relar' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
           - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04-arm
+            runner: ${{ github.repository == 'astral-sh/relar' && 'github-ubuntu-24.04-aarch64-4' || 'ubuntu-24.04-arm' }}
           - target: aarch64-apple-darwin
-            runner: macos-15
+            runner: ${{ github.repository == 'astral-sh/relar' && 'namespace-profile-macos-15' || 'macos-15' }}
     env:
       TARGET: ${{ matrix.target }}
     steps:
@@ -82,7 +82,7 @@ jobs:
   build-global-dist-artifacts:
     name: Shell installer
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository == 'astral-sh/relar' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
