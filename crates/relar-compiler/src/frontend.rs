@@ -3384,8 +3384,8 @@ impl<'a> Checker<'a> {
             ast::Expr::Name(name) if name.id == "__file__" => (
                 Type::Str,
                 ExprKind::Str(
-                    self.graph.modules[self.module]
-                        .path
+                    self.graph
+                        .module_filename(self.module)
                         .to_string_lossy()
                         .into_owned(),
                 ),

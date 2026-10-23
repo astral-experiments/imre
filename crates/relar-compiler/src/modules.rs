@@ -267,12 +267,22 @@ pub(crate) struct SourceGraph {
     pub(crate) session: Session,
     pub(crate) modules: Vec<SourceModule>,
     pub(crate) entry: ModuleId,
+    /// The absolute entry spelling used for Python's `__file__`.
+    entry_filename: PathBuf,
     /// Imports precede executable statements, so dependency completion order
     /// also gives Python's module initialization order.
     pub(crate) initialization: Vec<ModuleId>,
 }
 
 impl SourceGraph {
+    pub(crate) fn module_filename(&self, module: ModuleId) -> &Path {
+        if module == self.entry {
+            &self.entry_filename
+        } else {
+            &self.modules[module].path
+        }
+    }
+
     /// The entry needs its own initializer when it declares globals for later definitions.
     pub(crate) fn initializer_modules(&self) -> impl Iterator<Item = ModuleId> + '_ {
         self.initialization
@@ -286,15 +296,16 @@ impl SourceGraph {
     pub(crate) fn single(source: &str) -> Result<Self, String> {
         let mut loader = Loader::new(PathBuf::from("/"))?;
         loader.allow_imports = false;
+        let filename = PathBuf::from("/input.py");
         let entry = loader.add(
-            PathBuf::from("/input.py"),
-            PathBuf::from("/input.py"),
+            filename.clone(),
+            filename.clone(),
             "__main__".into(),
             false,
             source,
         )?;
         loader.scan(entry)?;
-        loader.finish(entry)
+        loader.finish(entry, filename)
     }
 
     pub(crate) fn load(entry: &Path, module_root: Option<&Path>) -> Result<Self, String> {
@@ -363,8 +374,7 @@ impl SourceGraph {
             }
         }
         loader.scan(id)?;
-        loader.modules[id].path = filename;
-        loader.finish(id)
+        loader.finish(id, filename)
     }
 
     /// Resolves namespace paths while leaving local-value attributes to the expression checker.
@@ -455,11 +465,12 @@ impl Loader {
         Ok(id)
     }
 
-    fn finish(mut self, entry: ModuleId) -> Result<SourceGraph, String> {
+    fn finish(mut self, entry: ModuleId, entry_filename: PathBuf) -> Result<SourceGraph, String> {
         self.session.check()?;
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
         Ok(SourceGraph {
+            entry_filename,
             inputs: self.inputs,
             session: self.session,
             modules: self.modules,

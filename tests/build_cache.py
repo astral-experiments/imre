@@ -93,6 +93,9 @@ def main():
         for spelling in (original, alias, original, alias):
             result = cli("run", source=spelling)
             assert result[0] == 0 and result[1] == str(spelling) + "\n", result
+        original.write_text("def identity(value: bytes) -> bytes:\n    return value\nprint(identity(1))\n")
+        result = cli("build", source=alias)
+        assert result[0] != 0 and any(f"{original.resolve()}:3:" in line for line in result[3]), result
         checks.append("Cached programs preserved the source filename when compiled via a symlink")
         collision = dict(env, RELAR_CACHE_DIR=str(root / "shadow-cache"))
         shadow.symlink_to("placed-program")
