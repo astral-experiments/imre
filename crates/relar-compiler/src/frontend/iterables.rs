@@ -93,8 +93,7 @@ impl Checker<'_> {
         let generator = matches!(source, ast::Expr::Generator(_));
         let mut zip_sum = None;
         let (input, convert) = if let ast::Expr::Generator(generator) = source
-            && call.arguments.args.len() == 1
-            && call.arguments.keywords.is_empty()
+            && self.zip_sum_rhs == Some(call.range())
         {
             (
                 Iteration::Prepared(self.generator_input(generator, None, Some(&mut zip_sum))?),

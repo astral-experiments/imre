@@ -14,6 +14,26 @@ pub(super) struct Sum {
     pub clear: Vec<usize>,
 }
 
+/// Only neighboring direct assignments can fuse. Other consumers need no saved iterator state.
+pub(super) fn rhs(statement: &ast::Stmt) -> Option<TextRange> {
+    let value = match statement {
+        ast::Stmt::Assign(assign) if matches!(assign.targets.as_slice(), [ast::Expr::Name(_)]) => {
+            &*assign.value
+        }
+        ast::Stmt::AnnAssign(assign) if matches!(&*assign.target, ast::Expr::Name(_)) => {
+            assign.value.as_deref()?
+        }
+        _ => return None,
+    };
+    let ast::Expr::Call(call) = value else {
+        return None;
+    };
+    (matches!(&*call.func, ast::Expr::Name(name) if name.id == "sum")
+        && matches!(call.arguments.args.as_slice(), [ast::Expr::Generator(_)])
+        && call.arguments.keywords.is_empty())
+    .then_some(call.range())
+}
+
 /// Both inputs are stable rooted lists. The generator binds two fresh locals and pulls every row.
 pub(super) fn lists<'a>(
     checker: &Checker<'_>,
