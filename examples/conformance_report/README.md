@@ -53,7 +53,21 @@ Python 3.15 and later use their standard-library TOML 1.1 parser.
 
 ## Replay a captured comparison
 
-Prepare a checkout of [python/typing](https://github.com/python/typing) at
+From the Relar repository root, replay the included 146-file capture with one
+native build and run. The resulting Markdown report compares ty 0.0.60 and 0.0.90.
+
+```sh
+workdir=$(mktemp -d)
+python3 benchmarks/conformance_grouping_inputs.py --scales 1 \
+  --archive benchmarks/results/2026-10-22-collector-ownership-study.tar.xz \
+  --output "$workdir/inputs"
+panel="$workdir/inputs/1x/changed"
+relar run examples/conformance_report/__main__.py --module-root examples -- \
+  --manifest "$panel/manifest.json" --old "$panel/old.json" --new "$panel/new.json" \
+  --format github --output "$workdir/report.md"
+```
+
+To capture a new comparison, prepare a checkout of [python/typing](https://github.com/python/typing) at
 `835b70f3f795f8e061b1f7621178515b0a77a0ad` and two ty executables. The preparation
 step runs ty with the upstream flags and records the source/binary hashes,
 commands, explicit environment, and raw stdout/stderr. Use a new output directory.
