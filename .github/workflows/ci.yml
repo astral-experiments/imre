@@ -31,6 +31,7 @@ jobs:
         run: |
           python3 -m pip install "wheel==0.45.1" "packaging==25.0"
           python3 tests/extension_wheel.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+      - uses: ./.github/actions/test-google-crc32c
       - name: Compare Apple Silicon executables with CPython
         run: |
           target/release/relar build tests/programs/control_flow.py -o "$RUNNER_TEMP/control_flow"
@@ -81,29 +82,10 @@ jobs:
         run: |
           python3 -m pip install "wheel==0.45.1" "packaging==25.0"
           python3 tests/extension_wheel.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
-      - name: Check out the CRC32C native library
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: ./.github/actions/test-google-crc32c
         with:
-          repository: google/crc32c
-          ref: 02e65f4fd3065d27b2e29324800ca6d04df16126 # 1.1.2
-          path: .upstream-crc32c
-          persist-credentials: false
-      - name: Run google-crc32c's upstream tests with both rebuilt extensions
-        run: |
-          python3 -m pip install "pytest==8.4.2"
-          work="$RUNNER_TEMP/google-crc32c"
-          mkdir -p "$work/include" "$work/consumer"
-          target/release/relar extension-header > "$work/include/Python.h"
-          python3 benchmarks/google_crc32c_build.py --crc32c-source .upstream-crc32c --output "$work" \
-            --relar-include "$work/include" --cc clang-18 --cxx clang++-18
-          python3 scripts/pack_extension_wheel.py "$work/wheel" --name google-crc32c --version 1.8.0 --output "$work/dist"
-          python3 -m pip install --no-index --no-deps --no-compile --only-binary=:all: \
-            --implementation rl --python-version 1 --abi relar1 --target "$work/site" "$work"/dist/*.whl
-          cp examples/google_crc32c/driver.py "$work/consumer/"
-          target/release/relar build "$work/consumer/driver.py" --extension-path "$work/site" --clang clang-18 -o "$work/driver"
-          python3 tests/google_crc32c.py cpython --cpython-package "$work/cpython"
-          python3 tests/google_crc32c.py relar --relar-binary "$work/driver"
-          python3 tests/google_crc32c.py fallback
+          cc: clang-18
+          cxx: clang++-18
       - name: Check native build caching, linker options, and status
         run: |
           # Exercise the distro toolchain without setup-python's LD_LIBRARY_PATH.
