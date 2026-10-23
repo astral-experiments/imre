@@ -218,7 +218,7 @@ fn run() -> Result<ExitCode, String> {
             progress.cached(label);
             if execute {
                 progress.running(&source_path);
-                return run_program(&output, &source_path, args, || drop(run_directory));
+                return run_program(&output, &source_path, args);
             }
             return Ok(ExitCode::SUCCESS);
         }
@@ -400,12 +400,10 @@ fn run() -> Result<ExitCode, String> {
     progress.finished(label);
     if execute {
         progress.running(&source_path);
-        return run_program(&output, &source_path, args, || {
-            drop(temporary);
-            drop(scratch);
-            drop(stage);
-            drop(run_directory);
-        });
+        drop(temporary);
+        drop(scratch);
+        drop(stage);
+        return run_program(&output, &source_path, args);
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -449,17 +447,16 @@ fn run_program(
     output: &Path,
     source: &Path,
     args: impl Iterator<Item = OsString>,
-    cleanup: impl FnOnce(),
 ) -> Result<ExitCode, String> {
     let mut program = Command::new(output);
     #[cfg(unix)]
     program.arg0(source);
-    let mut child = program
+    // An ELF interpreter may reopen the executable after spawn returns.
+    program
         .args(args)
-        .spawn()
-        .map_err(|e| format!("Could not run compiled {}: {e}", source.display()))?;
-    cleanup();
-    Ok(program_exit_code(child.wait().map_err(|e| e.to_string())?))
+        .status()
+        .map(program_exit_code)
+        .map_err(|e| format!("Could not run compiled {}: {e}", source.display()))
 }
 
 fn program_exit_code(status: ExitStatus) -> ExitCode {

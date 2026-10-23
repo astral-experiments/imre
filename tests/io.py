@@ -228,13 +228,19 @@ def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
     env = {**environment(), "RELAR_RUN_TEST": "inherited environment", "TMPDIR": str(scratch)}
     path = "./scripts/show args.py"
     program_args = ["--opt-level", "", "two words", "--", "--help", "--allocator", "jemalloc"]
-    result = subprocess.run(
-        [compiler, "run", path, *flags, "--", *program_args], input=b"from stdin\n",
-        cwd=directory, env=env, capture_output=True, timeout=60,
-    )
-    require_success(result, "relar run")
-    expected = [path, *program_args, "current working directory", "inherited environment", "from stdin"]
-    same_output(result.stdout, ("\n".join(expected) + "\n").encode(), "relar run argv and I/O")
+    expected = [path, *program_args, "current working directory", "inherited environment"]
+    with subprocess.Popen(
+        [compiler, "run", path, *flags, "--", *program_args], cwd=directory, env=env,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    ) as process:
+        visible_output(process.stdout.fileno(), ("\n".join(expected) + "\n").encode(), 60)
+        # An interpreter can still need this path after the parent has spawned it.
+        executables = list(scratch.glob("*/program"))
+        assert len(executables) == 1, "run removed its executable before the child finished"
+        assert set(scratch.rglob("*")) == {executables[0], executables[0].parent}
+        out, error = process.communicate(b"from stdin\n", timeout=60)
+    assert process.returncode == 0 and not error, (process.returncode, error)
+    same_output(out, b"from stdin\n", "relar run stdin")
     assert not list(scratch.iterdir()) and not (directory / source.stem).exists()
     rejected = [
         (["--allocator", "other"], b"--allocator expects system or jemalloc"),
