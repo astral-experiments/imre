@@ -25,7 +25,7 @@ pub(super) fn analyze(module: &Module) -> Vec<Vec<bool>> {
                 ExprKind::Construct { initializer, .. } => {
                     private_receiver.get(initializer) == Some(&true)
                 }
-                ExprKind::Set { .. } => true,
+                ExprKind::Set { .. } | ExprKind::List(_) => true,
                 _ => false,
             });
             function
@@ -33,8 +33,10 @@ pub(super) fn analyze(module: &Module) -> Vec<Vec<bool>> {
                 .iter()
                 .enumerate()
                 .map(|(slot, ty)| {
-                    matches!(ty, Type::Class(_) | Type::Set(_))
-                        && confined[slot]
+                    matches!(
+                        ty,
+                        Type::Class(_) | Type::Set(_) | Type::ListInt | Type::List(_)
+                    ) && confined[slot]
                         && !invalid[slot]
                         && !function.params.contains(&slot)
                 })
@@ -43,8 +45,8 @@ pub(super) fn analyze(module: &Module) -> Vec<Vec<bool>> {
         .collect()
 }
 
-/// Each use must be a direct field receiver, a set-insertion receiver or a
-/// final return. Passing or storing the object itself exposes the whole object.
+/// Field access, length, insertion, reservation and returning a local do not
+/// publish the accumulator during the scan. Other uses may expose it.
 fn confined_locals(function: &Function) -> Vec<bool> {
     fn account(uses: &mut [isize], expr: &Expr, count: isize) {
         if let ExprKind::Local(slot) = expr.kind {
@@ -69,7 +71,10 @@ fn confined_locals(function: &Function) -> Vec<bool> {
         account(&mut uses, expr, 1);
         match &expr.kind {
             ExprKind::Field(receiver, _) => account(&mut uses, receiver, -1),
-            ExprKind::Builtin(Builtin::SetAdd, args) => account(&mut uses, &args[0], -1),
+            ExprKind::Builtin(
+                Builtin::SetAdd | Builtin::Append | Builtin::ListReserveRange | Builtin::Len,
+                args,
+            ) => account(&mut uses, &args[0], -1),
             _ => {}
         }
     });

@@ -65,8 +65,8 @@ pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
         .collect()
 }
 
-/// Edge preservation permits append; length/buffer invariance additionally
-/// excludes it and reserve, including through every ordinary or fresh call.
+/// Appending preserves element owners. Incoming lengths and buffers also stay
+/// intact when an append or reserve targets a freshly allocated private list.
 fn summaries(
     module: &Module,
     append: bool,
@@ -254,8 +254,10 @@ fn preserves_edges(
             }
             ExprKind::Builtin(operation, args) => {
                 readonly_builtin(operation)
-                    || (matches!(operation, Builtin::SetAdd)
-                        && matches!(args[0].kind, ExprKind::Local(slot) if private[slot]))
+                    || (matches!(
+                        operation,
+                        Builtin::SetAdd | Builtin::Append | Builtin::ListReserveRange
+                    ) && matches!(args[0].kind, ExprKind::Local(slot) if private[slot]))
                     || (append
                         && matches!(
                             operation,
@@ -784,6 +786,16 @@ mod tests {
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn only_appends_to_a_fresh_private_list_preserve_the_input_length() {
+        let module = lower(include_str!(
+            "../../../tests/fixtures/containers/fresh_list_length.py"
+        ));
+        let facts = analyze(&module);
+        assert_eq!(facts[0].length_roots[0], Some(0));
+        assert_eq!(facts[1].length_roots[0], None);
     }
 
     #[test]
