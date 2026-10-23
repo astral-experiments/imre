@@ -250,7 +250,7 @@ pub unsafe extern "C" fn relar_regex_search(
 impl Match {
     /// Distinguishes an unknown selector (IndexError) from a nonparticipating group.
     #[inline(always)] // Keep the scalar span in the calling group or bound operation.
-    unsafe fn span(&self, selector: usize, named: u8) -> Result<Option<(usize, usize)>, Error> {
+    unsafe fn span(&self, selector: usize, named: u32) -> Result<Option<(usize, usize)>, Error> {
         let index = if named == 0 {
             // SAFETY: the ABI roots an integer selector's canonical word. Every
             // in-range group index is a small integer, so a boxed integer misses.
@@ -300,7 +300,7 @@ impl Storage {
 pub unsafe extern "C" fn relar_regex_group(
     value: *const Object,
     selector: usize,
-    named: u8,
+    named: u32,
 ) -> *const Str {
     // SAFETY: the match and selector are rooted; no borrowed substring escapes.
     let result = unsafe {
@@ -326,15 +326,15 @@ pub unsafe extern "C" fn relar_regex_group(
 pub unsafe extern "C" fn relar_regex_present(
     value: *const Object,
     selector: usize,
-    named: u8,
-) -> u8 {
+    named: u32,
+) -> u32 {
     // SAFETY: the match and selector are rooted throughout this read.
     let result = unsafe {
         object(value).0.with(|storage| {
             storage
                 .regex_match()
                 .span(selector, named)
-                .map(|span| u8::from(span.is_some()))
+                .map(|span| u32::from(span.is_some()))
         })
     };
     finish(result, 0)
@@ -348,8 +348,8 @@ pub unsafe extern "C" fn relar_regex_present(
 pub unsafe extern "C" fn relar_regex_bound(
     value: *const Object,
     selector: usize,
-    named: u8,
-    end: u8,
+    named: u32,
+    end: u32,
 ) -> usize {
     // SAFETY: the caller roots both handles. Every regex span is a UTF-8 boundary.
     let result = unsafe {

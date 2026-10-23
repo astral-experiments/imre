@@ -16,6 +16,24 @@ jobs:
   build-release-artifacts:
     uses: $/.github/workflows/build-release-binaries.yml
 
+  macos-arm64:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.14.5'
+      - run: cargo build --workspace --release --locked
+      - run: cargo test --workspace --release --locked
+      - name: Compare Apple Silicon executables with CPython
+        run: |
+          target/release/relar build tests/programs/control_flow.py -o "$RUNNER_TEMP/control_flow"
+          lipo -verify_arch arm64 "$RUNNER_TEMP/control_flow"
+          python3 tests/run_suites.py --workers 3 --log-dir "$RUNNER_TEMP/relar-suites" \
+            --suites differential io files bytes paths processes workspaces base45 \
+            -- --compiler target/release/relar --runtime target/release/librelar_runtime.a --opt-levels 3
+
   check:
     runs-on: ubuntu-24.04
     timeout-minutes: 90

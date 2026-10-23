@@ -45,13 +45,13 @@ pub unsafe extern "C" fn relar_union_release(value: usize) {
 /// # Safety
 /// Borrows the exact rooted payload encoded by `relar_union_retain`; zero is false.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_union_truthy(value: usize) -> u8 {
+pub unsafe extern "C" fn relar_union_truthy(value: usize) -> u32 {
     if value == 0 {
         return 0;
     }
     // SAFETY: neither exact immutable payload escapes the caller's root.
     unsafe {
-        u8::from(if value & 1 == 0 {
+        u32::from(if value & 1 == 0 {
             !(*(value as *const Str)).is_empty()
         } else {
             !(*((value & !1) as *const Bytes)).is_empty()

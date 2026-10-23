@@ -138,7 +138,7 @@ pub unsafe extern "C" fn relar_str_split(
     value: *const Str,
     separator: *const Str,
     maxsplit: usize,
-    reverse: u8,
+    reverse: u32,
 ) -> *const Object {
     // SAFETY: inputs remain immutable and rooted. ManuallyDrop borrows the Rc
     // capability without consuming the caller's owner; each part acquires its own.
@@ -256,10 +256,14 @@ pub unsafe extern "C" fn relar_str_strip(
 /// # Safety
 /// Both inputs are rooted strings. A nonzero reverse flag selects endswith.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_str_affix(value: *const Str, affix: *const Str, reverse: u8) -> u8 {
+pub unsafe extern "C" fn relar_str_affix(
+    value: *const Str,
+    affix: *const Str,
+    reverse: u32,
+) -> u32 {
     // SAFETY: this immutable comparison retains no borrowed input references.
     let (source, affix) = unsafe { (&*value, &*affix) };
-    u8::from(if reverse != 0 {
+    u32::from(if reverse != 0 {
         source.ends_with(affix.as_str())
     } else {
         source.starts_with(affix.as_str())

@@ -17,7 +17,8 @@ itoa.workspace = true
 regex-automata.workspace = true
 regex-syntax.workspace = true
 libc = "=0.2.190"
-linux-raw-sys = "=0.12.1"
+getrandom = { version = "=0.3.4", features = ["std"] }
+rustix = { version = "=1.1.5", features = ["fs"] }
 memchr = "=2.8.3"
 flate2 = { version = "=1.1.10", default-features = false, features = ["zlib-rs", "runtime_detection"] }
 ruff_python_literal = "=0.0.14"
@@ -27,6 +28,9 @@ serde = "=1.0.229"
 serde_json = { version = "=1.0.151", features = ["raw_value", "unbounded_depth"] }
 toml = { version = "=1.1.8", default-features = false, features = ["std", "parse", "preserve_order"] }
 smallvec = { version = "=1.16.3", features = ["union"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+linux-raw-sys = "=0.12.1"
 
 [lints]
 workspace = true

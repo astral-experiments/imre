@@ -246,7 +246,7 @@ pub unsafe extern "C" fn relar_json_encode(
     word: usize,
     schema: *const Schema,
     indent: usize,
-    ensure_ascii: u8,
+    ensure_ascii: u32,
 ) -> *const Str {
     let result = (|| {
         let indent = if indent == 0 {

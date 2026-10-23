@@ -94,9 +94,9 @@ ERRORS = {
 
 
 def run(
-    command: list[str], cwd: Path, *, timeout: int = 60
+    command: list[str], cwd: Path, *, timeout: int = 60, runner=subprocess.run
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    return runner(
         command,
         cwd=cwd,
         input="",

@@ -409,7 +409,7 @@ pub unsafe extern "C" fn relar_binary_write(value: *const Object, bytes: *const 
 /// # Safety
 /// `value` must be rooted TextIO or BinaryIO and pending state must be clear.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_text_enter(value: *const Object) -> u8 {
+pub unsafe extern "C" fn relar_text_enter(value: *const Object) -> u32 {
     // SAFETY: the rooted storage is accessed without callbacks or escaping references.
     let result = unsafe {
         object(value)
@@ -484,7 +484,7 @@ pub unsafe extern "C" fn relar_text_write(value: *const Object, text: *const Str
 /// # Safety
 /// Both handles must be rooted with matching types and pending state clear.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_text_write_discard(value: *const Object, text: *const Str) -> u8 {
+pub unsafe extern "C" fn relar_text_write_discard(value: *const Object, text: *const Str) -> u32 {
     // SAFETY: file I/O cannot reenter; only the write result leaves storage access.
     let result = unsafe {
         object(value)
@@ -507,7 +507,7 @@ pub unsafe extern "C" fn relar_text_write_parts(
     value: *const Object,
     parts: *const StringPart,
     count: usize,
-) -> u8 {
+) -> u32 {
     // SAFETY: all fragments remain rooted and immutable through assembly.
     let text = unsafe { concat_parts(parts, count) };
     // SAFETY: the file remains rooted; no callback or storage reference escapes.
@@ -524,7 +524,7 @@ pub unsafe extern "C" fn relar_text_write_parts(
 /// `value` must be rooted TextIO or BinaryIO and pending state clear. Returns 1 on success,
 /// or 0 with a pending error. Flushing an open read stream is a no-op.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_text_flush(value: *const Object) -> u8 {
+pub unsafe extern "C" fn relar_text_flush(value: *const Object) -> u32 {
     // SAFETY: file I/O has no callbacks or escaped storage references.
     let result = unsafe {
         object(value)
@@ -540,7 +540,7 @@ pub unsafe extern "C" fn relar_text_flush(value: *const Object) -> u8 {
 /// `value` must be rooted TextIO or BinaryIO and pending state clear. Returns 1 on success
 /// (including repeated close), or 0 with a pending error after releasing the fd.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_text_close(value: *const Object) -> u8 {
+pub unsafe extern "C" fn relar_text_close(value: *const Object) -> u32 {
     // SAFETY: only an independent stream owner escapes the nonreentrant access.
     let stream = unsafe {
         object(value)
@@ -555,12 +555,12 @@ pub unsafe extern "C" fn relar_text_close(value: *const Object) -> u8 {
 /// `value` must be rooted TextIO or BinaryIO. This infallible query is valid while
 /// an error is pending and never changes pending state.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_text_closed(value: *const Object) -> u8 {
+pub unsafe extern "C" fn relar_text_closed(value: *const Object) -> u32 {
     // SAFETY: this nonreentrant read returns only a copied boolean.
     unsafe {
         object(value)
             .0
-            .with(|storage| u8::from(storage.file().stream.is_none()))
+            .with(|storage| u32::from(storage.file().stream.is_none()))
     }
 }
 
@@ -615,6 +615,18 @@ mod tests {
             relar_object_release(error);
         }
         assert_eq!(relar_error_pending(), 0);
+    }
+
+    fn broken_pipe() -> Rc<Object> {
+        use std::os::fd::OwnedFd;
+        let (_reader, writer) = io::pipe().unwrap();
+        let file = File::from(OwnedFd::from(writer));
+        Rc::new(Object(StorageCell::new(Storage::File(Box::new(
+            FileState {
+                stream: Some(Stream::Write(BufWriter::with_capacity(8192, file))),
+                kind: FileKind::Text,
+            },
+        )))))
     }
 
     fn member(bytes: &[u8]) -> Vec<u8> {
@@ -889,7 +901,7 @@ mod tests {
             "é\0🦀\npartsé\0🦀\n".as_bytes()
         );
         let readonly = open(path.to_str().unwrap(), 0);
-        let full = open("/dev/full", 1);
+        let full = broken_pipe();
         let unbuffered = Str::from("x".repeat(8193));
         let large_parts = [
             StringPart {
@@ -902,7 +914,7 @@ mod tests {
             },
         ];
         // SAFETY: each failed write leaves its rooted stream available for the
-        // following recovery; a large write reaches /dev/full immediately.
+        // following recovery; a large write reaches the broken pipe immediately.
         unsafe {
             assert_eq!(
                 relar_text_write_discard(Rc::as_ptr(&readonly), &Str::new("")),
@@ -938,7 +950,7 @@ mod tests {
 
     #[test]
     fn failed_close_closes_aliases_and_final_drop_preserves_pending() {
-        let file = open("/dev/full", 1);
+        let file = broken_pipe();
         // SAFETY: the file and strings stay rooted; each failure is consumed before reuse.
         unsafe {
             assert_ne!(
@@ -955,7 +967,7 @@ mod tests {
             take_error(Kind::ValueError);
         }
 
-        let dropped = open("/dev/full", 1);
+        let dropped = broken_pipe();
         // SAFETY: the exception and file handles are rooted; pending owns an extra
         // exception reference, and both references are released exactly once.
         unsafe {
@@ -972,7 +984,7 @@ mod tests {
             relar_object_release(error);
         }
         assert_eq!(relar_error_pending(), 0);
-        let ignored_failure = open("/dev/full", 1);
+        let ignored_failure = broken_pipe();
         // SAFETY: the file and string remain rooted through the buffered write.
         unsafe {
             assert_ne!(

@@ -5,19 +5,24 @@ use std::cell::RefCell;
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
+#[cfg(target_os = "linux")]
+use std::os::fd::AsRawFd;
+use std::os::fd::{IntoRawFd, OwnedFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+#[cfg(any(target_os = "linux", test))]
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+
+use rustix::fs::{self as rfs, AtFlags, Dir, FileType, Mode, OFlags};
+use rustix::io::Errno;
 
 use super::Str;
 use super::exceptions::{Error, Kind, Result, finish};
 use super::files::os_error;
 
 const ATTEMPTS: usize = 20;
-const DIRECTORY_FLAGS: i32 =
-    libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW;
 
 thread_local! {
     static DEFAULT_DIRECTORY: RefCell<Option<Str>> = const { RefCell::new(None) };
@@ -30,22 +35,8 @@ fn random_name() -> io::Result<String> {
     let mut result = String::with_capacity(8);
     while result.len() != 8 {
         let mut entropy = [0_u8; 16];
-        // SAFETY: getrandom writes at most the capacity of this live byte array.
-        let count = unsafe { libc::getrandom(entropy.as_mut_ptr().cast(), entropy.len(), 0) };
-        if count < 0 {
-            let error = io::Error::last_os_error();
-            if error.kind() == io::ErrorKind::Interrupted {
-                continue;
-            }
-            return Err(error);
-        }
-        if count == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "empty random source",
-            ));
-        }
-        for &byte in &entropy[..count as usize] {
+        getrandom::fill(&mut entropy)?;
+        for byte in entropy {
             if byte < 222 {
                 result.push(CHARACTERS[usize::from(byte) % CHARACTERS.len()] as char);
                 if result.len() == 8 {
@@ -192,29 +183,18 @@ fn create(directory: Option<&str>, prefix: &str, suffix: &str) -> Result<Str> {
     ))
 }
 
-fn open_at(parent: RawFd, name: &CStr, flags: i32) -> io::Result<OwnedFd> {
-    // SAFETY: the name is terminated and the borrowed parent descriptor stays
-    // live; these flags never create an entry or require a mode argument.
-    let descriptor = unsafe { libc::openat(parent, name.as_ptr(), flags) };
-    if descriptor < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        // SAFETY: successful openat transfers a new uniquely owned descriptor.
-        Ok(unsafe { OwnedFd::from_raw_fd(descriptor) })
+/// Repair the held inode. Linux O_PATH descriptors need a separate chmod path.
+fn reset_permissions(descriptor: &OwnedFd) -> io::Result<()> {
+    match rfs::fchmod(descriptor, Mode::RWXU) {
+        #[cfg(target_os = "linux")]
+        Err(Errno::BADF) => reset_path_permissions(descriptor),
+        result => Ok(result?),
     }
 }
 
-/// Repair the inode held by the descriptor, never a path that can be exchanged
-/// for a symlink. Older kernels use procfs's reference to the same held inode.
-fn reset_permissions(descriptor: RawFd) -> io::Result<()> {
-    // SAFETY: the caller holds this descriptor throughout the synchronous call.
-    if unsafe { libc::fchmod(descriptor, 0o700) } == 0 {
-        return Ok(());
-    }
-    let error = io::Error::last_os_error();
-    if error.raw_os_error() != Some(libc::EBADF) {
-        return Err(error);
-    }
+#[cfg(target_os = "linux")]
+fn reset_path_permissions(held: &OwnedFd) -> io::Result<()> {
+    let descriptor = held.as_raw_fd();
     // SAFETY: AT_EMPTY_PATH addresses the held O_PATH inode directly. The empty
     // string is terminated and no lookup or symlink traversal is performed.
     if unsafe {
@@ -242,18 +222,28 @@ fn reset_permissions(descriptor: RawFd) -> io::Result<()> {
     )
 }
 
-fn open_directory(parent: RawFd, name: &CStr) -> io::Result<OwnedFd> {
-    match open_at(parent, name, DIRECTORY_FLAGS) {
+fn open_directory(parent: &OwnedFd, name: &CStr) -> io::Result<OwnedFd> {
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    match rfs::openat(parent, name, flags, Mode::empty()) {
         Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
-            let held = open_at(
-                parent,
-                name,
-                libc::O_PATH | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            )?;
-            reset_permissions(held.as_raw_fd())?;
-            open_at(held.as_raw_fd(), c".", DIRECTORY_FLAGS)
+            #[cfg(target_os = "macos")]
+            {
+                reset_entry_permissions(parent, name)?;
+                Ok(rfs::openat(parent, name, flags, Mode::empty())?)
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let held = rfs::openat(
+                    parent,
+                    name,
+                    OFlags::PATH | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                    Mode::empty(),
+                )?;
+                reset_permissions(&held)?;
+                Ok(rfs::openat(&held, c".", flags, Mode::empty())?)
+            }
         }
-        result => result,
+        result => Ok(result?),
     }
 }
 
@@ -262,134 +252,87 @@ struct Entry {
     directory: bool,
 }
 
-struct DirectoryStream(*mut libc::DIR);
-
-impl Drop for DirectoryStream {
-    fn drop(&mut self) {
-        // SAFETY: this wrapper uniquely owns the live DIR and its descriptor.
-        unsafe { libc::closedir(self.0) };
-    }
+fn file_type_at(parent: &OwnedFd, name: &CStr) -> rustix::io::Result<FileType> {
+    let stat = rfs::statat(parent, name, AtFlags::SYMLINK_NOFOLLOW)?;
+    Ok(FileType::from_raw_mode(stat.st_mode))
 }
 
-fn mode_at(parent: RawFd, name: &CStr) -> io::Result<libc::mode_t> {
-    let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
-    // SAFETY: metadata is writable, the name is terminated, and the borrowed
-    // parent remains live. NOFOLLOW reports the entry itself, including symlinks.
-    if unsafe {
-        libc::fstatat(
-            parent,
-            name.as_ptr(),
-            metadata.as_mut_ptr(),
-            libc::AT_SYMLINK_NOFOLLOW,
-        )
-    } != 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: successful fstatat initialized the complete stat structure.
-    Ok(unsafe { metadata.assume_init() }.st_mode)
-}
-
-/// Permission recovery also repairs regular entries, as tempfile does. Inspect
-/// the held inode before chmod so a concurrently substituted symlink is skipped.
-fn reset_entry_permissions(parent: RawFd, name: &CStr) -> io::Result<()> {
-    let held = match open_at(
-        parent,
-        name,
-        libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-    ) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+/// Inspect the held inode so a concurrently substituted symlink is skipped.
+#[cfg(target_os = "linux")]
+fn reset_entry_permissions(parent: &OwnedFd, name: &CStr) -> io::Result<()> {
+    let flags = OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let held = match rfs::openat(parent, name, flags, Mode::empty()) {
+        Err(Errno::NOENT) => return Ok(()),
         result => result?,
     };
-    let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
-    // SAFETY: held roots the inode and metadata is writable for a complete stat.
-    if unsafe { libc::fstat(held.as_raw_fd(), metadata.as_mut_ptr()) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: successful fstat initialized the complete structure.
-    if unsafe { metadata.assume_init() }.st_mode & libc::S_IFMT != libc::S_IFLNK {
-        reset_permissions(held.as_raw_fd())?;
+    if FileType::from_raw_mode(rfs::fstat(&held)?.st_mode) != FileType::Symlink {
+        reset_permissions(&held)?;
     }
     Ok(())
 }
 
-/// Snapshot names as native bytes; cleanup must remove undecodable filenames too.
-/// Close the scan descriptor before descending, while retaining the directory fd.
-fn entries(descriptor: RawFd) -> io::Result<std::vec::IntoIter<Entry>> {
-    let scan = open_at(descriptor, c".", DIRECTORY_FLAGS)?;
-    // SAFETY: fdopendir borrows scan on failure and takes ownership on success.
-    let stream = unsafe { libc::fdopendir(scan.as_raw_fd()) };
-    if stream.is_null() {
-        return Err(io::Error::last_os_error());
-    }
-    let _ = scan.into_raw_fd();
-    let stream = DirectoryStream(stream);
-    let mut result = Vec::new();
-    loop {
-        // SAFETY: this thread owns both errno and the live directory stream.
-        let entry = unsafe {
-            *libc::__errno_location() = 0;
-            libc::readdir(stream.0)
-        };
-        if entry.is_null() {
-            let error = io::Error::last_os_error();
-            return if error.raw_os_error() == Some(0) {
-                Ok(result.into_iter())
-            } else {
-                Err(error)
-            };
-        }
-        // SAFETY: readdir returned a live dirent until the next call; copy its
-        // terminated name and kind before advancing the stream.
-        let (name, kind) = unsafe {
-            (
-                CStr::from_ptr((*entry).d_name.as_ptr()).to_owned(),
-                (*entry).d_type,
-            )
-        };
-        if matches!(name.to_bytes(), b"." | b"..") {
-            continue;
-        }
-        let directory = kind == libc::DT_DIR
-            || kind == libc::DT_UNKNOWN
-                && mode_at(descriptor, &name)
-                    .is_ok_and(|mode| mode & libc::S_IFMT == libc::S_IFDIR);
-        result.push(Entry { name, directory });
+#[cfg(target_os = "macos")]
+fn reset_entry_permissions(parent: &OwnedFd, name: &CStr) -> io::Result<()> {
+    let result = match file_type_at(parent, name) {
+        Ok(FileType::Symlink) => return Ok(()),
+        // NOFOLLOW protects the target if another process replaces the entry.
+        Ok(_) => rfs::chmodat(parent, name, Mode::RWXU, AtFlags::SYMLINK_NOFOLLOW),
+        Err(error) => Err(error),
+    };
+    match result {
+        Err(Errno::NOENT) => Ok(()),
+        result => Ok(result?),
     }
 }
 
-fn remove_at(parent: RawFd, name: &CStr, directory: bool) -> io::Result<()> {
-    // SAFETY: the parent stays rooted, the entry name is terminated, and unlinkat
-    // never follows the final symlink. AT_REMOVEDIR removes only an empty directory.
-    if unsafe {
-        libc::unlinkat(
-            parent,
-            name.as_ptr(),
-            if directory { libc::AT_REMOVEDIR } else { 0 },
-        )
-    } == 0
-    {
-        return Ok(());
+/// Snapshot names as native bytes; cleanup must remove undecodable filenames too.
+/// Close the scan descriptor before descending, while retaining the directory fd.
+fn entries(descriptor: &OwnedFd) -> io::Result<std::vec::IntoIter<Entry>> {
+    let mut result = Vec::new();
+    for entry in Dir::read_from(descriptor)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if matches!(name.to_bytes(), b"." | b"..") {
+            continue;
+        }
+        let directory = entry.file_type() == FileType::Directory
+            || entry.file_type() == FileType::Unknown
+                && file_type_at(descriptor, name) == Ok(FileType::Directory);
+        result.push(Entry {
+            name: name.to_owned(),
+            directory,
+        });
     }
-    let error = io::Error::last_os_error();
-    if error.kind() == io::ErrorKind::NotFound {
-        Ok(())
-    } else {
-        Err(error)
+    Ok(result.into_iter())
+}
+
+fn remove_at(parent: &OwnedFd, name: &CStr, flags: AtFlags) -> io::Result<()> {
+    match rfs::unlinkat(parent, name, flags) {
+        Err(Errno::NOENT) => Ok(()),
+        result => Ok(result?),
     }
 }
 
 /// Permission recovery may discover a directory whose initial DT_UNKNOWN stat
 /// failed. Return true for that retry case so the caller descends, as tempfile's
 /// onexc handler does after its repaired unlink raises IsADirectoryError.
-fn unlink_entry(parent: RawFd, name: &CStr) -> io::Result<bool> {
-    match remove_at(parent, name, false) {
+fn unlink_entry(parent: &OwnedFd, name: &CStr) -> io::Result<bool> {
+    match remove_at(parent, name, AtFlags::empty()) {
         Ok(()) => Ok(false),
         Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
             reset_permissions(parent)?;
             reset_entry_permissions(parent, name)?;
-            match remove_at(parent, name, false) {
+            match remove_at(parent, name, AtFlags::empty()) {
                 Err(error) if error.kind() == io::ErrorKind::IsADirectory => Ok(true),
+                // Darwin reports EPERM when unlinkat encounters a directory.
+                #[cfg(target_os = "macos")]
+                Err(error) if error.raw_os_error() == Some(libc::EPERM) => {
+                    match file_type_at(parent, name) {
+                        Ok(FileType::Directory) => Ok(true),
+                        Err(Errno::NOENT) => Ok(false),
+                        _ => Err(error),
+                    }
+                }
                 result => result.map(|()| false),
             }
         }
@@ -399,24 +342,22 @@ fn unlink_entry(parent: RawFd, name: &CStr) -> io::Result<bool> {
 
 struct Frame {
     descriptor: OwnedFd,
-    parent: RawFd,
     name: CString,
     entries: std::vec::IntoIter<Entry>,
 }
 
 impl Frame {
-    fn open(parent: RawFd, name: CString) -> io::Result<Self> {
+    fn open(parent: &OwnedFd, name: CString) -> io::Result<Self> {
         let descriptor = open_directory(parent, &name)?;
-        let entries = match entries(descriptor.as_raw_fd()) {
+        let entries = match entries(&descriptor) {
             Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
-                reset_permissions(descriptor.as_raw_fd())?;
-                entries(descriptor.as_raw_fd())?
+                reset_permissions(&descriptor)?;
+                entries(&descriptor)?
             }
             result => result?,
         };
         Ok(Self {
             descriptor,
-            parent,
             name,
             entries,
         })
@@ -427,37 +368,32 @@ impl Frame {
 /// symlinks. The explicit stack avoids Rust stack growth for deeply nested trees.
 fn cleanup(path: &str) -> io::Result<()> {
     let path = Path::new(path);
-    let parent = CString::new(
-        path.parent()
-            .unwrap_or(Path::new("."))
-            .as_os_str()
-            .as_bytes(),
-    )?;
+    let parent = path.parent().unwrap_or(Path::new("."));
     let name = CString::new(path.file_name().unwrap_or(OsStr::new(".")).as_bytes())?;
-    let parent = match open_at(
-        libc::AT_FDCWD,
-        &parent,
-        libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC,
-    ) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+    #[cfg(target_os = "linux")]
+    let search = OFlags::PATH | OFlags::DIRECTORY;
+    #[cfg(target_os = "macos")]
+    let search = OFlags::from_bits_retain(libc::O_SEARCH as _);
+    let parent = match rfs::open(parent, search | OFlags::CLOEXEC, Mode::empty()) {
+        Err(Errno::NOENT) => return Ok(()),
         result => result?,
     };
-    match mode_at(parent.as_raw_fd(), &name) {
-        Ok(mode) if mode & libc::S_IFMT == libc::S_IFLNK => {
+    match file_type_at(&parent, &name) {
+        Ok(FileType::Symlink) => {
             return Err(io::Error::other("Cannot call rmtree on a symbolic link"));
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(Errno::NOENT) => return Ok(()),
         result => {
             result?;
         }
     }
-    let root = match Frame::open(parent.as_raw_fd(), name) {
+    let root = match Frame::open(&parent, name) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
         result => result?,
     };
     let mut stack = vec![root];
     while let Some(frame) = stack.last_mut() {
-        let descriptor = frame.descriptor.as_raw_fd();
+        let descriptor = &frame.descriptor;
         if let Some(entry) = frame.entries.next() {
             if entry.directory || unlink_entry(descriptor, &entry.name)? {
                 let child = Frame::open(descriptor, entry.name.clone()).or_else(|error| {
@@ -476,15 +412,16 @@ fn cleanup(path: &str) -> io::Result<()> {
             }
         } else {
             let frame = stack.pop().unwrap();
-            if let Err(error) = remove_at(frame.parent, &frame.name, true) {
+            let frame_parent = stack.last().map_or(&parent, |parent| &parent.descriptor);
+            if let Err(error) = remove_at(frame_parent, &frame.name, AtFlags::REMOVEDIR) {
                 if error.kind() != io::ErrorKind::PermissionDenied {
                     return Err(error);
                 }
                 if !stack.is_empty() {
-                    reset_permissions(frame.parent)?;
+                    reset_permissions(frame_parent)?;
                 }
-                reset_permissions(frame.descriptor.as_raw_fd())?;
-                remove_at(frame.parent, &frame.name, true)?;
+                reset_permissions(&frame.descriptor)?;
+                remove_at(frame_parent, &frame.name, AtFlags::REMOVEDIR)?;
             }
         }
     }
@@ -599,6 +536,8 @@ mod tests {
         let directory = Directory::new();
         let nested = directory.0.join("locked");
         fs::create_dir(&nested).unwrap();
+        fs::write(nested.join("native-é"), "bytes").unwrap();
+        #[cfg(target_os = "linux")]
         fs::write(
             nested.join(OsString::from_vec(b"native-\xff".to_vec())),
             "bytes",
@@ -671,10 +610,9 @@ mod tests {
         }
         let directory = Directory::new();
         fs::create_dir(directory.0.join("child")).unwrap();
-        let name = CString::new(directory.0.as_os_str().as_bytes()).unwrap();
-        let held = open_directory(libc::AT_FDCWD, &name).unwrap();
+        let held = fs::File::open(&directory.0).unwrap().into();
         fs::set_permissions(&directory.0, fs::Permissions::from_mode(0o500)).unwrap();
-        assert!(unlink_entry(held.as_raw_fd(), c"child").unwrap());
+        assert!(unlink_entry(&held, c"child").unwrap());
         assert!(directory.0.join("child").is_dir());
         assert_eq!(
             fs::metadata(&directory.0).unwrap().permissions().mode() & 0o777,

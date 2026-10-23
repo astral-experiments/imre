@@ -311,7 +311,7 @@ impl Emitter<'_, '_> {
     /// existing expression owners remain live until this status is checked.
     fn checked_int_list_status(&mut self, instruction: impl AsRef<str>) {
         let status = self.instruction(instruction);
-        let failed = self.instruction(format!("icmp eq i8 {status}, 0"));
+        let failed = self.instruction(format!("icmp eq i32 {status}, 0"));
         self.check_failed(&failed);
     }
 
@@ -499,8 +499,8 @@ impl Emitter<'_, '_> {
     /// Other fallible calls, including nullable/scalar generic getters, retain
     /// the pending-flag ABI because zero can also be a valid successful result.
     fn check_error(&mut self) {
-        let pending = self.instruction("call i8 @relar_error_pending()");
-        let pending = self.instruction(format!("icmp ne i8 {pending}, 0"));
+        let pending = self.instruction("call i32 @relar_error_pending()");
+        let pending = self.instruction(format!("icmp ne i32 {pending}, 0"));
         self.check_failed(&pending);
     }
 
@@ -1112,10 +1112,10 @@ impl Emitter<'_, '_> {
                     let mut matched = "false".to_owned();
                     for kind in &handler.kinds {
                         let byte = self.instruction(format!(
-                            "call i8 @relar_exception_matches(ptr {}, i32 {kind})",
+                            "call i32 @relar_exception_matches(ptr {}, i32 {kind})",
                             exception.operand
                         ));
-                        let test = self.instruction(format!("icmp ne i8 {byte}, 0"));
+                        let test = self.instruction(format!("icmp ne i32 {byte}, 0"));
                         matched = self.instruction(format!("or i1 {matched}, {test}"));
                     }
                     matched
@@ -2189,10 +2189,10 @@ impl Emitter<'_, '_> {
                 let at = self.operand(&args[1]);
                 let buffer = self.entry_alloca("[4 x i8]");
                 let status = self.instruction(format!(
-                    "call i8 @relar_str_get_part(ptr {}, i64 {}, ptr {buffer}, ptr {part})",
+                    "call i32 @relar_str_get_part(ptr {}, i64 {}, ptr {buffer}, ptr {part})",
                     source.value.operand, at.value.operand
                 ));
-                let failed = self.instruction(format!("icmp eq i8 {status}, 0"));
+                let failed = self.instruction(format!("icmp eq i32 {status}, 0"));
                 self.check_failed(&failed);
                 self.release_operand(&source);
                 self.release_operand(&at);
@@ -2291,19 +2291,19 @@ impl Emitter<'_, '_> {
         let (status, owners) = if matches!(args[1].kind, ExprKind::Binary(Binary::Concat, ..)) {
             let (scratch, count, owners) = self.concat_parts(concat_leaves(&args[1]));
             let status = self.instruction(format!(
-                "call i8 @relar_text_write_parts(ptr {}, ptr {scratch}, i64 {count})",
+                "call i32 @relar_text_write_parts(ptr {}, ptr {scratch}, i64 {count})",
                 receiver.value.operand
             ));
             (status, owners)
         } else {
             let text = self.operand(&args[1]);
             let status = self.instruction(format!(
-                "call i8 @relar_text_write_discard(ptr {}, ptr {})",
+                "call i32 @relar_text_write_discard(ptr {}, ptr {})",
                 receiver.value.operand, text.value.operand
             ));
             (status, vec![text])
         };
-        let failed = self.instruction(format!("icmp eq i8 {status}, 0"));
+        let failed = self.instruction(format!("icmp eq i32 {status}, 0"));
         self.check_failed(&failed);
         for owner in &owners {
             self.release_operand(owner);
@@ -2629,7 +2629,7 @@ impl Emitter<'_, '_> {
             )),
             Type::Str | Type::StrLiteral(_) => {
                 let equal = self.instruction(format!(
-                    "call i8 @relar_str_equal(ptr {}, ptr {})",
+                    "call i32 @relar_str_equal(ptr {}, ptr {})",
                     left.operand, right.operand
                 ));
                 let predicate = if matches!(op, Compare::Equal) {
@@ -2637,11 +2637,11 @@ impl Emitter<'_, '_> {
                 } else {
                     "eq"
                 };
-                self.instruction(format!("icmp {predicate} i8 {equal}, 0"))
+                self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
             }
             Type::Path => {
                 let equal = self.instruction(format!(
-                    "call i8 @relar_path_equal(ptr {}, ptr {})",
+                    "call i32 @relar_path_equal(ptr {}, ptr {})",
                     left.operand, right.operand
                 ));
                 let predicate = if matches!(op, Compare::Equal) {
@@ -2649,7 +2649,7 @@ impl Emitter<'_, '_> {
                 } else {
                     "eq"
                 };
-                self.instruction(format!("icmp {predicate} i8 {equal}, 0"))
+                self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
             }
             Type::Bytes => {
                 let order = self.instruction(format!(
@@ -2666,7 +2666,7 @@ impl Emitter<'_, '_> {
                     .is_some_and(|metadata| metadata.dataclass_eq) =>
             {
                 let equal = self.instruction(format!(
-                    "call i8 @relar_record_equal(ptr {}, ptr {})",
+                    "call i32 @relar_record_equal(ptr {}, ptr {})",
                     left.operand, right.operand
                 ));
                 let predicate = if matches!(op, Compare::Equal) {
@@ -2674,12 +2674,12 @@ impl Emitter<'_, '_> {
                 } else {
                     "eq"
                 };
-                self.instruction(format!("icmp {predicate} i8 {equal}, 0"))
+                self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
             }
             Type::Tuple(_) => {
                 if matches!(op, Compare::Equal | Compare::NotEqual) {
                     let equal = self.instruction(format!(
-                        "call i8 @relar_record_equal(ptr {}, ptr {})",
+                        "call i32 @relar_record_equal(ptr {}, ptr {})",
                         left.operand, right.operand
                     ));
                     let predicate = if matches!(op, Compare::Equal) {
@@ -2687,7 +2687,7 @@ impl Emitter<'_, '_> {
                     } else {
                         "eq"
                     };
-                    self.instruction(format!("icmp {predicate} i8 {equal}, 0"))
+                    self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
                 } else {
                     let order = self.instruction(format!(
                         "call i32 @relar_tuple_compare(ptr {}, ptr {})",
@@ -2937,12 +2937,12 @@ impl Emitter<'_, '_> {
             }
             Builtin::StringListContains => {
                 let byte = self.instruction(format!(
-                    "call i8 @relar_str_list_contains(ptr {}, ptr {})",
+                    "call i32 @relar_str_list_contains(ptr {}, ptr {})",
                     args[0].value.operand, args[1].value.operand
                 ));
                 Value {
                     ty: Type::Bool,
-                    operand: self.instruction(format!("icmp ne i8 {byte}, 0")),
+                    operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
                     small_integer: false,
                 }
             }
@@ -2966,14 +2966,14 @@ impl Emitter<'_, '_> {
                 let receiver = &args[0].value.operand;
                 let call = match operation {
                     RegexCapture::Absent => format!(
-                        "call i8 @relar_regex_present(ptr {receiver}, i64 {group}, i8 {named})"
+                        "call i32 @relar_regex_present(ptr {receiver}, i64 {group}, i32 {named})"
                     ),
                     RegexCapture::Start | RegexCapture::End => format!(
-                        "call i64 @relar_regex_bound(ptr {receiver}, i64 {group}, i8 {named}, i8 {})",
+                        "call i64 @relar_regex_bound(ptr {receiver}, i64 {group}, i32 {named}, i32 {})",
                         u8::from(*operation == RegexCapture::End)
                     ),
                     RegexCapture::Group => format!(
-                        "call ptr @relar_regex_group(ptr {receiver}, i64 {group}, i8 {named})"
+                        "call ptr @relar_regex_group(ptr {receiver}, i64 {group}, i32 {named})"
                     ),
                 };
                 let operand = if *known {
@@ -2982,7 +2982,7 @@ impl Emitter<'_, '_> {
                     self.checked_instruction(call)
                 };
                 let operand = if *operation == RegexCapture::Absent {
-                    self.instruction(format!("icmp eq i8 {operand}, 0"))
+                    self.instruction(format!("icmp eq i32 {operand}, 0"))
                 } else if matches!(returns, Type::Optional(_)) {
                     self.instruction(format!("ptrtoint ptr {operand} to i64"))
                 } else {
@@ -3014,11 +3014,11 @@ impl Emitter<'_, '_> {
             }
             Builtin::JsonEncode(schema) => {
                 let word = self.word(&args[0].value);
-                let ascii = self.instruction(format!("zext i1 {} to i8", args[2].value.operand));
+                let ascii = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
                 Value {
                     ty: returns,
                     operand: self.checked_instruction(format!(
-                        "call ptr @relar_json_encode(i64 {word}, ptr @{}, i64 {}, i8 {ascii})",
+                        "call ptr @relar_json_encode(i64 {word}, ptr @{}, i64 {}, i32 {ascii})",
                         json::schema_name(*schema),
                         args[1].value.operand,
                     )),
@@ -3136,17 +3136,20 @@ impl Emitter<'_, '_> {
                     Builtin::TextClose => "relar_text_close",
                     _ => unreachable!(),
                 };
-                self.checked_instruction(format!("call i8 @{name}(ptr {})", args[0].value.operand));
+                self.checked_instruction(format!(
+                    "call i32 @{name}(ptr {})",
+                    args[0].value.operand
+                ));
                 none()
             }
             Builtin::TextClosed => {
                 let byte = self.instruction(format!(
-                    "call i8 @relar_text_closed(ptr {})",
+                    "call i32 @relar_text_closed(ptr {})",
                     args[0].value.operand
                 ));
                 Value {
                     ty: Type::Bool,
-                    operand: self.instruction(format!("icmp ne i8 {byte}, 0")),
+                    operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
                     small_integer: false,
                 }
             }
@@ -3178,12 +3181,12 @@ impl Emitter<'_, '_> {
             }
             Builtin::ExceptionSuppressContext => {
                 let flag = self.instruction(format!(
-                    "call i8 @relar_exception_suppress_context(ptr {})",
+                    "call i32 @relar_exception_suppress_context(ptr {})",
                     args[0].value.operand
                 ));
                 Value {
                     ty: Type::Bool,
-                    operand: self.instruction(format!("icmp ne i8 {flag}, 0")),
+                    operand: self.instruction(format!("icmp ne i32 {flag}, 0")),
                     small_integer: false,
                 }
             }
@@ -3200,10 +3203,11 @@ impl Emitter<'_, '_> {
                 Type::Float => self.call("relar_float_str", Type::Str, &[&args[0].value]),
                 Type::Bytes => self.call("relar_bytes_str", Type::Str, &[&args[0].value]),
                 Type::Bool => {
-                    let byte = self.instruction(format!("zext i1 {} to i8", args[0].value.operand));
+                    let byte =
+                        self.instruction(format!("zext i1 {} to i32", args[0].value.operand));
                     Value {
                         ty: Type::Str,
-                        operand: self.instruction(format!("call ptr @relar_bool_str(i8 {byte})")),
+                        operand: self.instruction(format!("call ptr @relar_bool_str(i32 {byte})")),
                         small_integer: false,
                     }
                 }
@@ -3357,7 +3361,7 @@ impl Emitter<'_, '_> {
             }
             Builtin::ListAllI32 => {
                 let result = self.instruction(format!(
-                    "call i8 @relar_list_all_i32(ptr {}, i64 {}, i64 {}, i64 {})",
+                    "call i32 @relar_list_all_i32(ptr {}, i64 {}, i64 {}, i64 {})",
                     args[0].value.operand,
                     args[1].value.operand,
                     args[2].value.operand,
@@ -3365,7 +3369,7 @@ impl Emitter<'_, '_> {
                 ));
                 Value {
                     ty: Type::Bool,
-                    operand: self.instruction(format!("icmp ne i8 {result}, 0")),
+                    operand: self.instruction(format!("icmp ne i32 {result}, 0")),
                     small_integer: false,
                 }
             }
@@ -3465,12 +3469,12 @@ impl Emitter<'_, '_> {
                     "dict"
                 };
                 let byte = self.instruction(format!(
-                    "call i8 @relar_{family}_contains(ptr {}, i64 {key})",
+                    "call i32 @relar_{family}_contains(ptr {}, i64 {key})",
                     args[1].value.operand
                 ));
                 Value {
                     ty: Type::Bool,
-                    operand: self.instruction(format!("icmp ne i8 {byte}, 0")),
+                    operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
                     small_integer: false,
                 }
             }
@@ -3564,8 +3568,8 @@ impl Emitter<'_, '_> {
                     Type::Bytes => self.void_call("relar_print_bytes", &[&args[0].value]),
                     Type::Bool => {
                         let byte =
-                            self.instruction(format!("zext i1 {} to i8", args[0].value.operand));
-                        self.checked_line(format!("call void @relar_print_bool(i8 {byte})"));
+                            self.instruction(format!("zext i1 {} to i32", args[0].value.operand));
+                        self.checked_line(format!("call void @relar_print_bool(i32 {byte})"));
                     }
                     Type::None => self.void_call("relar_print_none", &[]),
                     Type::ListInt
@@ -3606,10 +3610,10 @@ impl Emitter<'_, '_> {
     fn dict_try_get(&mut self, stored: Type, args: &[Operand], returns: Type) -> Value {
         let key = self.word(&args[1].value);
         let byte = self.instruction(format!(
-            "call i8 @relar_dict_try_get(ptr {}, i64 {key}, ptr %mapping_key_word)",
+            "call i32 @relar_dict_try_get(ptr {}, i64 {key}, ptr %mapping_key_word)",
             args[0].value.operand
         ));
-        let found = self.instruction(format!("icmp ne i8 {byte}, 0"));
+        let found = self.instruction(format!("icmp ne i32 {byte}, 0"));
         let (present, absent, end) = (self.label(), self.label(), self.label());
         self.branch(&found, &present, &absent);
         self.start(&present);
@@ -3669,12 +3673,12 @@ impl Emitter<'_, '_> {
             "null"
         };
         let byte = self.checked_instruction(format!(
-            "call i8 @relar_mapping_iter_next(ptr {}, ptr %mapping_key_word, ptr {value_output})",
+            "call i32 @relar_mapping_iter_next(ptr {}, ptr %mapping_key_word, ptr {value_output})",
             iterator.operand
         ));
         let ready_value = Value {
             ty: Type::Bool,
-            operand: self.instruction(format!("icmp ne i8 {byte}, 0")),
+            operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
             small_integer: false,
         };
         self.store(ready, &ready_value);
@@ -3976,7 +3980,7 @@ impl Emitter<'_, '_> {
         let from = self.index_word(&source.value, true);
         let to = self.index_word(&destination.value, true);
         self.checked_int_list_status(format!(
-            "call i8 @relar_list_copy_index(ptr {}, i64 {to}, i64 {from})",
+            "call i32 @relar_list_copy_index(ptr {}, i64 {to}, i64 {from})",
             list.value.operand
         ));
         self.release_operand(&destination);
@@ -4050,7 +4054,7 @@ impl Emitter<'_, '_> {
         let word = self.word(value);
         if list.ty == Type::ListInt {
             self.checked_int_list_status(format!(
-                "call i8 @relar_list_set{suffix}(ptr {}, i64 {index}, i64 {word})",
+                "call i32 @relar_list_set{suffix}(ptr {}, i64 {index}, i64 {word})",
                 list.operand
             ));
         } else {
@@ -4440,9 +4444,11 @@ fn fallible(name: &str) -> bool {
         )
 }
 
+// Use i32 for runtime flags and status codes. Narrow C integers require different
+// extension attributes on Apple ARM64 and Linux ARM64, even for the same Rust type.
 const DECLARATIONS: &str = r#"
-declare ptr @relar_subprocess_run(ptr, ptr, ptr, i8, ptr)
-declare ptr @relar_subprocess_run_timeout(ptr, ptr, ptr, i8, ptr, ptr)
+declare ptr @relar_subprocess_run(ptr, ptr, ptr, i32, ptr)
+declare ptr @relar_subprocess_run_timeout(ptr, ptr, ptr, i32, ptr, ptr)
 declare ptr @relar_environ_copy()
 declare void @relar_subprocess_check(ptr)
 declare i64 @relar_subprocess_error_field(ptr, i32)
@@ -4454,16 +4460,16 @@ declare ptr @relar_path_name(ptr)
 declare ptr @relar_path_stem(ptr)
 declare ptr @relar_path_suffix(ptr)
 declare ptr @relar_path_parent(ptr)
-declare i8 @relar_path_is_absolute(ptr)
-declare ptr @relar_path_resolve(ptr, i8)
-declare i8 @relar_path_exists(ptr)
-declare i8 @relar_path_is_file(ptr)
-declare i8 @relar_path_is_dir(ptr)
-declare i8 @relar_path_equal(ptr, ptr)
+declare i32 @relar_path_is_absolute(ptr)
+declare ptr @relar_path_resolve(ptr, i32)
+declare i32 @relar_path_exists(ptr)
+declare i32 @relar_path_is_file(ptr)
+declare i32 @relar_path_is_dir(ptr)
+declare i32 @relar_path_equal(ptr, ptr)
 declare ptr @relar_path_read_text(ptr)
 declare i64 @relar_path_write_text(ptr, ptr)
-declare void @relar_path_mkdir(ptr, i64, i8, i8)
-declare void @relar_path_unlink(ptr, i8)
+declare void @relar_path_mkdir(ptr, i64, i32, i32)
+declare void @relar_path_unlink(ptr, i32)
 declare void @relar_path_rmdir(ptr)
 declare ptr @relar_path_replace(ptr, ptr)
 declare ptr @relar_tempdir_new(ptr, ptr, ptr)
@@ -4508,19 +4514,19 @@ declare ptr @relar_binary_readline(ptr)
 declare ptr @relar_gzip_open(ptr, i32)
 declare i64 @relar_binary_write(ptr, ptr)
 
-declare i8 @relar_error_pending()
+declare i32 @relar_error_pending()
 declare ptr @relar_error_take()
 declare void @relar_error_set(ptr)
 declare i32 @relar_error_unhandled()
 declare ptr @relar_exception_new(i32, ptr)
-declare i8 @relar_exception_matches(ptr, i32)
+declare i32 @relar_exception_matches(ptr, i32)
 declare void @relar_union_retain(i64)
 declare void @relar_union_release(i64)
-declare i8 @relar_union_truthy(i64)
+declare i32 @relar_union_truthy(i64)
 declare ptr @relar_exception_message(ptr)
 declare ptr @relar_exception_with_cause(ptr, ptr)
 declare ptr @relar_exception_cause(ptr)
-declare i8 @relar_exception_suppress_context(ptr)
+declare i32 @relar_exception_suppress_context(ptr)
 declare ptr @relar_exception_current()
 declare ptr @relar_exception_swap_active(ptr)
 declare void @relar_exception_raise(ptr)
@@ -4529,11 +4535,11 @@ declare void @relar_flush_stdout()
 declare ptr @relar_record_new(ptr)
 declare ptr @relar_json_decode(ptr, ptr)
 declare ptr @relar_toml_decode(ptr, ptr)
-declare ptr @relar_json_encode(i64, ptr, i64, i8)
+declare ptr @relar_json_encode(i64, ptr, i64, i32)
 declare ptr @relar_record_cached_result(ptr)
 declare void @relar_record_retain(ptr)
 declare void @relar_record_release(ptr)
-declare i8 @relar_record_equal(ptr, ptr) nounwind memory(read)
+declare i32 @relar_record_equal(ptr, ptr) nounwind memory(read)
 declare i32 @relar_tuple_compare(ptr, ptr) nounwind memory(read)
 declare ptr @relar_value_repr(i64, i32)
 declare void @relar_object_retain(ptr)
@@ -4589,34 +4595,34 @@ define internal i64 @relar_seq_borrow_index_proven_fast(ptr %sequence, i64 %inde
 declare ptr @relar_seq_repeat(ptr, i64)
 declare ptr @relar_dict_new(i32, i32)
 declare i64 @relar_dict_len(ptr)
-declare i8 @relar_dict_contains(ptr, i64)
+declare i32 @relar_dict_contains(ptr, i64)
 declare i64 @relar_dict_get(ptr, i64)
 declare ptr @relar_dict_gather_str_int(ptr, ptr)
 declare ptr @relar_dict_gather_bytes_int(ptr, ptr)
-declare i8 @relar_dict_try_get(ptr, i64, ptr)
+declare i32 @relar_dict_try_get(ptr, i64, ptr)
 declare i64 @relar_dict_get_default(ptr, i64, i64)
 declare void @relar_dict_set(ptr, i64, i64)
 declare void @relar_dict_delete(ptr, i64)
 declare ptr @relar_dict_iter(ptr, i32)
 declare ptr @relar_set_new(i32)
 declare i64 @relar_set_len(ptr)
-declare i8 @relar_set_contains(ptr, i64)
+declare i32 @relar_set_contains(ptr, i64)
 declare void @relar_set_add(ptr, i64)
 declare void @relar_set_discard(ptr, i64)
 declare ptr @relar_set_iter(ptr)
-declare i8 @relar_mapping_iter_next(ptr, ptr, ptr)
+declare i32 @relar_mapping_iter_next(ptr, ptr, ptr)
 declare ptr @relar_str_concat(ptr, ptr)
 declare ptr @relar_str_concat_parts(ptr, i64)
 declare ptr @relar_str_concat_parts_owned(ptr, ptr, i64)
 declare ptr @relar_str_append_utf8_owned(ptr, ptr, i64)
-declare i8 @relar_str_get_part(ptr, i64, ptr, ptr)
+declare i32 @relar_str_get_part(ptr, i64, ptr, ptr)
 declare ptr @relar_int_str_part(i64, ptr, ptr)
 declare ptr @relar_str_split_whitespace(ptr)
-declare ptr @relar_str_split(ptr, ptr, i64, i8)
+declare ptr @relar_str_split(ptr, ptr, i64, i32)
 declare ptr @relar_str_rsplit_last(ptr, ptr)
 declare ptr @relar_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @relar_str_strip(ptr, ptr, i32)
-declare i8 @relar_str_affix(ptr, ptr, i8)
+declare i32 @relar_str_affix(ptr, ptr, i32)
 declare i64 @relar_str_find(ptr, ptr, i64)
 declare void @relar_str_partition(ptr, ptr, ptr)
 declare ptr @relar_str_unquote(ptr)
@@ -4624,25 +4630,25 @@ declare ptr @relar_str_splitlines(ptr)
 declare ptr @relar_str_rstrip(ptr, ptr)
 declare void @relar_list_extend_unhinted(ptr, i32)
 declare ptr @relar_sort_detach(ptr, i32)
-declare void @relar_sort_restore(ptr, i32, ptr, i8)
-declare void @relar_sort_by_keys(ptr, i32, ptr, i32, i8)
+declare void @relar_sort_restore(ptr, i32, ptr, i32)
+declare void @relar_sort_by_keys(ptr, i32, ptr, i32, i32)
 declare ptr @relar_str_join(ptr, ptr)
 declare ptr @relar_str_replace(ptr, ptr, ptr)
-declare ptr @relar_float_format(double, i32, i8)
+declare ptr @relar_float_format(double, i32, i32)
 declare double @llvm.fabs.f64(double)
 declare ptr @relar_int_str(i64)
-declare ptr @relar_bool_str(i8)
+declare ptr @relar_bool_str(i32)
 declare ptr @relar_none_str()
 declare ptr @relar_text_open(ptr, i32)
-declare i8 @relar_text_enter(ptr)
+declare i32 @relar_text_enter(ptr)
 declare ptr @relar_text_read(ptr)
 declare ptr @relar_text_readline(ptr)
 declare i64 @relar_text_write(ptr, ptr)
-declare i8 @relar_text_write_discard(ptr, ptr)
-declare i8 @relar_text_write_parts(ptr, ptr, i64)
-declare i8 @relar_text_flush(ptr)
-declare i8 @relar_text_close(ptr)
-declare i8 @relar_text_closed(ptr)
+declare i32 @relar_text_write_discard(ptr, ptr)
+declare i32 @relar_text_write_parts(ptr, ptr, i64)
+declare i32 @relar_text_flush(ptr)
+declare i32 @relar_text_close(ptr)
+declare i32 @relar_text_closed(ptr)
 declare void @relar_args_init(i32, ptr)
 declare ptr @relar_sys_argv()
 declare void @relar_args_clear()
@@ -4652,14 +4658,14 @@ declare i64 @relar_int_literal(ptr, i64)
 declare i64 @relar_int_binary(i64, i64, i32)
 declare i32 @relar_int_compare(i64, i64)
 declare void @relar_print_int(i64)
-declare void @relar_print_bool(i8)
+declare void @relar_print_bool(i32)
 declare void @relar_print_none()
 declare ptr @relar_str_literal(ptr, i64)
 declare ptr @relar_regex_compile(ptr, i64)
 declare ptr @relar_regex_search(ptr, ptr)
-declare ptr @relar_regex_group(ptr, i64, i8)
-declare i8 @relar_regex_present(ptr, i64, i8)
-declare i64 @relar_regex_bound(ptr, i64, i8, i8)
+declare ptr @relar_regex_group(ptr, i64, i32)
+declare i32 @relar_regex_present(ptr, i64, i32)
+declare i64 @relar_regex_bound(ptr, i64, i32, i32)
 declare ptr @relar_str_get(ptr, i64)
 declare ptr @relar_str_slice(ptr, i64, i64, i64)
 declare ptr @relar_str_iter(ptr)
@@ -4669,27 +4675,27 @@ declare void @relar_str_retain(ptr)
 declare void @relar_str_release(ptr)
 declare void @relar_print_str(ptr)
 declare i64 @relar_str_len(ptr)
-declare i8 @relar_str_truthy(ptr)
-declare i8 @relar_bytes_truthy(ptr)
-declare i8 @relar_str_list_contains(ptr, ptr)
+declare i32 @relar_str_truthy(ptr)
+declare i32 @relar_bytes_truthy(ptr)
+declare i32 @relar_str_list_contains(ptr, ptr)
 declare void @relar_str_enum_table(ptr, i64)
-declare i8 @relar_str_equal(ptr, ptr)
+declare i32 @relar_str_equal(ptr, ptr)
 declare i64 @relar_int_parse(ptr)
 declare ptr @relar_input()
 declare ptr @relar_list_new()
 declare i64 @relar_list_sum(ptr, i64)
 declare i64 @relar_list_slice_sum(ptr, i64, i64, i64)
-declare i8 @relar_list_all_i32(ptr, i64, i64, i64)
+declare i32 @relar_list_all_i32(ptr, i64, i64, i64)
 declare void @relar_list_reserve_range(ptr, i64, i64, i64, i64)
 declare void @relar_list_retain(ptr)
 declare void @relar_list_release(ptr)
 declare i64 @relar_list_get(ptr, i64)
-declare i8 @relar_list_set(ptr, i64, i64)
+declare i32 @relar_list_set(ptr, i64, i64)
 declare i64 @relar_list_get_index(ptr, i64)
-declare i8 @relar_list_set_index(ptr, i64, i64)
+declare i32 @relar_list_set_index(ptr, i64, i64)
 declare i64 @relar_list_borrow_index(ptr, i64)
 declare i64 @relar_list_borrow_index_proven(ptr, i64) nounwind memory(argmem: read)
-declare i8 @relar_list_copy_index(ptr, i64, i64)
+declare i32 @relar_list_copy_index(ptr, i64, i64)
 declare void @relar_list_append(ptr, i64)
 declare void @relar_list_append_pair(ptr, i64, i64)
 declare i64 @relar_list_pop(ptr)

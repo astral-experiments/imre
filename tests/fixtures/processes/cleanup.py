@@ -4,7 +4,7 @@ from sys import argv
 
 
 def descriptors() -> int:
-    return sum(1 for path in Path("/proc/self/fd").iterdir())
+    return sum(1 for path in Path("/dev/fd").iterdir())
 
 
 before = descriptors()

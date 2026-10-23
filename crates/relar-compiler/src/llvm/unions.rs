@@ -69,10 +69,10 @@ impl Emitter<'_, '_> {
                 && matches!(value.ty, Type::Exception | Type::TimeoutExpired)
             {
                 let matched = self.instruction(format!(
-                    "call i8 @relar_exception_matches(ptr {}, i32 {kind})",
+                    "call i32 @relar_exception_matches(ptr {}, i32 {kind})",
                     value.operand
                 ));
-                self.instruction(format!("icmp ne i8 {matched}, 0"))
+                self.instruction(format!("icmp ne i32 {matched}, 0"))
             } else {
                 u8::from(class.accepts(value.ty)).to_string()
             };

@@ -241,7 +241,7 @@ def validate(binary: Path, compiler: Path, directory: Path) -> dict:
                 "annotations are enforced contracts"
             )
             assert checked.returncode == 1 and not checked.stdout, checked
-            assert checked.stderr.strip() == f"{source}:2:11: {diagnostic}", (
+            assert checked.stderr.strip() == f"{source.resolve()}:2:11: {diagnostic}", (
                 checked.stderr
             )
             rejected_calls.append(

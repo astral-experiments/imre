@@ -1,4 +1,4 @@
-# Build the Linux archives used by CI and GitHub Releases.
+# Build the archives used by CI and GitHub Releases.
 name: Build release binaries
 
 on:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  linux:
+  build:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -18,6 +18,8 @@ jobs:
             runner: ubuntu-24.04
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            runner: macos-15
     env:
       TARGET: ${{ matrix.target }}
     steps:
@@ -26,6 +28,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Clang 18
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang-18
       - name: Build binary
         run: cargo build --locked --profile dist --target "$TARGET" --workspace
