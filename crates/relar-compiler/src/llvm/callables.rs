@@ -338,7 +338,9 @@ print(apply(increment, 4))
     #[test]
     fn specializes_a_small_loop_with_two_cheap_stable_targets() {
         let call = "acc += fn(x)";
-        let large_loop = format!("{call}{}", "\n        acc += x".repeat(128));
+        // Independent effects exceed the loop budget without building a long
+        // chain of inferred additions on the same accumulator.
+        let large_loop = format!("{call}{}", "\n        print(x)".repeat(64));
         for (expression, body, specialized) in [
             ("x + 1", call, true),
             ("x * x + x * x + x * x", call, false),
