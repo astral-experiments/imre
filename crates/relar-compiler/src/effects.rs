@@ -8,7 +8,7 @@
 //! infallible here; every handler, else and finally body is included.
 
 use crate::callables::Targets;
-use crate::ir::{Binary, Builtin, Expr, ExprKind, Module, Statement, Type};
+use crate::ir::{Expr, ExprKind, Module, Statement, Type};
 
 pub(crate) struct ExceptionEffects {
     functions: Vec<bool>,
@@ -69,7 +69,7 @@ fn block(body: &[Statement], functions: &[bool], targets: &Targets) -> bool {
             expression(receiver, functions, targets) || expression(value, functions, targets)
         }
         Statement::AugmentField(receiver, _, op, value) => {
-            binary(*op)
+            op.may_raise()
                 || expression(receiver, functions, targets)
                 || expression(value, functions, targets)
         }
@@ -142,12 +142,7 @@ fn expression(value: &Expr, functions: &[bool], targets: &Targets) -> bool {
         | ExprKind::Negate(value)
         | ExprKind::Field(value, _) => expression(value, functions, targets),
         ExprKind::Binary(op, left, right) => {
-            (matches!(op, Binary::Concat) && left.ty == Type::Bytes)
-                || binary(*op)
-                || matches!(
-                    (left.ty, right.ty),
-                    (Type::Int, Type::Float) | (Type::Float, Type::Int)
-                )
+            op.may_raise_with_operands(left.ty, right.ty)
                 || expression(left, functions, targets)
                 || expression(right, functions, targets)
         }
@@ -194,170 +189,16 @@ fn expression(value: &Expr, functions: &[bool], targets: &Targets) -> bool {
             .as_ref()
             .is_some_and(|message| expression(message, functions, targets)),
         ExprKind::Builtin(builtin, args) => {
-            builtin_raises(builtin, args)
+            builtin.contract(args).may_raise
                 || args.iter().any(|arg| expression(arg, functions, targets))
         }
-    }
-}
-
-fn binary(op: Binary) -> bool {
-    match op {
-        Binary::Divide
-        | Binary::FloorDivide
-        | Binary::Modulo
-        | Binary::Repeat
-        | Binary::LeftShift
-        | Binary::RightShift => true,
-        Binary::Add
-        | Binary::Subtract
-        | Binary::Multiply
-        | Binary::Concat
-        | Binary::BitAnd
-        | Binary::BitOr
-        | Binary::BitXor => false,
-    }
-}
-
-/// Classifies only the builtin's own work. Argument evaluation is accounted
-/// separately, including eager defaults on otherwise infallible dictionary lookups.
-fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
-    match builtin {
-        Builtin::Text(operation) => matches!(
-            operation,
-            crate::ir::TextOperation::Split(_) | crate::ir::TextOperation::Partition
-        ),
-        Builtin::Path(operation) => matches!(
-            operation,
-            crate::ir::PathOperation::ReadText
-                | crate::ir::PathOperation::Absolute
-                | crate::ir::PathOperation::Resolve
-                | crate::ir::PathOperation::WriteText
-                | crate::ir::PathOperation::Mkdir
-                | crate::ir::PathOperation::Unlink
-                | crate::ir::PathOperation::Rmdir
-                | crate::ir::PathOperation::Replace
-                | crate::ir::PathOperation::TemporaryDirectory
-                | crate::ir::PathOperation::CleanupTemporaryDirectory
-                | crate::ir::PathOperation::Iterdir
-                | crate::ir::PathOperation::Next
-        ),
-        Builtin::RegexCapture { known, .. } => !known,
-        Builtin::Process(_)
-        | Builtin::JsonDecode(_)
-        | Builtin::JsonLoads
-        | Builtin::JsonSelect(_)
-        | Builtin::TomlDecode(_)
-        | Builtin::TomlKeys
-        | Builtin::JsonEncode(_)
-        | Builtin::Print
-        | Builtin::StderrLine
-        | Builtin::Input
-        | Builtin::ListGet
-        | Builtin::ListGetI32
-        | Builtin::ListGetBounded { .. }
-        | Builtin::ListSliceSum
-        | Builtin::StringGet
-        | Builtin::StringFormat
-        | Builtin::StringIntList
-        | Builtin::BytesGet
-        | Builtin::Decode
-        | Builtin::BytesValidateUtf8
-        | Builtin::BinaryOpen(_)
-        | Builtin::BinaryRead
-        | Builtin::BinaryReadSize
-        | Builtin::FileReadline
-        | Builtin::GzipOpen
-        | Builtin::BinaryWrite
-        | Builtin::Slice
-        | Builtin::SortRestore
-        | Builtin::Pop
-        | Builtin::DictGet
-        | Builtin::DictGatherStrInt
-        | Builtin::DictGatherBytesInt
-        | Builtin::DictDelete
-        | Builtin::SysArgv
-        | Builtin::ParseArgs
-        | Builtin::TextOpen(_)
-        | Builtin::TextEnter
-        | Builtin::TextRead
-        | Builtin::TextWrite
-        | Builtin::TextFlush
-        | Builtin::TextClose => true,
-        Builtin::Bytes => args.first().is_none_or(|arg| arg.ty != Type::Bytes),
-        Builtin::Int => args
-            .first()
-            .is_none_or(|arg| !matches!(arg.ty, Type::Int | Type::Bool)),
-        Builtin::Float => args
-            .first()
-            .is_none_or(|arg| !matches!(arg.ty, Type::Float | Type::Bool)),
-        Builtin::GlobalGet(_)
-        | Builtin::StrEnumMember { .. }
-        | Builtin::StrEnumName
-        | Builtin::StrEnumValue
-        | Builtin::StrEnumIdentity
-        | Builtin::LiteralStringView
-        | Builtin::StringListContains
-        | Builtin::RegexCompile(_)
-        | Builtin::RegexSearch
-        | Builtin::GlobalSet(_)
-        | Builtin::IntSignAsFloat
-        | Builtin::Bool
-        | Builtin::UnionInject
-        | Builtin::UnionProject
-        | Builtin::IsInstance(_)
-        | Builtin::Len
-        | Builtin::Abs
-        | Builtin::SortByKeys
-        | Builtin::SortDetach
-        | Builtin::ListExtendUnhinted
-        | Builtin::StringJoin
-        | Builtin::StringReplace
-        | Builtin::FloatFormat { .. }
-        | Builtin::ListAllI32
-        | Builtin::ListSum
-        | Builtin::ListReserveRange
-        | Builtin::ListDistinct
-        | Builtin::SequenceGetInBounds
-        | Builtin::ListGetBoundedInBounds { .. }
-        | Builtin::IntBounded { .. }
-        | Builtin::Append
-        | Builtin::IsNone
-        | Builtin::Split
-        | Builtin::SplitLines
-        | Builtin::RStrip
-        | Builtin::Str
-        | Builtin::Repr
-        | Builtin::TextClosed
-        | Builtin::DictGetDefault
-        | Builtin::DefaultListDict
-        | Builtin::DictAsBase
-        | Builtin::KeyUnion
-        | Builtin::SortedStringKeys
-        | Builtin::SortedRecordRows { .. }
-        | Builtin::DictTryGet(_)
-        | Builtin::DictContains
-        | Builtin::DictIter(_)
-        | Builtin::SetContains
-        | Builtin::SetAdd
-        | Builtin::SetDiscard
-        | Builtin::SetIter
-        | Builtin::StringIter
-        | Builtin::StringReverseIter
-        | Builtin::TupleCacheNew
-        | Builtin::TupleCacheResult
-        | Builtin::BytesIter
-        | Builtin::Encode
-        | Builtin::ExceptionMessage
-        | Builtin::ExceptionWithCause
-        | Builtin::ExceptionCause
-        | Builtin::ExceptionSuppressContext => false,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{CallArgs, ExceptHandler, Function};
+    use crate::ir::{Builtin, CallArgs, ExceptHandler, Function};
 
     fn integer() -> Expr {
         Expr {

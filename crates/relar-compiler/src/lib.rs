@@ -2,6 +2,7 @@ mod analysis;
 mod borrows;
 mod callables;
 mod classes;
+mod contracts;
 mod effects;
 mod fixed_regex;
 mod frontend;
