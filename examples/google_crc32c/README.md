@@ -23,8 +23,9 @@ assert state.hexdigest() == b"e3069283"
 ## Build and install
 
 The following commands run from the Relar checkout on x86-64 Linux with
-Clang, CMake, Ninja, and a CPython environment containing pip, wheel,
-packaging, and pytest. Set `work` to a fresh directory outside the checkout.
+Clang, CMake, a Make or Ninja generator, and a CPython environment containing
+pip, wheel, packaging, and pytest. Set `work` to a fresh directory outside the
+checkout. The published Linux timings used `CMAKE_GENERATOR=Ninja`.
 
 ```sh
 work=$(mktemp -d)
