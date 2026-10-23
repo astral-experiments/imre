@@ -1258,9 +1258,6 @@ impl Emitter<'_, '_> {
             ));
         }
         if entry {
-            if !self.sanitize {
-                self.line("call void @relar_init_native_heap()");
-            }
             let layout = self.instruction("call { i64, i64 } @relar_seq_layout()");
             self.line(format!(
                 "store {{ i64, i64 }} {layout}, ptr @sequence_layout"
@@ -4750,7 +4747,6 @@ declare i32 @relar_text_write_parts(ptr, ptr, i64)
 declare i32 @relar_text_flush(ptr)
 declare i32 @relar_text_close(ptr)
 declare i32 @relar_text_closed(ptr)
-declare void @relar_init_native_heap()
 declare void @relar_args_init(i32, ptr)
 declare ptr @relar_sys_argv()
 declare void @relar_args_clear()
@@ -5102,20 +5098,6 @@ mod tests {
                 .0
                 .contains("call void @relar_object_release(")
         );
-    }
-
-    #[test]
-    fn native_heap_selection_precedes_literals_and_preserves_the_sanitizer_heap() {
-        for address_sanitizer in [false, true] {
-            let llvm = compile("print('shared')\n", &CompileOptions { address_sanitizer }).unwrap();
-            let main = llvm.split_once("define i32 @main(").unwrap().1;
-            let init = main.find("call void @relar_init_native_heap()");
-            if address_sanitizer {
-                assert!(init.is_none());
-            } else {
-                assert!(init.unwrap() < main.find("call void @relar_init_literals()").unwrap());
-            }
-        }
     }
 
     #[test]
