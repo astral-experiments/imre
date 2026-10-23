@@ -4776,7 +4776,8 @@ declare void @relar_seq_set_index(ptr, i64, i64, i32)
 declare void @relar_seq_append(ptr, i64, i32)
 declare i64 @relar_seq_pop(ptr)
 declare i64 @relar_seq_len(ptr) nounwind memory(argmem: read)
-declare { i64, i64 } @relar_seq_layout() nounwind willreturn memory(none)
+; The entry bootstrap can wait for relar run before it returns the layout.
+declare { i64, i64 } @relar_seq_layout() nounwind
 @sequence_layout = internal global { i64, i64 } zeroinitializer
 define internal i32 @sequence_header(ptr %sequence) alwaysinline nounwind {
   %offset = load i64, ptr @sequence_layout

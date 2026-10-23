@@ -34,6 +34,8 @@
 mod floats;
 mod integer_text;
 mod objects;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod run_start;
 
 use objects::exceptions::{Error, Kind, Result, finish};
 
