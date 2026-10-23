@@ -18,6 +18,8 @@ mod ranges;
 mod reductions;
 mod tuples;
 mod types;
+#[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+mod verify;
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -30,13 +32,14 @@ pub struct CompileOptions {
 
 /// Checks source syntax, ty diagnostics, and Relar's exact type contract.
 pub fn check(source: &str) -> Result<(), String> {
-    frontend::lower(&modules::SourceGraph::single(source)?).map(|_| ())
+    let module = frontend::lower(&modules::SourceGraph::single(source)?)?;
+    verify_after(&module, "lowering")
 }
 
 /// Compiles a checked module to LLVM IR; the resulting executable uses no CPython.
 pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String> {
     let mut module = frontend::lower(&modules::SourceGraph::single(source)?)?;
-    specialize(&mut module);
+    specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     Ok(llvm::emit(&module, &ranges, options.address_sanitizer))
 }
@@ -70,7 +73,8 @@ impl SourceInputs {
 
 /// Checks a closed first-party module graph, inferring its package root when omitted.
 pub fn check_file(path: &Path, module_root: Option<&Path>) -> Result<(), String> {
-    frontend::lower(&modules::SourceGraph::load(path, module_root)?).map(|_| ())
+    let module = frontend::lower(&modules::SourceGraph::load(path, module_root)?)?;
+    verify_after(&module, "lowering")
 }
 
 /// Compiles one entry module and its statically resolved first-party dependencies.
@@ -81,7 +85,7 @@ pub fn compile_file(
 ) -> Result<Compilation, String> {
     let graph = modules::SourceGraph::load(path, module_root)?;
     let mut module = frontend::lower(&graph)?;
-    specialize(&mut module);
+    specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     Ok(Compilation {
         llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer),
@@ -113,7 +117,7 @@ pub fn compile_file_units(
 ) -> Result<UnitCompilation, String> {
     let graph = modules::SourceGraph::load(path, module_root)?;
     let (mut module, owners) = frontend::lower_with_owners(&graph)?;
-    specialize(&mut module);
+    specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     let names = graph
         .modules
@@ -134,13 +138,34 @@ pub fn compile_file_units(
     })
 }
 
-fn specialize(module: &mut ir::Module) {
+fn specialize(module: &mut ir::Module) -> Result<(), String> {
+    verify_after(module, "lowering")?;
     tuples::scalarize(module);
+    verify_after(module, "tuple scalarization")?;
     list_bounds::specialize(module);
+    verify_after(module, "list bounds specialization")?;
     list_specialization::specialize(module);
+    verify_after(module, "list specialization")?;
     range_specialization::specialize(module);
+    verify_after(module, "range specialization")?;
     reductions::specialize(module);
+    verify_after(module, "reduction specialization")?;
     guarded_text::specialize(module);
+    verify_after(module, "guarded text specialization")
+}
+
+/// Names the first stage that produces malformed IR, before later passes consume it.
+fn verify_after(module: &ir::Module, stage: &str) -> Result<(), String> {
+    #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+    {
+        verify::module(module)
+            .map_err(|error| format!("internal compiler error: invalid IR after {stage}: {error}"))
+    }
+    #[cfg(not(any(debug_assertions, test, feature = "verify-ir")))]
+    {
+        let _ = (module, stage);
+        Ok(())
+    }
 }
 
 /// Applies Python's source preprocessing before Ruff, ty, and source-range checks.

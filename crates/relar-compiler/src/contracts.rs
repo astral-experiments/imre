@@ -226,6 +226,73 @@ impl Builtin {
     }
 }
 
+#[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+impl Builtin {
+    /// Checks the representations consumed by specialized list and range lowerings.
+    /// Dominance, aliasing and the truth of recorded bounds remain pass proofs.
+    pub(crate) fn verify_specialization(
+        &self,
+        args: &[Expr],
+        result: Type,
+        types: &crate::types::Types,
+    ) -> Result<(), &'static str> {
+        use crate::ir::ExprKind;
+
+        let signature = |params: &[Type], returns| {
+            result == returns && args.iter().map(|arg| arg.ty).eq(params.iter().copied())
+        };
+        let bounds = |min, max| min <= max && min >= -(1_i64 << 62) && max < (1_i64 << 62);
+        let index = |value: &Expr| match &value.kind {
+            ExprKind::Local(_) => true,
+            ExprKind::Int(value) => value.parse::<u64>().is_ok_and(|value| value < (1 << 62)),
+            _ => false,
+        };
+        let valid = match self {
+            Self::ListGetI32 => signature(&[Type::ListInt, Type::Int], Type::Int),
+            Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
+                signature(&[Type::ListInt, Type::Int], Type::Int)
+                    && bounds(*min, *max)
+                    && (!matches!(self, Self::ListGetBoundedInBounds { .. })
+                        || (matches!(args[0].kind, ExprKind::Local(_)) && index(&args[1])))
+            }
+            Self::SequenceGetInBounds => matches!(args, [source, cursor]
+                if matches!(source.ty, Type::List(_))
+                    && types.element(source.ty) == Some(result)
+                    && matches!(source.kind, ExprKind::Local(_))
+                    && cursor.ty == Type::Int && index(cursor)),
+            Self::IntBounded { min, max } => {
+                signature(&[Type::Int], Type::Int)
+                    && bounds(*min, *max)
+                    && matches!(args[0].kind, ExprKind::Local(_))
+            }
+            Self::ListAllI32 => signature(
+                &[Type::ListInt, Type::Int, Type::Int, Type::Int],
+                Type::Bool,
+            ),
+            Self::ListReserveRange => {
+                signature(
+                    &[Type::ListInt, Type::Int, Type::Int, Type::Int, Type::Int],
+                    Type::None,
+                ) && matches!(args[4].kind, ExprKind::Int(_))
+                    && index(&args[4])
+            }
+            Self::ListDistinct => matches!(args, [left, right]
+                if types.element(left.ty).is_some() && types.element(right.ty).is_some() && result == Type::Bool),
+            Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
+            Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
+            Self::TupleCacheNew => args.is_empty() && matches!(result, Type::Tuple(_)),
+            Self::TupleCacheResult => matches!(args, [value]
+                if matches!(value.kind, ExprKind::Local(_)) && matches!(result, Type::Tuple(_)) && value.ty == result),
+            _ => true,
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err("invalid specialized operation operands, result or bounds")
+        }
+    }
+}
+
 impl Binary {
     /// Conservative operation effect before operand-specific conversion checks.
     pub(crate) fn may_raise(self) -> bool {
