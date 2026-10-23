@@ -111,36 +111,10 @@ impl ClassInfo {
             .collect::<Result<Vec<_>, _>>()?;
         // Reference counting is sufficient only while no accepted field graph can
         // close a cycle. This concerns storage types, not method signatures.
-        fn visit_type(ty: Type, fields: &[Vec<Type>], types: &Types, states: &mut [u8]) -> bool {
-            if let Type::Class(id) = ty {
-                visit(id, fields, types, states)
-            } else {
-                types
-                    .children(ty)
-                    .into_iter()
-                    .all(|child| visit_type(child, fields, types, states))
-            }
-        }
-        fn visit(id: usize, fields: &[Vec<Type>], types: &Types, states: &mut [u8]) -> bool {
-            if states[id] != 0 {
-                return states[id] == 2;
-            }
-            states[id] = 1;
-            if !fields[id]
-                .iter()
-                .all(|&ty| visit_type(ty, fields, types, states))
-            {
-                return false;
-            }
-            states[id] = 2;
-            true
-        }
-        let mut states = vec![0; fields.len()];
-        for (id, class) in declarations.definitions.iter().enumerate() {
-            if !visit(id, &fields, types, &mut states) {
-                return Err(graph.modules[class.definition.module].error(&class.node,
-                    "cyclic heap types are unsupported; class fields must form an acyclic ownership graph"));
-            }
+        if let Some(id) = Self::cyclic_field_root(&fields, types) {
+            let class = &declarations.definitions[id];
+            return Err(graph.modules[class.definition.module].error(&class.node,
+                "cyclic heap types are unsupported; class fields must form an acyclic ownership graph"));
         }
         let parsers = argparse::Parsers::collect(graph, types, &mut declarations, &mut fields)?;
         Ok(Self {
@@ -149,6 +123,39 @@ impl ClassInfo {
             declarations,
             fields,
         })
+    }
+
+    fn cyclic_field_root(fields: &[Vec<Type>], types: &Types) -> Option<usize> {
+        enum Step {
+            Visit(Type),
+            Finish(usize),
+        }
+        let mut states = vec![0; fields.len()];
+        let mut pending = Vec::new();
+        for root in 0..fields.len() {
+            if states[root] != 0 {
+                continue;
+            }
+            pending.push(Step::Visit(Type::Class(root)));
+            while let Some(step) = pending.pop() {
+                match step {
+                    Step::Finish(id) => states[id] = 2,
+                    Step::Visit(Type::Class(id)) => match states[id] {
+                        1 => return Some(root),
+                        2 => {}
+                        _ => {
+                            states[id] = 1;
+                            pending.push(Step::Finish(id));
+                            pending.extend(fields[id].iter().copied().map(Step::Visit));
+                        }
+                    },
+                    Step::Visit(ty) => {
+                        pending.extend(types.children(ty).into_iter().map(Step::Visit));
+                    }
+                }
+            }
+        }
+        None
     }
 }
 
@@ -4629,5 +4636,19 @@ mod tests {
             let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
             assert!(llvm.contains("call ptr @relar_seq_new("), "{source}");
         }
+    }
+
+    #[test]
+    fn deeply_nested_field_graphs_preserve_cycle_detection() {
+        use super::{ClassInfo, Type, Types};
+
+        let types = Types::default();
+        let mut fields: Vec<_> = (1..=20_000)
+            .map(|id| vec![types.list(Type::Class(id))])
+            .collect();
+        fields.push(vec![Type::Int]);
+        assert_eq!(ClassInfo::cyclic_field_root(&fields, &types), None);
+        fields.last_mut().unwrap().push(types.list(Type::Class(0)));
+        assert_eq!(ClassInfo::cyclic_field_root(&fields, &types), Some(0));
     }
 }
