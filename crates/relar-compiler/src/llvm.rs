@@ -3474,19 +3474,29 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::SortedStringKeys => {
+            Builtin::SortedStringKeys | Builtin::SortedRecordRows { .. } => {
                 let handles = self.entry_alloca(format!("[{} x ptr]", args.len()));
                 for (i, source) in args.iter().enumerate() {
                     let slot =
                         self.instruction(format!("getelementptr ptr, ptr {handles}, i64 {i}"));
                     self.line(format!("store ptr {}, ptr {slot}", source.value.operand));
                 }
-                Value {
-                    ty: returns,
-                    operand: self.instruction(format!(
+                let instruction = if let Builtin::SortedRecordRows { class, columns } = builtin {
+                    let id = self.strings.len();
+                    self.strings.push(columns.clone());
+                    format!(
+                        "call ptr @relar_sorted_record_rows(ptr {handles}, i64 {}, ptr @layout_class_{class}, ptr @str_{id})",
+                        args.len()
+                    )
+                } else {
+                    format!(
                         "call ptr @relar_sorted_string_keys(ptr {handles}, i64 {})",
                         args.len()
-                    )),
+                    )
+                };
+                Value {
+                    ty: returns,
+                    operand: self.instruction(instruction),
                     small_integer: false,
                 }
             }
@@ -4681,6 +4691,7 @@ declare ptr @relar_dict_new(i32, i32)
 declare ptr @relar_default_list_dict_new(i32, i32)
 declare ptr @relar_key_union(ptr, ptr)
 declare ptr @relar_sorted_string_keys(ptr, i64)
+declare ptr @relar_sorted_record_rows(ptr, i64, ptr, ptr)
 declare i64 @relar_dict_len(ptr)
 declare i32 @relar_dict_contains(ptr, i64)
 declare i64 @relar_dict_get(ptr, i64)
@@ -5166,6 +5177,70 @@ mod tests {
             1
         );
         assert_eq!(llvm.matches("call ptr @relar_key_union(").count(), 2);
+    }
+
+    #[test]
+    fn sorted_rows_require_only_generated_field_assignments() {
+        let source = include_str!("../../../tests/fixtures/containers/sorted_rows.py");
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert_eq!(
+            llvm.matches("call ptr @relar_sorted_record_rows(").count(),
+            1
+        );
+        assert_eq!(
+            llvm.matches("call ptr @relar_sorted_string_keys(").count(),
+            1
+        );
+    }
+
+    #[test]
+    fn sorted_rows_fall_back_for_observable_code_and_ordinary_dicts() {
+        let source = r#"
+from collections import defaultdict
+from dataclasses import dataclass
+
+@dataclass
+class Item:
+    key: str
+    values: list[int]
+
+def changed(values: list[int]) -> list[int]:
+    values.append(42)
+    return values
+
+class Custom:
+    key: str
+    values: list[int]
+    def __init__(self, key: str, values: list[int]) -> None:
+        self.key = key
+        self.values = changed(values)
+
+def filtered(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> list[Item]:
+    keys = sorted(a.keys() | b.keys())
+    return [Item(k, a[k]) for k in keys if k]
+
+def custom(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> list[Custom]:
+    keys = sorted(a.keys() | b.keys())
+    return [Custom(k, a[k]) for k in keys]
+
+def ordinary(a: dict[str, list[int]], b: dict[str, list[int]]) -> list[Item]:
+    keys = sorted(a.keys() | b.keys())
+    return [Item(k, a[k]) for k in keys]
+
+def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> list[Item]:
+    keys: list[str] = []
+    try:
+        keys = sorted(a.keys() | b.keys())
+        return [Item(k, a[k]) for k in keys]
+    finally:
+        print(len(keys))
+"#;
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert_eq!(
+            llvm.matches("call ptr @relar_sorted_string_keys(").count(),
+            4
+        );
+        assert!(!llvm.contains("call ptr @relar_sorted_record_rows("));
     }
 
     #[test]

@@ -48,32 +48,34 @@ fn permute<T>(values: &mut [T], order: &mut [usize]) {
 unsafe fn sort_strings(values: &mut [usize], reverse: bool) {
     // SAFETY: the list keeps these owners live, including while they move.
     let bytes = |word: usize| unsafe { (&*(word as *const Str)).as_bytes() };
-    let mut skip = 0;
-    if values.len() >= 64 {
-        let first = bytes(values[0]);
-        let mut prefix = first;
-        for &word in &values[1..] {
-            let candidate = bytes(word);
-            if !candidate.starts_with(prefix) {
-                let end = prefix
-                    .iter()
-                    .zip(candidate)
-                    .take_while(|(a, b)| a == b)
-                    .count();
-                prefix = &prefix[..end];
-                if end < 16 {
-                    break;
-                }
-            }
-        }
-        if prefix.len() >= 16 {
-            skip = prefix.len();
-        }
-    }
+    let skip = shared_prefix(values.iter().map(|&word| bytes(word)));
     values.sort_by(|&left, &right| {
         let order = bytes(left)[skip..].cmp(&bytes(right)[skip..]);
         if reverse { order.reverse() } else { order }
     });
+}
+
+/// Returns a byte prefix shared by every key only when its removal pays for a
+/// large sort. UTF-8 byte order after an identical prefix is unchanged.
+pub(super) fn shared_prefix<'a>(mut keys: impl ExactSizeIterator<Item = &'a [u8]>) -> usize {
+    if keys.len() < 64 {
+        return 0;
+    }
+    let mut prefix = keys.next().unwrap();
+    for candidate in keys {
+        if !candidate.starts_with(prefix) {
+            let end = prefix
+                .iter()
+                .zip(candidate)
+                .take_while(|(a, b)| a == b)
+                .count();
+            if end < 16 {
+                return 0;
+            }
+            prefix = &prefix[..end];
+        }
+    }
+    if prefix.len() < 16 { 0 } else { prefix.len() }
 }
 
 /// # Safety

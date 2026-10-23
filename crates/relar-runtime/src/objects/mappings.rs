@@ -7,6 +7,8 @@
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
 
+mod sorted_rows;
+
 use hashbrown::HashTable;
 use std::mem::ManuallyDrop;
 use std::rc::{Rc, Weak};

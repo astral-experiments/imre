@@ -32,6 +32,7 @@ mod projected_equality;
 mod records;
 mod regex;
 mod sequences;
+mod sorted_rows;
 mod stdlib;
 mod text;
 mod truthiness;
@@ -389,6 +390,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                 params.push(slot);
             }
             let (mut body, falls_through) = checker.function_body(&definition.body)?;
+            checker.fuse_sorted_rows(&definition.body, &mut body);
             if falls_through && types.payload(signature.returns).is_some() {
                 body.push(Statement::Return(Expr {
                     ty: signature.returns,

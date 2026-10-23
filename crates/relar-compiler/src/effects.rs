@@ -325,6 +325,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::DictAsBase
         | Builtin::KeyUnion
         | Builtin::SortedStringKeys
+        | Builtin::SortedRecordRows { .. }
         | Builtin::DictTryGet(_)
         | Builtin::DictContains
         | Builtin::DictIter(_)
