@@ -1008,7 +1008,10 @@ mod native_tests {
         );
         fs::write(&archive, []).unwrap();
         let compiled = crate::compile_file(&entry, None, &options).unwrap();
-        assert_eq!(compiled.extension_archives, [archive]);
+        assert_eq!(
+            compiled.extension_archives,
+            [archive.canonicalize().unwrap()]
+        );
         assert_eq!(
             compiled
                 .llvm_ir

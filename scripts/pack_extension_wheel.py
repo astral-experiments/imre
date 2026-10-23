@@ -1,19 +1,19 @@
 """Pack a staged Relar extension using the standard wheel format."""
 
 import argparse
-import platform
+import sys
 import sysconfig
 from pathlib import Path
 
+from packaging.tags import mac_platforms
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 from wheel.wheelfile import WheelFile
 
 
 def host_platform() -> str:
-    if platform.system() == "Darwin":
-        major, minor, *_ = platform.mac_ver()[0].split(".")
-        return f"macosx_{major}_{minor}_{platform.machine()}"
+    if sys.platform == "darwin":
+        return next(mac_platforms())
     return sysconfig.get_platform().replace("-", "_").replace(".", "_")
 
 
