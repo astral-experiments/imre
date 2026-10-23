@@ -78,3 +78,56 @@ jobs:
           path: |
             *.tar.gz
             *.sha256
+
+  build-global-dist-artifacts:
+    name: Shell installer
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.5"
+          checksum: f68d291c75783122dad58ab77def0e13f3233f358731db5d6d7e8715603b928f
+          enable-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: build-github-archives-*
+          path: target/distrib
+          merge-multiple: true
+      - name: Build shell installer
+        shell: bash
+        run: |
+          tag=$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "relar-compiler").version')
+          dist=(uv run --locked --only-dev --python 3.12 dist)
+          "${dist[@]}" manifest --tag="$tag" --artifacts=local --no-local-paths --output-format=json > "$RUNNER_TEMP/local-manifest.json"
+          # Cargo-dist embeds the native archive checksums in the installer.
+          mapfile -t checksums < <(jq -r '.artifacts[].checksum // empty' "$RUNNER_TEMP/local-manifest.json")
+          (
+            cd target/distrib
+            sha256sum --check --strict -- "${checksums[@]}"
+            cat "${checksums[@]}" > "$RUNNER_TEMP/archive-checksums"
+          )
+          jq --rawfile sums "$RUNNER_TEMP/archive-checksums" '
+            reduce ($sums | split("\n")[] | select(length > 0) | split("  ")) as [$sha, $name]
+              (.; .artifacts[$name].checksums.sha256 = $sha)
+          ' "$RUNNER_TEMP/local-manifest.json" > target/distrib/local-dist-manifest.json
+          "${dist[@]}" build --tag="$tag" --artifacts=global
+          (cd target/distrib && sha256sum --binary relar-installer.sh >> sha256.sum)
+      - name: Test shell installer
+        run: |
+          export RELAR_DOWNLOAD_URL="file://$PWD/target/distrib"
+          export RELAR_UNMANAGED_INSTALL="$RUNNER_TEMP/relar-install"
+          sh target/distrib/relar-installer.sh
+          echo 'print(40 + 2)' > "$RUNNER_TEMP/hello.py"
+          test "$("$RELAR_UNMANAGED_INSTALL/relar" run "$RUNNER_TEMP/hello.py")" = 42
+          test "$("$RELAR_UNMANAGED_INSTALL/relar" run "$RUNNER_TEMP/hello.py" --allocator jemalloc)" = 42
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: build-github-installer
+          if-no-files-found: error
+          path: |
+            target/distrib/relar-installer.sh
+            target/distrib/sha256.sum

@@ -5,6 +5,8 @@ packages = ["relar"]
 [dist]
 cargo-dist-version = "0.32.0"
 hosting = ["github"]
+installers = ["shell"]
+install-path = ["$XDG_BIN_HOME/", "$XDG_DATA_HOME/../bin", "~/.local/bin"]
 targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "aarch64-apple-darwin"]
 unix-archive = ".tar.gz"
 checksum = "sha256"
@@ -12,3 +14,11 @@ source-tarball = false
 auto-includes = false
 build-local-artifacts = false
 local-artifacts-jobs = ["./build-release-binaries"]
+
+# The compiler links against the runtime archives installed beside it.
+[dist.binaries]
+"*" = ["relar", "librelar_runtime.a", "librelar_runtime_jemalloc.a"]
+aarch64-apple-darwin = ["relar", "librelar_runtime.a"]
+
+[dist.min-glibc-version]
+"*" = "2.39"
