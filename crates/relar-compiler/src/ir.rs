@@ -467,6 +467,8 @@ pub(crate) enum Builtin {
     DictAsBase,
     /// Combines the current keys of rooted mappings/sets after both operands run.
     KeyUnion,
+    /// Produces sorted unique string keys from a small union of local dictionaries.
+    SortedStringKeys,
     /// Maps each Unicode scalar through an exact string-to-integer dictionary.
     /// The text is evaluated first; the mapping remains mutable between calls.
     DictGatherStrInt,

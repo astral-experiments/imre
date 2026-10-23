@@ -3474,6 +3474,22 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::SortedStringKeys => {
+                let handles = self.entry_alloca(format!("[{} x ptr]", args.len()));
+                for (i, source) in args.iter().enumerate() {
+                    let slot =
+                        self.instruction(format!("getelementptr ptr, ptr {handles}, i64 {i}"));
+                    self.line(format!("store ptr {}, ptr {slot}", source.value.operand));
+                }
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_sorted_string_keys(ptr {handles}, i64 {})",
+                        args.len()
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::DictGatherStrInt => self.call(
                 "relar_dict_gather_str_int",
                 Type::ListInt,
@@ -4660,6 +4676,7 @@ declare ptr @relar_seq_repeat(ptr, i64)
 declare ptr @relar_dict_new(i32, i32)
 declare ptr @relar_default_list_dict_new(i32, i32)
 declare ptr @relar_key_union(ptr, ptr)
+declare ptr @relar_sorted_string_keys(ptr, i64)
 declare i64 @relar_dict_len(ptr)
 declare i32 @relar_dict_contains(ptr, i64)
 declare i64 @relar_dict_get(ptr, i64)
@@ -5131,6 +5148,17 @@ mod tests {
         );
         assert_eq!(body.matches("call ptr @relar_tuple_probe(").count(), 3);
         assert_eq!(body.matches("call ptr @relar_record_new(").count(), 1);
+    }
+
+    #[test]
+    fn sorted_key_union_fuses_only_local_dictionary_reads() {
+        let llvm = compile(
+            "def add(d: dict[str, int]) -> dict[str, int]:\n    d['late'] = 1\n    return {}\ndef keys(a: dict[str, int], b: dict[str, int]) -> list[str]:\n    first = sorted(a.keys() | b.keys())\n    later = sorted(a.keys() | b.keys() | add(a).keys())\n    return first if first else later\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(llvm.matches("call ptr @relar_sorted_string_keys(").count(), 1);
+        assert_eq!(llvm.matches("call ptr @relar_key_union(").count(), 2);
     }
 
     #[test]

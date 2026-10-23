@@ -1209,6 +1209,57 @@ pub extern "C" fn relar_set_new(kind: u32) -> *const Object {
     ))))))
 }
 
+/// Reads distinct string keys directly from their source indexes and sorts the
+/// resulting list. Each dictionary already supplies unique keys and their hashes.
+///
+/// # Safety
+/// The array contains two to four rooted dictionaries with exact string keys.
+/// No callback or mutation occurs until every result owner has been acquired.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_sorted_string_keys(
+    sources: *const *const Object,
+    count: usize,
+) -> *const Object {
+    fn strings(storage: &Storage) -> &Table<Rc<Str>, usize> {
+        let Tables::Str(table) = &storage.dictionary().tables else {
+            fail("SystemError", "expected a dictionary with string keys")
+        };
+        table
+    }
+    // SAFETY: every array element is an immutable, rooted dictionary handle.
+    let sources = unsafe { std::slice::from_raw_parts(sources, count) };
+    let mut result = super::Words::new(3);
+    for (index, &source) in sources.iter().enumerate() {
+        let previous = &sources[..index];
+        if previous.contains(&source) {
+            continue;
+        }
+        // SAFETY: duplicate handles are skipped, so each nested read is of a
+        // distinct immutable table. Only acquired string owners escape the reads.
+        unsafe {
+            object(source).0.with(|storage| {
+                let table = strings(storage);
+                result
+                    .values
+                    .reserve(table.index.len().saturating_sub(result.values.len()));
+                for entry in table.entries.iter().flatten() {
+                    if !previous.iter().any(|&other| {
+                        object(other).0.with(|storage| {
+                            strings(storage).position(entry.hash, &entry.key).is_some()
+                        })
+                    }) {
+                        result.values.push(entry.key.clone().into_word());
+                    }
+                }
+            });
+        }
+    }
+    let list = Rc::into_raw(result.into_object());
+    // SAFETY: the freshly materialized list owns every exact string.
+    unsafe { super::stdlib::relar_sort_by_keys(list.cast(), 3, list.cast(), 3, 0) };
+    list
+}
+
 /// Creates a fresh set from two evaluated key views or sets. A direct view
 /// borrows its dictionary here, so effects in the other operand remain visible.
 ///

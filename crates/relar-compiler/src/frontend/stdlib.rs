@@ -2,6 +2,21 @@
 
 use super::*;
 
+/// All leaves must be plain local reads so no later operand can change the
+/// keys captured by an earlier union. Bound the number of membership probes.
+fn local_key_union(expr: &Expr, dictionaries: &mut Vec<Expr>) -> bool {
+    match &expr.kind {
+        ExprKind::Builtin(Builtin::KeyUnion, sources) => sources
+            .iter()
+            .all(|source| local_key_union(source, dictionaries)),
+        ExprKind::Local(_) if matches!(expr.ty, Type::Dict(_)) && dictionaries.len() < 4 => {
+            dictionaries.push(expr.clone());
+            true
+        }
+        _ => false,
+    }
+}
+
 impl Checker<'_> {
     /// Captures arguments before acquisition, materializes the source before key
     /// calls, and keeps the source argument rooted until the sorted result escapes.
@@ -20,6 +35,22 @@ impl Checker<'_> {
         let mut body = Vec::new();
         let mut clear = Vec::new();
         let input = self.expansion_input(&call.arguments.args[0], element)?;
+        if call.arguments.keywords.is_empty()
+            && let Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } = &input
+            && self.types.set_element(iterable.ty) == Some(Type::Str)
+        {
+            let mut dictionaries = Vec::new();
+            if local_key_union(iterable, &mut dictionaries) && dictionaries.len() >= 2 {
+                return Ok(Expr {
+                    ty: self.types.list(Type::Str),
+                    kind: ExprKind::Builtin(Builtin::SortedStringKeys, dictionaries),
+                });
+            }
+        }
         let input = self.capture_consumer_input(input, &mut body, &mut clear);
         let mut input = self.prepare_iteration(input, call, false)?;
         self.hint_empty_iteration(&input, Some(element.unwrap_or(Type::Int)));

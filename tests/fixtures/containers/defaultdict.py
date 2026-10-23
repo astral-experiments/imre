@@ -87,5 +87,15 @@ def main() -> None:
     print(len({"first", "second"} | {"first", "third"}))
     print(FirstParty().keys() | 2)
 
+    a = {"é": 1, "": 2, "same": 3}
+    b = {"same": 1, "ab": 2, "è": 3}
+    c = {"ab": 4, "z": 5}
+    alias = a
+    print(",".join(sorted(a.keys() | (b.keys() | c.keys()) | alias.keys())))
+    snapshot = sorted(a.keys() | b.keys() | insert(a, log).keys())
+    print("late" in snapshot)
+    print("late" in a)
+    print(",".join(sorted(c.keys() | a.keys(), reverse=True)))
+
 
 main()
