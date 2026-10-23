@@ -4,8 +4,10 @@
 //! shared descriptor. Sets store no value words. Active iterators keep their
 //! owner's entry directory stable through a compaction lease, never a Rust borrow.
 
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
+use std::hash::{BuildHasher, Hash, Hasher, RandomState};
+use std::sync::LazyLock;
+
+use hashbrown::HashTable;
 use std::mem::ManuallyDrop;
 use std::rc::{Rc, Weak};
 
@@ -231,12 +233,17 @@ impl ScalarKey for TupleKey {
     }
 }
 
+// All tables share a randomized SipHash key, like dictionaries in one Python
+// process. Immutable entries can pass their hash to another table or a resize.
+static HASHER: LazyLock<RandomState> = LazyLock::new(RandomState::new);
+
 struct Entry<K, V> {
+    hash: u64,
     key: K,
     value: V,
 }
 struct Table<K, V> {
-    index: HashMap<K, usize>,
+    index: HashTable<usize>,
     entries: Vec<Option<Entry<K, V>>>,
     iterators: Weak<()>,
 }
@@ -249,36 +256,70 @@ const _: () = assert!(size_of::<Option<Entry<Rc<Str>, ()>>>() >= 8);
 impl<K: ScalarKey, V: Copy> Table<K, V> {
     fn new() -> Self {
         Self {
-            index: HashMap::new(),
+            index: HashTable::new(),
             entries: Vec::new(),
             iterators: Weak::new(),
         }
     }
 
+    /// The fingerprint rejects most bucket candidates before comparing key values.
+    fn position<Q: Eq + ?Sized>(&self, hash: u64, key: &Q) -> Option<usize>
+    where
+        K: std::borrow::Borrow<Q>,
+    {
+        self.index
+            .find(hash, |&position| {
+                let entry = self.entries[position].as_ref().unwrap();
+                entry.hash == hash && entry.key.borrow() == key
+            })
+            .copied()
+    }
+
+    fn reserve(&mut self, additional: usize) {
+        let entries = &self.entries;
+        self.index
+            .try_reserve(additional, |&i| entries[i].as_ref().unwrap().hash)
+            .unwrap_or_else(|_| fail("MemoryError", "mapping allocation failed"));
+        self.entries
+            .try_reserve(additional)
+            .unwrap_or_else(|_| fail("MemoryError", "mapping allocation failed"));
+    }
+
+    fn insert_absent(&mut self, hash: u64, key: K, value: V) {
+        self.compact();
+        self.reserve(1);
+        let position = self.entries.len();
+        let entries = &self.entries;
+        self.index
+            .insert_unique(hash, position, |&i| entries[i].as_ref().unwrap().hash);
+        self.entries.push(Some(Entry { hash, key, value }));
+    }
+
     /// Preserves first-insertion position and returns owners displaced by an update.
     fn insert(&mut self, key: K, value: V) -> Option<(K, V)> {
-        if let Some(&position) = self.index.get(&key) {
+        let hash = HASHER.hash_one(&key);
+        if let Some(position) = self.position(hash, &key) {
             let entry = self.entries[position].as_mut().unwrap();
             return Some((key, std::mem::replace(&mut entry.value, value)));
         }
-        self.compact();
-        self.index
-            .try_reserve(1)
-            .unwrap_or_else(|_| fail("MemoryError", "mapping allocation failed"));
-        self.entries
-            .try_reserve(1)
-            .unwrap_or_else(|_| fail("MemoryError", "mapping allocation failed"));
-        self.index.insert(key.clone(), self.entries.len());
-        self.entries.push(Some(Entry { key, value }));
+        self.insert_absent(hash, key, value);
         None
     }
 
-    /// Returns both removed key owners, avoiding any drop during mutable access.
-    fn remove(&mut self, key: &K) -> Option<(K, Entry<K, V>)> {
-        let (indexed, position) = self.index.remove_entry(key)?;
+    /// Transfers the removed key and value so they can drop outside the mutation.
+    fn remove(&mut self, key: &K) -> Option<Entry<K, V>> {
+        let hash = HASHER.hash_one(key);
+        let slot = self
+            .index
+            .find_entry(hash, |&position| {
+                let entry = self.entries[position].as_ref().unwrap();
+                entry.hash == hash && &entry.key == key
+            })
+            .ok()?;
+        let (position, _) = slot.remove();
         let entry = self.entries[position].take().unwrap();
         self.compact();
-        Some((indexed, entry))
+        Some(entry)
     }
 
     fn compact(&mut self) {
@@ -288,17 +329,25 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         {
             return;
         }
-        let mut position = 0;
-        let index = &mut self.index;
-        self.entries.retain_mut(|entry| {
-            if let Some(entry) = entry {
-                *index.get_mut(&entry.key).unwrap() = position;
-                position += 1;
-                true
-            } else {
-                false
+        self.entries.retain(Option::is_some);
+        self.index.clear();
+        let entries = &self.entries;
+        for (position, entry) in entries.iter().enumerate() {
+            self.index
+                .insert_unique(entry.as_ref().unwrap().hash, position, |&i| {
+                    entries[i].as_ref().unwrap().hash
+                });
+        }
+    }
+
+    /// A key view already has the immutable hash needed by the result set.
+    fn copy_keys(&self, result: &mut Table<K, ()>) {
+        result.reserve(self.index.len().saturating_sub(result.index.len()));
+        for entry in self.entries.iter().flatten() {
+            if result.position(entry.hash, &entry.key).is_none() {
+                result.insert_absent(entry.hash, entry.key.clone(), ());
             }
-        });
+        }
     }
 
     fn iterator_lease(&mut self) -> Rc<()> {
@@ -310,9 +359,8 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     unsafe fn lookup(&self, word: usize) -> Option<&Entry<K, V>> {
         // SAFETY: the caller roots this table's exact key representation.
         let key = unsafe { K::borrow(word) };
-        self.index
-            .get(&*key)
-            .map(|&position| self.entries[position].as_ref().unwrap())
+        self.position(HASHER.hash_one(&*key), &*key)
+            .map(|position| self.entries[position].as_ref().unwrap())
     }
 
     fn next(&self, position: usize) -> Option<(usize, OwnedWord, V)> {
@@ -328,6 +376,37 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
                     (position + 1, key, entry.value)
                 })
             })
+    }
+}
+
+impl<K: ScalarKey> Table<K, usize> {
+    /// Hash a subscription once, including when the sealed list factory inserts.
+    /// The table and the returned expression each acquire their own list owner.
+    unsafe fn subscript(
+        &mut self,
+        word: usize,
+        kind: WordKind,
+        factory: Option<WordKind>,
+    ) -> Option<OwnedWord> {
+        // SAFETY: the incoming key remains rooted for this whole operation.
+        let key = unsafe { K::borrow(word) };
+        let hash = HASHER.hash_one(&*key);
+        if let Some(position) = self.position(hash, &*key) {
+            let value = self.entries[position].as_ref().unwrap().value;
+            // SAFETY: the table roots the stored value of the declared kind.
+            return Some(unsafe { kind.acquire(value) });
+        }
+        let element = factory?;
+        let list = if element.raw() == 2 {
+            crate::relar_list_new() as usize
+        } else {
+            super::relar_seq_new(element.raw()) as usize
+        };
+        // SAFETY: the factory transfers its fresh list to the table. The caller
+        // owns the acquired result independently of any subsequent replacement.
+        let result = unsafe { kind.acquire(list) };
+        self.insert_absent(hash, (*key).clone(), list);
+        Some(result)
     }
 }
 
@@ -384,6 +463,17 @@ impl<V: Copy> Tables<V> {
             Self::Tuple(_) => 6,
         }
     }
+    fn copy_keys(&self, result: &mut Tables<()>) {
+        match (self, result) {
+            (Self::Int(table), Tables::Int(result)) => table.copy_keys(result),
+            (Self::Enum(table), Tables::Enum(result)) => table.copy_keys(result),
+            (Self::Str(table), Tables::Str(result)) => table.copy_keys(result),
+            (Self::Path(table), Tables::Path(result)) => table.copy_keys(result),
+            (Self::Bytes(table), Tables::Bytes(result)) => table.copy_keys(result),
+            (Self::Tuple(table), Tables::Tuple(result)) => table.copy_keys(result),
+            _ => unreachable!("key union requires the same key kind"),
+        }
+    }
     fn len(&self) -> usize {
         table!(self, table => table.index.len())
     }
@@ -417,18 +507,17 @@ impl<V: Copy> Tables<V> {
         }
         table!(self, table => insert(table, key, value))
     }
-    unsafe fn remove(&mut self, word: usize) -> Option<(OwnedWord, OwnedWord, V)> {
+    unsafe fn remove(&mut self, word: usize) -> Option<(OwnedWord, V)> {
         unsafe fn remove<K: ScalarKey, V: Copy>(
             table: &mut Table<K, V>,
             word: usize,
-        ) -> Option<(OwnedWord, OwnedWord, V)> {
+        ) -> Option<(OwnedWord, V)> {
             // SAFETY: the caller roots an exact key of this table's kind.
             let key = unsafe { K::borrow(word) };
-            table.remove(&key).map(|(indexed, entry)| {
-                // SAFETY: the table transferred two independent key owners.
+            table.remove(&key).map(|entry| {
+                // SAFETY: the table transferred the stored key owner.
                 unsafe {
                     (
-                        OwnedWord::from_owned(indexed.into_word(), WordKind::new(K::KIND)),
                         OwnedWord::from_owned(entry.key.into_word(), WordKind::new(K::KIND)),
                         entry.value,
                     )
@@ -846,25 +935,16 @@ unsafe fn missing_key(value: *const Object, key: usize) -> Error {
 /// before interpreting zero, which is also a valid nullable/scalar value.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_get(value: *const Object, key: usize) -> usize {
-    // SAFETY: the caller supplies lookup's rooted handles.
-    if let Some(owned) = unsafe { lookup(value, key) } {
+    // SAFETY: this native subscription only hashes immutable keys and constructs
+    // an empty builtin list, so no storage borrow crosses a user callback.
+    let owned = unsafe {
+        object(value).0.with_mut(|storage| {
+        let mapping = storage.dictionary_mut();
+        table!(&mut mapping.tables, table => table.subscript(key, mapping.value_kind, mapping.default_list_element))
+    })
+    };
+    if let Some(owned) = owned {
         return owned.into_word();
-    }
-    // SAFETY: the immutable factory descriptor is copied before insertion.
-    if let Some(element) = unsafe {
-        object(value)
-            .0
-            .with(|s| s.dictionary().default_list_element)
-    } {
-        let list = if element.raw() == 2 {
-            crate::relar_list_new() as usize
-        } else {
-            super::relar_seq_new(element.raw()) as usize
-        };
-        // SAFETY: the fresh list has the declared value kind; insertion retains it
-        // independently, leaving the constructor's owner for the expression result.
-        unsafe { relar_dict_set(value, key, list) };
-        return list;
     }
     // SAFETY: input roots remain live after storage access ends.
     unsafe { missing_key(value, key) }.returning(0)
@@ -975,9 +1055,11 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                 } else {
                     let mut key = Str::new("");
                     key.push(character);
-                    table.index.get(&key).map_or(0, |&position| {
-                        table.entries[position].as_ref().unwrap().value
-                    })
+                    table
+                        .position(HASHER.hash_one(&key), &key)
+                        .map_or(0, |position| {
+                            table.entries[position].as_ref().unwrap().value
+                        })
                 };
                 // Canonical Int words are nonzero, including the integer zero.
                 if word == 0 {
@@ -1063,7 +1145,7 @@ pub unsafe extern "C" fn relar_dict_set(value: *const Object, key: usize, word: 
 }
 /// # Safety
 /// Root the dictionary and its exact key. Missing sets KeyError; removal drops
-/// both key owners and the value only after mutable storage access has ended.
+/// the key and value owners only after mutable storage access has ended.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_delete(value: *const Object, key: usize) {
     // SAFETY: lookup/removal cannot reenter; returned values own their references.
@@ -1074,7 +1156,7 @@ pub unsafe extern "C" fn relar_dict_delete(value: *const Object, key: usize) {
             mapping
                 .tables
                 .remove(key)
-                .map(|(a, b, word)| (a, b, OwnedWord::from_owned(word, mapping.value_kind)))
+                .map(|(key, word)| (key, OwnedWord::from_owned(word, mapping.value_kind)))
         })
     };
     if old.is_none() {
@@ -1150,13 +1232,9 @@ pub unsafe extern "C" fn relar_key_union(
         // hash operations use sealed immutable keys and cannot call user code.
         unsafe {
             object(source).0.with(|storage| {
-                let mut add = |word| {
-                    result.insert(WordKind::new(kind).acquire(word), ());
-                    true
-                };
                 match storage {
-                    Storage::Dictionary(dict) => dict.tables.all(|key, _| add(key)),
-                    Storage::Set(set) => set.tables.all(|key, ()| add(key)),
+                    Storage::Dictionary(dict) => dict.tables.copy_keys(&mut result),
+                    Storage::Set(set) => set.tables.copy_keys(&mut result),
                     _ => unreachable!("the checker proves both key sources"),
                 };
             })
@@ -1267,6 +1345,32 @@ mod tests {
 
     fn integer(value: i64) -> usize {
         Int::small(value).unwrap().into_raw()
+    }
+
+    #[test]
+    fn cached_hash_collisions_preserve_keys_across_growth_and_compaction() {
+        // Force every key into one full-hash collision, including during transfer
+        // between independently allocated tables. Keys still compare by value.
+        let mut source = Table::<usize, ()>::new();
+        let mut result = Table::<usize, ()>::new();
+        for key in 1..90 {
+            source.insert_absent(42, key, ());
+        }
+        source.copy_keys(&mut result);
+        source.copy_keys(&mut result);
+        assert_eq!(result.index.len(), 89);
+        for key in 1..70 {
+            let position = source.position(42, &key).unwrap();
+            let slot = source.index.find_entry(42, |&i| i == position).unwrap();
+            slot.remove();
+            source.entries[position].take();
+        }
+        source.compact();
+        for (index, key) in (70..90).enumerate() {
+            assert_eq!(source.position(42, &key), Some(index));
+            assert!(result.position(42, &key).is_some());
+        }
+        assert!(source.position(42, &69).is_none());
     }
 
     #[test]
