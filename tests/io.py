@@ -162,6 +162,46 @@ def terminal_message(command: list[str], timeout: float) -> bytes:
     return output
 
 
+def check_run_command(directory: Path, compiler: str, flags: list[str]) -> int:
+    help_text = run([compiler, "run", "--help"], cwd=directory, input=b"")
+    require_success(help_text, "relar run --help")
+    assert b"relar run SOURCE.py" in help_text.stdout
+    script_dir = directory / "scripts"
+    script_dir.mkdir()
+    source = script_dir / "show args.py"
+    source.write_text(
+        "import os\nfrom pathlib import Path\nfrom sys import argv\n"
+        "for arg in argv:\n    print(arg)\n"
+        "print(Path('message').read_text(encoding='utf-8'))\n"
+        "print(os.environ.copy()['RELAR_RUN_TEST'])\nprint(input())\n",
+        encoding="utf-8",
+    )
+    (directory / "message").write_text("current working directory", encoding="utf-8")
+    scratch = directory / "compiler-temporaries"
+    scratch.mkdir()
+    env = {**environment(), "RELAR_RUN_TEST": "inherited environment", "TMPDIR": str(scratch)}
+    path = "./scripts/show args.py"
+    program_args = ["--opt-level", "", "two words", "--", "--help"]
+    result = subprocess.run(
+        [compiler, "run", path, *flags, "--", *program_args], input=b"from stdin\n",
+        cwd=directory, env=env, capture_output=True, timeout=60,
+    )
+    require_success(result, "relar run")
+    expected = [path, *program_args, "current working directory", "inherited environment", "from stdin"]
+    same_output(result.stdout, ("\n".join(expected) + "\n").encode(), "relar run argv and I/O")
+    assert not list(scratch.iterdir()) and not (directory / source.stem).exists()
+
+    source.write_text("raise ValueError('script failed')\n", encoding="utf-8")
+    compiled = [compiler, "run", path, *flags]
+    failed = subprocess.run(compiled, cwd=directory, env=env, capture_output=True, timeout=60)
+    assert failed.returncode == 1 and failed.stderr == b"ValueError: script failed\n", failed
+    assert not failed.stdout and not list(scratch.iterdir())
+    before = source.read_bytes()
+    collision = run([*compiled, "--emit-llvm", path], cwd=directory, input=b"")
+    assert collision.returncode and b"distinct paths" in collision.stderr and source.read_bytes() == before
+    return 4
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True, type=Path)
@@ -184,6 +224,10 @@ def main() -> None:
     passed = 0
     with tempfile.TemporaryDirectory(prefix="relar-io-") as directory:
         temporary = Path(directory)
+        flags = ["--runtime", runtime, "--clang", args.clang, "--opt-level", args.opt_levels[0], *build_flags]
+        if args.sanitize:
+            flags.append("--sanitize")
+        passed += check_run_command(temporary, compiler, flags)
         sources = {}
         for name, source in PROGRAMS.items():
             path = temporary / f"{name}.py"

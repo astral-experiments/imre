@@ -1,15 +1,18 @@
 use std::ffi::{OsStr, OsString};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, ExitStatus};
+
+#[cfg(unix)]
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 
 use relar_compiler::CompileOptions;
 
-const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY]\n       relar build SOURCE.py [-o OUTPUT] [--module-root DIRECTORY]\n           [--runtime LIBRARY.a] [--emit-llvm FILE.ll] [--clang CLANG]\n           [--opt-level 0|1|2|3] [--sanitize]\n           [--target TRIPLE] [--lto-linker PATH]\n\nBuild writes the executable to the current directory using the source filename without its extension.\nThinLTO (--lto-linker) requires explicit --runtime and --target.";
+const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY]\n       relar build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]\n       relar run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]\n\nBuild options:\n  --module-root DIRECTORY  --runtime LIBRARY.a  --emit-llvm FILE.ll\n  --clang CLANG  --opt-level 0|1|2|3  --sanitize\n  --target TRIPLE  --lto-linker PATH\n\nBuild writes the executable to the current directory using the source filename without its extension.\nRun compiles a temporary executable and passes arguments after -- to the program.\nThinLTO (--lto-linker) requires explicit --runtime and --target.";
 
 fn main() -> ExitCode {
     match run() {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(error) => {
             eprintln!("{error}");
             ExitCode::FAILURE
@@ -17,24 +20,30 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<(), String> {
+fn run() -> Result<ExitCode, String> {
     let mut args = std::env::args_os().skip(1);
     let command = args.next().ok_or(USAGE)?;
     if command == "--help" || command == "-h" {
         println!("{USAGE}");
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     }
     if command == "--version" {
         println!(
             "relar {} (Ruff/ty 0.0.14; LLVM AOT)",
             env!("CARGO_PKG_VERSION")
         );
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     }
-    if command != "build" && command != "check" {
+    let execute = command == "run";
+    if command != "build" && command != "check" && !execute {
         return Err(USAGE.to_owned());
     }
-    let source_path = PathBuf::from(args.next().ok_or(USAGE)?);
+    let source = args.next().ok_or(USAGE)?;
+    if source == "--help" || source == "-h" {
+        println!("{USAGE}");
+        return Ok(ExitCode::SUCCESS);
+    }
+    let source_path = PathBuf::from(source);
     let mut output = None;
     let mut runtime = None;
     let mut llvm_path = None;
@@ -45,6 +54,9 @@ fn run() -> Result<(), String> {
     let mut optimization = OsString::from("3");
     let mut options = CompileOptions::default();
     while let Some(flag) = args.next() {
+        if execute && flag == "--" {
+            break;
+        }
         if command == "check" && flag != "--module-root" {
             return Err(USAGE.to_owned());
         }
@@ -55,7 +67,7 @@ fn run() -> Result<(), String> {
         let value = args.next().ok_or(USAGE)?;
         match flag.to_str() {
             Some("--module-root") => module_root = Some(PathBuf::from(value)),
-            Some("-o") => output = Some(PathBuf::from(value)),
+            Some("-o") if !execute => output = Some(PathBuf::from(value)),
             Some("--runtime") => runtime = Some(PathBuf::from(value)),
             Some("--emit-llvm") => llvm_path = Some(PathBuf::from(value)),
             Some("--clang") => clang = Some(value),
@@ -73,14 +85,22 @@ fn run() -> Result<(), String> {
         }
     }
     if command == "check" {
-        return relar_compiler::check_file(&source_path, module_root.as_deref());
+        relar_compiler::check_file(&source_path, module_root.as_deref())?;
+        return Ok(ExitCode::SUCCESS);
     }
     if !cfg!(all(target_os = "linux", target_pointer_width = "64")) {
         return Err("The prototype currently supports 64-bit Linux hosts".to_owned());
     }
-    let output = output
-        .or_else(|| source_path.file_stem().map(PathBuf::from))
-        .ok_or("Could not infer an executable name from the source path; pass -o OUTPUT.")?;
+    let run_directory = execute
+        .then(tempfile::tempdir)
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    let output = match &run_directory {
+        Some(directory) => directory.path().join("program"),
+        None => output
+            .or_else(|| source_path.file_stem().map(PathBuf::from))
+            .ok_or("Could not infer an executable name from the source path; pass -o OUTPUT.")?,
+    };
     if lto_linker.is_some() && (runtime.is_none() || target.is_none()) {
         return Err("--lto-linker requires explicit --runtime and --target".to_owned());
     }
@@ -199,7 +219,31 @@ fn run() -> Result<(), String> {
     if !status.success() {
         return Err(format!("LLVM compilation/linking failed: {status}"));
     }
-    Ok(())
+    if let Some(directory) = run_directory {
+        let mut program = Command::new(&output);
+        #[cfg(unix)]
+        program.arg0(&source_path);
+        let mut child = program.args(args).spawn().map_err(|error| {
+            format!("Could not run compiled {}: {error}", source_path.display())
+        })?;
+        // The child has opened its executable. Release both temporary files
+        // before waiting, including when the child is subsequently interrupted.
+        drop(temporary);
+        drop(directory);
+        let status = child.wait().map_err(|error| error.to_string())?;
+        return Ok(program_exit_code(status));
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn program_exit_code(status: ExitStatus) -> ExitCode {
+    #[cfg(unix)]
+    let code = status
+        .code()
+        .or_else(|| status.signal().map(|signal| 128 + signal));
+    #[cfg(not(unix))]
+    let code = status.code();
+    ExitCode::from(code.unwrap_or(1) as u8)
 }
 
 fn identity(path: &Path) -> Result<PathBuf, String> {
