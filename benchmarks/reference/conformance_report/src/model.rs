@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
@@ -186,14 +187,14 @@ impl Classification {
     }
 }
 
-pub struct TestCase {
+pub struct TestCase<D = Diagnostic, E = ExpectedError> {
     pub key: String,
-    pub old: Vec<Diagnostic>,
-    pub new: Vec<Diagnostic>,
-    pub expected: Vec<ExpectedError>,
+    pub old: Vec<D>,
+    pub new: Vec<D>,
+    pub expected: Vec<E>,
 }
 
-impl TestCase {
+impl<D, E> TestCase<D, E> {
     fn empty(key: String) -> Self {
         Self {
             key,
@@ -202,7 +203,9 @@ impl TestCase {
             expected: Vec::new(),
         }
     }
+}
 
+impl TestCase {
     pub fn diagnostics(&self, source: Side) -> &[Diagnostic] {
         if source == Side::Old {
             &self.old
@@ -233,14 +236,7 @@ impl TestCase {
         } else if !self.old.is_empty() && self.new.is_empty() {
             Change::Removed
         } else if !self.old.is_empty() && !self.new.is_empty() {
-            if self.old.len() != self.new.len() {
-                return Change::Changed;
-            }
-            let mut old: Vec<_> = self.old.iter().map(Diagnostic::fingerprint).collect();
-            let mut new: Vec<_> = self.new.iter().map(Diagnostic::fingerprint).collect();
-            old.sort_unstable();
-            new.sort_unstable();
-            if old == new {
+            if diagnostics_are_equivalent(&self.old, &self.new) {
                 Change::Unchanged
             } else {
                 Change::Changed
@@ -275,6 +271,17 @@ impl TestCase {
     }
 }
 
+pub fn diagnostics_are_equivalent(left: &[Diagnostic], right: &[Diagnostic]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut a: Vec<_> = left.iter().map(Diagnostic::fingerprint).collect();
+    let mut b: Vec<_> = right.iter().map(Diagnostic::fingerprint).collect();
+    a.sort_unstable();
+    b.sort_unstable();
+    a == b
+}
+
 pub fn filename(path: &str) -> &str {
     std::path::Path::new(path)
         .file_name()
@@ -282,31 +289,40 @@ pub fn filename(path: &str) -> &str {
         .unwrap_or("")
 }
 
-pub fn group_diagnostics(
-    old: Vec<Diagnostic>,
-    new: Vec<Diagnostic>,
-    expected: Vec<ExpectedError>,
-) -> Vec<TestCase> {
+/// The report moves its decoded records; repeated analysis can borrow the same records.
+pub fn group_diagnostics<D, E, I>(
+    old: I,
+    new: I,
+    expected: impl IntoIterator<Item = E>,
+) -> Vec<TestCase<D, E>>
+where
+    D: Borrow<Diagnostic>,
+    E: Borrow<ExpectedError>,
+    I: IntoIterator<Item = D>,
+{
     let mut tagged_lines = HashMap::new();
-    for error in &expected {
-        if let Some(tag) = &error.tag {
-            tagged_lines.insert(
-                (filename(&error.path).to_owned(), error.line.clone()),
-                tag.clone(),
-            );
-        }
-    }
     let mut groups = BTreeMap::new();
+    for error in expected {
+        let e = error.borrow();
+        if let Some(tag) = &e.tag {
+            tagged_lines.insert((filename(&e.path).to_owned(), e.line.clone()), tag.clone());
+        }
+        let key = e.key();
+        groups
+            .entry(key.clone())
+            .or_insert_with(|| TestCase::empty(key))
+            .expected
+            .push(error);
+    }
     for (source, diagnostics) in [(Side::Old, old), (Side::New, new)] {
         for diagnostic in diagnostics {
-            let tag = tagged_lines.get(&(
-                filename(&diagnostic.path).to_owned(),
-                diagnostic.positions.begin.line.clone(),
-            ));
+            let d = diagnostic.borrow();
+            let tag =
+                tagged_lines.get(&(filename(&d.path).to_owned(), d.positions.begin.line.clone()));
             let key = if let Some(tag) = tag {
-                format!("{}:{tag}", diagnostic.path)
+                format!("{}:{tag}", d.path)
             } else {
-                format!("{}:{}", diagnostic.path, diagnostic.positions.begin.line)
+                format!("{}:{}", d.path, d.positions.begin.line)
             };
             let group = groups
                 .entry(key.clone())
@@ -317,14 +333,6 @@ pub fn group_diagnostics(
                 group.new.push(diagnostic);
             }
         }
-    }
-    for error in expected {
-        let key = error.key();
-        groups
-            .entry(key.clone())
-            .or_insert_with(|| TestCase::empty(key))
-            .expected
-            .push(error);
     }
     groups.into_values().collect()
 }
@@ -378,13 +386,13 @@ pub fn compute_stats<'a>(
     stats
 }
 
-pub struct FileStats<'a> {
-    pub path: &'a str,
+pub struct FileStats {
+    pub path: String,
     pub old: Statistics,
     pub new: Statistics,
 }
 
-impl FileStats<'_> {
+impl FileStats {
     pub fn total_change(&self) -> i64 {
         (self.new.true_positives - self.old.true_positives).abs()
             + (self.new.false_positives - self.old.false_positives).abs()

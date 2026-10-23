@@ -87,7 +87,7 @@ def discover_sources(suite: Path) -> list[SourceText]:
     for path in candidates:
         if path.name.split("_")[0] in groups:
             canonical = path.resolve(strict=True)
-            sources.append(SourceText(str(canonical), canonical.read_text(encoding="utf-8")))
+            sources.append(SourceText(canonical, canonical.read_text(encoding="utf-8")))
     if not sources:
         raise ValueError("no conformance test files discovered")
     return sources
@@ -102,7 +102,7 @@ def analyzer_arguments(suite: Path, sources: list[SourceText]) -> list[str]:
         "--error=invalid-named-tuple-override", "--error=deprecated",
         "--error=redundant-final-classvar", "--exit-zero",
         "--extra-search-path=" + str(suite / "tests"),
-        *[source.path for source in sources],
+        *[str(source.path) for source in sources],
     ]
 
 
@@ -114,13 +114,13 @@ def run_analyzer(binary: Path, arguments: list[str], suite: Path, environment: d
     return result.stdout
 
 
-def resolve_diagnostic_paths(text: str, suite: Path, paths: dict[str, str]) -> None:
+def resolve_diagnostic_paths(text: str, suite: Path, paths: dict[str, Path]) -> None:
     for diagnostic in decode(text, list[WireDiagnostic]):
         raw = diagnostic.location.path
         path = Path(raw)
         if not path.is_absolute():
             path = suite / path
-        paths[raw] = str(path.resolve())
+        paths[raw] = path.resolve()
 
 
 def live_main(arguments: list[str]) -> None:
@@ -135,13 +135,13 @@ def live_main(arguments: list[str]) -> None:
         collect_expected_diagnostics(sources)
         command = analyzer_arguments(suite, sources)
         environment = os.environ.copy()
-        paths: dict[str, str] = {}
+        paths: dict[str, Path] = {}
         old = run_analyzer(old_ty, command, suite, environment, options.timeout)
         resolve_diagnostic_paths(old, suite, paths)
         new = run_analyzer(new_ty, command, suite, environment, options.timeout)
         resolve_diagnostic_paths(new, suite, paths)
-        aliases = [PathAlias(raw, canonical) for raw, canonical in paths.items()]
-        manifest = Manifest(options.suite_revision, [source.path for source in sources], aliases)
+        aliases = [PathAlias(raw, str(canonical)) for raw, canonical in paths.items()]
+        manifest = Manifest(options.suite_revision, [str(source.path) for source in sources], aliases)
         inputs = Inputs(manifest, paths, sources, old, new)
         rendered = render_report(inputs, options.format, options.force_summary_table)
         staged = workspace / "report.md"

@@ -50,10 +50,32 @@ struct Header {
 const _: () = assert!(size_of::<Header>() == 16 && align_of::<Header>() == 8);
 
 /// # Safety
-/// `payload` is a rooted native record, either standalone or in a record block.
+/// `payload` is a rooted native record or a live read-only tuple probe.
 pub(super) unsafe fn descriptor<'a>(payload: *const usize) -> &'a RecordDescriptor {
     // SAFETY: the immutable descriptor belongs to the live allocation's header.
     unsafe { (*payload.cast::<Header>().sub(1)).descriptor() }
+}
+
+/// Initializes caller-owned scratch for a tuple used only by a read-only lookup.
+///
+/// # Safety
+/// `scratch` contains two header words followed by `descriptor.length` writable
+/// words. The caller initializes and roots every field before probing. The
+/// payload may be hashed and compared, and must never be retained or released.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_tuple_probe(
+    scratch: *mut usize,
+    descriptor: *const RecordDescriptor,
+) -> *mut usize {
+    // SAFETY: the buffer is word-aligned and has space for this header and tuple.
+    unsafe {
+        let header = scratch.cast::<Header>();
+        header.write(Header {
+            references: Cell::new(0),
+            descriptor,
+        });
+        header.add(1).cast()
+    }
 }
 
 impl Header {

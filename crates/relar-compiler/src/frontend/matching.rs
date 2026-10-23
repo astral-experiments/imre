@@ -760,7 +760,8 @@ impl Checker<'_> {
         key_type: Type,
         value_type: Type,
     ) -> Pattern {
-        let result = self.hidden(value.ty);
+        let dictionary = self.types.dict(key_type, value_type);
+        let result = self.hidden(dictionary);
         let iterator = self.hidden(Type::Iterator);
         let key = self.hidden(key_type);
         let item = self.hidden(value_type);
@@ -771,7 +772,7 @@ impl Checker<'_> {
             Statement::Assign(
                 result,
                 Expr {
-                    ty: value.ty,
+                    ty: dictionary,
                     kind: ExprKind::Dict {
                         key: key_type,
                         value: value_type,

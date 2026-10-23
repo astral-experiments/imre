@@ -13,7 +13,7 @@ if [[ -z $(git tag --list '[0-9]*') ]]; then
     fi
 fi
 uv run --locked --python 3.12 --only-group release rooster release "$@"
-cargo update -p relar-compiler -p relar-runtime
+cargo update --workspace
 version=$(workspace_version)
 git checkout -b "release/$version"
 git add CHANGELOG.md Cargo.toml Cargo.lock

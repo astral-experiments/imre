@@ -22,6 +22,7 @@ mod inference;
 mod iterables;
 mod json;
 mod literals;
+mod local_functions;
 mod matching;
 mod module_values;
 mod paths;
@@ -30,6 +31,8 @@ mod processes;
 mod projected_equality;
 mod records;
 mod regex;
+mod sequences;
+mod sorted_rows;
 mod stdlib;
 mod text;
 mod truthiness;
@@ -387,6 +390,7 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
                 params.push(slot);
             }
             let (mut body, falls_through) = checker.function_body(&definition.body)?;
+            checker.fuse_sorted_rows(&definition.body, &mut body);
             if falls_through && types.payload(signature.returns).is_some() {
                 body.push(Statement::Return(Expr {
                     ty: signature.returns,
@@ -583,7 +587,25 @@ fn signature(
         } else {
             parameter
                 .annotation()
-                .map(|value| annotation_in_class(value, graph, module, classes, types, owner))
+                .map(|value| {
+                    if let ast::Expr::Subscript(sequence) = value
+                        && graph.resolve(module, &sequence.value)
+                            == Some(Binding::Intrinsic(Intrinsic::Sequence))
+                    {
+                        sequences::check_reads(function, parameter.name().as_str(), source)?;
+                        let element = annotation_in_class(
+                            &sequence.slice,
+                            graph,
+                            module,
+                            classes,
+                            types,
+                            owner,
+                        )?;
+                        Ok(types.list(element))
+                    } else {
+                        annotation_in_class(value, graph, module, classes, types, owner)
+                    }
+                })
                 .transpose()?
                 .or(parameter
                     .default
@@ -835,12 +857,16 @@ fn annotation_at(
                     return Err(error(
                         source,
                         &*value.slice,
-                        "set elements must be int, str, bytes, or immutable scalar tuples",
+                        "set elements must be int, str, bytes, Path, or immutable scalar tuples",
                     ));
                 }
                 Ok(types.set(element))
             }
-            ast::Expr::Name(name) if name.id == "dict" => {
+            receiver
+                if matches!(receiver, ast::Expr::Name(name) if name.id == "dict")
+                    || graph.resolve(module, receiver)
+                        == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
+            {
                 let ast::Expr::Tuple(arguments) = &*value.slice else {
                     return Err(error(
                         source,
@@ -860,10 +886,24 @@ fn annotation_at(
                     return Err(error(
                         source,
                         key,
-                        "dictionary keys must be int, str, bytes, or immutable scalar tuples",
+                        "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
                     ));
                 }
-                Ok(types.dict(key_type, nested(value)?))
+                let value_type = nested(value)?;
+                if graph.resolve(module, receiver)
+                    == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
+                {
+                    if types.element(value_type).is_none() {
+                        return Err(error(
+                            source,
+                            value,
+                            "defaultdict requires a typed list value",
+                        ));
+                    }
+                    Ok(types.default_list_dict(key_type, value_type))
+                } else {
+                    Ok(types.dict(key_type, value_type))
+                }
             }
             ast::Expr::Name(name) if name.id == "tuple" => {
                 let fields = if let ast::Expr::Tuple(fields) = &*value.slice {
@@ -980,6 +1020,7 @@ struct Checker<'a> {
     regex_guards: Vec<(usize, regex::CaptureNames)>,
     returns: Type,
     names: HashMap<String, usize>,
+    local_functions: HashMap<String, local_functions::Binding>,
     locals: Vec<Type>,
     assigned: HashSet<usize>,
     calls: HashSet<usize>,
@@ -1020,6 +1061,7 @@ impl<'a> Checker<'a> {
             regex_guards: Vec::new(),
             returns: Type::None,
             names: HashMap::new(),
+            local_functions: HashMap::new(),
             locals: Vec::new(),
             assigned: HashSet::new(),
             calls: HashSet::new(),
@@ -1037,6 +1079,7 @@ impl<'a> Checker<'a> {
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
         if reserved(name)
             || self.graph.modules[self.module].bindings.contains_key(name)
+            || self.local_functions.contains_key(name)
             || self.class_receiver.as_deref() == Some(name)
         {
             return Err(error(
@@ -1154,6 +1197,15 @@ impl<'a> Checker<'a> {
     fn coerce(&self, value: Expr, expected: Type, node: &impl Ranged) -> Result<Expr, String> {
         if value.ty == expected {
             return Ok(value);
+        }
+        if self.types.is_default_list_dict(value.ty)
+            && !self.types.is_default_list_dict(expected)
+            && self.types.mapping(value.ty) == self.types.mapping(expected)
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::DictAsBase, vec![value]),
+            });
         }
         if matches!(value.ty, Type::StrEnum(_)) && expected == Type::Str {
             return Err(error(
@@ -1309,6 +1361,31 @@ impl<'a> Checker<'a> {
                 }
             }
             ast::Expr::Call(call)
+                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
+            {
+                let (key, value) = self.types.mapping(concrete).ok_or_else(|| {
+                    error(
+                        self.source,
+                        call,
+                        "defaultdict(list) requires a typed dictionary context",
+                    )
+                })?;
+                if self.types.element(value).is_none()
+                    || !matches!(call.arguments.args.as_slice(), [ast::Expr::Name(name)] if name.id == "list")
+                    || !call.arguments.keywords.is_empty()
+                {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "only defaultdict(list) with a typed list value is supported",
+                    ));
+                }
+                Expr {
+                    ty: self.types.default_list_dict(key, value),
+                    kind: ExprKind::Builtin(Builtin::DefaultListDict, Vec::new()),
+                }
+            }
+            ast::Expr::Call(call)
                 if self.types.mapping(concrete).is_some()
                     && matches!(&*call.func, ast::Expr::Name(name) if name.id == "dict")
                     && call.arguments.args.is_empty()
@@ -1316,7 +1393,7 @@ impl<'a> Checker<'a> {
             {
                 let (key, value) = self.types.mapping(concrete).unwrap();
                 Expr {
-                    ty: concrete,
+                    ty: self.types.dict(key, value),
                     kind: ExprKind::Dict {
                         key,
                         value,
@@ -1586,7 +1663,7 @@ impl<'a> Checker<'a> {
                     return Err(error(
                         self.source,
                         key,
-                        "dictionary keys must be int, str, bytes, or immutable scalar tuples",
+                        "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
                     ));
                 }
                 let value = self.expr(&item.value)?;
@@ -1633,7 +1710,7 @@ impl<'a> Checker<'a> {
                 return Err(error(
                     self.source,
                     value,
-                    "set elements must be int, str, bytes, or immutable scalar tuples",
+                    "set elements must be int, str, bytes, Path, or immutable scalar tuples",
                 ));
             }
             element = Some(checked.ty);
@@ -2149,6 +2226,10 @@ impl<'a> Checker<'a> {
 
     fn statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
         let result = match statement {
+            ast::Stmt::FunctionDef(function) => {
+                self.define_local_function(function)?;
+                None
+            }
             ast::Stmt::Assign(assign) => {
                 return Ok((self.assignment_statement(assign)?, true));
             }
@@ -2861,6 +2942,13 @@ impl<'a> Checker<'a> {
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         self.reject_class_receiver_value(expression)?;
+        if self.local_function_binding(expression).is_some() {
+            return Err(error(
+                self.source,
+                expression,
+                "local functions require a direct call or a noncapturing map/filter callback",
+            ));
+        }
         if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(signature) = self.functions.get(&definition).cloned()
         {
@@ -2978,8 +3066,20 @@ impl<'a> Checker<'a> {
                 (ty, ExprKind::Tuple(values))
             }
             ast::Expr::BinOp(binary) => {
-                let mut left = self.expr(&binary.left)?;
-                let mut right = self.expr(&binary.right)?;
+                let (mut left, mut right) = if binary.op == ast::Operator::BitOr {
+                    let (left, left_key) = self.union_operand(&binary.left)?;
+                    let (right, right_key) = self.union_operand(&binary.right)?;
+                    if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
+                        self.expect(left_key, right_key, binary)?;
+                        return Ok(Expr {
+                            ty: self.types.set(left_key),
+                            kind: ExprKind::Builtin(Builtin::KeyUnion, vec![left, right]),
+                        });
+                    }
+                    (left, right)
+                } else {
+                    (self.expr(&binary.left)?, self.expr(&binary.right)?)
+                };
                 if binary.op == ast::Operator::Add
                     && matches!(left.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
                     && matches!(right.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
@@ -3179,15 +3279,15 @@ impl<'a> Checker<'a> {
                             "regex objects do not support value comparisons in Relar",
                         ));
                     }
-                    if matches!(
-                        ty,
-                        Type::ListInt
-                            | Type::List(_)
-                            | Type::Dict(_)
-                            | Type::Set(_)
-                            | Type::Optional(_)
-                            | Type::Union(_)
-                    ) || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
+                    let tuple_list = self.types.element(ty).is_some_and(|item| {
+                        matches!(item, Type::Tuple(_)) && self.types.hashable_key(item)
+                    });
+                    if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
+                        || matches!(
+                            ty,
+                            Type::Dict(_) | Type::Set(_) | Type::Optional(_) | Type::Union(_)
+                        )
+                        || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
                     {
                         return Err(error(
                             self.source,
@@ -3420,7 +3520,37 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.call_with_key_view(call, None)
+    }
+
+    /// A direct `dict.keys()` operand roots the mapping until the operation.
+    /// Other methods called `keys` still use ordinary class/module dispatch.
+    fn union_operand(&mut self, source: &ast::Expr) -> Result<(Expr, Option<Type>), String> {
+        let mut view = false;
+        let value = match source {
+            ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Attribute(attr) if attr.attr.as_str() == "keys") => {
+                self.call_with_key_view(call, Some(&mut view))?
+            }
+            _ => self.expr(source)?,
+        };
+        let key = if view {
+            self.types.mapping(value.ty).map(|(key, _)| key)
+        } else {
+            self.types.set_element(value.ty)
+        };
+        Ok((value, key))
+    }
+
+    fn call_with_key_view(
+        &mut self,
+        call: &ast::ExprCall,
+        key_view: Option<&mut bool>,
+    ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
+        if let Some(binding) = self.local_function_binding(&call.func) {
+            let function = binding.target(self.source, &*call.func)?.clone();
+            return self.call_local_function(call, &function);
+        }
         match self.resolve(&call.func) {
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
@@ -3656,12 +3786,19 @@ impl<'a> Checker<'a> {
                 });
             }
             if let Some((key_type, value_type)) = self.types.mapping(receiver.ty) {
+                if attribute.attr.as_str() == "keys"
+                    && call.arguments.args.is_empty()
+                    && let Some(view) = key_view
+                {
+                    *view = true;
+                    return Ok(receiver);
+                }
                 if attribute.attr.as_str() != "get" || !(1..=2).contains(&call.arguments.args.len())
                 {
                     return Err(error(
                         self.source,
                         call,
-                        "supported dictionary methods are get(key[, default]) and loop-head items()",
+                        "supported dictionary methods are get(key[, default]), loop-head items(), and keys() in a key union",
                     ));
                 }
                 let key = self.expr_expected(&call.arguments.args[0], key_type)?;

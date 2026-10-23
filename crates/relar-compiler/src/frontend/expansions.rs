@@ -299,7 +299,7 @@ impl Checker<'_> {
             return Err(error(
                 self.source,
                 node,
-                "set elements must be int, str, bytes, or immutable scalar tuples",
+                "set elements must be int, str, bytes, Path, or immutable scalar tuples",
             ));
         }
         let value = self.coerce(value, ty, node)?;
@@ -364,7 +364,7 @@ impl Checker<'_> {
             return Err(error(
                 self.source,
                 node,
-                "set elements must be int, str, bytes, or immutable scalar tuples",
+                "set elements must be int, str, bytes, Path, or immutable scalar tuples",
             ));
         }
         let (ty, empty) = if is_set {
@@ -478,7 +478,7 @@ impl Checker<'_> {
                     return Err(error(
                         self.source,
                         key,
-                        "dictionary keys must be int, str, bytes, or immutable scalar tuples",
+                        "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
                     ));
                 }
                 let captured = self.hidden(key_expr.ty);

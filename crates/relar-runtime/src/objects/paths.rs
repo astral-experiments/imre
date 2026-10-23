@@ -15,11 +15,28 @@ use super::{Int, Object, Storage, StorageCell, Str, fail, files, object};
 
 impl Storage {
     pub(super) fn path(&self) -> &str {
+        self.path_text()
+    }
+
+    fn path_text(&self) -> &Rc<Str> {
         match self {
-            Self::Path(path) => path,
+            Self::Path { text, .. } => text,
             _ => fail("SystemError", "expected a path object"),
         }
     }
+}
+
+/// A canonical spelling can share the input string's immutable owner. Only
+/// the one- and two-slash roots and the current-directory marker stand alone.
+fn is_normalized(path: &str) -> bool {
+    if matches!(path, "." | "/" | "//") {
+        return true;
+    }
+    let tail = path
+        .strip_prefix("//")
+        .or_else(|| path.strip_prefix('/'))
+        .unwrap_or(path);
+    tail.split('/').all(|part| !part.is_empty() && part != ".")
 }
 
 /// POSIX normalization removes empty and dot components while retaining `..`
@@ -61,11 +78,20 @@ fn join(path: &str, child: &str) -> Str {
         joined.push('/');
     }
     joined.push_str(child);
-    normalize(&joined)
+    // The parent is already normalized. A non-dot canonical relative child
+    // introduces no component that needs rewriting across the boundary.
+    if child != "." && is_normalized(child) {
+        joined
+    } else {
+        normalize(&joined)
+    }
 }
 
-fn new_path(path: Str) -> *const Object {
-    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Path(path)))))
+fn new_path(path: impl Into<Rc<Str>>) -> *const Object {
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Path {
+        text: path.into(),
+        name: std::cell::OnceCell::new(),
+    }))))
 }
 
 fn name(path: &str) -> &str {
@@ -200,11 +226,18 @@ fn suffix_start(name: &str) -> Option<usize> {
 }
 
 /// # Safety
-/// `text` is a rooted exact UTF-8 string. The result transfers one Path owner.
+/// `text` is a live `Rc<Str>` handle from the string ABI. The result transfers
+/// one Path owner and may retain the input's canonical spelling.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_path_new(text: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable source through normalization.
-    new_path(normalize(unsafe { &*text }))
+    let spelling = unsafe { &*text };
+    if is_normalized(spelling) {
+        // SAFETY: the rooted input remains alive while its shared owner is acquired.
+        new_path(unsafe { super::acquire_rc::<Str>(text as usize) })
+    } else {
+        new_path(normalize(spelling))
+    }
 }
 
 /// # Safety
@@ -238,22 +271,37 @@ pub unsafe extern "C" fn relar_path_equal(left: *const Object, right: *const Obj
 /// Root an exact Path. The result transfers one owned string with its spelling.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_path_text(path: *const Object) -> *const Str {
-    // SAFETY: only an independent immutable string escapes the storage access.
-    let text = unsafe { object(path).0.with(|storage| Str::from(storage.path())) };
-    Rc::into_raw(Rc::new(text))
+    // SAFETY: the path roots its immutable spelling until the result acquires it.
+    let text = unsafe {
+        object(path)
+            .0
+            .with(|storage| Rc::clone(storage.path_text()))
+    };
+    Rc::into_raw(text)
 }
 
 /// # Safety
 /// Root an exact Path. The result transfers its final component as an owned string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_path_name(path: *const Object) -> *const Str {
-    // SAFETY: the path is immutable and the copied component owns its storage.
+    // SAFETY: spelling is fixed. The one per-path cached component and the
+    // returned handle each own their reference across subsequent operations.
     let text = unsafe {
-        object(path)
-            .0
-            .with(|storage| Str::from(name(storage.path())))
+        object(path).0.with(|storage| {
+            let Storage::Path { text, name: cached } = storage else {
+                fail("SystemError", "expected a path object");
+            };
+            Rc::clone(cached.get_or_init(|| {
+                let component = name(text);
+                if component.len() == text.len() {
+                    Rc::clone(text)
+                } else {
+                    Rc::new(Str::from(component))
+                }
+            }))
+        })
     };
-    Rc::into_raw(Rc::new(text))
+    Rc::into_raw(text)
 }
 
 /// # Safety
@@ -846,8 +894,43 @@ mod tests {
         }
     }
     fn path(text: &str) -> Rc<Object> {
-        // SAFETY: this new allocation transfers one owner into the test's Rc.
-        unsafe { Rc::from_raw(new_path(normalize(text))) }
+        let text = Rc::new(Str::from(text));
+        // SAFETY: the input is rooted and the new path transfers one owner.
+        unsafe { Rc::from_raw(relar_path_new(Rc::as_ptr(&text))) }
+    }
+
+    #[test]
+    fn shared_spelling_and_basename_survive_other_owners() {
+        let mut source = Rc::new(Str::from(
+            "//r/../é\0/this-long-basename-is-stored-in-a-heap-buffer",
+        ));
+        let original = (*source).clone();
+        // SAFETY: every input remains rooted through its call and each native
+        // return transfers one owner. Source and results use normal Rc COW.
+        unsafe {
+            let path = Rc::from_raw(relar_path_new(Rc::as_ptr(&source)));
+            let first = Rc::from_raw(relar_path_text(Rc::as_ptr(&path)));
+            let component = Rc::from_raw(relar_path_name(Rc::as_ptr(&path)));
+            let mut other = Rc::from_raw(relar_path_name(Rc::as_ptr(&path)));
+            assert!(Rc::ptr_eq(&first, &source));
+            assert!(Rc::ptr_eq(&other, &component));
+            Rc::make_mut(&mut source).push('!');
+            Rc::make_mut(&mut other).push('?');
+            drop(path);
+            assert_eq!(*first, original);
+            assert_eq!(
+                component.as_str(),
+                "this-long-basename-is-stored-in-a-heap-buffer"
+            );
+        }
+        for root in ["", "/", "//", "///"] {
+            for a in ["", ".", "..", ".hidden", "a", "é\0"] {
+                for b in ["", ".", "..", "b", "/c", "あ"] {
+                    let path = format!("{root}{a}/{b}");
+                    assert_eq!(is_normalized(&path), normalize(&path) == path);
+                }
+            }
+        }
     }
     fn take_error(kind: Kind) {
         assert_eq!(relar_error_pending(), 1);

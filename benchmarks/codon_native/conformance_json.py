@@ -1,6 +1,7 @@
 """Appended after the unchanged conformance parse module's declarations."""
 
 from codon_json_helpers import array, integer, load, record, required, string
+from conformance_report.model import WireLocation
 
 
 def _json_position(value: json.JSON) -> Position:
@@ -8,10 +9,10 @@ def _json_position(value: json.JSON) -> Position:
     return Position(line=integer(required(value, "line")), column=integer(required(value, "column")))
 
 
-def _json_location(value: json.JSON) -> Location:
+def _json_location(value: json.JSON) -> WireLocation:
     record(value)
     positions = record(required(value, "positions"))
-    return Location(
+    return WireLocation(
         path=string(required(value, "path")),
         positions=Positions(
             begin=_json_position(required(positions, "begin")),

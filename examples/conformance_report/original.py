@@ -106,17 +106,7 @@ def render_report(upstream, inputs: PreparedInputs, format: str, force_summary_t
     old = diagnostics(upstream, inputs.old, upstream.Source.OLD, inputs.paths)
     new = diagnostics(upstream, inputs.new, upstream.Source.NEW, inputs.paths)
     grouped = upstream.group_diagnostics_by_key(old=old, new=new, expected=expected)
-    # collect_file_stats calls resolve() again in upstream. Here the manifest's
-    # identities are already resolved for every engine, so retain its algorithm
-    # with that redundant filesystem lookup removed from this input adapter.
-    path_to_cases = {source.path: [] for source in inputs.sources}
-    for case in grouped:
-        path_to_cases[case.path].append(case)
-    file_stats = [upstream.FileStats(
-        path=path,
-        old=upstream.compute_stats(cases, upstream.Source.OLD),
-        new=upstream.compute_stats(cases, upstream.Source.NEW),
-    ) for path, cases in path_to_cases.items()]
+    file_stats = upstream.collect_file_stats(grouped, [source.path for source in inputs.sources])
     return "\n\n".join(filter(None, [
         upstream.render_summary(grouped, file_stats, force_summary_table=force_summary_table),
         upstream.render_file_stats_table(file_stats),

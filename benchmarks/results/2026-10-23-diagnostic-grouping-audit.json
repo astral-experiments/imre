@@ -1,0 +1,154 @@
+{
+  "status": "passed",
+  "revision": "7178431490cd6d8838b67daca89ccbdf03e7ce34",
+  "indexed_files": 419,
+  "exact_definitions": {
+    "diagnostics_are_equivalent": "3fef0355c2b4769885028e8088c33ba28e519cd835ac3df99c9edfcc2062bfa1",
+    "group_diagnostics_by_key": "6b1108feaa4d9c67ffaba34a54a94666437a95991c547096fe66f2fc392c7103",
+    "collect_file_stats": "82c28e347bcd04d2417b117d85f0dacfdd17173b7a940ab0f74b61f1fb9230ca"
+  },
+  "real_outputs_reexecuted": 32,
+  "seeded_replay": true,
+  "modes": {
+    "normal": {
+      "mode": "normal",
+      "revision": "7178431490cd6d8838b67daca89ccbdf03e7ce34",
+      "baseline_revision": "17845276508a0431276b2606f4f076dcd58ecf37",
+      "cases": 16,
+      "observations": 1872,
+      "parity_streams": 8,
+      "time_target_met": true,
+      "largest_ratio": 1.8265091432586191,
+      "results_sha256": "f0e748fe0ccbfcb8c6e730f58cd081b7210e14b7c5aee609a1ae9fb94e130d05"
+    },
+    "thinlto": {
+      "mode": "thinlto",
+      "revision": "7178431490cd6d8838b67daca89ccbdf03e7ce34",
+      "baseline_revision": "17845276508a0431276b2606f4f076dcd58ecf37",
+      "cases": 16,
+      "observations": 1872,
+      "parity_streams": 8,
+      "time_target_met": true,
+      "largest_ratio": 1.7869711405161788,
+      "results_sha256": "50c9e9dfb4028b4004c5654c07cb61d00ea5476152dca761272fad57d064c701"
+    }
+  },
+  "intermediate": {
+    "mode": "normal",
+    "revision": "23332c0adf8919e44b2c6465e35a650ea0417d62",
+    "baseline_revision": "17845276508a0431276b2606f4f076dcd58ecf37",
+    "cases": 16,
+    "observations": 1872,
+    "parity_streams": 8,
+    "time_target_met": false,
+    "largest_ratio": 2.0595354832766812,
+    "results_sha256": "25b6723c50754b47a244feacba658a090979bfef280077b22696a8680ef1ffb3"
+  },
+  "grouping_calls_zero_four_rounds": {
+    "before": [
+      0,
+      4
+    ],
+    "after": [
+      0,
+      4
+    ],
+    "rust": [
+      0,
+      4
+    ]
+  },
+  "path_sensitivity": {
+    "normal/1": {
+      "long": 1.2448378659760828,
+      "short": 1.341940582550609
+    },
+    "normal/10": {
+      "long": 1.940869251890923,
+      "short": 2.0583346587475013
+    },
+    "thinlto/1": {
+      "long": 1.1969376756341963,
+      "short": 1.3036470799343227
+    },
+    "thinlto/10": {
+      "long": 2.1287517362457984,
+      "short": 2.280417751836383
+    }
+  },
+  "full_report_peak_kib": {
+    "normal/1": {
+      "before": 9712.0,
+      "after": 9968.0,
+      "rust": 7912.0,
+      "codon": 19968.0,
+      "upstream": 27626.0,
+      "cpython": 24408.0
+    },
+    "normal/10": {
+      "before": 47826.0,
+      "after": 47314.0,
+      "rust": 56062.0,
+      "codon": 117760.0,
+      "upstream": 93862.0,
+      "cpython": 75924.0
+    },
+    "thinlto/1": {
+      "before": 10456.0,
+      "after": 10712.0,
+      "rust": 8420.0,
+      "codon": 19968.0,
+      "upstream": 27626.0,
+      "cpython": 24422.0
+    },
+    "thinlto/10": {
+      "before": 48572.0,
+      "after": 48186.0,
+      "rust": 56438.0,
+      "codon": 117760.0,
+      "upstream": 93852.0,
+      "cpython": 75936.0
+    }
+  },
+  "qa": {
+    "ordinary": {
+      "application": 96,
+      "compute": 120,
+      "stdout": 3,
+      "output-error": 6,
+      "parser_differentials": 30000,
+      "report_differentials": 400
+    },
+    "sanitized": {
+      "application": 96,
+      "compute": 120,
+      "stdout": 3,
+      "output-error": 6,
+      "parser_differentials": 30000,
+      "report_differentials": 400
+    }
+  },
+  "live_checkout": {
+    "changed-github": {
+      "bytes": 109258,
+      "sha256": "73cbc74bf3f97bfdbbb8933a749156213074ac57ba010d06b75ae48b45a946b2"
+    },
+    "changed-diff": {
+      "bytes": 98897,
+      "sha256": "02dbe6bddad251ec551877113bb64a65b1c5448f71019bf945fa750d965e44af"
+    },
+    "unchanged-github": {
+      "bytes": 469,
+      "sha256": "42d7a663e0480e4007e0d997002b575de8f77fb007e2a59148e8501761f5b1ec"
+    },
+    "unchanged-diff": {
+      "bytes": 469,
+      "sha256": "42d7a663e0480e4007e0d997002b575de8f77fb007e2a59148e8501761f5b1ec"
+    }
+  },
+  "live_median_ms": {
+    "upstream": 797.172711,
+    "relar": 716.00211,
+    "rust": 708.1732865
+  }
+}

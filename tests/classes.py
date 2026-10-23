@@ -113,7 +113,9 @@ def verify_upstream_definitions() -> None:
         source = path.read_text()
         lines = source.splitlines(keepends=True)
         return {
-            node.name: textwrap.dedent("".join(lines[node.lineno - 1:node.end_lineno]))
+            node.name: textwrap.dedent("".join(lines[
+                min([node.lineno, *(d.lineno for d in node.decorator_list)]) - 1:node.end_lineno
+            ]))
             for node in ast.walk(ast.parse(source))
             if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in names
         }
@@ -121,7 +123,8 @@ def verify_upstream_definitions() -> None:
     reporter = PROJECT / "examples" / "conformance_report"
     checks = [
         (reporter / "upstream/conformance.py", reporter / "model.py",
-         {"Source", "Classification", "Change", "compute_stats", "change", "diagnostics_by_source", "classify"}),
+         {"Source", "Classification", "Change", "compute_stats", "change", "diagnostics_by_source",
+          "classify", "key", "diagnostics_are_equivalent", "group_diagnostics_by_key", "collect_file_stats"}),
         (reporter / "upstream/conformance.py", reporter / "render.py", {"collect_diagnostic_entries"}),
         (PROJECT / "examples/python_catalog/upstream/fetch-download-metadata.py",
          FIXTURES / "uv_variant.py", {"Variant", "variant_sort_key"}),

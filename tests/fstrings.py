@@ -45,7 +45,6 @@ REJECTED = {
     "set_field": 'values = {1}\nprint(f"{values}")\n',
     "tuple_field": 'print(f"{(1, 2)}")\n',
     "optional_integer_field": 'def render(value: int | None) -> str:\n    return f"{value}"\nprint(render(1))\n',
-    "optional_string_field": 'def render(value: str | None) -> str:\n    return f"{value!s}"\nprint(render(None))\n',
     "builtin_rebinding": 'def render() -> None:\n    str = 101\n    print(f"{str!s}")\nrender()\n',
     "surrogate_literal_span": 'print(f"\\uD800{1}")\n',
     "surrogate_long_escape": 'print(f"{1}\\U0000DFFF")\n',

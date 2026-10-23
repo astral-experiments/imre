@@ -461,6 +461,19 @@ pub(crate) enum Builtin {
     TextClose,
     TextClosed,
     DictGet,
+    /// Creates a dictionary whose missing subscription stores a fresh typed list.
+    DefaultListDict,
+    /// Widens a defaultdict owner to its ordinary dictionary interface.
+    DictAsBase,
+    /// Combines the current keys of rooted mappings/sets after both operands run.
+    KeyUnion,
+    /// Produces sorted unique string keys from a small union of local dictionaries.
+    SortedStringKeys,
+    /// Each generated field reads the sorted key (0) or one input dictionary (1-based).
+    SortedRecordRows {
+        class: usize,
+        columns: Vec<u8>,
+    },
     /// Maps each Unicode scalar through an exact string-to-integer dictionary.
     /// The text is evaluated first; the mapping remains mutable between calls.
     DictGatherStrInt,

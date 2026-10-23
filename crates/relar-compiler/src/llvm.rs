@@ -2639,9 +2639,14 @@ impl Emitter<'_, '_> {
                 };
                 self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
             }
-            Type::Path => {
+            Type::Path | Type::List(_) => {
+                let operation = if left.ty == Type::Path {
+                    "path"
+                } else {
+                    "sequence"
+                };
                 let equal = self.instruction(format!(
-                    "call i32 @relar_path_equal(ptr {}, ptr {})",
+                    "call i32 @relar_{operation}_equal(ptr {}, ptr {})",
                     left.operand, right.operand
                 ));
                 let predicate = if matches!(op, Compare::Equal) {
@@ -2710,7 +2715,6 @@ impl Emitter<'_, '_> {
                 right.operand
             )),
             Type::ListInt
-            | Type::List(_)
             | Type::Dict(_)
             | Type::Set(_)
             | Type::Iterator
@@ -2874,7 +2878,7 @@ impl Emitter<'_, '_> {
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
-        if matches!(builtin, Builtin::LiteralStringView) {
+        if matches!(builtin, Builtin::LiteralStringView | Builtin::DictAsBase) {
             let value = self.expr(&expressions[0]);
             return Value {
                 ty: returns,
@@ -2899,11 +2903,22 @@ impl Emitter<'_, '_> {
             self.store(*slot, &value);
             return self.truth(&value);
         }
+        let probe_index = match builtin {
+            Builtin::DictGetDefault | Builtin::DictTryGet(_) => Some(1),
+            Builtin::DictContains | Builtin::SetContains => Some(0),
+            _ => None,
+        };
+        let mut probe_fields = Vec::new();
         let args = expressions
             .iter()
             .enumerate()
             .map(|(index, arg)| {
-                if index == 0
+                if probe_index == Some(index)
+                    && let ExprKind::Tuple(fields) = &arg.kind
+                    && (1..=16).contains(&fields.len())
+                {
+                    self.tuple_probe(arg.ty, fields, &mut probe_fields)
+                } else if index == 0
                     && matches!(
                         builtin,
                         Builtin::Len | Builtin::Bool | Builtin::RegexCapture { .. }
@@ -2932,8 +2947,8 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::LiteralStringView => {
-                unreachable!("string views transfer the operand owner directly")
+            Builtin::LiteralStringView | Builtin::DictAsBase => {
+                unreachable!("representation-preserving views transfer the operand owner directly")
             }
             Builtin::StringListContains => {
                 let byte = self.instruction(format!(
@@ -3441,6 +3456,50 @@ impl Emitter<'_, '_> {
                 &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
             ),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
+            Builtin::DefaultListDict => {
+                let (key, list) = self.module.types.mapping(returns).unwrap();
+                let element = self.module.types.element(list).unwrap();
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_default_list_dict_new(i32 {}, i32 {})",
+                        representation_kind(key, &self.module.types),
+                        representation_kind(element, &self.module.types)
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::KeyUnion => self.call(
+                "relar_key_union",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::SortedStringKeys | Builtin::SortedRecordRows { .. } => {
+                let handles = self.entry_alloca(format!("[{} x ptr]", args.len()));
+                for (i, source) in args.iter().enumerate() {
+                    let slot =
+                        self.instruction(format!("getelementptr ptr, ptr {handles}, i64 {i}"));
+                    self.line(format!("store ptr {}, ptr {slot}", source.value.operand));
+                }
+                let instruction = if let Builtin::SortedRecordRows { class, columns } = builtin {
+                    let id = self.strings.len();
+                    self.strings.push(columns.clone());
+                    format!(
+                        "call ptr @relar_sorted_record_rows(ptr {handles}, i64 {}, ptr @layout_class_{class}, ptr @str_{id})",
+                        args.len()
+                    )
+                } else {
+                    format!(
+                        "call ptr @relar_sorted_string_keys(ptr {handles}, i64 {})",
+                        args.len()
+                    )
+                };
+                Value {
+                    ty: returns,
+                    operand: self.instruction(instruction),
+                    small_integer: false,
+                }
+            }
             Builtin::DictGatherStrInt => self.call(
                 "relar_dict_gather_str_int",
                 Type::ListInt,
@@ -3599,7 +3658,36 @@ impl Emitter<'_, '_> {
         for arg in &args {
             self.release_operand(arg);
         }
+        for field in &probe_fields {
+            self.release(field);
+        }
         result
+    }
+
+    /// Read-only lookups never take ownership of the key, even on a miss in a
+    /// defaultdict. Keep the field owners across subsequent arguments and errors.
+    fn tuple_probe(&mut self, ty: Type, fields: &[Expr], roots: &mut Vec<Value>) -> Operand {
+        let scratch = self.entry_alloca(format!("[{} x i64]", fields.len() + 2));
+        let payload = self.instruction(format!(
+            "call ptr @relar_tuple_probe(ptr {scratch}, ptr @layout_{})",
+            record_name(ty)
+        ));
+        let value = Value {
+            ty,
+            operand: payload,
+            small_integer: false,
+        };
+        for (index, field) in fields.iter().enumerate() {
+            let field = self.expr(field);
+            let pointer = self.field_pointer(&value, index);
+            let word = self.word(&field);
+            self.line(format!("store i64 {word}, ptr {pointer}"));
+            roots.push(field);
+        }
+        Operand {
+            value,
+            ownership: Ownership::Borrowed,
+        }
     }
 
     /// Uses word-sized scratch storage only on the successful lookup edge. A
@@ -4009,10 +4097,14 @@ impl Emitter<'_, '_> {
     fn get_item(&mut self, list: &Value, index: &Value, returns: Type, nonnegative: bool) -> Value {
         if matches!(list.ty, Type::Dict(_)) {
             let key = self.word(index);
-            let word = self.checked_instruction(format!(
-                "call i64 @relar_dict_get(ptr {}, i64 {key})",
-                list.operand
-            ));
+            let lookup = format!("call i64 @relar_dict_get(ptr {}, i64 {key})", list.operand);
+            // A sealed list factory supplies every missing subscription. The
+            // receiver and key have already completed their own error checks.
+            let word = if self.module.types.is_default_list_dict(list.ty) {
+                self.instruction(lookup)
+            } else {
+                self.checked_instruction(lookup)
+            };
             return self.unpack_word(word, returns);
         }
         let family = if list.ty == Type::ListInt {
@@ -4533,6 +4625,7 @@ declare void @relar_exception_raise(ptr)
 declare void @relar_exception_reraise()
 declare void @relar_flush_stdout()
 declare ptr @relar_record_new(ptr)
+declare ptr @relar_tuple_probe(ptr, ptr)
 declare ptr @relar_json_decode(ptr, ptr)
 declare ptr @relar_toml_decode(ptr, ptr)
 declare ptr @relar_json_encode(i64, ptr, i64, i32)
@@ -4540,6 +4633,7 @@ declare ptr @relar_record_cached_result(ptr)
 declare void @relar_record_retain(ptr)
 declare void @relar_record_release(ptr)
 declare i32 @relar_record_equal(ptr, ptr) nounwind memory(read)
+declare i32 @relar_sequence_equal(ptr, ptr) nounwind memory(read)
 declare i32 @relar_tuple_compare(ptr, ptr) nounwind memory(read)
 declare ptr @relar_value_repr(i64, i32)
 declare void @relar_object_retain(ptr)
@@ -4594,6 +4688,10 @@ define internal i64 @relar_seq_borrow_index_proven_fast(ptr %sequence, i64 %inde
 }
 declare ptr @relar_seq_repeat(ptr, i64)
 declare ptr @relar_dict_new(i32, i32)
+declare ptr @relar_default_list_dict_new(i32, i32)
+declare ptr @relar_key_union(ptr, ptr)
+declare ptr @relar_sorted_string_keys(ptr, i64)
+declare ptr @relar_sorted_record_rows(ptr, i64, ptr, ptr)
 declare i64 @relar_dict_len(ptr)
 declare i32 @relar_dict_contains(ptr, i64)
 declare i64 @relar_dict_get(ptr, i64)
@@ -5056,6 +5154,108 @@ mod tests {
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn read_only_tuple_lookups_use_scratch_and_subscriptions_own_their_keys() {
+        let body = function_body(
+            "def probe(d: dict[tuple[str, int], int], x: str) -> int:\n    d.get((x, 1))\n    d.get((x, 2), 3)\n    if (x, 4) in d:\n        return d[(x, 5)]\n    return 0\n",
+        );
+        assert_eq!(body.matches("call ptr @relar_tuple_probe(").count(), 3);
+        assert_eq!(body.matches("call ptr @relar_record_new(").count(), 1);
+    }
+
+    #[test]
+    fn sorted_key_union_fuses_only_local_dictionary_reads() {
+        let llvm = compile(
+            "def add(d: dict[str, int]) -> dict[str, int]:\n    d['late'] = 1\n    return {}\ndef keys(a: dict[str, int], b: dict[str, int]) -> list[str]:\n    first = sorted(a.keys() | b.keys())\n    later = sorted(a.keys() | b.keys() | add(a).keys())\n    return first if first else later\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            llvm.matches("call ptr @relar_sorted_string_keys(").count(),
+            1
+        );
+        assert_eq!(llvm.matches("call ptr @relar_key_union(").count(), 2);
+    }
+
+    #[test]
+    fn sorted_rows_require_only_generated_field_assignments() {
+        let source = include_str!("../../../tests/fixtures/containers/sorted_rows.py");
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert_eq!(
+            llvm.matches("call ptr @relar_sorted_record_rows(").count(),
+            1
+        );
+        assert_eq!(
+            llvm.matches("call ptr @relar_sorted_string_keys(").count(),
+            1
+        );
+    }
+
+    #[test]
+    fn sorted_rows_fall_back_for_observable_code_and_ordinary_dicts() {
+        let source = r#"
+from collections import defaultdict
+from dataclasses import dataclass
+
+@dataclass
+class Item:
+    key: str
+    values: list[int]
+
+def changed(values: list[int]) -> list[int]:
+    values.append(42)
+    return values
+
+class Custom:
+    key: str
+    values: list[int]
+    def __init__(self, key: str, values: list[int]) -> None:
+        self.key = key
+        self.values = changed(values)
+
+def filtered(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> list[Item]:
+    keys = sorted(a.keys() | b.keys())
+    return [Item(k, a[k]) for k in keys if k]
+
+def custom(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> list[Custom]:
+    keys = sorted(a.keys() | b.keys())
+    return [Custom(k, a[k]) for k in keys]
+
+def ordinary(a: dict[str, list[int]], b: dict[str, list[int]]) -> list[Item]:
+    keys = sorted(a.keys() | b.keys())
+    return [Item(k, a[k]) for k in keys]
+
+def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> list[Item]:
+    keys: list[str] = []
+    try:
+        keys = sorted(a.keys() | b.keys())
+        return [Item(k, a[k]) for k in keys]
+    finally:
+        print(len(keys))
+"#;
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert_eq!(
+            llvm.matches("call ptr @relar_sorted_string_keys(").count(),
+            4
+        );
+        assert!(!llvm.contains("call ptr @relar_sorted_record_rows("));
+    }
+
+    #[test]
+    fn only_a_sealed_list_factory_eliminates_subscription_errors() {
+        let factory = function_body(
+            "from collections import defaultdict\ndef get(d: defaultdict[str, list[int]], key: str) -> list[int]:\n    return d[key]\n",
+        );
+        let ordinary = function_body(
+            "def get(d: dict[str, list[int]], key: str) -> list[int]:\n    return d[key]\n",
+        );
+        for body in [&factory, &ordinary] {
+            assert!(body.contains("call i64 @relar_dict_get("));
+        }
+        assert!(!factory.contains("call i32 @relar_error_pending()"));
+        assert!(ordinary.contains("call i32 @relar_error_pending()"));
     }
 
     #[test]

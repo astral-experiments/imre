@@ -100,3 +100,12 @@ annotation. Member comparisons, value patterns, classification, statistics, and
 title methods use the application’s original function bodies. The classification
 comparison checks both source versions, all four classifications, all four
 change kinds, and the resulting Markdown against upstream CPython.
+
+The grouping benchmark specializes the upstream `Sequence[Path]` annotation
+to the list provided by all callers. Codon's native `defaultdict` infers its
+factory type from a concrete `list[TyDiagnostic]` or `list[ExpectedError]`.
+Its dictionary keys are iterators, so the adapter materializes three key sets
+for the union. A non-null tag is passed through `str` after the original
+filter. Native `Path` handles file resolution and basename grouping. The
+comparison checks the order and fields of every diagnostic and expected error,
+each group's equivalence, and the per-file counts in source-list order.

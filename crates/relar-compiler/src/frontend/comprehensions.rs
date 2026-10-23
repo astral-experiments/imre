@@ -10,6 +10,42 @@ use super::*;
 
 mod slices;
 
+/// Only a stored field of the same local can be read again under its guard.
+fn local_field(value: &Expr) -> Option<(usize, usize)> {
+    if let ExprKind::Field(receiver, field) = &value.kind
+        && let ExprKind::Local(local) = receiver.kind
+    {
+        Some((local, *field))
+    } else {
+        None
+    }
+}
+
+fn present_field(condition: &Expr) -> Option<(usize, usize)> {
+    if let ExprKind::Not(inner) = &condition.kind
+        && let ExprKind::Builtin(Builtin::IsNone, args) = &inner.kind
+        && let [value] = args.as_slice()
+    {
+        local_field(value)
+    } else {
+        None
+    }
+}
+
+/// Evaluating the dict key precedes the value. A call, property or assignment
+/// could change the guarded field through an alias during that interval.
+fn preserves_field(value: &Expr) -> bool {
+    match &value.kind {
+        ExprKind::Local(_) | ExprKind::Int(_) | ExprKind::Bool(_) | ExprKind::Str(_) => true,
+        ExprKind::Field(receiver, _) | ExprKind::Unwrap(receiver) => preserves_field(receiver),
+        ExprKind::Tuple(items) => items.iter().all(preserves_field),
+        ExprKind::Builtin(Builtin::Path(ir::PathOperation::Name) | Builtin::Len, args) => {
+            args.iter().all(preserves_field)
+        }
+        _ => false,
+    }
+}
+
 pub(super) struct Helper {
     pub function: ir::Function,
     pub calls: HashSet<usize>,
@@ -113,7 +149,7 @@ impl<'a> Display<'a> {
     }
 }
 
-fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
+pub(super) fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
     if let ast::Expr::Name(name) = target {
         names.insert(name.id.to_string());
     } else if let ast::Expr::Starred(starred) = target {
@@ -142,6 +178,25 @@ pub(super) fn free_reads(expression: &ast::Expr, bound: HashSet<String>) -> Hash
         nested_lambdas: true,
     };
     reads.visit_expr(expression);
+    reads.names
+}
+
+pub(super) fn function_reads(function: &ast::StmtFunctionDef) -> HashSet<String> {
+    let mut bound = narrowing::assigned_names(&function.body);
+    bound.extend(
+        function
+            .parameters
+            .iter_non_variadic_params()
+            .map(|p| p.name().to_string()),
+    );
+    let mut reads = Reads {
+        names: HashSet::new(),
+        bound: vec![bound],
+        nested_lambdas: true,
+    };
+    for statement in &function.body {
+        reads.visit_stmt(statement);
+    }
     reads.names
 }
 
@@ -376,6 +431,10 @@ impl Checker<'_> {
         }
         if !narrowing::expression_assignments(expression).is_empty()
             || pipelines::is_pipeline_expression(&display.clauses[0].iter)
+            || !self.local_functions.is_empty()
+                && free_reads(expression, HashSet::new())
+                    .iter()
+                    .any(|name| self.local_functions.contains_key(name))
         {
             return self.inline_comprehension(expression, display, expected);
         }
@@ -722,7 +781,8 @@ impl Checker<'_> {
                 checker.apply_facts(condition, true);
             }
             let mut body = if index + 1 == display.clauses.len() {
-                checker.comprehension_leaf(display.value, expected, result)?
+                let guarded = conditions.last().and_then(present_field);
+                checker.comprehension_leaf(display.value, expected, result, guarded)?
             } else {
                 checker.comprehension_clause(display, index + 1, None, expected, result)?
             };
@@ -741,10 +801,11 @@ impl Checker<'_> {
         value: Yield<'_>,
         expected: Option<Type>,
         result: usize,
+        guarded: Option<(usize, usize)>,
     ) -> Result<Vec<Statement>, String> {
         match value {
             Yield::Sum(expression) => {
-                let value = self.expr_expected(expression, Type::Int)?;
+                let value = self.guarded_element(expression, Some(Type::Int), guarded)?;
                 self.locals[result] = Type::Int;
                 Ok(vec![Statement::Assign(
                     result,
@@ -767,16 +828,12 @@ impl Checker<'_> {
                         self.types.element(ty)
                     }
                 });
-                let value = if let Some(element) = element {
-                    self.expr_expected(expression, element)?
-                } else {
-                    self.expr(expression)?
-                };
+                let value = self.guarded_element(expression, element, guarded)?;
                 if is_set && !self.types.hashable_key(value.ty) {
                     return Err(error(
                         self.source,
                         expression,
-                        "set elements must be int, str, bytes, or immutable scalar tuples",
+                        "set elements must be int, str, bytes, Path, or immutable scalar tuples",
                     ));
                 }
                 self.locals[result] = if is_set {
@@ -798,24 +855,17 @@ impl Checker<'_> {
             }
             Yield::Dict(key, value) => {
                 let expected = expected.and_then(|ty| self.types.mapping(ty));
-                let key_value = if let Some((key_type, _)) = expected {
-                    self.expr_expected(key, key_type)?
-                } else {
-                    self.expr(key)?
-                };
+                let key_value = self.guarded_element(key, expected.map(|(ty, _)| ty), guarded)?;
                 if !self.types.hashable_key(key_value.ty) {
                     return Err(error(
                         self.source,
                         key,
-                        "dictionary keys must be int, str, bytes, or immutable scalar tuples",
+                        "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
                     ));
                 }
                 let captured = self.hidden(key_value.ty);
-                let value = if let Some((_, value_type)) = expected {
-                    self.expr_expected(value, value_type)?
-                } else {
-                    self.expr(value)?
-                };
+                let guarded = guarded.filter(|_| preserves_field(&key_value));
+                let value = self.guarded_element(value, expected.map(|(_, ty)| ty), guarded)?;
                 self.locals[result] = self.types.dict(key_value.ty, value.ty);
                 Ok(vec![Statement::Scope {
                     body: vec![
@@ -827,12 +877,59 @@ impl Checker<'_> {
             }
         }
     }
+
+    fn guarded_element(
+        &mut self,
+        expression: &ast::Expr,
+        expected: Option<Type>,
+        guarded: Option<(usize, usize)>,
+    ) -> Result<Expr, String> {
+        if let Some((slot, field)) = guarded
+            && let ast::Expr::Attribute(attribute) = expression
+            && let ast::Expr::Name(receiver) = &*attribute.value
+            && self.names.get(receiver.id.as_str()) == Some(&slot)
+            && let Type::Class(class) = self.locals[slot]
+            && self.classes.declarations.definitions[class].fields[field].name
+                == attribute.attr.as_str()
+            && let Some(payload) = self.types.payload(self.classes.fields[class][field])
+        {
+            let value = self.expr(expression)?;
+            let unwrapped = Expr {
+                ty: payload,
+                kind: ExprKind::Unwrap(Box::new(value)),
+            };
+            return match expected {
+                Some(ty) => self.coerce(unwrapped, ty, expression),
+                None => Ok(unwrapped),
+            };
+        }
+        match expected {
+            Some(ty) => self.expr_expected(expression, ty),
+            None => self.expr(expression),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::ir::{Builtin, ExprKind, Statement, Type, walk_expressions};
     use crate::{CompileOptions, check, compile};
+
+    #[test]
+    fn unrelated_guard_keeps_context_for_bound_method_inference() {
+        let source = "from typing import Callable\nclass Row:\n    tag: str | None\n    def __init__(self) -> None:\n        self.tag = None\n    def apply(self, value):\n        return value\ndef choose(rows: list[Row]) -> list[Callable[[int], int]]:\n    return [r.apply for r in rows if r.tag is not None]\n";
+        // Both forms must infer the method before the existing aggregate
+        // storage restriction rejects the program.
+        for program in [
+            source.to_owned(),
+            source.replace(" if r.tag is not None", ""),
+        ] {
+            assert_eq!(
+                check(&program).unwrap_err(),
+                "callable values cannot be stored in containers or tuples"
+            );
+        }
+    }
 
     #[test]
     fn character_lookup_fusion_requires_an_exact_pure_comprehension() {

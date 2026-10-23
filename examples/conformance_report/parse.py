@@ -42,14 +42,14 @@ class Manifest:
 
 @dataclass(slots=True)
 class SourceText:
-    path: str
+    path: Path
     text: str
 
 
 @dataclass(slots=True)
 class Inputs:
     manifest: Manifest
-    paths: dict[str, str]
+    paths: dict[str, Path]
     sources: list[SourceText]
     old: str
     new: str
@@ -88,7 +88,7 @@ def collect_expected_diagnostics(sources: list[SourceText]) -> list[ExpectedErro
             tag: str | None = None
             raw_tag = annotation.tag
             if raw_tag is not None:
-                tag = f"{Path(source.path).name}:{raw_tag}"
+                tag = f"{source.path.name}:{raw_tag}"
             errors.append(ExpectedError(
                 description=annotation.description,
                 location=Location(path=source.path, positions=Positions(
@@ -101,7 +101,7 @@ def collect_expected_diagnostics(sources: list[SourceText]) -> list[ExpectedErro
     return errors
 
 
-def collect_ty_diagnostics(text: str, source: Source, paths: dict[str, str]) -> list[TyDiagnostic]:
+def collect_ty_diagnostics(text: str, source: Source, paths: dict[str, Path]) -> list[TyDiagnostic]:
     wire = decode(text, list[WireDiagnostic])
     result: list[TyDiagnostic] = []
     for diagnostic in wire:
@@ -120,18 +120,19 @@ def collect_ty_diagnostics(text: str, source: Source, paths: dict[str, str]) -> 
 
 def read_inputs(manifest_file: str, old_file: str, new_file: str) -> Inputs:
     manifest = decode(Path(manifest_file).read_text(encoding="utf-8"), Manifest)
-    paths: dict[str, str] = {}
+    paths: dict[str, Path] = {}
     for alias in manifest.diagnostic_paths:
         if alias.raw in paths:
             raise ValueError("duplicate diagnostic path alias")
-        paths[alias.raw] = alias.path
+        paths[alias.raw] = Path(alias.path)
     seen: set[str] = set()
     sources: list[SourceText] = []
     for path in manifest.test_files:
         if path in seen:
             raise ValueError("duplicate conformance test path")
         seen.add(path)
-        sources.append(SourceText(path, Path(path).read_text(encoding="utf-8")))
+        file = Path(path)
+        sources.append(SourceText(file, file.read_text(encoding="utf-8")))
     return Inputs(
         manifest, paths, sources,
         Path(old_file).read_text(encoding="utf-8"),

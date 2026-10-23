@@ -17,6 +17,9 @@ REJECTED = {
     "mutable_order": 'sorted([([1],), ([2],)])',
     "mixed_key_shape": 'values = {(1, "one"): 1}\nvalues[("one", 1)] = 2',
     "tuple_mutation": 'value = (1, "one")\nvalue[0] = 2',
+    "list_compare_mutable": 'a = [([1],)]\nprint(a == a)',
+    "list_compare_float": 'a = [(1.0,)]\nprint(a == a)',
+    "list_compare_order": 'a = [(1,)]\nprint(a < a)',
 }
 
 if __name__ == "__main__":

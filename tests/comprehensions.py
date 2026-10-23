@@ -17,6 +17,10 @@ BOOTSTRAP = (
 )
 
 REJECTED = {
+    "readonly_sequence_method": "from collections.abc import Sequence\ndef mutate(xs: Sequence[int]) -> None:\n    xs.append(2)  # ty: ignore[unresolved-attribute]\n",
+    "readonly_sequence_alias": "from typing import Sequence\ndef leak(xs: Sequence[int]) -> None:\n    alias = xs\n    alias[0] = 1\n",
+    "sequence_requires_list": "from typing import Sequence\ndef count(xs: Sequence[int]) -> int:\n    return len(xs)\nprint(count((1, 2)))\n",
+    "sequence_element_contract": "from typing import Sequence\ndef count(xs: Sequence[int]) -> int:\n    return len(xs)\nprint(count(['s']))\n",
     "generator_expression": "values = (value for value in range(3))\n",
     "async_comprehension": "async def collect(values: list[int]) -> list[int]:\n    return [value async for value in values]\n",
     "bool_as_integer": "values: list[int] = [True for value in range(3)]\n",
@@ -49,6 +53,18 @@ REJECTED = {
     "constructor_partial_self_body": "class Item:\n    values: list[int]\n    def __init__(self) -> None:\n        self.values = [len(self.values) for index in range(3)]\nItem()\n",
     "constructor_partial_self_iterable": "class Item:\n    values: list[int]\n    def __init__(self) -> None:\n        self.values = [self for self in self.values]\nItem()\n",
 }
+
+FIELD_CASE = """from dataclasses import dataclass
+@dataclass
+class Row:
+    tag: str | None
+def invalidate(row: Row) -> int:
+    row.tag = None
+    return 1
+def select(rows: list[Row]) -> dict[int, str]:
+"""
+REJECTED["dict_key_invalidates_field"] = FIELD_CASE + "    return {invalidate(r): r.tag for r in rows if r.tag is not None}\n"
+REJECTED["last_filter_invalidates_field"] = FIELD_CASE + "    return {0: r.tag for r in rows if r.tag is not None if invalidate(r)}\n"
 
 IMPORTED_REJECTIONS = {
     "inactive_dynamic_comprehension": {

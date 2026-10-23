@@ -6,9 +6,30 @@ def segment(value: str) -> str:
     return value
 
 
+def returned_names() -> tuple[str, str]:
+    original = "//host/δοκιμή/a-component-longer-than-inline-storage"
+    path = Path(original)
+    spelling = str(path)
+    component = path.name
+    original += "-new"
+    changed = path.name
+    changed += "!"
+    rendered = str(path)
+    rendered += "?"
+    print(original)
+    print(changed)
+    print(rendered)
+    print(path == Path(spelling))
+    return (spelling, component)
+
+
+spelling, component = returned_names()
+print(spelling)
+print(component)
 for text in ["", ".", "./", "././", "/", "//", "///", "////", "a//b/./c/", "a/../b", "../..", "//host//share/file.tar.gz", "///host/file", ".hidden", "..hidden", ".hidden.ext", "...", "..", "α/λ🙂.json", "a\\b.txt", "a\0b"]:
     path = Path(text)
     print(str(path))
+    print(path.as_posix())
     print(path.name)
     print(path.stem)
     print(path.suffix)

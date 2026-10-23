@@ -40,6 +40,44 @@ fn permute<T>(values: &mut [T], order: &mut [usize]) {
     }
 }
 
+/// Long path-like strings often share the same leading bytes. For a large
+/// stable sort, find that prefix once before comparing the remaining bytes.
+///
+/// # Safety
+/// Each word is an immutable string rooted for the entire sort.
+unsafe fn sort_strings(values: &mut [usize], reverse: bool) {
+    // SAFETY: the list keeps these owners live, including while they move.
+    let bytes = |word: usize| unsafe { (&*(word as *const Str)).as_bytes() };
+    let skip = shared_prefix(values.iter().map(|&word| bytes(word)));
+    values.sort_by(|&left, &right| {
+        let order = bytes(left)[skip..].cmp(&bytes(right)[skip..]);
+        if reverse { order.reverse() } else { order }
+    });
+}
+
+/// Returns a byte prefix shared by every key only when its removal pays for a
+/// large sort. UTF-8 byte order after an identical prefix is unchanged.
+pub(super) fn shared_prefix<'a>(mut keys: impl ExactSizeIterator<Item = &'a [u8]>) -> usize {
+    if keys.len() < 64 {
+        return 0;
+    }
+    let mut prefix = keys.next().unwrap();
+    for candidate in keys {
+        if !candidate.starts_with(prefix) {
+            let end = prefix
+                .iter()
+                .zip(candidate)
+                .take_while(|(a, b)| a == b)
+                .count();
+            if end < 16 {
+                return 0;
+            }
+            prefix = &prefix[..end];
+        }
+    }
+    if prefix.len() < 16 { 0 } else { prefix.len() }
+}
+
 /// # Safety
 /// Both words are rooted canonical integers for this comparison.
 unsafe fn compare_int(left: usize, right: usize) -> Ordering {
@@ -205,6 +243,19 @@ pub unsafe extern "C" fn relar_sort_by_keys(
     key_kind: u32,
     reverse: u32,
 ) {
+    if values == keys && key_kind == 3 {
+        // Without a key function, the string list itself owns every comparison
+        // operand. A stable sort can move those owners directly.
+        // SAFETY: the exclusive list access roots both strings across comparison.
+        unsafe {
+            object(values.cast()).0.with_mut(|storage| {
+                let values = storage.sequence_mut();
+                values.check_kind(key_kind);
+                sort_strings(&mut values.values, reverse != 0);
+            });
+        }
+        return;
+    }
     // SAFETY: both exact list owners remain rooted throughout this operation.
     let mut order = unsafe { key_order(keys, key_kind, reverse != 0) };
     if element_kind == 2 {
@@ -354,6 +405,51 @@ mod tests {
             let mut values: Vec<_> = (0..length).collect();
             permute(&mut values, &mut order);
             assert!(values.into_iter().eq((0..length).rev()));
+        }
+    }
+
+    #[test]
+    fn direct_string_sorts_preserve_equal_owners_in_both_directions() {
+        let texts = ["é", "", "é", "z", ""].map(|s| Rc::new(Str::from(s)));
+        for (reverse, order) in [(0, [1, 4, 3, 0, 2]), (1, [0, 2, 3, 1, 4])] {
+            // SAFETY: the list and its string owners stay rooted throughout the sort.
+            unsafe {
+                let list = Rc::from_raw(super::super::relar_seq_new(3));
+                let pointer = Rc::as_ptr(&list);
+                for text in &texts {
+                    super::super::relar_seq_append(pointer, Rc::as_ptr(text) as usize, 3);
+                }
+                relar_sort_by_keys(pointer.cast(), 3, pointer.cast(), 3, reverse);
+                list.0.with(|storage| {
+                    assert_eq!(
+                        storage.sequence().values.as_slice(),
+                        order.map(|i| Rc::as_ptr(&texts[i]) as usize),
+                    );
+                });
+            }
+            assert!(texts.iter().all(|text| Rc::strong_count(text) == 1));
+        }
+    }
+
+    #[test]
+    fn sorting_shared_prefixes_uses_unicode_byte_order_and_stable_ties() {
+        for prefix in ["", "a-long-directory-name/"] {
+            let keys: Vec<_> = (0..96)
+                .map(|i| Rc::new(Str::from(format!("{prefix}{}", ["é", "è", "ê"][i % 3]))))
+                .collect();
+            for reverse in [false, true] {
+                let mut expected: Vec<_> = keys.iter().collect();
+                expected.sort_by(|a, b| if reverse { b.cmp(a) } else { a.cmp(b) });
+                let mut words: Vec<_> = keys.iter().map(|s| Rc::as_ptr(s) as usize).collect();
+                // SAFETY: keys owns each immutable string until the comparison finishes.
+                unsafe { sort_strings(&mut words, reverse) };
+                assert!(
+                    expected
+                        .into_iter()
+                        .map(|s| Rc::as_ptr(s) as usize)
+                        .eq(words)
+                );
+            }
         }
     }
 

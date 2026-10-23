@@ -168,6 +168,17 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
     }
 }
 
+/// Compares lists of the same checked immutable tuple type in element order.
+///
+/// # Safety
+/// Both inputs are rooted sequence objects of the same concrete type. Element
+/// comparisons have no user callbacks and neither list changes during this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_sequence_equal(left: *const Object, right: *const Object) -> u32 {
+    // SAFETY: the compiler verified both sequence layouts before calling.
+    u32::from(unsafe { object_equal(left, right) })
+}
+
 unsafe fn object_equal(left: *const Object, right: *const Object) -> bool {
     if left == right {
         return true;
@@ -190,7 +201,9 @@ unsafe fn object_equal(left: *const Object, right: *const Object) -> bool {
                 }
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => left.equal(right),
                 (Storage::Set(left), Storage::Set(right)) => left.equal(right),
-                (Storage::Path(left), Storage::Path(right)) => left == right,
+                (Storage::Path { text: left, .. }, Storage::Path { text: right, .. }) => {
+                    left == right
+                }
                 _ => false,
             })
         })
@@ -262,7 +275,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                     }
                     Storage::Dictionary(value) => value.write_repr(output),
                     Storage::Set(value) => value.write_repr(output),
-                    Storage::Path(value) => {
+                    Storage::Path { text: value, .. } => {
                         output.push_str("PosixPath(");
                         output.push_str(&super::exceptions::string_repr(value));
                         output.push(')');

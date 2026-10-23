@@ -1,5 +1,4 @@
 """Complete report rendering adapted from the pinned Ruff source in upstream/."""
-from pathlib import Path
 from typing import assert_never
 from conformance_report.model import Change, DiagnosticEntry, FileStats, Source, Statistics, TestCase, TyDiagnostic, compute_stats, diagnostic_text
 
@@ -49,7 +48,7 @@ def render_html_diff_row(tc: TestCase, base_url: str, *, source: Source | None) 
                 min_line = line
             if line > max_line:
                 max_line = line
-        filename = Path(all_diags[0].location.path).name
+        filename = all_diags[0].location.path.name
         if min_line == max_line:
             url = f'{base_url}tests/{filename}#L{min_line}'
             display = f'{filename}:{min_line}'
@@ -218,7 +217,7 @@ def render_file_stats_table(file_stats: list[FileStats], base_url: str) -> str:
     changed = [fs for fs in file_stats if fs.total_change > 0]
     if not changed:
         return ''
-    changed = sorted(changed, key=lambda fs: (-fs.total_change, Path(fs.path).name))
+    changed = sorted(changed, key=lambda fs: (-fs.total_change, fs.path.name))
     rows: list[str] = []
     for fs in changed:
         if fs.new_passes and (not fs.old_passes):
@@ -236,8 +235,8 @@ def render_file_stats_table(file_stats: list[FileStats], base_url: str) -> str:
                 status = '📉 Regressing'
             else:
                 status = '➡️ Neutral'
-        url = base_url + f'tests/{Path(fs.path).name}'
-        rows.append(f'| [{Path(fs.path).name}]({url}) | {fmt(fs.old.true_positives, fs.new.true_positives, greater_is_better=True)} | {fmt(fs.old.false_positives, fs.new.false_positives, greater_is_better=False)} | {fmt(fs.old.false_negatives, fs.new.false_negatives, greater_is_better=False)} | {status} |')
+        url = base_url + f'tests/{fs.path.name}'
+        rows.append(f'| [{fs.path.name}]({url}) | {fmt(fs.old.true_positives, fs.new.true_positives, greater_is_better=True)} | {fmt(fs.old.false_positives, fs.new.false_positives, greater_is_better=False)} | {fmt(fs.old.false_negatives, fs.new.false_negatives, greater_is_better=False)} | {status} |')
     totals_row = f'| **Total (all files)** | **{fmt(old_totals.true_positives, new_totals.true_positives, greater_is_better=True)}** | **{fmt(old_totals.false_positives, new_totals.false_positives, greater_is_better=False)}** | **{fmt(old_totals.false_negatives, new_totals.false_negatives, greater_is_better=False)}** | {passing}/{total_files} |'
     lines = ['### Test file breakdown', '', '<details>', f"<summary>{len(changed)} file{('s' if len(changed) != 1 else '')} altered</summary>", '', '| File | True Positives | False Positives | False Negatives | Status |', '|------|----|----|----|--------|', *rows, totals_row, '', '</details>', '']
     return '\n'.join(lines)

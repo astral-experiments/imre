@@ -1265,6 +1265,12 @@ impl Checker<'_> {
         // emitted creation still precedes that source's evaluation.
         let checked = if definition.is_some() || matches!(callback, ast::Expr::Lambda(_)) {
             None
+        } else if let Some(binding) = self.local_function_binding(callback) {
+            Some(binding.target(self.source, callback)?.callback(
+                self.types,
+                self.source,
+                callback,
+            )?)
         } else {
             Some(self.expr(callback)?)
         };

@@ -27,6 +27,7 @@ ryu = "=1.0.23"
 serde = "=1.0.229"
 serde_json = { version = "=1.0.151", features = ["raw_value", "unbounded_depth"] }
 toml = { version = "=1.1.8", default-features = false, features = ["std", "parse", "preserve_order"] }
+hashbrown = { version = "=0.17.1", default-features = false, features = ["inline-more"] }
 smallvec = { version = "=1.16.3", features = ["union"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

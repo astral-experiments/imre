@@ -183,7 +183,9 @@ pub(super) fn field_default(
     let concrete = types.payload(ty).unwrap_or(ty);
     let kind = match factory {
         ContainerFactory::List if types.element(concrete).is_some() => ExprKind::List(Vec::new()),
-        ContainerFactory::Dict if types.mapping(concrete).is_some() => {
+        ContainerFactory::Dict
+            if types.mapping(concrete).is_some() && !types.is_default_list_dict(concrete) =>
+        {
             let (key, value) = types.mapping(concrete).unwrap();
             ExprKind::Dict {
                 key,

@@ -1,5 +1,7 @@
 """Typed conformance data and diagnostic classification."""
 
+from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum, auto
 from pathlib import Path
@@ -61,6 +63,12 @@ class Positions:
 
 @dataclass(kw_only=True, slots=True)
 class Location:
+    path: Path
+    positions: Positions
+
+
+@dataclass(kw_only=True, slots=True)
+class WireLocation:
     path: str
     positions: Positions
 
@@ -70,7 +78,7 @@ class WireDiagnostic:
     check_name: str
     description: str
     severity: str
-    location: Location
+    location: WireLocation
 
 
 @dataclass(kw_only=True, slots=True)
@@ -98,26 +106,20 @@ def diagnostic_text(diagnostic: TyDiagnostic) -> str:
     )
 
 
-def fingerprint(diagnostic: TyDiagnostic) -> tuple[str, str, str, str, int, int]:
-    return (
-        diagnostic.check_name,
-        diagnostic.description,
-        diagnostic.severity,
-        diagnostic.location.path,
-        diagnostic.location.positions.begin.line,
-        diagnostic.location.positions.begin.column,
-    )
-
-
 def diagnostics_are_equivalent(a: list[TyDiagnostic], b: list[TyDiagnostic]) -> bool:
-    if len(a) != len(b):
-        return False
-    left = sorted(map(fingerprint, a))
-    right = sorted(map(fingerprint, b))
-    for old, new in zip(left, right):
-        if old != new:
-            return False
-    return True
+    """Compare two diagnostic lists for equality, ignoring the ``source`` field."""
+
+    def fingerprint(d: TyDiagnostic) -> tuple[str, str, str, str, int, int]:
+        return (
+            d.check_name,
+            d.description,
+            d.severity,
+            str(d.location.path),
+            d.location.positions.begin.line,
+            d.location.positions.begin.column,
+        )
+
+    return sorted(map(fingerprint, a)) == sorted(map(fingerprint, b))
 
 
 @dataclass(kw_only=True, slots=True)
@@ -130,10 +132,12 @@ class ExpectedError:
 
     @property
     def key(self) -> str:
-        tag = self.tag
-        if tag is None:
-            return f"{self.location.path}:{self.location.positions.begin.line}"
-        return f"{self.location.path}:{tag}"
+        """Key to group expected errors by path and beginning line or path and tag."""
+        return (
+            f"{self.location.path.as_posix()}:{self.location.positions.begin.line}"
+            if self.tag is None
+            else f"{self.location.path.as_posix()}:{self.tag}"
+        )
 
 
 @dataclass(kw_only=True, slots=True)
@@ -165,7 +169,7 @@ class TestCase:
         return bool(self.expected) and all(error.multi for error in self.expected)
 
     @property
-    def path(self) -> str:
+    def path(self) -> Path:
         if self.new:
             return self.new[0].location.path
         if self.old:
@@ -233,7 +237,7 @@ class DiagnosticEntry:
 
 @dataclass(kw_only=True, slots=True)
 class FileStats:
-    path: str
+    path: Path
     old: Statistics
     new: Statistics
 
@@ -270,58 +274,67 @@ def compute_stats(test_cases: list[TestCase], source: Source) -> Statistics:
     return stats
 
 
-def diagnostic_key(diagnostic: TyDiagnostic, tags: dict[tuple[str, int], str]) -> str:
-    tag = tags.get((Path(diagnostic.location.path).name, diagnostic.location.positions.begin.line))
-    if tag is None:
-        return f"{diagnostic.location.path}:{diagnostic.location.positions.begin.line}"
-    return f"{diagnostic.location.path}:{tag}"
-
-
 def group_diagnostics_by_key(
-    old: list[TyDiagnostic], new: list[TyDiagnostic], expected: list[ExpectedError]
+    old: list[TyDiagnostic],
+    new: list[TyDiagnostic],
+    expected: list[ExpectedError],
 ) -> list[TestCase]:
-    tagged_lines: dict[tuple[str, int], str] = {}
-    for error in expected:
-        tag = error.tag
-        if tag is not None:
-            tagged_lines[(Path(error.location.path).name, error.location.positions.begin.line)] = tag
+    # Build a lookup from (filename, line) to tag so ty diagnostics on a tagged
+    # line can be grouped with all other expected errors sharing that tag.
+    tagged_lines: dict[tuple[str, int], str] = {
+        (e.location.path.name, e.location.positions.begin.line): e.tag
+        for e in expected
+        if e.tag is not None
+    }
 
-    old_by_key: dict[str, list[TyDiagnostic]] = {}
-    new_by_key: dict[str, list[TyDiagnostic]] = {}
-    expected_by_key: dict[str, list[ExpectedError]] = {}
-    keys: set[str] = set()
-    for diagnostic in old:
-        key = diagnostic_key(diagnostic, tagged_lines)
-        if key not in old_by_key:
-            old_by_key[key] = []
-        old_by_key[key].append(diagnostic)
-        keys.add(key)
-    for diagnostic in new:
-        key = diagnostic_key(diagnostic, tagged_lines)
-        if key not in new_by_key:
-            new_by_key[key] = []
-        new_by_key[key].append(diagnostic)
-        keys.add(key)
-    for error in expected:
-        key = error.key
-        if key not in expected_by_key:
-            expected_by_key[key] = []
-        expected_by_key[key].append(error)
-        keys.add(key)
-    cases: list[TestCase] = []
-    for key in sorted(keys):
-        cases.append(TestCase(
-            key=key, old=old_by_key.get(key, []), new=new_by_key.get(key, []),
-            expected=expected_by_key.get(key, []),
-        ))
-    return cases
+    def ty_key(diag: TyDiagnostic) -> str:
+        tag = tagged_lines.get(
+            (diag.location.path.name, diag.location.positions.begin.line)
+        )
+        return (
+            f"{diag.location.path.as_posix()}:{tag}"
+            if tag is not None
+            else f"{diag.location.path.as_posix()}:{diag.location.positions.begin.line}"
+        )
+
+    old_by_key: defaultdict[str, list[TyDiagnostic]] = defaultdict(list)
+    new_by_key: defaultdict[str, list[TyDiagnostic]] = defaultdict(list)
+    expected_by_key: defaultdict[str, list[ExpectedError]] = defaultdict(list)
+
+    for diag in old:
+        old_by_key[ty_key(diag)].append(diag)
+    for diag in new:
+        new_by_key[ty_key(diag)].append(diag)
+    for err in expected:
+        expected_by_key[err.key].append(err)
+
+    all_keys = sorted(old_by_key.keys() | new_by_key.keys() | expected_by_key.keys())
+    return [
+        TestCase(
+            key=key,
+            old=old_by_key[key],
+            new=new_by_key[key],
+            expected=expected_by_key[key],
+        )
+        for key in all_keys
+    ]
 
 
-def collect_file_stats(test_cases: list[TestCase], test_files: list[str]) -> list[FileStats]:
-    path_to_cases: dict[str, list[TestCase]] = {path: [] for path in test_files}
-    for case in test_cases:
-        path_to_cases[case.path].append(case)
-    result: list[FileStats] = []
-    for path, cases in path_to_cases.items():
-        result.append(FileStats(path=path, old=compute_stats(cases, Source.OLD), new=compute_stats(cases, Source.NEW)))
-    return result
+def collect_file_stats(
+    test_cases: list[TestCase], test_files: Sequence[Path]
+) -> list[FileStats]:
+    # `test_cases` only contain files where `ty` generates a diagnostic
+    # We expand this with the full set of `test_files` to ensure we don't undercount
+    path_to_cases: dict[Path, list[TestCase]] = {
+        path.resolve(): [] for path in test_files
+    }
+    for tc in test_cases:
+        path_to_cases[tc.path].append(tc)
+    return [
+        FileStats(
+            path=path,
+            old=compute_stats(cases, Source.OLD),
+            new=compute_stats(cases, Source.NEW),
+        )
+        for path, cases in path_to_cases.items()
+    ]

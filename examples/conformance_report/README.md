@@ -53,7 +53,24 @@ Python 3.15 and later use their standard-library TOML 1.1 parser.
 
 ## Replay a captured comparison
 
-Prepare a checkout of [python/typing](https://github.com/python/typing) at
+From the Relar repository root, replay the included 146-file capture with one
+native build and run. The resulting Markdown report compares ty 0.0.60 and 0.0.90.
+
+```sh
+workdir=$(mktemp -d)
+python3 benchmarks/conformance_grouping_inputs.py --scales 1 \
+  --archive benchmarks/results/2026-10-22-collector-ownership-study.tar.xz \
+  --output "$workdir/inputs"
+panel="$workdir/inputs/1x/changed"
+relar run examples/conformance_report/__main__.py --module-root examples -- \
+  --manifest "$panel/manifest.json" --old "$panel/old.json" --new "$panel/new.json" \
+  --format github --output "$workdir/report.md"
+```
+
+On Linux, add `--allocator jemalloc` before the `--` in the `relar run` command
+to use the allocator measured in the grouping benchmarks.
+
+To capture a new comparison, prepare a checkout of [python/typing](https://github.com/python/typing) at
 `835b70f3f795f8e061b1f7621178515b0a77a0ad` and two ty executables. The preparation
 step runs ty with the upstream flags and records the source/binary hashes,
 commands, explicit environment, and raw stdout/stderr. Use a new output directory.
@@ -97,23 +114,25 @@ render reports for the measured program. Test paths are the already resolved
 absolute identities produced by preparation. Inputs must use UTF-8 and complete
 GitLab diagnostic records with integer positions; unknown JSON fields are ignored.
 
-The reporter compiles Ruff’s complete `Source`, `Classification`, and `Change`
-enums and its `compute_stats` and `collect_diagnostic_entries` functions
-unchanged. The latter checks that every change is handled and stably sorts
-entries by title priority, title, and test-case key. The same source check
-covers `TestCase.classify`, `TestCase.change`, and `TestCase.diagnostics_by_source`.
-Enum methods take Ruff’s original string-valued `Literal` arguments. Other
-parts of the port use display helpers and concrete records for decoded JSON.
+Relar compiles Ruff’s `group_diagnostics_by_key`, `diagnostics_are_equivalent`,
+`collect_file_stats`, `compute_stats`, and `collect_diagnostic_entries` directly.
+These functions group diagnostics by path and tag, compare fingerprints, include
+files with no cases in the statistics, and sort the final entries. Their source
+is checked against the pinned script, along with `ExpectedError.key`,
+`TestCase.classify`, `TestCase.change`, `TestCase.diagnostics_by_source`, and
+the complete `Source`, `Classification`, and `Change` enums. JSON decoding
+uses a separate wire record for the original path string. Each diagnostic and
+expected error carries a native `Path` into the analysis.
 Ruff’s original verbose regex runs with Rust’s regex engine and exposes the
 same named captures and character offsets as CPython. Assertions for no
 annotations and no new true positives remain errors. The latter omits the
 upstream diagnostic record debug dump. The adapter suppresses the upstream output-file confirmation
 and duplicated report on stderr.
 
-`original.py` runs the unchanged upstream regex, models and renderers with the
-same offline inputs and quiet file-output adapter. It is explicitly an upstream
-**adapter**, not the unchanged upstream CLI. Its preloaded source wrapper and
-canonical paths remove repeated discovery and path resolution for all engines.
+`original.py` runs the upstream regex, models, analysis and renderers with
+the same offline inputs. The adapter preloads the source text and raw JSON.
+Ruff’s file-statistics function resolves every test path on every report pass,
+including files with no diagnostics.
 
 `compute.py` repeats the complete annotation scan, JSON decode, grouping,
 classification, sorting and rendering over preloaded raw text, then prints an
@@ -163,6 +182,13 @@ In 972 pairs, each side has a single diagnostic. Relar compares the six
 fingerprint fields directly in these pairs, avoiding two temporary tuples and
 two sorted lists per pair. The [collector profiles and timings](../../benchmarks/results/2026-10-22-collector-ownership.md)
 measure the effect across all 1,269 groups.
+The diagnostic grouping study compares ordered groups, fingerprint equivalence,
+per-file statistics, and complete reports on 146 and 1,460 source files.
+[Timings, memory, and checkout-path sensitivity](../../benchmarks/results/2026-10-23-diagnostic-grouping.md)
+
+On Linux, `relar build script.py --allocator jemalloc` selects a separate archive.
+The [allocator comparison](../../benchmarks/results/2026-10-23-diagnostic-allocator.md)
+measures grouping and complete reports against Rust using both allocator choices.
 
 `benchmarks/conformance_validate.py` compares full reports and filesystem effects
 against the unchanged upstream implementation. Its seeded checks exercise the
