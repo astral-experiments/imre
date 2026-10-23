@@ -40,6 +40,7 @@ mod text;
 mod truthiness;
 mod unions;
 mod unpacking;
+mod zip_sums;
 use assignments::LocalState;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
@@ -377,6 +378,7 @@ pub(crate) fn lower_with_owners(
         );
     }
     let mut functions = Vec::new();
+    let mut zip_sums = Vec::new();
     let mut owners = Vec::new();
     let mut call_graph = Vec::new();
     let mut class_reads = Vec::new();
@@ -446,10 +448,14 @@ pub(crate) fn lower_with_owners(
                 },
                 checker.calls,
                 checker.class_reads.into_inner(),
+                checker.zip_sums,
             ))
         })();
-        let (function, calls, reads) =
+        let (function, calls, reads, sums) =
             result.map_err(|error| format!("{}:{error}", module.path.display()))?;
+        if sums.len() >= 2 {
+            zip_sums.push((functions.len(), sums));
+        }
         owners.push(*module_id);
         functions.push(function);
         call_graph.push(calls);
@@ -569,6 +575,9 @@ pub(crate) fn lower_with_owners(
         )?;
     }
     let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
+    for (id, sums) in zip_sums {
+        zip_sums::fuse(&mut functions, id, &sums);
+    }
     Ok((
         ir::Module {
             types,
@@ -1097,6 +1106,9 @@ enum Iteration {
 }
 
 struct Checker<'a> {
+    /// Capture only the outer sum of an assignment with a neighboring sum.
+    zip_sum_rhs: Option<TextRange>,
+    zip_sums: HashMap<usize, zip_sums::Sum>,
     source: &'a str,
     graph: &'a SourceGraph,
     module: ModuleId,
@@ -1140,6 +1152,8 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            zip_sum_rhs: None,
+            zip_sums: HashMap::new(),
             source: &graph.modules[module].source,
             graph,
             module,
@@ -2384,6 +2398,8 @@ impl<'a> Checker<'a> {
         let mut body = Vec::new();
         let mut falls_through = true;
         let reachable = self.reachable;
+        let enclosing_sum = self.zip_sum_rhs;
+        let mut previous_sum = false;
         for (index, statement) in statements.iter().enumerate() {
             if let ast::Stmt::Assign(assignment) = statement
                 && let [ast::Expr::Name(name)] = assignment.targets.as_slice()
@@ -2396,11 +2412,18 @@ impl<'a> Checker<'a> {
                 self.declare(name.id.as_str(), self.types.list(element), name)?;
             }
             self.reachable = reachable && falls_through;
+            let sum = zip_sums::rhs(statement);
+            self.zip_sum_rhs = sum.filter(|_| {
+                self.inference.is_none()
+                    && (previous_sum || statements.get(index + 1).and_then(zip_sums::rhs).is_some())
+            });
+            previous_sum = sum.is_some();
             let (lowered, continues) = self.statement(statement)?;
             body.extend(lowered);
             falls_through &= continues;
         }
         self.reachable = reachable;
+        self.zip_sum_rhs = enclosing_sum;
         Ok((body, falls_through))
     }
 
