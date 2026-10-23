@@ -340,6 +340,8 @@ pub(crate) enum Builtin {
     Input,
     Int,
     Float,
+    /// Represents an exact integer by its sign for a proved zero-comparison parameter.
+    IntSignAsFloat,
     Bool,
     Str,
     /// Python representation of a value with a fully known storage shape.
@@ -358,6 +360,7 @@ pub(crate) enum Builtin {
     FloatFormat {
         precision: u32,
         percent: bool,
+        positive_sign: u8,
     },
     ListGet,
     /// A live-length guard proves a private cursor or constant index is in
@@ -522,6 +525,7 @@ pub(crate) enum TextOperation {
     Find,
     Partition,
     Unquote,
+    Dedent,
 }
 
 /// Native path operations keep their exact result types in the checked IR.

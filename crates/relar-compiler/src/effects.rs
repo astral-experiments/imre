@@ -294,6 +294,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::RegexCompile(_)
         | Builtin::RegexSearch
         | Builtin::GlobalSet(_)
+        | Builtin::IntSignAsFloat
         | Builtin::Bool
         | Builtin::UnionInject
         | Builtin::UnionProject

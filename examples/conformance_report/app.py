@@ -5,7 +5,7 @@ from pathlib import Path
 
 from conformance_report.model import ExpectedError, Source, TyDiagnostic, collect_file_stats, group_diagnostics_by_key
 from conformance_report.parse import Inputs, collect_frozen_diagnostics, collect_ty_diagnostics, read_inputs
-from conformance_report.render import render_cases, render_file_stats, render_summary
+from conformance_report.render import render_cases, render_file_stats, summary_for_checkout
 
 
 @dataclass(slots=True)
@@ -79,7 +79,7 @@ def render_diagnostics(
     file_stats = collect_file_stats(grouped, test_files)
     base_url = f"https://github.com/python/typing/blob/{revision}/conformance/"
     sections = [
-        render_summary(grouped, file_stats, base_url, force_summary_table=force_summary_table),
+        summary_for_checkout(grouped, file_stats, base_url, force_summary_table=force_summary_table),
         render_file_stats(file_stats, base_url),
         render_cases(grouped, base_url, format=format),
     ]

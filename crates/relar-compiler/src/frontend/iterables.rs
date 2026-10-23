@@ -90,7 +90,8 @@ impl Checker<'_> {
             let start = self.sum_start(call)?;
             return Ok(add_start(subtotal, start));
         }
-        let (input, convert) = self.consumer_input(source, Some(Type::Int))?;
+        let generator = matches!(source, ast::Expr::Generator(_));
+        let (input, convert) = self.consumer_input(source, (!generator).then_some(Type::Int))?;
         let start = self.sum_start(call)?;
         if !convert
             && let Iteration::Container {
@@ -146,7 +147,8 @@ impl Checker<'_> {
         };
         body.extend(
             self.expand_items_after(input, call, after, |checker, value| {
-                let value = checker.consumer_value(value, convert, call)?;
+                let as_int = convert || (generator && value.ty == Type::Bool);
+                let value = checker.consumer_value(value, as_int, call)?;
                 checker.expect(Type::Int, value.ty, call)?;
                 Ok(vec![Statement::Assign(
                     result,

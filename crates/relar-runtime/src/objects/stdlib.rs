@@ -477,11 +477,14 @@ pub unsafe extern "C" fn relar_str_replace(
 /// Percent scaling is binary64 multiplication, before rounding. Rust's fixed
 /// formatter uses ties-to-even; Python's lowercase nonfinite spellings are explicit.
 #[unsafe(no_mangle)]
-pub extern "C" fn relar_float_format(value: f64, precision: u32, percent: u32) -> *const Str {
+pub extern "C" fn relar_float_format(value: f64, precision: u32, flags: u32) -> *const Str {
     if precision > 1000 {
         fail("SystemError", "unchecked float format precision");
     }
-    let value = if percent != 0 { value * 100.0 } else { value };
+    // The low bit selects percentages. A zero high byte keeps the default sign.
+    let percent = flags & 1 != 0;
+    let positive_sign = (flags >> 8) as u8;
+    let value = if percent { value * 100.0 } else { value };
     let mut result = if value.is_nan() {
         Str::from("nan")
     } else if value.is_infinite() {
@@ -494,7 +497,10 @@ pub extern "C" fn relar_float_format(value: f64, precision: u32, percent: u32) -
         let precision = precision as usize;
         compact_str::format_compact!("{value:.precision$}")
     };
-    if percent != 0 {
+    if positive_sign != 0 && !result.starts_with('-') {
+        result.insert(0, char::from(positive_sign));
+    }
+    if percent {
         result.push('%');
     }
     Rc::into_raw(Rc::new(result))
@@ -691,7 +697,9 @@ mod tests {
 
     #[test]
     fn fixed_float_formats_preserve_rounding_sign_and_nonfinite_spelling() {
-        for (value, precision, percent, expected) in [
+        let plus = u32::from(b'+') << 8;
+        let space = u32::from(b' ') << 8;
+        for (value, precision, flags, expected) in [
             (1.25, 1, 0, "1.2"),
             (2.675, 2, 0, "2.67"),
             (-0.0, 2, 0, "-0.00"),
@@ -699,9 +707,12 @@ mod tests {
             (f64::INFINITY, 3, 1, "inf%"),
             (f64::NEG_INFINITY, 0, 0, "-inf"),
             (-f64::NAN, 2, 0, "nan"),
+            (-f64::NAN, 2, plus | 1, "+nan%"),
+            (0.0, 2, space, " 0.00"),
+            (-0.0, 2, plus | 1, "-0.00%"),
         ] {
             // SAFETY: the formatter transfers exactly one fresh string owner.
-            let actual = unsafe { Rc::from_raw(relar_float_format(value, precision, percent)) };
+            let actual = unsafe { Rc::from_raw(relar_float_format(value, precision, flags)) };
             assert_eq!(actual.as_str(), expected);
         }
     }

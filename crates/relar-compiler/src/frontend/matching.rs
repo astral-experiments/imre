@@ -132,6 +132,14 @@ impl Checker<'_> {
         if exhaustive && let ExprKind::Call(_, args) = &mut value.kind {
             args.exhaustive_enum_match = true;
         }
+        let mut remaining_pairs = matches!(
+            self.types.fields(value.ty).as_deref(),
+            Some([Type::Bool, Type::Bool])
+        )
+        .then_some(0b1111u8);
+        let mut pair_locals = remaining_pairs
+            .and_then(|_| bool_pair_names(&branch.subject))
+            .filter(|names| names.iter().all(|name| self.names.contains_key(*name)));
         // A named subject stores its target before yielding the same value.
         // Track that outer target with the same narrowing rules as a bare name.
         let visible = match &*branch.subject {
@@ -162,6 +170,17 @@ impl Checker<'_> {
             let success = self.hidden(Type::Bool);
             let value = self.match_subject(subject);
             let mut pattern = self.pattern(&case.pattern, value, success)?;
+            if let Some(names) = pair_locals
+                && names.iter().any(|name| {
+                    pattern.captures.iter().any(|capture| capture.name == *name)
+                        || case
+                            .guard
+                            .as_deref()
+                            .is_some_and(|guard| expression_rebinds(guard, name))
+                })
+            {
+                pair_locals = None;
+            }
 
             let mut failure = entering.clone();
             if let Some(ty) = pattern.failure {
@@ -202,9 +221,21 @@ impl Checker<'_> {
             if let Some(guard) = case.guard.as_deref() {
                 self.apply_facts(guard, true);
             }
-            let (case_body, falls) = self.block(&case.body)?;
-            if falls {
+            let (case_body, falls) = if remaining_pairs == Some(0)
+                && let Some(names) = pair_locals
+                && let Some(call) = self.bool_pair_assertion(case, names)
+            {
+                (vec![self.assert_never(call, true)?], false)
+            } else {
+                self.block(&case.body)?
+            };
+            if falls && remaining_pairs != Some(0) {
                 exits.push(Flow::read(self));
+            }
+            if case.guard.is_none()
+                && let Some(remaining) = &mut remaining_pairs
+            {
+                *remaining &= !bool_pair_coverage(&case.pattern);
             }
             let mut chosen = vec![Statement::Assign(selected, boolean(true))];
             chosen.extend(case_body);
@@ -236,7 +267,7 @@ impl Checker<'_> {
                 Vec::new(),
             ));
         }
-        if !exhaustive {
+        if !exhaustive && remaining_pairs != Some(0) {
             exits.extend(pending);
         }
         let falls = !exits.is_empty();
@@ -256,6 +287,26 @@ impl Checker<'_> {
             }],
             falls,
         ))
+    }
+
+    /// The wildcard may restate the same unchanged locals after all four cases.
+    fn bool_pair_assertion<'a>(
+        &self,
+        case: &'a ast::MatchCase,
+        names: [&str; 2],
+    ) -> Option<&'a ast::ExprCall> {
+        if case.guard.is_none()
+            && matches!(&case.pattern, ast::Pattern::MatchAs(pattern) if pattern.name.is_none() && pattern.pattern.is_none())
+            && let [ast::Stmt::Expr(statement)] = case.body.as_slice()
+            && let ast::Expr::Call(call) = &*statement.value
+            && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::AssertNever))
+            && let [arg] = call.arguments.args.as_ref()
+            && bool_pair_names(arg) == Some(names)
+        {
+            Some(call)
+        } else {
+            None
+        }
     }
 
     fn match_subject(&self, slot: usize) -> Expr {
@@ -1054,4 +1105,42 @@ fn expression_rebinds(expression: &ast::Expr, name: &str) -> bool {
     let mut stores = Stores { name, found: false };
     stores.visit_expr(expression);
     stores.found
+}
+
+fn bool_pair_names(expression: &ast::Expr) -> Option<[&str; 2]> {
+    if let ast::Expr::Tuple(pair) = expression
+        && let [ast::Expr::Name(left), ast::Expr::Name(right)] = pair.elts.as_slice()
+    {
+        Some([left.id.as_str(), right.id.as_str()])
+    } else {
+        None
+    }
+}
+
+/// Bits 0 through 3 represent FF, FT, TF and TT for an exact tuple[bool, bool].
+fn bool_pair_coverage(pattern: &ast::Pattern) -> u8 {
+    match pattern {
+        ast::Pattern::MatchOr(or) => or
+            .patterns
+            .iter()
+            .fold(0, |bits, pattern| bits | bool_pair_coverage(pattern)),
+        ast::Pattern::MatchSequence(pair) => {
+            let [
+                ast::Pattern::MatchSingleton(left),
+                ast::Pattern::MatchSingleton(right),
+            ] = pair.patterns.as_slice()
+            else {
+                return 0;
+            };
+            use ast::Singleton::{False, True};
+            match (left.value, right.value) {
+                (False, False) => 0b0001,
+                (False, True) => 0b0010,
+                (True, False) => 0b0100,
+                (True, True) => 0b1000,
+                _ => 0,
+            }
+        }
+        _ => 0,
+    }
 }

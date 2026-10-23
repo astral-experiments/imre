@@ -89,6 +89,17 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
             edits.append({"kind": "native function declaration", "line": node.lineno, "before": before, "after": after})
         if not isinstance(node, ast.ClassDef):
             continue
+        if name == "conformance_report/model.py" and node.name in {
+            "Position", "Positions", "Location", "TyDiagnostic", "ExpectedError", "TestCase",
+        }:
+            # Codon dataclasses use tuple-style display. Ruff shows the Python record on assertion failure.
+            fields = [item.target.id for item in node.body if isinstance(item, ast.AnnAssign)]
+            pieces = [f"{field}={{self.{field}!r}}" for field in fields]
+            if node.name == "Location":
+                pieces[fields.index("path")] = "path=PosixPath({self.path.as_posix()!r})"
+            display = node.name + "(" + ", ".join(pieces) + ")"
+            lines[node.end_lineno - 1] += f'\n    def __repr__(self) -> str:\n        return f"{display}"\n'
+            edits.append({"kind": "native Python dataclass repr", "class": node.name, "fields": fields})
         for decorator in node.decorator_list:
             if isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Name) and decorator.func.id == "dataclass":
                 if decorator.lineno != decorator.end_lineno or decorator.args:
@@ -178,6 +189,15 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
         changed = changed.replace(before, after)
         body_edits.append((before, after))
         edits.append({"kind": "native named formatting with format_map", "before": before, "after": after})
+    if name == "conformance_report/render.py" and "from textwrap import dedent\n" in changed:
+        # Codon appends its source location to messages raised by assert statements.
+        before = "        assert new.true_positives > 0, ("
+        after = "        if not (new.true_positives > 0):\n            raise AssertionError("
+        if changed.count(before) != 1:
+            raise ValueError("unexpected summary assertion")
+        changed = changed.replace(before, after)
+        body_edits.append((before, after))
+        edits.append({"kind": "preserve the summary assertion payload", "before": before, "after": after})
     if name == "conformance_report/render.py" and "from typing import assert_never\n" in changed:
         changed = changed.replace("from typing import assert_never\n",
                                   'def assert_never(value):\n    raise AssertionError(f"Expected code to be unreachable, but got: {value!r}")\n')
@@ -354,7 +374,8 @@ def main() -> None:
             )
             native_re = codon.parent.parent / "lib/codon/stdlib/re.codon"
             record["native_re"] = {"path": str(native_re), "sha256": digest(native_re.read_bytes())}
-        for source, generated in (("live_platform.py", "codon_platform.codon"),
+        for source, generated in (("conformance_dedent.py", "textwrap.codon"),
+                                  ("live_platform.py", "codon_platform.codon"),
                                   ("live_subprocess.py", "subprocess.codon"),
                                   ("live_tempfile.py", "tempfile.codon")):
             (source_root / generated).write_bytes((HERE / source).read_bytes())

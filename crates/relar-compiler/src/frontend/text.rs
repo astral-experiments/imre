@@ -10,6 +10,7 @@ fn parameter(name: &str, ty: Type, kind: ParameterKind, default: Option<Expr>) -
         ty,
         kind,
         default,
+        sign_only: false,
     }
 }
 
@@ -137,16 +138,21 @@ impl Checker<'_> {
         Ok(self.text_operation(operation, returns, arguments))
     }
 
-    /// Binds UTF-8 replacement decoding without exposing other URL operations.
-    pub(super) fn unquote_call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    /// Binds standard-library functions taking one positional or named string.
+    pub(super) fn text_function(
+        &mut self,
+        call: &ast::ExprCall,
+        name: &str,
+        operation: TextOperation,
+    ) -> Result<Expr, String> {
         let parameters = [parameter(
-            "string",
+            name,
             Type::Str,
             ParameterKind::PositionalOrKeyword,
             None,
         )];
         let arguments = self.arguments(call, &parameters, None)?;
-        Ok(self.text_operation(TextOperation::Unquote, Type::Str, arguments))
+        Ok(self.text_operation(operation, Type::Str, arguments))
     }
 
     /// Keyword permutation happens only after supplied expressions have executed

@@ -223,7 +223,8 @@ class Statistics:
     def recall(self) -> float:
         if self.true_positives + self.false_negatives > 0:
             return self.true_positives / (self.true_positives + self.false_negatives)
-        return 0.0
+        else:
+            return 0.0
 
 
 @dataclass(kw_only=True, slots=True)

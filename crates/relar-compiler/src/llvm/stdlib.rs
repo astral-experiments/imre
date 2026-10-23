@@ -77,12 +77,16 @@ impl Emitter<'_, '_> {
                 Type::Str,
                 &[&args[0].value, &args[1].value, &args[2].value],
             ),
-            Builtin::FloatFormat { precision, percent } => Value {
+            Builtin::FloatFormat {
+                precision,
+                percent,
+                positive_sign,
+            } => Value {
                 ty: Type::Str,
                 operand: self.instruction(format!(
                     "call ptr @relar_float_format(double {}, i32 {precision}, i32 {})",
                     args[0].value.operand,
-                    u8::from(*percent),
+                    u32::from(*percent) | (u32::from(*positive_sign) << 8),
                 )),
                 small_integer: false,
             },

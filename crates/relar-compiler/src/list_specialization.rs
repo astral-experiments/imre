@@ -604,6 +604,7 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
             | Builtin::Process(_)
             | Builtin::Int
             | Builtin::Float
+            | Builtin::IntSignAsFloat
             | Builtin::Bool
             | Builtin::Str
             | Builtin::Len

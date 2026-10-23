@@ -3375,6 +3375,18 @@ impl Emitter<'_, '_> {
                 Type::Float => self.call("relar_float_int", Type::Int, &[&args[0].value]),
                 _ => unreachable!("int conversion was checked"),
             },
+            Builtin::IntSignAsFloat => {
+                let order = self.instruction(format!(
+                    "call i32 @compare_int(i64 {}, i64 {})",
+                    args[0].value.operand,
+                    small(0).operand
+                ));
+                Value {
+                    ty: Type::Float,
+                    operand: self.instruction(format!("sitofp i32 {order} to double")),
+                    small_integer: false,
+                }
+            }
             Builtin::Float => match args[0].value.ty {
                 Type::Float => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Int => self.call("relar_int_float", Type::Float, &[&args[0].value]),
@@ -4874,6 +4886,7 @@ declare void @relar_sort_by_keys(ptr, i32, ptr, i32, i32)
 declare ptr @relar_str_join(ptr, ptr)
 declare ptr @relar_str_format(ptr, ptr, i64)
 declare ptr @relar_str_replace(ptr, ptr, ptr)
+declare ptr @relar_str_dedent(ptr)
 declare ptr @relar_float_format(double, i32, i32)
 declare double @llvm.fabs.f64(double)
 declare ptr @relar_int_str(i64)

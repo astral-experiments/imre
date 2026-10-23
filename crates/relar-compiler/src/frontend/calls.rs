@@ -15,6 +15,7 @@ pub(super) struct Parameter {
     pub ty: Type,
     pub kind: ParameterKind,
     pub default: Option<Expr>,
+    pub sign_only: bool,
 }
 
 /// Defaults have no user-visible effects or mutable identity. Checking them at
@@ -147,7 +148,7 @@ impl Checker<'_> {
         receiver: Option<Expr>,
     ) -> Result<ir::CallArgs, String> {
         self.arguments_with(call, params, receiver, |checker, index, argument| {
-            checker.expr_expected(argument, params[index].ty)
+            checker.direct_argument(argument, params[index].ty, params[index].sign_only)
         })
     }
 

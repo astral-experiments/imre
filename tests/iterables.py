@@ -21,6 +21,8 @@ REJECTED = {
     "sum_strings": 'print(sum("12"))\n',
     "sum_floats": "print(sum([1.0, 2.0]))\n",
     "sum_bools": "print(sum([True, False]))\n",
+    "sum_float_generator": "print(sum(float(i) for i in [1]))\n",
+    "sum_bool_generator_wrong_start": "print(sum((i > 0 for i in [1]), start=True))\n",
     "sum_tuple_mixed": "print(sum((1, True)))\n",
     "sum_pairs": "print(sum(enumerate([1])))\n",
     "sum_empty_strings": "values: list[str] = []\nprint(sum(values))\n",

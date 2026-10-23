@@ -13,7 +13,42 @@ from comprehensions import BOOTSTRAP, require_result, run, snapshot, write_files
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "matching"
 
+PAIR_MATCH = """\
+from typing import assert_never
+def classify(left: bool, right: bool) -> int:
+    match left, right:
+        case (True, True) | (True, False) | (False, True):
+            return 1
+"""
+LAST_PAIR = "        case (False, False):\n            return 0\n"
+PAIR_FALLBACK = "        case _:\n            assert_never((left, right))  # ty: ignore[type-assertion-failure]\n"
+
 REJECTED = {
+    "bool_pair_incomplete": PAIR_MATCH + PAIR_FALLBACK,
+    "bool_pair_missing_return": PAIR_MATCH,
+    "bool_pair_int_subject": PAIR_MATCH.replace("left: bool", "left: int")
+    + LAST_PAIR
+    + PAIR_FALLBACK,
+    "bool_pair_guarded": PAIR_MATCH
+    + LAST_PAIR.replace("):", ") if left:")
+    + PAIR_FALLBACK,
+    "bool_pair_reordered": PAIR_MATCH
+    + LAST_PAIR
+    + PAIR_FALLBACK.replace("(left, right)", "(right, left)"),
+    "bool_pair_guard_rebind": PAIR_MATCH
+    + "        case (False, False) if (left := right):\n            return 2\n"
+    + LAST_PAIR
+    + PAIR_FALLBACK,
+    "bool_pair_capture_rebind": PAIR_MATCH
+    + "        case (right, False) if right:\n            return 2\n"
+    + LAST_PAIR
+    + PAIR_FALLBACK,
+    "bool_pair_body_rebind": PAIR_MATCH
+    + LAST_PAIR
+    + PAIR_FALLBACK.replace(
+        "            assert_never",
+        "            left = not left\n            assert_never",
+    ),
     "duplicate_capture": "match [1, 2]:\n    case [value, value]:\n        pass\n",
     "duplicate_as_capture": "match 1:\n    case value as value:\n        pass\n",
     "duplicate_mapping_rest": 'match {"key": 1}:\n    case {"key": value, **value}:\n        pass\n',
