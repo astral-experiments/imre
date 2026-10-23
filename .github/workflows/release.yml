@@ -87,11 +87,13 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ fromJson(needs.plan.outputs.val).announcement_tag }}
           RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_CHECKSUMS: ${{ join(fromJson(needs.plan.outputs.val).artifacts.*.checksum, ' ') }}
           PRERELEASE_FLAG: ${{ fromJson(needs.plan.outputs.val).announcement_is_prerelease && '--prerelease' || '' }}
           ANNOUNCEMENT_TITLE: ${{ fromJson(needs.plan.outputs.val).announcement_title }}
           ANNOUNCEMENT_BODY: ${{ fromJson(needs.plan.outputs.val).announcement_github_body }}
         run: |
           printf '%s\n' "$ANNOUNCEMENT_BODY" > "$RUNNER_TEMP/notes.txt"
-          (cd artifacts && sha256sum --check --strict -- *.sha256)
+          read -ra checksums <<< "$RELEASE_CHECKSUMS"
+          (cd artifacts && sha256sum --check --strict -- "${checksums[@]}")
           gh release create "$RELEASE_TAG" --target "$RELEASE_COMMIT" ${PRERELEASE_FLAG:+"$PRERELEASE_FLAG"} \
             --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
