@@ -2,6 +2,23 @@
 
 An ahead-of-time compiler for typed Python, written in Rust.
 
+```python
+# hello.py
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+
+
+print(greet("world"))
+```
+
+On 64-bit Linux, build and run the executable.
+
+```console
+$ relar build hello.py
+$ ./hello
+Hello, world!
+```
+
 > [!WARNING]
 > This README includes human edits; all code changes, PR summaries, and additional
 > documentation were authored entirely by GPT-6 Astra in [Codex](https://openai.com/codex/).
@@ -71,16 +88,6 @@ with Relar and CPython, and comparing it with a Rust implementation:
 | --- | ---: | ---: | ---: | ---: |
 | Repeated requests (64 products in stock) | 77.66 | 26.69 | 23.34 | 2.91× |
 | Distinct requests (16,384 products in stock) | 112.35 | 52.24 | 43.05 | 2.15× |
-
-## Developer tools
-
-The [memory-report comparator](examples/memory_report/README.md) compares report files and directories or runs two versions of ty over prepared projects. It can keep the child processes’ transcripts and atomically publish the Markdown report. The [workspace and atomic-output comparison](benchmarks/results/2026-10-21-native-workspaces.md) measures complete runs at 1.00–1.57× Rust’s time, file-only reports at 1.13–1.26×, and repeated report computation at 1.42–1.57× across ordinary and ThinLTO builds.
-
-The [conformance reporter](examples/conformance_report/README.md) reads test groups from a typing checkout, runs both ty executables with timeouts, resolves diagnostic paths, and atomically publishes the Markdown or GitHub report. It compiles Ruff’s `Source`, `Classification`, and `Change` enums and the original `compute_stats` and `collect_diagnostic_entries` functions. Collecting 249 ordered diagnostics from 1,269 groups took 268 µs ordinarily and 215 µs with ThinLTO, or 1.45× and 1.51× the Rust reference’s time. [Collector and full-report benchmarks](benchmarks/results/2026-10-22-collector-ownership.md).
-
-The [Python download catalog](examples/python_catalog/README.md) selects and renders 6,098 downloads from uv’s index of 58,721 release artifacts. It reads the shipped gzip index directly. Across plain and gzip inputs at 1× and 10×, median runs take 1.11–1.22× Rust’s time with peak RSS under 16 MiB. [Timings and allocation profiles](benchmarks/results/2026-10-22-catalog-ownership.md).
-
-The [five-engine comparison](benchmarks/results/2026-10-21-native-tools.md) runs the catalog and conformance reporter against upstream and typed CPython, Codon, and Rust. Complete runs take 1.48–1.84× Rust’s time ordinarily and 1.33–1.77× with ThinLTO. Repeated computation also stays within 2× in both modes.
 
 ## Installation
 
