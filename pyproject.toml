@@ -1,4 +1,5 @@
 [dependency-groups]
+dev = ["astral-dev-toolchain-cargo-dist==0.32.0"]
 release = ["rooster==0.1.1"]
 
 [tool.uv.dependency-groups]
@@ -9,7 +10,7 @@ changelog-contributors = false
 major-labels = []
 minor-labels = ["breaking"]
 ignore-labels = ["internal", "internal:ci", "internal:testing", "internal:automations"]
-version-files = ["crates/relar-compiler/Cargo.toml", "crates/relar-runtime/Cargo.toml"]
+version-files = [{ path = "Cargo.toml", field = "workspace.package.version" }]
 version-format = "cargo"
 
 [tool.rooster.section-labels]

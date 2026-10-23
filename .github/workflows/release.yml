@@ -1,144 +1,97 @@
+# Adapted from astral-sh/uv's cargo-dist release workflow.
+# Copyright 2022-2024, axodotdev
+# SPDX-License-Identifier: MIT or Apache-2.0
 name: Release
+permissions: {}
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/release.yml
-      - scripts/*release*
-      - CHANGELOG.md
-      - Cargo.toml
-      - Cargo.lock
-      - crates/*/Cargo.toml
-      - dist-workspace.toml
-      - crates/*/dist.toml
-      - pyproject.toml
-      - rust-toolchain.toml
-      - LICENSE-*
-      - examples/conformance_report/upstream/LICENSE
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Bare Cargo version to publish from main, or dry-run'
-        type: string
-        default: dry-run
+      dry-run:
+        description: Build release artifacts without publishing
         required: true
+        default: false
+        type: boolean
 
-permissions:
-  contents: read
+env:
+  ACTIONS_CACHE_MODE: none
+  UV_LOCKED: 1
 
 jobs:
   plan:
+    if: github.repository == 'astral-sh/relar' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - id: version
-        env:
-          RELEASE_TAG: ${{ inputs.tag || 'dry-run' }}
-        run: |
-          if [[ "$RELEASE_TAG" != dry-run && ( "$GITHUB_REPOSITORY" != astral-sh/relar || "$GITHUB_REF" != refs/heads/main ) ]]; then
-            echo 'Publish releases from astral-sh/relar on main.' >&2
-            exit 1
-          fi
-          version=$(python3 scripts/release-version.py -- "$RELEASE_TAG")
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [[ "$RELEASE_TAG" != dry-run ]]; then
-            python3 scripts/release-version.py --notes -- "$RELEASE_TAG" > /dev/null
-          fi
-
-  package:
-    name: Package ${{ matrix.target }}
-    needs: plan
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-24.04
-            dist_sha256: cd355dab0b4c02fb59038fef87655550021d07f45f1d82f947a34ef98560abb8
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04-arm
-            dist_sha256: 382cc29ff91ef12a5bf78ad8ee1804661d24e2fbe64b1bdedd6078723b677ae5
-    env:
-      TARGET: ${{ matrix.target }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Install Clang 18
-        run: sudo apt-get update && sudo apt-get install -y clang-18
-      - name: Install cargo-dist 0.31.0
-        env:
-          DIST_SHA256: ${{ matrix.dist_sha256 }}
-        run: |
-          file="cargo-dist-$TARGET.tar.xz"
-          curl --proto '=https' --tlsv1.2 -LsSf "https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/$file" -o "$RUNNER_TEMP/$file"
-          printf '%s  %s\n' "$DIST_SHA256" "$RUNNER_TEMP/$file" | sha256sum --check --status
-          tar -xJf "$RUNNER_TEMP/$file" -C "$RUNNER_TEMP" "cargo-dist-$TARGET/dist"
-          install -m 755 "$RUNNER_TEMP/cargo-dist-$TARGET/dist" "$HOME/.cargo/bin/dist"
-      - name: Test the runtime on the release architecture
-        run: cargo test --profile dist --locked --target "$TARGET" -p relar-runtime
-      - name: Package and run a script from the extracted archive
-        run: bash scripts/package-release.sh "$TARGET" dist
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: relar-${{ matrix.target }}
-          path: |
-            dist/relar-${{ matrix.target }}.tar.gz
-            dist/relar-${{ matrix.target }}.tar.gz.sha256
-          compression-level: 0
-          if-no-files-found: error
-
-  release:
-    needs: [plan, package]
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'astral-sh/relar' && github.ref == 'refs/heads/main' && inputs.tag == needs.plan.outputs.version
-    runs-on: ubuntu-24.04
-    concurrency: relar-publish
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      val: ${{ steps.plan.outputs.manifest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          pattern: relar-*-unknown-linux-gnu
-          path: dist
-          merge-multiple: true
-      - name: Publish verified archives to GitHub Releases
-        shell: bash
+          version: "0.13.5"
+          checksum: f68d291c75783122dad58ab77def0e13f3233f358731db5d6d7e8715603b928f
+          enable-cache: false
+      - id: plan
+        run: |
+          tag=$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "relar-compiler").version')
+          uv run --only-dev --python 3.12 dist plan --tag="$tag" --output-format=json > plan-dist-manifest.json
+          echo "manifest=$(jq -c . plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
+      - name: Check release tag
+        if: ${{ !inputs.dry-run }}
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.plan.outputs.version }}
+          RELEASE_TAG: ${{ fromJson(steps.plan.outputs.manifest).announcement_tag }}
         run: |
-          if git show-ref --verify --quiet "refs/tags/$TAG"; then
-            test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$GITHUB_SHA"
+          jq -e '.announcement_changelog | type == "string" and length > 0' plan-dist-manifest.json > /dev/null || {
+            echo "::error::Merge the Prepare release PR for $RELEASE_TAG first"
+            exit 1
+          }
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
           fi
-          python3 scripts/release-version.py --notes -- "$TAG" > "$RUNNER_TEMP/release-notes.md"
-          cd dist
-          assets=()
-          for arch in x86_64 aarch64; do
-            archive="relar-$arch-unknown-linux-gnu.tar.gz"
-            # Bind the sidecar to its expected filename before checking the archive.
-            expected=$(sha256sum --binary "$archive")
-            [[ $(<"$archive.sha256") == "$expected" ]]
-            assets+=("$archive" "$archive.sha256")
-          done
-
-          releases=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].tag_name')
-          if grep -Fxq -- "$TAG" <<< "$releases"; then
-            echo "Release $TAG already exists." >&2
+          release_exists="$(gh api graphql \
+            -f owner="$GITHUB_REPOSITORY_OWNER" -f name="${GITHUB_REPOSITORY#*/}" -f tag="$RELEASE_TAG" \
+            -f query='query($owner: String!, $name: String!, $tag: String!) { repository(owner: $owner, name: $name) { release(tagName: $tag) { id } } }' \
+            --jq '.data.repository | if . == null then error("Repository not found") else .release != null end')"
+          if [[ "$release_exists" != false ]]; then
+            echo "::error::Release $RELEASE_TAG already exists"
             exit 1
           fi
-          flags=()
-          if [[ ${TAG%%+*} == *-* ]]; then
-            flags+=(--prerelease --latest=false)
-          fi
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "Relar $TAG" --notes-file "$RUNNER_TEMP/release-notes.md" "${flags[@]}" "${assets[@]}"
+
+  build-release-artifacts:
+    needs: plan
+    uses: $/.github/workflows/build-release-binaries.yml
+    permissions:
+      contents: read
+
+  publish-github:
+    needs: [plan, build-release-artifacts]
+    if: ${{ !inputs.dry-run }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download GitHub artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: build-github-archives-*
+          path: artifacts
+          merge-multiple: true
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ fromJson(needs.plan.outputs.val).announcement_tag }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          PRERELEASE_FLAG: ${{ fromJson(needs.plan.outputs.val).announcement_is_prerelease && '--prerelease' || '' }}
+          ANNOUNCEMENT_TITLE: ${{ fromJson(needs.plan.outputs.val).announcement_title }}
+          ANNOUNCEMENT_BODY: ${{ fromJson(needs.plan.outputs.val).announcement_github_body }}
+        run: |
+          printf '%s\n' "$ANNOUNCEMENT_BODY" > "$RUNNER_TEMP/notes.txt"
+          (cd artifacts && sha256sum --check --strict -- *.sha256)
+          gh release create "$RELEASE_TAG" --target "$RELEASE_COMMIT" ${PRERELEASE_FLAG:+"$PRERELEASE_FLAG"} \
+            --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*

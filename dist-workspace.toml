@@ -3,16 +3,12 @@ members = ["cargo:."]
 packages = ["relar"]
 
 [dist]
-cargo-dist-version = "0.31.0"
+cargo-dist-version = "0.32.0"
+hosting = ["github"]
 targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
 unix-archive = ".tar.gz"
 checksum = "sha256"
 source-tarball = false
 auto-includes = false
-include = [
-    "target/release-assets/LICENSE-APACHE",
-    "target/release-assets/LICENSE-MIT",
-    "target/release-assets/LICENSE-Ruff",
-    "target/release-assets/LICENSE-typeshed",
-    "target/release-assets/librelar_runtime.a",
-]
+build-local-artifacts = false
+local-artifacts-jobs = ["./build-release-binaries"]

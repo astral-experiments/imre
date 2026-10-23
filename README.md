@@ -112,8 +112,6 @@ cp target/release/relar target/release/librelar_runtime.a ~/.cargo/bin/
 
 Make sure `~/.cargo/bin` is on your `PATH`.
 
-Maintainers use the **Prepare release** and **Release** GitHub Actions workflows to prepare the changelog and publish the archives. [Release guide](docs/releasing.md).
-
 ## Getting started
 
 Given `totals.py`:
@@ -145,6 +143,12 @@ Arguments after `--` go into the script’s `sys.argv`. Use `build` to keep the 
 relar build totals.py
 ./totals 10 20 12
 ```
+
+## Releasing
+
+Run **Prepare release** on `main` to open the version and changelog PR. Approve its CI and merge it.
+Then run **Release** on `main` to publish the two Linux archives and their checksums to GitHub Releases.
+Select **dry-run** to build the archives without publishing.
 
 ## License
 
