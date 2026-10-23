@@ -22,6 +22,19 @@ pub(super) struct Prepared {
     pub clear: Vec<usize>,
 }
 
+impl Prepared {
+    /// Pulls and binds one owned item, or exits the source loop on exhaustion.
+    fn bind_next(next: &mut Vec<Statement>, ready: Expr, value: usize, bindings: Vec<Statement>) {
+        next.push(Statement::If(
+            not(ready),
+            vec![Statement::Exhaust],
+            Vec::new(),
+        ));
+        next.extend(bindings);
+        next.push(Statement::Clear(value));
+    }
+}
+
 /// These constructors have observable acquisition timing and cannot be passed
 /// into an eager comprehension helper as ordinary captured container values.
 pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Expr) -> bool {
@@ -116,7 +129,7 @@ impl Checker<'_> {
     ) -> Result<Option<Iteration>, String> {
         if let ast::Expr::Generator(generator) = expression {
             return Ok(Some(Iteration::Prepared(
-                self.generator_input(generator, element)?,
+                self.generator_input(generator, element, None)?,
             )));
         }
         let ast::Expr::Call(call) = expression else {
@@ -1121,10 +1134,11 @@ impl Checker<'_> {
     /// factor = 1
     /// sum((factor * x for x in [1, 2]), (factor := 2))  # 8
     /// ```
-    fn generator_input(
+    pub(super) fn generator_input(
         &mut self,
         generator: &ast::ExprGenerator,
         element: Option<Type>,
+        zip_sum: Option<&mut Option<zip_sums::Sum>>,
     ) -> Result<Prepared, String> {
         if generator.generators.iter().any(|clause| clause.is_async) {
             return Err(error(
@@ -1155,6 +1169,9 @@ impl Checker<'_> {
                 "assignment expressions are forbidden in comprehension targets",
             ));
         }
+        let lists = zip_sum
+            .as_ref()
+            .and_then(|_| zip_sums::lists(self, generator));
         let first = self.expansion_input(&generator.generators[0].iter, None)?;
         let mut first = self.prepare_iteration(first, generator, false)?;
         let before = self.local_state();
@@ -1232,6 +1249,32 @@ impl Checker<'_> {
             self.expr(&generator.elt)?
         };
         let value = self.hidden(yielded.ty);
+        if let (Some(out), Some((lists, targets))) = (zip_sum, lists)
+            && yielded.ty == Type::Int
+        {
+            let items = targets.map(|name| self.names[name]);
+            let zip = &inputs[0];
+            let mut next = zip.next.clone();
+            Prepared::bind_next(
+                &mut next,
+                self.local(zip.ready),
+                zip.value,
+                bindings[0].clone(),
+            );
+            *out = Some(zip_sums::Sum {
+                lists,
+                items,
+                term: yielded.clone(),
+                begin: zip.evaluate.clone(),
+                next,
+                clear: zip
+                    .clear
+                    .iter()
+                    .copied()
+                    .chain(first_private..value)
+                    .collect(),
+            });
+        }
         let ready = self.hidden(Type::Bool);
         let done = self.hidden(Type::Bool);
         let depth = self.hidden(Type::Int);
@@ -1583,13 +1626,7 @@ impl Checker<'_> {
             }
         }
         let mut body = input.next;
-        body.push(Statement::If(
-            not(self.local(input.ready)),
-            vec![Statement::Exhaust],
-            Vec::new(),
-        ));
-        body.extend(binding);
-        body.push(Statement::Clear(input.value));
+        Prepared::bind_next(&mut body, self.local(input.ready), input.value, binding);
         self.loop_breaks.push(Vec::new());
         body.extend(lower_body(self)?);
         let breaks = self.loop_breaks.pop().unwrap();

@@ -40,6 +40,7 @@ mod text;
 mod truthiness;
 mod unions;
 mod unpacking;
+mod zip_sums;
 use assignments::LocalState;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
@@ -377,6 +378,7 @@ pub(crate) fn lower_with_owners(
         );
     }
     let mut functions = Vec::new();
+    let mut zip_sums = Vec::new();
     let mut owners = Vec::new();
     let mut call_graph = Vec::new();
     let mut class_reads = Vec::new();
@@ -446,10 +448,14 @@ pub(crate) fn lower_with_owners(
                 },
                 checker.calls,
                 checker.class_reads.into_inner(),
+                checker.zip_sums,
             ))
         })();
-        let (function, calls, reads) =
+        let (function, calls, reads, sums) =
             result.map_err(|error| format!("{}:{error}", module.path.display()))?;
+        if sums.len() >= 2 {
+            zip_sums.push((functions.len(), sums));
+        }
         owners.push(*module_id);
         functions.push(function);
         call_graph.push(calls);
@@ -569,6 +575,9 @@ pub(crate) fn lower_with_owners(
         )?;
     }
     let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
+    for (id, sums) in zip_sums {
+        zip_sums::fuse(&mut functions, id, &sums);
+    }
     Ok((
         ir::Module {
             types,
@@ -1097,6 +1106,7 @@ enum Iteration {
 }
 
 struct Checker<'a> {
+    zip_sums: HashMap<usize, zip_sums::Sum>,
     source: &'a str,
     graph: &'a SourceGraph,
     module: ModuleId,
@@ -1140,6 +1150,7 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            zip_sums: HashMap::new(),
             source: &graph.modules[module].source,
             graph,
             module,

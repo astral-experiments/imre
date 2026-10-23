@@ -91,7 +91,18 @@ impl Checker<'_> {
             return Ok(add_start(subtotal, start));
         }
         let generator = matches!(source, ast::Expr::Generator(_));
-        let (input, convert) = self.consumer_input(source, (!generator).then_some(Type::Int))?;
+        let mut zip_sum = None;
+        let (input, convert) = if let ast::Expr::Generator(generator) = source
+            && call.arguments.args.len() == 1
+            && call.arguments.keywords.is_empty()
+        {
+            (
+                Iteration::Prepared(self.generator_input(generator, None, Some(&mut zip_sum))?),
+                false,
+            )
+        } else {
+            self.consumer_input(source, (!generator).then_some(Type::Int))?
+        };
         let start = self.sum_start(call)?;
         if !convert
             && let Iteration::Container {
@@ -120,6 +131,9 @@ impl Checker<'_> {
             });
         }
         let result = self.hidden(Type::Int);
+        if let Some(sum) = zip_sum {
+            self.zip_sums.insert(result, sum);
+        }
         let mut body = Vec::new();
         let mut clear = vec![result];
         let fixed_tuple = matches!(
