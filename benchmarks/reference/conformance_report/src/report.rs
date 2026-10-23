@@ -353,6 +353,37 @@ fn outcome(difference: f64, greater_is_better: bool, neutral: bool) -> &'static 
     }
 }
 
+/// Ruff dedents after inserting the revision. Only the header can contain
+/// interpolated newlines; every nonblank source line starts with `indent` spaces.
+fn summary_template(header: &str, body: &str, indent: usize) -> String {
+    let Some((first, continuation)) = header.split_once('\n') else {
+        return format!("\n## {header}\n{body}");
+    };
+    let blank = |line: &str| line.chars().all(crate::parse::python_whitespace);
+    let lines = continuation.split('\n');
+    let margin = lines
+        .clone()
+        .filter(|line| !blank(line))
+        .map(|line| line.len() - line.trim_start_matches(' ').len())
+        .fold(indent, usize::min);
+    let padding = " ".repeat(indent - margin);
+    let mut result = format!("\n{padding}## {first}");
+    for line in lines {
+        result.push('\n');
+        if !blank(line) {
+            result.push_str(&line[margin..]);
+        }
+    }
+    for line in body.split('\n') {
+        result.push('\n');
+        if !line.is_empty() {
+            result.push_str(&padding);
+            result.push_str(line);
+        }
+    }
+    result
+}
+
 pub fn summary(cases: &[TestCase], files: &[FileStats], base: &str, force: bool) -> Result<String> {
     let old = compute_stats(cases, Side::Old);
     let new = compute_stats(cases, Side::New);
@@ -376,8 +407,12 @@ pub fn summary(cases: &[TestCase], files: &[FileStats], base: &str, force: bool)
     );
     let base_header = format!("[Typing conformance results]({base})");
     if !force && cases.iter().all(|case| case.change() == Change::Unchanged) {
-        return Ok(format!(
-            "\n## {base_header}\n\n### No changes detected ✅\n\n<details>\n<summary>Current numbers</summary>\n\n<br>\n{paragraph}\n\n</details>\n"
+        return Ok(summary_template(
+            &base_header,
+            &format!(
+                "\n### No changes detected ✅\n\n<details>\n<summary>Current numbers</summary>\n\n<br>\n{paragraph}\n\n</details>\n"
+            ),
+            12,
         ));
     }
     let improved = (precision_change > 0.0 && recall_change >= 0.0 && passing_change >= 0)
@@ -395,7 +430,6 @@ pub fn summary(cases: &[TestCase], files: &[FileStats], base: &str, force: bool)
     };
     let total_files = files.len();
     let lines = vec![
-        format!("\n## {header}"),
         String::new(),
         paragraph,
         String::new(),
@@ -457,5 +491,5 @@ pub fn summary(cases: &[TestCase], files: &[FileStats], base: &str, force: bool)
         String::new(),
         String::new(),
     ];
-    Ok(lines.join("\n"))
+    Ok(summary_template(&header, &lines.join("\n"), 8))
 }

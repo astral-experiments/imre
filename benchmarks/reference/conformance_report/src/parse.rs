@@ -106,7 +106,7 @@ pub fn read_inputs(manifest_file: &str, old_file: &str, new_file: &str) -> Resul
     })
 }
 
-fn python_whitespace(character: char) -> bool {
+pub(super) fn python_whitespace(character: char) -> bool {
     character.is_whitespace() || matches!(character, '\u{1c}'..='\u{1f}')
 }
 
