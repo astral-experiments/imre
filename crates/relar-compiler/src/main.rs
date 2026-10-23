@@ -156,6 +156,13 @@ fn run() -> Result<ExitCode, String> {
     }
     let mut progress = BuildOutput::new(verbosity);
     let label = if execute { &source_path } else { &output };
+    let bundled = clang
+        .is_none()
+        .then(build_cache::NativeToolchain::bundled)
+        .flatten();
+    let bundled_native = bundled
+        .as_ref()
+        .filter(|_| target.as_deref().is_none_or(native_linux_gnu_target));
     let native = if clang.is_none()
         && target.is_none()
         && lto_linker.is_none()
@@ -163,12 +170,22 @@ fn run() -> Result<ExitCode, String> {
         && !options.address_sanitizer
         && link.args.is_empty()
     {
-        build_cache::native_toolchain(&runtime)
+        build_cache::native_toolchain(&runtime, bundled_native)
     } else {
         None
     };
     let split = native.is_some() && !whole_program;
-    let native_lld = native.as_ref().and_then(|tools| tools.lld.as_deref());
+    let native_lld = if lto_linker.is_some()
+        || link.args.iter().any(|arg| {
+            arg.as_encoded_bytes().starts_with(b"-fuse-ld=")
+                || arg.as_encoded_bytes().starts_with(b"--ld-path=")
+        }) {
+        None
+    } else {
+        bundled_native
+            .or(native.as_ref())
+            .and_then(|tools| tools.lld.as_deref())
+    };
     let cache = native.as_ref().filter(|_| !no_cache).and_then(|native| {
         build_cache::Cache::open(
             &source_path,
@@ -194,13 +211,14 @@ fn run() -> Result<ExitCode, String> {
                 &output,
                 None,
                 native_lld,
+                bundled.as_ref().map(|tools| tools.clang.as_path()),
             )?;
             build_cache::materialize(&file, &output).map_err(|e| e.to_string())?;
             build_cache::trace("hit");
             progress.cached(label);
             if execute {
                 progress.running(&source_path);
-                return run_program(&output, &source_path, args, || drop(run_directory));
+                return run_program(&output, &source_path, args);
             }
             return Ok(ExitCode::SUCCESS);
         }
@@ -226,6 +244,7 @@ fn run() -> Result<ExitCode, String> {
         &output,
         llvm_path.as_deref(),
         lto_linker.as_deref().or(native_lld),
+        bundled.as_ref().map(|tools| tools.clang.as_path()),
     )?;
     let stage = cache.as_ref().and_then(|c| c.stage());
     let staged_output = stage.as_ref().map(|s| s.path().join("program"));
@@ -256,10 +275,9 @@ fn run() -> Result<ExitCode, String> {
                 .expect("unit compilation has a staging directory");
             let objects = build_cache::compile_objects(
                 &units,
-                &native
+                native
                     .as_ref()
-                    .expect("native toolchain for module objects")
-                    .clang,
+                    .expect("native toolchain for module objects"),
                 &optimization,
                 dir.path(),
                 stage.as_ref().and(cache.as_ref()),
@@ -269,7 +287,13 @@ fn run() -> Result<ExitCode, String> {
             objects
         }
     };
-    let mut linker = Command::new(clang.as_deref().unwrap_or(OsStr::new("clang-18")));
+    let mut linker = match &bundled {
+        Some(tools) => tools.driver(),
+        None => Command::new(clang.as_deref().unwrap_or(OsStr::new("clang-18"))),
+    };
+    if let Some(tools) = bundled_native {
+        tools.native_link_paths(&mut linker);
+    }
     if let Some(lld) = native_lld {
         let mut argument = OsString::from("--ld-path=");
         argument.push(lld);
@@ -344,7 +368,9 @@ fn run() -> Result<ExitCode, String> {
         driver.status()
     };
     let status = match invoke(&mut linker) {
-        Err(error) if clang.is_none() && error.kind() == ErrorKind::NotFound => {
+        Err(error)
+            if clang.is_none() && bundled.is_none() && error.kind() == ErrorKind::NotFound =>
+        {
             let mut fallback = Command::new("clang");
             invoke(fallback.args(linker.get_args())).map_err(|error| {
                 format!(
@@ -374,12 +400,10 @@ fn run() -> Result<ExitCode, String> {
     progress.finished(label);
     if execute {
         progress.running(&source_path);
-        return run_program(&output, &source_path, args, || {
-            drop(temporary);
-            drop(scratch);
-            drop(stage);
-            drop(run_directory);
-        });
+        drop(temporary);
+        drop(scratch);
+        drop(stage);
+        return run_program(&output, &source_path, args);
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -390,6 +414,7 @@ fn validate_paths<'a>(
     output: &'a Path,
     llvm_path: Option<&'a Path>,
     linker: Option<&'a Path>,
+    clang: Option<&'a Path>,
 ) -> Result<(), String> {
     let mut paths = sources.collect::<Vec<_>>();
     paths.extend([runtime, output]);
@@ -399,6 +424,7 @@ fn validate_paths<'a>(
     if let Some(path) = linker {
         paths.push(path);
     }
+    paths.extend(clang);
     let identities = paths
         .iter()
         .map(|path| identity(path))
@@ -421,17 +447,16 @@ fn run_program(
     output: &Path,
     source: &Path,
     args: impl Iterator<Item = OsString>,
-    cleanup: impl FnOnce(),
 ) -> Result<ExitCode, String> {
     let mut program = Command::new(output);
     #[cfg(unix)]
     program.arg0(source);
-    let mut child = program
+    // An ELF interpreter may reopen the executable after spawn returns.
+    program
         .args(args)
-        .spawn()
-        .map_err(|e| format!("Could not run compiled {}: {e}", source.display()))?;
-    cleanup();
-    Ok(program_exit_code(child.wait().map_err(|e| e.to_string())?))
+        .status()
+        .map(program_exit_code)
+        .map_err(|e| format!("Could not run compiled {}: {e}", source.display()))
 }
 
 fn program_exit_code(status: ExitStatus) -> ExitCode {
@@ -476,6 +501,18 @@ fn runtime_archive(
     Ok(std::env::current_exe()
         .map_err(|error| error.to_string())?
         .with_file_name(filename))
+}
+
+/// The release's startup objects and libraries match only its native GNU/Linux ABI.
+fn native_linux_gnu_target(target: &OsStr) -> bool {
+    let Some((arch, rest)) = target.to_str().and_then(|s| s.split_once('-')) else {
+        return false;
+    };
+    arch == std::env::consts::ARCH
+        && (rest == "linux-gnu"
+            || rest
+                .split_once('-')
+                .is_some_and(|(_, os)| os == "linux-gnu"))
 }
 
 fn linux_target(target: &OsStr) -> bool {
@@ -552,6 +589,20 @@ fn same_file(left: &Path, right: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_link_inputs_match_the_native_arch_and_abi() {
+        let arch = std::env::consts::ARCH;
+        for (target, expected) in [
+            (format!("{arch}-linux-gnu"), true),
+            (format!("{arch}-unknown-linux-gnu"), true),
+            (format!("{arch}-unknown-linux-musl"), false),
+            (format!("{arch}-linux-gnux32"), false),
+            ("other-unknown-linux-gnu".to_owned(), false),
+        ] {
+            assert_eq!(native_linux_gnu_target(OsStr::new(&target)), expected);
+        }
+    }
 
     #[cfg(unix)]
     #[test]

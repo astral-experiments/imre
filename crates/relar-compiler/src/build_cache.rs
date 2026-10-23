@@ -1,5 +1,5 @@
-//! Private native executable and module object cache for the system Clang 18 toolchain.
-use std::collections::BTreeSet;
+//! Private native executable and module object cache for supported Clang 18 toolchains.
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
@@ -21,6 +21,14 @@ struct Stamp {
 }
 
 impl Stamp {
+    fn optional(path: &Path) -> Option<Option<Self>> {
+        if path.try_exists().ok()? {
+            Some(Some(Self::read(path)?))
+        } else {
+            Some(None)
+        }
+    }
+
     fn read(path: &Path) -> Option<Self> {
         #[cfg(unix)]
         use std::os::unix::fs::MetadataExt;
@@ -56,12 +64,74 @@ pub struct Cache {
 pub struct NativeToolchain {
     pub clang: PathBuf,
     pub lld: Option<PathBuf>,
+    bundle: Option<PathBuf>,
 }
 
 impl NativeToolchain {
+    pub fn bundled() -> Option<Self> {
+        if !cfg!(target_os = "linux") {
+            return None;
+        }
+        let root = env::current_exe().ok()?.with_file_name("relar-toolchain");
+        let clang = root.join("bin/clang");
+        clang.is_file().then(|| Self {
+            clang,
+            lld: Some(root.join("bin/ld.lld")),
+            bundle: Some(root),
+        })
+    }
+
+    pub fn driver(&self) -> Command {
+        let mut command = Command::new(&self.clang);
+        if self.bundle.is_some() {
+            command.arg("--no-default-config");
+        }
+        command
+    }
+
+    pub fn native_link_paths(&self, command: &mut Command) {
+        if let Some(root) = &self.bundle {
+            let link = root.join("link");
+            command.arg("-B").arg(&link).arg("-L").arg(link);
+        }
+    }
+
     fn linker(&self) -> &Path {
         self.lld.as_deref().unwrap_or(Path::new("/usr/bin/ld"))
     }
+}
+
+/// On hosts without distro metadata, ask the ELF interpreter which libraries
+/// the bundled tools actually load. The loader exits before entering the tool.
+fn stamp_loaded_libraries(tool: &Path, stamps: &mut BTreeMap<PathBuf, Stamp>) -> Option<()> {
+    let trace = Command::new(tool)
+        .env("LD_TRACE_LOADED_OBJECTS", "1")
+        .output()
+        .ok()?;
+    if !trace.status.success() {
+        return None;
+    }
+    let mut saw_interpreter = false;
+    for line in std::str::from_utf8(&trace.stdout).ok()?.lines() {
+        let line = line.trim_start();
+        if line.starts_with("linux-vdso.so.") {
+            continue;
+        }
+        let (name, _) = line.rsplit_once(" (0x")?;
+        let path = match name.split_once(" => ") {
+            Some((_, path)) => Path::new(path),
+            None => {
+                saw_interpreter = true;
+                Path::new(name)
+            }
+        };
+        if !path.is_absolute() {
+            return None;
+        }
+        let stamp = Stamp::read(path)?;
+        stamps.insert(stamp.resolved.clone(), stamp);
+    }
+    saw_interpreter.then_some(())
 }
 
 pub fn trace_enabled() -> bool {
@@ -148,7 +218,7 @@ impl ObjectEntry {
 
 pub fn compile_objects(
     units: &[CodegenUnit],
-    clang: &Path,
+    toolchain: &NativeToolchain,
     opt: &OsStr,
     stage: &Path,
     cache: Option<&Cache>,
@@ -187,7 +257,8 @@ pub fn compile_objects(
         }
         if !hit {
             fs::write(&ir_path, &unit.llvm_ir).map_err(|e| e.to_string())?;
-            let status = Command::new(clang)
+            let status = toolchain
+                .driver()
                 .current_dir(stage)
                 .arg(format!("-O{}", opt.to_string_lossy()))
                 .args([
@@ -230,8 +301,13 @@ pub fn materialize(from: &Path, output: &Path) -> io::Result<()> {
 }
 
 /// Decide native codegen independently of whether the user permits cache writes.
-pub fn native_toolchain(runtime: &Path) -> Option<NativeToolchain> {
-    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) || !ordinary_archive(runtime) {
+pub fn native_toolchain(
+    runtime: &Path,
+    bundled: Option<&NativeToolchain>,
+) -> Option<NativeToolchain> {
+    if !ordinary_archive(runtime)
+        || (!cfg!(all(target_os = "linux", target_arch = "x86_64")) && bundled.is_none())
+    {
         return None;
     }
     // Custom search paths, injected Clang flags, and user configs may introduce
@@ -255,6 +331,9 @@ pub fn native_toolchain(runtime: &Path) -> Option<NativeToolchain> {
     }) {
         return None;
     }
+    if let Some(bundled) = bundled {
+        return Some(bundled.clone());
+    }
     let path = env::var_os("PATH")?;
     let clang = env::split_paths(&path)
         .map(|p| p.join("clang-18"))
@@ -275,8 +354,7 @@ pub fn native_toolchain(runtime: &Path) -> Option<NativeToolchain> {
         return None;
     }
     let compiler = env::current_exe().ok()?;
-    // The release archive installs its private ELF linker beside the compiler.
-    // Source builds can use the matching distribution package instead.
+    // Also support a standalone linker beside Relar, as in earlier releases.
     let lld = [
         compiler.with_file_name("relar-ld.lld"),
         PathBuf::from("/usr/bin/ld.lld-18"),
@@ -286,6 +364,7 @@ pub fn native_toolchain(runtime: &Path) -> Option<NativeToolchain> {
     Some(NativeToolchain {
         clang: PathBuf::from("/usr/bin/clang-18"),
         lld,
+        bundle: None,
     })
 }
 
@@ -305,6 +384,26 @@ impl Cache {
             None => None,
         };
         let runtime = Stamp::read(runtime)?;
+        let dpkg = Stamp::optional(Path::new("/var/lib/dpkg/status"))?;
+        let loader_cache = Stamp::optional(Path::new("/etc/ld.so.cache"))?;
+        // Updating Clang's private shared libraries can change native code even
+        // if the driver executable and the host package database stay unchanged.
+        let mut compiler_libraries = BTreeMap::new();
+        if let Some(root) = &toolchain.bundle {
+            for library in fs::read_dir(root.join("lib")).ok()? {
+                let library = library.ok()?.path();
+                if library.is_file() {
+                    let stamp = Stamp::read(&library)?;
+                    compiler_libraries.insert(library, stamp);
+                }
+            }
+            if dpkg.is_none() || loader_cache.is_none() {
+                stamp_loaded_libraries(&toolchain.clang, &mut compiler_libraries)?;
+                stamp_loaded_libraries(toolchain.linker(), &mut compiler_libraries)?;
+            }
+        } else if dpkg.is_none() || loader_cache.is_none() {
+            return None;
+        }
         let recipe = serde_json::to_vec(&(
             3,
             module_objects,
@@ -315,8 +414,9 @@ impl Cache {
             Stamp::read(&env::current_exe().ok()?)?,
             &runtime,
             Stamp::read(&toolchain.clang)?,
-            Stamp::read(Path::new("/var/lib/dpkg/status"))?,
-            Stamp::read(Path::new("/etc/ld.so.cache"))?,
+            compiler_libraries,
+            dpkg,
+            loader_cache,
         ))
         .ok()?;
         let base = env::var_os("RELAR_CACHE_DIR")
@@ -421,6 +521,7 @@ impl Cache {
         // LLD's Make depfile normalizes POSIX backslashes into separators.
         // Its object trace preserves those names, including archive members.
         let lld = self.toolchain.lld.is_some();
+        let bundled_link_dir = self.toolchain.bundle.as_ref().map(|root| root.join("link"));
         let cwd = env::current_dir().ok()?;
         if lld
             && (cwd.as_os_str().as_encoded_bytes().contains(&b'\\')
@@ -453,13 +554,18 @@ impl Cache {
             // custom script can introduce a dependency whose name was normalized.
             if lld {
                 let resolved = p.canonicalize().ok()?;
-                let distro = |path: &Path| {
-                    ["/usr/lib", "/lib", "/lib64"]
+                let supported = |path: &Path| {
+                    ["/usr/lib", "/usr/lib64", "/lib", "/lib64"]
                         .iter()
                         .any(|dir| path.starts_with(dir))
+                        || bundled_link_dir
+                            .as_ref()
+                            .is_some_and(|dir| path.starts_with(dir))
                 };
                 let cwd_symlink = p.parent() == Some(cwd.as_path()) && p.is_symlink();
-                if resolved != self.runtime && !(distro(&resolved) && (distro(&p) || cwd_symlink)) {
+                if resolved != self.runtime
+                    && !(supported(&resolved) && (supported(&p) || cwd_symlink))
+                {
                     return None;
                 }
             }
@@ -476,10 +582,9 @@ impl Cache {
         let search_dirs = match &self.previous {
             Some(previous) => previous.search_dirs.clone(),
             None => {
-                let search = Command::new(&self.toolchain.clang)
-                    .arg("-print-search-dirs")
-                    .output()
-                    .ok()?;
+                let mut driver = self.toolchain.driver();
+                self.toolchain.native_link_paths(&mut driver);
+                let search = driver.arg("-print-search-dirs").output().ok()?;
                 let search = std::str::from_utf8(&search.stdout).ok()?;
                 let libraries = search
                     .lines()
@@ -488,7 +593,10 @@ impl Cache {
             }
         };
         paths.extend(search_dirs.iter().cloned());
-        paths.insert(PathBuf::from("/usr/lib/gcc/x86_64-linux-gnu"));
+        paths.insert(Path::new("/usr/lib/gcc").join(format!("{}-linux-gnu", env::consts::ARCH)));
+        if let Some(dir) = bundled_link_dir {
+            paths.insert(dir);
+        }
         let output = materialized_output.canonicalize().ok()?;
         let mut native = Vec::with_capacity(paths.len());
         for path in paths {
@@ -517,5 +625,19 @@ impl Cache {
         temp.flush().ok()?;
         temp.persist(&self.manifest).ok()?;
         Some(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_package_metadata_is_distinct_from_present_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        let database = root.path().join("status");
+        assert!(Stamp::optional(&database).unwrap().is_none());
+        fs::write(&database, "").unwrap();
+        assert!(Stamp::optional(&database).unwrap().is_some());
     }
 }

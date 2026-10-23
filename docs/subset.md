@@ -866,16 +866,20 @@ arguments to the compiled program.
 
 ## Incremental builds
 
-`relar build` and `relar run` share a per-user cache on native x86-64 Debian/Ubuntu
-with distribution Clang 18, GNU BFD as the system `ld`, and an ordinary runtime archive. Both commands
+`relar build` and `relar run` share a per-user cache with the bundled native
+Linux toolchain and an ordinary runtime archive. Source builds on x86-64
+Debian and Ubuntu can also use the cache with distribution Clang 18 and GNU
+BFD as the system `ld`. Both commands
 reuse the last executable when its sources, import lookups, build options, compiler,
 runtime, and native link inputs are still current. Program arguments and the output
 path can change between invocations.
 
-For these builds Relar uses the LLD 18 companion shipped in the x86-64 Linux
-release, then `/usr/bin/ld.lld-18` if installed, and otherwise the system GNU
-linker. `--verbose-link` shows the selected driver arguments. Changing linkers
-relinks with the existing module objects.
+The Linux releases use the private Clang and LLD 18 in `relar-toolchain/bin`.
+Relar passes the bundled startup objects and libraries to Clang when linking for
+the host. Executables use the host's glibc. On x86-64 Debian and Ubuntu, a source
+build checks for `/usr/bin/ld.lld-18` and otherwise uses the system GNU linker.
+`--verbose-link` shows the selected driver arguments. Changing linkers relinks
+with the existing module objects.
 
 LLVM's dependency file cannot represent every POSIX filename. When LLD reads an
 object path containing a literal backslash or a custom linker script outside the
