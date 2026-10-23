@@ -615,6 +615,12 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
             | Builtin::FloatFormat { .. }
             | Builtin::JsonDecode(_)
             | Builtin::JsonLoads
+            | Builtin::JsonLoad
+            | Builtin::JsonGet { .. }
+            | Builtin::JsonGetReceiver
+            | Builtin::JsonAdd
+            | Builtin::JsonAddFields(_, _)
+            | Builtin::JsonIsInt
             | Builtin::JsonSelect(_)
             | Builtin::TomlDecode(_)
             | Builtin::JsonEncode(_)

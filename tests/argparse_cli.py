@@ -43,6 +43,23 @@ CASES = {
         ["--items", "a", "--debug", "--locations", ".", "foo//bar"],
         ["--items", "a", "--locations=/foo/./bar"],
     ],
+    "commands": [
+        [],
+        ["--help"],
+        ["unknown"],
+        ["--", "read"],
+        ["--", "--help"],
+        ["read", "--help"],
+        ["write", "--help"],
+        ["--label", "sample", "read"],
+        ["read", "--first", "dir/a", "--second", "dir/b"],
+        ["write"],
+        ["write", "--text", "okay"],
+        ["write", "--text"],
+        ["read", "--text", "a"],
+        ["--other", "write"],
+        ["--other", "write", "--text", "ok", "extra"],
+    ],
     "two": [[], ["--help"], ["--mo=lar"], ["--flag"], ["--paths", "one", "two"]],
 }
 REJECTED = {
@@ -153,8 +170,27 @@ def main():
             )
             if check.returncode == 0:
                 raise AssertionError(statement)
+        # A field unique to one child is accessible only after dispatch.
+        source = Path(directory) / "unchecked_command.py"
+        commands = (FIXTURES / "commands.py").read_text()
+        for wrong in ["print(args.text)", "print(args.first)"]:
+            source.write_text(commands.replace("    print(args.label)", "    " + wrong))
+            checked = subprocess.run([args.compiler, "check", source], capture_output=True)
+            if checked.returncode == 0:
+                raise AssertionError(wrong)
+        source.write_text(commands.replace("    return args\n", "    print(args.text)\n    return args\n"))
+        checked = subprocess.run([args.compiler, "check", source], capture_output=True)
+        if checked.returncode == 0 or b"unknown field" not in checked.stderr:
+            raise AssertionError(checked.stderr)
+        source.write_text(
+            "import argparse\ndef count(args: argparse.Namespace) -> int:\n    return 1\n"
+            "print(count(0))  # ty: ignore[invalid-argument-type]\n"
+        )
+        checked = subprocess.run([args.compiler, "check", source], capture_output=True)
+        if checked.returncode == 0 or b"argparse.Namespace requires" not in checked.stderr:
+            raise AssertionError(checked.stderr)
     print(
-        f"Validated {checks} argparse process comparisons and {len(REJECTED) + 3} compile-time rejections"
+        f"Validated {checks} argparse process comparisons and {len(REJECTED) + 7} compile-time rejections"
     )
 
 

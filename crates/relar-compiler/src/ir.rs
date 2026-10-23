@@ -444,10 +444,25 @@ pub(crate) enum Builtin {
     SplitLines,
     RStrip,
     SysArgv,
-    ParseArgs,
+    /// The child layout descriptors follow the literal subcommand order.
+    ParseArgs(Vec<usize>),
+    /// Retags a namespace after its immutable command field selects a child layout.
+    NamespaceView,
     /// Decodes one string into a checked record, list, or string-key dictionary.
     JsonDecode(Type),
+    JsonLoad,
     JsonLoads,
+    /// A dictionary with a read-only JSON receiver and a literal string key.
+    JsonGet {
+        key: String,
+        empty_list: bool,
+    },
+    JsonAdd,
+    /// Both lookups borrow the same local JSON document and use literal integer defaults.
+    JsonAddFields(String, String),
+    JsonIsInt,
+    /// Bind the JSON object method before an effectful default is evaluated.
+    JsonGetReceiver,
     /// A literal-key path rooted in a readonly JSON owner. The result type selects
     /// an owned view, an exact scalar, or comparison with a supplied string literal.
     JsonSelect(Vec<String>),
@@ -487,6 +502,8 @@ pub(crate) enum Builtin {
     DictAsBase,
     /// Combines the current keys of rooted mappings/sets after both operands run.
     KeyUnion,
+    KeySet,
+    KeyIntersection,
     /// Produces sorted unique string keys from a small union of local dictionaries.
     SortedStringKeys,
     /// Each generated field reads the sorted key (0) or one input dictionary (1-based).
@@ -541,6 +558,7 @@ pub(crate) enum TextOperation {
     Partition,
     Unquote,
     Dedent,
+    ShlexSplit,
 }
 
 /// Native path operations keep their exact result types in the checked IR.
@@ -548,6 +566,7 @@ pub(crate) enum TextOperation {
 pub(crate) enum PathOperation {
     New,
     Join,
+    WithName,
     Text,
     Name,
     Stem,
@@ -576,6 +595,9 @@ pub(crate) enum PathOperation {
 /// Synchronous process operations cannot invoke language callbacks.
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessOperation {
+    Executable,
+    Exit,
+    RunToStderr,
     Run,
     RunTimeout,
     EnvironCopy,

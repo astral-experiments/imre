@@ -86,6 +86,14 @@ def main():
         ok(cli("build"), MISS)
         ok(cli("build", cwd=root), HIT)
         checks.append("Adding, changing, or removing a working-directory linker-script input invalidated the executable")
+        original = project / "source.py"
+        original.write_text("print(__file__)\n")
+        alias = project / "alias.py"
+        alias.symlink_to(original)
+        for spelling in (original, alias, original, alias):
+            result = cli("run", source=spelling)
+            assert result[0] == 0 and result[1] == str(spelling) + "\n", result
+        checks.append("Cached programs preserved the source filename when compiled via a symlink")
         collision = dict(env, RELAR_CACHE_DIR=str(root / "shadow-cache"))
         shadow.symlink_to("placed-program")
         ok(cli("build", output=project / "placed-program", e=collision), ["relar cache miss"])

@@ -3015,7 +3015,10 @@ impl Emitter<'_, '_> {
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
-        if matches!(builtin, Builtin::LiteralStringView | Builtin::DictAsBase) {
+        if matches!(
+            builtin,
+            Builtin::LiteralStringView | Builtin::DictAsBase | Builtin::NamespaceView
+        ) {
             let value = self.expr(&expressions[0]);
             return Value {
                 ty: returns,
@@ -3084,7 +3087,7 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::LiteralStringView | Builtin::DictAsBase => {
+            Builtin::LiteralStringView | Builtin::DictAsBase | Builtin::NamespaceView => {
                 unreachable!("representation-preserving views transfer the operand owner directly")
             }
             Builtin::StringListContains => {
@@ -3148,15 +3151,39 @@ impl Emitter<'_, '_> {
             }
             Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
-            Builtin::JsonLoads => Value {
+            Builtin::JsonLoad | Builtin::JsonLoads => Value {
                 ty: returns,
                 operand: self.checked_instruction(format!(
-                    "call ptr @relar_json_loads(ptr {})",
+                    "call ptr @relar_json_{}(ptr {})",
+                    if matches!(builtin, Builtin::JsonLoad) {
+                        "load"
+                    } else {
+                        "loads"
+                    },
                     args[0].value.operand
                 )),
                 small_integer: false,
             },
             Builtin::JsonSelect(path) => self.json_select(path, returns, &args),
+            Builtin::JsonGet { key, empty_list } => self.json_get(key, *empty_list, returns, &args),
+            Builtin::JsonAdd => {
+                self.call("relar_json_add", returns, &[&args[0].value, &args[1].value])
+            }
+            Builtin::JsonAddFields(a, b) => self.json_add_fields(a, b, &args),
+            Builtin::JsonGetReceiver => {
+                self.call("relar_json_get_receiver", returns, &[&args[0].value])
+            }
+            Builtin::JsonIsInt => {
+                let bit = self.instruction(format!(
+                    "call i32 @relar_json_is_int(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
+                    small_integer: false,
+                }
+            }
             Builtin::TomlKeys => self.call("relar_toml_keys", Type::StringKeys, &[&args[0].value]),
             Builtin::JsonDecode(schema) | Builtin::TomlDecode(schema) => {
                 let format = if matches!(builtin, Builtin::TomlDecode(_)) {
@@ -3231,17 +3258,30 @@ impl Emitter<'_, '_> {
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("relar_input", Type::Str, &[]),
             Builtin::SysArgv => self.call("relar_sys_argv", returns, &[]),
-            Builtin::ParseArgs => {
+            Builtin::ParseArgs(children) => {
                 let Type::Class(class) = returns else {
                     unreachable!()
                 };
                 let [schema, description, argv] = args.as_slice() else {
                     unreachable!()
                 };
+                let child_layouts = if children.is_empty() {
+                    "null".to_owned()
+                } else {
+                    let size = children.len();
+                    let slot = self.instruction(format!("alloca [{size} x ptr]"));
+                    let layouts = children
+                        .iter()
+                        .map(|child| format!("ptr @layout_class_{child}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.line(format!("store [{size} x ptr] [{layouts}], ptr {slot}"));
+                    slot
+                };
                 Value {
                     ty: returns,
                     operand: self.checked_instruction(format!(
-                        "call ptr @relar_argparse_parse(ptr @layout_class_{class}, ptr {}, ptr {}, ptr {})",
+                        "call ptr @relar_argparse_parse(ptr @layout_class_{class}, ptr {child_layouts}, ptr {}, ptr {}, ptr {})",
                         schema.value.operand, description.value.operand, argv.value.operand,
                     )),
                     small_integer: false,
@@ -3660,11 +3700,18 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::KeyUnion => self.call(
-                "relar_key_union",
-                returns,
-                &[&args[0].value, &args[1].value],
-            ),
+            Builtin::KeyUnion | Builtin::KeySet | Builtin::KeyIntersection => {
+                let function = if matches!(builtin, Builtin::KeyIntersection) {
+                    "relar_key_intersection"
+                } else {
+                    "relar_key_union"
+                };
+                self.call(
+                    function,
+                    returns,
+                    &[&args[0].value, &args.last().unwrap().value],
+                )
+            }
             Builtin::SortedStringKeys | Builtin::SortedRecordRows { .. } => {
                 let handles = self.entry_alloca(format!("[{} x ptr]", args.len()));
                 for (i, source) in args.iter().enumerate() {
@@ -4688,6 +4735,8 @@ fn fallible(name: &str) -> bool {
                 | "relar_bytes_repeat"
                 | "relar_bytes_decode"
                 | "relar_toml_keys"
+                | "relar_json_add"
+                | "relar_json_get_receiver"
                 | "relar_bytes_validate_utf8"
                 | "relar_binary_open"
                 | "relar_binary_read"
@@ -4706,6 +4755,7 @@ fn fallible(name: &str) -> bool {
                 | "relar_path_rmdir"
                 | "relar_path_replace"
                 | "relar_path_absolute"
+                | "relar_path_with_name"
                 | "relar_path_resolve"
                 | "relar_tempdir_new"
                 | "relar_tempdir_cleanup"
@@ -4770,6 +4820,7 @@ declare ptr @relar_path_new(ptr)
 declare ptr @relar_path_join(ptr, ptr)
 declare ptr @relar_path_text(ptr)
 declare ptr @relar_path_name(ptr)
+declare ptr @relar_path_with_name(ptr, ptr)
 declare ptr @relar_path_stem(ptr)
 declare ptr @relar_path_suffix(ptr)
 declare ptr @relar_path_parent(ptr)
@@ -4850,6 +4901,12 @@ declare ptr @relar_record_new(ptr)
 declare ptr @relar_tuple_probe(ptr, ptr)
 declare ptr @relar_json_decode(ptr, ptr)
 declare ptr @relar_json_loads(ptr)
+declare ptr @relar_json_load(ptr)
+declare i64 @relar_json_get(ptr, ptr, i64, i32, i64)
+declare ptr @relar_json_add(ptr, ptr)
+declare ptr @relar_json_get_receiver(ptr)
+declare ptr @relar_json_add_fields(ptr, ptr, i64, i64, ptr, i64, i64)
+declare i32 @relar_json_is_int(ptr)
 declare i64 @relar_json_select(ptr, ptr, i64, i32, ptr)
 declare i32 @relar_json_truth(ptr)
 declare i32 @relar_json_null(ptr)
@@ -4917,6 +4974,7 @@ declare ptr @relar_seq_repeat(ptr, i64)
 declare ptr @relar_dict_new(i32, i32)
 declare ptr @relar_default_list_dict_new(i32, i32)
 declare ptr @relar_key_union(ptr, ptr)
+declare ptr @relar_key_intersection(ptr, ptr)
 declare ptr @relar_sorted_string_keys(ptr, i64)
 declare ptr @relar_sorted_record_rows(ptr, i64, ptr, ptr)
 declare i64 @relar_dict_len(ptr)
@@ -4961,6 +5019,10 @@ declare ptr @relar_str_join(ptr, ptr)
 declare ptr @relar_str_format(ptr, ptr, i64)
 declare ptr @relar_str_replace(ptr, ptr, ptr)
 declare ptr @relar_str_dedent(ptr)
+declare ptr @relar_shlex_split(ptr)
+declare ptr @relar_sys_executable()
+declare void @relar_sys_exit(i64)
+declare void @relar_subprocess_to_stderr(ptr, i32)
 declare ptr @relar_float_format(double, i32, i32)
 declare double @llvm.fabs.f64(double)
 declare ptr @relar_int_str(i64)
@@ -4977,7 +5039,7 @@ declare i32 @relar_text_flush(ptr)
 declare i32 @relar_text_close(ptr)
 declare i32 @relar_text_closed(ptr)
 declare void @relar_args_init(i32, ptr)
-declare ptr @relar_argparse_parse(ptr, ptr, ptr, ptr)
+declare ptr @relar_argparse_parse(ptr, ptr, ptr, ptr, ptr)
 declare ptr @relar_sys_argv()
 declare void @relar_args_clear()
 declare void @relar_int_retain(i64)

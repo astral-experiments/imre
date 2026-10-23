@@ -120,6 +120,7 @@ impl Emitter<'_, '_> {
                     PathOperation::Absolute => "relar_path_absolute",
                     PathOperation::New => "relar_path_new",
                     PathOperation::Join => "relar_path_join",
+                    PathOperation::WithName => "relar_path_with_name",
                     PathOperation::Text => "relar_path_text",
                     PathOperation::Name => "relar_path_name",
                     PathOperation::Stem => "relar_path_stem",

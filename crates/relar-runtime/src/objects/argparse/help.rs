@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::fmt::Write;
 use std::io::IsTerminal;
 
-use super::{Kind, OptionSpec, Parser};
+use super::{Kind, OptionSpec, Parser, Subcommands};
 
 pub(super) fn width() -> usize {
     let columns = std::env::var("COLUMNS")
@@ -216,6 +216,62 @@ fn usage_lines(
     output
 }
 
+impl Subcommands {
+    fn metavar(&self) -> String {
+        format!(
+            "{{{}}}",
+            self.choices
+                .iter()
+                .map(|child| child.name.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    }
+}
+
+/// Formats a help action at its real indentation, using the section-wide column.
+fn help_row(
+    output: &mut String,
+    width: usize,
+    position: usize,
+    indent: usize,
+    label: &str,
+    styled: &str,
+    help: &str,
+) {
+    write!(output, "{}{styled}", " ".repeat(indent)).unwrap();
+    if help.is_empty() {
+        output.push('\n');
+        return;
+    }
+    let fits = indent + len(label) + 2 <= position;
+    if !fits {
+        output.push('\n');
+    }
+    let padding = if fits {
+        position - indent - len(label)
+    } else {
+        position
+    };
+    if help.trim().is_empty() {
+        if fits {
+            output.push_str(&" ".repeat(padding));
+            output.push('\n');
+        }
+        return;
+    }
+    output.push_str(&" ".repeat(padding));
+    for (index, line) in wrap(help, width.saturating_sub(position).max(11))
+        .iter()
+        .enumerate()
+    {
+        if index != 0 {
+            output.push_str(&" ".repeat(position));
+        }
+        writeln!(output, "{line}").unwrap();
+    }
+}
+
 impl Parser {
     pub(super) fn usage(&self, width: usize) -> String {
         let color = color_enabled();
@@ -234,11 +290,16 @@ impl Parser {
                 (length + 2, format!("[{styled}]"))
             });
         }
+        let positional = self.subcommands.as_ref().map(|commands| {
+            let text = format!("{} ...", commands.metavar());
+            (len(&text), paint(color, "32", &text))
+        });
         let prefix = "usage: ".len();
         let mut text = paint(color, "1;34", "usage: ");
-        let full_width = parts.iter().map(|(width, _)| *width).sum::<usize>() + parts.len() - 1;
+        let full_width = parts.iter().map(|(width, _)| *width).sum::<usize>() + parts.len() - 1
+            + positional.as_ref().map_or(0, |(len, _)| len + 1);
         if prefix + full_width <= width {
-            for (i, (_, part)) in parts.iter().enumerate() {
+            for (i, (_, part)) in parts.iter().chain(&positional).enumerate() {
                 if i != 0 {
                     text.push(' ');
                 }
@@ -251,11 +312,27 @@ impl Parser {
                 prefix,
                 width,
             ));
+            if let Some((_, part)) = positional {
+                text.push('\n');
+                text.push_str(&" ".repeat(prefix + len(&self.prog) + 1));
+                text.push_str(&part);
+            }
         } else {
             text.push_str(&parts[0].1);
             text.push('\n');
             text.push_str(&" ".repeat(prefix));
-            text.push_str(&usage_lines(&parts[1..], prefix, prefix, width));
+            let mut options = usage_lines(&parts[1..], prefix, prefix, width);
+            if let Some((n, part)) = positional {
+                let option_width: usize = parts[1..].iter().map(|(n, _)| n + 1).sum();
+                if prefix + option_width + n > width {
+                    options.push('\n');
+                    options.push_str(&" ".repeat(prefix));
+                } else {
+                    options.push(' ');
+                }
+                options.push_str(&part);
+            }
+            text.push_str(&options);
         }
         text.push('\n');
         text
@@ -280,7 +357,6 @@ impl Parser {
             }
         }
         let color = color_enabled();
-        writeln!(output, "\n{}", paint(color, "1;34", "options:")).unwrap();
         let mut rows = vec![(
             "-h, --help".to_owned(),
             "show this help message and exit".to_owned(),
@@ -291,10 +367,50 @@ impl Parser {
                 expand(&option.help, &self.prog, Some(option)),
             )
         }));
-        let max_header = rows.iter().map(|(label, _)| len(label)).max().unwrap();
+        let mut max_header = rows.iter().map(|(label, _)| len(label)).max().unwrap();
+        if let Some(commands) = &self.subcommands {
+            max_header = max_header.max(len(&commands.metavar()));
+            for child in &commands.choices {
+                if child.help.is_some() {
+                    max_header = max_header.max(2 + len(&child.name));
+                }
+            }
+        }
         let position = (max_header + 4)
             .min(24)
             .min(width.saturating_sub(20).max(4));
+        if let Some(commands) = &self.subcommands {
+            writeln!(
+                output,
+                "\n{}",
+                paint(color, "1;34", "positional arguments:")
+            )
+            .unwrap();
+            let label = commands.metavar();
+            help_row(
+                &mut output,
+                width,
+                position,
+                2,
+                &label,
+                &paint(color, "1;32", &label),
+                "",
+            );
+            for child in &commands.choices {
+                if let Some(help) = &child.help {
+                    help_row(
+                        &mut output,
+                        width,
+                        position,
+                        4,
+                        &child.name,
+                        &paint(color, "1;32", &child.name),
+                        &expand(help, &self.prog, None),
+                    );
+                }
+            }
+        }
+        writeln!(output, "\n{}", paint(color, "1;34", "options:")).unwrap();
         for (label, help) in rows {
             let styled = if label == "-h, --help" {
                 format!(
@@ -305,37 +421,7 @@ impl Parser {
             } else {
                 option_label(&label, false, color)
             };
-            write!(output, "  {styled}").unwrap();
-            if help.is_empty() {
-                output.push('\n');
-                continue;
-            }
-            let fits = len(&label) + 4 <= position;
-            if !fits {
-                output.push('\n');
-            }
-            let padding = if fits {
-                position - 2 - len(&label)
-            } else {
-                position
-            };
-            if help.trim().is_empty() {
-                if fits {
-                    output.push_str(&" ".repeat(padding));
-                    output.push('\n');
-                }
-                continue;
-            }
-            output.push_str(&" ".repeat(padding));
-            for (index, line) in wrap(&help, width.saturating_sub(position).max(11))
-                .iter()
-                .enumerate()
-            {
-                if index != 0 {
-                    output.push_str(&" ".repeat(position));
-                }
-                writeln!(output, "{line}").unwrap();
-            }
+            help_row(&mut output, width, position, 2, &label, &styled, &help);
         }
         // HelpFormatter collapses three or more newlines throughout the report,
         // including blank lines at the edges of a raw module docstring.

@@ -2,6 +2,101 @@
 //! keep conditional writes from becoming unconditional initialization facts.
 
 use super::*;
+use ruff_python_ast::visitor::transformer::{self, Transformer};
+
+/// Keep a parameter's public keyword while giving its lexical references an
+/// internal spelling. Builtin fast paths can then match names without ever
+/// interpreting a local `bytes`, `map`, or `len` as the builtin.
+pub(super) fn alias_builtin_parameters(
+    function: &mut ast::StmtFunctionDef,
+    bindings: &HashMap<String, Binding>,
+) {
+    let params = &mut function.parameters;
+    for parameter in params
+        .posonlyargs
+        .iter_mut()
+        .chain(&mut params.args)
+        .chain(&mut params.kwonlyargs)
+    {
+        let name = &mut parameter.parameter.name.id;
+        if RESERVED.contains(&name.as_str())
+            && name.starts_with(|c: char| c.is_ascii_lowercase())
+            && !bindings.contains_key(name.as_str())
+        {
+            let alias = BuiltinAlias {
+                original: name.clone(),
+                local: format!("$param:{name}").into(),
+            };
+            *name = alias.local.clone();
+            alias.visit_body(&mut function.body);
+        }
+    }
+}
+
+struct BuiltinAlias {
+    original: ast::name::Name,
+    local: ast::name::Name,
+}
+
+impl BuiltinAlias {
+    fn rename(&self, name: &mut ast::name::Name) {
+        if name == &self.original {
+            *name = self.local.clone();
+        }
+    }
+}
+
+impl Transformer for BuiltinAlias {
+    // Local annotations use the static type namespace, never the parameter value.
+    fn visit_annotation(&self, _: &mut ast::Expr) {}
+
+    fn visit_expr(&self, expr: &mut ast::Expr) {
+        match expr {
+            ast::Expr::Name(name) => self.rename(&mut name.id),
+            ast::Expr::Lambda(lambda)
+                if lambda
+                    .parameters
+                    .as_ref()
+                    .is_some_and(|p| p.find(&self.original).is_some()) =>
+            {
+                self.visit_parameters(lambda.parameters.as_mut().unwrap());
+            }
+            _ => transformer::walk_expr(self, expr),
+        }
+    }
+
+    fn visit_stmt(&self, stmt: &mut ast::Stmt) {
+        if let ast::Stmt::FunctionDef(nested) = stmt {
+            self.rename(&mut nested.name.id);
+            if nested.parameters.find(&self.original).is_some() {
+                self.visit_parameters(&mut nested.parameters);
+                return;
+            }
+        }
+        transformer::walk_stmt(self, stmt);
+    }
+
+    fn visit_except_handler(&self, handler: &mut ast::ExceptHandler) {
+        let ast::ExceptHandler::ExceptHandler(h) = handler;
+        if let Some(name) = &mut h.name {
+            self.rename(&mut name.id);
+        }
+        transformer::walk_except_handler(self, handler);
+    }
+
+    fn visit_pattern(&self, pattern: &mut ast::Pattern) {
+        let binding = match pattern {
+            ast::Pattern::MatchAs(p) => &mut p.name,
+            ast::Pattern::MatchStar(p) => &mut p.name,
+            ast::Pattern::MatchMapping(p) => &mut p.rest,
+            _ => return transformer::walk_pattern(self, pattern),
+        };
+        if let Some(name) = binding {
+            self.rename(&mut name.id);
+        }
+        transformer::walk_pattern(self, pattern);
+    }
+}
 
 #[derive(Clone)]
 pub(super) struct LocalState {

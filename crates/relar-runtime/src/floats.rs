@@ -294,7 +294,7 @@ pub extern "C" fn relar_float_divide(left: f64, right: f64, operation: u32) -> f
 /// Compares exactly by truncating the finite float to an integer, then resolving
 /// an equal truncation using its fractional sign. No integer is rounded to f64.
 /// The fourth result, 2, denotes unordered comparison with NaN.
-fn compare(integer: &Int, float: f64) -> i32 {
+pub(super) fn compare(integer: &Int, float: f64) -> i32 {
     if float.is_nan() {
         return 2;
     }

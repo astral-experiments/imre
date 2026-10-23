@@ -251,6 +251,37 @@ pub unsafe extern "C" fn relar_path_join(path: *const Object, child: *const Str)
 }
 
 /// # Safety
+/// The caller roots the exact path and new name. Success transfers a fresh path.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_with_name(
+    path: *const Object,
+    replacement: *const Str,
+) -> *const Object {
+    use super::exceptions::string_repr;
+    // SAFETY: both inputs stay rooted and this operation cannot call user code.
+    let result = unsafe {
+        object(path).0.with(|storage| {
+            let path = storage.path();
+            let replacement = &*replacement;
+            if replacement.is_empty() || replacement.as_str() == "." || replacement.contains('/') {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!("Invalid name {}", string_repr(replacement)),
+                ));
+            }
+            if name(path).is_empty() {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    format!("PosixPath({}) has an empty name", string_repr(path)),
+                ));
+            }
+            Ok(new_path(join(parent(path), replacement)))
+        })
+    };
+    finish(result, std::ptr::null())
+}
+
+/// # Safety
 /// Both arguments are rooted exact Paths; comparison borrows immutable storage.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_path_equal(left: *const Object, right: *const Object) -> u32 {

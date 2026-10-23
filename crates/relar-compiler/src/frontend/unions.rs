@@ -20,6 +20,13 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
+        if matches!((value.ty, ty), (Type::Class(parent), Type::Class(child)) if self.classes.parsers.child_of(child, parent))
+        {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::NamespaceView, vec![value]),
+            };
+        }
         if matches!(ty, Type::StrLiteral(_)) && matches!(value.ty, Type::Str | Type::StrLiteral(_))
         {
             return literals::view(value, ty);
@@ -131,6 +138,17 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(value)?;
+        if value.ty == Type::JsonValue
+            && matches!(
+                self.instance_types(classes)?.as_slice(),
+                [InstanceType::Exact(Type::Int)]
+            )
+        {
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::JsonIsInt, vec![value]),
+            });
+        }
         if matches!(
             self.types.payload(value.ty).unwrap_or(value.ty),
             Type::JsonValue | Type::JsonObject

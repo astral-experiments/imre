@@ -130,6 +130,7 @@ impl Checker<'_> {
         }
         let (kind, ty, arity) = match name {
             "absolute" => (PathOperation::Absolute, Type::Path, 0),
+            "with_name" => (PathOperation::WithName, Type::Path, 1),
             "as_posix" => (PathOperation::Text, Type::Str, 0),
             "exists" => (PathOperation::Exists, Type::Bool, 0),
             "is_file" => (PathOperation::IsFile, Type::Bool, 0),

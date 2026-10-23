@@ -138,6 +138,7 @@ impl Checker<'_> {
             ast::Expr::Name(_) => self.assign(target, value),
             ast::Expr::Subscript(subscript) => {
                 let receiver = self.expr(&subscript.value)?;
+                self.check_mutable_json_rows(receiver.ty, subscript)?;
                 let (key, element) = self
                     .types
                     .mapping(receiver.ty)

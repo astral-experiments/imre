@@ -152,7 +152,12 @@ impl Checker<'_> {
             None,
         )];
         let arguments = self.arguments(call, &parameters, None)?;
-        Ok(self.text_operation(operation, Type::Str, arguments))
+        let returns = if matches!(operation, TextOperation::ShlexSplit) {
+            self.types.list(Type::Str)
+        } else {
+            Type::Str
+        };
+        Ok(self.text_operation(operation, returns, arguments))
     }
 
     /// Keyword permutation happens only after supplied expressions have executed

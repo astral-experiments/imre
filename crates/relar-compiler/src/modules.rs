@@ -51,6 +51,7 @@ pub(crate) enum IntrinsicModule {
     Typing,
     Dataclasses,
     Pathlib,
+    Shlex,
     Tempfile,
     Subprocess,
     Os,
@@ -75,9 +76,14 @@ pub(crate) enum IntrinsicModule {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
     ArgumentParser,
+    ArgparseNamespace,
     RawDescriptionHelpFormatter,
     FutureAnnotations,
     Stderr,
+    SysExecutable,
+    SysExit,
+    ShlexSplit,
+    Final,
     Argv,
     TextIO,
     BinaryIO,
@@ -105,6 +111,7 @@ pub(crate) enum Intrinsic {
     ZlibError,
     JsonDecode,
     JsonEncode,
+    JsonLoad,
     JsonLoads,
     JsonDecodeError,
     Any,
@@ -133,6 +140,7 @@ impl IntrinsicModule {
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
             "pathlib" => Some(Self::Pathlib),
+            "shlex" => Some(Self::Shlex),
             "tempfile" => Some(Self::Tempfile),
             "subprocess" => Some(Self::Subprocess),
             "os" => Some(Self::Os),
@@ -173,10 +181,15 @@ impl IntrinsicModule {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Sys, "stderr") => Intrinsic::Stderr,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
+            (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
                 Intrinsic::RawDescriptionHelpFormatter
             }
             (Self::Sys, "argv") => Intrinsic::Argv,
+            (Self::Sys, "executable") => Intrinsic::SysExecutable,
+            (Self::Sys, "exit") => Intrinsic::SysExit,
+            (Self::Shlex, "split") => Intrinsic::ShlexSplit,
+            (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
             (Self::Typing, "Union") => Intrinsic::Union,
@@ -206,6 +219,7 @@ impl IntrinsicModule {
             (Self::Zlib, "error") => Intrinsic::ZlibError,
             (Self::RelarJson, "decode") => Intrinsic::JsonDecode,
             (Self::Json, "loads") => Intrinsic::JsonLoads,
+            (Self::Json, "load") => Intrinsic::JsonLoad,
             (Self::Json, "JSONDecodeError") => Intrinsic::JsonDecodeError,
             (Self::RelarJson, "encode") => Intrinsic::JsonEncode,
             (Self::RelarToml, "decode") => Intrinsic::TomlDecode,
@@ -284,6 +298,11 @@ impl SourceGraph {
     }
 
     pub(crate) fn load(entry: &Path, module_root: Option<&Path>) -> Result<Self, String> {
+        // __file__ preserves the invoked spelling, including symlinks and '..'.
+        // Use the canonical path below for import resolution and containment.
+        let filename = std::env::current_dir()
+            .map_err(|err| err.to_string())?
+            .join(entry);
         let entry = entry
             .canonicalize()
             .map_err(|error| format!("{}: {error}", entry.display()))?;
@@ -344,6 +363,7 @@ impl SourceGraph {
             }
         }
         loader.scan(id)?;
+        loader.modules[id].path = filename;
         loader.finish(id)
     }
 

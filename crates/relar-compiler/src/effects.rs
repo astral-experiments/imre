@@ -222,14 +222,18 @@ fn binary(op: Binary) -> bool {
 /// separately, including eager defaults on otherwise infallible dictionary lookups.
 fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
     match builtin {
+        Builtin::JsonIsInt => false,
         Builtin::Text(operation) => matches!(
             operation,
-            crate::ir::TextOperation::Split(_) | crate::ir::TextOperation::Partition
+            crate::ir::TextOperation::Split(_)
+                | crate::ir::TextOperation::Partition
+                | crate::ir::TextOperation::ShlexSplit
         ),
         Builtin::Path(operation) => matches!(
             operation,
             crate::ir::PathOperation::ReadText
                 | crate::ir::PathOperation::Absolute
+                | crate::ir::PathOperation::WithName
                 | crate::ir::PathOperation::Resolve
                 | crate::ir::PathOperation::WriteText
                 | crate::ir::PathOperation::Mkdir
@@ -245,6 +249,11 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         Builtin::Process(_)
         | Builtin::JsonDecode(_)
         | Builtin::JsonLoads
+        | Builtin::JsonLoad
+        | Builtin::JsonGet { .. }
+        | Builtin::JsonGetReceiver
+        | Builtin::JsonAdd
+        | Builtin::JsonAddFields(_, _)
         | Builtin::JsonSelect(_)
         | Builtin::TomlDecode(_)
         | Builtin::TomlKeys
@@ -276,7 +285,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::DictGatherBytesInt
         | Builtin::DictDelete
         | Builtin::SysArgv
-        | Builtin::ParseArgs
+        | Builtin::ParseArgs(_)
         | Builtin::TextOpen(_)
         | Builtin::TextEnter
         | Builtin::TextRead
@@ -295,6 +304,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::StrEnumName
         | Builtin::StrEnumValue
         | Builtin::StrEnumIdentity
+        | Builtin::NamespaceView
         | Builtin::LiteralStringView
         | Builtin::StringListContains
         | Builtin::RegexCompile(_)
@@ -332,6 +342,8 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::DefaultListDict
         | Builtin::DictAsBase
         | Builtin::KeyUnion
+        | Builtin::KeySet
+        | Builtin::KeyIntersection
         | Builtin::SortedStringKeys
         | Builtin::SortedRecordRows { .. }
         | Builtin::DictTryGet(_)

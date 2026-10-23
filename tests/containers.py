@@ -283,7 +283,7 @@ main()
 REJECTED = {
     "set_empty_without_context": "values = set()\n",
     "set_iterable_constructor": "values: set[int] = set([1, 2])\n",
-    "set_copy_constructor": "original = {1, 2}\nvalues: set[int] = set(original)\n",
+    "set_copy_wrong_element": "original = {1, 2}\nvalues: set[str] = set(original)\n",
     "set_bool_annotation": "values: set[bool] = set()\n",
     "set_bool_literal": "values = {True, False}\n",
     "set_bool_int_literal": "values = {1, True}\n",
@@ -427,7 +427,7 @@ REJECTED = {
     "iteration_target_type_mismatch": 'value = "text"\nfor value in [1]:\n    pass\n',
     "iteration_tuple_target_arity": "for first, second in [(1, 2, 3)]:\n    pass\n",
     "iteration_range_tuple_target": "for (value,) in range(2):\n    pass\n",
-    "iteration_tuple_iterable": "for value in (1, 2):\n    print(value)\n",
+    "iteration_heterogeneous_tuple": 'for value in (1, "two"):\n    print(value)\n',
     "iteration_optional_iterable": """
         def show(values: list[int] | None) -> None:
             for value in values:

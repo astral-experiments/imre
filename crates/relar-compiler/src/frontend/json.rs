@@ -6,6 +6,12 @@ use crate::ir::{JsonDefault, JsonField, JsonRecordSchema};
 /// Folds successive literal subscripts into one traversal. The keys have no
 /// evaluation effects; the first failing lookup still determines the exception.
 pub(super) fn select(value: Expr, ty: Type, key: Option<String>, literal: Option<Expr>) -> Expr {
+    if key.is_none()
+        && literal.is_none()
+        && matches!(value.kind, ExprKind::Builtin(Builtin::JsonGet { .. }, _))
+    {
+        return Expr { ty, ..value };
+    }
     let (mut path, mut args) = match value {
         Expr {
             ty: Type::JsonValue,
@@ -18,6 +24,49 @@ pub(super) fn select(value: Expr, ty: Type, key: Option<String>, literal: Option
     Expr {
         ty,
         kind: ExprKind::Builtin(Builtin::JsonSelect(path), args),
+    }
+}
+
+/// Literal defaults and reads of the same rooted local have no Python side
+/// effects. The runtime can add the selected values without boxing either one.
+pub(super) fn add(left: Expr, right: Expr) -> Expr {
+    fn field(expr: &Expr) -> Option<(&String, &Expr, &Expr, usize)> {
+        let ExprKind::Builtin(
+            Builtin::JsonGet {
+                key,
+                empty_list: false,
+            },
+            args,
+        ) = &expr.kind
+        else {
+            return None;
+        };
+        let [receiver, default] = args.as_slice() else {
+            return None;
+        };
+        let ExprKind::Local(slot) = receiver.kind else {
+            return None;
+        };
+        matches!(default.kind, ExprKind::Int(_)).then_some((key, receiver, default, slot))
+    }
+    let kind = if let (Some((a, receiver, left_default, x)), Some((b, _, right_default, y))) =
+        (field(&left), field(&right))
+        && x == y
+    {
+        ExprKind::Builtin(
+            Builtin::JsonAddFields(a.clone(), b.clone()),
+            vec![
+                receiver.clone(),
+                left_default.clone(),
+                right_default.clone(),
+            ],
+        )
+    } else {
+        ExprKind::Builtin(Builtin::JsonAdd, vec![left, right])
+    };
+    Expr {
+        ty: Type::JsonValue,
+        kind,
     }
 }
 
@@ -57,6 +106,86 @@ pub(super) fn compare(
 }
 
 impl Checker<'_> {
+    /// The same document array may be projected at multiple typed boundaries.
+    /// Its source type remains read-only across aliases and function calls.
+    pub(super) fn check_mutable_json_rows(
+        &self,
+        ty: Type,
+        node: &impl Ranged,
+    ) -> Result<(), String> {
+        if self.types.element(ty) == Some(Type::JsonObject) {
+            return Err(error(
+                self.source,
+                node,
+                "lists of readonly JSON object views cannot be mutated",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn json_load(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let [stream] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "json.load requires one open text stream",
+            ));
+        };
+        let stream = self.expr_expected(stream, Type::TextIO)?;
+        let text = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::TextRead, vec![stream]),
+        };
+        Ok(Expr {
+            ty: Type::JsonValue,
+            kind: ExprKind::Builtin(Builtin::JsonLoad, vec![text]),
+        })
+    }
+
+    pub(super) fn json_get(
+        &mut self,
+        receiver: Expr,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        self.reject_builtin_keywords(call)?;
+        let [ast::Expr::StringLiteral(key), default] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "readonly JSON get requires a literal string key and an integer or empty-list default",
+            ));
+        };
+        check_string(key, self.source)?;
+        let empty_list = matches!(default, ast::Expr::List(list) if list.elts.is_empty());
+        let args = if empty_list {
+            vec![receiver]
+        } else {
+            let default = self.expr_expected(default, Type::Int)?;
+            // Python binds the method before evaluating the default. Literal and
+            // local reads cannot mask a missing attribute on a malformed row.
+            let receiver = if matches!(default.kind, ExprKind::Int(_) | ExprKind::Local(_)) {
+                receiver
+            } else {
+                Expr {
+                    ty: receiver.ty,
+                    kind: ExprKind::Builtin(Builtin::JsonGetReceiver, vec![receiver]),
+                }
+            };
+            vec![receiver, default]
+        };
+        Ok(Expr {
+            ty: Type::JsonValue,
+            kind: ExprKind::Builtin(
+                Builtin::JsonGet {
+                    key: key.value.to_string(),
+                    empty_list,
+                },
+                args,
+            ),
+        })
+    }
+
     pub(super) fn json_loads(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         let [text] = call.arguments.args.as_ref() else {
