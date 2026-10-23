@@ -46,7 +46,10 @@ enum Storage {
     BytesIterator(bytes::BytesIterator),
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
-    Path(Str),
+    Path {
+        text: Rc<Str>,
+        name: std::cell::OnceCell<Rc<Str>>,
+    },
     PathIterator(Box<paths::PathIterator>),
     RegexPattern(Box<regexes::Pattern>),
     RegexMatch(regexes::Match),
