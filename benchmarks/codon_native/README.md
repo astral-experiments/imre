@@ -116,3 +116,10 @@ renderer pass the selected checkout URLs explicitly so its sibling function can
 use them. Codon 0.20.4 accepts named fields through `str.format_map`. The
 adapter puts the filename and integer line into a native `dict[str, str | int]`
 and calls `format_map` on the original template.
+
+The conformance summary uses a native `textwrap.dedent` adapter. It removes
+the common space/tab prefix after interpolation and normalizes whitespace-only
+lines. For Ruff’s zero-true-positive error, the builder gives six record types
+Python-style `__repr__` methods and raises `AssertionError` explicitly so its
+message contains exactly the first five grouped cases. Codon’s uncaught error
+handler prints its source location in a separate traceback.

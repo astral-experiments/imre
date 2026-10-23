@@ -1,7 +1,9 @@
+use crate::Result;
 use crate::model::{
     Change, Diagnostic, FileStats, Side, Statistics, TestCase, compute_stats, filename,
 };
-use crate::{Error, Result};
+
+mod assertion;
 
 const SUMMARY_NOTE: &str = "Each test case represents one expected error annotation or a group of annotations sharing a tag. Counts are per test case, not per diagnostic — multiple diagnostics on the same line count as one. Required annotations (`E`) are true positives when ty flags the expected location and false negatives when it does not. Optional annotations (`E?`) are true positives when flagged but true negatives (not false negatives) when not. Tagged annotations (`E[tag]`) require ty to flag exactly one of the tagged lines; tagged multi-annotations (`E[tag+]`) allow any number up to the tag count. Flagging unexpected locations counts as a false positive.";
 
@@ -355,9 +357,7 @@ pub fn summary(cases: &[TestCase], files: &[FileStats], base: &str, force: bool)
     let old = compute_stats(cases, Side::Old);
     let new = compute_stats(cases, Side::New);
     if new.true_positives == 0 {
-        return Err(Error::assertion(
-            "Expected ty to have at least one true positive.",
-        ));
+        return Err(assertion::missing_true_positives(cases));
     }
     let old_passing = files.iter().filter(|file| file.old.passes()).count() as i64;
     let new_passing = files.iter().filter(|file| file.new.passes()).count() as i64;

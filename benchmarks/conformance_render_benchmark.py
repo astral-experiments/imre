@@ -54,9 +54,13 @@ def main():
     parser.add_argument("--cpu", type=int, required=True)
     parser.add_argument("--full-matrix", action="store_true",
                         help="also time unchanged captures and both formats on the live checkout")
+    parser.add_argument("--compact", action="store_true",
+                        help="also time the unforced unchanged summary in both formats, frozen and live")
     parser.add_argument("--live", nargs=3, type=Path, metavar=("SUITE", "OLD_TY", "NEW_TY"))
     parser.add_argument("--live-cpus", type=int, nargs="+")
     args = parser.parse_args()
+    if args.compact and not args.full_matrix:
+        parser.error("--compact requires --full-matrix")
     if bool(args.live) != bool(args.live_cpus):
         parser.error("--live and --live-cpus must be provided together")
     provenance = json.loads((args.fixtures / "provenance.json").read_bytes())
@@ -85,24 +89,29 @@ def main():
                 if {p.stem: digest(p.read_bytes()) for p in paths} != provenance["panels"][panel_name]["inputs"]:
                     raise ValueError(f"{panel_name} capture differs from its manifest")
                 inputs[panel_name] = workload_metadata(Workload(*paths))
-                for fmt in ("github", "diff"):
-                    workload = Workload(*paths, fmt)
-                    expected = oracle(workload).report.encode()
-                    name = f"{panel_name}-{fmt}"
-                    cases[name] = measure(commands, workload.arguments(), expected, {args.cpu}, output, live=False)
-                    print(name, cases[name]["median_ms"], flush=True)
+                forces = (True, False) if args.compact and state == "unchanged" else (True,)
+                for force in forces:
+                    for fmt in ("github", "diff"):
+                        workload = Workload(*paths, fmt, force)
+                        expected = oracle(workload).report.encode()
+                        name = f"{panel_name}-{fmt}" + ("" if force else "-compact")
+                        cases[name] = measure(commands, workload.arguments(), expected, {args.cpu}, output, live=False)
+                        print(name, cases[name]["median_ms"], flush=True)
         if args.live:
             live_commands = {**commands, "cpython": [str(python), "-E", "-s", "-B", str(APP / "original_live.py")]}
-            for fmt in (("github", "diff") if args.full_matrix else ("github",)):
-                argv = ["--suite", str(suite), "--old-ty", str(old_ty), "--new-ty", str(new_ty),
-                        "--timeout", "30", "--format", fmt, "--force-summary-table"]
-                # The live diff includes checkout paths that differ from the captured fixtures.
-                subprocess.run([*live_commands["cpython"], *argv, "--output", str(output)],
-                               cwd=output.parent, env=environment(output.parent), capture_output=True,
-                               timeout=180, check=True)
-                case = f"live/{fmt}"
-                cases[case] = measure(live_commands, argv, output.read_bytes(), set(args.live_cpus), output, live=True)
-                print(case, cases[case]["median_ms"], flush=True)
+            for force in ((True, False) if args.compact else (True,)):
+                for fmt in (("github", "diff") if args.full_matrix else ("github",)):
+                    argv = ["--suite", str(suite), "--old-ty", str(old_ty if force else new_ty),
+                            "--new-ty", str(new_ty), "--timeout", "30", "--format", fmt]
+                    if force:
+                        argv.append("--force-summary-table")
+                    # The live diff includes checkout paths that differ from the captured fixtures.
+                    subprocess.run([*live_commands["cpython"], *argv, "--output", str(output)],
+                                   cwd=output.parent, env=environment(output.parent), capture_output=True,
+                                   timeout=180, check=True)
+                    case = f"live/{fmt}" + ("" if force else "-compact")
+                    cases[case] = measure(live_commands, argv, output.read_bytes(), set(args.live_cpus), output, live=True)
+                    print(case, cases[case]["median_ms"], flush=True)
     if [file_id(p) for p in files] != artifacts:
         raise ValueError("benchmark binaries or oracle changed during measurement")
     record = {"schema": 1, "invocation": sys.argv, "host": platform.uname()._asdict(),

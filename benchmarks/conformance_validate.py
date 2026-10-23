@@ -49,6 +49,7 @@ class Workload:
 class Expected:
     report: str | None = None
     error: str | None = None
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class ComputeExpected:
     stdout: bytes = b""
     error: str | None = None
     report: str | None = None
+    error_message: str | None = None
 
 
 def _python_command(python: str | Path, module: str) -> list[str]:
@@ -194,7 +196,11 @@ def oracle(workload: Workload, *, source_contents: dict[str, str] | None = None)
         ]))
         return Expected(report=rendered)
     except Exception as error:
-        return Expected(error=error_kind(error))
+        # Ruff shows up to five grouped records when the new run has no true positives.
+        message = str(error) if isinstance(error, AssertionError) and str(error).startswith(
+            "Expected ty to have at least one true positive.\n"
+        ) else None
+        return Expected(error=error_kind(error), error_message=message)
 
 
 def compute_oracle(
@@ -210,7 +216,7 @@ def compute_oracle(
         return ComputeExpected(stdout=b"0\n", report="")
     expected = oracle(workload, source_contents=source_contents)
     if expected.error is not None:
-        return ComputeExpected(error=expected.error)
+        return ComputeExpected(error=expected.error, error_message=expected.error_message)
     assert expected.report is not None
     return ComputeExpected(stdout=f"{len(expected.report) * rounds}\n".encode(), report=expected.report)
 
@@ -225,6 +231,16 @@ def captured_error(stderr: bytes) -> str | None:
     if not matches:
         return None
     return "ValueError" if matches[-1] == "JSONDecodeError" else matches[-1]
+
+
+def check_error(stderr: bytes, expected: Expected | ComputeExpected) -> None:
+    assert captured_error(stderr) == expected.error, stderr.decode(errors="replace")
+    if expected.error_message is not None:
+        # Codon prints a colored exception header followed by a separate native backtrace.
+        payload, trailer, _ = stderr.partition(b"\n\n\x1b[1mRaised from:\x1b[0m ")
+        plain = re.sub(rb"\x1b\[[0-9;]*m", b"", payload) if trailer else stderr.removesuffix(b"\n")
+        _, header, message = (b"\n" + plain).rpartition(f"\n{expected.error}: ".encode())
+        assert header and message == expected.error_message.encode(), plain.decode(errors="replace")
 
 
 def check_result(
@@ -242,7 +258,7 @@ def check_result(
     else:
         assert completed.returncode != 0, "expected failure"
         assert completed.stdout == b"", "failed command wrote stdout"
-        assert captured_error(completed.stderr) == expected.error, completed.stderr.decode(errors="replace")
+        check_error(completed.stderr, expected)
         if output is not None:
             if previous_output is None:
                 assert not output.exists(), "failed command created a report"
@@ -270,7 +286,7 @@ def check_compute_result(
             assert output.read_bytes() == expected.report.encode(), "final compute report differs"
     else:
         assert completed.returncode != 0 and completed.stdout == b""
-        assert captured_error(completed.stderr) == expected.error, completed.stderr.decode(errors="replace")
+        check_error(completed.stderr, expected)
         if output is not None:
             if previous_output is None:
                 assert not output.exists()
@@ -388,6 +404,8 @@ def cases() -> list[Case]:
         item["location"]["positions"]["end"]["line"] += 100
     result = [
         Case("unchanged", {"alpha.py": "x() # E\n", "quiet.py": ""}, same, reordered),
+        Case("multiline-summary-revision", {"alpha.py": "x() # E\n"}, same, reordered,
+             mutation="multiline-revision"),
         Case("all-classifications", {"alpha.py": source, "quiet.py": "quiet()\n", "empty.py": ""}, old, new),
         Case("unicode-and-fallback", {"alpha.py": unicode_source}, [anchor],
              [anchor, *[diagnostic("alpha.py", line, message="rule: é 😀\nnext") for line in (3, 4, 5, 6)]]),
@@ -405,6 +423,12 @@ def cases() -> list[Case]:
              error="AssertionError"),
         Case("no-new-true-positive", {"alpha.py": "x() # E\n"}, [anchor], [],
              error="AssertionError"),
+        Case("no-new-true-positive-sample",
+             {"β.py": "a() # E: first\nunexpected()\nc() # E?: optional\nd() # E\ne() # E\n"
+                      "f() # E: outside the sample\ng() # E: last omitted\n"},
+             [diagnostic("β.py", 1, message="""rule: old's "quoted" line\nnext"""),
+              diagnostic("β.py", 4, message="rule: λ")],
+             [diagnostic("β.py", 2, message="rule: unexpected")], error="AssertionError"),
         Case("missing-path-alias", {"alpha.py": "x() # E\n"}, [anchor],
              [anchor, diagnostic("unmapped.py", 2)], error="KeyError"),
         Case("unknown-test-file", {"alpha.py": "x() # E\n"}, [anchor],
@@ -433,6 +457,9 @@ def materialize_case(case: Case, directory: Path, *, format: str = "github",
         files.append(str(path))
         aliases.append({"raw": "raw/" + name, "path": str(path)})
     manifest = {"suite_revision": FIXTURE_REVISION, "test_files": files, "diagnostic_paths": aliases}
+    if case.mutation == "multiline-revision":
+        # Interpolation can change the common indentation of Ruff's entire summary template.
+        manifest["suite_revision"] = "branch/λ\n  continuation\n\u2003"
     if case.mutation == "extra-alias":
         aliases.append({"raw": "raw/unmapped.py", "path": str(directory.resolve() / "unmapped.py")})
     elif case.mutation == "duplicate-path":
