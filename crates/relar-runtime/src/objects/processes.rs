@@ -1154,9 +1154,9 @@ mod tests {
     #[test]
     fn timeout_preserves_raw_bytes_and_reaps_the_direct_child() {
         let args = args(&[
-            "/usr/bin/python3",
+            "/bin/sh",
             "-c",
-            "import os,time; os.write(1,b'raw\\r\\n\\xff\\xe2\\x82'); os.write(2,str(os.getpid()).encode()); time.sleep(10)",
+            r#"printf 'raw\r\n\377\342\202'; printf %s "$$" >&2; exec sleep 10"#,
         ]);
         let weak = Rc::downgrade(&args);
         let error = timeout_failure(&args, 0.5);
@@ -1204,11 +1204,7 @@ mod tests {
 
     #[test]
     fn timeout_does_not_wait_for_descendant_pipe_owners() {
-        let argv = args(&[
-            "/usr/bin/python3",
-            "-c",
-            "import os,time\npid=os.fork()\nif pid == 0:\n time.sleep(2)\n os._exit(0)\nos.write(1,b'parent finished')\nos._exit(0)",
-        ]);
+        let argv = args(&["/bin/sh", "-c", "sleep 2 & printf 'parent finished'"]);
         let started = Instant::now();
         let error = timeout_failure(&argv, 0.4);
         assert_kind(&error, Kind::TimeoutExpired);
@@ -1221,15 +1217,23 @@ mod tests {
 
     #[test]
     fn deadline_capture_drains_both_full_pipes_before_expiry() {
-        let argv = args(&[
-            "/usr/bin/python3",
-            "-c",
-            "import os,time\nfor _ in range(4):\n os.write(1,b'O'*65536)\n os.write(2,b'E'*65536)\ntime.sleep(10)",
-        ]);
-        let error = timeout_failure(&argv, 0.5);
-        assert_kind(&error, Kind::TimeoutExpired);
-        let stdout = timeout_bytes(&error, 2).unwrap();
-        let stderr = timeout_bytes(&error, 3).unwrap();
+        let mut child = Command::new("python3")
+            .args([
+                "-c",
+                "import os,time\nos.write(1,b'!')\nfor _ in range(4):\n os.write(1,b'O'*65536)\n os.write(2,b'E'*65536)\ntime.sleep(10)",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Start the capture deadline after interpreter startup, before draining either pipe.
+        let mut ready = [0];
+        let stdout = child.stdout.as_mut().unwrap();
+        stdout.read_exact(&mut ready).unwrap();
+        assert_eq!(ready, [b'!']);
+        let Ok(Captured::TimedOut(Some(stdout), Some(stderr))) = capture_timeout(child, 1.0) else {
+            panic!("expected a timeout with both output streams");
+        };
         assert_eq!(stdout.len(), 262_144);
         assert_eq!(stderr.len(), 262_144);
         assert!(stdout.iter().all(|byte| *byte == b'O'));
@@ -1238,7 +1242,7 @@ mod tests {
 
     #[test]
     fn timeout_boundaries_and_failed_validation_leave_no_direct_children() {
-        let argv = args(&["/usr/bin/python3", "-c", "import time; time.sleep(10)"]);
+        let argv = args(&["sleep", "10"]);
         for timeout in [0.0, -0.0, -0.5, f64::NEG_INFINITY] {
             let error = timeout_failure(&argv, timeout);
             assert_kind(&error, Kind::TimeoutExpired);
