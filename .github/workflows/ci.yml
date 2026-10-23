@@ -34,6 +34,13 @@ jobs:
             --suites differential io files bytes paths processes workspaces base45 \
             -- --compiler target/release/relar --runtime target/release/librelar_runtime.a --opt-levels 3
 
+      - name: Compare Ruff’s conformance reports with CPython
+        run: |
+          target/release/relar build examples/conformance_report/__main__.py --module-root examples -o "$RUNNER_TEMP/conformance-report"
+          python3 benchmarks/conformance_grouping_inputs.py \
+            --archive benchmarks/results/2026-10-22-collector-ownership-study.tar.xz \
+            --output "$RUNNER_TEMP/conformance-inputs" --check-reporter "$RUNNER_TEMP/conformance-report"
+
   check:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -50,6 +57,12 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
       - run: cargo build --workspace --release --locked
+      - name: Compare Ruff’s conformance reports with CPython
+        run: |
+          target/release/relar build examples/conformance_report/__main__.py --module-root examples -o "$RUNNER_TEMP/conformance-report"
+          python3 benchmarks/conformance_grouping_inputs.py \
+            --archive benchmarks/results/2026-10-22-collector-ownership-study.tar.xz \
+            --output "$RUNNER_TEMP/conformance-inputs" --check-reporter "$RUNNER_TEMP/conformance-report"
       - name: Compare native suites with CPython
         run: |
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-ordinary --suites differential imports classes containers comprehensions fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes \
