@@ -39,6 +39,18 @@ Each fresh process reads the manifest, sources and two captures, then writes a c
 
 Every timed output matched the pinned upstream byte for byte in both builds. Frozen reports took 1.31–1.46× Rust’s time.
 
+## Default system allocator
+
+Ordinary builds with the shipped system allocator also passed the 2× target against system-allocator Rust. The table gives medians in milliseconds over eight paired live runs. Each run alternated which engine went first. All output hashes matched the four-engine comparison.
+
+| Live workload | Relar | Rust | Relar / Rust |
+| --- | ---: | ---: | ---: |
+| 146 files, two real ty runs | 660.9 | 649.1 | 1.018× |
+| 146 files, replayed ty output | 191.9 | 172.9 | 1.110× |
+| 1,460 files, replayed ty output | 1,815.7 | 1,646.5 | 1.103× |
+
+The eight frozen cases took 1.44–1.53× Rust’s time over 12 paired runs each.
+
 ## Source and input checks
 
 The native collector matched every ordered field of 1,323 expected diagnostics at 1× and 13,230 at 10×. A Unicode and mixed-newline fixture also matched, including character columns, named tags, optional markers and multi-line tags. A live test overwrites a test file with invalid bytes while ty runs. The report retains the original annotations. Invalid UTF-8 or a suite with no annotations fails before ty starts.
