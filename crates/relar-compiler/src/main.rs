@@ -318,16 +318,28 @@ fn linux_target(target: &OsStr) -> bool {
 }
 
 fn identity(path: &Path) -> Result<PathBuf, String> {
-    if path.exists() {
-        return path.canonicalize().map_err(|error| error.to_string());
+    let mut absolute = std::path::absolute(path).map_err(|error| error.to_string())?;
+    loop {
+        match absolute.canonicalize() {
+            Ok(resolved) => return Ok(resolved),
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+        let parent = absolute
+            .parent()
+            .ok_or("output path has no parent")?
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        // A dangling link names the file the build will create. Resolve its
+        // target relative to the link's parent, including through other links.
+        match absolute.read_link() {
+            Ok(target) => absolute = parent.join(target),
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                return Ok(parent.join(absolute.file_name().ok_or("output path has no filename")?));
+            }
+            Err(error) => return Err(error.to_string()),
+        }
     }
-    let absolute = std::path::absolute(path).map_err(|error| error.to_string())?;
-    let parent = absolute
-        .parent()
-        .ok_or("output path has no parent")?
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    Ok(parent.join(absolute.file_name().ok_or("output path has no filename")?))
 }
 
 /// Canonical paths catch symlinks; inode identity also protects hard-linked inputs.
@@ -345,6 +357,23 @@ fn same_file(left: &Path, right: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_output_links_share_their_destinations_identity() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        std::fs::create_dir(root.join("links")).unwrap();
+        symlink("../output", root.join("links/ir")).unwrap();
+        symlink("links/ir", root.join("chain")).unwrap();
+        let output = identity(&root.join("output")).unwrap();
+        assert_eq!(identity(&root.join("links/ir")).unwrap(), output);
+        assert_eq!(identity(&root.join("chain")).unwrap(), output);
+        assert_ne!(identity(&root.join("other")).unwrap(), output);
+        assert!(!output.exists());
+    }
 
     #[test]
     fn allocator_selects_the_sibling_runtime() {
