@@ -29,6 +29,8 @@ for text in [
     'value=true', 'value=1.0', 'value="1"', 'value=[]', 'value={}',
     'value=1979-05-27', 'value=07:32:00', 'value=1979-05-27T07:32:00Z',
     'value=null', 'value=01', 'value=1_', 'value=0x_G',
+    'value=0x', 'value=0o', 'value=0b', 'ignored=[0x]', 'ignored={nested=0o}',
+    'value=1_a0', 'ignored=[1_b0]',
     'value=1\nvalue=2', 'ignored=1\nignored=2', '[ignored]\nx=1\n[ignored]\ny=2',
     'ignored=[1,2', 'ignored="\\uD800"', 'ignored="\\q"',
     'ignored=2023-02-29', 'ignored=0000-01-01', 'ignored=23:59:60',
