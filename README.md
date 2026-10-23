@@ -91,36 +91,24 @@ with Relar and CPython, and comparing it with a Rust implementation:
 
 ## Installation
 
-Relar uses Clang 18 on Linux and Apple Clang from the Xcode Command Line Tools
-on Apple Silicon macOS (`xcode-select --install`). The Linux binaries are built on Ubuntu 24.04.
-In an empty directory, download and verify the archive for your platform from [GitHub Releases](https://github.com/astral-sh/relar/releases).
+Install Relar on Linux or Apple Silicon macOS with the standalone installer.
 
-```console
-case "$(uname -sm)" in
-  "Linux x86_64"|"Linux aarch64") bundle="relar-$(uname -m)-unknown-linux-gnu" ;;
-  "Darwin arm64") bundle="relar-aarch64-apple-darwin" ;;
-esac
-gh release download --repo astral-sh/relar --pattern "$bundle.tar.gz" --pattern "$bundle.tar.gz.sha256"
-shasum -a 256 -c "$bundle.tar.gz.sha256"
-tar -xzf "$bundle.tar.gz"
-mkdir -p ~/.local/bin
-cp "$bundle/relar" "$bundle/librelar_runtime.a" ~/.local/bin/
+```sh
+curl -LsSf https://github.com/astral-sh/relar/releases/latest/download/relar-installer.sh | sh
 ```
 
-Keep both files together and add `~/.local/bin` to your `PATH`. Programs built
-with Relar can run without the compiler, runtime archive, or Clang.
+To compile programs, install Clang 18 on Linux or the Xcode Command Line Tools
+on macOS (`xcode-select --install`). The Linux binaries require glibc 2.39 or later.
+You can also download the archives from [GitHub Releases](https://github.com/astral-sh/relar/releases).
 
-To build from Git, also install the [Rust toolchain](rust-toolchain.toml).
+To build from source, use the [Rust toolchain](rust-toolchain.toml).
 
 ```console
 git clone https://github.com/astral-sh/relar.git
 cd relar
 cargo build --workspace --release --locked
-mkdir -p ~/.cargo/bin
-cp target/release/relar target/release/librelar_runtime.a ~/.cargo/bin/
+./target/release/relar --version
 ```
-
-Make sure `~/.cargo/bin` is on your `PATH`.
 
 ## Getting started
 
