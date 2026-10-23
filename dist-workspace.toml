@@ -17,10 +17,9 @@ auto-includes = false
 build-local-artifacts = false
 local-artifacts-jobs = ["./build-release-binaries"]
 
-# Install the runtime archives and the packaged linker beside the compiler.
+# The installer moves the Linux native toolchain as one private directory.
 [dist.binaries]
-"*" = ["relar", "librelar_runtime.a", "librelar_runtime_jemalloc.a"]
-x86_64-unknown-linux-gnu = ["relar", "librelar_runtime.a", "librelar_runtime_jemalloc.a", "relar-ld.lld"]
+"*" = ["relar", "librelar_runtime.a", "librelar_runtime_jemalloc.a", "relar-toolchain"]
 aarch64-apple-darwin = ["relar", "librelar_runtime.a"]
 
 [dist.min-glibc-version]

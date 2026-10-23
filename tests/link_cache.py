@@ -123,6 +123,29 @@ def main():
             collision = subprocess.run([compiler, "build", "main.py", "-o", companion], cwd=root,
                                        env=environment, capture_output=True, text=True)
             assert collision.returncode and "distinct paths" in collision.stderr, collision.stderr
+
+            # A packaged driver takes precedence over PATH, also on the uncached IR path.
+            tools = install / "relar-toolchain"
+            for name in ("bin", "lib", "link"):
+                (tools / name).mkdir(parents=True)
+            private_clang = Path(shutil.copy2("/usr/bin/clang-18", tools / "bin/clang"))
+            (tools / "bin/ld.lld").symlink_to(companion)
+            zlib = subprocess.check_output(["clang-18", "-print-file-name=libz.so.1"], text=True).strip()
+            library = Path(shutil.copy2(zlib, tools / "lib/libz.so.1"))
+            without_clang = {"PATH": str(root / "empty-path")}
+            verbose = invoke("--verbose-link", events=["relink", "store"], objects="miss", **without_clang)
+            assert any(str(private_clang) in line and str(tools / "bin/ld.lld") in line for line in verbose)
+            invoke(mode="run", events=["hit"], **without_clang)
+            stamp = library.stat()
+            os.utime(library, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 1_000_000_000))
+            invoke(events=miss, objects="miss", **without_clang)
+            invoke("--emit-llvm", root / "output.ll", mode="run", events=["bypass"], **without_clang)
+            invoke("--target", f"{os.uname().machine}-linux-gnu", mode="run", events=["bypass"], **without_clang)
+            override = invoke("-Clink-arg=--ld-path=/usr/bin/ld", "--verbose-link",
+                              mode="run", events=["bypass"], **without_clang)
+            assert all(str(tools / "bin/ld.lld") not in line for line in override), override
+            explicit = invoke("--clang", "/usr/bin/clang-18", "--verbose-link", events=["bypass"])
+            assert all(str(tools) not in line for line in explicit), explicit
     print("Passed native link option, cache identity, and external input checks")
 
 

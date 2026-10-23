@@ -101,10 +101,12 @@ Install Relar on Linux or Apple Silicon macOS with the standalone installer.
 curl --proto '=https' --tlsv1.2 -LsSf https://labs.astral.sh/relar/install.sh | sh
 ```
 
-To compile programs, install Clang 18 on Linux or the Xcode Command Line Tools
-on macOS (`xcode-select --install`). The Linux binaries require glibc 2.39 or later.
-The x86-64 Linux release includes LLD 18 for faster native links. For a source
-build on Debian or Ubuntu, install `lld-18` alongside `clang-18` to use it.
+The x86-64 and ARM64 Linux releases include Clang 18, LLD 18, and the native
+link inputs that `relar build` and `relar run` need. Keep the `relar-toolchain`
+directory beside `relar` when moving an installation. The Linux binaries require
+glibc 2.39 or later. On macOS, install the Xcode Command Line Tools
+(`xcode-select --install`). For a source build on Debian or Ubuntu, install
+`clang-18`. Installing `lld-18` also enables faster links on x86-64.
 To install a specific version, use `https://labs.astral.sh/relar/releases/<version>/install.sh`.
 
 To build from source, use the [Rust toolchain](rust-toolchain.toml).
@@ -143,8 +145,9 @@ relar run totals.py -- 10 20 12
 
 Arguments after `--` go into the script’s `sys.argv`. Use `build` to keep the compiled executable.
 
-On native x86-64 Debian and Ubuntu with the standard Clang 18 toolchain, `build` and
-`run` share cached executables and module objects by default. The build summary
+`build` and `run` share cached executables and module objects by default with
+the bundled Linux toolchain. Source builds on x86-64 Debian and Ubuntu also
+support this cache with the distribution's Clang 18 toolchain. The build summary
 goes to stderr. Pass `-v` to see each module decision or `-q` to suppress
 progress. [Build cache and code generation](docs/subset.md#incremental-builds)
 
