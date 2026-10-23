@@ -94,9 +94,9 @@ For more, see the [design](docs/design.md) and [supported subset](docs/subset.md
 
 Relar and CPython 3.14.5 run the same Python programs. The Rust references read the same inputs and produce the same outputs.
 
-![Median elapsed time and interquartile range for Rust, CPython and Relar on six workloads. Exact medians follow in the table.](benchmarks/results/runtime-suite.svg)
+![Median time to render the offline conformance report. Rust took 23.59 ms, Relar 33.04 ms, and CPython 247.01 ms.](benchmarks/results/runtime-conformance.svg)
 
-Each point is the median of 12 fresh processes on one AMD EPYC Milan CPU, including startup, imports and file I/O. Lower is faster.
+The chart shows the offline reporter rendering captured ty diagnostics. The table gives median elapsed times for all six workloads. Each median covers 12 fresh processes pinned to one AMD EPYC Milan CPU. Timings include startup, imports and file I/O.
 
 | Workload | Input per process | Rust (ms) | CPython (ms) | Relar (ms) | CPython / Relar |
 | --- | --- | ---: | ---: | ---: | ---: |

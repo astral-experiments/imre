@@ -1,6 +1,6 @@
 # Benchmarks
 
-The [Rust, CPython and Relar comparison](runtime-suite.md) covers six workloads with checked outputs, raw samples and a command to reproduce the tables and figure.
+The [Rust, CPython and Relar comparison](runtime-suite.md) covers six workloads with checked outputs, raw samples and a command to reproduce the tables and figures.
 
 ## Route planner
 

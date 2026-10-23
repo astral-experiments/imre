@@ -1,6 +1,10 @@
 # Rust, CPython and Relar
 
-The [README](../README.md#benchmark) shows the median elapsed time for each workload. The ranges below are the 25th and 75th percentiles of the same 12 measurements. The last column gives the size of the file each implementation had to reproduce byte for byte.
+Each panel compares Rust, Relar and CPython on one workload. Bar lengths share a zero baseline within each panel, and the labels give absolute times in milliseconds. The [README](../README.md#benchmark) lists all six medians for each runtime.
+
+![Six panels comparing median elapsed time for Rust, Relar and CPython on inventory reconciliation, Base45 decoding, Luhn checksums, telemetry and offline conformance reporting.](results/runtime-suite.svg)
+
+The ranges below are the 25th and 75th percentiles of the same 12 measurements. The last column gives the size of the file each implementation had to reproduce byte for byte.
 
 | Workload | Rust (ms) | CPython (ms) | Relar (ms) | Output file (bytes) |
 | --- | ---: | ---: | ---: | ---: |
@@ -35,9 +39,9 @@ Run the suite from the repository root on Linux with CPython 3.14+, Clang 18 and
 python3.14 benchmarks/runtime_suite.py --output benchmarks/local/runtime-suite.json
 ```
 
-The runner builds the native executables before timing and selects the first permitted CPU. Pass `--cpu N` to select another one. The recorded run used `--cpu 12 --toolchain ohm`. This command regenerates the SVG and prints both Markdown tables from the committed data.
+The runner builds the native executables before timing and selects the first permitted CPU. Pass `--cpu N` to select another one. The recorded run used `--cpu 12 --toolchain ohm`. This command writes the README chart (`runtime-conformance.svg`) and the workload panels (`runtime-suite.svg`) and prints both Markdown tables from the committed data.
 
 ```sh
 uv run --script benchmarks/render_runtime_suite.py benchmarks/results/runtime-suite.json \
-  --svg benchmarks/local/runtime-suite.svg
+  --output-dir benchmarks/local
 ```

@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="600pt" height="181.5pt" viewBox="0 0 600 181.5" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <title>Render the conformance report</title>
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:title>Render the conformance report</dc:title>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.8, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 181.5
+L 600 181.5
+L 600 0
+L 0 0
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="LineCollection_1">
+    <path d="M 78.75 59.25
+L 78.75 138.75
+" clip-path="url(#p7cb1a9eaa0)" style="fill: none; stroke: #e2dfe1; stroke-width: 0.7"/>
+   </g>
+   <g id="LineCollection_2">
+    <path d="M 161.85 59.25
+L 161.85 138.75
+" clip-path="url(#p7cb1a9eaa0)" style="fill: none; stroke: #e2dfe1; stroke-width: 0.7"/>
+   </g>
+   <g id="LineCollection_3">
+    <path d="M 244.95 59.25
+L 244.95 138.75
+" clip-path="url(#p7cb1a9eaa0)" style="fill: none; stroke: #e2dfe1; stroke-width: 0.7"/>
+   </g>
+   <g id="LineCollection_4">
+    <path d="M 328.05 59.25
+L 328.05 138.75
+" clip-path="url(#p7cb1a9eaa0)" style="fill: none; stroke: #e2dfe1; stroke-width: 0.7"/>
+   </g>
+   <g id="LineCollection_5">
+    <path d="M 411.15 59.25
+L 411.15 138.75
+" clip-path="url(#p7cb1a9eaa0)" style="fill: none; stroke: #e2dfe1; stroke-width: 0.7"/>
+   </g>
+   <g id="LineCollection_6">
+    <path d="M 494.25 59.25
+L 494.25 138.75
+" clip-path="url(#p7cb1a9eaa0)" style="fill: none; stroke: #e2dfe1; stroke-width: 0.7"/>
+   </g>
+   <g id="patch_2">
+    <path d="M 78.75 65.625
+L 117.952959 65.625
+L 117.952959 79.875
+L 78.75 79.875
+z
+" clip-path="url(#p7cb1a9eaa0)" style="fill: #edb846"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 78.75 91.875
+L 133.654458 91.875
+L 133.654458 106.125
+L 78.75 106.125
+z
+" clip-path="url(#p7cb1a9eaa0)" style="fill: #edb846"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 78.75 118.125
+L 489.284044 118.125
+L 489.284044 132.375
+L 78.75 132.375
+z
+" clip-path="url(#p7cb1a9eaa0)" style="fill: #edb846"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #262528" x="19.5" y="26.716875" transform="rotate(-0 19.5 26.716875)">Render the conformance report</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 9.9px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #56545b" x="19.5" y="44.731781" transform="rotate(-0 19.5 44.731781)">146 files, two captured ty runs  ·  Median of 12 runs  ·  Lower is faster</text>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 8.6px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #56545b" x="78.75" y="156.123063" transform="rotate(-0 78.75 156.123063)">0</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 8.6px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #56545b" x="161.85" y="156.123063" transform="rotate(-0 161.85 156.123063)">50</text>
+   </g>
+   <g id="text_5">
+    <text style="font-size: 8.6px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #56545b" x="244.95" y="156.123063" transform="rotate(-0 244.95 156.123063)">100</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 8.6px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #56545b" x="328.05" y="156.123063" transform="rotate(-0 328.05 156.123063)">150</text>
+   </g>
+   <g id="text_7">
+    <text style="font-size: 8.6px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #56545b" x="411.15" y="156.123063" transform="rotate(-0 411.15 156.123063)">200</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 8.6px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #56545b" x="494.25" y="156.123063" transform="rotate(-0 494.25 156.123063)">250</text>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 10.8px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #262528" x="69.75" y="75.730125" transform="rotate(-0 69.75 75.730125)">Rust</text>
+   </g>
+   <g id="text_10">
+    <text style="font-weight: 700; font-size: 10.4px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #262528" x="125.452959" y="75.61975" transform="rotate(-0 125.452959 75.61975)">23.59 ms</text>
+   </g>
+   <g id="text_11">
+    <text style="font-size: 10.8px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #262528" x="69.75" y="101.980125" transform="rotate(-0 69.75 101.980125)">Relar</text>
+   </g>
+   <g id="text_12">
+    <text style="font-weight: 700; font-size: 10.4px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #262528" x="141.154458" y="101.86975" transform="rotate(-0 141.154458 101.86975)">33.04 ms</text>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 10.8px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #262528" x="69.75" y="128.230125" transform="rotate(-0 69.75 128.230125)">CPython</text>
+   </g>
+   <g id="text_14">
+    <text style="font-weight: 700; font-size: 10.4px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #262528" x="496.784044" y="128.11975" transform="rotate(-0 496.784044 128.11975)">247.01 ms</text>
+   </g>
+   <g id="text_15">
+    <text style="font-size: 8.8px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #56545b" x="286.5" y="172.67825" transform="rotate(-0 286.5 172.67825)">Elapsed time (ms)</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p7cb1a9eaa0">
+   <rect x="0" y="0" width="600" height="181.5"/>
+  </clipPath>
+ </defs>
+</svg>
