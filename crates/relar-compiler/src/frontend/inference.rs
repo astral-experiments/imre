@@ -2,7 +2,49 @@
 
 use std::cell::{Cell, RefCell};
 
+use ruff_python_ast::visitor::{Visitor, walk_stmt};
+
 use super::*;
+
+/// Only a standalone append in this lexical scope supplies a list layout hint.
+/// The ordinary checker still checks its operand and every other use of the list.
+pub(super) fn first_append<'ast>(
+    name: &str,
+    statements: &'ast [ast::Stmt],
+) -> Option<&'ast ast::Expr> {
+    struct Appends<'name, 'ast> {
+        name: &'name str,
+        value: Option<&'ast ast::Expr>,
+    }
+
+    impl<'ast> Visitor<'ast> for Appends<'_, 'ast> {
+        fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
+            if self.value.is_some()
+                || matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))
+            {
+                return;
+            }
+            if let ast::Stmt::Expr(stmt) = stmt
+                && let ast::Expr::Call(call) = &*stmt.value
+                && let ast::Expr::Attribute(method) = &*call.func
+                && method.attr.as_str() == "append"
+                && matches!(&*method.value, ast::Expr::Name(name) if name.id == self.name)
+                && let [value] = call.arguments.args.as_ref()
+                && call.arguments.keywords.is_empty()
+            {
+                self.value = Some(value);
+            } else {
+                walk_stmt(self, stmt);
+            }
+        }
+
+        fn visit_expr(&mut self, _: &'ast ast::Expr) {}
+    }
+
+    let mut appends = Appends { name, value: None };
+    appends.visit_body(statements);
+    appends.value
+}
 
 const DEFERRED: &str = "inference is waiting for a function return type";
 

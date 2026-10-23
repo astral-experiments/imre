@@ -182,6 +182,10 @@ In 972 pairs, each side has a single diagnostic. Relar compares the six
 fingerprint fields directly in these pairs, avoiding two temporary tuples and
 two sorted lists per pair. The [collector profiles and timings](../../benchmarks/results/2026-10-22-collector-ownership.md)
 measure the effect across all 1,269 groups.
+Ruff’s original `render_file_stats_table` renders the per-file breakdown.
+The enclosing function supplies the report URL for the selected typing revision.
+[Full-report benchmarks](../../benchmarks/results/2026-10-23-file-stats-table.md)
+
 The diagnostic grouping study compares ordered groups, fingerprint equivalence,
 per-file statistics, and complete reports on 146 and 1,460 source files.
 [Timings, memory, and checkout-path sensitivity](../../benchmarks/results/2026-10-23-diagnostic-grouping.md)

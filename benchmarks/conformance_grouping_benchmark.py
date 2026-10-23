@@ -60,12 +60,12 @@ def main():
     ap.add_argument("--cpu", type=int, required=True)
     ap.add_argument("--samples", type=int, default=12)
     ap.add_argument("--pilot", action="store_true")
+    ap.add_argument("--reports-only", action="store_true", help="time complete reports without building isolated kernels")
     opts = ap.parse_args()
     cfg = json.loads(opts.config.read_bytes())
     engines = cfg["engines"]
-    assert set(engines) == set(ENGINES) and all(
-        set(v) == {"analysis", "report", "compute"} for v in engines.values()
-    )
+    operations = {"report"} if opts.reports_only else {"analysis", "report", "compute"}
+    assert set(engines) == set(ENGINES) and all(set(v) == operations for v in engines.values())
     assert (
         cfg["mode"] in ("normal", "thinlto")
         and len(cfg["revision"]) == len(cfg["baseline_revision"]) == 40
@@ -169,6 +169,8 @@ def main():
                 workloads[(state, fmt)] = VALIDATION["Workload"](
                     *(Path(s) for s in paths), fmt
                 )
+            if opts.reports_only:
+                continue
             for mode in ("dump", "aliases"):
                 command = [mode, *paths, "1"]
                 stdout, body, _ = run([*engines["upstream"]["analysis"], *command])
@@ -194,6 +196,8 @@ def main():
         ]
         specs += [("report", state, fmt, 1) for state, fmt in workloads]
         specs.append(("compute", "changed", "github", 5 if scale == 1 else 2))
+        if opts.reports_only:
+            specs = [case for case in specs if case[0] == "report"]
         for mode, state, fmt, rounds in specs:
             path = fixtures / f"{scale}x" / state
             arguments = [

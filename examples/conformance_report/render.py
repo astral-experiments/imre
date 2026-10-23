@@ -14,14 +14,6 @@ GITHUB_FOOTER = ['</table>']
 SUMMARY_NOTE = '\n    Each test case represents one expected error annotation or a group of annotations\n    sharing a tag. Counts are per test case, not per diagnostic — multiple diagnostics\n    on the same line count as one. Required annotations (`E`) are true positives when\n    ty flags the expected location and false negatives when it does not. Optional\n    annotations (`E?`) are true positives when flagged but true negatives (not false\n    negatives) when not. Tagged annotations (`E[tag]`) require ty to flag exactly one\n    of the tagged lines; tagged multi-annotations (`E[tag+]`) allow any number up to\n    the tag count. Flagging unexpected locations counts as a false positive.\n'
 TITLE_PRIORITY: dict[str, int] = {'True positives added': 0, 'False positives removed': 1, 'True positives changed': 2, 'False positives changed': 3, 'False positives added': 4, 'True positives removed': 5, 'Optional Diagnostics Added': 6, 'Optional Diagnostics Removed': 7, 'Optional Diagnostics Changed': 8}
 
-def fmt(old: int, new: int, *, greater_is_better: bool=True) -> str:
-    if old == new:
-        return str(new)
-    diff = new - old
-    improved = diff > 0 if greater_is_better else diff < 0
-    indicator = ' ✅' if improved else ' ❌'
-    return f'{new} ({signed_int(diff)}){indicator}'
-
 def format_metric(diff: float, old: float, new: float) -> str:
     if diff > 0:
         return f'increased from <b>{old:.2%}</b> to <b>{new:.2%}</b>'
@@ -200,46 +192,91 @@ def render_test_cases(test_cases: list[TestCase], base_url: str, *, format: str=
         position = end
     return '\n'.join(lines)
 
-def render_file_stats_table(file_stats: list[FileStats], base_url: str) -> str:
-    """Render a per-file breakdown showing only files whose TP/FP/FN counts changed."""
-    old_totals = Statistics()
-    new_totals = Statistics()
-    passing = 0
-    total_files = len(file_stats)
-    for fs in file_stats:
-        old_totals.true_positives += fs.old.true_positives
-        old_totals.false_positives += fs.old.false_positives
-        old_totals.false_negatives += fs.old.false_negatives
-        new_totals.true_positives += fs.new.true_positives
-        new_totals.false_positives += fs.new.false_positives
-        new_totals.false_negatives += fs.new.false_negatives
-        passing += 1 if fs.new_passes else 0
-    changed = [fs for fs in file_stats if fs.total_change > 0]
-    if not changed:
-        return ''
-    changed = sorted(changed, key=lambda fs: (-fs.total_change, fs.path.name))
-    rows: list[str] = []
-    for fs in changed:
-        if fs.new_passes and (not fs.old_passes):
-            status = '✅ Newly Passing 🎉'
-        elif fs.old_passes and (not fs.new_passes):
-            status = '❌ Newly Failing ☹️'
-        elif fs.new_passes:
-            status = '✅ Still Passing'
-        else:
-            old_errors = fs.old.false_positives + fs.old.false_negatives
-            new_errors = fs.new.false_positives + fs.new.false_negatives
-            if new_errors < old_errors:
-                status = '📈 Improving'
-            elif new_errors > old_errors:
-                status = '📉 Regressing'
+def render_file_stats(file_stats: list[FileStats], CONFORMANCE_DIR_WITH_README: str) -> str:
+    # Bind Ruff's report URL to this checkout for the duration of the call.
+    def render_file_stats_table(file_stats: list[FileStats]) -> str:
+        """Render a per-file breakdown showing only files whose TP/FP/FN counts changed."""
+
+        def fmt(old: int, new: int, *, greater_is_better: bool = True) -> str:
+            if old == new:
+                return str(new)
+            diff = new - old
+            improved = diff > 0 if greater_is_better else diff < 0
+            indicator = " ✅" if improved else " ❌"
+            return f"{new} ({diff:+}){indicator}"
+
+        # Collect totals across all files regardless of change.
+        old_totals = Statistics()
+        new_totals = Statistics()
+        passing = 0
+        total_files = len(file_stats)
+
+        for fs in file_stats:
+            old_totals.true_positives += fs.old.true_positives
+            old_totals.false_positives += fs.old.false_positives
+            old_totals.false_negatives += fs.old.false_negatives
+            new_totals.true_positives += fs.new.true_positives
+            new_totals.false_positives += fs.new.false_positives
+            new_totals.false_negatives += fs.new.false_negatives
+            passing += fs.new_passes
+
+        changed = [fs for fs in file_stats if fs.total_change > 0]
+        if not changed:
+            return ""
+
+        changed.sort(key=lambda fs: (-fs.total_change, fs.path.name))
+
+        rows = []
+        for fs in changed:
+            if fs.new_passes and not fs.old_passes:
+                status = "✅ Newly Passing 🎉"
+            elif fs.old_passes and not fs.new_passes:
+                status = "❌ Newly Failing ☹️"
+            elif fs.new_passes:
+                status = "✅ Still Passing"
             else:
-                status = '➡️ Neutral'
-        url = base_url + f'tests/{fs.path.name}'
-        rows.append(f'| [{fs.path.name}]({url}) | {fmt(fs.old.true_positives, fs.new.true_positives, greater_is_better=True)} | {fmt(fs.old.false_positives, fs.new.false_positives, greater_is_better=False)} | {fmt(fs.old.false_negatives, fs.new.false_negatives, greater_is_better=False)} | {status} |')
-    totals_row = f'| **Total (all files)** | **{fmt(old_totals.true_positives, new_totals.true_positives, greater_is_better=True)}** | **{fmt(old_totals.false_positives, new_totals.false_positives, greater_is_better=False)}** | **{fmt(old_totals.false_negatives, new_totals.false_negatives, greater_is_better=False)}** | {passing}/{total_files} |'
-    lines = ['### Test file breakdown', '', '<details>', f"<summary>{len(changed)} file{('s' if len(changed) != 1 else '')} altered</summary>", '', '| File | True Positives | False Positives | False Negatives | Status |', '|------|----|----|----|--------|', *rows, totals_row, '', '</details>', '']
-    return '\n'.join(lines)
+                old_errors = fs.old.false_positives + fs.old.false_negatives
+                new_errors = fs.new.false_positives + fs.new.false_negatives
+                if new_errors < old_errors:
+                    status = "📈 Improving"
+                elif new_errors > old_errors:
+                    status = "📉 Regressing"
+                else:
+                    status = "➡️ Neutral"
+            url = CONFORMANCE_DIR_WITH_README + f"tests/{fs.path.name}"
+            rows.append(
+                f"| [{fs.path.name}]({url})"
+                f" | {fmt(fs.old.true_positives, fs.new.true_positives, greater_is_better=True)}"
+                f" | {fmt(fs.old.false_positives, fs.new.false_positives, greater_is_better=False)}"
+                f" | {fmt(fs.old.false_negatives, fs.new.false_negatives, greater_is_better=False)}"
+                f" | {status} |"
+            )
+
+        totals_row = (
+            f"| **Total (all files)**"
+            f" | **{fmt(old_totals.true_positives, new_totals.true_positives, greater_is_better=True)}**"
+            f" | **{fmt(old_totals.false_positives, new_totals.false_positives, greater_is_better=False)}**"
+            f" | **{fmt(old_totals.false_negatives, new_totals.false_negatives, greater_is_better=False)}**"
+            f" | {passing}/{total_files} |"
+        )
+
+        lines = [
+            "### Test file breakdown",
+            "",
+            "<details>",
+            f"<summary>{len(changed)} file{'s' if len(changed) != 1 else ''} altered</summary>",
+            "",
+            "| File | True Positives | False Positives | False Negatives | Status |",
+            "|------|----|----|----|--------|",
+            *rows,
+            totals_row,
+            "",
+            "</details>",
+            "",
+        ]
+        return "\n".join(lines)
+
+    return render_file_stats_table(file_stats)
 
 def diff_format(diff: float, *, greater_is_better: bool=True, neutral: bool=False) -> str:
     if diff == 0:

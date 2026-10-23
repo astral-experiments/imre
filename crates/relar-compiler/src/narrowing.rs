@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use ruff_python_ast as ast;
-use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr, walk_pattern};
+use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr, walk_pattern, walk_stmt};
 
 /// Returns facts guaranteed when `test` has the requested truth value.
 /// A true fact means non-None. Only local names are eligible: attribute and
@@ -191,6 +191,14 @@ pub(crate) fn assigned_names(body: &[ast::Stmt]) -> HashSet<String> {
 struct Assignments(HashSet<String>);
 
 impl<'a> Visitor<'a> for Assignments {
+    fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
+        if let ast::Stmt::FunctionDef(function) = statement {
+            self.0.insert(function.name.to_string());
+        } else {
+            walk_stmt(self, statement);
+        }
+    }
+
     fn visit_pattern(&mut self, pattern: &'a ast::Pattern) {
         let name = match pattern {
             ast::Pattern::MatchAs(pattern) => pattern.name.as_ref(),

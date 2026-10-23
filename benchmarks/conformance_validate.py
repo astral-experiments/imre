@@ -22,7 +22,7 @@ if sys.flags.optimize:
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "examples" / "conformance_report"
 SENTINEL = b"previous report must survive\n"
-REVISION = "835b70f3f795f8e061b1f7621178515b0a77a0ad"
+FIXTURE_REVISION = "test/alternate-report-revision"
 
 
 def digest(data: bytes) -> str:
@@ -432,7 +432,7 @@ def materialize_case(case: Case, directory: Path, *, format: str = "github",
         path.write_bytes(source.encode())
         files.append(str(path))
         aliases.append({"raw": "raw/" + name, "path": str(path)})
-    manifest = {"suite_revision": REVISION, "test_files": files, "diagnostic_paths": aliases}
+    manifest = {"suite_revision": FIXTURE_REVISION, "test_files": files, "diagnostic_paths": aliases}
     if case.mutation == "extra-alias":
         aliases.append({"raw": "raw/unmapped.py", "path": str(directory.resolve() / "unmapped.py")})
     elif case.mutation == "duplicate-path":
