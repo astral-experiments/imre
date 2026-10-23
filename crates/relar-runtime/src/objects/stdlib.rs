@@ -40,6 +40,42 @@ fn permute<T>(values: &mut [T], order: &mut [usize]) {
     }
 }
 
+/// Long path-like strings often share the same leading bytes. For a large
+/// stable sort, find that prefix once before comparing the remaining bytes.
+///
+/// # Safety
+/// Each word is an immutable string rooted for the entire sort.
+unsafe fn sort_strings(values: &mut [usize], reverse: bool) {
+    // SAFETY: the list keeps these owners live, including while they move.
+    let bytes = |word: usize| unsafe { (&*(word as *const Str)).as_bytes() };
+    let mut skip = 0;
+    if values.len() >= 64 {
+        let first = bytes(values[0]);
+        let mut prefix = first;
+        for &word in &values[1..] {
+            let candidate = bytes(word);
+            if !candidate.starts_with(prefix) {
+                let end = prefix
+                    .iter()
+                    .zip(candidate)
+                    .take_while(|(a, b)| a == b)
+                    .count();
+                prefix = &prefix[..end];
+                if end < 16 {
+                    break;
+                }
+            }
+        }
+        if prefix.len() >= 16 {
+            skip = prefix.len();
+        }
+    }
+    values.sort_by(|&left, &right| {
+        let order = bytes(left)[skip..].cmp(&bytes(right)[skip..]);
+        if reverse { order.reverse() } else { order }
+    });
+}
+
 /// # Safety
 /// Both words are rooted canonical integers for this comparison.
 unsafe fn compare_int(left: usize, right: usize) -> Ordering {
@@ -213,10 +249,7 @@ pub unsafe extern "C" fn relar_sort_by_keys(
             object(values.cast()).0.with_mut(|storage| {
                 let values = storage.sequence_mut();
                 values.check_kind(key_kind);
-                values.values.sort_by(|&left, &right| {
-                    let order = (&*(left as *const Str)).cmp(&*(right as *const Str));
-                    if reverse != 0 { order.reverse() } else { order }
-                });
+                sort_strings(&mut values.values, reverse != 0);
             });
         }
         return;
@@ -393,6 +426,28 @@ mod tests {
                 });
             }
             assert!(texts.iter().all(|text| Rc::strong_count(text) == 1));
+        }
+    }
+
+    #[test]
+    fn sorting_shared_prefixes_uses_unicode_byte_order_and_stable_ties() {
+        for prefix in ["", "a-long-directory-name/"] {
+            let keys: Vec<_> = (0..96)
+                .map(|i| Rc::new(Str::from(format!("{prefix}{}", ["é", "è", "ê"][i % 3]))))
+                .collect();
+            for reverse in [false, true] {
+                let mut expected: Vec<_> = keys.iter().collect();
+                expected.sort_by(|a, b| if reverse { b.cmp(a) } else { a.cmp(b) });
+                let mut words: Vec<_> = keys.iter().map(|s| Rc::as_ptr(s) as usize).collect();
+                // SAFETY: keys owns each immutable string until the comparison finishes.
+                unsafe { sort_strings(&mut words, reverse) };
+                assert!(
+                    expected
+                        .into_iter()
+                        .map(|s| Rc::as_ptr(s) as usize)
+                        .eq(words)
+                );
+            }
         }
     }
 
