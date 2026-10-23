@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -11,8 +12,12 @@ print(root.exists())
 print(Path("outside/keep.txt").read_text(encoding="utf-8"))
 
 with TemporaryDirectory(dir="scratch") as readonly:
-    Path(readonly).rmdir()
-    Path("scratch/locked-root").replace(readonly)
+    child = Path(readonly) / "locked.txt"
+    child.write_text("read-only root", encoding="utf-8")
+    subprocess.run(
+        ["chmod", "000", str(child), readonly],
+        capture_output=True, encoding="utf-8", check=True,
+    )
 print(Path(readonly).exists())
 
 with TemporaryDirectory(dir="scratch") as missing:
