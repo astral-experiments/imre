@@ -155,7 +155,11 @@ enum Completion {
     Error,
 }
 
-pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> String {
+pub(crate) fn emit(
+    module: &Module,
+    ranges: &RangeFacts<'_>,
+    sanitize: bool,
+) -> Result<String, String> {
     emit_program(module, ranges, sanitize, None)
 }
 
@@ -164,7 +168,7 @@ fn emit_program(
     ranges: &RangeFacts<'_>,
     sanitize: bool,
     mut partition: Option<&mut units::Owners<'_>>,
-) -> String {
+) -> Result<String, String> {
     let borrows = borrows::analyze(module);
     let effects = effects::analyze(module);
     let inline_dispatch = string_enums::inline_dispatch(module, &effects);
@@ -192,6 +196,9 @@ fn emit_program(
         small_locals: Vec::new(),
         temporaries: Vec::new(),
         cleanups: Vec::new(),
+        try_nesting: 0,
+        cleanup_bytes: 0,
+        cleanup_limit_hit: false,
         return_exit: String::new(),
         error_exit: String::new(),
         sanitize,
@@ -217,7 +224,7 @@ fn emit_program(
             emitter.next_label = 0;
             emitter.current_unit = plan.functions[id];
         }
-        emitter.function(function, &format!("fn_{id}"), false, &borrows[id]);
+        emitter.function(function, &format!("fn_{id}"), false, &borrows[id])?;
         if let Some(plan) = &mut partition {
             plan.strings
                 .resize(emitter.strings.len(), plan.functions[id]);
@@ -228,7 +235,7 @@ fn emit_program(
         emitter.next_label = 0;
         emitter.current_unit = plan.entry;
     }
-    emitter.function(&module.entry, "main", true, borrows.last().unwrap());
+    emitter.function(&module.entry, "main", true, borrows.last().unwrap())?;
     if let Some(plan) = &mut partition {
         plan.strings.resize(emitter.strings.len(), plan.entry);
     }
@@ -268,7 +275,7 @@ fn emit_program(
     // Layout hints never replace the representation, overflow, or error guards.
     output.push_str("\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n");
     output.push_str("!1 = !{!\"branch_weights\", i32 2000, i32 1}\n");
-    output
+    Ok(output)
 }
 
 struct Emitter<'a, 'module> {
@@ -295,6 +302,9 @@ struct Emitter<'a, 'module> {
     small_locals: Vec<bool>,
     temporaries: Vec<Value>,
     cleanups: Vec<Cleanup>,
+    try_nesting: usize,
+    cleanup_bytes: usize,
+    cleanup_limit_hit: bool,
     return_exit: String,
     error_exit: String,
     sanitize: bool,
@@ -1137,6 +1147,14 @@ impl Emitter<'_, '_> {
                 Cleanup::Active { previous, name } => self.restore_active(&previous, name),
                 Cleanup::Completion(value) => self.release(&value),
                 Cleanup::Finally { body, loops } => {
+                    // A finalbody can itself contain transfers and protected
+                    // regions. Bound copied cleanup IR across one outer try.
+                    const MAX_CLEANUP_BYTES: usize = 8 * 1024 * 1024;
+                    if self.cleanup_limit_hit || self.cleanup_bytes >= MAX_CLEANUP_BYTES {
+                        self.cleanup_limit_hit = true;
+                        self.terminated = true;
+                        return;
+                    }
                     let depth = self.cleanups.len();
                     let error = if matches!(completion, Completion::Error) {
                         let error = self.call("relar_error_take", Type::Exception, &[]);
@@ -1157,7 +1175,11 @@ impl Emitter<'_, '_> {
                         None
                     };
                     self.loops = loops;
+                    let before = self.code.len();
+                    let previous_bytes = self.cleanup_bytes;
                     self.block(&body);
+                    // Nested copies are already included in this byte range.
+                    self.cleanup_bytes = previous_bytes + (self.code.len() - before);
                     self.cleanups.truncate(depth);
                     if self.terminated {
                         return;
@@ -1193,6 +1215,10 @@ impl Emitter<'_, '_> {
         orelse: &[Statement],
         finalbody: &[Statement],
     ) {
+        if self.try_nesting == 0 {
+            self.cleanup_bytes = 0;
+        }
+        self.try_nesting += 1;
         let depth = self.cleanups.len();
         let end = self.label();
         if !finalbody.is_empty() {
@@ -1202,11 +1228,12 @@ impl Emitter<'_, '_> {
             });
         }
         let dispatch = self.label();
-        if !handlers.is_empty() {
+        let catches_error = !handlers.is_empty() || !finalbody.is_empty();
+        if catches_error {
             self.cleanups.push(Cleanup::Handler(dispatch.clone()));
         }
         self.block(body);
-        if !handlers.is_empty() {
+        if catches_error {
             self.cleanups.pop();
         }
         if !self.terminated {
@@ -1269,9 +1296,15 @@ impl Emitter<'_, '_> {
             self.void_call("relar_error_set", &[&exception]);
             self.release(&exception);
             self.route(Completion::Error);
+        } else if catches_error {
+            // Every failure in this protected body shares its pending-error
+            // cleanup. Outer protected bodies provide their own landing pads.
+            self.start(&dispatch);
+            self.route(Completion::Error);
         }
         self.cleanups.truncate(depth);
         self.start(&end);
+        self.try_nesting -= 1;
     }
 
     /// The caller roots arguments throughout a call. Parameters whose bindings
@@ -1282,7 +1315,7 @@ impl Emitter<'_, '_> {
         symbol: &str,
         entry: bool,
         borrows: &FunctionBorrows,
-    ) {
+    ) -> Result<(), String> {
         self.entry_allocas.clear();
         self.locals = function.locals.clone();
         self.borrowed_locals = borrows.locals.clone();
@@ -1424,6 +1457,10 @@ impl Emitter<'_, '_> {
         }
         self.code.push_str("}\n");
         self.code.insert_str(allocas_at, &self.entry_allocas);
+        if self.cleanup_limit_hit {
+            return Err("Relar: finally cleanup expansion exceeds the compiler limit".to_owned());
+        }
+        Ok(())
     }
 
     fn block(&mut self, statements: &[Statement]) {
@@ -5834,7 +5871,7 @@ def total(text: str) -> int:
         };
         assert!(!module.functions[0].expression_rebound()[0]);
         let ranges = crate::ranges::analyze(&module);
-        let llvm = super::emit(&module, &ranges, false);
+        let llvm = super::emit(&module, &ranges, false).unwrap();
         let body = llvm
             .split_once("@fn_0(")
             .unwrap()

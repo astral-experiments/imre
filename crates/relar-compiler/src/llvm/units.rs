@@ -156,7 +156,7 @@ pub(crate) fn emit_units(
         entry,
         strings: Vec::new(),
     };
-    let ir = emit_program(module, ranges, sanitize, Some(&mut owners));
+    let ir = emit_program(module, ranges, sanitize, Some(&mut owners))?;
     let mut remaining = ir.as_str();
     let mut common = String::from("source_filename = \"relar-unit\"\n");
     let mut common_refs = HashSet::new();

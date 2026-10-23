@@ -41,7 +41,7 @@ pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String>
     let mut module = frontend::lower(&modules::SourceGraph::single(source)?)?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
-    Ok(llvm::emit(&module, &ranges, options.address_sanitizer))
+    llvm::emit(&module, &ranges, options.address_sanitizer)
 }
 
 /// The generated IR and every source file that must be protected from output writes.
@@ -88,7 +88,7 @@ pub fn compile_file(
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     Ok(Compilation {
-        llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer),
+        llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer)?,
         source_inputs: graph.inputs,
         input_paths: graph
             .modules
@@ -338,6 +338,31 @@ def first(path: str) -> bytes:
         assert!(llvm.contains("define i32 @main()"));
         assert!(!llvm.contains("call void @relar_args_init"));
         assert!(!llvm.contains("call void @relar_args_clear"));
+    }
+
+    #[test]
+    fn nested_finally_emission_stays_bounded() {
+        fn indent(body: &str) -> String {
+            body.lines().map(|line| format!("    {line}\n")).collect()
+        }
+        fn program(depth: usize, nested_cleanup: bool) -> String {
+            let mut body = "pass\n".to_owned();
+            for _ in 0..depth {
+                let nested = indent(&body);
+                body = if nested_cleanup {
+                    format!("try:\n    int(text)\nfinally:\n{nested}")
+                } else {
+                    format!("try:\n{nested}finally:\n    int(text)\n")
+                };
+            }
+            format!("def f(text: str) -> None:\n{}f('1')\n", indent(&body))
+        }
+        let options = CompileOptions::default();
+        let shallow = compile(&program(8, false), &options).unwrap();
+        let deep = compile(&program(12, false), &options).unwrap();
+        assert!(deep.len() < 2 * shallow.len());
+        let error = compile(&program(14, true), &options).unwrap_err();
+        assert!(error.contains("finally cleanup expansion"), "{error}");
     }
 
     #[test]

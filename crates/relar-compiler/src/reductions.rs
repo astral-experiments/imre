@@ -684,7 +684,7 @@ def total(text: str) -> int:
             generic_adds != 0,
             "the original accumulator remains the fallback"
         );
-        let llvm = crate::llvm::emit(&module, &ranges, false);
+        let llvm = crate::llvm::emit(&module, &ranges, false).unwrap();
         assert!(llvm.contains("call void @llvm.assume"));
         assert!(llvm.contains("call i64 @int_add"));
         assert!(llvm.contains("call i64 @relar_list_borrow_index(ptr"));
