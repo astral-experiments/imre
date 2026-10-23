@@ -89,21 +89,19 @@ class TyDiagnostic:
     location: Location
     source: Source
 
+    def __str__(self) -> str:
+        return (
+            f"{self.location.path}:{self.location.positions.begin.line}:"
+            f"{self.location.positions.begin.column}: "
+            f"{self.severity_for_display}[{self.check_name}] {self.description}"
+        )
+
     @property
     def severity_for_display(self) -> str:
-        if self.severity == "major":
-            return "error"
-        if self.severity == "minor":
-            return "warning"
-        return "unknown"
-
-
-def diagnostic_text(diagnostic: TyDiagnostic) -> str:
-    return (
-        f"{diagnostic.location.path}:{diagnostic.location.positions.begin.line}:"
-        f"{diagnostic.location.positions.begin.column}: "
-        f"{diagnostic.severity_for_display}[{diagnostic.check_name}] {diagnostic.description}"
-    )
+        return {
+            "major": "error",
+            "minor": "warning",
+        }.get(self.severity, "unknown")
 
 
 def diagnostics_are_equivalent(a: list[TyDiagnostic], b: list[TyDiagnostic]) -> bool:

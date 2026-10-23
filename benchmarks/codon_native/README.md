@@ -109,3 +109,10 @@ for the union. A non-null tag is passed through `str` after the original
 filter. Native `Path` handles file resolution and basename grouping. The
 comparison checks the order and fields of every diagnostic and expected error,
 each group's equivalence, and the per-file counts in source-list order.
+
+The diagnostic section uses Codon's native `groupby`, list concatenation,
+generator `min` and `max`, and record `__str__`. The two calls to the HTML row
+renderer pass the selected checkout URLs explicitly so its sibling function can
+use them. Codon 0.20.4 accepts named fields through `str.format_map`. The
+adapter puts the filename and integer line into a native `dict[str, str | int]`
+and calls `format_map` on the original template.

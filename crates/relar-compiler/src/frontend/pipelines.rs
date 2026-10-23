@@ -1520,6 +1520,68 @@ impl Checker<'_> {
         }
     }
 
+    /// Reduce exact integers in one pass without retaining intermediate items.
+    pub(super) fn extremum_call(
+        &mut self,
+        call: &ast::ExprCall,
+        minimum: bool,
+    ) -> Result<Expr, String> {
+        let name = if minimum { "min" } else { "max" };
+        self.reject_builtin_keywords(call)?;
+        let [source @ ast::Expr::Generator(_)] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                &format!("{name} requires one integer generator expression"),
+            ));
+        };
+        let input = self.expansion_input(source, Some(Type::Int))?;
+        let best = self.hidden(Type::Int);
+        let empty = self.hidden(Type::Bool);
+        let mut body = vec![Statement::Assign(empty, boolean(true))];
+        body.extend(self.expand_items(input, call, |checker, item| {
+            checker.expect(Type::Int, item.ty, call)?;
+            let order = if minimum {
+                Compare::Less
+            } else {
+                Compare::Greater
+            };
+            let better = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Boolean(
+                    false,
+                    vec![
+                        checker.local(empty),
+                        compare(order, item.clone(), checker.local(best)),
+                    ],
+                ),
+            };
+            Ok(vec![Statement::If(
+                better,
+                vec![
+                    Statement::Assign(best, item),
+                    Statement::Assign(empty, boolean(false)),
+                ],
+                Vec::new(),
+            )])
+        })?);
+        body.push(Statement::If(
+            self.local(empty),
+            vec![raise_value_error(format!(
+                "{name}() iterable argument is empty"
+            ))],
+            Vec::new(),
+        ));
+        Ok(Expr {
+            ty: Type::Int,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(self.local(best)),
+                clear: vec![empty, best],
+            },
+        })
+    }
+
     /// Quantifiers consume truth values immediately and never pull after their
     /// deciding element. Fixed tuples preserve eager field evaluation first.
     pub(super) fn quantifier_call(

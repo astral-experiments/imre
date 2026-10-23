@@ -3,6 +3,49 @@
 use super::*;
 
 impl Checker<'_> {
+    /// The right operand may mutate or rebind the left before either list is copied.
+    pub(super) fn concat_lists(
+        &mut self,
+        left: Expr,
+        right: Expr,
+        node: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let ty = left.ty;
+        let left_slot = self.hidden(ty);
+        let right_slot = self.hidden(ty);
+        let result = self.hidden(ty);
+        let mut body = vec![
+            Statement::Assign(left_slot, left),
+            Statement::Assign(right_slot, right),
+            Statement::Assign(
+                result,
+                Expr {
+                    ty,
+                    kind: ExprKind::List(Vec::new()),
+                },
+            ),
+        ];
+        let mut element = self.types.element(ty);
+        for slot in [left_slot, right_slot] {
+            let input = Iteration::Container {
+                iterable: self.local(slot),
+                items: false,
+                start: None,
+            };
+            body.extend(self.expand_items(input, node, |checker, value| {
+                checker.expansion_insert(result, &mut element, value, false, node)
+            })?);
+        }
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(self.local(result)),
+                clear: vec![result, right_slot, left_slot],
+            },
+        })
+    }
+
     /// Roots the receiver before its argument, and snapshots list aliases so
     /// extending a list by itself consumes only the original elements.
     pub(super) fn extend_list(

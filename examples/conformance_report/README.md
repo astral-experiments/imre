@@ -193,6 +193,12 @@ Ruff’s original `render_test_cases` groups consecutive entries by title with
 GitHub rows link to the same revision as the per-file breakdown.
 [Test-case renderer benchmarks](../../benchmarks/results/2026-10-23-render-test-cases.md)
 
+Both diagnostic row renderers also come directly from Ruff. `render_diff_row`
+formats each `TyDiagnostic` using its original `__str__` and severity labels.
+`render_html_diff_row` links to a single line or to the range between the
+lowest and highest line numbers in the group.
+[Diagnostic row benchmarks](../../benchmarks/results/2026-10-23-diagnostic-rows.md)
+
 The [expected diagnostics comparison](../../benchmarks/results/2026-10-23-expected-diagnostics.md)
 measures the live reporter with real ty and replayed analyzer output. It also
 counts source reads across repeated frozen reports.

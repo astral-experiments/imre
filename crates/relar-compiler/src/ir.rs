@@ -359,6 +359,7 @@ pub(crate) enum Builtin {
     SortDetach,
     SortRestore,
     StringJoin,
+    StringFormat,
     StringReplace,
     Text(TextOperation),
     FloatFormat {

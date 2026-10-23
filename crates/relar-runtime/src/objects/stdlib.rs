@@ -324,6 +324,124 @@ pub unsafe extern "C" fn relar_str_join(
     }
 }
 
+/// Substitutes plain named fields in encounter order. A missing field can raise
+/// before a malformed brace later in the same template.
+fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> crate::Result<Str> {
+    let mut result = Str::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(at) = memchr::memchr2(b'{', b'}', rest.as_bytes()) {
+        result.push_str(&rest[..at]);
+        let brace = rest.as_bytes()[at];
+        rest = &rest[at + 1..];
+        if rest.as_bytes().first() == Some(&brace) {
+            result.push(char::from(brace));
+            rest = &rest[1..];
+            continue;
+        }
+        if brace == b'}' || rest.is_empty() {
+            return Err(Error::new(
+                Kind::ValueError,
+                if brace == b'}' {
+                    "Single '}' encountered in format string"
+                } else {
+                    "Single '{' encountered in format string"
+                },
+            ));
+        }
+        let Some(end) = rest.find(['{', '}', '!', ':']) else {
+            return Err(Error::new(
+                Kind::ValueError,
+                "expected '}' before end of string",
+            ));
+        };
+        let (field_name, mut tail) = rest.split_at(end);
+        if tail.starts_with('{') {
+            return Err(Error::new(Kind::ValueError, "unexpected '{' in field name"));
+        }
+        let name = field_name.split(['.', '[']).next().unwrap();
+        let mut supported = name.len() == field_name.len();
+        let unmatched = || Error::new(Kind::ValueError, "unmatched '{' in format spec");
+        if let Some(conversion) = tail.strip_prefix('!') {
+            let mut chars = conversion.chars();
+            let flag = chars.next().ok_or_else(|| {
+                Error::new(
+                    Kind::ValueError,
+                    "end of string while looking for conversion specifier",
+                )
+            })?;
+            supported &= flag == 's';
+            tail = chars.as_str();
+            if !tail.is_empty() && !tail.starts_with([':', '}']) {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    "expected ':' after conversion specifier",
+                ));
+            }
+        }
+        if let Some(spec) = tail.strip_prefix(':') {
+            let end = spec.find('}').ok_or_else(unmatched)?;
+            supported &= end == 0;
+            tail = &spec[end..];
+        }
+        rest = tail.strip_prefix('}').ok_or_else(unmatched)?;
+        if name
+            .chars()
+            .all(|ch| crate::integer_text::decimal_digit(ch).is_some())
+        {
+            let index = name
+                .chars()
+                .try_fold(0isize, |index, ch| {
+                    index
+                        .checked_mul(10)?
+                        .checked_add(crate::integer_text::decimal_digit(ch)? as isize)
+                })
+                .ok_or_else(|| {
+                    Error::new(Kind::ValueError, "Too many decimal digits in format string")
+                })?;
+            return Err(Error::new(
+                Kind::IndexError,
+                compact_str::format_compact!(
+                    "Replacement index {index} out of range for positional args tuple"
+                ),
+            ));
+        }
+        let text = field(name)
+            .ok_or_else(|| Error::new(Kind::KeyError, super::exceptions::string_repr(name)))?;
+        if !supported {
+            return Err(Error::new(
+                Kind::ValueError,
+                "Relar str.format supports plain named fields and !s",
+            ));
+        }
+        result.push_str(text);
+    }
+    result.push_str(rest);
+    Ok(result)
+}
+
+/// # Safety
+/// The template and each of the `count` pairs of immutable name and value
+/// handles are rooted until return. The result has its own string owner.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_format(
+    template: *const Str,
+    fields: *const [*const Str; 2],
+    count: usize,
+) -> *const Str {
+    // SAFETY: the compiler supplies one stack slot per rooted argument pair.
+    let (template, fields) = unsafe { (&*template, std::slice::from_raw_parts(fields, count)) };
+    let formatted = format_named(template, |name| {
+        fields.iter().find_map(|&[key, value]| {
+            // SAFETY: the operands stay immutable and rooted until formatting ends.
+            unsafe { ((&*key).as_str() == name).then(|| (&*value).as_str()) }
+        })
+    });
+    super::finish(
+        formatted.map(|text| Rc::into_raw(Rc::new(text))),
+        std::ptr::null(),
+    )
+}
+
 /// # Safety
 /// All three handles are rooted immutable UTF-8 strings. Empty matches occur at
 /// Unicode scalar boundaries, including both ends, exactly as Python str.replace.

@@ -172,6 +172,8 @@ const RESERVED: &[&str] = &[
     "map",
     "filter",
     "sum",
+    "min",
+    "max",
     "zip",
     "reversed",
     "any",
@@ -328,6 +330,8 @@ pub(crate) fn lower_with_owners(
                 if class.generated_initializer {
                     records::private_initializer_parameters(&mut method, module);
                 }
+            } else if method.name.as_str() == "__str__" && signature.returns != Type::Str {
+                return Err(module.error(&method, "__str__ must return str"));
             }
             classes.methods[class_id].insert(method.name.to_string(), signature.clone());
             definitions.push((module_id, method, signature));
@@ -654,8 +658,10 @@ fn signature(
         .as_deref()
         .map(|value| annotation_in_class(value, graph, module, classes, types, owner))
         .transpose()?
-        .or_else(|| {
-            (receiver.is_some() && function.name.as_str() == "__init__").then_some(Type::None)
+        .or_else(|| match (receiver, function.name.as_str()) {
+            (Some(_), "__init__") => Some(Type::None),
+            (Some(_), "__str__") => Some(Type::Str),
+            _ => None,
         });
     let id = inference.register(parameter_types, returns);
     Ok(Signature {
@@ -1305,13 +1311,6 @@ impl<'a> Checker<'a> {
             if let ast::Expr::Attribute(attribute) = expression
                 && self.resolve(expression).is_none()
             {
-                if attribute.attr.as_str().starts_with("__") {
-                    return Err(error(
-                        self.source,
-                        attribute,
-                        "special methods cannot be used as function values",
-                    ));
-                }
                 if let Some(class) = self.class_reference(&attribute.value) {
                     let value = self.class_attribute(attribute, class, None, Some(concrete))?;
                     return self.coerce(value, expected, expression);
@@ -1468,6 +1467,13 @@ impl<'a> Checker<'a> {
                     ty: concrete,
                     kind: ExprKind::Tuple(values),
                 }
+            }
+            ast::Expr::BinOp(binary)
+                if binary.op == ast::Operator::Add && self.types.element(concrete).is_some() =>
+            {
+                let left = self.expr_expected(&binary.left, concrete)?;
+                let right = self.expr_expected(&binary.right, concrete)?;
+                self.concat_lists(left, right, expression)?
             }
             ast::Expr::BinOp(binary)
                 if binary.op == ast::Operator::Mult && self.types.element(concrete).is_some() =>
@@ -3144,6 +3150,17 @@ impl<'a> Checker<'a> {
                 {
                     return self.path_join(left, right, binary);
                 }
+                if binary.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
+                    if matches!(&left.kind, ExprKind::List(items) if items.is_empty())
+                        && self.types.element(right.ty).is_some()
+                    {
+                        left.ty = right.ty;
+                    } else if matches!(&right.kind, ExprKind::List(items) if items.is_empty()) {
+                        right.ty = left.ty;
+                    }
+                    self.expect(left.ty, right.ty, binary)?;
+                    return self.concat_lists(left, right, binary);
+                }
                 return self.binary_expr(binary.op, left, right, expression);
             }
             ast::Expr::UnaryOp(unary) => {
@@ -3507,7 +3524,7 @@ impl<'a> Checker<'a> {
                 return Err(error(
                     self.source,
                     expression,
-                    "generator expressions require an immediate for, comprehension, list, sum, any, or all consumer",
+                    "generator expressions require an immediate for, comprehension, list, sum, min, max, any, or all consumer",
                 ));
             }
             _ => {
@@ -3760,6 +3777,11 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
                 return self.regex_method(receiver, attribute, call);
             }
+            if attribute.attr.as_str() == "format"
+                && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
+            {
+                return self.named_format_call(Self::string_value(receiver), call);
+            }
             if receiver.ty == Type::Str {
                 match attribute.attr.as_str() {
                     "join" => return self.join_call(receiver, call),
@@ -3942,6 +3964,7 @@ impl<'a> Checker<'a> {
             "sorted" => return self.sorted_call(call, None),
             "abs" => return self.abs_call(call),
             "sum" => return self.sum_call(call),
+            "min" | "max" => return self.extremum_call(call, name.id == "min"),
             "any" | "all" => return self.quantifier_call(call, name.id == "all"),
             "map" | "filter" | "zip" | "reversed" | "enumerate" | "range" => {
                 return Err(error(
@@ -4085,25 +4108,23 @@ impl<'a> Checker<'a> {
             });
         }
         if args.len() == 1 && dataclass_values::repr_supported(args[0].ty, self.types) {
-            if name.id == "repr"
-                || (name.id == "str"
-                    && matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess))
-            {
+            if name.id == "repr" {
                 return Ok(Expr {
                     ty: Type::Str,
                     kind: ExprKind::Builtin(Builtin::Repr, args),
                 });
             }
-            if name.id == "print" && matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess) {
-                return Ok(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        Builtin::Print,
-                        vec![Expr {
-                            ty: Type::Str,
-                            kind: ExprKind::Builtin(Builtin::Repr, args),
-                        }],
-                    ),
+            if matches!(name.id.as_str(), "str" | "print")
+                && matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess)
+            {
+                let text = self.record_text(args.into_iter().next().unwrap());
+                return Ok(if name.id == "str" {
+                    text
+                } else {
+                    Expr {
+                        ty: Type::None,
+                        kind: ExprKind::Builtin(Builtin::Print, vec![text]),
+                    }
                 });
             }
         }

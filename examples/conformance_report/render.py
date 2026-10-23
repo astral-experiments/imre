@@ -2,7 +2,7 @@
 from itertools import groupby
 from typing import Literal
 from typing import assert_never
-from conformance_report.model import Change, DiagnosticEntry, FileStats, Source, Statistics, TestCase, TyDiagnostic, compute_stats, diagnostic_text
+from conformance_report.model import Change, DiagnosticEntry, FileStats, Source, Statistics, TestCase, TyDiagnostic, compute_stats
 
 def signed_int(value: int) -> str:
     return '+' + str(value) if value >= 0 else str(value)
@@ -30,43 +30,9 @@ def format_int_metric(diff: int, old: int, new: int, total: int) -> str:
         return f'regressed from <b>{old}/{total}</b> to <b>{new}/{total}</b>'
     return f'held steady at <b>{old}/{total}</b>'
 
-def render_html_diff_row_at(tc: TestCase, base_url: str, *, source: Source | None) -> list[str]:
-    """Render a single HTML <tr> with a test-case link and a markdown diff block."""
-    all_diags = [*tc.old, *tc.new] if source is None else tc.diagnostics_by_source(source)
-    if all_diags:
-        min_line = all_diags[0].location.positions.begin.line
-        max_line = min_line
-        for diagnostic in all_diags:
-            line = diagnostic.location.positions.begin.line
-            if line < min_line:
-                min_line = line
-            if line > max_line:
-                max_line = line
-        filename = all_diags[0].location.path.name
-        if min_line == max_line:
-            url = f'{base_url}tests/{filename}#L{min_line}'
-            display = f'{filename}:{min_line}'
-        else:
-            url = f'{base_url}tests/{filename}#L{min_line}-L{max_line}'
-            display = f'{filename}:{min_line}:{max_line}'
-        location = f'[{display}]({url})'
-    else:
-        location = tc.key
-    diff_lines: list[str] = []
-    if source is None:
-        for d in tc.old:
-            diff_lines.append(f'-{d.severity_for_display}[{d.check_name}] {d.description}')
-        for d in tc.new:
-            diff_lines.append(f'+{d.severity_for_display}[{d.check_name}] {d.description}')
-    else:
-        sign = '-' if source == Source.OLD else '+'
-        for d in tc.diagnostics_by_source(source):
-            diff_lines.append(f'{sign}{d.severity_for_display}[{d.check_name}] {d.description}')
-    return ['', '<tr>', '<td>', '', location, '', '</td>', '', '<td>', '', '```diff', *diff_lines, '```', '', '</td>', '</tr>']
-
-def render_diff_row(diagnostics: list[TyDiagnostic], *, removed: bool=False) -> str:
-    sign = '-' if removed else '+'
-    return '\n'.join((f'{sign} {diagnostic_text(d)}' for d in diagnostics))
+def render_diff_row(diagnostics: list[TyDiagnostic], *, removed: bool = False) -> str:
+    sign = "-" if removed else "+"
+    return "\n".join(f"{sign} {d}" for d in diagnostics)
 
 def collect_diagnostic_entries(test_cases: list[TestCase]) -> list[DiagnosticEntry]:
     """Classify each changed test case and assign it to a titled section."""
@@ -155,9 +121,64 @@ def collect_diagnostic_entries(test_cases: list[TestCase]) -> list[DiagnosticEnt
     )
     return entries
 
-def render_cases(test_cases: list[TestCase], base_url: str, *, format: str = "diff") -> str:
+def render_cases(test_cases: list[TestCase], CONFORMANCE_DIR_WITH_README: str, *, format: str = "diff") -> str:
+    CONFORMANCE_URL = CONFORMANCE_DIR_WITH_README + "tests/{filename}#L{line}"
+
     def render_html_diff_row(tc: TestCase, *, source: Source | None) -> list[str]:
-        return render_html_diff_row_at(tc, base_url, source=source)
+        """Render a single HTML <tr> with a test-case link and a markdown diff block."""
+        all_diags = tc.old + tc.new if source is None else tc.diagnostics_by_source(source)
+
+        if all_diags:
+            min_line = min(d.location.positions.begin.line for d in all_diags)
+            max_line = max(d.location.positions.begin.line for d in all_diags)
+            filename = all_diags[0].location.path.name
+            if min_line == max_line:
+                url = CONFORMANCE_URL.format(filename=filename, line=min_line)
+                display = f"{filename}:{min_line}"
+            else:
+                url = (
+                    f"{CONFORMANCE_DIR_WITH_README}tests/{filename}#L{min_line}-L{max_line}"
+                )
+                display = f"{filename}:{min_line}:{max_line}"
+            location = f"[{display}]({url})"
+        else:
+            location = tc.key
+
+        diff_lines = []
+        if source is None:
+            for d in tc.old:
+                diff_lines.append(
+                    f"-{d.severity_for_display}[{d.check_name}] {d.description}"
+                )
+            for d in tc.new:
+                diff_lines.append(
+                    f"+{d.severity_for_display}[{d.check_name}] {d.description}"
+                )
+        else:
+            sign = "-" if source == Source.OLD else "+"
+            for d in tc.diagnostics_by_source(source):
+                diff_lines.append(
+                    f"{sign}{d.severity_for_display}[{d.check_name}] {d.description}"
+                )
+
+        return [
+            "",
+            "<tr>",
+            "<td>",
+            "",
+            location,
+            "",
+            "</td>",
+            "",
+            "<td>",
+            "",
+            "```diff",
+            *diff_lines,
+            "```",
+            "",
+            "</td>",
+            "</tr>",
+        ]
 
     def render_test_cases(
         test_cases: list[TestCase],

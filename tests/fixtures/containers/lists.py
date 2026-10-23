@@ -2,6 +2,11 @@ def first(left: str, right: str) -> str:
     return left
 
 
+def change_left(items: list[list[int]]) -> list[list[int]]:
+    items.append([3])
+    return items
+
+
 def main() -> None:
     words: list[str] = ["alpha", "beta"]
     alias = words
@@ -40,6 +45,24 @@ def main() -> None:
     rows[0][0] = "changed"
     print(saved_row[0])
     print(rows[-1][0])
+
+    # Both operands are evaluated before the left side is copied.
+    items = [[1]]
+    combined = items + change_left(items)
+    print(len(combined))
+    print(combined[1][0])
+    combined[0].append(2)
+    print(combined[2][1])
+    print(items[0][1])
+    combined.pop()
+    print(len(items))
+    words = ["first"]
+    renamed = words + (words := ["replacement"])
+    print(renamed[0])
+    print(renamed[-1])
+    print(([] + words + [])[0])
+    contextual: list[str] = [] + []
+    print(len(contextual))
     replacement = rows.pop()
     print(replacement[0])
     print(len(rows))
