@@ -14,6 +14,22 @@ def checked_sums(text: str) -> None:
     print(sum([-2305843009213693952 for digit in digits[-1::-2]]))
 
 
+def successor_sum(text: str) -> int:
+    digits = list(map(int, text))
+    return sum([digit * (digit + 1) for digit in digits])
+
+
+def near_limit_sum(text: str) -> int:
+    digits = list(map(int, text))
+    return sum([digit + 2305843009213693942 for digit in digits])
+
+
+def wide_product(text: str) -> int:
+    digits = list(map(int, text))
+    # At digit 9 the second operand needs 33 bits.
+    return sum([digit * (digit + 4_294_967_287) for digit in digits])
+
+
 def early_continue() -> int:
     values = [1]
     cursor = 0
@@ -63,8 +79,7 @@ def nonzero_start(text: str) -> int:
     return total
 
 
-def progress_before_continue(text: str) -> int:
-    digits = list(map(int, text))
+def progress_before_continue(digits: list[int]) -> int:
     cursor = 0
     total = 0
     while cursor < len(digits):
@@ -82,8 +97,11 @@ def progress_before_continue(text: str) -> int:
 
 for text in ["", "0", "01", "012", "019", "123456789012345６７"]:
     checked_sums(text)
+    print(successor_sum(text))
+    print(near_limit_sum(text))
+    print(wide_product(text))
     print(nonzero_start(text))
-    print(progress_before_continue(text))
+    print(progress_before_continue(list(map(int, text))))
 print(early_continue())
 print(stale_reverse_length())
 print(rebound_reverse_source())

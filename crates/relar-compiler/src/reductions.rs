@@ -8,8 +8,7 @@
 use std::collections::HashMap;
 
 use crate::ir::{
-    Binary, Builtin, Compare, Expr, ExprKind, Function, Module, ReductionPlan, Statement, Type,
-    walk_expressions,
+    Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type, walk_expressions,
 };
 use crate::list_bounds::block_readonly;
 use crate::ranges::{IntRange, RangeFacts};
@@ -50,99 +49,11 @@ pub(crate) fn specialize(module: &mut Module) {
             &ranges,
             &mut plans,
         );
-        outline_square_sum(function, &mut plans);
     }
     drop(ranges);
     for function in module.functions.iter_mut().chain([&mut module.entry]) {
         install(&mut function.body, &mut plans);
     }
-}
-
-/// Only the subtotal escapes this private helper. Use the ordinary loop
-/// version's proven read and accumulator bound, keeping its original fallback.
-fn outline_square_sum(function: &Function, plans: &mut HashMap<*const Statement, Statement>) {
-    let [param] = function.params[..] else { return };
-    let [
-        Statement::Assign(result, zero),
-        Statement::Scope { body, clear },
-        Statement::Return(ret),
-    ] = function.body.as_slice()
-    else {
-        return;
-    };
-    let [
-        Statement::Assign(source, input),
-        Statement::Assign(cursor, start),
-        original,
-    ] = body.as_slice()
-    else {
-        return;
-    };
-    if function.locals[param] != Type::ListInt
-        || function.returns != Type::Int
-        || !is_local(input, param)
-        || !is_local(ret, *result)
-        || clear.contains(result)
-        || literal(zero) != Some(0)
-        || literal(start) != Some(0)
-    {
-        return;
-    }
-    let Some(Statement::If(_, fast, _)) = plans.get_mut(&std::ptr::from_ref(original)) else {
-        return;
-    };
-    let [Statement::While(_, body, tail)] = fast.as_slice() else {
-        return;
-    };
-    let [
-        Statement::Assign(item, read),
-        Statement::Assign(advanced, _),
-        Statement::Assign(subtotal, sum),
-    ] = body.as_slice()
-    else {
-        return;
-    };
-    if !tail.is_empty() || advanced != cursor || subtotal != result {
-        return;
-    }
-    let ExprKind::Builtin(Builtin::ListGetBoundedInBounds { min, max }, args) = &read.kind else {
-        return;
-    };
-    let [list, index] = args.as_slice() else {
-        return;
-    };
-    if !is_local(list, *source)
-        || !is_local(index, *cursor)
-        || *min < 0
-        || *max > i64::from(u16::MAX)
-    {
-        return;
-    }
-    let ExprKind::Binary(Binary::Add, acc, term) = &sum.kind else {
-        return;
-    };
-    let ExprKind::Builtin(Builtin::IntBounded { min: 0, max }, _) = acc.kind else {
-        return;
-    };
-    let ExprKind::Binary(Binary::Multiply, left, right) = &term.kind else {
-        return;
-    };
-    if is_local(left, *item) && is_local(right, *item) {
-        fast[0] = Statement::Assign(
-            *result,
-            Expr {
-                ty: Type::Int,
-                kind: ExprKind::Builtin(
-                    Builtin::ListReduce(ReductionPlan::SumSquares { max }),
-                    vec![list.clone()],
-                ),
-            },
-        );
-    }
-}
-
-fn is_local(value: &Expr, slot: usize) -> bool {
-    matches!(value.kind, ExprKind::Local(local) if local == slot)
 }
 
 fn collect(
@@ -740,49 +651,6 @@ mod tests {
     }
 
     #[test]
-    fn whole_list_square_requires_an_exact_term_and_bounded_elements() {
-        for (input, term, expected_max) in [
-            ("list(map(int, text))", "x * x for x in values", Some(9)),
-            ("[0, 65535]", "x * x for x in values", Some(65535)),
-            ("[0, 65536]", "x * x for x in values", None),
-            ("[-1, 9]", "x * x for x in values", None),
-            ("unknown", "x * x for x in values", None),
-            ("[0, 9]", "2 * x for x in values", None),
-            ("[0, 9]", "x * x for x in values if x != 0", None),
-            ("[0, 9]", "x * x for x in values[-2::-2]", None),
-        ] {
-            let mut module = lower(&format!(
-                "def total(text: str, unknown: list[int]) -> int:\n    values = {input}\n    return sum([{term}])\n"
-            ));
-            specialize(&mut module);
-            let ranges = crate::ranges::analyze(&module);
-            let mut found = Vec::new();
-            for function in &module.functions {
-                walk_expressions(&function.body, &mut |value| {
-                    if let ExprKind::Builtin(
-                        Builtin::ListReduce(ReductionPlan::SumSquares { max }),
-                        args,
-                    ) = &value.kind
-                    {
-                        assert!(matches!(
-                            args.as_slice(),
-                            [Expr {
-                                ty: Type::ListInt,
-                                kind: ExprKind::Local(_)
-                            }]
-                        ));
-                        let bound = IntRange { min: 0, max: *max };
-                        assert_eq!(ranges.integer(value), Some(bound));
-                        found.push(bound);
-                    }
-                });
-            }
-            let expected = expected_max.map(|x| budget(IntRange { min: 0, max: x * x }).unwrap().1);
-            assert_eq!(found.as_slice(), expected.as_slice(), "{input}, {term}");
-        }
-    }
-
-    #[test]
     fn canonical_comprehension_reduction_keeps_a_checked_fallback() {
         let mut module = lower(
             r#"
@@ -820,15 +688,15 @@ def total(text: str) -> int:
         assert!(llvm.contains("call void @llvm.assume"));
         assert!(llvm.contains("call i64 @int_add"));
         assert!(llvm.contains("call i64 @relar_list_borrow_index(ptr"));
-        let lines = llvm.lines().collect::<Vec<_>>();
-        let proven = lines
-            .windows(2)
-            .filter(|lines| lines[0].contains("call i64 @relar_list_borrow_index_proven("))
-            .collect::<Vec<_>>();
-        assert_eq!(proven.len(), 1);
+        let (_, read) = llvm
+            .split_once("call i64 @relar_list_borrow_index_proven(")
+            .unwrap();
+        let (before_tag, _) = read.split_once("call void @llvm.assume").unwrap();
+        assert!(before_tag.contains("and i64"));
         assert!(
-            proven[0][1].contains("and i64"),
-            "the proven read proceeds directly to its tag fact, without an error sentinel test"
+            !before_tag
+                .lines()
+                .any(|line| line.contains("icmp eq i64") && line.ends_with(", 0"))
         );
     }
 

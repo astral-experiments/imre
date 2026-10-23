@@ -621,7 +621,6 @@ pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
             | Builtin::ListGetBoundedInBounds { .. }
             | Builtin::IntBounded { .. }
             | Builtin::ListSum
-            | Builtin::ListReduce(_)
             | Builtin::ListSliceSum
             | Builtin::StringIntList
             | Builtin::StringGet
