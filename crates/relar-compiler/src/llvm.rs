@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
+use crate::contracts::runtime_call_may_raise;
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
     Binary, Builtin, CallArgs, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType,
@@ -376,7 +377,7 @@ impl Emitter<'_, '_> {
     }
 
     fn call(&mut self, name: &str, returns: Type, args: &[&Value]) -> Value {
-        self.call_with_effect(name, returns, args, fallible(name), false)
+        self.call_with_effect(name, returns, args, runtime_call_may_raise(name), false)
     }
 
     /// Uses only the final IR's conservative callee summary. Argument evaluation
@@ -438,7 +439,7 @@ impl Emitter<'_, '_> {
             .collect::<Vec<_>>()
             .join(", ");
         let instruction = format!("call void @{name}({args})");
-        if fallible(name) {
+        if runtime_call_may_raise(name) {
             self.checked_line(instruction);
         } else {
             self.line(instruction);
@@ -4700,109 +4701,6 @@ fn none() -> Value {
         operand: "0".to_owned(),
         small_integer: false,
     }
-}
-
-/// This list follows the runtime's pending-error contract. Proven integer
-/// arithmetic, ownership operations, lookup-with-default, lengths and hashing
-/// remain infallible; allocation failure and invalid ABI use are fatal.
-fn fallible(name: &str) -> bool {
-    name.starts_with("fn_")
-        || matches!(
-            name,
-            "int_floordiv"
-                | "int_mod"
-                | "int_lshift"
-                | "int_rshift"
-                | "relar_flush_stdout"
-                | "relar_subprocess_run"
-                | "relar_subprocess_run_timeout"
-                | "relar_subprocess_run_timeout_int"
-                | "relar_environ_get"
-                | "relar_environ_copy"
-                | "relar_subprocess_check"
-                | "relar_subprocess_error_field"
-                | "relar_print_int"
-                | "relar_print_float"
-                | "relar_stderr_line"
-                | "relar_print_str"
-                | "relar_print_bytes"
-                | "relar_bytes_count"
-                | "relar_bytes_list"
-                | "relar_bytes_get"
-                | "relar_bytes_get_index"
-                | "relar_bytes_slice"
-                | "relar_bytes_concat"
-                | "relar_bytes_repeat"
-                | "relar_bytes_decode"
-                | "relar_toml_keys"
-                | "relar_json_add"
-                | "relar_json_get_receiver"
-                | "relar_bytes_validate_utf8"
-                | "relar_binary_open"
-                | "relar_binary_read"
-                | "relar_binary_read_size"
-                | "relar_binary_readline"
-                | "relar_gzip_open"
-                | "relar_binary_write"
-                | "relar_print_bool"
-                | "relar_print_none"
-                | "relar_input"
-                | "relar_sys_argv"
-                | "relar_path_read_text"
-                | "relar_path_write_text"
-                | "relar_path_mkdir"
-                | "relar_path_unlink"
-                | "relar_path_rmdir"
-                | "relar_path_replace"
-                | "relar_path_absolute"
-                | "relar_path_with_name"
-                | "relar_path_resolve"
-                | "relar_tempdir_new"
-                | "relar_tempdir_cleanup"
-                | "relar_path_next"
-                | "relar_text_open"
-                | "relar_text_enter"
-                | "relar_text_read"
-                | "relar_text_readline"
-                | "relar_text_write"
-                | "relar_text_flush"
-                | "relar_text_close"
-                | "relar_int_parse"
-                | "relar_int_float"
-                | "relar_float_int"
-                | "relar_float_parse"
-                | "relar_bytes_float"
-                | "relar_int_true_divide"
-                | "relar_assert_fail"
-                | "relar_range_step_zero"
-                | "relar_list_get"
-                | "relar_list_set"
-                | "relar_list_get_index"
-                | "relar_list_set_index"
-                | "relar_list_borrow_index"
-                | "relar_list_copy_index"
-                | "relar_list_pop"
-                | "relar_list_repeat"
-                | "relar_list_slice"
-                | "relar_list_slice_sum"
-                | "relar_str_get"
-                | "relar_str_slice"
-                | "relar_str_int_list"
-                | "relar_seq_get"
-                | "relar_seq_set"
-                | "relar_seq_get_index"
-                | "relar_seq_set_index"
-                | "relar_seq_pop"
-                | "relar_seq_repeat"
-                | "relar_seq_slice"
-                | "relar_dict_get"
-                | "relar_dict_gather_str_int"
-                | "relar_dict_gather_bytes_int"
-                | "relar_dict_delete"
-                | "relar_mapping_iter_next"
-                | "relar_exception_raise"
-                | "relar_exception_reraise"
-        )
 }
 
 // Use i32 for runtime flags and status codes. Narrow C integers require different

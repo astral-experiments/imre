@@ -454,7 +454,7 @@ impl Plan<'_> {
                         self.outputs.insert(root);
                         self.appends += 1;
                     }
-                    operation if readonly_builtin(operation) => {}
+                    operation if operation.contract(args).preserves_list_storage() => {}
                     _ => return false,
                 }
             }
@@ -583,78 +583,6 @@ impl Plan<'_> {
         }
         true
     }
-}
-
-/// These closed operations neither call user code nor mutate existing containers.
-pub(crate) fn readonly_builtin(operation: &Builtin) -> bool {
-    matches!(
-        operation,
-        Builtin::GlobalGet(_)
-            | Builtin::StrEnumMember { .. }
-            | Builtin::StrEnumName
-            | Builtin::StrEnumValue
-            | Builtin::StrEnumIdentity
-            | Builtin::LiteralStringView
-            | Builtin::StringListContains
-            | Builtin::RegexCompile(_)
-            | Builtin::RegexSearch
-            | Builtin::RegexCapture { .. }
-            | Builtin::Path(_)
-            | Builtin::Text(_)
-            | Builtin::Process(_)
-            | Builtin::Int
-            | Builtin::Float
-            | Builtin::IntSignAsFloat
-            | Builtin::Bool
-            | Builtin::Str
-            | Builtin::Len
-            | Builtin::Abs
-            | Builtin::StringJoin
-            | Builtin::StringFormat
-            | Builtin::StringReplace
-            | Builtin::FloatFormat { .. }
-            | Builtin::JsonDecode(_)
-            | Builtin::JsonLoads
-            | Builtin::JsonLoad
-            | Builtin::JsonGet { .. }
-            | Builtin::JsonGetReceiver
-            | Builtin::JsonAdd
-            | Builtin::JsonAddFields(_, _)
-            | Builtin::JsonIsInt
-            | Builtin::JsonSelect(_)
-            | Builtin::TomlDecode(_)
-            | Builtin::JsonEncode(_)
-            | Builtin::ListGet
-            | Builtin::SequenceGetInBounds
-            | Builtin::ListGetI32
-            | Builtin::ListGetBounded { .. }
-            | Builtin::ListGetBoundedInBounds { .. }
-            | Builtin::IntBounded { .. }
-            | Builtin::ListSum
-            | Builtin::ListSliceSum
-            | Builtin::StringIntList
-            | Builtin::StringGet
-            | Builtin::Bytes
-            | Builtin::BytesGet
-            | Builtin::Encode
-            | Builtin::Decode
-            | Builtin::Slice
-            | Builtin::IsNone
-            | Builtin::UnionInject
-            | Builtin::UnionProject
-            | Builtin::IsInstance(_)
-            | Builtin::Split
-            | Builtin::SplitLines
-            | Builtin::RStrip
-            | Builtin::DictGet
-            | Builtin::DictGetDefault
-            | Builtin::DictTryGet(_)
-            | Builtin::DictContains
-            | Builtin::SetContains
-            | Builtin::ExceptionMessage
-            | Builtin::ExceptionCause
-            | Builtin::ExceptionSuppressContext
-    )
 }
 
 /// The condition is nonfallible and reads no storage beyond a rooted list's
