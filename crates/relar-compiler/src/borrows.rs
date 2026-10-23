@@ -109,7 +109,7 @@ fn summaries(
 }
 
 /// Visits statement nodes once, including statements nested inside expressions.
-fn statements(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
+pub(crate) fn statements(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
     fn block(body: &[Statement], visit: &mut impl FnMut(&Statement)) {
         for statement in body {
             visit(statement);
@@ -154,8 +154,16 @@ pub(crate) fn written(function: &Function) -> Vec<bool> {
 }
 
 fn written_except(function: &Function, permitted: impl Fn(&Expr) -> bool) -> Vec<bool> {
-    let mut written = function.expression_rebound();
-    statements(&function.body, &mut |statement| match statement {
+    written_in(&function.body, function.locals.len(), permitted)
+}
+
+pub(crate) fn written_in(
+    body: &[Statement],
+    slots: usize,
+    permitted: impl Fn(&Expr) -> bool,
+) -> Vec<bool> {
+    let mut written = vec![false; slots];
+    statements(body, &mut |statement| match statement {
         Statement::Assign(slot, value) => written[*slot] |= !permitted(value),
         Statement::Clear(slot) => written[*slot] = true,
         Statement::Move(target, source) => {
@@ -196,7 +204,10 @@ fn written_except(function: &Function, permitted: impl Fn(&Expr) -> bool) -> Vec
         }
         _ => {}
     });
-    ir::walk_expressions(&function.body, &mut |expression| {
+    ir::walk_expressions(body, &mut |expression| {
+        if let ExprKind::Bind(slot, _) = expression.kind {
+            written[slot] = true;
+        }
         if let ExprKind::Scope { clear, .. } = &expression.kind {
             for &slot in clear {
                 written[slot] = true;
