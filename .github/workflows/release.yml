@@ -95,3 +95,51 @@ jobs:
           (cd artifacts && sha256sum --check --strict sha256.sum)
           gh release create "$RELEASE_TAG" --target "$RELEASE_COMMIT" ${PRERELEASE_FLAG:+"$PRERELEASE_FLAG"} \
             --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
+
+  publish-mirror:
+    needs: [plan, publish-github]
+    runs-on: ubuntu-24.04
+    environment: release
+    concurrency:
+      group: relar-publish-mirror
+      queue: max
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ fromJson(needs.plan.outputs.val).announcement_tag }}
+    steps:
+      - name: Download and verify public release assets
+        run: |
+          gh release download "$RELEASE_TAG" --dir public \
+            --pattern 'relar-*.tar.gz' --pattern 'relar-*.tar.gz.sha256' \
+            --pattern relar-installer.sh --pattern sha256.sum
+          cd public
+          sha256sum --check --strict sha256.sum
+          for archive in relar-*.tar.gz; do
+            sha256sum --check --strict "$archive.sha256"
+          done
+          cp relar-installer.sh install.sh
+          sha256sum --binary install.sh *.tar.gz.sha256 >> sha256.sum
+      - name: Publish to Astral Labs
+        shell: bash
+        working-directory: public
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.MIRROR_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.MIRROR_R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: https://${{ vars.MIRROR_R2_CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          AWS_DEFAULT_REGION: auto
+          R2_BUCKET: ${{ vars.MIRROR_R2_BUCKET_NAME }}
+          PRERELEASE: ${{ fromJson(needs.plan.outputs.val).announcement_is_prerelease }}
+        run: |
+          aws s3 cp --recursive --cache-control 'public, max-age=31536000, immutable' \
+            . "s3://$R2_BUCKET/relar/releases/$RELEASE_TAG/"
+          curl -LsSf --retry 3 "https://labs.astral.sh/relar/releases/$RELEASE_TAG/install.sh" | cmp - install.sh
+          if [[ "$PRERELEASE" == false ]]; then
+            latest=$(gh release view --json tagName --jq .tagName)
+            if [[ "$RELEASE_TAG" == "$latest" ]]; then
+              aws s3 cp --cache-control 'public, max-age=300' \
+                install.sh "s3://$R2_BUCKET/relar/install.sh"
+            fi
+          fi

@@ -4,7 +4,9 @@ packages = ["relar"]
 
 [dist]
 cargo-dist-version = "0.32.0"
-hosting = ["github"]
+hosting = ["simple"]
+simple-download-url = "https://labs.astral.sh/relar/releases/{tag}"
+create-release = false
 installers = ["shell"]
 install-path = ["$XDG_BIN_HOME/", "$XDG_DATA_HOME/../bin", "~/.local/bin"]
 targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "aarch64-apple-darwin"]

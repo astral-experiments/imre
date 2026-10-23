@@ -94,12 +94,12 @@ with Relar and CPython, and comparing it with a Rust implementation:
 Install Relar on Linux or Apple Silicon macOS with the standalone installer.
 
 ```sh
-curl -LsSf https://github.com/astral-sh/relar/releases/latest/download/relar-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://labs.astral.sh/relar/install.sh | sh
 ```
 
 To compile programs, install Clang 18 on Linux or the Xcode Command Line Tools
 on macOS (`xcode-select --install`). The Linux binaries require glibc 2.39 or later.
-You can also download the archives from [GitHub Releases](https://github.com/astral-sh/relar/releases).
+To install a specific version, use `https://labs.astral.sh/relar/releases/<version>/install.sh`.
 
 To build from source, use the [Rust toolchain](rust-toolchain.toml).
 
