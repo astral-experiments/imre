@@ -86,7 +86,9 @@ pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, St
                 }
                 output.push(c);
                 if c == '{' {
-                    if !count(&mut input, &mut output)? {
+                    if input.peek() == Some(&',') {
+                        output.push('0');
+                    } else if !count(&mut input, &mut output)? {
                         return Err("expected a compact regex repetition count".into());
                     }
                     if input.next_if_eq(&',').is_some() {
