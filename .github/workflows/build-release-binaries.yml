@@ -30,6 +30,9 @@ jobs:
       - name: Install Clang 18
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang-18
+      - name: Support Linux ARM64 kernels with up to 64 KiB pages
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: echo 'JEMALLOC_SYS_WITH_LG_PAGE=16' >> "$GITHUB_ENV"
       - name: Build binary
         run: cargo build --locked --profile dist --target "$TARGET" --workspace
       - name: Test runtime
@@ -45,8 +48,13 @@ jobs:
           mkdir -p "$ARCHIVE_NAME"
           cp "target/$TARGET/dist/relar" "target/$TARGET/dist/librelar_runtime.a" LICENSE-APACHE LICENSE-MIT "$ARCHIVE_NAME/"
           cp examples/conformance_report/upstream/LICENSE "$ARCHIVE_NAME/LICENSE-Ruff"
-          typeshed_manifest=$(cargo metadata --locked --format-version 1 --filter-platform "$TARGET" | jq -er '.packages[] | select(.name == "ty_vendored") | .manifest_path')
+          cargo metadata --locked --format-version 1 --filter-platform "$TARGET" > "$RUNNER_TEMP/relar-packages.json"
+          typeshed_manifest=$(jq -er '.packages[] | select(.name == "ty_vendored") | .manifest_path' "$RUNNER_TEMP/relar-packages.json")
           cp "$(dirname "$typeshed_manifest")/vendor/typeshed/LICENSE" "$ARCHIVE_NAME/LICENSE-typeshed"
+          if [[ "$TARGET" == *-linux-gnu ]]; then
+            jemalloc_manifest=$(jq -er '.packages[] | select(.name == "tikv-jemalloc-sys") | .manifest_path' "$RUNNER_TEMP/relar-packages.json")
+            cp "$(dirname "$jemalloc_manifest")/jemalloc/COPYING" "$ARCHIVE_NAME/LICENSE-jemalloc"
+          fi
           tar czvf "$ARCHIVE_FILE" "$ARCHIVE_NAME"
           shasum -a 256 "$ARCHIVE_FILE" > "$ARCHIVE_FILE.sha256"
 
@@ -56,6 +64,10 @@ jobs:
           cd "$RUNNER_TEMP"
           echo 'print(40 + 2)' > smoke.py
           test "$("./relar-$TARGET/relar" run smoke.py)" = 42
+          if [[ "$TARGET" == *-linux-gnu ]]; then
+            test -s "relar-$TARGET/LICENSE-jemalloc"
+            test "$("./relar-$TARGET/relar" run smoke.py --allocator jemalloc)" = 42
+          fi
 
       - name: Upload binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
