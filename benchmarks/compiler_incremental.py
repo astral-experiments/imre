@@ -73,16 +73,17 @@ def run(command, env, audit=False):
                                        (end_cpu.ru_stime - start_cpu.ru_stime))}, stderr.decode().splitlines(), observed
 
 
-def flags_audit(calls, variant):
+def flags_audit(calls, module_objects):
     drivers = [(exe, argv) for exe, argv in calls if "-Wl,--gc-sections" in argv and "-Wl,-z,relro,-z,now" in argv]
     assert len(drivers) == 1, [(exe, argv[:10]) for exe, argv in calls]
     driver, args = drivers[0]
     assert "-O3" in args and any(x.endswith("/librelar_runtime.a") for x in args)
-    if variant == "child":
+    if module_objects:
         assert sum(opt.endswith(".o") for opt in args) == 7, args
     else:
         assert sum(opt.endswith(".ll") for opt in args) == 1, args
-    ld = [(exe, argv) for exe, argv in calls if exe.endswith("ld.bfd") and "--gc-sections" in argv]
+    selected = next((arg.removeprefix("--ld-path=") for arg in args if arg.startswith("--ld-path=")), "/usr/bin/ld")
+    ld = [(exe, argv) for exe, argv in calls if Path(exe) == Path(selected).resolve() and "--gc-sections" in argv]
     assert len(ld) == 1
     ld_path, ld_args = ld[0]
     assert any(ld_args[i:i+4] == ("-z", "relro", "-z", "now") for i in range(len(ld_args)-3)), ld_args
@@ -131,6 +132,7 @@ def main():
         p.add_argument("--" + name, type=Path, required=True)
     p.add_argument("--parent-revision", required=True)
     p.add_argument("--child-revision", required=True)
+    p.add_argument("--cached-parent", action="store_true", help="Expect the parent to use the native module cache too")
     p.add_argument("--inputs", type=Path, help="Existing official 1x/changed panel (otherwise regenerate from archive)")
     p.add_argument("--cpu", type=int, default=min(os.sched_getaffinity(0)))
     p.add_argument("--edit-pairs", type=int, default=6)
@@ -202,7 +204,8 @@ def main():
             timing, lines, observed = run(cmd, dict(env, RELAR_CACHE_DIR=str(cache)), audit)
             events = [s.removeprefix("relar cache ") for s in lines if s.startswith("relar cache ")]
             objects = [s.split(" ", 3)[2:] for s in lines if s.startswith("relar object ")]
-            if variant == "child":
+            module_objects = variant == "child" or a.cached_parent
+            if module_objects:
                 assert events == (["hit"] if state == "hit" else ["miss", "store"]), lines
                 if state == "hit":
                     assert not objects
@@ -213,7 +216,7 @@ def main():
             else:
                 assert not events and not objects
             if audit:
-                data["link_audits"][variant] = flags_audit(observed, variant)
+                data["link_audits"][variant] = flags_audit(observed, module_objects)
             if mode == "build":
                 got = direct(native, expected)["report_sha256"]
             else:
