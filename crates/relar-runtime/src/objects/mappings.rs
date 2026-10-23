@@ -38,6 +38,25 @@ impl Hash for IntKey {
     }
 }
 
+/// A key roots the first inserted immutable path, and hashes its normalized
+/// POSIX spelling without allocating or accessing the filesystem.
+#[derive(Clone)]
+struct PathKey(Rc<Object>);
+
+impl PartialEq for PathKey {
+    fn eq(&self, other: &Self) -> bool {
+        // SAFETY: both keys root exact immutable path objects.
+        unsafe { super::paths::relar_path_equal(Rc::as_ptr(&self.0), Rc::as_ptr(&other.0)) != 0 }
+    }
+}
+impl Eq for PathKey {}
+impl Hash for PathKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // SAFETY: the key roots immutable path storage for this nonreentrant hash.
+        unsafe { self.0.0.with(|path| path.path().hash(state)) };
+    }
+}
+
 /// An immutable tuple owns its concrete record without copying its fields into
 /// a second allocation. Lookup borrows that owner; hashing cannot call user code.
 struct TupleKey(*const usize);
@@ -93,6 +112,7 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
                 0 | 1 | 10 => word.hash(state),
                 2 => IntKey::borrow(word).hash(state),
                 3 => (&*(word as *const Str)).hash(state),
+                5 => PathKey::borrow(word).hash(state),
                 6 => hash_tuple(word as *const usize, state),
                 8 => (&*(word as *const Bytes)).hash(state),
                 _ => unreachable!("the checker excludes mutable and float tuple keys"),
@@ -172,6 +192,24 @@ impl ScalarKey for Rc<Bytes> {
     }
     fn into_word(self) -> usize {
         Rc::into_raw(self) as usize
+    }
+}
+
+impl ScalarKey for PathKey {
+    const KIND: u32 = 5;
+    fn word(&self) -> usize {
+        Rc::as_ptr(&self.0) as usize
+    }
+    unsafe fn borrow(word: usize) -> ManuallyDrop<Self> {
+        // SAFETY: the caller roots an exact path; the borrowed Rc is never dropped.
+        ManuallyDrop::new(Self(unsafe { Rc::from_raw(word as *const Object) }))
+    }
+    unsafe fn from_owned(word: usize) -> Self {
+        // SAFETY: the caller transfers one independently acquired path owner.
+        Self(unsafe { Rc::from_raw(word as *const Object) })
+    }
+    fn into_word(self) -> usize {
+        Rc::into_raw(self.0) as usize
     }
 }
 
@@ -297,6 +335,7 @@ enum Tables<V> {
     Int(Table<IntKey, V>),
     Enum(Table<usize, V>),
     Str(Table<Rc<Str>, V>),
+    Path(Table<PathKey, V>),
     Bytes(Table<Rc<Bytes>, V>),
     Tuple(Table<TupleKey, V>),
 }
@@ -307,6 +346,7 @@ macro_rules! table {
             Tables::Int($table) => $body,
             Tables::Enum($table) => $body,
             Tables::Str($table) => $body,
+            Tables::Path($table) => $body,
             Tables::Bytes($table) => $body,
             Tables::Tuple($table) => $body,
         }
@@ -328,12 +368,10 @@ impl<V: Copy> Tables<V> {
             2 => Self::Int(Table::new()),
             10 => Self::Enum(Table::new()),
             3 => Self::Str(Table::new()),
+            5 => Self::Path(Table::new()),
             6 => Self::Tuple(Table::new()),
             8 => Self::Bytes(Table::new()),
-            _ => fail(
-                "SystemError",
-                "mapping keys must be integers, strings, bytes, or immutable tuples",
-            ),
+            _ => fail("SystemError", "unsupported immutable mapping key kind"),
         }
     }
     fn key_kind(&self) -> u32 {
@@ -341,6 +379,7 @@ impl<V: Copy> Tables<V> {
             Self::Int(_) => 2,
             Self::Enum(_) => 10,
             Self::Str(_) => 3,
+            Self::Path(_) => 5,
             Self::Bytes(_) => 8,
             Self::Tuple(_) => 6,
         }
@@ -430,6 +469,8 @@ impl AsciiIntCache {
 pub(super) struct Mapping {
     tables: Tables<usize>,
     value_kind: WordKind,
+    /// A sealed list factory is invoked only by a missing subscription.
+    default_list_element: Option<WordKind>,
     /// Present only after a string-to-integer gather. Words borrow current table
     /// values; ASCII mutation updates the corresponding slot before old owners drop.
     ascii_int: Option<Box<AsciiIntCache>>,
@@ -506,6 +547,9 @@ impl Mapping {
     /// # Safety
     /// The table and every descendant remain rooted and immutable until return.
     pub(super) unsafe fn write_repr(&self, output: &mut String) {
+        if self.default_list_element.is_some() {
+            output.push_str("defaultdict(<class 'list'>, ");
+        }
         output.push('{');
         let key_kind = WordKind::new(self.tables.key_kind());
         let mut first = true;
@@ -523,12 +567,16 @@ impl Mapping {
             true
         });
         output.push('}');
+        if self.default_list_element.is_some() {
+            output.push(')');
+        }
     }
 
     pub(super) fn new(key_kind: u32, value_kind: u32) -> Self {
         Self {
             tables: Tables::new(key_kind),
             value_kind: WordKind::new(value_kind),
+            default_list_element: None,
             ascii_int: None,
         }
     }
@@ -745,6 +793,15 @@ pub extern "C" fn relar_dict_new(key_kind: u32, value_kind: u32) -> *const Objec
         Box::new(Mapping::new(key_kind, value_kind)),
     )))))
 }
+/// Attaches the exact element descriptor to a native `defaultdict(list)`.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_default_list_dict_new(key_kind: u32, element_kind: u32) -> *const Object {
+    let mut mapping = Mapping::new(key_kind, if element_kind == 2 { 4 } else { 5 });
+    mapping.default_list_element = Some(WordKind::new(element_kind));
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
+        Box::new(mapping),
+    )))))
+}
 /// # Safety
 /// `value` is a rooted dictionary.
 #[unsafe(no_mangle)]
@@ -792,6 +849,22 @@ pub unsafe extern "C" fn relar_dict_get(value: *const Object, key: usize) -> usi
     // SAFETY: the caller supplies lookup's rooted handles.
     if let Some(owned) = unsafe { lookup(value, key) } {
         return owned.into_word();
+    }
+    // SAFETY: the immutable factory descriptor is copied before insertion.
+    if let Some(element) = unsafe {
+        object(value)
+            .0
+            .with(|s| s.dictionary().default_list_element)
+    } {
+        let list = if element.raw() == 2 {
+            crate::relar_list_new() as usize
+        } else {
+            super::relar_seq_new(element.raw()) as usize
+        };
+        // SAFETY: the fresh list has the declared value kind; insertion retains it
+        // independently, leaving the constructor's owner for the expression result.
+        unsafe { relar_dict_set(value, key, list) };
+        return list;
     }
     // SAFETY: input roots remain live after storage access ends.
     unsafe { missing_key(value, key) }.returning(0)
@@ -1053,6 +1126,46 @@ pub extern "C" fn relar_set_new(kind: u32) -> *const Object {
         },
     ))))))
 }
+
+/// Creates a fresh set from two evaluated key views or sets. A direct view
+/// borrows its dictionary here, so effects in the other operand remain visible.
+///
+/// # Safety
+/// Both inputs are rooted dictionaries or sets with the same immutable key kind.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_key_union(
+    left: *const Object,
+    right: *const Object,
+) -> *const Object {
+    let key_kind = |storage: &Storage| match storage {
+        Storage::Dictionary(dict) => dict.tables.key_kind(),
+        Storage::Set(set) => set.tables.key_kind(),
+        _ => fail("SystemError", "expected dictionary keys or a set"),
+    };
+    // SAFETY: the exact key descriptor is copied from the rooted left operand.
+    let kind = unsafe { object(left).0.with(key_kind) };
+    let mut result = Tables::new(kind);
+    for source in [left, right] {
+        // SAFETY: the destination is private and distinct from both inputs. All
+        // hash operations use sealed immutable keys and cannot call user code.
+        unsafe {
+            object(source).0.with(|storage| {
+                let mut add = |word| {
+                    result.insert(WordKind::new(kind).acquire(word), ());
+                    true
+                };
+                match storage {
+                    Storage::Dictionary(dict) => dict.tables.all(|key, _| add(key)),
+                    Storage::Set(set) => set.tables.all(|key, ()| add(key)),
+                    _ => unreachable!("the checker proves both key sources"),
+                };
+            })
+        };
+    }
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Set(Box::new(
+        Set { tables: result },
+    ))))))
+}
 /// # Safety
 /// `value` is a rooted set.
 #[unsafe(no_mangle)]
@@ -1154,6 +1267,36 @@ mod tests {
 
     fn integer(value: i64) -> usize {
         Int::small(value).unwrap().into_raw()
+    }
+
+    #[test]
+    fn key_union_keeps_the_original_path_and_subscription_keeps_its_list() {
+        // SAFETY: both inputs and every returned owner have their exact ABI type.
+        unsafe {
+            let original = Rc::from_raw(super::super::paths::relar_path_new(&Str::new("./a/")));
+            let equal = Rc::from_raw(super::super::paths::relar_path_new(&Str::new("a")));
+            let weak = Rc::downgrade(&original);
+            let mapping = Rc::from_raw(relar_default_list_dict_new(5, 3));
+            let dict = Rc::as_ptr(&mapping);
+            let list =
+                Rc::from_raw(relar_dict_get(dict, Rc::as_ptr(&original) as usize) as *const Object);
+            let again =
+                Rc::from_raw(relar_dict_get(dict, Rc::as_ptr(&equal) as usize) as *const Object);
+            assert!(Rc::ptr_eq(&list, &again));
+            assert_eq!(Rc::strong_count(&equal), 1);
+            let keys = Rc::from_raw(relar_key_union(dict, dict));
+            drop(original);
+            drop(mapping);
+            drop(again);
+            assert_eq!(Rc::strong_count(&list), 1);
+            assert!(weak.upgrade().is_some());
+            assert_eq!(
+                relar_set_contains(Rc::as_ptr(&keys), Rc::as_ptr(&equal) as usize),
+                1
+            );
+            drop(keys);
+            assert!(weak.upgrade().is_none());
+        }
     }
 
     #[test]

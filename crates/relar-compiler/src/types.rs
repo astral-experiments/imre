@@ -10,6 +10,7 @@ enum Shape {
     StringLiterals(Vec<String>),
     List(Type),
     Dict(Type, Type),
+    DefaultListDict(Type, Type),
     Set(Type),
     Tuple(Vec<Type>),
     Callable(Vec<Type>, Type),
@@ -54,7 +55,12 @@ impl Types {
     pub(crate) fn hashable_key(&self, ty: Type) -> bool {
         matches!(
             ty,
-            Type::Int | Type::Str | Type::StrLiteral(_) | Type::StrEnum(_) | Type::Bytes
+            Type::Int
+                | Type::Str
+                | Type::StrLiteral(_)
+                | Type::StrEnum(_)
+                | Type::Bytes
+                | Type::Path
         ) || matches!(ty, Type::Tuple(_)) && self.immutable_key_field(ty)
     }
 
@@ -69,6 +75,7 @@ impl Types {
             | Type::StrLiteral(_)
             | Type::StrEnum(_)
             | Type::Bytes
+            | Type::Path
             | Type::None => true,
             Type::Tuple(_) => self
                 .fields(ty)
@@ -251,6 +258,16 @@ impl Types {
         Type::Dict(self.intern(Shape::Dict(key, value)))
     }
 
+    /// The factory is part of the source contract; storage is still a dictionary.
+    pub(crate) fn default_list_dict(&self, key: Type, value: Type) -> Type {
+        debug_assert!(self.element(value).is_some());
+        Type::Dict(self.intern(Shape::DefaultListDict(key, value)))
+    }
+
+    pub(crate) fn is_default_list_dict(&self, ty: Type) -> bool {
+        matches!(ty, Type::Dict(id) if matches!(self.0.borrow().shapes[id], Shape::DefaultListDict(..)))
+    }
+
     pub(crate) fn set(&self, element: Type) -> Type {
         Type::Set(self.intern(Shape::Set(element)))
     }
@@ -324,7 +341,7 @@ impl Types {
             return None;
         };
         match self.0.borrow().shapes[id] {
-            Shape::Dict(key, value) => Some((key, value)),
+            Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => Some((key, value)),
             _ => unreachable!("dictionary type identity has a dictionary shape"),
         }
     }
@@ -381,8 +398,13 @@ impl Types {
             ),
             Type::Dict(_) => {
                 let (key, value) = self.mapping(ty).unwrap();
+                let name = if self.is_default_list_dict(ty) {
+                    "defaultdict"
+                } else {
+                    "dict"
+                };
                 format!(
-                    "dict[{}, {}]",
+                    "{name}[{}, {}]",
                     self.describe(key, class_name),
                     self.describe(value, class_name)
                 )

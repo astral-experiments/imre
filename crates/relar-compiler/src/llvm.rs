@@ -2878,7 +2878,7 @@ impl Emitter<'_, '_> {
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
-        if matches!(builtin, Builtin::LiteralStringView) {
+        if matches!(builtin, Builtin::LiteralStringView | Builtin::DictAsBase) {
             let value = self.expr(&expressions[0]);
             return Value {
                 ty: returns,
@@ -2936,8 +2936,8 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::LiteralStringView => {
-                unreachable!("string views transfer the operand owner directly")
+            Builtin::LiteralStringView | Builtin::DictAsBase => {
+                unreachable!("representation-preserving views transfer the operand owner directly")
             }
             Builtin::StringListContains => {
                 let byte = self.instruction(format!(
@@ -3445,6 +3445,24 @@ impl Emitter<'_, '_> {
                 &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
             ),
             Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
+            Builtin::DefaultListDict => {
+                let (key, list) = self.module.types.mapping(returns).unwrap();
+                let element = self.module.types.element(list).unwrap();
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_default_list_dict_new(i32 {}, i32 {})",
+                        representation_kind(key, &self.module.types),
+                        representation_kind(element, &self.module.types)
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::KeyUnion => self.call(
+                "relar_key_union",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::DictGatherStrInt => self.call(
                 "relar_dict_gather_str_int",
                 Type::ListInt,
@@ -4599,6 +4617,8 @@ define internal i64 @relar_seq_borrow_index_proven_fast(ptr %sequence, i64 %inde
 }
 declare ptr @relar_seq_repeat(ptr, i64)
 declare ptr @relar_dict_new(i32, i32)
+declare ptr @relar_default_list_dict_new(i32, i32)
+declare ptr @relar_key_union(ptr, ptr)
 declare i64 @relar_dict_len(ptr)
 declare i32 @relar_dict_contains(ptr, i64)
 declare i64 @relar_dict_get(ptr, i64)

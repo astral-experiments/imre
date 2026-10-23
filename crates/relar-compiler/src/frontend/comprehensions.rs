@@ -833,7 +833,7 @@ impl Checker<'_> {
                     return Err(error(
                         self.source,
                         expression,
-                        "set elements must be int, str, bytes, or immutable scalar tuples",
+                        "set elements must be int, str, bytes, Path, or immutable scalar tuples",
                     ));
                 }
                 self.locals[result] = if is_set {
@@ -864,7 +864,7 @@ impl Checker<'_> {
                     return Err(error(
                         self.source,
                         key,
-                        "dictionary keys must be int, str, bytes, or immutable scalar tuples",
+                        "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
                     ));
                 }
                 let captured = self.hidden(key_value.ty);
