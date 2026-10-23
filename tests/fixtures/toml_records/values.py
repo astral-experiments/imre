@@ -86,3 +86,12 @@ for token in ["inf", "+inf", "-inf", "nan", "+nan", "-nan", "1e999", "-1e999", "
     number = decode("value=" + token, dict[str, float])["value"]
     print(number)
     print(number != number)
+
+print(repr(decode('\ufeffvalue=1', dict[str, int])))
+print(repr(decode('\ufeffvalue="\ufeff"', dict[str, str])))
+for invalid_bom in ['\ufeff\ufeffvalue=1', 'value=1\ufeff']:
+    try:
+        decode(invalid_bom, dict[str, int])
+        assert False, "unexpected byte order mark"
+    except ValueError:
+        print("invalid byte order mark")

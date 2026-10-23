@@ -102,7 +102,7 @@ def decode(text: str, schema: type[T], /) -> T:
         raise TypeError("TOML decode schema must be a fixed record or string-key dictionary")
     parser = _load_parser()
     try:
-        value = parser.loads(text)
+        value = parser.loads(text.removeprefix("\ufeff"))
     except (parser.TOMLDecodeError, RecursionError) as error:
         raise ValueError("invalid TOML") from error
     pending = [(value, 1)]
