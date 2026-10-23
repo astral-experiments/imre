@@ -1036,6 +1036,7 @@ name = "relar-compiler"
 version = "0.1.1"
 dependencies = [
  "blake3",
+ "libc",
  "regex",
  "regex-syntax",
  "ruff_db",

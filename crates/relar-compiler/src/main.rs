@@ -4,11 +4,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus};
 
 #[cfg(unix)]
-use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::os::unix::process::ExitStatusExt;
 
 mod build_cache;
 mod build_output;
 mod cli;
+#[cfg(unix)]
+mod run_program;
 
 use build_output::BuildOutput;
 use cli::{BuildOptions, Relro};
@@ -216,9 +218,9 @@ fn run() -> Result<ExitCode, String> {
             build_cache::materialize(&file, &output).map_err(|e| e.to_string())?;
             build_cache::trace("hit");
             progress.cached(label);
-            if execute {
+            if let Some(directory) = run_directory {
                 progress.running(&source_path);
-                return run_program(&output, &source_path, args);
+                return run_program(&output, directory, &source_path, args);
             }
             return Ok(ExitCode::SUCCESS);
         }
@@ -398,12 +400,12 @@ fn run() -> Result<ExitCode, String> {
         }
     }
     progress.finished(label);
-    if execute {
+    if let Some(directory) = run_directory {
         progress.running(&source_path);
         drop(temporary);
         drop(scratch);
         drop(stage);
-        return run_program(&output, &source_path, args);
+        return run_program(&output, directory, &source_path, args);
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -445,16 +447,18 @@ fn validate_paths<'a>(
 
 fn run_program(
     output: &Path,
+    directory: tempfile::TempDir,
     source: &Path,
     args: impl Iterator<Item = OsString>,
 ) -> Result<ExitCode, String> {
-    let mut program = Command::new(output);
     #[cfg(unix)]
-    program.arg0(source);
-    // An ELF interpreter may reopen the executable after spawn returns.
-    program
-        .args(args)
-        .status()
+    let status = run_program::launch(output, directory, source, args);
+    #[cfg(not(unix))]
+    let status = {
+        let _directory = directory;
+        Command::new(output).args(args).status()
+    };
+    status
         .map(program_exit_code)
         .map_err(|e| format!("Could not run compiled {}: {e}", source.display()))
 }
