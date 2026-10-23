@@ -123,7 +123,7 @@ def main() -> None:
     compiler, runtime = str(args.compiler.resolve()), str(args.runtime.resolve())
     python = str(Path(args.python).resolve()) if "/" in args.python else args.python
     clang = str(Path(args.clang).resolve()) if "/" in args.clang else args.clang
-    flags = []
+    flags = ["--quiet"]
     if args.target:
         flags += ["--target", args.target]
     if args.lto_linker is not None:

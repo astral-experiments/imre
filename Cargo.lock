@@ -107,6 +107,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "blake3"
+version = "1.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d9e454fc11f76977dc803893aff6304ed33d6a26efae8696573bea74baa27ae"
+dependencies = [
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq",
+ "cpufeatures",
+]
+
+[[package]]
 name = "boxcar"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -210,6 +223,12 @@ dependencies = [
  "static_assertions",
  "zmij",
 ]
+
+[[package]]
+name = "constant_time_eq"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "cpufeatures"
@@ -1016,6 +1035,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 name = "relar-compiler"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "regex",
  "regex-syntax",
  "ruff_db",
@@ -1024,6 +1044,8 @@ dependencies = [
  "ruff_text_size",
  "salsa",
  "salsa-macro-rules",
+ "serde",
+ "serde_json",
  "tempfile",
  "ty_module_resolver",
  "ty_python_core",

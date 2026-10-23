@@ -252,6 +252,7 @@ def main() -> None:
                         compiler,
                         "build",
                         str(source),
+                        "--quiet",
                         "-o",
                         str(binary),
                         "--runtime",

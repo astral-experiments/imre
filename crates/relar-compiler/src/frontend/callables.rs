@@ -192,6 +192,7 @@ impl Checker<'_> {
         self.helpers.finish(
             id,
             comprehensions::Helper {
+                module: self.module,
                 function: ir::Function {
                     params,
                     returns,

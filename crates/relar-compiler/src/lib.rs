@@ -35,12 +35,7 @@ pub fn check(source: &str) -> Result<(), String> {
 /// Compiles a checked module to LLVM IR; the resulting executable uses no CPython.
 pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String> {
     let mut module = frontend::lower(&modules::SourceGraph::single(source)?)?;
-    tuples::scalarize(&mut module);
-    list_bounds::specialize(&mut module);
-    list_specialization::specialize(&mut module);
-    range_specialization::specialize(&mut module);
-    reductions::specialize(&mut module);
-    guarded_text::specialize(&mut module);
+    specialize(&mut module);
     let ranges = ranges::analyze(&module);
     Ok(llvm::emit(&module, &ranges, options.address_sanitizer))
 }
@@ -49,6 +44,27 @@ pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String>
 pub struct Compilation {
     pub llvm_ir: String,
     pub input_paths: Vec<PathBuf>,
+    pub source_inputs: SourceInputs,
+}
+
+/// Files and failed import lookups observed by the source loader.
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+pub struct SourceInputs {
+    pub files: Vec<(PathBuf, PathBuf, String)>,
+    pub missing: Vec<PathBuf>,
+}
+
+impl SourceInputs {
+    pub fn fresh(&self) -> bool {
+        self.missing
+            .iter()
+            .all(|p| matches!(p.try_exists(), Ok(false)))
+            && self.files.iter().all(|(p, identity, digest)| {
+                p.canonicalize().is_ok_and(|now| &now == identity)
+                    && std::fs::read(p)
+                        .is_ok_and(|bytes| blake3::hash(&bytes).to_hex().as_str() == digest)
+            })
+    }
 }
 
 /// Checks a closed first-party module graph, inferring its package root when omitted.
@@ -64,21 +80,66 @@ pub fn compile_file(
 ) -> Result<Compilation, String> {
     let graph = modules::SourceGraph::load(path, module_root)?;
     let mut module = frontend::lower(&graph)?;
-    tuples::scalarize(&mut module);
-    list_bounds::specialize(&mut module);
-    list_specialization::specialize(&mut module);
-    range_specialization::specialize(&mut module);
-    reductions::specialize(&mut module);
-    guarded_text::specialize(&mut module);
+    specialize(&mut module);
     let ranges = ranges::analyze(&module);
     Ok(Compilation {
         llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer),
+        source_inputs: graph.inputs,
         input_paths: graph
             .modules
             .into_iter()
             .map(|module| module.path)
             .collect(),
     })
+}
+
+pub struct CodegenUnit {
+    pub name: String,
+    pub llvm_ir: String,
+}
+
+pub struct UnitCompilation {
+    pub units: Vec<CodegenUnit>,
+    pub input_paths: Vec<PathBuf>,
+    pub source_inputs: SourceInputs,
+}
+
+/// Keeps whole-program checking and specialization, then partitions native code by source owner.
+pub fn compile_file_units(
+    path: &Path,
+    module_root: Option<&Path>,
+    options: &CompileOptions,
+) -> Result<UnitCompilation, String> {
+    let graph = modules::SourceGraph::load(path, module_root)?;
+    let (mut module, owners) = frontend::lower_with_owners(&graph)?;
+    specialize(&mut module);
+    let ranges = ranges::analyze(&module);
+    let names = graph
+        .modules
+        .iter()
+        .map(|m| m.name.clone())
+        .collect::<Vec<_>>();
+    Ok(UnitCompilation {
+        units: llvm::emit_units(
+            &module,
+            &ranges,
+            options.address_sanitizer,
+            &owners,
+            &names,
+            graph.entry,
+        )?,
+        input_paths: graph.modules.into_iter().map(|m| m.path).collect(),
+        source_inputs: graph.inputs,
+    })
+}
+
+fn specialize(module: &mut ir::Module) {
+    tuples::scalarize(module);
+    list_bounds::specialize(module);
+    list_specialization::specialize(module);
+    range_specialization::specialize(module);
+    reductions::specialize(module);
+    guarded_text::specialize(module);
 }
 
 /// Applies Python's source preprocessing before Ruff, ty, and source-range checks.

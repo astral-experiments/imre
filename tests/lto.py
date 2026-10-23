@@ -62,6 +62,7 @@ def main() -> None:
                 compiler,
                 "build",
                 str(SOURCE),
+                "--quiet",
                 "-o",
                 str(binary),
                 "--emit-llvm",

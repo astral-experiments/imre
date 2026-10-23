@@ -209,6 +209,7 @@ impl SourceModule {
 }
 
 pub(crate) struct SourceGraph {
+    pub(crate) inputs: crate::SourceInputs,
     pub(crate) session: Session,
     pub(crate) modules: Vec<SourceModule>,
     pub(crate) entry: ModuleId,
@@ -244,6 +245,7 @@ impl SourceGraph {
         if entry.file_name().and_then(|value| value.to_str()) == Some("__init__.py") {
             return Err("use a program module or package __main__.py as the entry source".into());
         }
+        let inferred = module_root.is_none();
         let root = if let Some(root) = module_root {
             root.canonicalize()
                 .map_err(|error| format!("{}: {error}", root.display()))?
@@ -279,6 +281,9 @@ impl SourceGraph {
         let source = std::fs::read_to_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
         let mut loader = Loader::new(root)?;
+        if inferred {
+            loader.inputs.missing.push(loader.root.join("__init__.py"));
+        }
         let id = loader.add(entry.clone(), entry, name.clone(), false, &source)?;
         // Like `python -m package.program`, package initialization precedes the entry.
         // The entry itself is __main__, and is deliberately not attached as a package child.
@@ -322,6 +327,7 @@ fn resolve_binding(
 }
 
 struct Loader {
+    inputs: crate::SourceInputs,
     root: PathBuf,
     session: Session,
     modules: Vec<SourceModule>,
@@ -336,6 +342,7 @@ impl Loader {
     fn new(root: PathBuf) -> Result<Self, String> {
         Ok(Self {
             session: Session::new(&root)?,
+            inputs: crate::SourceInputs::default(),
             root,
             modules: Vec::new(),
             by_name: HashMap::new(),
@@ -354,6 +361,11 @@ impl Loader {
         is_package: bool,
         source: &str,
     ) -> Result<ModuleId, String> {
+        self.inputs.files.push((
+            path.clone(),
+            identity.clone(),
+            blake3::hash(source.as_bytes()).to_hex().to_string(),
+        ));
         let source = crate::normalize_source(source)
             .map_err(|error| format!("{}: {error}", path.display()))?
             .into_owned();
@@ -375,9 +387,12 @@ impl Loader {
         Ok(id)
     }
 
-    fn finish(self, entry: ModuleId) -> Result<SourceGraph, String> {
+    fn finish(mut self, entry: ModuleId) -> Result<SourceGraph, String> {
         self.session.check()?;
+        self.inputs.missing.sort_unstable();
+        self.inputs.missing.dedup();
         Ok(SourceGraph {
+            inputs: self.inputs,
             session: self.session,
             modules: self.modules,
             entry,
@@ -590,33 +605,22 @@ impl Loader {
 
     /// Intrinsic imports use fixed identities, but never silently accept a
     /// first-party file that attempts to shadow the standard-library namespace.
-    fn intrinsic_module(&self, name: &str) -> Result<Option<IntrinsicModule>, String> {
+    fn intrinsic_module(&mut self, name: &str) -> Result<Option<IntrinsicModule>, String> {
         let module = IntrinsicModule::named(name);
-        if module.is_some()
-            && self.allow_imports
-            && (self
-                .root
-                .join(format!("{}.py", name.split('.').next().unwrap()))
-                .exists()
-                || self
-                    .root
-                    .join(name.split('.').next().unwrap())
-                    .join("__init__.py")
-                    .exists()
-                || self
-                    .root
-                    .join(name.replace('.', "/"))
-                    .with_extension("py")
-                    .exists()
-                || self
-                    .root
-                    .join(name.replace('.', "/"))
-                    .join("__init__.py")
-                    .exists())
-        {
-            return Err(format!(
-                "standard-library shadowing is unsupported: {name:?}"
-            ));
+        if module.is_some() && self.allow_imports {
+            for base in [
+                self.root.join(name.split('.').next().unwrap()),
+                self.root.join(name.replace('.', "/")),
+            ] {
+                for candidate in [base.with_extension("py"), base.join("__init__.py")] {
+                    if candidate.exists() {
+                        return Err(format!(
+                            "standard-library shadowing is unsupported: {name:?}"
+                        ));
+                    }
+                    self.inputs.missing.push(candidate);
+                }
+            }
         }
         Ok(module)
     }
@@ -692,6 +696,7 @@ impl Loader {
         let (path, is_package) = if package.is_file() {
             (package, true)
         } else {
+            self.inputs.missing.push(package);
             (base.with_extension("py"), false)
         };
         if !path.is_file() {

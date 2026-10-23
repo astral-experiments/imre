@@ -59,6 +59,12 @@ jobs:
       - name: Free disk space for native test binaries
         run: cargo clean --profile dev
       - run: cargo build --workspace --release --locked
+      - name: Check native build caching, linker options, and status
+        run: |
+          # The cache supports distro Clang and ld.bfd. setup-python can add LD_LIBRARY_PATH.
+          for suite in build_cache module_objects link_cache build_output; do
+            env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin python3 "tests/$suite.py" --compiler target/release/relar
+          done
       - name: Compare Ruff’s conformance reports with CPython
         run: |
           target/release/relar build examples/conformance_report/__main__.py --module-root examples -o "$RUNNER_TEMP/conformance-report"
