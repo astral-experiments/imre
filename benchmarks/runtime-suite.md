@@ -1,6 +1,6 @@
 # Rust, CPython and Relar
 
-Each panel compares Rust, Relar and CPython on one workload. Bar lengths share a zero baseline within each panel, and the labels give absolute times in milliseconds. The [README](../README.md#benchmark) lists all six medians for each runtime.
+Median elapsed time in milliseconds, including startup, imports and file I/O. Lower is faster. The [README](../README.md#benchmark) lists all six medians for each runtime.
 
 ![Six panels comparing median elapsed time for Rust, Relar and CPython on inventory reconciliation, Base45 decoding, Luhn checksums, telemetry and offline conformance reporting.](results/runtime-suite.svg)
 

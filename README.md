@@ -96,7 +96,7 @@ Relar and CPython 3.14.5 run the same Python programs. The Rust references read 
 
 ![Median time to render the offline conformance report. Rust took 23.59 ms, Relar 33.04 ms, and CPython 247.01 ms.](benchmarks/results/runtime-conformance.svg)
 
-The chart shows the offline reporter rendering captured ty diagnostics. The table gives median elapsed times for all six workloads. Each median covers 12 fresh processes pinned to one AMD EPYC Milan CPU. Timings include startup, imports and file I/O.
+The chart shows the offline conformance reporter processing 146 files and two captured ty runs. Lower is faster. The table gives median elapsed times for all six workloads. Each median covers 12 fresh processes pinned to one AMD EPYC Milan CPU. Timings include startup, imports and file I/O.
 
 | Workload | Input per process | Rust (ms) | CPython (ms) | Relar (ms) | CPython / Relar |
 | --- | --- | ---: | ---: | ---: | ---: |
