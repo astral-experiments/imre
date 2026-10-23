@@ -327,28 +327,59 @@ impl Binary {
 /// A native symbol, its borrowed inputs, and the convention for consuming its result.
 pub(crate) struct RuntimeCall<R, const N: usize> {
     pub(crate) symbol: &'static str,
-    pub(crate) params: [Type; N],
+    pub(crate) params: [RuntimeParam; N],
     pub(crate) result: R,
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RuntimeParam {
+    Value(Type),
+    /// A decoded, nonnegative index. A tagged integer word also lowers to `i64`.
+    NativeIndex,
+}
+
+const INT_LIST: RuntimeParam = RuntimeParam::Value(Type::ListInt);
+const TAGGED_INT: RuntimeParam = RuntimeParam::Value(Type::Int);
 
 /// A successful call transfers one integer word. Raw zero signals a pending error.
 pub(crate) struct OwnedIntOrError;
 pub(crate) struct InfallibleVoid;
+/// One signals success. Zero signals a pending error.
+pub(crate) struct StatusOrError;
 
 pub(crate) const LIST_GET: RuntimeCall<OwnedIntOrError, 2> = RuntimeCall {
     symbol: "relar_list_get",
-    params: [Type::ListInt, Type::Int],
+    params: [INT_LIST, TAGGED_INT],
     result: OwnedIntOrError,
 };
 pub(crate) const LIST_APPEND: RuntimeCall<InfallibleVoid, 2> = RuntimeCall {
     symbol: "relar_list_append",
-    params: [Type::ListInt, Type::Int],
+    params: [INT_LIST, TAGGED_INT],
     result: InfallibleVoid,
 };
 pub(crate) const LIST_POP: RuntimeCall<OwnedIntOrError, 1> = RuntimeCall {
     symbol: "relar_list_pop",
-    params: [Type::ListInt],
+    params: [INT_LIST],
     result: OwnedIntOrError,
+};
+pub(crate) const LIST_SET: RuntimeCall<StatusOrError, 3> = RuntimeCall {
+    symbol: "relar_list_set",
+    params: [INT_LIST, TAGGED_INT, TAGGED_INT],
+    result: StatusOrError,
+};
+pub(crate) const LIST_SET_INDEX: RuntimeCall<StatusOrError, 3> = RuntimeCall {
+    symbol: "relar_list_set_index",
+    params: [INT_LIST, RuntimeParam::NativeIndex, TAGGED_INT],
+    result: StatusOrError,
+};
+pub(crate) const LIST_COPY_INDEX: RuntimeCall<StatusOrError, 3> = RuntimeCall {
+    symbol: "relar_list_copy_index",
+    params: [
+        INT_LIST,
+        RuntimeParam::NativeIndex,
+        RuntimeParam::NativeIndex,
+    ],
+    result: StatusOrError,
 };
 
 /// Error checks for the emitter's generic native call helpers. Specialized
@@ -423,11 +454,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_int_true_divide"
                 | "relar_assert_fail"
                 | "relar_range_step_zero"
-                | "relar_list_set"
                 | "relar_list_get_index"
-                | "relar_list_set_index"
                 | "relar_list_borrow_index"
-                | "relar_list_copy_index"
                 | "relar_list_repeat"
                 | "relar_list_slice"
                 | "relar_list_slice_sum"
