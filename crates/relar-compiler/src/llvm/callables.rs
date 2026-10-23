@@ -3,12 +3,46 @@
 use std::collections::BTreeSet;
 
 use super::*;
+use crate::callables::Target;
+
+const MAX_LOOP_NODES: usize = 192;
+const MAX_TARGET_NODES: usize = 8;
 
 fn adapter_name(function: usize, bound: bool) -> String {
     format!(
         "callable_{function}_{}",
         if bound { "bound" } else { "plain" }
     )
+}
+
+/// Bound inlining growth to two short, straight-line return expressions.
+/// Aggregate construction, nested calls, and control flow retain generic dispatch.
+fn small_pair(module: &Module, targets: &[Target]) -> bool {
+    let mut nodes = 0;
+    for target in targets {
+        let body = &module.functions[target.function].body;
+        if !matches!(body.as_slice(), [Statement::Return(_)]) {
+            return false;
+        }
+        let mut simple = true;
+        crate::ir::walk_expressions(body, &mut |value| {
+            nodes += 1;
+            simple &= matches!(
+                value.kind,
+                ExprKind::Local(_)
+                    | ExprKind::Int(_)
+                    | ExprKind::Float(_)
+                    | ExprKind::Bool(_)
+                    | ExprKind::Field(..)
+                    | ExprKind::Negate(_)
+                    | ExprKind::Binary(Binary::Add | Binary::Subtract | Binary::Multiply, ..)
+            );
+        });
+        if !simple || nodes > MAX_TARGET_NODES {
+            return false;
+        }
+    }
+    true
 }
 
 /// The callback borrows its record's receiver for the entire invocation. Plain
@@ -84,6 +118,83 @@ pub(super) fn adapters(module: &Module, sanitize: bool) -> String {
 }
 
 impl Emitter<'_, '_> {
+    /// Version one bounded loop around an invocation of an unchanged, initialized
+    /// local. Both arms still read the original receiver and use ordinary cleanup.
+    pub(super) fn version_callback_loop(
+        &mut self,
+        statement: &Statement,
+        prefix: &[Statement],
+    ) -> bool {
+        if !self.can_version_callback {
+            return false;
+        }
+        let (Statement::For { body, .. } | Statement::While(_, body, _)) = statement else {
+            return false;
+        };
+        let mut candidate = None;
+        crate::ir::walk_expressions(body, &mut |value| {
+            if candidate.is_none()
+                && let ExprKind::Invoke { callable, .. } = &value.kind
+                && let ExprKind::Local(slot) = callable.kind
+                && let [first, second] = self.callable_targets.get(callable.ty)
+                && self.function_units.is_none_or(|units| {
+                    units[first.function] == self.current_unit
+                        && units[second.function] == self.current_unit
+                })
+                && small_pair(self.module, &[*first, *second])
+            {
+                candidate = Some((slot, std::ptr::from_ref(callable.as_ref()), *first, *second));
+            }
+        });
+        let Some((slot, site, first, second)) = candidate else {
+            return false;
+        };
+        let whole_loop = std::slice::from_ref(statement);
+        let mut nodes = 0;
+        crate::borrows::statements(whole_loop, &mut |_| nodes += 1);
+        crate::ir::walk_expressions(whole_loop, &mut |_| nodes += 1);
+        if nodes > MAX_LOOP_NODES
+            || crate::borrows::written_in(whole_loop, self.locals.len(), |_| false)[slot]
+        {
+            return false;
+        }
+        // Lazy pipelines capture their callback in a private local before the
+        // loop. A dominating capture of a stable parameter also proves non-null
+        // on empty inputs, so the guard may read the target before iteration.
+        if !self.borrowed_params[slot] {
+            let Some(capture) = prefix.iter().rposition(|stmt| {
+                matches!(stmt,
+                Statement::Assign(dest, Expr { kind: ExprKind::Local(src), .. })
+                    if *dest == slot && self.borrowed_params[*src] && self.locals[*src] == self.locals[slot])
+            }) else {
+                return false;
+            };
+            if crate::borrows::written_in(&prefix[capture + 1..], self.locals.len(), |_| false)
+                [slot]
+            {
+                return false;
+            }
+        }
+        self.can_version_callback = false;
+        let callable = self.instruction(format!("load ptr, ptr %local{slot}"));
+        let target = self.instruction(format!("load ptr, ptr {callable}"));
+        let adapter = adapter_name(first.function, first.bound);
+        let is_first = self.instruction(format!("icmp eq ptr {target}, @{adapter}"));
+        let (yes, no, end) = (self.label(), self.label(), self.label());
+        self.branch(&is_first, &yes, &no);
+        for (label, target) in [(&yes, first), (&no, second)] {
+            self.start(label);
+            self.callback_version = Some((site, target));
+            self.statement(statement);
+            if !self.terminated {
+                self.jump(&end);
+            }
+        }
+        self.callback_version = None;
+        self.start(&end);
+        true
+    }
+
     /// Captures the receiver once and transfers its owner into the immutable
     /// callable record. Its destructor uses the ordinary record descriptor.
     pub(super) fn callable_value(
@@ -128,9 +239,14 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         let targets = self.callable_targets.get(callable.ty).to_vec();
+        let direct = match (targets.as_slice(), self.callback_version) {
+            ([target], _) => Some(*target),
+            (_, Some((site, target))) if std::ptr::eq(site, callable) => Some(target),
+            _ => None,
+        };
         let callable = self.operand(callable);
         let values = self.call_operands(args);
-        let target = if let [target] = targets.as_slice() {
+        let target = if let Some(target) = direct {
             format!("@{}", adapter_name(target.function, target.bound))
         } else {
             self.instruction(format!("load ptr, ptr {}", callable.value.operand))
@@ -217,6 +333,47 @@ print(apply(increment, 4))
             "{body}"
         );
         assert!(!body.contains("@relar_record_new"), "{body}");
+    }
+
+    #[test]
+    fn specializes_a_small_loop_with_two_cheap_stable_targets() {
+        let call = "acc += fn(x)";
+        // Independent effects exceed the loop budget without building a long
+        // chain of inferred additions on the same accumulator.
+        let large_loop = format!("{call}{}", "\n        print(x)".repeat(64));
+        for (expression, body, specialized) in [
+            ("x + 1", call, true),
+            ("x * x + x * x + x * x", call, false),
+            ("x + 1", "acc += fn(x)\n        fn = identity", false),
+            ("x + 1", large_loop.as_str(), false),
+            ("x + 1", "acc += x\n    else:\n        acc += fn(1)", false),
+        ] {
+            let source = format!(
+                r#"
+from typing import Callable
+def identity(x: int) -> int:
+    return x
+def other(x: int) -> int:
+    return {expression}
+def total(fn: Callable[[int], int], xs: list[int]) -> int:
+    acc = fn(0)
+    for x in xs:
+        {body}
+    return acc
+print(total(identity, [1]))
+print(total(other, [2]))
+"#
+            );
+            let ir = compile(&source, &CompileOptions::default()).unwrap();
+            let body = ir.split_once("define internal i64 @fn_2(").unwrap().1;
+            let body = body.split_once("\n}").unwrap().0;
+            assert_eq!(body.contains("call i64 @callable_0_plain("), specialized);
+            assert_eq!(body.contains("call i64 @callable_1_plain("), specialized);
+            assert_eq!(
+                body.matches("call i64 %").count(),
+                if specialized { 1 } else { 2 }
+            );
+        }
     }
 
     #[test]

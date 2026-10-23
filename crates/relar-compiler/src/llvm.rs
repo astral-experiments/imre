@@ -199,6 +199,10 @@ fn emit_program(
         effects,
         inline_dispatch,
         callable_targets: crate::callables::Targets::analyze(module),
+        function_units: partition.as_ref().map(|plan| plan.functions),
+        current_unit: 0,
+        can_version_callback: false,
+        callback_version: None,
         integer_regions: integer_regions::analyze(module),
         uses_sys_argv: module.uses_sys_argv(),
     };
@@ -207,10 +211,11 @@ fn emit_program(
         plan.strings.resize(emitter.strings.len(), plan.entry);
     }
     for (id, function) in module.functions.iter().enumerate() {
-        if partition.is_some() {
+        if let Some(plan) = &partition {
             // SSA names and labels are scoped to one LLVM function.
             emitter.next_value = 0;
             emitter.next_label = 0;
+            emitter.current_unit = plan.functions[id];
         }
         emitter.function(function, &format!("fn_{id}"), false, &borrows[id]);
         if let Some(plan) = &mut partition {
@@ -218,9 +223,10 @@ fn emit_program(
                 .resize(emitter.strings.len(), plan.functions[id]);
         }
     }
-    if partition.is_some() {
+    if let Some(plan) = &partition {
         emitter.next_value = 0;
         emitter.next_label = 0;
+        emitter.current_unit = plan.entry;
     }
     emitter.function(&module.entry, "main", true, borrows.last().unwrap());
     if let Some(plan) = &mut partition {
@@ -296,6 +302,10 @@ struct Emitter<'a, 'module> {
     effects: ExceptionEffects,
     inline_dispatch: Vec<bool>,
     callable_targets: crate::callables::Targets,
+    function_units: Option<&'a [usize]>,
+    current_unit: usize,
+    can_version_callback: bool,
+    callback_version: Option<(*const Expr, crate::callables::Target)>,
     integer_regions: Vec<Option<integer_regions::Summary>>,
     uses_sys_argv: bool,
 }
@@ -1287,6 +1297,10 @@ impl Emitter<'_, '_> {
             self.borrowed_params[slot] = !rebound[slot];
         }
         self.loops.clear();
+        self.can_version_callback = function
+            .locals
+            .iter()
+            .any(|ty| self.callable_targets.get(*ty).len() == 2);
         self.temporaries.clear();
         self.cleanups.clear();
         self.return_exit = self.label();
@@ -1414,16 +1428,16 @@ impl Emitter<'_, '_> {
 
     fn block(&mut self, statements: &[Statement]) {
         let incoming = self.temporaries.clone();
-        let mut statements = statements.iter().peekable();
-        while let Some(statement) = statements.next() {
+        let mut sequence = statements.iter().enumerate().peekable();
+        while let Some((index, statement)) = sequence.next() {
             if self.terminated {
                 break;
             }
-            if let Some(next) = statements.peek()
+            if let Some((_, next)) = sequence.peek()
                 && self.append_pair(statement, next)
             {
-                statements.next();
-            } else {
+                sequence.next();
+            } else if !self.version_callback_loop(statement, &statements[..index]) {
                 self.statement(statement);
             }
             debug_assert!(
