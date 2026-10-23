@@ -12,7 +12,7 @@ use std::io::Write;
 use std::os::fd::IntoRawFd;
 use std::path::{Path, PathBuf};
 
-use model::{FileStats, Side, TestCase, compute_stats, group_diagnostics};
+use model::{ExpectedError, FileStats, Side, TestCase, compute_stats, group_diagnostics};
 use parse::Inputs;
 
 type Result<T> = std::result::Result<T, Error>;
@@ -197,7 +197,14 @@ fn collect_file_stats(cases: &[TestCase], inputs: &Inputs) -> Result<Vec<FileSta
 }
 
 fn render_report(inputs: &Inputs, options: &Options) -> Result<String> {
-    let expected = parse::collect_expected(&inputs.sources)?;
+    render_diagnostics(inputs, options, parse::collect_expected(&inputs.sources)?)
+}
+
+fn render_diagnostics(
+    inputs: &Inputs,
+    options: &Options,
+    expected: Vec<ExpectedError>,
+) -> Result<String> {
     let old = parse::collect_diagnostics(&inputs.old, &inputs.paths)?;
     let new = parse::collect_diagnostics(&inputs.new, &inputs.paths)?;
     let grouped = group_diagnostics(old, new, expected);

@@ -215,7 +215,7 @@ pub fn run(arguments: &[String]) -> Result<()> {
         ".relar-conformance-",
     )?);
     let sources = discover(&suite)?;
-    crate::parse::collect_expected(&sources)?;
+    let expected = crate::parse::collect_expected(&sources)?;
     let arguments = self::arguments(&suite, &sources);
     let environment = std::env::vars().collect();
     let mut aliases = HashMap::new();
@@ -240,7 +240,7 @@ pub fn run(arguments: &[String]) -> Result<()> {
         compute: false,
         rounds: 1,
     };
-    let report = crate::render_report(&inputs, &report_options)?;
+    let report = crate::render_diagnostics(&inputs, &report_options, expected)?;
     let staged = workspace.0.join("report.md");
     crate::write_text(&staged.to_string_lossy(), &report)?;
     std::fs::rename(staged, output).map_err(Error::io)?;
