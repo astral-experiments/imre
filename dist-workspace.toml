@@ -17,9 +17,10 @@ auto-includes = false
 build-local-artifacts = false
 local-artifacts-jobs = ["./build-release-binaries"]
 
-# The compiler links against the runtime archives installed beside it.
+# Install the runtime archives and the packaged linker beside the compiler.
 [dist.binaries]
 "*" = ["relar", "librelar_runtime.a", "librelar_runtime_jemalloc.a"]
+x86_64-unknown-linux-gnu = ["relar", "librelar_runtime.a", "librelar_runtime_jemalloc.a", "relar-ld.lld"]
 aarch64-apple-darwin = ["relar", "librelar_runtime.a"]
 
 [dist.min-glibc-version]

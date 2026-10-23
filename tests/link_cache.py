@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 
@@ -100,6 +101,28 @@ def main():
         invoke(events=["bypass"], RELAR_ENCODED_FLAGS=option)
         assert subprocess.check_output([binary], text=True) == "second\n17\n"
         invoke(events=["hit"], mode="run")
+
+        # Moving from the system linker to the packaged one changes only the link action.
+        source_lld = next((p for p in (compiler.with_name("relar-ld.lld"), Path("/usr/bin/ld.lld-18"))
+                           if p.is_file()), None)
+        if source_lld:
+            install = root / "install"
+            install.mkdir()
+            (install / "librelar_runtime.a").symlink_to(compiler.with_name("librelar_runtime.a"))
+            compiler = Path(shutil.copy2(compiler, install / "relar"))
+            invoke(events=miss, objects="miss")
+            invoke(events=["hit"], mode="run")
+            companion = Path(shutil.copy2(source_lld, install / "relar-ld.lld"))
+            invoke(events=miss, objects="hit")
+            verbose = invoke("--verbose-link", events=["relink", "store"], objects="hit")
+            assert any(f"--ld-path={companion}" in line for line in verbose), verbose
+            stat = companion.stat()
+            os.utime(companion, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+            invoke(events=miss, objects="hit")
+            invoke(events=["hit"], mode="run")
+            collision = subprocess.run([compiler, "build", "main.py", "-o", companion], cwd=root,
+                                       env=environment, capture_output=True, text=True)
+            assert collision.returncode and "distinct paths" in collision.stderr, collision.stderr
     print("Passed native link option, cache identity, and external input checks")
 
 

@@ -787,16 +787,26 @@ arguments to the compiled program.
 ## Incremental builds
 
 `relar build` and `relar run` share a per-user cache on native x86-64 Debian/Ubuntu
-with distribution Clang 18, GNU BFD, and an ordinary runtime archive. Both commands
+with distribution Clang 18, GNU BFD as the system `ld`, and an ordinary runtime archive. Both commands
 reuse the last executable when its sources, import lookups, build options, compiler,
 runtime, and native link inputs are still current. Program arguments and the output
 path can change between invocations.
 
+For these builds Relar uses the LLD 18 companion shipped in the x86-64 Linux
+release, then `/usr/bin/ld.lld-18` if installed, and otherwise the system GNU
+linker. `--verbose-link` shows the selected driver arguments. Changing linkers
+relinks with the existing module objects.
+
+LLVM's dependency file cannot represent every POSIX filename. When LLD reads an
+object path containing a literal backslash or a custom linker script outside the
+system library directories, Relar keeps the module objects and repeats the link
+on the next invocation.
+
 After a source edit, Relar checks and lowers the entire import graph. It recompiles
 the modules whose emitted LLVM changed and relinks the program. Changing a public
 signature or a shared layout can also recompile a caller. Changing only section GC
-or RELRO relinks with the existing objects. `--verbose-link` performs the link and
-prints its actual command, including when all the module objects are cached.
+or RELRO relinks with the existing objects. `--verbose-link` performs the link
+even when all the module objects are cached.
 
 Build status goes to stderr. Use `-v` or `--verbose` to see each compiled and
 reused module, or `-q` or `--quiet` to suppress progress. Set `NO_COLOR` for plain
