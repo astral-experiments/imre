@@ -52,6 +52,7 @@ jobs:
           typeshed_manifest=$(jq -er '.packages[] | select(.name == "ty_vendored") | .manifest_path' "$RUNNER_TEMP/relar-packages.json")
           cp "$(dirname "$typeshed_manifest")/vendor/typeshed/LICENSE" "$ARCHIVE_NAME/LICENSE-typeshed"
           if [[ "$TARGET" == *-linux-gnu ]]; then
+            cp "target/$TARGET/dist/librelar_runtime_jemalloc.a" "$ARCHIVE_NAME/"
             jemalloc_manifest=$(jq -er '.packages[] | select(.name == "tikv-jemalloc-sys") | .manifest_path' "$RUNNER_TEMP/relar-packages.json")
             cp "$(dirname "$jemalloc_manifest")/jemalloc/COPYING" "$ARCHIVE_NAME/LICENSE-jemalloc"
           fi
