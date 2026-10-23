@@ -205,6 +205,22 @@ pub unsafe extern "C" fn relar_sort_by_keys(
     key_kind: u32,
     reverse: u32,
 ) {
+    if values == keys && key_kind == 3 {
+        // Without a key function, the string list itself owns every comparison
+        // operand. A stable sort can move those owners directly.
+        // SAFETY: the exclusive list access roots both strings across comparison.
+        unsafe {
+            object(values.cast()).0.with_mut(|storage| {
+                let values = storage.sequence_mut();
+                values.check_kind(key_kind);
+                values.values.sort_by(|&left, &right| {
+                    let order = (&*(left as *const Str)).cmp(&*(right as *const Str));
+                    if reverse != 0 { order.reverse() } else { order }
+                });
+            });
+        }
+        return;
+    }
     // SAFETY: both exact list owners remain rooted throughout this operation.
     let mut order = unsafe { key_order(keys, key_kind, reverse != 0) };
     if element_kind == 2 {
@@ -354,6 +370,29 @@ mod tests {
             let mut values: Vec<_> = (0..length).collect();
             permute(&mut values, &mut order);
             assert!(values.into_iter().eq((0..length).rev()));
+        }
+    }
+
+    #[test]
+    fn direct_string_sorts_preserve_equal_owners_in_both_directions() {
+        let texts = ["é", "", "é", "z", ""].map(|s| Rc::new(Str::from(s)));
+        for (reverse, order) in [(0, [1, 4, 3, 0, 2]), (1, [0, 2, 3, 1, 4])] {
+            // SAFETY: the list and its string owners stay rooted throughout the sort.
+            unsafe {
+                let list = Rc::from_raw(super::super::relar_seq_new(3));
+                let pointer = Rc::as_ptr(&list);
+                for text in &texts {
+                    super::super::relar_seq_append(pointer, Rc::as_ptr(text) as usize, 3);
+                }
+                relar_sort_by_keys(pointer.cast(), 3, pointer.cast(), 3, reverse);
+                list.0.with(|storage| {
+                    assert_eq!(
+                        storage.sequence().values.as_slice(),
+                        order.map(|i| Rc::as_ptr(&texts[i]) as usize),
+                    );
+                });
+            }
+            assert!(texts.iter().all(|text| Rc::strong_count(text) == 1));
         }
     }
 
