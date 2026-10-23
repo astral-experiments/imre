@@ -1,0 +1,586 @@
+{
+  "revision": "fb74f367acca0130b44c1b7ec1301ccb8a61e279",
+  "dirty": false,
+  "date_utc": "2026-10-23",
+  "os": "Linux 6.8.0-147-generic x86_64",
+  "cpu": {
+    "model": "AMD EPYC-Milan Processor",
+    "allowed_cpus_before_pinning": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31
+    ],
+    "affinity": [
+      12
+    ]
+  },
+  "python": {
+    "implementation": "cpython",
+    "version": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+    "version_number": "3.14.5",
+    "gil_enabled": true,
+    "free_threaded_build": false,
+    "jit_available": true,
+    "jit_enabled": false,
+    "debug_build": false,
+    "pgo": {
+      "configure_enable_optimizations": true,
+      "profile_use_flag_present": true
+    },
+    "lto": {
+      "configure_option": "--with-lto",
+      "lto_flag_present": true
+    }
+  },
+  "rustc": "rustc 1.98.1-dev (f62703110 2026-09-08) (ohm-1.98.1-1)\nbinary: rustc\ncommit-hash: f6270311094cd4b48fefce03debdffcf8396c64c\ncommit-date: 2026-09-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1-dev\nLLVM version: 22.1.8",
+  "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+  "relar": "relar 0.1.1 (Ruff/ty 0.0.14; LLVM AOT)",
+  "binaries_sha256": {
+    "cpython": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "compiler": "fd53102de6b6f0a944e244f893d804697b18ea80b357832ab4f8363ac62c84a2",
+    "runtime": "ca1e4ea7c9e11795efb6ff2969d9e1585b1986aa318b0e0979627a11a10c8c79",
+    "inventory_reconciliation": {
+      "rust": "43feeda80c5bb63eb2c791ac54bce69de9f8c08cc04eb83de9f439c865139840",
+      "relar": "0e8d4262c59afaf4c4b75db467aafa03dcfe868e2202924d34ceb0d4c8d42fc8"
+    },
+    "base45_codec": {
+      "rust": "666696aadb0e7e88bed08151e380fa8455b6884efd460db64c40fc0facdd485b",
+      "relar": "a823f4cae5961dbf85cedb79c3c8849f88ca3972a4b7c2e9aa4849ce1146a51c"
+    },
+    "luhn_checksum": {
+      "rust": "793774e0d9ad6cfa6bce3725fbaa7af24a71924e6a4a698e75adcfc67c6354d5",
+      "relar": "b175b890c165ac03ef3ef9026ffded03bacd4e5ec3a34ebe6b8af10a0e3aa613"
+    },
+    "telemetry_comparison": {
+      "rust": "7327d90f35fbd45542e27b0fc5b074e8cfc416da1a5a454c2cf0023452bf55c3",
+      "relar": "8d8d0b5ec80e9ccf1eb25cd71f69beb65ec8ae0d1db6681755cee3910c1b006a"
+    },
+    "conformance_report": {
+      "rust": "f8ce1dad54c972c784bfaaf4e6d399eba6880e344874171eb4bff541f600bb39",
+      "relar": "68e357115f5b8e2833570877610260c2fde486c567c9fb70e7360a9c0b34527c"
+    }
+  },
+  "cases": [
+    {
+      "name": "Inventory (repeated)",
+      "input": "16,384 requests, 64 SKUs",
+      "package": "inventory_reconciliation",
+      "stdout": "",
+      "report_bytes": 654942,
+      "report_sha256": "774a72dd3b72c2292a8b9c409dc8a79ffdd4c683de7f2ffcab1155757c41ae5d",
+      "warmups_ns": [
+        {
+          "relar": 31641207,
+          "rust": 25920561,
+          "cpython": 78894224
+        },
+        {
+          "relar": 29731290,
+          "cpython": 75847568,
+          "rust": 25455235
+        }
+      ],
+      "samples_ns": [
+        {
+          "rust": 25483437,
+          "cpython": 77615421,
+          "relar": 29578665
+        },
+        {
+          "rust": 24598850,
+          "relar": 29372231,
+          "cpython": 75636766
+        },
+        {
+          "cpython": 76006815,
+          "rust": 25025245,
+          "relar": 29250192
+        },
+        {
+          "cpython": 74649536,
+          "relar": 29085957,
+          "rust": 24628776
+        },
+        {
+          "relar": 29385646,
+          "rust": 24550529,
+          "cpython": 74958432
+        },
+        {
+          "relar": 29393971,
+          "cpython": 75598164,
+          "rust": 26101358
+        },
+        {
+          "rust": 25137673,
+          "cpython": 77337604,
+          "relar": 147004079
+        },
+        {
+          "rust": 42817825,
+          "relar": 30518786,
+          "cpython": 126785609
+        },
+        {
+          "cpython": 79246259,
+          "rust": 25532128,
+          "relar": 31171993
+        },
+        {
+          "cpython": 79157714,
+          "relar": 32032075,
+          "rust": 27831531
+        },
+        {
+          "relar": 30506793,
+          "rust": 25465473,
+          "cpython": 76887887
+        },
+        {
+          "relar": 31964489,
+          "cpython": 79961010,
+          "rust": 25129478
+        }
+      ]
+    },
+    {
+      "name": "Inventory (distinct)",
+      "input": "16,384 requests, 16,384 SKUs",
+      "package": "inventory_reconciliation",
+      "stdout": "",
+      "report_bytes": 1438871,
+      "report_sha256": "d1f666f0a0deab8399509219a027001e23f6614b90c6b46dae0987de65a51d7a",
+      "warmups_ns": [
+        {
+          "relar": 54296075,
+          "rust": 54793311,
+          "cpython": 118569004
+        },
+        {
+          "relar": 54391704,
+          "cpython": 114381585,
+          "rust": 46924574
+        }
+      ],
+      "samples_ns": [
+        {
+          "rust": 46391021,
+          "cpython": 113176060,
+          "relar": 53521443
+        },
+        {
+          "rust": 45725121,
+          "relar": 52213878,
+          "cpython": 118574073
+        },
+        {
+          "cpython": 115804735,
+          "rust": 45791243,
+          "relar": 53139220
+        },
+        {
+          "cpython": 110533266,
+          "relar": 198433114,
+          "rust": 77322976
+        },
+        {
+          "relar": 54678106,
+          "rust": 46612943,
+          "cpython": 148772663
+        },
+        {
+          "relar": 54324158,
+          "cpython": 116043349,
+          "rust": 47164892
+        },
+        {
+          "rust": 45506594,
+          "cpython": 110844034,
+          "relar": 52964085
+        },
+        {
+          "rust": 45104646,
+          "relar": 52870991,
+          "cpython": 111470863
+        },
+        {
+          "cpython": 110119104,
+          "rust": 45636787,
+          "relar": 53156302
+        },
+        {
+          "cpython": 109461100,
+          "relar": 52595999,
+          "rust": 45337708
+        },
+        {
+          "relar": 52038652,
+          "rust": 45289470,
+          "cpython": 116558278
+        },
+        {
+          "relar": 52389063,
+          "cpython": 109288789,
+          "rust": 45659920
+        }
+      ]
+    },
+    {
+      "name": "Base45 decode",
+      "input": "64 \u00d7 16 KiB decoded",
+      "package": "base45_codec",
+      "stdout": "OK\n1080192\n",
+      "report_bytes": 16384,
+      "report_sha256": "13fa6b1d5000619cda71d4ab29d5be0728b0ad07699a54e23ae14e2399219f9f",
+      "warmups_ns": [
+        {
+          "relar": 15825577,
+          "rust": 9235463,
+          "cpython": 305207548
+        },
+        {
+          "relar": 19486358,
+          "cpython": 220102425,
+          "rust": 9325741
+        }
+      ],
+      "samples_ns": [
+        {
+          "rust": 9609770,
+          "cpython": 189300231,
+          "relar": 15544335
+        },
+        {
+          "rust": 9069603,
+          "relar": 14974603,
+          "cpython": 183520407
+        },
+        {
+          "cpython": 185561148,
+          "rust": 10274687,
+          "relar": 16872096
+        },
+        {
+          "cpython": 183156278,
+          "relar": 15543232,
+          "rust": 10276292
+        },
+        {
+          "relar": 14941050,
+          "rust": 8567629,
+          "cpython": 181290734
+        },
+        {
+          "relar": 15045124,
+          "cpython": 184090859,
+          "rust": 8698713
+        },
+        {
+          "rust": 8989864,
+          "cpython": 182652750,
+          "relar": 15228434
+        },
+        {
+          "rust": 8573749,
+          "relar": 15030748,
+          "cpython": 357599442
+        },
+        {
+          "cpython": 219356307,
+          "rust": 11822632,
+          "relar": 18698089
+        },
+        {
+          "cpython": 187211622,
+          "relar": 15614205,
+          "rust": 9215867
+        },
+        {
+          "relar": 15573188,
+          "rust": 9255912,
+          "cpython": 182732269
+        },
+        {
+          "relar": 15989162,
+          "cpython": 182577911,
+          "rust": 9264737
+        }
+      ]
+    },
+    {
+      "name": "Luhn checksum",
+      "input": "65,536 \u00d7 16 digits",
+      "package": "luhn_checksum",
+      "stdout": "OK\n589824\n",
+      "report_bytes": 1,
+      "report_sha256": "19581e27de7ced00ff1ce50b2047e7a567c76b1cbaebabe5ef03f7c3017bb5b7",
+      "warmups_ns": [
+        {
+          "relar": 13814522,
+          "rust": 5143177,
+          "cpython": 150565904
+        },
+        {
+          "relar": 13200959,
+          "cpython": 151140211,
+          "rust": 5608857
+        }
+      ],
+      "samples_ns": [
+        {
+          "rust": 3720560,
+          "cpython": 149458300,
+          "relar": 13144444
+        },
+        {
+          "rust": 5054194,
+          "relar": 12780967,
+          "cpython": 150540516
+        },
+        {
+          "cpython": 148561881,
+          "rust": 4906108,
+          "relar": 12727346
+        },
+        {
+          "cpython": 147607693,
+          "relar": 86310137,
+          "rust": 20658219
+        },
+        {
+          "relar": 14197997,
+          "rust": 4988723,
+          "cpython": 204252103
+        },
+        {
+          "relar": 13681333,
+          "cpython": 151412321,
+          "rust": 6079134
+        },
+        {
+          "rust": 5803480,
+          "cpython": 155131639,
+          "relar": 14126003
+        },
+        {
+          "rust": 5376634,
+          "relar": 13024410,
+          "cpython": 149598641
+        },
+        {
+          "cpython": 148598148,
+          "rust": 5357108,
+          "relar": 13454942
+        },
+        {
+          "cpython": 148372598,
+          "relar": 12761751,
+          "rust": 5195667
+        },
+        {
+          "relar": 12952896,
+          "rust": 5046720,
+          "cpython": 150522723
+        },
+        {
+          "relar": 12837141,
+          "cpython": 148063712,
+          "rust": 5451462
+        }
+      ]
+    },
+    {
+      "name": "Telemetry report",
+      "input": "81 \u00d7 4,096 aligned pairs",
+      "package": "telemetry_comparison",
+      "stdout": "OK\n11526057\n",
+      "report_bytes": 123,
+      "report_sha256": "f890328da9d59387ab85e47a841425449c07c60f3f09774d431b45d140ddab00",
+      "warmups_ns": [
+        {
+          "relar": 13490658,
+          "rust": 9323266,
+          "cpython": 122795888
+        },
+        {
+          "relar": 12724563,
+          "cpython": 117732456,
+          "rust": 9138884
+        }
+      ],
+      "samples_ns": [
+        {
+          "rust": 9367429,
+          "cpython": 119153974,
+          "relar": 13829340
+        },
+        {
+          "rust": 9425177,
+          "relar": 13336942,
+          "cpython": 125446392
+        },
+        {
+          "cpython": 118918474,
+          "rust": 9289994,
+          "relar": 13005656
+        },
+        {
+          "cpython": 124048050,
+          "relar": 13271561,
+          "rust": 9634426
+        },
+        {
+          "relar": 13435937,
+          "rust": 9138301,
+          "cpython": 200367397
+        },
+        {
+          "relar": 23869470,
+          "cpython": 150688963,
+          "rust": 10725168
+        },
+        {
+          "rust": 9314360,
+          "cpython": 120317301,
+          "relar": 14440457
+        },
+        {
+          "rust": 10219325,
+          "relar": 14285678,
+          "cpython": 120198719
+        },
+        {
+          "cpython": 119096508,
+          "rust": 8774093,
+          "relar": 12909055
+        },
+        {
+          "cpython": 120182960,
+          "relar": 13106883,
+          "rust": 8744197
+        },
+        {
+          "relar": 13291097,
+          "rust": 9170482,
+          "cpython": 117984065
+        },
+        {
+          "relar": 13064495,
+          "cpython": 118452828,
+          "rust": 10292541
+        }
+      ]
+    },
+    {
+      "name": "Conformance report",
+      "input": "146 files, two captured ty runs",
+      "package": "conformance_report",
+      "stdout": "",
+      "report_bytes": 109258,
+      "report_sha256": "73cbc74bf3f97bfdbbb8933a749156213074ac57ba010d06b75ae48b45a946b2",
+      "warmups_ns": [
+        {
+          "relar": 37019275,
+          "rust": 24981862,
+          "cpython": 282750470
+        },
+        {
+          "relar": 33582794,
+          "cpython": 248098575,
+          "rust": 25965525
+        }
+      ],
+      "samples_ns": [
+        {
+          "rust": 23971040,
+          "cpython": 252987159,
+          "relar": 36375806
+        },
+        {
+          "rust": 25212513,
+          "relar": 32255441,
+          "cpython": 257625599
+        },
+        {
+          "cpython": 247043018,
+          "rust": 23595502,
+          "relar": 32849217
+        },
+        {
+          "cpython": 246676847,
+          "relar": 32824450,
+          "rust": 23407030
+        },
+        {
+          "relar": 31778593,
+          "rust": 22775161,
+          "cpython": 243835194
+        },
+        {
+          "relar": 33221130,
+          "cpython": 244626648,
+          "rust": 23441454
+        },
+        {
+          "rust": 23191577,
+          "cpython": 246981102,
+          "relar": 33914130
+        },
+        {
+          "rust": 23104115,
+          "relar": 32173478,
+          "cpython": 416036476
+        },
+        {
+          "cpython": 276414377,
+          "rust": 26117799,
+          "relar": 37680987
+        },
+        {
+          "cpython": 250762245,
+          "relar": 33424297,
+          "rust": 23927699
+        },
+        {
+          "relar": 32774969,
+          "rust": 23580141,
+          "cpython": 244748363
+        },
+        {
+          "relar": 33316286,
+          "cpython": 245571046,
+          "rust": 24352511
+        }
+      ]
+    }
+  ]
+}

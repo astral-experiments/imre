@@ -125,6 +125,8 @@ def main():
         args.svg, format="svg", metadata={"Date": None, "Title": "Runtime by workload"}
     )
     plt.close(fig)
+    # Matplotlib leaves trailing spaces at line breaks inside SVG paths.
+    args.svg.write_text(args.svg.read_text().replace(" \n", "\n"))
     print("\n".join(times), "\n\n", "\n".join(spreads), sep="")
 
 

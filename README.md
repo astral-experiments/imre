@@ -92,13 +92,22 @@ For more, see the [design](docs/design.md) and [supported subset](docs/subset.md
 
 ## Benchmark
 
-Running the same [inventory reconciliation program](examples/inventory_reconciliation/)
-with Imre and CPython, and comparing it with a Rust implementation:
+Relar and CPython 3.14.5 run the same Python programs. The Rust references read the same inputs and produce the same outputs.
 
-| Workload | CPython 3.14.5 (ms) | Imre (ms) | Rust (ms) | Imre speedup vs. CPython |
-| --- | ---: | ---: | ---: | ---: |
-| Repeated requests (64 products in stock) | 77.66 | 26.69 | 23.34 | 2.91× |
-| Distinct requests (16,384 products in stock) | 112.35 | 52.24 | 43.05 | 2.15× |
+![Median elapsed time and interquartile range for Rust, CPython and Relar on six workloads. Exact medians follow in the table.](benchmarks/results/runtime-suite.svg)
+
+Each point is the median of 12 fresh processes on one AMD EPYC Milan CPU, including startup, imports and file I/O. Lower is faster.
+
+| Workload | Input per process | Rust (ms) | CPython (ms) | Relar (ms) | CPython / Relar |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Inventory (repeated) | 16,384 requests, 64 SKUs | 25.30 | 77.11 | 30.04 | 2.57× |
+| Inventory (distinct) | 16,384 requests, 16,384 SKUs | 45.69 | 112.32 | 53.05 | 2.12× |
+| Base45 decode | 64 × 16 KiB decoded | 9.24 | 183.81 | 15.54 | 11.83× |
+| Luhn checksum | 65,536 × 16 digits | 5.28 | 149.53 | 13.08 | 11.43× |
+| Telemetry report | 81 × 4,096 aligned pairs | 9.34 | 120.19 | 13.31 | 9.03× |
+| Conformance report | 146 files, two captured ty runs | 23.59 | 247.01 | 33.04 | 7.48× |
+
+[Workloads, timing ranges and reproduction](benchmarks/runtime-suite.md) · [Raw samples](benchmarks/results/runtime-suite.json)
 
 ## Installation
 
