@@ -115,6 +115,7 @@ impl Session {
         if let Some(error) = parsed.errors().first() {
             return Err(format!("{path}: {error}"));
         }
+        check_handler_count(parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
         check_indentation(source, parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
         self.files.push(file);
         Ok(parsed)
@@ -280,6 +281,27 @@ fn check_source_complexity(source: &str) -> Result<(), &'static str> {
             return Err("Relar: source exceeds the syntax complexity limit");
         }
     }
+}
+
+/// ty retains a snapshot of the scope's flow state for every handler in a try.
+fn check_handler_count(tokens: &Tokens) -> Result<(), &'static str> {
+    let mut outer = Vec::new();
+    let mut handlers = 0;
+    for token in tokens {
+        match token.kind() {
+            TokenKind::Indent => outer.push(std::mem::take(&mut handlers)),
+            TokenKind::Dedent => handlers = outer.pop().unwrap_or_default(),
+            TokenKind::Try => handlers = 0,
+            TokenKind::Except => {
+                handlers += 1;
+                if handlers > 96 {
+                    return Err("Relar: try statement exceeds the exception handler limit");
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Rejects ambiguous indentation while preserving whitespace inside string tokens.
