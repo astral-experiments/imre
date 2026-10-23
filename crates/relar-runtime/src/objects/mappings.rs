@@ -1430,8 +1430,10 @@ mod tests {
     fn key_union_keeps_the_original_path_and_subscription_keeps_its_list() {
         // SAFETY: both inputs and every returned owner have their exact ABI type.
         unsafe {
-            let original = Rc::from_raw(super::super::paths::relar_path_new(&Str::new("./a/")));
-            let equal = Rc::from_raw(super::super::paths::relar_path_new(&Str::new("a")));
+            let [original, equal] = ["./a/", "a"].map(|spelling| {
+                let text = Rc::new(Str::new(spelling));
+                Rc::from_raw(super::super::paths::relar_path_new(Rc::as_ptr(&text)))
+            });
             let weak = Rc::downgrade(&original);
             let mapping = Rc::from_raw(relar_default_list_dict_new(5, 3));
             let dict = Rc::as_ptr(&mapping);
