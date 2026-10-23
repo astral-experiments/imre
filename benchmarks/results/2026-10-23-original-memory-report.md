@@ -1,6 +1,6 @@
 # Ruff’s memory report
 
-Relar and CPython run Ruff’s original `scripts/memory_report.py`. The `compare` measurements include process startup, directory discovery, JSON decoding, ranking, Markdown rendering, and writing the full report to stdout. Codon runs the native typed port, and the independent Rust implementation uses Serde and native integers with a checked arbitrary-precision fallback. Relar and Rust both use ThinLTO and the system allocator. [Ruff source](https://github.com/astral-sh/ruff/blob/3e4fffb05a2b143fafbf31d891c79c878fe3bcd3/scripts/memory_report.py) · [Measurement record](2026-10-23-original-memory-report.json.gz)
+Relar and CPython run Ruff’s original `scripts/memory_report.py`. The `compare` measurements include process startup, directory discovery, JSON decoding, ranking, Markdown rendering, and writing the full report to stdout. Codon runs the native typed port, and the independent Rust implementation uses Serde and native integers with a checked arbitrary-precision fallback. Relar and Rust both use ThinLTO and the system allocator. [Ruff source](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/memory_report.py) · [Measurement record](2026-10-23-original-memory-report.json.gz)
 
 | Comparison | Projects | Items across old and new | CPython (ms) | Codon (ms) | Relar (ms) | Rust (ms) | Relar / Rust |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |

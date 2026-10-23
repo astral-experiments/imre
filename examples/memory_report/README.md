@@ -31,7 +31,7 @@ original command on all four projects with both ty executables.
 ## Run the typed port
 
 This is a typed port of Ruff's real
-[`scripts/memory_report.py`](https://github.com/astral-sh/ruff/blob/3e4fffb05a2b143fafbf31d891c79c878fe3bcd3/scripts/memory_report.py)
+[`scripts/memory_report.py`](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/memory_report.py)
 file and directory comparison modes, plus a prepared-project collection mode.
 It reads `TY_MEMORY_REPORT=json` captures and
 produces the same Markdown summary and largest-change tables. The retained
