@@ -36,7 +36,7 @@ def main() -> None:
         "--rust-lld",
         type=Path,
         required=True,
-        help="actual Rust rust-lld backend, not a gcc-ld wrapper",
+        help="LLD binary to invoke through the host's linker name",
     )
     parser.add_argument("--python", default=sys.executable)
     args = parser.parse_args()
@@ -49,7 +49,8 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="relar-lto-") as directory:
         temporary = Path(directory)
-        linker = temporary / "linker with spaces" / "ld.lld"
+        flavor = "ld64.lld" if sys.platform == "darwin" else "ld.lld"
+        linker = temporary / "linker with spaces" / flavor
         linker.parent.mkdir()
         linker.symlink_to(backend)
         binary = temporary / "short-strings"

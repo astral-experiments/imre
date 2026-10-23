@@ -220,7 +220,7 @@ pub unsafe extern "C" fn relar_path_join(path: *const Object, child: *const Str)
 /// # Safety
 /// Both arguments are rooted exact Paths; comparison borrows immutable storage.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_path_equal(left: *const Object, right: *const Object) -> u8 {
+pub unsafe extern "C" fn relar_path_equal(left: *const Object, right: *const Object) -> u32 {
     if left == right {
         return 1;
     }
@@ -229,7 +229,7 @@ pub unsafe extern "C" fn relar_path_equal(left: *const Object, right: *const Obj
         object(left).0.with(|left| {
             object(right)
                 .0
-                .with(|right| u8::from(left.path() == right.path()))
+                .with(|right| u32::from(left.path() == right.path()))
         })
     }
 }
@@ -302,12 +302,12 @@ pub unsafe extern "C" fn relar_path_parent(path: *const Object) -> *const Object
 /// # Safety
 /// Root an exact Path; this lexical predicate cannot fail or invoke callbacks.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_path_is_absolute(path: *const Object) -> u8 {
+pub unsafe extern "C" fn relar_path_is_absolute(path: *const Object) -> u32 {
     // SAFETY: the immutable rooted path is borrowed only for the predicate.
     unsafe {
         object(path)
             .0
-            .with(|storage| u8::from(storage.path().starts_with('/')))
+            .with(|storage| u32::from(storage.path().starts_with('/')))
     }
 }
 
@@ -315,7 +315,7 @@ pub unsafe extern "C" fn relar_path_is_absolute(path: *const Object) -> u8 {
 /// Root an exact Path with clear pending error state. Success transfers a new
 /// absolute Path owner; strict lookup failures preserve their OS error category.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_path_resolve(path: *const Object, strict: u8) -> *const Object {
+pub unsafe extern "C" fn relar_path_resolve(path: *const Object, strict: u32) -> *const Object {
     // SAFETY: filesystem calls cannot reenter; no borrowed storage escapes.
     let result = unsafe {
         object(path)
@@ -329,23 +329,23 @@ pub unsafe extern "C" fn relar_path_resolve(path: *const Object, strict: u8) -> 
 /// Root an exact Path. Like Python 3.14, failed metadata queries (including NUL
 /// paths) return false and do not install or modify a pending language error.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_path_exists(path: *const Object) -> u8 {
+pub unsafe extern "C" fn relar_path_exists(path: *const Object) -> u32 {
     // SAFETY: filesystem queries have no callbacks; only a boolean escapes.
     unsafe {
         object(path)
             .0
-            .with(|storage| u8::from(fs::metadata(storage.path()).is_ok()))
+            .with(|storage| u32::from(fs::metadata(storage.path()).is_ok()))
     }
 }
 
 /// # Safety
 /// Root an exact Path. This follows symlinks and suppresses metadata errors.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_path_is_file(path: *const Object) -> u8 {
+pub unsafe extern "C" fn relar_path_is_file(path: *const Object) -> u32 {
     // SAFETY: filesystem queries have no callbacks; only a boolean escapes.
     unsafe {
         object(path).0.with(|storage| {
-            u8::from(fs::metadata(storage.path()).is_ok_and(|metadata| metadata.is_file()))
+            u32::from(fs::metadata(storage.path()).is_ok_and(|metadata| metadata.is_file()))
         })
     }
 }
@@ -353,11 +353,11 @@ pub unsafe extern "C" fn relar_path_is_file(path: *const Object) -> u8 {
 /// # Safety
 /// Root an exact Path. This follows symlinks and suppresses metadata errors.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_path_is_dir(path: *const Object) -> u8 {
+pub unsafe extern "C" fn relar_path_is_dir(path: *const Object) -> u32 {
     // SAFETY: filesystem queries have no callbacks; only a boolean escapes.
     unsafe {
         object(path).0.with(|storage| {
-            u8::from(fs::metadata(storage.path()).is_ok_and(|metadata| metadata.is_dir()))
+            u32::from(fs::metadata(storage.path()).is_ok_and(|metadata| metadata.is_dir()))
         })
     }
 }
@@ -439,8 +439,8 @@ fn mkdir(path: &str, mode: u32, parents: bool, exist_ok: bool) -> io::Result<()>
 pub unsafe extern "C" fn relar_path_mkdir(
     path: *const Object,
     mode: usize,
-    parents: u8,
-    exist_ok: u8,
+    parents: u32,
+    exist_ok: u32,
 ) {
     // SAFETY: both arguments stay rooted through validation and filesystem I/O.
     let result = unsafe {
@@ -463,7 +463,7 @@ pub unsafe extern "C" fn relar_path_mkdir(
 /// Root an exact Path with clear pending error state. Missing-ok suppresses only
 /// a missing entry; directories and non-directory ancestors retain their errors.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_path_unlink(path: *const Object, missing_ok: u8) {
+pub unsafe extern "C" fn relar_path_unlink(path: *const Object, missing_ok: u32) {
     // SAFETY: unlink has no language callbacks and the immutable path stays live.
     let result = unsafe {
         object(path).0.with(|storage| {
@@ -1062,7 +1062,12 @@ mod tests {
             take_error(Kind::NotADirectoryError);
             let root = directory.path();
             relar_path_unlink(Rc::as_ptr(&root), 1);
-            take_error(Kind::IsADirectoryError);
+            // Darwin returns EPERM and Linux returns EISDIR for unlink on a directory.
+            take_error(if cfg!(target_os = "macos") {
+                Kind::PermissionError
+            } else {
+                Kind::IsADirectoryError
+            });
         }
         assert_eq!(relar_error_pending(), 0);
     }

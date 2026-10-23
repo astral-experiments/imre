@@ -97,8 +97,7 @@ def seed(directory: Path) -> None:
     }.items():
         (directory / name).symlink_to(target)
     invalid = os.fsencode(directory / "readonly-tree" / "blocked") + b"/invalid-\xff"
-    with open(invalid, "wb") as stream:
-        stream.write(b"raw Unix filename")
+    files.write_non_utf8_filename(invalid)
     (directory / "outside" / "keep.txt").chmod(0o400)
     (directory / "outside").chmod(0o500)
     (directory / "readonly-tree" / "blocked" / "locked.txt").chmod(0)

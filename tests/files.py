@@ -1,14 +1,17 @@
 """Compare sealed UTF-8 files, context cleanup, and process arguments with CPython."""
 
 import argparse
+import errno
 import gzip
 import os
 import resource
 import selectors
+import socket
 import subprocess
 import sys
 import tempfile
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from textwrap import dedent
 
@@ -82,7 +85,7 @@ for index in range(12):
 with open("large.txt", "w", encoding="utf-8") as stream:
     stream.write(text + "\0λ" + text)
 try:
-    with open("/dev/full", "w", encoding="utf-8") as stream:
+    with open("failing-output", "w", encoding="utf-8") as stream:
         stream.write("prefix" + text + "suffix")
 except OSError:
     print("discarded write failed")
@@ -349,7 +352,7 @@ with open("output.txt", "r", encoding="utf-8") as stream:
     print(stream.read())
 """,
     "flush_and_close_failure": r"""
-stream = open("/dev/full", "w", encoding="utf-8")
+stream = open("failing-output", "w", encoding="utf-8")
 stream.write("buffered")
 try:
     stream.flush()
@@ -366,12 +369,12 @@ print(stream.closed)
 """,
     "close_replaces_completion": r"""
 def owned_return() -> list[int]:
-    with open("/dev/full", "w", encoding="utf-8") as stream:
+    with open("failing-output", "w", encoding="utf-8") as stream:
         stream.write("buffered")
         return [999999999999999999999999999999999999]
 
 outer = open("output.txt", "w", encoding="utf-8")
-inner = open("/dev/full", "w", encoding="utf-8")
+inner = open("failing-output", "w", encoding="utf-8")
 try:
     with outer:
         outer.write("outer still closes")
@@ -425,7 +428,7 @@ ERRORS = {
     ),
     "uncaught_close": (
         (
-            'with open("/dev/full", "w", encoding="utf-8") as stream:\n'
+            'with open("failing-output", "w", encoding="utf-8") as stream:\n'
             '    stream.write("buffered")\n    raise ValueError("replaced")'
         ),
         "OSError",
@@ -499,6 +502,17 @@ print(stream.closed)
 """
 
 
+def write_non_utf8_filename(path: bytes) -> bool:
+    try:
+        with open(path, "wb") as stream:
+            stream.write(b"native filename")
+    except OSError as error:
+        if error.errno != errno.EILSEQ:
+            raise
+        return False  # APFS requires UTF-8 filenames.
+    return True
+
+
 def environment() -> dict[str, str]:
     return {**os.environ, "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1"}
 
@@ -510,8 +524,22 @@ def descriptor_limit() -> None:
     resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
 
 
-def run(command, cwd: Path, *, limit_descriptors: bool = False):
-    return subprocess.run(
+def run_with_failing_output(command, *, cwd, **options):
+    with ExitStack() as stack:
+        target = "/dev/full"
+        if sys.platform == "darwin":
+            # Reopening the socket succeeds, but writes fail with EDESTADDRREQ.
+            sock = stack.enter_context(socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM))
+            target = f"/dev/fd/{sock.fileno()}"
+            options["pass_fds"] = (sock.fileno(),)
+        path = Path(cwd) / "failing-output"
+        path.symlink_to(target)
+        stack.callback(path.unlink)
+        return subprocess.run(command, cwd=cwd, **options)
+
+
+def run(command, cwd: Path, *, limit_descriptors: bool = False, runner=subprocess.run):
+    return runner(
         command,
         cwd=cwd,
         input=b"",
@@ -633,9 +661,6 @@ def main() -> None:
     parser.add_argument("--opt-levels", nargs="+", default=["0", "3"])
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
-    assert Path("/dev/full").exists(), (
-        "file error checks require the supported Linux target"
-    )
     compiler = str(args.compiler.resolve())
     flags = ["--runtime", str(args.runtime.resolve()), "--clang", args.clang]
     if args.target:
@@ -676,6 +701,7 @@ def main() -> None:
             path = project / "main.py"
             path.write_text(dedent(source), encoding="utf-8")
             (project / "bridge.py").write_text(BRIDGE, encoding="utf-8")
+            runner = run_with_failing_output if '"failing-output"' in source else subprocess.run
             argv = (
                 ["", "é λ🙂", "space separated"] if name == "argument_aliases" else []
             )
@@ -685,6 +711,7 @@ def main() -> None:
                 [args.python, "-E", "-B", str(path), *argv],
                 reference_dir,
                 limit_descriptors=name == "descriptor_recovery",
+                runner=runner,
             )
             check_result(reference, category, f"CPython {name}")
             expected_files = snapshot(reference_dir)
@@ -718,6 +745,7 @@ def main() -> None:
                     [str(binary), *argv],
                     native_dir,
                     limit_descriptors=name == "descriptor_recovery",
+                    runner=runner,
                 )
                 check_result(actual, category, f"Relar {name} O{level}")
                 assert actual.stdout == reference.stdout, (

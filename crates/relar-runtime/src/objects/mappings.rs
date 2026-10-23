@@ -755,9 +755,9 @@ pub unsafe extern "C" fn relar_dict_len(value: *const Object) -> usize {
 /// # Safety
 /// Both inputs are rooted and `key` has the dictionary's exact key representation.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_dict_contains(value: *const Object, key: usize) -> u8 {
+pub unsafe extern "C" fn relar_dict_contains(value: *const Object, key: usize) -> u32 {
     // SAFETY: hashing/equality cannot call user code.
-    u8::from(unsafe {
+    u32::from(unsafe {
         object(value)
             .0
             .with(|s| s.dictionary().tables.lookup(key).is_some())
@@ -932,7 +932,7 @@ pub unsafe extern "C" fn relar_dict_try_get(
     value: *const Object,
     key: usize,
     out: *mut usize,
-) -> u8 {
+) -> u32 {
     // SAFETY: the caller roots the exact inputs.
     let Some(owned) = (unsafe { lookup(value, key) }) else {
         return 0;
@@ -1063,9 +1063,9 @@ pub unsafe extern "C" fn relar_set_len(value: *const Object) -> usize {
 /// # Safety
 /// Root both the set and its exact-kind scalar key.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_set_contains(value: *const Object, key: usize) -> u8 {
+pub unsafe extern "C" fn relar_set_contains(value: *const Object, key: usize) -> u32 {
     // SAFETY: hashing/equality cannot reenter user code.
-    u8::from(unsafe {
+    u32::from(unsafe {
         object(value)
             .0
             .with(|s| s.set().tables.lookup(key).is_some())
@@ -1115,7 +1115,7 @@ pub unsafe extern "C" fn relar_mapping_iter_next(
     value: *const Object,
     key_out: *mut usize,
     value_out: *mut usize,
-) -> u8 {
+) -> u32 {
     // SAFETY: the rooted iterator snapshots independent owners before returning.
     let next = unsafe {
         object(value).0.with_mut(|storage| match storage {

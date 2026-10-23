@@ -35,7 +35,7 @@ for turn in range(4):
     except ValueError:
         print("nul write")
     try:
-        Path("/dev/full").write_text("buffered failure", encoding="utf-8")
+        Path("failing-output").write_text("buffered failure", encoding="utf-8")
     except OSError:
         print("close reports failure")
     try:

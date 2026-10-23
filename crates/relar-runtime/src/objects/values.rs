@@ -67,9 +67,9 @@ pub(super) unsafe fn tuple_order(left: *const usize, right: *const usize) -> Ord
 /// Both arguments are rooted, fully initialized records with immutable live
 /// descriptors. No mutation or user callback may overlap this operation.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_record_equal(left: *const usize, right: *const usize) -> u8 {
+pub unsafe extern "C" fn relar_record_equal(left: *const usize, right: *const usize) -> u32 {
     // SAFETY: the ABI promises both checked record roots for the entire traversal.
-    u8::from(unsafe { record_equal(left, right) })
+    u32::from(unsafe { record_equal(left, right) })
 }
 
 unsafe fn record_equal(left: *const usize, right: *const usize) -> bool {

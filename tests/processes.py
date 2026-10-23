@@ -173,7 +173,6 @@ def main() -> None:
     parser.add_argument("--opt-levels", nargs="+", choices=["0", "1", "2", "3"], default=["0", "3"])
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
-    assert sys.platform == "linux", "process validation requires the Linux backend"
     assert len(set(args.opt_levels)) == len(args.opt_levels)
     compiler = str(args.compiler.resolve())
     flags = ["--runtime", str(args.runtime.resolve()), "--clang", args.clang]

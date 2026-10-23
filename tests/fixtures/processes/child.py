@@ -37,7 +37,7 @@ elif mode == "invalid":
     Path("completed.txt").write_text("child finished", encoding="utf-8")
     raise SystemExit(7)
 elif mode == "signal":
-    os.kill(os.getpid(), signal.SIGTERM)
+    os.kill(os.getpid(), signal.SIGUSR1)
 elif mode == "descriptor":
     try:
         os.fstat(int(sys.argv[2]))
