@@ -322,6 +322,13 @@ pub(crate) enum Compare {
 }
 
 #[derive(Clone)]
+pub(crate) enum ReductionPlan {
+    /// A forward, whole-list sum. The guard proves the subtotal fits in
+    /// 0..=max, and the readonly list contains tagged integers in 0..=u16::MAX.
+    SumSquares { max: i64 },
+}
+
+#[derive(Clone)]
 pub(crate) enum Builtin {
     StrEnumMember {
         class: usize,
@@ -366,6 +373,8 @@ pub(crate) enum Builtin {
     /// Reduces an exact integer list after evaluating its source and start.
     /// Integer addition cannot invoke callbacks or raise a recoverable error.
     ListSum,
+    /// Applies a proven reduction to one rooted list inside its length guard.
+    ListReduce(ReductionPlan),
     /// Sums a private integer slice at the slice's original evaluation point.
     /// Nullable bounds and zero-step errors match ordinary slicing.
     ListSliceSum,

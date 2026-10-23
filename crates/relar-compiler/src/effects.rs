@@ -307,6 +307,7 @@ fn builtin_raises(builtin: &Builtin, args: &[Expr]) -> bool {
         | Builtin::FloatFormat { .. }
         | Builtin::ListAllI32
         | Builtin::ListSum
+        | Builtin::ListReduce(_)
         | Builtin::ListReserveRange
         | Builtin::ListDistinct
         | Builtin::SequenceGetInBounds

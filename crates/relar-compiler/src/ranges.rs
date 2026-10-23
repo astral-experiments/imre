@@ -931,6 +931,9 @@ impl Analyzer {
                         _ => Interval::UNKNOWN,
                     },
                     Builtin::BytesGet => Interval::bounded(0, 255),
+                    Builtin::ListReduce(crate::ir::ReductionPlan::SumSquares { max }) => {
+                        Interval::bounded(0, i128::from(*max))
+                    }
                     Builtin::ListGetI32 => {
                         Interval::bounded(i128::from(i32::MIN), i128::from(i32::MAX))
                     }
