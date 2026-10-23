@@ -35,6 +35,8 @@ for text in [
     'ignored=[1,2', 'ignored="\\uD800"', 'ignored="\\q"',
     'ignored=2023-02-29', 'ignored=0000-01-01', 'ignored=23:59:60',
     'ignored={a=1,a=2}', 'ignored={a=1}\nignored.b=2',
+    'ignored={a=\n1}', 'ignored={a\n=1}', 'ignored={a=# comment\r\n1}',
+    'ignored=[{a.b =\n[1]}]',
 ]:
     try:
         value = decode(text, Item)
