@@ -618,8 +618,14 @@ mod tests {
     }
 
     fn broken_pipe() -> Rc<Object> {
+        use std::net::Shutdown;
         use std::os::fd::OwnedFd;
-        let (_reader, writer) = io::pipe().unwrap();
+        use std::os::unix::net::UnixStream;
+
+        let (_peer, writer) = UnixStream::pair().unwrap();
+        // A concurrent fork can keep a pipe reader alive until exec. Shutting
+        // down the writer guarantees EPIPE even while the child holds the peer.
+        writer.shutdown(Shutdown::Write).unwrap();
         let file = File::from(OwnedFd::from(writer));
         Rc::new(Object(StorageCell::new(Storage::File(Box::new(
             FileState {
