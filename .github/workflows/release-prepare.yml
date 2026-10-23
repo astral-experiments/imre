@@ -1,0 +1,59 @@
+name: "Prepare release"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The version to set (overrides detection)"
+        required: false
+        type: string
+
+permissions: {}
+
+jobs:
+  prepare-release:
+    if: github.repository == 'astral-sh/relar' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.5"
+          checksum: "f68d291c75783122dad58ab77def0e13f3233f358731db5d6d7e8715603b928f"
+
+      - name: "Configure Git"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: "Bump version"
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            ./scripts/release.sh --version "$INPUT_VERSION"
+          else
+            ./scripts/release.sh
+          fi
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+
+      - name: "Create or update pull request"
+        run: |
+          branch="$(git branch --show-current)"
+          git push --force-with-lease origin HEAD:"$branch"
+
+          pull_request="$(gh pr list --base main --head "$branch" --state open --json url --jq '.[0].url')"
+          if [ -n "$pull_request" ]; then
+            gh pr edit "$pull_request" --add-assignee "$GITHUB_TRIGGERING_ACTOR"
+            printf '%s\n' "$pull_request"
+          else
+            gh pr create --base main --head "$branch" --assignee "$GITHUB_TRIGGERING_ACTOR" --fill-first
+          fi
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

@@ -1,0 +1,99 @@
+# Adapted from astral-sh/uv's cargo-dist release workflow.
+# Copyright 2022-2024, axodotdev
+# SPDX-License-Identifier: MIT or Apache-2.0
+name: Release
+permissions: {}
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Build release artifacts without publishing
+        required: true
+        default: false
+        type: boolean
+
+env:
+  ACTIONS_CACHE_MODE: none
+  UV_LOCKED: 1
+
+jobs:
+  plan:
+    if: github.repository == 'astral-sh/relar' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      val: ${{ steps.plan.outputs.manifest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.5"
+          checksum: f68d291c75783122dad58ab77def0e13f3233f358731db5d6d7e8715603b928f
+          enable-cache: false
+      - id: plan
+        run: |
+          tag=$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "relar-compiler").version')
+          uv run --only-dev --python 3.12 dist plan --tag="$tag" --output-format=json > plan-dist-manifest.json
+          echo "manifest=$(jq -c . plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
+      - name: Check release tag
+        if: ${{ !inputs.dry-run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ fromJson(steps.plan.outputs.manifest).announcement_tag }}
+        run: |
+          jq -e '.announcement_changelog | type == "string" and length > 0' plan-dist-manifest.json > /dev/null || {
+            echo "::error::Merge the Prepare release PR for $RELEASE_TAG first"
+            exit 1
+          }
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
+          fi
+          release_exists="$(gh api graphql \
+            -f owner="$GITHUB_REPOSITORY_OWNER" -f name="${GITHUB_REPOSITORY#*/}" -f tag="$RELEASE_TAG" \
+            -f query='query($owner: String!, $name: String!, $tag: String!) { repository(owner: $owner, name: $name) { release(tagName: $tag) { id } } }' \
+            --jq '.data.repository | if . == null then error("Repository not found") else .release != null end')"
+          if [[ "$release_exists" != false ]]; then
+            echo "::error::Release $RELEASE_TAG already exists"
+            exit 1
+          fi
+
+  build-release-artifacts:
+    needs: plan
+    uses: $/.github/workflows/build-release-binaries.yml
+    permissions:
+      contents: read
+
+  publish-github:
+    needs: [plan, build-release-artifacts]
+    if: ${{ !inputs.dry-run }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download GitHub artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: build-github-archives-*
+          path: artifacts
+          merge-multiple: true
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ fromJson(needs.plan.outputs.val).announcement_tag }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_CHECKSUMS: ${{ join(fromJson(needs.plan.outputs.val).artifacts.*.checksum, ' ') }}
+          PRERELEASE_FLAG: ${{ fromJson(needs.plan.outputs.val).announcement_is_prerelease && '--prerelease' || '' }}
+          ANNOUNCEMENT_TITLE: ${{ fromJson(needs.plan.outputs.val).announcement_title }}
+          ANNOUNCEMENT_BODY: ${{ fromJson(needs.plan.outputs.val).announcement_github_body }}
+        run: |
+          printf '%s\n' "$ANNOUNCEMENT_BODY" > "$RUNNER_TEMP/notes.txt"
+          read -ra checksums <<< "$RELEASE_CHECKSUMS"
+          (cd artifacts && sha256sum --check --strict -- "${checksums[@]}")
+          gh release create "$RELEASE_TAG" --target "$RELEASE_COMMIT" ${PRERELEASE_FLAG:+"$PRERELEASE_FLAG"} \
+            --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*

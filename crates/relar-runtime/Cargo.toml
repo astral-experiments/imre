@@ -1,6 +1,6 @@
 [package]
 name = "relar-runtime"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
@@ -28,6 +28,9 @@ serde = "=1.0.229"
 serde_json = { version = "=1.0.151", features = ["raw_value", "unbounded_depth"] }
 toml = { version = "=1.1.8", default-features = false, features = ["std", "parse", "preserve_order"] }
 smallvec = { version = "=1.16.3", features = ["union"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+linux-raw-sys = "=0.12.1"
 
 [lints]
 workspace = true

@@ -91,9 +91,26 @@ with Relar and CPython, and comparing it with a Rust implementation:
 
 ## Installation
 
-Install the [Rust toolchain](rust-toolchain.toml). On 64-bit Linux, install Clang 18.
-On Apple Silicon macOS, install Apple Clang with `xcode-select --install`.
-Then build and install Relar from Git.
+Relar uses Clang 18 on Linux and Apple Clang from the Xcode Command Line Tools
+on Apple Silicon macOS (`xcode-select --install`). The Linux binaries are built on Ubuntu 24.04.
+In an empty directory, download and verify the archive for your platform from [GitHub Releases](https://github.com/astral-sh/relar/releases).
+
+```console
+case "$(uname -sm)" in
+  "Linux x86_64"|"Linux aarch64") bundle="relar-$(uname -m)-unknown-linux-gnu" ;;
+  "Darwin arm64") bundle="relar-aarch64-apple-darwin" ;;
+esac
+gh release download --repo astral-sh/relar --pattern "$bundle.tar.gz" --pattern "$bundle.tar.gz.sha256"
+shasum -a 256 -c "$bundle.tar.gz.sha256"
+tar -xzf "$bundle.tar.gz"
+mkdir -p ~/.local/bin
+cp "$bundle/relar" "$bundle/librelar_runtime.a" ~/.local/bin/
+```
+
+Keep both files together and add `~/.local/bin` to your `PATH`. Programs built
+with Relar can run without the compiler, runtime archive, or Clang.
+
+To build from Git, also install the [Rust toolchain](rust-toolchain.toml).
 
 ```console
 git clone https://github.com/astral-sh/relar.git
@@ -136,6 +153,12 @@ Arguments after `--` go into the script’s `sys.argv`. Use `build` to keep the 
 relar build totals.py
 ./totals 10 20 12
 ```
+
+## Releasing
+
+Run **Prepare release** on `main` to open the version and changelog PR. Approve its CI and merge it.
+Then run **Release** on `main` to publish the Linux and macOS archives and their checksums to GitHub Releases.
+Select **dry-run** to build the archives without publishing.
 
 ## License
 

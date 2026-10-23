@@ -1,5 +1,6 @@
 /target/
 /.relar/
+/.venv/
 /benchmarks/local/
 /benchmarks/**/target/
 __pycache__/

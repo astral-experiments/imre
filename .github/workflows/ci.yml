@@ -13,6 +13,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  build-release-artifacts:
+    uses: $/.github/workflows/build-release-binaries.yml
+
   macos-arm64:
     runs-on: macos-15
     timeout-minutes: 45
