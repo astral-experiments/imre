@@ -188,6 +188,8 @@ fn emit_program(
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
         regex_literals: BTreeMap::new(),
+        bytes_literals: BTreeMap::new(),
+        integer_literals: BTreeMap::new(),
         enum_members: Vec::new(),
         literal_globals: literal_globals(module),
         next_value: 0,
@@ -315,6 +317,8 @@ struct Emitter<'a, 'module> {
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
+    bytes_literals: BTreeMap<Vec<u8>, usize>,
+    integer_literals: BTreeMap<Vec<u8>, usize>,
     enum_members: Vec<[usize; 3]>,
     literal_globals: Vec<Option<String>>,
     next_value: usize,
@@ -1922,32 +1926,6 @@ impl Emitter<'_, '_> {
         self.output.string_name(id, "str")
     }
 
-    fn literal(&mut self, contents: &str, ty: Type) -> Value {
-        self.literal_bytes(contents.as_bytes(), ty)
-    }
-
-    /// Emits exact source bytes without routing arbitrary byte values through UTF-8.
-    fn literal_bytes(&mut self, contents: &[u8], ty: Type) -> Value {
-        if ty == Type::Str {
-            return self.pooled_literal(contents, Type::Str);
-        }
-        let name = self.byte_array(contents.to_vec());
-        let function = match ty {
-            Type::Int => "relar_int_literal",
-            Type::Bytes => "relar_bytes_literal",
-            _ => unreachable!("literal representation was checked"),
-        };
-        Value {
-            ty,
-            operand: self.instruction(format!(
-                "call {} @{function}(ptr @{name}, i64 {})",
-                ty.llvm(),
-                contents.len()
-            )),
-            small_integer: false,
-        }
-    }
-
     /// Produces an owned result; its consumer must transfer or release that ownership.
     fn expr(&mut self, expression: &Expr) -> Value {
         let mut value = if self.can_borrow_projection(expression) {
@@ -1969,7 +1947,7 @@ impl Emitter<'_, '_> {
                 {
                     small(value)
                 } else {
-                    self.literal(value, Type::Int)
+                    self.pooled_literal(value.as_bytes(), Type::Int)
                 }
             }
             ExprKind::Float(value) => Value {
@@ -1984,9 +1962,9 @@ impl Emitter<'_, '_> {
             },
             ExprKind::Str(value) => Value {
                 ty: expression.ty,
-                ..self.literal(value, Type::Str)
+                ..self.pooled_literal(value.as_bytes(), Type::Str)
             },
-            ExprKind::Bytes(value) => self.literal_bytes(value, Type::Bytes),
+            ExprKind::Bytes(value) => self.pooled_literal(value, Type::Bytes),
             ExprKind::None => none(),
             ExprKind::Local(slot) => {
                 let mut value = self.borrow_slot(*slot);
@@ -2983,11 +2961,24 @@ impl Emitter<'_, '_> {
             self.release_operand(&right);
             return result;
         }
+        // A chain keeps its middle operand across the next expression. Limit
+        // short field borrows to one native comparison with passive operands.
+        let operand = if ops.len() == 1
+            && matches!(
+                values[0].ty,
+                Type::Str | Type::StrLiteral(_) | Type::Tuple(_)
+            )
+            && values.iter().all(read_only_field_operand)
+        {
+            Self::immediate_receiver
+        } else {
+            Self::operand
+        };
         let end = self.label();
         let mut incoming = Vec::new();
-        let mut left = self.operand(&values[0]);
+        let mut left = operand(self, &values[0]);
         for (i, &op) in ops.iter().enumerate() {
-            let right = self.operand(&values[i + 1]);
+            let right = operand(self, &values[i + 1]);
             let test = self.compare(op, &left.value, &right.value);
             self.release_operand(&left);
             if i + 1 == ops.len() {
@@ -3128,6 +3119,22 @@ impl Emitter<'_, '_> {
             return self.truth(&value);
         }
         let probe_index = builtin.tuple_probe_index();
+        // A later key or eager default can replace the receiver or any field
+        // along its path. A stack key assembled from local snapshots cannot.
+        let borrow_probe = probe_index.is_some_and(|key| {
+            expressions
+                .iter()
+                .enumerate()
+                .all(|(i, arg)| match &arg.kind {
+                    ExprKind::Tuple(fields) if i == key => {
+                        TUPLE_PROBE_ARITY.contains(&fields.len())
+                            && fields
+                                .iter()
+                                .all(|field| matches!(field.kind, ExprKind::Local(_)))
+                    }
+                    _ => read_only_field_operand(arg),
+                })
+        });
         let mut probe_fields = Vec::new();
         let args = expressions
             .iter()
@@ -3143,11 +3150,12 @@ impl Emitter<'_, '_> {
                         index + 1 == expressions.len(),
                         &mut probe_fields,
                     )
-                } else if index == 0
-                    && matches!(
-                        builtin,
-                        Builtin::Len | Builtin::Bool | Builtin::RegexCapture { .. }
-                    )
+                } else if borrow_probe
+                    || (index == 0
+                        && matches!(
+                            builtin,
+                            Builtin::Len | Builtin::Bool | Builtin::RegexCapture { .. }
+                        ))
                 {
                     self.immediate_receiver(arg)
                 } else {
@@ -4476,6 +4484,24 @@ impl Emitter<'_, '_> {
     }
 }
 
+/// Evaluating these expressions cannot rebind a local or mutate a record.
+/// Only local-rooted projections borrow; literals keep their usual ownership.
+fn read_only_field_operand(expression: &Expr) -> bool {
+    match &expression.kind {
+        ExprKind::Local(_)
+        | ExprKind::Str(_)
+        | ExprKind::Bool(_)
+        | ExprKind::None
+        | ExprKind::Int(_) => true,
+        ExprKind::Field(receiver, _) => read_only_field_operand(receiver),
+        ExprKind::Unwrap(inner) => {
+            matches!(inner.kind, ExprKind::Local(_))
+                && !matches!(expression.ty, Type::Bool | Type::Float)
+        }
+        _ => false,
+    }
+}
+
 /// Proves only that integer evaluation cannot mutate a list or invoke user
 /// code. Allocation, arithmetic errors, and current bounds checks remain in
 /// their original order. Both complete comparison operands must pass before
@@ -5358,6 +5384,32 @@ mod tests {
     }
 
     #[test]
+    fn repeated_bytes_and_heap_integer_constants_share_typed_roots() {
+        let llvm = compile(
+            "def data() -> bytes:\n    return b'18446744073709551616'\ndef number() -> int:\n    return 18446744073709551616\nprint(data())\nprint(b'18446744073709551616')\nprint(number())\nprint(18446744073709551616)\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            llvm.lines()
+                .filter(|line| line.starts_with("@literal_"))
+                .count(),
+            2
+        );
+        let eager = llvm
+            .split_once("define internal void @relar_init_literals()")
+            .unwrap()
+            .1;
+        let eager = eager.split_once("\n}").unwrap().0;
+        assert!(!eager.contains("@relar_bytes_literal("));
+        assert!(!eager.contains("@relar_int_literal("));
+        assert_eq!(llvm.matches("call ptr @relar_bytes_literal(").count(), 1);
+        assert_eq!(llvm.matches("call i64 @relar_int_literal(").count(), 1);
+        assert!(llvm.contains("call void @relar_bytes_release(ptr %literal_"));
+        assert!(llvm.contains("call void @relar_int_release(i64 %literal_"));
+    }
+
+    #[test]
     fn string_constants_are_rooted_once_and_cleared_on_both_main_exits() {
         let llvm = compile(
             "def text() -> str:\n    return 'shared'\nprint('shared')\nprint(text())\n",
@@ -5471,6 +5523,28 @@ mod tests {
         );
         assert_eq!(body.matches("call ptr @relar_tuple_probe(").count(), 3);
         assert_eq!(body.matches("call ptr @relar_record_new(").count(), 1);
+    }
+
+    #[test]
+    fn short_field_borrows_end_before_mutating_defaults() {
+        let llvm = compile(
+            include_str!("../../../tests/fixtures/tuple_keys/field_borrows.py"),
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        let exercise = llvm.split_once("define internal i8 @fn_2(").unwrap().1;
+        let (reads, later) = exercise
+            .split_once("call i32 @relar_tuple_compare(")
+            .unwrap();
+        assert!(reads.contains("call i32 @relar_dict_try_get("));
+        let (before_default, _) = later.split_once("call ptr @fn_0(").unwrap();
+        for retain in [
+            "call void @relar_object_retain(",
+            "call void @relar_record_retain(",
+        ] {
+            assert!(!reads.contains(retain));
+            assert!(before_default.contains(retain));
+        }
     }
 
     #[test]
