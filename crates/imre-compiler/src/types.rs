@@ -99,6 +99,7 @@ impl Types {
             | Type::Document(_)
             | Type::Logger
             | Type::Sha256
+            | Type::ZipFile
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::JsonRoot
@@ -404,6 +405,7 @@ impl Types {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::Sha256
+            | Type::ZipFile
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::BinaryIO => Some(true),
@@ -613,6 +615,7 @@ impl Types {
             match ty {
                 Type::TextIO
                 | Type::BinaryIO
+                | Type::ZipFile
                 | Type::AsyncProcess(_)
                 | Type::DirectoryContext(_)
                 | Type::GeneratorContext

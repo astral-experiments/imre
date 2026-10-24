@@ -76,6 +76,7 @@ impl Type {
             | Self::TextIO
             | Self::Logger
             | Self::Sha256
+            | Self::ZipFile
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -120,6 +121,7 @@ impl Type {
             | Self::TextIO
             | Self::Logger
             | Self::Sha256
+            | Self::ZipFile
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -691,6 +693,7 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::Sha256
+            | Type::ZipFile
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -3240,6 +3243,7 @@ impl Emitter<'_, '_> {
                 | Type::None
                 | Type::Class(_)
                 | Type::Sha256
+                | Type::ZipFile
                 | Type::Exception
                 | Type::ExitCode
                 | Type::TimeoutExpired
@@ -4028,6 +4032,12 @@ impl Emitter<'_, '_> {
                 self.call(symbol, returns, &[&args[0].value])
             }
             Builtin::Sha256Copy => self.call("imre_sha256_copy", Type::Sha256, &[&args[0].value]),
+            Builtin::ZipOpen => self.call("imre_zip_open", returns, &[&args[0].value]),
+            Builtin::ZipNamelist => self.call("imre_zip_namelist", returns, &[&args[0].value]),
+            Builtin::ZipClose => {
+                self.void_call("imre_zip_close", &[&args[0].value]);
+                none()
+            }
             Builtin::BytesValidateUtf8 => {
                 self.call("imre_bytes_validate_utf8", Type::Bytes, &[&args[0].value])
             }
@@ -4686,6 +4696,7 @@ impl Emitter<'_, '_> {
                     | Type::AsyncProcess(_)
                     | Type::Logger
                     | Type::Sha256
+                    | Type::ZipFile
                     | Type::RegexPattern
                     | Type::JsonRoot
                     | Type::JsonValue
@@ -4905,6 +4916,7 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::Sha256
+            | Type::ZipFile
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -4960,6 +4972,7 @@ impl Emitter<'_, '_> {
             | Type::AsyncProcess(_)
             | Type::Logger
             | Type::Sha256
+            | Type::ZipFile
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -5505,6 +5518,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::AsyncProcess(_)
         | Type::Logger
         | Type::Sha256
+        | Type::ZipFile
         | Type::RegexPattern
         | Type::JsonRoot
         | Type::JsonValue
@@ -5756,6 +5770,9 @@ declare void @imre_sha256_update(ptr, ptr)
 declare ptr @imre_sha256_digest(ptr)
 declare ptr @imre_sha256_hexdigest(ptr)
 declare ptr @imre_sha256_copy(ptr)
+declare ptr @imre_zip_open(ptr)
+declare ptr @imre_zip_namelist(ptr)
+declare void @imre_zip_close(ptr)
 declare ptr @imre_bytes_validate_utf8(ptr)
 declare ptr @imre_binary_open(ptr, i32)
 declare ptr @imre_binary_read(ptr)
