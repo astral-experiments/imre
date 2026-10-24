@@ -49,7 +49,7 @@ pub(crate) fn scalarize(module: &mut Module) {
         })
         .collect::<Vec<_>>();
     for function in module.functions.iter_mut().chain([&mut module.entry]) {
-        scalarize_function(function, &producers);
+        scalarize_function(function, &producers, &module.types, &module.class_fields);
     }
 }
 
@@ -67,7 +67,12 @@ fn only_parameters(expression: &Expr, params: &[usize]) -> bool {
     result
 }
 
-fn scalarize_function(function: &mut Function, producers: &[Option<Producer>]) {
+fn scalarize_function(
+    function: &mut Function,
+    producers: &[Option<Producer>],
+    types: &crate::types::Types,
+    class_fields: &[Vec<Type>],
+) {
     // Named bindings can replace a tuple midway through another expression.
     // Retain aggregate ownership until the projection pass models those writes.
     if function
@@ -82,7 +87,10 @@ fn scalarize_function(function: &mut Function, producers: &[Option<Producer>]) {
         .iter()
         .enumerate()
         .map(|(slot, ty)| Candidate {
-            eligible: matches!(ty, Type::Tuple(_)) && !function.params.contains(&slot),
+            // Splitting a file owner's tuple changes the order of its final drops.
+            eligible: matches!(ty, Type::Tuple(_))
+                && !function.params.contains(&slot)
+                && !types.may_own_file(*ty, class_fields, true),
             fields: None,
         })
         .collect::<Vec<_>>();

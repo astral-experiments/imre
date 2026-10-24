@@ -413,6 +413,52 @@ discard(True)
 with open("order.bin", "rb") as result:
     print(result.read())
 """,
+    "projected_tuple_release_order": r"""
+from dataclasses import dataclass
+from typing import BinaryIO
+
+@dataclass(repr=False, eq=False)
+class Leaf:
+    stream: BinaryIO
+
+def writer(mark: bytes) -> BinaryIO:
+    stream = open("order.bin", "ab")
+    stream.write(mark)
+    return stream
+
+def projected() -> None:
+    streams = (writer(b"A"), writer(b"B"), writer(b"C"))
+    print(streams[1].closed)
+
+def nested() -> None:
+    leaves = (Leaf(writer(b"D")), Leaf(writer(b"E")), Leaf(writer(b"F")))
+    print(leaves[1].stream.closed)
+
+def replaced(count: int) -> None:
+    streams = (writer(b"G"), writer(b"H"))
+    for i in range(count):
+        streams = (writer(b"I"), writer(b"J"))
+        print(streams[0].closed)
+
+def fail() -> BinaryIO:
+    raise ValueError("stop")
+
+def interrupted() -> None:
+    streams = (writer(b"K"), writer(b"L"))
+    try:
+        streams = (writer(b"M"), fail())
+    except ValueError:
+        print(streams[0].closed)
+
+with open("order.bin", "wb") as empty:
+    pass
+projected()
+nested()
+replaced(2)
+interrupted()
+with open("order.bin", "rb") as result:
+    print(result.read())
+""",
     "flush_and_close_failure": r"""
 stream = open("failing-output", "w", encoding="utf-8")
 stream.write("buffered")

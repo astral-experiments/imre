@@ -507,21 +507,9 @@ impl Checker<'_> {
         }
     }
 
-    /// A file or any of its transitive owners has an observable final drop.
-    /// Opaque callables may also own a bound receiver that contains a file.
     fn may_own_file(&self, ty: Type, opaque_callables: bool) -> bool {
-        match ty {
-            Type::TextIO | Type::BinaryIO => true,
-            Type::Callable(_) if opaque_callables => true,
-            Type::Class(class) => self.classes.fields[class]
-                .iter()
-                .any(|ty| self.may_own_file(*ty, opaque_callables)),
-            _ => self
-                .types
-                .children(ty)
-                .into_iter()
-                .any(|ty| self.may_own_file(ty, opaque_callables)),
-        }
+        self.types
+            .may_own_file(ty, &self.classes.fields, opaque_callables)
     }
 
     /// Only file resources have observable final drops in the sealed language.
