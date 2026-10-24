@@ -34,16 +34,27 @@ pub(super) fn native_size(value: &Int) -> Result<isize> {
 }
 
 /// Uses Ruff's byte repr rules, including quote choice and lowercase hex escapes.
-pub(super) fn repr(value: &[u8]) -> Str {
+fn repr(value: &[u8]) -> Str {
+    let mut output = String::new();
+    write_repr(&mut output, value);
+    Str::from(output)
+}
+
+pub(super) fn write_repr(output: &mut String, value: &[u8]) {
     let escaped = AsciiEscape::new_repr(value);
-    let quote = escaped.layout().quote.as_char();
-    let mut result = String::from("b");
-    result.push(quote);
+    let layout = escaped.layout();
+    if output.is_empty()
+        && let Some(size) = layout.len.and_then(|body| body.checked_add(3))
+    {
+        output.reserve_exact(size);
+    }
+    let quote = layout.quote.as_char();
+    output.push('b');
+    output.push(quote);
     escaped
-        .write_body(&mut result)
+        .write_body(output)
         .expect("writing to a String cannot fail");
-    result.push(quote);
-    Str::from(result)
+    output.push(quote);
 }
 
 /// # Safety
@@ -606,5 +617,16 @@ mod tests {
                 assert_eq!(relar_error_pending(), 0);
             }
         }
+    }
+
+    #[test]
+    fn standalone_bytes_repr_uses_the_escaped_size() {
+        let input = vec![0; 16 * 1024];
+        let mut output = String::new();
+        write_repr(&mut output, &input);
+        assert_eq!(output.len(), 4 * input.len() + 3);
+        assert!(output.starts_with("b\x27\\x00"));
+        assert!(output.ends_with("\\x00\x27"));
+        assert!(output.capacity() < 128 * 1024);
     }
 }

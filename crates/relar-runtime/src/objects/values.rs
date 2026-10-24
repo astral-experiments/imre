@@ -445,7 +445,7 @@ unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
                 };
                 output.push_str(&crate::floats::render(value));
             }
-            8 => output.push_str(&super::bytes::repr(&*(word as *const Bytes))),
+            8 => super::bytes::write_repr(output, &*(word as *const Bytes)),
             9 if word & 1 == 0 => {
                 write_scalar(output, word, WordKind::new(3));
             }
