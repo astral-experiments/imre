@@ -61,3 +61,13 @@ reference_python=/path/to/cpython-3.14.5/python
 ```
 
 This run records what upstream passes and skips on the host. Native compatibility uses the separate Relar results. An infrastructure error in a stripped interpreter is visible until it is reproduced with a test-enabled CPython build.
+
+## Native Counter cases
+
+`native_counter.py` compiles the complete CPython `TestCounter.test_total`, `test_invariant_for_the_in_operator` and `test_eq` methods into standalone executables. The typed assertion adapters compare both native operands and count every executed assertion. The three tests must execute 1, 6 and 2 assertions respectively. The manifest pins the entire upstream `test_collections.py` file. The typed subset uses integer counts, so the upstream `test_update`, which also stores `None`, is outside this gate.
+
+```sh
+python3 benchmarks/cpython_stdlib/native_counter.py \
+    --relar /path/to/relar --runtime /path/to/librelar_runtime.a \
+    --clang /path/to/clang --result native-counter.json
+```

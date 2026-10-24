@@ -531,6 +531,8 @@ pub(crate) enum Builtin {
     DictGet,
     /// Creates a dictionary whose missing subscription stores a fresh typed list.
     DefaultListDict,
+    CounterNew,
+    CounterTotal,
     /// Widens a defaultdict owner to its ordinary dictionary interface.
     DictAsBase,
     /// Combines the current keys of rooted mappings/sets after both operands run.

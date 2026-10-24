@@ -16,6 +16,7 @@ mod assignments;
 mod callables;
 mod calls;
 mod comprehensions;
+mod counter;
 mod dataclass_values;
 mod enums;
 mod expansions;
@@ -923,6 +924,15 @@ fn annotation_at(
             )
         });
     }
+    if let ast::Expr::Subscript(s) = expression
+        && graph.resolve(module, &s.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
+    {
+        let key = annotation_at(&s.slice, graph, module, classes, types, source, owner)?;
+        if !matches!(key, Type::Int | Type::Str) {
+            return Err(error(source, expression, "Counter keys must be str or int"));
+        }
+        return Ok(types.counter(key));
+    }
     match graph.resolve(module, expression) {
         Some(Binding::Definition(definition)) => {
             if let Some(&id) = classes.ids.get(&definition) {
@@ -938,6 +948,7 @@ fn annotation_at(
                 )
             });
         }
+        Some(Binding::Intrinsic(Intrinsic::Counter)) => return Ok(types.counter(Type::Str)),
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
@@ -1450,8 +1461,9 @@ impl<'a> Checker<'a> {
         {
             return Ok(json::select(value, expected, None, None));
         }
-        if self.types.is_default_list_dict(value.ty)
+        if (self.types.is_default_list_dict(value.ty) || self.types.is_counter(value.ty))
             && !self.types.is_default_list_dict(expected)
+            && !self.types.is_counter(expected)
             && self.types.mapping(value.ty) == self.types.mapping(expected)
         {
             return Ok(Expr {
@@ -1604,6 +1616,12 @@ impl<'a> Checker<'a> {
                 } else {
                     self.list_call(call, self.types.element(concrete))?
                 }
+            }
+            ast::Expr::Call(call)
+                if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::Counter))
+                    && self.types.mapping(concrete).is_some() =>
+            {
+                self.counter(call, None, self.types.mapping(concrete).map(|(key, _)| key))?
             }
             ast::Expr::Call(call)
                 if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::DefaultDict)) =>
@@ -3890,12 +3908,9 @@ impl<'a> Checker<'a> {
                     if matches!(ty, Type::ListInt | Type::List(_)) && !tuple_list
                         || matches!(
                             ty,
-                            Type::Dict(_)
-                                | Type::Set(_)
-                                | Type::StringKeys
-                                | Type::Optional(_)
-                                | Type::Union(_)
+                            Type::Set(_) | Type::StringKeys | Type::Optional(_) | Type::Union(_)
                         )
+                        || matches!(ty, Type::Dict(_)) && !self.types.is_counter(ty)
                         || matches!(ty, Type::Tuple(_)) && !self.types.hashable_key(ty)
                     {
                         return Err(error(
@@ -4285,6 +4300,18 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::TomlKeys, vec![text]),
             });
         }
+        if let ast::Expr::Subscript(s) = &*call.func
+            && self.resolve(&s.value) == Some(Binding::Intrinsic(Intrinsic::Counter))
+        {
+            let ty = annotation(
+                &s.slice,
+                self.graph,
+                self.module,
+                &self.classes.declarations,
+                self.types,
+            )?;
+            return self.counter(call, None, Some(ty));
+        }
         match self.resolve(&call.func) {
             Some(Binding::Intrinsic(Intrinsic::Sha256)) => {
                 return Err(error(
@@ -4293,6 +4320,7 @@ impl<'a> Checker<'a> {
                     "sha256 is supported only with an immediate .hexdigest()",
                 ));
             }
+            Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
                     self.source,
@@ -4508,6 +4536,20 @@ impl<'a> Checker<'a> {
                     "split" | "rsplit" | "strip" | "lstrip" | "rstrip" | "startswith"
                     | "endswith" | "find" | "partition" => {
                         return self.text_method(receiver, attribute.attr.as_str(), call);
+                    }
+                    _ => {}
+                }
+            }
+            if self.types.is_counter(receiver.ty) {
+                match attribute.attr.as_str() {
+                    "update" => return self.counter(call, Some(receiver), None),
+                    "total"
+                        if call.arguments.args.is_empty() && call.arguments.keywords.is_empty() =>
+                    {
+                        return Ok(Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Builtin(Builtin::CounterTotal, vec![receiver]),
+                        });
                     }
                     _ => {}
                 }
@@ -4868,7 +4910,8 @@ impl<'a> Checker<'a> {
                 });
             }
             if matches!(name.id.as_str(), "str" | "print")
-                && matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess)
+                && (matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess)
+                    || self.types.is_counter(args[0].ty))
             {
                 let text = self.record_text(args.into_iter().next().unwrap());
                 return Ok(if name.id == "str" {
