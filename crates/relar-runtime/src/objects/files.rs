@@ -4,6 +4,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::os::fd::IntoRawFd;
+use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
@@ -294,11 +295,17 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
         _ => fail("SystemError", "invalid file mode"),
     }
     .map_err(os_error)?;
-    if file.metadata().map_err(os_error)?.is_dir() {
+    let metadata = file.metadata().map_err(os_error)?;
+    if metadata.is_dir() {
         return Err(Error::new(Kind::IsADirectoryError, "is a directory"));
     }
     let stream = match mode {
         0 => Stream::Read(Input::new(file, gzip, binary)),
+        _ if binary => {
+            // CPython 3.14 bounds the device's preferred block size for buffered I/O.
+            let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
+            Stream::Write(BufWriter::with_capacity(capacity, file))
+        }
         _ => Stream::Write(BufWriter::with_capacity(8192, file)),
     };
     Ok(FileState {
