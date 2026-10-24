@@ -13,20 +13,20 @@ impl Checker<'_> {
         if let ast::Expr::BoolOp(boolean) = expression {
             let and = boolean.op == ast::BoolOp::And;
             let mut values = Vec::new();
-            let mut exits = Vec::new();
+            let mut exit = None;
             for (index, value) in boolean.values.iter().enumerate() {
                 values.push(self.condition(value)?);
-                let after = self.local_state();
                 if index + 1 == boolean.values.len() {
-                    exits.push(after);
+                    self.merge_exit(&mut exit);
                 } else {
+                    let after = self.local_state();
                     self.apply_facts(value, !and);
-                    exits.push(self.local_state());
+                    self.merge_exit(&mut exit);
                     self.restore_state(after);
                     self.apply_facts(value, and);
                 }
             }
-            self.join_states(exits);
+            self.restore_state(exit.expect("boolean conditions have operands"));
             return Ok(Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Boolean(and, values),
