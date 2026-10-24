@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
+use ruff_python_ast::visitor::{Visitor, walk_body, walk_expr, walk_stmt};
 use ruff_python_ast::{Comprehension, Expr, Number, Stmt, UnaryOp};
 
 const MAX_DEPTH: usize = 256;
@@ -14,6 +14,7 @@ pub(super) fn check(body: &[Stmt], tokens: usize) -> Result<(), &'static str> {
     }
     let mut shapes = Shapes {
         scopes: vec![HashMap::new()],
+        straight_line: HashMap::new(),
         fixed: body
             .iter()
             .filter_map(|stmt| match stmt {
@@ -116,16 +117,20 @@ fn bind_target<'a>(target: &'a Expr, shape: Shape, bind: &mut impl FnMut(&'a str
 struct Shapes<'a> {
     fixed: HashSet<&'a str>,
     scopes: Vec<HashMap<&'a str, Shape>>,
+    straight_line: HashMap<&'a str, Shape>,
     conditional: bool,
     exceeded: bool,
 }
 
 impl<'a> Shapes<'a> {
+    fn scope_binding(&self, name: &str) -> Option<&Shape> {
+        self.scopes.iter().rev().find_map(|s| s.get(name))
+    }
+
     fn lookup(&self, name: &str) -> Shape {
-        self.scopes
-            .iter()
-            .rev()
-            .find_map(|s| s.get(name))
+        self.straight_line
+            .get(name)
+            .or_else(|| self.scope_binding(name))
             .cloned()
             .unwrap_or_default()
     }
@@ -247,11 +252,18 @@ impl<'a> Shapes<'a> {
         }
     }
 
-    fn bind(&mut self, target: &'a Expr, shape: Shape) {
+    fn bind(&mut self, target: &'a Expr, shape: Shape, definite: bool) {
         self.exceeded |= shape.depth > MAX_DEPTH;
         bind_target(target, shape, &mut |name, shape| {
             self.exceeded |= shape.depth > MAX_DEPTH;
-            let old = self.lookup(name);
+            let old = self.scope_binding(name).cloned().unwrap_or_default();
+            if self.conditional {
+                if definite && (old.depth != 0 || shape.depth != 0) {
+                    self.straight_line.insert(name, shape.clone());
+                } else {
+                    self.straight_line.remove(name);
+                }
+            }
             if shape.depth != 0 || old.depth != 0 {
                 self.scopes.last_mut().unwrap().insert(
                     name,
@@ -267,6 +279,14 @@ impl<'a> Shapes<'a> {
 }
 
 impl<'a> Visitor<'a> for Shapes<'a> {
+    fn visit_body(&mut self, body: &'a [Stmt]) {
+        // Within an arm, a completed assignment is definite for the next
+        // statement. Across arms use the conservative facts in the scope.
+        self.straight_line.clear();
+        walk_body(self, body);
+        self.straight_line.clear();
+    }
+
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         if self.exceeded {
             return;
@@ -276,16 +296,17 @@ impl<'a> Visitor<'a> for Shapes<'a> {
                 self.visit_expr(&node.value);
                 let shape = self.shape(&node.value, &[]);
                 for target in &node.targets {
-                    self.bind(target, shape.clone());
+                    self.bind(target, shape.clone(), true);
                 }
             }
             Stmt::AnnAssign(node) => {
                 if let Some(value) = &node.value {
                     self.visit_expr(value);
-                    self.bind(&node.target, self.shape(value, &[]));
+                    self.bind(&node.target, self.shape(value, &[]), true);
                 }
             }
             Stmt::FunctionDef(_) | Stmt::ClassDef(_) => {
+                self.straight_line.clear();
                 self.scopes.push(HashMap::new());
                 let outer = std::mem::take(&mut self.conditional);
                 if let Stmt::FunctionDef(function) = stmt {
@@ -310,7 +331,11 @@ impl<'a> Visitor<'a> for Shapes<'a> {
                     Stmt::If(_) | Stmt::For(_) | Stmt::While(_) | Stmt::Match(_) | Stmt::Try(_)
                 );
                 if let Stmt::For(node) = stmt {
-                    self.bind(&node.target, self.shape(&node.iter, &[]).element(None));
+                    self.bind(
+                        &node.target,
+                        self.shape(&node.iter, &[]).element(None),
+                        false,
+                    );
                 }
                 walk_stmt(self, stmt);
                 self.conditional = outer;
@@ -321,7 +346,7 @@ impl<'a> Visitor<'a> for Shapes<'a> {
     fn visit_expr(&mut self, expr: &'a Expr) {
         walk_expr(self, expr);
         if let Expr::Named(node) = expr {
-            self.bind(&node.target, self.shape(&node.value, &[]));
+            self.bind(&node.target, self.shape(&node.value, &[]), false);
         }
     }
 }
@@ -410,6 +435,13 @@ mod tests {
         assert!(!limited(&format!("{deep}result = ((pair[1],),)\n")));
         assert!(limited(&format!("{deep}result = ((pair[0],),)\n")));
         assert!(limited(&format!("{deep}result = ((pair[index],),)\n")));
+        let arms = "if flag:\n    y = pair[0]\nelse:\n    y = pair[1]\n";
+        assert!(limited(&format!("{deep}{arms}result = ((y,),)\n")));
+        let in_arm = format!(
+            "x = (1,)\nif flag:\n{}",
+            "    pair = (x, 1)\n    x = (pair[1],)\n".repeat(300)
+        );
+        assert!(!limited(&in_arm));
     }
 
     #[test]
