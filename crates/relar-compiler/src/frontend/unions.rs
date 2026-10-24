@@ -304,7 +304,7 @@ impl Checker<'_> {
                 }
             }
             if let Some(ty) = self.types.union(&members) {
-                self.narrowed.insert(slot, ty);
+                self.narrowed.insert_mut(slot, ty);
             }
         }
     }

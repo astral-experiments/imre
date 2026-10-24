@@ -179,10 +179,14 @@ impl<'a> ConditionalFacts<'a> {
         }
         for (name, ty) in &mut self.narrowed {
             if let Some(&slot) = checker.names.get(*name) {
-                *ty = match *ty {
-                    Some(previous) => checker.narrowed.insert(slot, previous),
-                    None => checker.narrowed.remove(&slot),
-                };
+                let incoming = checker.narrowed.get(&slot).copied();
+                match *ty {
+                    Some(previous) => checker.narrowed.insert_mut(slot, previous),
+                    None => {
+                        checker.narrowed.remove_mut(&slot);
+                    }
+                }
+                *ty = incoming;
             }
         }
     }
@@ -197,7 +201,7 @@ impl<'a> ConditionalFacts<'a> {
             if let Some(slot) = checker.names.get(name)
                 && checker.narrowed.get(slot).copied() != ty
             {
-                checker.narrowed.remove(slot);
+                checker.narrowed.remove_mut(slot);
             }
         }
     }
@@ -247,21 +251,92 @@ impl<'a> BooleanExits<'a> {
     }
 }
 
+// Snapshots share unchanged trie nodes with the current flow. Entering a
+// nested suite only copies the paths for slots whose facts actually change.
+#[derive(Clone, Default)]
+pub(super) struct Assigned(rpds::HashTrieMap<usize, u64>);
+
+impl Assigned {
+    pub(super) fn contains(&self, slot: &usize) -> bool {
+        let bits = self.0.get(&(slot / 64)).copied().unwrap_or(0);
+        bits & (1 << (slot % 64)) != 0
+    }
+
+    pub(super) fn insert(&mut self, slot: usize) {
+        let index = slot / 64;
+        let mask = 1 << (slot % 64);
+        let bits = self.0.get(&index).copied().unwrap_or(0);
+        if bits & mask == 0 {
+            self.0.insert_mut(index, bits | mask);
+        }
+    }
+
+    pub(super) fn remove(&mut self, slot: &usize) {
+        let index = slot / 64;
+        if let Some(&bits) = self.0.get(&index) {
+            let remaining = bits & !(1 << (slot % 64));
+            if remaining != bits {
+                self.set_word(index, remaining);
+            }
+        }
+    }
+
+    fn set_word(&mut self, index: usize, bits: u64) {
+        if bits == 0 {
+            self.0.remove_mut(&index);
+        } else {
+            self.0.insert_mut(index, bits);
+        }
+    }
+
+    fn intersect(&mut self, other: &Self) {
+        if !self.0.ptr_eq(&other.0) {
+            for (&index, &bits) in &self.0.clone() {
+                let common = bits & other.0.get(&index).copied().unwrap_or(0);
+                if common != bits {
+                    self.set_word(index, common);
+                }
+            }
+        }
+    }
+
+    pub(super) fn extend(&mut self, other: &Self) {
+        for (&index, &bits) in &other.0 {
+            let old = self.0.get(&index).copied().unwrap_or(0);
+            if old | bits != old {
+                self.0.insert_mut(index, old | bits);
+            }
+        }
+    }
+}
+
+pub(super) type Narrowed = rpds::HashTrieMap<usize, Type>;
+
+pub(super) fn intersect(
+    assigned: &mut Assigned,
+    narrowed: &mut Narrowed,
+    other_assigned: &Assigned,
+    other_narrowed: &Narrowed,
+) {
+    assigned.intersect(other_assigned);
+    if !narrowed.ptr_eq(other_narrowed) {
+        for (slot, ty) in &narrowed.clone() {
+            if other_narrowed.get(slot) != Some(ty) {
+                narrowed.remove_mut(slot);
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct LocalState {
-    pub(super) assigned: HashSet<usize>,
-    pub(super) narrowed: HashMap<usize, Type>,
+    pub(super) assigned: Assigned,
+    pub(super) narrowed: Narrowed,
 }
 
 impl LocalState {
-    pub(super) fn retain_common(
-        &mut self,
-        assigned: &HashSet<usize>,
-        narrowed: &HashMap<usize, Type>,
-    ) {
-        self.assigned.retain(|slot| assigned.contains(slot));
-        self.narrowed
-            .retain(|slot, ty| narrowed.get(slot) == Some(ty));
+    pub(super) fn retain_common(&mut self, assigned: &Assigned, narrowed: &Narrowed) {
+        intersect(&mut self.assigned, &mut self.narrowed, assigned, narrowed);
     }
 }
 
@@ -375,5 +450,33 @@ impl Checker<'_> {
             }
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Assigned;
+
+    #[test]
+    fn snapshots_merge_assignments_across_word_boundaries() {
+        let mut original = Assigned::default();
+        for slot in [0, 63, 64, 128] {
+            original.insert(slot);
+        }
+        let mut branch = original.clone();
+        assert!(branch.0.ptr_eq(&original.0));
+        branch.remove(&0);
+        branch.remove(&128);
+        branch.insert(65);
+        assert!(original.contains(&0) && original.contains(&128));
+        assert!(!original.contains(&65));
+
+        let mut joined = original.clone();
+        joined.intersect(&branch);
+        assert!(joined.contains(&63) && joined.contains(&64));
+        assert!(!joined.contains(&0) && !joined.contains(&65) && !joined.contains(&128));
+        joined.extend(&branch);
+        assert!(joined.contains(&65));
+        assert!(!joined.contains(&0) && !joined.contains(&128));
     }
 }

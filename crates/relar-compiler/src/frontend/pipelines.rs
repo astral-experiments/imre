@@ -1242,7 +1242,7 @@ impl Checker<'_> {
         self.comprehension_depth += 1;
         // Suspended generators can observe later enclosing writes. Facts about
         // those mutable slots must be proved again inside the lazy body.
-        self.narrowed.clear();
+        self.narrowed = assignments::Narrowed::new();
         let mut inputs = Vec::new();
         let mut bindings = Vec::new();
         let mut filters = Vec::new();
@@ -1266,7 +1266,11 @@ impl Checker<'_> {
                     .iter()
                     .filter_map(|name| self.names.get(name).copied())
                     .collect::<HashSet<_>>();
-                self.narrowed.retain(|slot, _| stable.contains(slot));
+                for (slot, _) in &self.narrowed.clone() {
+                    if !stable.contains(slot) {
+                        self.narrowed.remove_mut(slot);
+                    }
+                }
             }
             let repeated_writes = generator.generators[index..]
                 .iter()
@@ -1276,7 +1280,7 @@ impl Checker<'_> {
                 .collect::<HashSet<_>>();
             for name in repeated_writes {
                 if let Some(slot) = self.names.get(&name) {
-                    self.narrowed.remove(slot);
+                    self.narrowed.remove_mut(slot);
                 }
             }
             bindings.push(self.bind_iterator_pattern(&clause.target, input.value)?);
@@ -1345,7 +1349,7 @@ impl Checker<'_> {
         {
             for name in narrowing::expression_assignments(expression) {
                 if let Some(slot) = self.names.get(&name) {
-                    self.narrowed.remove(slot);
+                    self.narrowed.remove_mut(slot);
                     writes.insert(*slot);
                 }
             }
@@ -1658,7 +1662,7 @@ impl Checker<'_> {
         // A later consumer argument or zip constructor argument may have
         // established new facts since this lazy body was checked.
         for slot in &input.writes {
-            self.narrowed.remove(slot);
+            self.narrowed.remove_mut(slot);
         }
         let before = self.assigned.clone();
         let mut facts = self.narrowed.clone();
@@ -1667,7 +1671,7 @@ impl Checker<'_> {
         target_names(target, &mut rebound);
         for name in rebound {
             if let Some(slot) = self.names.get(&name) {
-                facts.remove(slot);
+                facts.remove_mut(slot);
             }
         }
         let mut body = input.next;
