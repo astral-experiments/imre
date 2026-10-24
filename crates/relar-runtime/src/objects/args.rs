@@ -83,19 +83,6 @@ pub extern "C" fn relar_sys_executable() -> *const Str {
     Rc::into_raw(Rc::new(Str::from(text)))
 }
 
-/// # Safety
-/// The argument is a borrowed, live Python integer, or zero for no exit status.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_sys_exit(code: usize) {
-    if code == 0 {
-        Error::new(Kind::SystemExit, "").raise();
-        return;
-    }
-    // SAFETY: the caller owns the exact integer throughout conversion.
-    let code = unsafe { super::Int::borrow(code) };
-    Error::new(Kind::SystemExit, code.big().to_string()).raise();
-}
-
 /// Returns an owned reference to the same mutable list on every successful call.
 /// Strict UTF-8 failure returns null with a pending UnicodeDecodeError. Pending
 /// state must be clear; init must already have captured this main activation.
