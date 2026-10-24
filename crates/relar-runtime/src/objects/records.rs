@@ -1,12 +1,18 @@
 //! Fixed native records with a compact header and compiler-described payload.
 
 use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
-use std::cell::{Cell, UnsafeCell};
+use std::cell::{Cell, RefCell, UnsafeCell};
 use std::rc::Rc;
 
 use super::{fail, words::WordKind};
 
 pub(super) mod strings;
+
+thread_local! {
+    // The outer release owns the queue on its stack. This slot has no TLS
+    // destructor, so records can also be released during thread teardown.
+    static RECORDS_TO_DROP: Cell<*const RefCell<Vec<*const usize>>> = const { Cell::new(std::ptr::null()) };
+}
 
 /// Compiler-emitted immutable metadata; every field occupies one eight-byte word.
 /// The descriptor and its kind array must outlive every allocation using them.
@@ -271,6 +277,32 @@ pub unsafe extern "C" fn relar_record_release(payload: *const usize) {
     if count != 1 {
         return;
     }
+    RECORDS_TO_DROP.with(|slot| {
+        // SAFETY: a non-null pointer belongs to the enclosing release on this
+        // thread. The C ABI cannot unwind, and the outer call clears the slot
+        // before returning. No queue borrow spans a field release.
+        if let Some(pending) = unsafe { slot.get().as_ref() } {
+            pending.borrow_mut().push(payload);
+            return;
+        }
+        let pending = RefCell::new(Vec::new());
+        slot.set(&pending);
+        let mut next = Some(payload);
+        while let Some(current) = next {
+            // SAFETY: only the final owner enqueues a record. Its allocation and
+            // descriptor stay live until this worklist destroys it.
+            unsafe { destroy_record(current) };
+            next = pending.borrow_mut().pop();
+        }
+        slot.set(std::ptr::null());
+    });
+}
+
+/// # Safety
+/// The record has lost its final owner and its fields have not been released.
+unsafe fn destroy_record(payload: *const usize) {
+    // SAFETY: the allocation remains live until the field owners are released.
+    let header = unsafe { &*payload.cast::<Header>().sub(1) };
     // SAFETY: metadata remains immutable and live even while payloads are released.
     let descriptor = header.descriptor();
     if let Some(block) = header.block() {
@@ -338,6 +370,64 @@ mod tests {
             }
             kind.release(old);
         }
+    }
+
+    #[test]
+    fn deep_record_chains_release_iteratively_and_preserve_shared_children() {
+        let record_kind = [6];
+        let descriptor = RecordDescriptor {
+            length: 1,
+            kinds: record_kind.as_ptr(),
+            semantics: std::ptr::null(),
+        };
+        let string_kind = [3];
+        let leaf_descriptor = RecordDescriptor {
+            length: 1,
+            kinds: string_kind.as_ptr(),
+            semantics: std::ptr::null(),
+        };
+        let text = Rc::new(Str::from("shared leaf"));
+        // SAFETY: each new field receives one live owner of its declared kind.
+        // Both descriptors outlive every release, including the saved leaf.
+        unsafe {
+            let leaf = relar_record_new(&leaf_descriptor);
+            leaf.write(Rc::into_raw(text.clone()) as usize);
+            relar_record_retain(leaf);
+            let mut root = leaf;
+            for _ in 0..50_000 {
+                let parent = relar_record_new(&descriptor);
+                parent.write(root as usize);
+                root = parent;
+            }
+            relar_record_release(root);
+            assert_eq!(Rc::strong_count(&text), 2);
+            relar_record_release(leaf);
+            assert_eq!(Rc::strong_count(&text), 1);
+        }
+    }
+
+    #[test]
+    fn records_can_be_released_from_thread_local_destructors() {
+        struct ReleaseOnExit;
+        impl Drop for ReleaseOnExit {
+            fn drop(&mut self) {
+                let kinds = [0];
+                let descriptor = RecordDescriptor {
+                    length: kinds.len(),
+                    kinds: kinds.as_ptr(),
+                    semantics: std::ptr::null(),
+                };
+                // SAFETY: the descriptor outlives the sole owner.
+                unsafe { relar_record_release(relar_record_new(&descriptor)) };
+            }
+        }
+        thread_local! { static ON_EXIT: ReleaseOnExit = const { ReleaseOnExit }; }
+        std::thread::spawn(|| {
+            ON_EXIT.with(|_| {});
+            drop(ReleaseOnExit);
+        })
+        .join()
+        .unwrap();
     }
 
     #[test]
