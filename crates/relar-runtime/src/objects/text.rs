@@ -64,7 +64,7 @@ pub(super) fn owned_string(value: &str) -> Rc<Str> {
 }
 
 /// Appends an owned slice of source, retaining its allocation for a full slice.
-fn push_part(parts: &mut Words, source: &Rc<Str>, value: &str) {
+pub(super) fn push_part(parts: &mut Words, source: &Rc<Str>, value: &str) {
     parts
         .values
         .try_reserve(1)
