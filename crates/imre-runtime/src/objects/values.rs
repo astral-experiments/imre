@@ -320,14 +320,16 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
 pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
     let mut output = String::new();
     // SAFETY: the caller supplies the exact checked representation and root.
-    unsafe { write_repr(&mut output, word, WordKind::new(kind)) };
+    if !unsafe { write_repr(&mut output, word, WordKind::new(kind)) } {
+        return std::ptr::null();
+    }
     Rc::into_raw(Rc::new(Str::from(output)))
 }
 
 /// # Safety
 /// The word and all descendants are rooted with the supplied representation;
 /// no runtime mutation or user callback can overlap formatting.
-pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind) {
+pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind) -> bool {
     let mut pending = Vec::new();
     let mut current = Some(ReprTask::Word(word, kind));
     while let Some(task) = current.take().or_else(|| pending.pop()) {
@@ -370,7 +372,10 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                             None
                         }
                         Storage::Dictionary(mapping) => {
-                            format_entry(owner, mapping.repr_entry(output, position), &mut pending)
+                            match mapping.repr_entry(output, position) {
+                                Ok(entry) => format_entry(owner, entry, &mut pending),
+                                Err(_) => Some(ReprTask::OutOfMemory),
+                            }
                         }
                         Storage::Set(set) => {
                             format_entry(owner, set.repr_entry(output, position), &mut pending)
@@ -399,9 +404,14 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                     output.push_str(": ");
                     None
                 }
+                ReprTask::OutOfMemory => {
+                    super::exceptions::sequence_allocation_failed();
+                    return false;
+                }
             }
         };
     }
+    true
 }
 
 enum ReprTask {
@@ -409,6 +419,7 @@ enum ReprTask {
     Object(*const Object, usize),
     Record(*const usize, usize, usize),
     KeySeparator,
+    OutOfMemory,
 }
 
 pub(super) struct ReprEntry {
@@ -432,6 +443,18 @@ fn format_entry(
 }
 
 /// # Safety
+/// The caller roots the exact integer during formatting.
+pub(super) unsafe fn write_int_repr(output: &mut impl Write, word: usize) -> std::fmt::Result {
+    // SAFETY: the caller roots the integer for this borrow.
+    let value = unsafe { Int::borrow(word) };
+    if let Some(small) = value.as_small() {
+        write!(output, "{small}")
+    } else {
+        write!(output, "{}", value.big())
+    }
+}
+
+/// # Safety
 /// The rooted word has its declared scalar, integer-list, or nullable representation.
 unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
     let raw = kind.raw();
@@ -448,14 +471,7 @@ unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
                 let value = if raw & NULLABLE != 0 { word - 1 } else { word };
                 output.push_str(if value == 0 { "False" } else { "True" });
             }
-            2 => {
-                let value = Int::borrow(word);
-                if let Some(value) = value.as_small() {
-                    write!(output, "{value}").unwrap();
-                } else {
-                    write!(output, "{}", value.big()).unwrap();
-                }
-            }
+            2 => write_int_repr(output, word).unwrap(),
             3 => super::exceptions::push_string_repr(&*(word as *const Str), output),
             4 => (&*(word as *const List)).0.with(|values| {
                 output.push('[');

@@ -254,7 +254,6 @@ impl Builtin {
             | Self::StringListFilter(_)
             | Self::StringListSortSuffix(_)
             | Self::StringListNonempty
-            | Self::Str
             | Self::NominalIdentity
             | Self::StrEnumMember { .. }
             | Self::StrEnumName
@@ -266,6 +265,7 @@ impl Builtin {
             | Self::StringReplace
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
+            Self::Str => Contract::new(true, PreservesLists),
             Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
             Self::ListReserveRange => Contract::new(false, PreservesOwners),
             Self::BinaryOpen(_)
@@ -298,6 +298,7 @@ impl Builtin {
             | Self::TextOpen(_)
             | Self::TextRead
             | Self::TextWrite
+            | Self::Repr
             | Self::TomlKeys => Contract::new(true, Unknown),
             Self::BytesIter
             | Self::DefaultListDict
@@ -315,7 +316,6 @@ impl Builtin {
             | Self::ListAllI32
             | Self::ListDistinct
             | Self::ListExtendUnhinted
-            | Self::Repr
             | Self::SetAdd
             | Self::SetDiscard
             | Self::SetIter
