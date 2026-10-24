@@ -6139,7 +6139,7 @@ scan("a\nb", Path("lines.txt"), "4")
             );
             let llvm = crate::compile(&source, &crate::CompileOptions::default()).unwrap();
             assert!(!llvm.contains("call ptr @imre_seq_new("));
-            assert!(!llvm.contains("call void @imre_seq_append("));
+            assert!(!llvm.contains("call i32 @imre_seq_append("));
             assert!(!llvm.contains("call ptr @imre_record_try_new("));
         }
     }
