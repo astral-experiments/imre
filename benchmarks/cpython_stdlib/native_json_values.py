@@ -36,6 +36,27 @@ def unpack_native_repr(payload):
     return ast.literal_eval(NumberNames().visit(ast.parse(payload, mode="eval")))
 
 
+def check_bounded_malformed_object(program, directory):
+    import resource
+
+    # Duplicate keys keep CPython's dictionary small even when the first field is nested.
+    repeated = b'"a":0,' * 1_000_000
+
+    def bound_memory():
+        resource.setrlimit(resource.RLIMIT_AS, (64 << 20, 64 << 20))
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+    for document in (b'{' + repeated + b'"bad":}', b'{"nested":{' + repeated + b'"a":0},"bad":}'):
+        (directory / "input.bin").write_bytes(document)
+        expected = (f"JSONDecodeError\nExpecting value: line 1 column {len(document)} "
+                    f"(char {len(document) - 1})\n").encode()
+        for command in ([sys.executable, "-I", "-S", HERE / "json_values_driver.py"], [program]):
+            run = subprocess.run([*command, "load", "file", "1", "1", "None"], cwd=directory,
+                                 capture_output=True, timeout=30, preexec_fn=bound_memory)
+            if (run.returncode, run.stdout, run.stderr) != (0, expected, b""):
+                raise RuntimeError(f"bounded json.load failed: {command[0]}, {run!r}")
+
+
 class Native:
     def __init__(self, program, directory, error):
         self.program = program
@@ -128,6 +149,9 @@ def main():
                 if "call " + call not in generated:
                     raise RuntimeError(f"native driver omits {call}")
             report["sha256"]["executable"] = sha256(program)
+            if sys.platform == "linux":
+                check_bounded_malformed_object(program, directory)
+                report["bounded_malformed_object"] = "pass"
             for group, methods in METHODS.items():
                 name = "test_" + group.lower()
                 module = importlib.import_module("test.test_json." + name)

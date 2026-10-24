@@ -15,6 +15,7 @@ use std::rc::Rc;
 use serde::Deserializer;
 use serde::de::{Error as _, MapAccess, Visitor};
 use serde_json::value::RawValue;
+use smallvec::SmallVec;
 
 use super::{Key, check_depth};
 use crate::objects::words::Words;
@@ -470,27 +471,58 @@ impl<'de> Visitor<'de> for Fields<'_, '_> {
     }
 }
 
+/// Keep only borrowed spans until the complete object and its trailing input are valid.
+/// Wider objects use whole-document validation before their fields are materialized.
+struct RootSpans;
+
+impl<'de> Visitor<'de> for RootSpans {
+    type Value = SmallVec<[(&'de RawValue, &'de RawValue); 8]>;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a JSON object")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut spans = Self::Value::new();
+        while let Some(key) = map.next_key()? {
+            if spans.len() == spans.inline_size() {
+                return Err(A::Error::custom("too many fields to index inline"));
+            }
+            spans.push((key, map.next_value()?));
+        }
+        Ok(spans)
+    }
+}
+
+fn root_fields(source: Source<'_>, nodes: &mut Vec<Node>) -> Option<Vec<(Str, usize)>> {
+    let mut parser = serde_json::Deserializer::from_str(source.text);
+    let spans = parser.deserialize_map(RootSpans).ok()?;
+    parser.end().ok()?;
+    spans
+        .into_iter()
+        .map(|(key, raw)| {
+            let key = serde_json::Deserializer::from_str(key.get())
+                .deserialize_str(Key)
+                .ok()?;
+            Some((Str::new(key.as_ref()), push_node(nodes, raw, source).ok()?))
+        })
+        .collect()
+}
+
 fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
     let text = source.text;
     let trimmed = text.trim_start_matches([' ', '\n', '\r', '\t']);
     if !trimmed.starts_with('[') {
         let mut nodes = Vec::new();
-        let index = if trimmed.starts_with('{') {
-            let mut parser = serde_json::Deserializer::from_str(trimmed);
-            let fields = parser
-                .deserialize_map(Fields(&mut nodes, source))
-                .and_then(|fields| parser.end().map(|()| fields))
-                // A structural error anywhere, including trailing data, takes precedence
-                // over a typed value error (such as an unrepresentable Unicode scalar).
-                .map_err(|error| {
-                    serde_json::from_str::<&RawValue>(text)
-                        .err()
-                        .unwrap_or(error)
-                })?;
+        let index = if trimmed.starts_with('{')
+            && let Some(fields) = root_fields(source, &mut nodes)
+        {
             let index = nodes.len();
             nodes.push(Node::Object(fields));
             index
         } else {
+            // Preserve the original error location if a validated field cannot be decoded.
+            nodes.clear();
             let raw = serde_json::from_str::<&RawValue>(text)?;
             push_node(&mut nodes, raw, source)?
         };
