@@ -1273,7 +1273,7 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
             let mut values = crate::take_list_buffer(length);
             values
                 .try_reserve_exact(length)
-                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+                .map_err(|_| Error::allocation())?;
             if ascii_small {
                 for (slot, &character) in values.spare_capacity_mut()[..length]
                     .iter_mut()
