@@ -199,6 +199,9 @@ impl Inference {
                 }
             }
             for (module, function, signature) in definitions.iter() {
+                if graph.modules[*module].archive.is_some() {
+                    continue; // Native declarations must be fully annotated.
+                }
                 let (ready, infer_return) = {
                     let pending = self.pending.borrow();
                     let pending = &pending[signature.id];
