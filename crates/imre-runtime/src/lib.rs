@@ -1471,7 +1471,7 @@ pub unsafe extern "C" fn imre_list_repeat(list: *const List, count: usize) -> *c
             let mut result = Vec::new();
             result
                 .try_reserve_exact(length)
-                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+                .map_err(|_| Error::allocation())?;
             if !list.is_empty() {
                 for _ in 0..count {
                     result.extend(list.iter().cloned());

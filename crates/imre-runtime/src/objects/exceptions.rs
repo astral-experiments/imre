@@ -361,7 +361,7 @@ impl Error {
         }
     }
 
-    pub(super) fn allocation() -> Self {
+    pub(crate) fn allocation() -> Self {
         Self {
             kind: Kind::MemoryError,
             payload: None,

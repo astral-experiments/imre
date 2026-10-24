@@ -408,7 +408,7 @@ pub unsafe extern "C" fn imre_seq_repeat(value: *const Object, count: usize) -> 
             result
                 .values
                 .try_reserve_exact(length)
-                .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
+                .map_err(|_| Error::allocation())?;
             if !values.values.is_empty() {
                 for _ in 0..count {
                     for &word in &values.values {
