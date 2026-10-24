@@ -100,6 +100,8 @@ def main():
                     samples.extend((arguments, width, color) for color in (False, True))
             for width in (" 34\t", "+3_4", "٣٤", "3__4", "9" * 20, "0" * 4300 + "34"):
                 samples.append((["--help"], width, False))
+            for separator in ("\x1c", "\x1d", "\x1e", "\x1f"):
+                samples.append((["--help"], separator + "34" + separator, False))
             for level in args.opt_levels:
                 subprocess.run(
                     [
