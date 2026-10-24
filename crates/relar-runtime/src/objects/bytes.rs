@@ -71,35 +71,35 @@ pub unsafe extern "C" fn relar_byte_output_reserve_range(
 
 /// # Safety
 /// Root the private output and its canonical integer arguments for this call.
-unsafe fn append_bytes<const N: usize>(output: *const Object, words: [usize; N]) {
+unsafe fn append_bytes<const N: usize>(output: *const Object, words: [usize; N]) -> i32 {
     // SAFETY: only compiler-generated appends access this rooted private object.
     unsafe {
         super::object(output).0.with_mut(|storage| {
             let Storage::ByteOutput(output) = storage else {
                 unreachable!()
             };
-            if output.bytes.len() > super::MAX_LIST_LEN - N {
-                fail("MemoryError", "list allocation failed");
-            }
-            output
-                .bytes
-                .try_reserve(N)
-                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
             for word in words {
+                // Keep a successful first append if the second needs to grow.
+                if output.bytes.len() == super::MAX_LIST_LEN || output.bytes.try_reserve(1).is_err()
+                {
+                    super::exceptions::sequence_allocation_failed();
+                    return 0;
+                }
                 // Canonical 0..=255 are exactly the odd words in 1..=511.
                 // Invalid Ints have no observable destructor. Record the error
                 // without raising: a later producer exception must still win.
                 output.invalid |= word & !0x1fe != 1;
                 output.bytes.push((word >> 1) as u8);
             }
-        });
+            1
+        })
     }
 }
 
 /// # Safety
 /// Root the private output and the exact integer throughout the append.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_byte_output_append(output: *const Object, word: usize) {
+pub unsafe extern "C" fn relar_byte_output_append(output: *const Object, word: usize) -> i32 {
     // SAFETY: the caller roots both the output and the canonical integer.
     unsafe { append_bytes(output, [word]) }
 }
@@ -111,7 +111,7 @@ pub unsafe extern "C" fn relar_byte_output_append_pair(
     output: *const Object,
     first: usize,
     second: usize,
-) {
+) -> i32 {
     // SAFETY: the caller roots the output and both canonical integers.
     unsafe { append_bytes(output, [first, second]) }
 }
@@ -718,7 +718,10 @@ mod tests {
                 assert_eq!(output.bytes.capacity(), 256);
                 assert!(output.bytes.is_empty());
             });
-            relar_byte_output_append_pair(Rc::as_ptr(&output), 1, 511);
+            assert_eq!(
+                relar_byte_output_append_pair(Rc::as_ptr(&output), 1, 511),
+                1
+            );
             let buffer = output.0.with(|storage| {
                 let Storage::ByteOutput(output) = storage else {
                     unreachable!()

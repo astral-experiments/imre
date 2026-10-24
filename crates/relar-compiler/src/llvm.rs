@@ -5,8 +5,8 @@ use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
 use crate::contracts::{
-    LIST_APPEND, LIST_BORROW_INDEX, LIST_COPY_INDEX, LIST_GET, LIST_GET_INDEX, LIST_POP, LIST_SET,
-    LIST_SET_INDEX, runtime_call_may_raise,
+    BYTE_OUTPUT_APPEND, BYTE_OUTPUT_APPEND_PAIR, LIST_APPEND, LIST_BORROW_INDEX, LIST_COPY_INDEX,
+    LIST_GET, LIST_GET_INDEX, LIST_POP, LIST_SET, LIST_SET_INDEX, runtime_call_may_raise,
 };
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
@@ -1576,7 +1576,7 @@ impl Emitter<'_, '_> {
 
     /// Combines two appends whose already-evaluated operands cannot change.
     /// Integer locals are immutable values, and append cannot replace its local
-    /// receiver. Allocation exhaustion is fatal for both runtime entrypoints.
+    /// receiver. A private byte output reports a failure after any completed append.
     fn append_pair(&mut self, first: &Statement, second: &Statement) -> bool {
         let (
             Statement::Expr(Expr {
@@ -1610,12 +1610,17 @@ impl Emitter<'_, '_> {
         let receiver = self.operand(receiver);
         let first = self.operand(first);
         let second = self.operand(second);
-        let name = if receiver.value.ty == Type::ByteOutput {
-            "relar_byte_output_append_pair"
+        if receiver.value.ty == Type::ByteOutput {
+            self.runtime_call(
+                &BYTE_OUTPUT_APPEND_PAIR,
+                [&receiver.value, &first.value, &second.value],
+            );
         } else {
-            "relar_list_append_pair"
-        };
-        self.void_call(name, &[&receiver.value, &first.value, &second.value]);
+            self.void_call(
+                "relar_list_append_pair",
+                &[&receiver.value, &first.value, &second.value],
+            );
+        }
         for operand in [&receiver, &first, &second] {
             self.release_operand(operand);
         }
@@ -4477,7 +4482,7 @@ impl Emitter<'_, '_> {
 
     fn append(&mut self, list: &Value, value: &Value) {
         if list.ty == Type::ByteOutput {
-            self.void_call("relar_byte_output_append", &[list, value]);
+            self.runtime_call(&BYTE_OUTPUT_APPEND, [list, value]);
         } else if list.ty == Type::ListInt {
             self.runtime_call(&LIST_APPEND, [list, value]);
         } else {
@@ -5006,8 +5011,6 @@ declare ptr @relar_bytes_count(i64)
 declare ptr @relar_bytes_list(ptr)
 declare ptr @relar_byte_output_new()
 declare void @relar_byte_output_reserve_range(ptr, i64, i64, i64, i64)
-declare void @relar_byte_output_append(ptr, i64)
-declare void @relar_byte_output_append_pair(ptr, i64, i64)
 declare ptr @relar_byte_output_finish(ptr)
 declare ptr @relar_bytes_concat(ptr, ptr)
 declare ptr @relar_bytes_repeat(ptr, i64)
@@ -5231,6 +5234,8 @@ declare void @relar_list_release(ptr)
 declare i64 @relar_list_borrow_index_proven(ptr, i64) nounwind memory(argmem: read)
 declare ptr @relar_list_data_readonly(ptr) nounwind memory(argmem: read)
 {LIST_COPY_INDEX}
+{BYTE_OUTPUT_APPEND}
+{BYTE_OUTPUT_APPEND_PAIR}
 {LIST_APPEND}
 declare void @relar_list_append_pair(ptr, i64, i64)
 {LIST_POP}"
@@ -6169,9 +6174,21 @@ def total(text: str) -> int:
     #[test]
     fn byte_output_requires_a_private_list_and_one_terminal_conversion() {
         let eligible = function_body(
-            "def encode(value: int) -> bytes:\n    out: list[int] = []\n    out.extend(divmod(value, 256))\n    return bytes(out)\n",
+            "def encode(value: int) -> bytes:\n    out: list[int] = []\n    out.extend(divmod(value, 256))\n    out.append(value)\n    return bytes(out)\n",
         );
-        assert!(eligible.contains("call void @relar_byte_output_append_pair("));
+        for name in ["relar_byte_output_append", "relar_byte_output_append_pair"] {
+            let mut lines = eligible.lines();
+            let call = lines
+                .find(|line| line.contains(&format!("call i32 @{name}(")))
+                .unwrap();
+            let status = call.trim().split_once(" = ").unwrap().0;
+            assert!(
+                lines
+                    .next()
+                    .unwrap()
+                    .contains(&format!("icmp eq i32 {status}, 0"))
+            );
+        }
         assert!(eligible.contains("call ptr @relar_byte_output_finish("));
         assert!(!eligible.contains("call ptr @relar_bytes_list("));
 

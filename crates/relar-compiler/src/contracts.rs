@@ -177,8 +177,8 @@ impl Builtin {
             | Self::StringReplace
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
-            Self::SortByKeys => Contract::new(true, PreservesOwners),
-            Self::Append | Self::ListReserveRange => Contract::new(false, PreservesOwners),
+            Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
+            Self::ListReserveRange => Contract::new(false, PreservesOwners),
             Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize
@@ -373,6 +373,20 @@ pub(crate) const LIST_APPEND: RuntimeCall<InfallibleVoid, 2> = RuntimeCall {
     symbol: "relar_list_append",
     params: [INT_LIST, TAGGED_INT],
     result: InfallibleVoid,
+};
+pub(crate) const BYTE_OUTPUT_APPEND: RuntimeCall<StatusOrError, 2> = RuntimeCall {
+    symbol: "relar_byte_output_append",
+    params: [RuntimeParam::Value(Type::ByteOutput), TAGGED_INT],
+    result: StatusOrError,
+};
+pub(crate) const BYTE_OUTPUT_APPEND_PAIR: RuntimeCall<StatusOrError, 3> = RuntimeCall {
+    symbol: "relar_byte_output_append_pair",
+    params: [
+        RuntimeParam::Value(Type::ByteOutput),
+        TAGGED_INT,
+        TAGGED_INT,
+    ],
+    result: StatusOrError,
 };
 pub(crate) const LIST_POP: RuntimeCall<OwnedIntOrError, 1> = RuntimeCall {
     symbol: "relar_list_pop",
