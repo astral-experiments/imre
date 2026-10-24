@@ -266,6 +266,9 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
 }
 
 thread_local! {
+    static RECORD_ALLOCATION_ERROR: Rc<Object> = new_exception(
+        Kind::MemoryError, Rc::new(Str::new("record allocation failed")),
+    );
     static PENDING: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
     static ACTIVE: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
     // The non-Drop mirror lets successful calls query one TLS byte without
@@ -274,6 +277,19 @@ thread_local! {
     // flag before dropping displaced owners. The single-thread, no-callback
     // contract makes the brief interval between owner and flag writes unobservable.
     static PENDING_PRESENT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Prepare the exception before generated code starts allocating records.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_record_error_init() {
+    RECORD_ALLOCATION_ERROR.with(|_| ());
+    PENDING.with(|_| ());
+    ACTIVE.with(|_| ());
+}
+
+#[cold]
+pub(super) fn record_allocation_failed() {
+    RECORD_ALLOCATION_ERROR.with(|error| replace_pending(Some(Rc::clone(error))));
 }
 
 fn new_exception(kind: Kind, payload: impl Into<Payload>) -> Rc<Object> {

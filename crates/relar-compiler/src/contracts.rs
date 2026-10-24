@@ -220,9 +220,8 @@ impl Builtin {
             | Self::SplitLinesIter
             | Self::StringIter
             | Self::StringReverseIter
-            | Self::TextClosed
-            | Self::TupleCacheNew
-            | Self::TupleCacheResult => Contract::new(false, Unknown),
+            | Self::TextClosed => Contract::new(false, Unknown),
+            Self::TupleCacheNew | Self::TupleCacheResult => Contract::new(true, Unknown),
         }
     }
 }

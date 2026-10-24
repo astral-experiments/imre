@@ -121,7 +121,6 @@ fn expression(value: &Expr, functions: &[bool], targets: &Targets) -> bool {
         | ExprKind::None
         | ExprKind::Local(_) => false,
         ExprKind::List(values)
-        | ExprKind::Tuple(values)
         | ExprKind::Set { values, .. }
         | ExprKind::Compare(values, _)
         | ExprKind::Boolean(_, values) => values
@@ -175,15 +174,7 @@ fn expression(value: &Expr, functions: &[bool], targets: &Targets) -> bool {
                     .iter()
                     .any(|arg| expression(arg, functions, targets))
         }
-        ExprKind::Construct {
-            initializer, args, ..
-        } => {
-            functions.get(*initializer).copied().unwrap_or(true)
-                || args
-                    .values
-                    .iter()
-                    .any(|arg| expression(arg, functions, targets))
-        }
+        ExprKind::Tuple(_) | ExprKind::Construct { .. } => true,
         ExprKind::Exception { message, .. } => message
             .as_ref()
             .is_some_and(|message| expression(message, functions, targets)),
@@ -396,7 +387,7 @@ def conversion(values: list[str]) -> bool:
         };
         assert_eq!(
             analyze(&module).functions,
-            [false, true, false, true, true, true, true, true]
+            [false, true, true, true, true, true, true, true]
         );
     }
 

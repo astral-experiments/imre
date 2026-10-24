@@ -4697,7 +4697,7 @@ scan("a\nb", Path("lines.txt"), "4")
             let llvm = crate::compile(&source, &crate::CompileOptions::default()).unwrap();
             assert!(!llvm.contains("call ptr @relar_seq_new("));
             assert!(!llvm.contains("call void @relar_seq_append("));
-            assert!(!llvm.contains("call ptr @relar_record_new("));
+            assert!(!llvm.contains("call ptr @relar_record_try_new("));
         }
     }
 
