@@ -282,3 +282,30 @@ fn sorted_rows_reuse_only_live_ordered_sources_and_detach_on_write() {
         assert_eq!(rows(&copy), ["+ a", "+ b", "- c", "- c"]);
     }
 }
+
+#[test]
+fn split_ranges_preserve_unicode_lines_filters_and_independent_mutation() {
+    use crate::objects::{imre_seq_get_index, imre_str_splitlines, stdlib::imre_str_join};
+
+    let source = Rc::new(Str::new(
+        "+🦀hello\u{2028}+++excluded\r\n-β\u{85}plain\n".repeat(64),
+    ));
+    // SAFETY: the input, separator and lists root every handle; each owned
+    // result is taken exactly once and no storage borrow spans a mutation.
+    unsafe {
+        let split = Rc::from_raw(imre_str_splitlines(Rc::as_ptr(&source)));
+        let copy = Rc::from_raw(imre_str_list_copy(Rc::as_ptr(&split)));
+        let added = filter_rows(&split, "+", None, Some("+++"), 2);
+        let separator = Str::new("|");
+        let joined = Rc::from_raw(imre_str_join(&separator, Rc::as_ptr(&added)));
+        assert_eq!(joined.as_str(), vec!["hello"; 64].join("|"));
+        assert_eq!(imre_seq_len(Rc::as_ptr(&split)), 2 * 256 + 1);
+        let original = Rc::from_raw(imre_seq_get_index(Rc::as_ptr(&copy), 0) as *const Str);
+        assert_eq!(original.as_str(), "+🦀hello");
+        let extra = Rc::new(Str::new("detached"));
+        imre_seq_append(Rc::as_ptr(&split), Rc::as_ptr(&extra) as usize, 3);
+        assert_eq!(imre_seq_len(Rc::as_ptr(&split)), 2 * 257 + 1);
+        assert_eq!(imre_seq_len(Rc::as_ptr(&copy)), 2 * 256 + 1);
+        assert_eq!(imre_seq_len(Rc::as_ptr(&added)), 2 * 64 + 1);
+    }
+}

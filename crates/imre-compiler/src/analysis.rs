@@ -72,10 +72,7 @@ impl Session {
                 "tomli",
                 "from tomllib import load as load, loads as loads\n",
             ),
-            (
-                "unidiff",
-                "class PatchSet:\n    def __init__(self, patch: str) -> None: ...\n",
-            ),
+            ("unidiff", include_str!("analysis/unidiff.pyi")),
             (
                 "tomli_w",
                 "from typing import Any, BinaryIO\ndef dumps(obj: dict[str, Any]) -> str: ...\ndef dump(obj: dict[str, Any], fp: BinaryIO) -> None: ...\n",

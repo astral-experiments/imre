@@ -15,9 +15,11 @@ mod deferred_diff;
 mod difflib;
 pub(crate) mod exceptions;
 mod files;
+mod joined_lines;
 mod json;
 mod logging;
 mod mappings;
+mod patchset;
 mod paths;
 mod posixpath;
 mod processes;
@@ -69,6 +71,9 @@ enum Storage {
         name: std::cell::OnceCell<Rc<Str>>,
     },
     PathIterator(Box<paths::PathIterator>),
+    PatchSet(patchset::PatchSet),
+    PatchedFile(patchset::PatchedFile),
+    Hunk(Box<patchset::Hunk>),
     RegexPattern(Box<regexes::Pattern>),
     Logger(Rc<Str>),
     RegexMatch(regexes::Match),
@@ -367,9 +372,12 @@ pub unsafe extern "C" fn imre_seq_pop(value: *const Object) -> usize {
 pub unsafe extern "C" fn imre_seq_len(value: *const Object) -> usize {
     // SAFETY: only the copied length leaves storage.
     let length = unsafe {
-        object(value)
-            .0
-            .with(|storage| storage.sequence().values.len())
+        object(value).0.with(|storage| {
+            let words = storage.sequence_storage();
+            words
+                .plan()
+                .map_or_else(|| words.values.len(), deferred_diff::Deferred::len)
+        })
     };
     debug_assert!(length <= MAX_LIST_LEN);
     (length << 1) | 1
@@ -1088,7 +1096,8 @@ pub unsafe extern "C" fn imre_str_splitlines_iter(value: *const Str) -> *const O
 pub unsafe extern "C" fn imre_str_splitlines(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
-    split_lines(&value, |range| owned_line(&value, range))
+    deferred_diff::Deferred::split_lines(&value)
+        .unwrap_or_else(|| split_lines(&value, |range| owned_line(&value, range)))
 }
 
 fn split_lines(value: &str, own: impl Fn(std::ops::Range<usize>) -> Rc<Str>) -> *const Object {

@@ -27,12 +27,14 @@ mod enums;
 mod expansions;
 mod inference;
 mod iterables;
+mod joined_lines;
 mod json;
 mod literals;
 mod local_functions;
 mod logging;
 mod matching;
 mod module_values;
+mod patchset;
 mod paths;
 mod pipelines;
 mod posixpath;
@@ -637,6 +639,7 @@ pub(crate) fn lower_with_owners(
                 &globals,
             );
             checker.returns = signature.returns;
+            checker.joined_lines = joined_lines::find(&definition.body);
             checker.asynchronous = signature.asynchronous;
             checker.method_context(signature.method);
             let mut params = Vec::new();
@@ -1264,6 +1267,13 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
         Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
+        Some(Binding::Intrinsic(Intrinsic::PatchSet)) => {
+            return Ok(Type::Patch(ir::PatchKind::Set));
+        }
+        Some(Binding::Intrinsic(Intrinsic::PatchedFile)) => {
+            return Ok(Type::Patch(ir::PatchKind::File));
+        }
+        Some(Binding::Intrinsic(Intrinsic::Hunk)) => return Ok(Type::Patch(ir::PatchKind::Hunk)),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
             return Ok(Type::CompletedProcess(crate::ir::ProcessCapture::TEXT));
@@ -1611,6 +1621,7 @@ struct Checker<'a> {
     regex_locals: HashMap<usize, regex::CaptureLayout>,
     /// Group dictionary locals whose complete set of reads resolves to capture slots.
     regex_fields: HashMap<usize, HashMap<String, usize>>,
+    joined_lines: HashMap<TextRange, String>,
     namespace_guards: Vec<(usize, usize)>,
     captured_process_errors: Vec<processes::CapturedFields>,
     returns: Type,
@@ -1665,6 +1676,7 @@ impl<'a> Checker<'a> {
             regex_guards: Vec::new(),
             regex_locals: HashMap::new(),
             regex_fields: HashMap::new(),
+            joined_lines: HashMap::new(),
             namespace_guards: Vec::new(),
             captured_process_errors: Vec::new(),
             returns: Type::None,
@@ -3633,6 +3645,7 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ZlibError)) => Some(29),
             Some(Binding::Intrinsic(Intrinsic::TomlDecodeError)) => Some(30),
             Some(Binding::Intrinsic(Intrinsic::JsonDecodeError)) => Some(31),
+            Some(Binding::Intrinsic(Intrinsic::UnidiffParseError)) => Some(35),
             Some(_) => None,
             None => match expression {
                 ast::Expr::Name(name) => exception_kind(name.id.as_str()),
@@ -4342,27 +4355,32 @@ impl<'a> Checker<'a> {
                     } else {
                         receiver
                     };
-                    let (key_type, builtin) =
-                        if let Some((key, _)) = self.types.mapping(receiver.ty) {
-                            (key, Builtin::DictContains)
-                        } else if receiver.ty == Type::Str {
-                            (Type::Str, Builtin::StringContains)
-                        } else if let Some(element) = self
-                            .types
-                            .set_element(receiver.ty)
-                            .or((receiver.ty == Type::StringKeys).then_some(Type::Str))
-                        {
-                            (element, Builtin::SetContains)
-                        } else if self.types.element(receiver.ty) == Some(Type::Str) {
-                            (Type::Str, Builtin::StringListContains)
-                        } else {
-                            return Err(error(
-                                self.source,
-                                expression,
-                                "membership requires a concrete dictionary or set",
-                            ));
-                        };
-                    let key = if key_type == Type::Str {
+                    let (key_type, builtin) = if let Some((key, _)) =
+                        self.types.mapping(receiver.ty)
+                    {
+                        (key, Builtin::DictContains)
+                    } else if receiver.ty == Type::Str {
+                        (Type::Str, Builtin::StringContains)
+                    } else if let Some(element) = self
+                        .types
+                        .set_element(receiver.ty)
+                        .or((receiver.ty == Type::StringKeys).then_some(Type::Str))
+                    {
+                        (element, Builtin::SetContains)
+                    } else if receiver.ty == Type::ListInt {
+                        (self.types.optional(Type::Int), Builtin::IntListContains)
+                    } else if self.types.element(receiver.ty) == Some(Type::Str) {
+                        (Type::Str, Builtin::StringListContains)
+                    } else {
+                        return Err(error(
+                            self.source,
+                            expression,
+                            "membership requires a dictionary, set, string, list[int], or list[str]",
+                        ));
+                    };
+                    let key = if receiver.ty == Type::ListInt {
+                        self.coerce(key, key_type, expression)?
+                    } else if key_type == Type::Str {
                         Self::string_value(key)
                     } else {
                         key
@@ -4566,6 +4584,13 @@ impl<'a> Checker<'a> {
                             ));
                         }
                     };
+                    if matches!(ty, Type::Patch(_)) {
+                        return Err(error(
+                            self.source,
+                            expression,
+                            "comparison of unified-diff objects is unsupported",
+                        ));
+                    }
                     if matches!(ty, Type::RegexPattern | Type::RegexMatch) {
                         return Err(error(
                             self.source,
@@ -4773,6 +4798,9 @@ impl<'a> Checker<'a> {
                         }
                         _ => return self.class_attribute(attribute, class, Some(receiver), None),
                     }
+                }
+                if let Type::Patch(kind) = receiver.ty {
+                    return self.patch_attribute(kind, receiver, attribute);
                 }
                 if receiver.ty == Type::Logger {
                     return self.logger_attribute(receiver, attribute);
@@ -5163,6 +5191,7 @@ impl<'a> Checker<'a> {
                     "ndiff requires immediate materialization",
                 ));
             }
+            Some(Binding::Intrinsic(Intrinsic::PatchSet)) => return self.parse_patch(call),
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::GetSysconfigPath | Intrinsic::OsPathExists),
@@ -5488,6 +5517,18 @@ impl<'a> Checker<'a> {
                 return Ok(Expr {
                     ty: self.types.list(Type::Str),
                     kind: match receiver.kind {
+                        _ if let Some(separator) = self.joined_lines.get(&call.range()) => {
+                            ExprKind::Builtin(
+                                Builtin::JoinedSplitLines,
+                                vec![
+                                    receiver,
+                                    Expr {
+                                        ty: Type::Str,
+                                        kind: ExprKind::Str(separator.clone()),
+                                    },
+                                ],
+                            )
+                        }
                         ExprKind::Builtin(Builtin::Decode, bytes) => {
                             ExprKind::Builtin(Builtin::DecodeSplitLines, bytes)
                         }
@@ -5716,6 +5757,11 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|arg| self.expr(arg))
             .collect::<Result<Vec<_>, _>>()?;
+        if let [value] = args.as_slice()
+            && let Some(result) = self.patch_builtin(name.id.as_str(), value)
+        {
+            return Ok(result);
+        }
         if name.id == "hash" {
             let [value] = args.as_slice() else {
                 return Err(error(self.source, call, "hash requires one argument"));

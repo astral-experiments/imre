@@ -945,6 +945,26 @@ pub extern "C" fn imre_list_new() -> *const List {
     new_list(Vec::new())
 }
 
+/// Test an optional integer against a homogeneous integer list. Small integers
+/// are canonical words; only two distinct heap integers need a value comparison.
+///
+/// # Safety
+/// The caller roots the list and its optional integer (zero represents None).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_list_contains(needle: usize, list: *const List) -> u32 {
+    if needle == 0 {
+        return 0;
+    }
+    // SAFETY: neither the list scan nor integer equality can reenter or mutate it.
+    unsafe {
+        u32::from((&*list).0.with(|values| {
+            values.iter().any(|v| {
+                v.0 == needle || ((v.0 | needle) & 1 == 0 && imre_int_compare(v.0, needle) == 0)
+            })
+        }))
+    }
+}
+
 /// # Safety
 /// The argument must be a live list handle or null during slot cleanup.
 #[unsafe(no_mangle)]

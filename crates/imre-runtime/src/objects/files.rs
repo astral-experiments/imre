@@ -1,8 +1,8 @@
 //! Sealed UTF-8 text and byte streams. Explicit operations report language errors;
 //! final ownership cleanup only closes resources and never changes error state.
 
-use std::fs::OpenOptions;
-use std::io;
+use std::fs::{File, Metadata, OpenOptions};
+use std::io::{self, Read};
 use std::os::fd::IntoRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
@@ -43,15 +43,18 @@ impl Stream {
             Self::Read(input) => (input.into_file(), Ok(())),
             Self::Write(writer) => writer.finish(),
         };
-        let descriptor = file.into_raw_fd();
-        // SAFETY: into_raw_fd transfers our unique descriptor owner. Do not
-        // retry close after EINTR: the descriptor may already have been reused.
-        let closed = if unsafe { libc::close(descriptor) } == 0 {
-            Ok(())
-        } else {
-            Err(io::Error::last_os_error())
-        };
-        closed.and(flushed)
+        close_file(file).and(flushed)
+    }
+}
+
+fn close_file(file: File) -> io::Result<()> {
+    let descriptor = file.into_raw_fd();
+    // SAFETY: into_raw_fd transfers our unique descriptor owner. Do not
+    // retry close after EINTR: the descriptor may already have been reused.
+    if unsafe { libc::close(descriptor) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
     }
 }
 
@@ -291,7 +294,7 @@ fn open(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<*const Object
     )))))
 }
 
-fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
+fn open_file(path: &str, mode: u32) -> Result<(File, Metadata)> {
     super::super::initialize_io();
     if path.contains('\0') {
         return Err(Error::new(Kind::ValueError, "embedded null byte"));
@@ -312,6 +315,11 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
     if metadata.is_dir() {
         return Err(Error::new(Kind::IsADirectoryError, "is a directory"));
     }
+    Ok((file, metadata))
+}
+
+fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileState> {
+    let (file, metadata) = open_file(path, mode)?;
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
     let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
     let stream = match mode {
@@ -348,7 +356,23 @@ pub(super) fn read_path_text(path: &str) -> Result<Str> {
 }
 
 pub(super) fn read_path_bytes(path: &str) -> Result<Bytes> {
-    with_path_file(path, 0, true, |state| state.input()?.read_bytes(None))
+    let (mut file, metadata) = open_file(path, 0)?;
+    let mut bytes = Vec::new();
+    // Path.read_bytes owns the descriptor until close and consumes it to EOF.
+    // A regular file can fill the result directly without allocating a second
+    // buffered-reader window (128 KiB even for an empty input).
+    let result = if metadata.is_file() {
+        file.read_to_end(&mut bytes)
+            .map(|_| bytes)
+            .map_err(os_error)
+    } else {
+        let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
+        let mut input = Input::new(file, false, true, capacity);
+        let result = input.read_bytes(None);
+        file = input.into_file();
+        result
+    };
+    close_file(file).map_err(os_error).and(result)
 }
 
 pub(super) fn write_path_bytes(path: &str, bytes: &[u8]) -> Result<usize> {

@@ -4,6 +4,8 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
     Document(DocumentShape),
+    /// Read-only nodes from the sealed unified-diff parser.
+    Patch(PatchKind),
     Int,
     Float,
     Bool,
@@ -144,6 +146,9 @@ impl std::fmt::Display for Type {
             Self::GeneratorContext => "@contextmanager",
             Self::DirectoryContext(_) => "directory context",
             Self::Semaphore => "asyncio.Semaphore",
+            Self::Patch(PatchKind::Set) => "unidiff.PatchSet",
+            Self::Patch(PatchKind::File) => "unidiff.PatchedFile",
+            Self::Patch(PatchKind::Hunk) => "unidiff.Hunk",
             Self::RegexPattern => "re.Pattern[str]",
             Self::Logger => "logging.Logger",
             Self::RegexMatch => "re.Match[str]",
@@ -425,6 +430,7 @@ pub(crate) enum Builtin {
     EnumString,
     NominalIdentity,
     LiteralStringView,
+    IntListContains,
     StringListContains,
     StringContains,
     /// Reads an initialized module binding with an independent owned reference.
@@ -549,6 +555,8 @@ pub(crate) enum Builtin {
     IsInstance(Vec<InstanceType>),
     Split,
     SplitLines,
+    /// Only the first line and a joined remainder can be observed.
+    JoinedSplitLines,
     DecodeSplitLines,
     Ndiff,
     /// Copy an exact list of immutable strings into a distinct mutable list.
@@ -599,6 +607,7 @@ pub(crate) enum Builtin {
     JsonDump(Type),
     Path(PathOperation),
     PosixPath(PosixPathOperation),
+    Patch(PatchOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
@@ -732,6 +741,26 @@ pub(crate) enum RegexCapture {
     Absent,
     Start,
     End,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PatchKind {
+    Set,
+    File,
+    Hunk,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum PatchOperation {
+    Parse,
+    Len,
+    Files,
+    ModifiedFiles,
+    ModifiedCount,
+    Hunks,
+    Path,
+    SourceStart,
+    HunkText,
 }
 
 /// Closed string operations preserve exact argument and storage types.

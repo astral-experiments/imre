@@ -63,6 +63,7 @@ pub(crate) enum Kind {
     SystemExit = 32,
     CancelledError = 33,
     ExceptionGroup = 34,
+    UnidiffParseError = 35,
 }
 
 impl Kind {
@@ -103,6 +104,7 @@ impl Kind {
             32 => Self::SystemExit,
             33 => Self::CancelledError,
             34 => Self::ExceptionGroup,
+            35 => Self::UnidiffParseError,
             _ => fail("SystemError", "invalid exception kind"),
         }
     }
@@ -144,6 +146,7 @@ impl Kind {
             Self::SystemExit => "SystemExit",
             Self::CancelledError => "CancelledError",
             Self::ExceptionGroup => "ExceptionGroup",
+            Self::UnidiffParseError => "UnidiffParseError",
         }
     }
 

@@ -117,6 +117,10 @@ impl Builtin {
                 },
                 PreservesLists,
             ),
+            Self::Patch(operation) => Contract::new(
+                matches!(operation, crate::ir::PatchOperation::Parse),
+                PreservesLists,
+            ),
             Self::Logging(operation) => Contract::new(
                 matches!(operation, crate::ir::LogOperation::Configure),
                 PreservesLists,
@@ -250,6 +254,7 @@ impl Builtin {
             | Self::SetContains
             | Self::Split
             | Self::SplitLines
+            | Self::JoinedSplitLines
             | Self::Ndiff
             | Self::StringListCopy
             | Self::StringListFilter(_)
@@ -261,6 +266,7 @@ impl Builtin {
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString
+            | Self::IntListContains
             | Self::StringListContains
             | Self::StringContains
             | Self::UnionInject
@@ -528,6 +534,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || matches!(
             name,
             "int_floordiv"
+                | "imre_patch_parse"
                 | "imre_json_index"
                 | "imre_json_iter"
                 | "imre_json_len"
