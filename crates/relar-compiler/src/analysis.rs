@@ -1,5 +1,7 @@
 //! Hosts ty's real semantic analysis and Ruff's cached parser over one source snapshot.
 
+mod inferred_shapes;
+
 use std::path::Path;
 use std::sync::Arc;
 
@@ -129,6 +131,8 @@ impl Session {
         if let Some(error) = limits.error {
             return Err(format!("{path}: {error}"));
         }
+        inferred_shapes::check(&parsed.syntax().body, parsed.tokens().len())
+            .map_err(|error| format!("{path}: {error}"))?;
         self.files.push(file);
         Ok(parsed)
     }

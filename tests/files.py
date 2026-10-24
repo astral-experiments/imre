@@ -351,6 +351,30 @@ write_file()
 with open("output.txt", "r", encoding="utf-8") as stream:
     print(stream.read())
 """,
+    "list_release_order": r"""
+from typing import BinaryIO
+
+def writer(mark: bytes) -> BinaryIO:
+    stream = open("order.bin", "ab")
+    stream.write(mark)
+    return stream
+
+def discard(shared: bool) -> None:
+    streams: list[BinaryIO] = [writer(b"A"), writer(b"B")]
+    if shared:
+        streams.append(streams[0])
+    else:
+        streams.append(writer(b"C"))
+    streams.append(writer(b"D"))
+    print(len(streams))
+
+with open("order.bin", "wb") as empty:
+    pass
+discard(False)
+discard(True)
+with open("order.bin", "rb") as result:
+    print(result.read())
+""",
     "flush_and_close_failure": r"""
 stream = open("failing-output", "w", encoding="utf-8")
 stream.write("buffered")
