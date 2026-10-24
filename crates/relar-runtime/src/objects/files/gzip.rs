@@ -1,12 +1,15 @@
 //! CPython's gzip member framing on top of flate2's streaming DEFLATE decoder.
 
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, Read};
+use std::io::{self, BufRead, Read};
 use std::mem::MaybeUninit;
+use std::ops::Range;
 
 use flate2::{Crc, Decompress, FlushDecompress, Status};
 
 use super::Kind;
+
+const CHUNK_SIZE: usize = 128 * 1024;
 
 #[derive(Debug)]
 pub(super) struct GzipError(pub(super) Kind, pub(super) &'static str);
@@ -21,12 +24,60 @@ impl std::error::Error for GzipError {}
 
 enum Phase {
     Header,
-    Body,
+    Body { chunk_end: Option<usize> },
     Trailer,
 }
 
+/// Metadata reads and DEFLATE share unread bytes across gzip members. A new
+/// DEFLATE chunk starts at the current compressed position, even after a header.
+struct GzipInput {
+    file: File,
+    block: Box<[u8]>,
+    unread: Range<usize>,
+}
+
+impl GzipInput {
+    fn fill_block(&mut self) -> io::Result<usize> {
+        if self.unread.start + CHUNK_SIZE > self.block.len() {
+            self.block.copy_within(self.unread.clone(), 0);
+            self.unread = 0..self.unread.len();
+        }
+        let end = self.unread.start + CHUNK_SIZE;
+        while self.unread.end < end {
+            match self.file.read(&mut self.block[self.unread.end..]) {
+                Ok(0) => break,
+                Ok(count) => self.unread.end += count,
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(end.min(self.unread.end))
+    }
+}
+
+impl BufRead for GzipInput {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        if self.unread.is_empty() {
+            self.unread = 0..self.file.read(&mut self.block[..CHUNK_SIZE])?;
+        }
+        Ok(&self.block[self.unread.clone()])
+    }
+
+    fn consume(&mut self, count: usize) {
+        self.unread.start += count;
+    }
+}
+
+impl Read for GzipInput {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        let count = self.fill_buf()?.read(out)?;
+        self.consume(count);
+        Ok(count)
+    }
+}
+
 pub(super) struct GzipReader {
-    input: BufReader<File>,
+    input: GzipInput,
     decoder: Decompress,
     crc: Crc,
     phase: Phase,
@@ -35,7 +86,12 @@ pub(super) struct GzipReader {
 impl GzipReader {
     pub(super) fn new(file: File) -> Self {
         Self {
-            input: BufReader::with_capacity(128 * 1024, file),
+            input: GzipInput {
+                file,
+                // Leave room to slide past small members without moving a full chunk each time.
+                block: vec![0; CHUNK_SIZE + 4096].into_boxed_slice(),
+                unread: 0..0,
+            },
             decoder: Decompress::new(false),
             crc: Crc::new(),
             phase: Phase::Header,
@@ -43,7 +99,7 @@ impl GzipReader {
     }
 
     pub(super) fn into_file(self) -> File {
-        self.input.into_inner()
+        self.input.file
     }
 
     /// Skip optional metadata without allocating in proportion to its size.
@@ -90,7 +146,7 @@ impl GzipReader {
         if flags & 2 != 0 {
             self.input.read_exact(&mut [0; 2])?;
         }
-        self.phase = Phase::Body;
+        self.phase = Phase::Body { chunk_end: None };
         Ok(true)
     }
 
@@ -138,8 +194,13 @@ impl GzipReader {
                     }
                 }
                 Phase::Trailer => self.trailer()?,
-                Phase::Body => {
-                    let input = self.input.fill_buf()?;
+                Phase::Body { chunk_end } => {
+                    let end = match chunk_end {
+                        Some(end) => end,
+                        None => self.input.fill_block()?,
+                    };
+                    let input = &self.input.block[self.input.unread.start..end];
+                    let empty = input.is_empty();
                     let before = (self.decoder.total_in(), self.decoder.total_out());
                     let status = self
                         .decoder
@@ -152,8 +213,15 @@ impl GzipReader {
                     self.input.consume(consumed);
                     if status == Status::StreamEnd {
                         self.phase = Phase::Trailer;
-                    } else if written == 0 && consumed == 0 {
+                    } else if written == 0 && consumed == 0 && (chunk_end.is_none() || !empty) {
                         return Err(io::ErrorKind::UnexpectedEof.into());
+                    } else {
+                        // A full output can leave bytes inside the inflater.
+                        // Drain those before supplying another compressed chunk.
+                        self.phase = Phase::Body {
+                            chunk_end: (self.input.unread.start < end || written == out.len())
+                                .then_some(end),
+                        };
                     }
                     if written > 0 {
                         // SAFETY: total_out advanced by the initialized prefix length.
