@@ -168,6 +168,7 @@ impl Module {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Function {
     pub params: Vec<usize>,
     pub returns: Type,

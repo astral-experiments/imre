@@ -50,11 +50,15 @@ pub(crate) struct Session {
     db: Database,
     files: Vec<File>,
     rules: Arc<RuleSelection>,
-    root: PathBuf,
-    used_hints: Cell<bool>,
+    pub(crate) root: PathBuf,
+    hint_reads: Cell<usize>,
 }
 
 impl Session {
+    pub(crate) fn hint_reads(&self) -> usize {
+        self.hint_reads.get()
+    }
+
     pub(crate) fn new(root: &Path) -> Result<Self, String> {
         let root = root.to_str().ok_or("module paths must be valid UTF-8")?;
         let system = InMemorySystem::default();
@@ -130,7 +134,7 @@ impl Session {
             files: Vec::new(),
             rules: Arc::new(rules),
             root: PathBuf::from(root),
-            used_hints: Cell::new(false),
+            hint_reads: Cell::new(0),
         })
     }
 
@@ -215,7 +219,7 @@ impl Session {
         use crate::ir::Type;
         use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
 
-        self.used_hints.set(true);
+        self.hint_reads.set(self.hint_reads.get() + 1);
         let file = self.db.program_file(self.files[module]);
         let ty = value.inferred_type(&SemanticModel::new(&self.db, file))?;
         if !matches!(
@@ -251,7 +255,7 @@ impl Session {
     }
 
     pub(crate) fn is_never(&self, module: usize, value: &ruff_python_ast::Expr) -> bool {
-        self.used_hints.set(true);
+        self.hint_reads.set(self.hint_reads.get() + 1);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
         matches!(
             value.inferred_type(&model),
@@ -392,7 +396,7 @@ impl AnalysisCache {
         graph: &crate::modules::SourceGraph,
         lowering_succeeded: bool,
     ) {
-        if graph.session.used_hints.take() {
+        if graph.session.hint_reads.take() != 0 {
             self.hints
                 .get_or_insert_with(|| CachedSession::new(graph.session.clone(), &graph.inputs));
         } else if lowering_succeeded {

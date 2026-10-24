@@ -81,7 +81,7 @@ pub fn check_file(path: &Path, module_root: Option<&Path>) -> Result<(), String>
 fn check_file_with(
     path: &Path,
     module_root: Option<&Path>,
-    cache: Option<&mut analysis::AnalysisCache>,
+    cache: Option<&mut IncrementalCompiler>,
 ) -> Result<(), String> {
     let mut graph = modules::SourceGraph::load(path, module_root)?;
     let (module, _) = checked_lower_with(&mut graph, cache)?;
@@ -121,17 +121,19 @@ pub struct UnitCompilation {
 }
 
 /// Reuses ty's semantic queries across revisions of a first-party program in this process.
-/// Each call resolves imports and runs Relar's preflight, lowering and requested code generation
-/// against the current files. Changing the module root or resolved file set starts a new database.
+/// A change confined to literal `int` or `bool` defaults on explicitly typed top-level functions
+/// can also reuse completed caller bodies that did not consume those defaults. Each call resolves
+/// imports, checks the whole program and runs the requested code generation against current files.
 #[derive(Default)]
 pub struct IncrementalCompiler {
     cache: analysis::AnalysisCache,
+    callers: frontend::CallerCache,
 }
 
 impl IncrementalCompiler {
     /// Checks the current revision, including unused definitions in every reachable file.
     pub fn check_file(&mut self, path: &Path, module_root: Option<&Path>) -> Result<(), String> {
-        check_file_with(path, module_root, Some(&mut self.cache))
+        check_file_with(path, module_root, Some(self))
     }
 
     /// Checks the current revision and emits the same codegen units as [`compile_file_units`].
@@ -141,7 +143,7 @@ impl IncrementalCompiler {
         module_root: Option<&Path>,
         options: &CompileOptions,
     ) -> Result<UnitCompilation, String> {
-        compile_file_units_with(path, module_root, options, Some(&mut self.cache))
+        compile_file_units_with(path, module_root, options, Some(self))
     }
 }
 
@@ -158,7 +160,7 @@ fn compile_file_units_with(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
-    cache: Option<&mut analysis::AnalysisCache>,
+    cache: Option<&mut IncrementalCompiler>,
 ) -> Result<UnitCompilation, String> {
     let mut graph = modules::SourceGraph::load(path, module_root)?;
     let (mut module, owners) = checked_lower_with(&mut graph, cache)?;
@@ -194,17 +196,22 @@ fn checked_lower(
 
 fn checked_lower_with(
     graph: &mut modules::SourceGraph,
-    cache: Option<&mut analysis::AnalysisCache>,
+    cache: Option<&mut IncrementalCompiler>,
 ) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
-    let Some(cache) = cache else {
+    let Some(compiler) = cache else {
         return checked_lower(graph);
     };
-    cache.restore_hints(graph)?;
-    let lowered = frontend::lower_with_owners(graph);
-    cache.retain_hints(graph, lowered.is_ok());
-    let lowered = lowered?;
-    cache.check(&mut graph.session, &graph.inputs)?;
-    Ok(lowered)
+    compiler.cache.restore_hints(graph)?;
+    let lowered = frontend::lower_with_caller_cache(graph, compiler.callers.prepare(graph));
+    compiler.cache.retain_hints(graph, lowered.is_ok());
+    let checked = lowered.and_then(|lowered| {
+        compiler.cache.check(&mut graph.session, &graph.inputs)?;
+        Ok(lowered)
+    });
+    if checked.is_err() {
+        compiler.callers = frontend::CallerCache::default();
+    }
+    checked
 }
 
 fn specialize(module: &mut ir::Module) -> Result<(), String> {

@@ -32,6 +32,10 @@ impl ModuleValues {
         slot
     }
 
+    pub(super) fn types(&self) -> std::cell::Ref<'_, Vec<Type>> {
+        self.types.borrow()
+    }
+
     pub fn into_types(self) -> Vec<Type> {
         self.types.into_inner()
     }

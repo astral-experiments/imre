@@ -69,6 +69,10 @@ impl Helpers {
         }
     }
 
+    pub(super) fn len(&self) -> usize {
+        self.functions.borrow().len()
+    }
+
     pub(super) fn reserve(&self) -> usize {
         let mut functions = self.functions.borrow_mut();
         let id = self.first + functions.len();

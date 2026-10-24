@@ -14,6 +14,7 @@ use crate::types::Types;
 mod argparse;
 mod assignments;
 mod callables;
+mod caller_cache;
 mod calls;
 mod comprehensions;
 mod dataclass_values;
@@ -42,6 +43,7 @@ mod unions;
 mod unpacking;
 mod zip_sums;
 use assignments::LocalState;
+pub(crate) use caller_cache::CallerCache;
 use calls::{Parameter, ParameterKind};
 use comprehensions::Helpers;
 use module_values::{Initialization, ModuleValues};
@@ -258,6 +260,13 @@ pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
 pub(crate) fn lower_with_owners(
     graph: &SourceGraph,
 ) -> Result<(ir::Module, Vec<ModuleId>), String> {
+    lower_with_caller_cache(graph, None)
+}
+
+pub(crate) fn lower_with_caller_cache(
+    graph: &SourceGraph,
+    mut cache: Option<&mut CallerCache>,
+) -> Result<(ir::Module, Vec<ModuleId>), String> {
     let types = Types::default();
     let mut classes = ClassInfo::new(graph, &types)?;
     dataclass_values::validate(&classes, graph, &types)?;
@@ -385,6 +394,9 @@ pub(crate) fn lower_with_owners(
                 .map_err(|error| format!("{}:{error}", graph.modules[module_id].path.display()))?,
         );
     }
+    if let Some(cache) = cache.as_deref_mut() {
+        cache.validate_abi(&definitions, &globals);
+    }
     let mut functions = Vec::new();
     let mut zip_sums = Vec::new();
     let mut owners = Vec::new();
@@ -393,81 +405,27 @@ pub(crate) fn lower_with_owners(
     let mut recursion_errors = Vec::new();
     for (module_id, definition, signature) in &definitions {
         let module = &graph.modules[*module_id];
-        let result = (|| {
-            let mut checker = Checker::new(
-                graph,
-                *module_id,
-                &signatures,
-                &classes,
-                &types,
-                &helpers,
-                &globals,
-            );
-            checker.returns = signature.returns;
-            checker.method_context(signature.method);
-            let mut params = Vec::new();
-            for (parameter, signature) in definition
-                .parameters
-                .iter_non_variadic_params()
-                .zip(&signature.params)
-            {
-                let slot = checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
-                checker.assigned.insert(slot);
-                params.push(slot);
-            }
-            let (mut body, falls_through) = checker.function_body(&definition.body)?;
-            if let Some(context) = signature.method
-                && let class = &classes.declarations.definitions[context.class]
-                && class.generated_initializer
-                && class.initializer == Some(context.index)
-                && let Some(post) = classes.methods[context.class].get("__post_init__")
-            {
-                checker.calls.insert(post.id);
-                body.push(Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Call(
-                        post.id,
-                        ir::CallArgs::positional(vec![checker.local(params[0])]),
-                    ),
-                }));
-            }
-            checker.fuse_sorted_rows(&definition.body, &mut body);
-            if falls_through && types.payload(signature.returns).is_some() {
-                body.push(Statement::Return(Expr {
-                    ty: signature.returns,
-                    kind: ExprKind::Absent(Box::new(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::None,
-                    })),
-                }));
-            } else if falls_through && signature.returns != Type::None {
-                return Err(error(
-                    &module.source,
-                    definition,
-                    "not every path returns the declared type",
-                ));
-            }
-            Ok((
-                ir::Function {
-                    params,
-                    returns: signature.returns,
-                    locals: checker.locals,
-                    body,
-                },
-                checker.calls,
-                checker.class_reads.into_inner(),
-                checker.zip_sums,
-            ))
-        })();
-        let (function, calls, reads, sums) =
-            result.map_err(|error| format!("{}:{error}", module.path.display()))?;
+        let checker = Checker::new(
+            graph,
+            *module_id,
+            &signatures,
+            &classes,
+            &types,
+            &helpers,
+            &globals,
+        );
+        let result = match cache.as_deref_mut() {
+            Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
+            _ => lower_body(checker, definition, signature),
+        };
+        let (body, sums) = result.map_err(|error| format!("{}:{error}", module.path.display()))?;
         if sums.len() >= 2 {
             zip_sums.push((functions.len(), sums));
         }
         owners.push(*module_id);
-        functions.push(function);
-        call_graph.push(calls);
-        class_reads.push(reads);
+        functions.push(body.function);
+        call_graph.push(body.calls);
+        class_reads.push(body.class_reads);
         recursion_errors.push(module.error(
             definition,
             "recursive calls are unsupported in this prototype",
@@ -570,6 +528,9 @@ pub(crate) fn lower_with_owners(
     for (id, sums) in zip_sums {
         zip_sums::fuse(&mut functions, id, &sums);
     }
+    if let Some(cache) = cache {
+        cache.finish(&types);
+    }
     Ok((
         ir::Module {
             types,
@@ -581,6 +542,83 @@ pub(crate) fn lower_with_owners(
             entry,
         },
         owners,
+    ))
+}
+
+#[derive(Clone)]
+struct LoweredBody {
+    function: ir::Function,
+    calls: HashSet<usize>,
+    class_reads: HashSet<DefinitionId>,
+    default_reads: Vec<caller_cache::DefaultId>,
+}
+
+type BodyResult = Result<(LoweredBody, HashMap<usize, zip_sums::Sum>), String>;
+
+fn lower_body(
+    mut checker: Checker<'_>,
+    definition: &ast::StmtFunctionDef,
+    signature: &Signature,
+) -> BodyResult {
+    #[cfg(test)]
+    caller_cache::record_lowering(definition.name.as_str());
+    checker.returns = signature.returns;
+    checker.method_context(signature.method);
+    let mut params = Vec::new();
+    for (parameter, signature) in definition
+        .parameters
+        .iter_non_variadic_params()
+        .zip(&signature.params)
+    {
+        let slot = checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
+        checker.assigned.insert(slot);
+        params.push(slot);
+    }
+    let (mut body, falls_through) = checker.function_body(&definition.body)?;
+    if let Some(context) = signature.method
+        && let class = &checker.classes.declarations.definitions[context.class]
+        && class.generated_initializer
+        && class.initializer == Some(context.index)
+        && let Some(post) = checker.classes.methods[context.class].get("__post_init__")
+    {
+        checker.calls.insert(post.id);
+        body.push(Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Call(
+                post.id,
+                ir::CallArgs::positional(vec![checker.local(params[0])]),
+            ),
+        }));
+    }
+    checker.fuse_sorted_rows(&definition.body, &mut body);
+    if falls_through && checker.types.payload(signature.returns).is_some() {
+        body.push(Statement::Return(Expr {
+            ty: signature.returns,
+            kind: ExprKind::Absent(Box::new(Expr {
+                ty: Type::None,
+                kind: ExprKind::None,
+            })),
+        }));
+    } else if falls_through && signature.returns != Type::None {
+        return Err(error(
+            checker.source,
+            definition,
+            "not every path returns the declared type",
+        ));
+    }
+    Ok((
+        LoweredBody {
+            function: ir::Function {
+                params,
+                returns: signature.returns,
+                locals: checker.locals,
+                body,
+            },
+            calls: checker.calls,
+            class_reads: checker.class_reads.into_inner(),
+            default_reads: checker.default_reads.unwrap_or_default(),
+        },
+        checker.zip_sums,
     ))
 }
 
@@ -1152,6 +1190,7 @@ struct Checker<'a> {
     assigned: assignments::Assigned,
     calls: HashSet<usize>,
     class_reads: std::cell::RefCell<HashSet<DefinitionId>>,
+    default_reads: Option<Vec<caller_cache::DefaultId>>,
     loop_breaks: Vec<Option<LocalState>>,
     in_finally: bool,
     reachable: bool,
@@ -1197,6 +1236,7 @@ impl<'a> Checker<'a> {
             assigned: assignments::Assigned::default(),
             calls: HashSet::new(),
             class_reads: Default::default(),
+            default_reads: None,
             loop_breaks: Vec::new(),
             in_finally: false,
             reachable: true,
@@ -4054,6 +4094,13 @@ impl<'a> Checker<'a> {
                 });
             }
             let args = self.arguments(call, &signature.params, None)?;
+            if let Some(reads) = &mut self.default_reads {
+                // The binder appends omitted defaults after all source operands.
+                let supplied = call.arguments.args.len() + call.arguments.keywords.len();
+                reads.extend(args.order.iter().enumerate().filter_map(|(param, &value)| {
+                    (value >= supplied).then_some((definition, param))
+                }));
+            }
             self.calls.insert(signature.id);
             return Ok(Expr {
                 ty: signature.returns,
