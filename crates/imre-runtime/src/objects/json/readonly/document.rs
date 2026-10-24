@@ -127,6 +127,7 @@ impl Value {
                     Ok(Node::Array(children))
                 })?
             },
+            // SAFETY: the shared table roots its keys and each document during this read.
             Self::Table(t) => unsafe {
                 t.0.with(|storage| {
                     let mut fields = Vec::new();
