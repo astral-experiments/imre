@@ -492,8 +492,9 @@ def indirect(value: str) -> int:
 "#;
         let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
         assert!(llvm.contains("getelementptr inbounds %class_0"));
-        // Parsing, its fallible caller, and the process-entry flush stay checked.
-        assert_eq!(llvm.matches("call i32 @imre_error_pending()").count(), 3);
+        // Parsing and its fallible caller stay checked. Finalization returns the exit status.
+        assert_eq!(llvm.matches("call i32 @imre_error_pending()").count(), 2);
+        assert!(llvm.contains("call i32 @imre_finish_stdio()"));
     }
 
     #[test]
