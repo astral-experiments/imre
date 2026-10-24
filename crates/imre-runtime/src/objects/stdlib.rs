@@ -392,15 +392,19 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
                 Rc::increment_strong_count(value);
                 return value;
             }
-            let separators = string_capacity(
-                separator
-                    .len()
-                    .checked_mul(values.values.len().saturating_sub(1)),
-            );
-            let length = values.values.iter().try_fold(separators, |length, &word| {
-                length.checked_add((&*(word as *const Str)).len())
-            });
-            let mut result = Str::with_capacity(string_capacity(length));
+            let length = separator
+                .len()
+                .checked_mul(values.values.len().saturating_sub(1))
+                .and_then(|separators| {
+                    values.values.iter().try_fold(separators, |length, &word| {
+                        length.checked_add((&*(word as *const Str)).len())
+                    })
+                });
+            let Some(mut result) = length.and_then(|length| Str::try_with_capacity(length).ok())
+            else {
+                super::exceptions::sequence_allocation_failed();
+                return std::ptr::null();
+            };
             for (index, &word) in values.values.iter().enumerate() {
                 if index != 0 {
                     result.push_str(separator);
