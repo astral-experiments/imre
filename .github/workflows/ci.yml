@@ -67,6 +67,12 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - name: Validate slice-sum fusion on bounded heaps
+        env:
+          CLANG: clang-18
+        run: |
+          cargo build -p relar-runtime --locked
+          cargo test -p relar-compiler --lib --locked slice_sum_validation::bounded_slice_sums -- --exact --ignored --nocapture
       - name: Free disk space for native test binaries
         run: cargo clean --profile dev
       - run: cargo build --workspace --release --locked --features relar-compiler/verify-ir

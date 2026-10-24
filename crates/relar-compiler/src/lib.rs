@@ -16,6 +16,8 @@ mod narrowing;
 mod range_specialization;
 mod ranges;
 mod reductions;
+#[cfg(test)]
+mod slice_sum_validation;
 mod tuples;
 mod types;
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
