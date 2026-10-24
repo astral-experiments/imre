@@ -4,7 +4,10 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
-use crate::contracts::{LIST_APPEND, LIST_GET, LIST_POP, runtime_call_may_raise};
+use crate::contracts::{
+    LIST_APPEND, LIST_COPY_INDEX, LIST_GET, LIST_POP, LIST_SET, LIST_SET_INDEX,
+    runtime_call_may_raise,
+};
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
     Binary, Builtin, CallArgs, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType,
@@ -4311,12 +4314,9 @@ impl Emitter<'_, '_> {
         let list = self.operand(source_receiver);
         let source = self.operand(source);
         let destination = self.operand(index);
-        let from = self.index_word(&source.value, true);
-        let to = self.index_word(&destination.value, true);
-        self.checked_int_list_status(format!(
-            "call i32 @relar_list_copy_index(ptr {}, i64 {to}, i64 {from})",
-            list.value.operand
-        ));
+        let from = self.native_index(&source.value);
+        let to = self.native_index(&destination.value);
+        self.runtime_call(&LIST_COPY_INDEX, [&list.value, &to, &from]);
         self.release_operand(&destination);
         self.release_operand(&source);
         self.release_operand(&list);
@@ -4384,22 +4384,19 @@ impl Emitter<'_, '_> {
             ));
             return;
         }
-        let family = if list.ty == Type::ListInt {
-            "list"
-        } else {
-            "seq"
-        };
-        let suffix = if nonnegative { "_index" } else { "" };
-        let index = self.index_word(index, nonnegative);
-        let word = self.word(value);
         if list.ty == Type::ListInt {
-            self.checked_int_list_status(format!(
-                "call i32 @relar_list_set{suffix}(ptr {}, i64 {index}, i64 {word})",
-                list.operand
-            ));
+            if nonnegative {
+                let index = self.native_index(index);
+                self.runtime_call(&LIST_SET_INDEX, [list, &index, value]);
+            } else {
+                self.runtime_call(&LIST_SET, [list, index, value]);
+            }
         } else {
+            let suffix = if nonnegative { "_index" } else { "" };
+            let index = self.index_word(index, nonnegative);
+            let word = self.word(value);
             self.checked_line(format!(
-                "call void @relar_{family}_set{suffix}(ptr {}, i64 {index}, i64 {word}, i32 {})",
+                "call void @relar_seq_set{suffix}(ptr {}, i64 {index}, i64 {word}, i32 {})",
                 list.operand,
                 representation_kind(value.ty, &self.module.types)
             ));
@@ -4961,13 +4958,13 @@ declare void @relar_list_release(ptr)
     writeln!(
         output,
         "{LIST_GET}
-declare i32 @relar_list_set(ptr, i64, i64)
+{LIST_SET}
 declare i64 @relar_list_get_index(ptr, i64)
-declare i32 @relar_list_set_index(ptr, i64, i64)
+{LIST_SET_INDEX}
 declare i64 @relar_list_borrow_index(ptr, i64)
 declare i64 @relar_list_borrow_index_proven(ptr, i64) nounwind memory(argmem: read)
 declare ptr @relar_list_data_readonly(ptr) nounwind memory(argmem: read)
-declare i32 @relar_list_copy_index(ptr, i64, i64)
+{LIST_COPY_INDEX}
 {LIST_APPEND}
 declare void @relar_list_append_pair(ptr, i64, i64)
 {LIST_POP}"
