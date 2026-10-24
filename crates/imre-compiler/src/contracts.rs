@@ -5,7 +5,9 @@
 //! remain the responsibility of the analysis using the contract. In particular,
 //! preserving lists does not imply freedom from I/O, allocation or errors.
 
-use crate::ir::{Binary, Builtin, Expr, PathOperation, ProcessOperation, TextOperation, Type};
+use crate::ir::{
+    Binary, Builtin, Expr, PathOperation, PosixPathOperation, ProcessOperation, TextOperation, Type,
+};
 
 /// Guarantees needed by list specialization and rooted heap borrows.
 #[derive(Clone, Copy)]
@@ -72,11 +74,13 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::PosixPath(operation) => Contract::new(
-                match operation {
-                    crate::ir::PosixPathOperation::MixedJoin { .. } => true,
-                    crate::ir::PosixPathOperation::Splitext => true, // Tuple allocation is fallible.
-                    _ => false,
-                },
+                matches!(
+                    operation,
+                    PosixPathOperation::MixedJoin { .. }
+                        | PosixPathOperation::Splitext
+                        | PosixPathOperation::Normpath
+                        | PosixPathOperation::Abspath
+                ),
                 PreservesLists,
             ),
             Self::Path(operation) => Contract::new(

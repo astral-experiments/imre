@@ -799,6 +799,8 @@ pub(crate) enum PosixPathOperation {
     Basename,
     Dirname,
     Splitext,
+    Normpath,
+    Abspath,
 }
 
 /// Operations on the native logging registry and its named loggers.

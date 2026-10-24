@@ -10,7 +10,11 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let join = operation == PosixPathOperation::Join;
-        let param = if join { "a" } else { "p" };
+        let param = match operation {
+            PosixPathOperation::Join => "a",
+            PosixPathOperation::Normpath | PosixPathOperation::Abspath => "path",
+            _ => "p",
+        };
         let (first, rest) = match (
             call.arguments.args.as_ref(),
             call.arguments.keywords.as_ref(),

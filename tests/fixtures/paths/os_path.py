@@ -4,6 +4,7 @@ from os import path as imported
 from os.path import splitext
 from pathlib import Path
 from posixpath import join as lexical_join
+from posixpath import normpath
 
 
 def next_bytes(data: str) -> bytes:
@@ -39,6 +40,9 @@ print(os.path.join("./raw//", Path("a/./b"), ""))
 print(os.path.basename(Path("a//b/")))
 print(os.path.dirname(Path("one")))
 print(repr(os.path.splitext(Path("//δ/.file.ext"))))
+print(normpath(path=Path("//x/../δ")))
+print(repr(imported.abspath(path=b"//nonexistent/../\xff")))
+print(path.abspath(Path("missing/../file")) == path.join(os.getcwd(), "file"))
 try:
     print(path.join("raw", next_bytes("middle"), b"last"))  # ty: ignore[no-matching-overload]
 except TypeError as error:
