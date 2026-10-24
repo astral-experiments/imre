@@ -245,9 +245,16 @@ pub extern "C" fn relar_seq_layout() -> SequenceLayout {
 
 impl Drop for Words {
     fn drop(&mut self) {
-        for word in self.values.drain(..) {
+        let release = |word| {
             // SAFETY: each buffer word owns its declared value independently.
             unsafe { self.kind.release(word) };
+        };
+        let words = self.values.drain(..);
+        if records::release_in_progress() {
+            // The record worklist already pops enqueued children in reverse.
+            words.for_each(release);
+        } else {
+            words.rev().for_each(release);
         }
     }
 }
