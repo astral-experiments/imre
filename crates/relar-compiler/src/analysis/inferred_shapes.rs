@@ -474,11 +474,31 @@ impl<'a> Visitor<'a> for Shapes<'a> {
             writes: HashSet<String>,
             may_skip: bool,
         }
-        impl Evaluation<'_, '_> {
+        impl<'a> Evaluation<'_, 'a> {
             fn optional(&mut self, visit: impl FnOnce(&mut Self)) {
                 let previous = std::mem::replace(&mut self.may_skip, true);
                 visit(self);
                 self.may_skip = previous;
+            }
+
+            fn comprehension(
+                &mut self,
+                generators: &'a [Comprehension],
+                values: impl FnOnce(&mut Self),
+            ) {
+                let Some((first, rest)) = generators.split_first() else {
+                    values(self);
+                    return;
+                };
+                // The first iterable is evaluated even when it is empty. Its
+                // target, filters, later generators, and values may be skipped.
+                self.visit_expr(&first.iter);
+                self.optional(|v| {
+                    v.visit_expr(&first.target);
+                    first.ifs.iter().for_each(|item| v.visit_expr(item));
+                    rest.iter().for_each(|item| v.visit_comprehension(item));
+                    values(v);
+                });
             }
         }
         impl<'a> Visitor<'a> for Evaluation<'_, 'a> {
@@ -514,11 +534,22 @@ impl<'a> Visitor<'a> for Shapes<'a> {
                         first.iter().for_each(|item| self.visit_expr(item));
                         self.optional(|v| rest.iter().for_each(|item| v.visit_expr(item)));
                     }
-                    Expr::ListComp(_)
-                    | Expr::SetComp(_)
-                    | Expr::DictComp(_)
-                    | Expr::Generator(_) => {
-                        self.optional(|v| walk_expr(v, expr));
+                    Expr::ListComp(node) => {
+                        self.comprehension(&node.generators, |v| v.visit_expr(&node.elt));
+                    }
+                    Expr::SetComp(node) => {
+                        self.comprehension(&node.generators, |v| v.visit_expr(&node.elt));
+                    }
+                    Expr::DictComp(node) => {
+                        self.comprehension(&node.generators, |v| {
+                            if let Some(key) = &node.key {
+                                v.visit_expr(key);
+                            }
+                            v.visit_expr(&node.value);
+                        });
+                    }
+                    Expr::Generator(node) => {
+                        self.comprehension(&node.generators, |v| v.visit_expr(&node.elt));
                     }
                     Expr::Lambda(_) => {}
                     _ => walk_expr(self, expr),
@@ -542,6 +573,15 @@ mod tests {
     fn limited(body: &str) -> bool {
         let parsed = parse_module(body).unwrap();
         check(&parsed.syntax().body, parsed.tokens().len()).is_err()
+    }
+
+    #[test]
+    fn walrus_in_first_comprehension_iterable_is_definite() {
+        let mut body = String::from("x = (0,)\n");
+        for _ in 0..=MAX_DEPTH {
+            body.push_str("x = [(x,) for _ in ((x := 0),)][0]\n");
+        }
+        assert!(!limited(&body));
     }
 
     #[test]
