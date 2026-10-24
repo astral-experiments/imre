@@ -230,6 +230,26 @@ mod tests {
     use super::{CompileOptions, compile};
 
     #[test]
+    fn reject_starred_tuple_displays_before_expanding_their_fields() {
+        let mut source = String::from("def f(x: int) -> int:\n    a0 = (x,)\n");
+        for i in 1..=16 {
+            source.push_str(&format!("    a{i} = (*a{}, *a{})\n", i - 1, i - 1));
+        }
+        source.push_str("    return x\n");
+        for rejected in [
+            source.as_str(),
+            "def f(x: tuple[int] = (*(1,),)) -> int:\n    return 0\n",
+        ] {
+            let error = super::check(rejected).unwrap_err();
+            assert!(
+                error.contains("starred elements in tuple displays"),
+                "{error}"
+            );
+        }
+        super::check("def f(x: int) -> int:\n    a, *rest = (x, x)\n    b = [*rest]\n    return a + len(b)\n").unwrap();
+    }
+
+    #[test]
     fn deep_source_returns_a_diagnostic_but_wide_displays_compile() {
         for expression in [
             format!("{}1", "-".repeat(4096)),
