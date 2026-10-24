@@ -3498,14 +3498,14 @@ impl<'a> Checker<'a> {
                     return Ok(result);
                 }
                 let mut values = Vec::new();
-                let mut exits = Vec::new();
+                let mut exit = None;
                 for (index, value) in compare.operands.iter().enumerate() {
                     values.push(self.expr(value)?);
                     if index != 0 {
-                        exits.push(self.local_state());
+                        self.merge_exit(&mut exit);
                     }
                 }
-                self.join_states(exits);
+                self.restore_state(exit.expect("comparisons have at least two operands"));
                 if values
                     .iter()
                     .any(|value| matches!(value.ty, Type::JsonValue | Type::JsonObject))
