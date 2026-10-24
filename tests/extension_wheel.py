@@ -101,7 +101,7 @@ def main() -> None:
         (wheel,) = dist.glob("*.whl")
         _, _, _, tags = parse_wheel_filename(wheel.name)
         (tag,) = tags
-        assert (tag.interpreter, tag.abi) == ("rl1", "relar1")
+        assert (tag.interpreter, tag.abi) == ("rl312", "relar1")
         pip = (
             sys.executable,
             "-m",
@@ -120,7 +120,7 @@ def main() -> None:
             "--implementation",
             "rl",
             "--python-version",
-            "1",
+            "3.12",
             "--abi",
             tag.abi,
             wheel,

@@ -40,7 +40,7 @@ def main() -> None:
 
     dist = name.replace("-", "_")
     info = f"{dist}-{args.version}.dist-info"
-    tag = f"rl1-relar1-{args.platform}"
+    tag = f"rl312-relar1-{args.platform}"
     args.output.mkdir(parents=True, exist_ok=True)
     output = args.output / f"{dist}-{args.version}-{tag}.whl"
     with WheelFile(str(output), "w") as wheel:

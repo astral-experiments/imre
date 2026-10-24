@@ -9,6 +9,7 @@ use std::os::unix::process::{CommandExt, ExitStatusExt};
 mod build_cache;
 mod build_output;
 mod cli;
+mod wheel;
 
 use build_output::BuildOutput;
 use cli::{BuildOptions, Relro};
@@ -22,9 +23,11 @@ enum Allocator {
 }
 
 const JEMALLOC_RUNTIME: &str = "librelar_runtime_jemalloc.a";
+const PYTHON_HEADER: &str = include_str!("../../relar-runtime/include/Python.h");
 
 const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY]
        relar extension-header
+       relar wheel PROJECT [--out-dir DIR] [--overlay DIR] [--python PYTHON]
        relar build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]
        relar run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]
 
@@ -76,8 +79,11 @@ fn run() -> Result<ExitCode, String> {
         if args.next().is_some() {
             return Err("relar extension-header takes no arguments".into());
         }
-        print!("{}", include_str!("../../relar-runtime/include/Python.h"));
+        print!("{PYTHON_HEADER}");
         return Ok(ExitCode::SUCCESS);
+    }
+    if command == "wheel" {
+        return wheel::run(args);
     }
     let execute = command == "run";
     if command != "build" && command != "check" && !execute {
