@@ -41,6 +41,20 @@ fn scalar_annotation(expr: &Expr) -> bool {
         || matches!(expr, Expr::Name(name) if matches!(name.id.as_str(), "str" | "bytes" | "int" | "bool" | "float"))
 }
 
+fn bind_target<'a>(target: &'a Expr, depth: usize, bind: &mut impl FnMut(&'a str, usize)) {
+    let elements = match target {
+        Expr::Name(node) => return bind(node.id.as_str(), depth),
+        // A starred target receives a list of the remaining elements.
+        Expr::Starred(node) => return bind_target(&node.value, depth + 1, bind),
+        Expr::Tuple(node) => &node.elts,
+        Expr::List(node) => &node.elts,
+        _ => return,
+    };
+    for element in elements {
+        bind_target(element, depth.saturating_sub(1), bind);
+    }
+}
+
 struct Shapes<'a> {
     fixed: HashSet<&'a str>,
     scopes: Vec<HashMap<&'a str, usize>>,
@@ -71,9 +85,9 @@ impl<'a> Shapes<'a> {
         let mut bindings = locals.to_vec();
         for gen_ in generators {
             let depth = self.depth_in(&gen_.iter, &bindings).saturating_sub(1);
-            if let Expr::Name(target) = &gen_.target {
-                bindings.push((target.id.as_str(), depth));
-            }
+            bind_target(&gen_.target, depth, &mut |name, depth| {
+                bindings.push((name, depth));
+            });
         }
         1 + values
             .iter()
@@ -153,31 +167,20 @@ impl<'a> Shapes<'a> {
 
     fn bind(&mut self, target: &'a Expr, depth: usize) {
         self.exceeded |= depth > MAX_DEPTH;
-        match target {
-            Expr::Name(node) => {
-                let name = node.id.as_str();
-                let old = self.lookup(name);
-                if depth != 0 || old != 0 {
-                    self.scopes.last_mut().unwrap().insert(
-                        name,
-                        if self.conditional {
-                            old.max(depth)
-                        } else {
-                            depth
-                        },
-                    );
-                }
+        bind_target(target, depth, &mut |name, depth| {
+            self.exceeded |= depth > MAX_DEPTH;
+            let old = self.lookup(name);
+            if depth != 0 || old != 0 {
+                self.scopes.last_mut().unwrap().insert(
+                    name,
+                    if self.conditional {
+                        old.max(depth)
+                    } else {
+                        depth
+                    },
+                );
             }
-            Expr::List(node) => node
-                .elts
-                .iter()
-                .for_each(|e| self.bind(e, depth.saturating_sub(1))),
-            Expr::Tuple(node) => node
-                .elts
-                .iter()
-                .for_each(|e| self.bind(e, depth.saturating_sub(1))),
-            _ => {}
-        }
+        });
     }
 }
 
@@ -276,6 +279,29 @@ mod tests {
         ] {
             let last = wrap.replace("{p}", &format!("v{}", MAX_DEPTH - 1));
             assert!(limited(&format!("{body}result = {last}\n")), "{wrap}");
+        }
+    }
+
+    #[test]
+    fn bounds_nesting_through_unpack_targets() {
+        for step in [
+            "*v{i}, = (v{p},)",
+            "v{i} = [rest for *rest, in [(v{p},)]][0]",
+            "v{i} = [(item,) for (item,) in [(v{p},)]][0]",
+        ] {
+            let mut body = String::from("v0 = (1,)\n");
+            for i in 1..=MAX_DEPTH {
+                if i == MAX_DEPTH {
+                    assert!(!limited(&body), "{step}");
+                }
+                body.push_str(
+                    &step
+                        .replace("{i}", &i.to_string())
+                        .replace("{p}", &(i - 1).to_string()),
+                );
+                body.push('\n');
+            }
+            assert!(limited(&body), "{step}");
         }
     }
 
