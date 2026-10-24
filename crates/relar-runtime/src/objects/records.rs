@@ -14,6 +14,10 @@ thread_local! {
     static RECORDS_TO_DROP: Cell<*const RefCell<Vec<*const usize>>> = const { Cell::new(std::ptr::null()) };
 }
 
+pub(super) fn release_in_progress() -> bool {
+    RECORDS_TO_DROP.with(|slot| !slot.get().is_null())
+}
+
 /// Compiler-emitted immutable metadata; every field occupies one eight-byte word.
 /// The descriptor and its kind array must outlive every allocation using them.
 #[repr(C)]
