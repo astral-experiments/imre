@@ -513,6 +513,8 @@ Indexing uses exact integer indexes, including negative indexes, and returns an 
 
 On POSIX, `os.path.join(a, *parts)`, `basename(p)`, `dirname(p)`, and `splitext(p)` take strings, bytes, or native `pathlib.Path` values. Calls can also use `posixpath`, aliased modules, and imported function names. String and byte spellings preserve redundant slashes, dots, and trailing separators according to each function. A native `Path` supplies its normalized string spelling. A join accepts fixed positional components and raises `TypeError` when string and byte paths are mixed. `splitext` returns a pair of the input string or byte type.
 
+`os.path.normpath(path)` removes redundant separators and dot components and collapses `..` lexically. Exactly two leading slashes survive. `os.path.abspath(path)` applies the same rules after prepending the current directory to a relative input; it does not resolve symlinks or require the path to exist. Both accept `str`, `bytes`, and native `Path`. Byte inputs produce bytes even when a path or working directory contains invalid UTF-8. Text results must be representable as Imre strings.
+
 `from pathlib import Path` exposes a sealed native POSIX path type on both supported hosts. `Path()` represents the current directory; fixed positional string or `Path` arguments join left to right. The `/` operator accepts a path and a string or path, including a string on the left. An absolute segment replaces the preceding path. Empty segments, repeated separators, and `.` components normalize lexically; `..` components and exactly two leading slashes remain intact. Construction and joining do not access the filesystem or resolve symlinks. `path.joinpath()` returns a fresh equal path. It accepts zero or more positional string or path segments, joined in order.
 
 `name`, `stem`, `suffix`, and `parent` are read-only properties. Parent traversal stops at the anchor or current directory. Components follow [Python 3.14 semantics](https://docs.python.org/3.14/library/pathlib.html), including `Path("report.").suffix == "."`. On these POSIX hosts, `path.as_posix()` returns the same text as `str(path)`. Paths compare by normalized value with `==` and `!=`; `str`, `print`, and ordinary f-strings produce the path text, while `repr` and `!r` produce `PosixPath(...)`. Paths are always true, including `Path("")`. They can appear in exact fields, lists, dictionary keys and values, sets, tuples, callables, and nullable storage. Dictionary and set lookups hash the normalized path spelling without accessing the filesystem. Dataclass equality and repr traverse their native values. Path ordering, subclasses, and arbitrary `os.PathLike` implementations are outside this contract.
@@ -614,11 +616,19 @@ A parser can require a subcommand with `add_subparsers(dest="command", required=
 
 Keep each builder local. Declare parent options first, followed by each subparser and its options, then assign or return `parse_args()`. Dynamic declarations, ordinary positionals, and nested or optional subcommands are outside this grammar.
 
+## Standard logging
+
+`logging.getLogger(name=None)` returns the same native logger for each name. Omitted, None, empty, and `"root"` names refer to `logging.root`. Loggers expose `name`, `level`, `root`, `parent`, `setLevel(int)`, `getEffectiveLevel()`, and `isEnabledFor(int)`. Named levels inherit through dot-separated parents. Integer levels retain Python's full precision.
+
+`debug`, `info`, `warning`, `error`, `critical`, `fatal`, and `log(level, message, ...)` write to standard error. Scalar message arguments support literal `%s`, `%r`, `%d`, and `%%`. Arguments execute in source order and conversion waits until the event is enabled. The fallback handler emits warning and higher levels before configuration. The module-level convenience functions configure the root handler on first use.
+
+`logging.basicConfig` accepts `level`, `format`, `datefmt`, and `force`. A configured handler keeps its settings unless forced. Both configuration and `setLevel` accept the standard level-name literals. The percent-style format accepts `name`, `levelname`, `levelno`, `message`, and local-time `asctime`. Custom handlers and filters are outside this surface.
+
 ## Synchronous subprocesses
 
 On POSIX, `shutil.which(cmd, mode=os.F_OK | os.X_OK, path=None)` searches for a non-directory accessible with the requested mode. It returns an owned string, bytes, or `None`. String and native `Path` commands produce string paths, and bytes commands preserve arbitrary filename bytes. The search path accepts strings, bytes, native paths, or `None`. A command containing a directory component is checked directly. A missing `PATH` uses the platform default, an empty search path finds nothing, and empty entries in a nonempty colon-separated path search the current directory. Native string results must be representable as UTF-8. `os.F_OK`, `os.R_OK`, `os.W_OK` and `os.X_OK` are available for mode expressions.
 
-The runtime supports a sealed `subprocess.run` boundary with exact `list[str]` arguments. Capture requires literal `capture_output=True` and either `text=True` or `encoding="utf-8"`. Both forms decode strict UTF-8. `check` is a boolean expression, defaulting to false. `cwd` accepts a string, native `Path`, or a nullable form of either, and `env` accepts `dict[str, str]` or `None`. Arguments may be positional or named `args`; the other parameters are keyword-only. All supplied expressions evaluate once in source order before launching the child, even when keyword order differs from parameter order.
+The runtime supports a sealed `subprocess.run` boundary with exact `list[str]` arguments. Output defaults to the inherited descriptors. `capture_output=True` captures both streams. Each `stdout` or `stderr` may also select `subprocess.PIPE`, `subprocess.DEVNULL`, `sys.stdout`, or `sys.stderr`. `stderr=subprocess.STDOUT` follows the child's stdout, including when it is a pipe. Captures return bytes by default. Literal `text=True` or UTF-8 `encoding` decodes captured bytes strictly and normalizes newlines. Inherited, discarded, and redirected fields are `None`. `check` is a boolean expression, defaulting to false. `cwd` accepts a string, native `Path`, or a nullable form of either, and `env` accepts `dict[str, str]` or `None`. Arguments may be positional or named `args`; the other parameters are keyword-only. All supplied expressions evaluate once in source order before launching the child, even when keyword order differs from parameter order.
 
 ```python
 import os
@@ -639,11 +649,11 @@ result = subprocess.run(
 print(result.stdout)
 ```
 
-The call waits for the child, captures stdout and stderr independently, and inherits stdin. It closes other inherited descriptors in the child and restores the default pipe and file-size signal dispositions. Executable lookup respects the supplied environment and child working directory. Arguments pass literally to the executable; shell expansion is never implicit. Both completed captures use strict UTF-8 and translate CRLF and bare CR to LF. Decoding happens after the child has been reaped and before a nonzero status is checked.
+The call waits for the child and inherits stdin. It closes other inherited descriptors in the child and restores the default pipe and file-size signal dispositions. Executable lookup respects the supplied environment and child working directory. Arguments pass literally to the executable; shell expansion is never implicit. Text captures translate CRLF and bare CR to LF. Byte captures preserve the original stream. Decoding happens after the child has been reaped and before a nonzero status is checked.
 
-The result has the exact type `subprocess.CompletedProcess[str]`; bare `CompletedProcess` denotes the same sealed type. Its read-only fields are `args: list[str]`, `returncode: int`, `stdout: str`, and `stderr: str`. Empty captures are empty strings, and signal termination produces a negative return code. Results can be stored in classes, containers, and optionals. Equality compares identity; `str`, `repr`, formatted output, and `isinstance` support the sealed result. `args` retains the original argument list, so later list mutation remains visible through that field. Calling `check_returncode()` immediately checks the stored status; escaping that bound method is unsupported.
+The result exposes read-only `args: list[str]`, `returncode: int`, and the two stream fields. Each stream has the exact type `str`, `bytes` or `None` selected by that call. `CompletedProcess[str]` and `CompletedProcess[bytes]` annotate results that capture both streams. A bare annotation retains the existing two-text-captures type. Signal termination produces a negative return code. Results can be stored in classes, containers, and optionals. Equality compares identity; `str`, `repr`, formatted output, and `isinstance` support the sealed result. `args` retains the original argument list, so later list mutation remains visible through that field. Calling `check_returncode()` immediately checks the stored status; escaping that bound method is unsupported.
 
-`check=True` or a failing `check_returncode()` raises the catch-only `subprocess.CalledProcessError`, which matches `subprocess.SubprocessError` and `Exception`. It exposes read-only `returncode: int` and `cmd: list[str]`. For a failed capture, `stdout`, `output`, and `stderr` are strings. Both `stdout` and `output` expose the same capture. `cmd` aliases the original argument list, and the diagnostic reflects its current contents. These fixed getters raise `AttributeError` on unrelated exception instances. Missing executables and invalid working directories retain their ordinary operating-system error categories; they are not subprocess status errors.
+`check=True` or a failing `check_returncode()` raises the catch-only `subprocess.CalledProcessError`, which matches `subprocess.SubprocessError` and `Exception`. It exposes read-only `returncode: int`, `cmd: list[str]`, and the captured or absent `stdout`, `output`, and `stderr` fields. `stdout` and `output` expose the same capture. `cmd` aliases the original argument list, and the diagnostic reflects its current contents. These fixed getters raise `AttributeError` on unrelated exception instances. Missing executables and invalid working directories retain their ordinary operating-system error categories; they are not subprocess status errors.
 
 `os.environ.get(key)` and `os.getenv(key)` read a string from the environment and return `None` for a missing key. Both accept an optional `default` of type `str | None`. A string default gives a `str` result. `os.getcwd()` returns the current directory, and `os.fspath(path)` accepts a `str`, `bytes`, or native `Path`. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
 
@@ -651,10 +661,10 @@ The result has the exact type `subprocess.CompletedProcess[str]`; bare `Complete
 escaping, and comment handling. A discarded `subprocess.run(argv, check=True,
 stdout=sys.stderr)` forwards both child streams to the parent’s stderr while
 the child is running. Failure raises `CalledProcessError` with uncaptured
-streams set to `None`. In a handler around a direct captured call or
-`check_returncode()`, the stream fields on the caught error have type `str`.
-When redirection is possible, including through an indirect call, their type
-is `str | None`.
+streams set to `None`. A handler around direct calls with the same stream mode,
+including `check_returncode()`, sees each field's exact `str`, `bytes`, or
+`None` type. If a user call, explicit raise or different mode can supply the
+exception, the field type includes the representations used by the program.
 
 For programs that explicitly launch Python helpers, `sys.executable` is the
 absolute interpreter path selected by `IMRE_PYTHON`, or the first executable

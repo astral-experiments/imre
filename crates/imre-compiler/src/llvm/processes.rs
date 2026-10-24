@@ -296,35 +296,26 @@ impl Emitter<'_, '_> {
                 ));
                 none()
             }
-            ProcessOperation::Run | ProcessOperation::RunTimeout => {
+            ProcessOperation::Run { streams } => {
                 let layout = self
                     .output
-                    .global_ref("layout_completed_process".to_owned());
+                    .global_ref(format!("layout_{}", record_name(returns)));
                 let cwd =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
                 let environment =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
                 let check = self.instruction(format!("zext i1 {} to i32", args[3].value.operand));
-                let operand = if matches!(operation, ProcessOperation::RunTimeout) {
-                    if args[4].value.ty == Type::Int {
-                        self.checked_instruction(format!(
-                            "call ptr @imre_subprocess_run_timeout_int(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, i64 {}, ptr @{layout})",
-                            args[0].value.operand, args[4].value.operand
-                        ))
-                    } else {
-                        let timeout = self
-                            .instruction(format!("inttoptr i64 {} to ptr", args[4].value.operand));
-                        self.checked_instruction(format!(
-                        "call ptr @imre_subprocess_run_timeout(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, ptr {timeout}, ptr @{layout})",
-                        args[0].value.operand
-                    ))
-                    }
-                } else {
-                    self.checked_instruction(format!(
-                        "call ptr @imre_subprocess_run(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, ptr @{layout})",
-                        args[0].value.operand
-                    ))
+                let (kind, timeout) = match args.get(4) {
+                    Some(arg) => (
+                        if arg.value.ty == Type::Int { 2 } else { 7 },
+                        arg.value.operand.as_str(),
+                    ),
+                    None => (0, "0"),
                 };
+                let operand = self.checked_instruction(format!(
+                    "call ptr @imre_subprocess_run_modes(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, i32 {streams}, i32 {kind}, i64 {timeout}, ptr @{layout})",
+                    args[0].value.operand
+                ));
                 self.owned(Value {
                     ty: returns,
                     operand,
@@ -381,6 +372,11 @@ impl Emitter<'_, '_> {
                 none()
             }
             ProcessOperation::ErrorField(field) => {
+                let tagged = matches!(
+                    self.module.types.payload(returns).unwrap_or(returns),
+                    Type::Union(_)
+                );
+                let field = field | if tagged { 8 } else { 0 };
                 let word = self.checked_instruction(format!(
                     "call i64 @imre_subprocess_error_field(ptr {}, i32 {field})",
                     args[0].value.operand

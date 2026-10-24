@@ -1244,9 +1244,10 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::Counter)) => return Ok(types.counter(Type::Str)),
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
-            return Ok(Type::CompletedProcess);
+            return Ok(Type::CompletedProcess(crate::ir::ProcessCapture::TEXT));
         }
         _ => {}
     }
@@ -1307,14 +1308,18 @@ fn annotation_at(
                 Some(Binding::Intrinsic(Intrinsic::CompletedProcess))
             ) =>
         {
-            if nested(&value.slice)? != Type::Str {
-                return Err(error(
-                    source,
-                    expression,
-                    "CompletedProcess requires str output",
-                ));
-            }
-            Ok(Type::CompletedProcess)
+            let capture = match nested(&value.slice)? {
+                Type::Str => crate::ir::ProcessCapture::TEXT,
+                Type::Bytes => crate::ir::ProcessCapture::BYTES,
+                _ => {
+                    return Err(error(
+                        source,
+                        expression,
+                        "CompletedProcess requires str or bytes output",
+                    ));
+                }
+            };
+            Ok(Type::CompletedProcess(capture))
         }
         ast::Expr::Subscript(value)
             if matches!(
@@ -3706,11 +3711,11 @@ impl<'a> Checker<'a> {
             let before_handler = name.and_then(|_| self.take_breaks());
             let capture_depth = self.captured_process_errors.len();
             if let (Some(slot), Some(target)) = (name, &handler.name)
-                && processes::captures_errors(&try_.body, &body)
                 && !narrowing::assigned_names(&handler.body).contains(target.as_str())
             {
-                self.captured_process_errors
-                    .push(processes::captured_fields(slot, &body, self.types));
+                let view =
+                    processes::process_error_view(slot, &try_.body, &body, self.types, &kinds);
+                self.captured_process_errors.push(view);
             }
             let (handler_body, falls) = self.block(&handler.body)?;
             self.captured_process_errors.truncate(capture_depth);
@@ -4069,18 +4074,23 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
             });
         }
-        if let Some(Binding::Intrinsic(
-            intrinsic @ (Intrinsic::SysExecutable | Intrinsic::SysPlatform),
-        )) = self.resolve(expression)
-        {
-            let operation = match intrinsic {
-                Intrinsic::SysExecutable => Builtin::Process(ir::ProcessOperation::Executable),
-                _ => Builtin::SysPlatform,
-            };
-            return Ok(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Builtin(operation, Vec::new()),
-            });
+        if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
+            match symbol {
+                Intrinsic::LogRoot => return Ok(self.root_logger()),
+                Intrinsic::SysExecutable | Intrinsic::SysPlatform => {
+                    let operation = match symbol {
+                        Intrinsic::SysExecutable => {
+                            Builtin::Process(ir::ProcessOperation::Executable)
+                        }
+                        _ => Builtin::SysPlatform,
+                    };
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(operation, Vec::new()),
+                    });
+                }
+                _ => {}
+            }
         }
         let (ty, kind) = match expression {
             ast::Expr::NumberLiteral(value) => match &value.value {
@@ -4364,7 +4374,7 @@ impl<'a> Checker<'a> {
                             self.expr(value)?
                         }
                         [left, right] => {
-                            return self.enum_identity(left, right, compare.ops[0], expression);
+                            return self.nominal_identity(left, right, compare.ops[0], expression);
                         }
                         _ => unreachable!(),
                     };
@@ -4750,13 +4760,16 @@ impl<'a> Checker<'a> {
                         _ => return self.class_attribute(attribute, class, Some(receiver), None),
                     }
                 }
+                if receiver.ty == Type::Logger {
+                    return self.logger_attribute(receiver, attribute);
+                }
                 if receiver.ty == Type::Path {
                     return self.path_attribute(receiver, attribute);
                 }
                 if matches!(receiver.ty, Type::AsyncProcess(_)) {
                     return self.async_returncode(receiver, attribute);
                 }
-                if receiver.ty == Type::CompletedProcess {
+                if matches!(receiver.ty, Type::CompletedProcess(_)) {
                     return self.process_attribute(receiver, attribute);
                 }
                 if matches!(receiver.ty, Type::Exception | Type::TimeoutExpired) {
@@ -5136,36 +5149,18 @@ impl<'a> Checker<'a> {
                 };
                 return self.fspath_argument(path);
             }
+            Some(Binding::Intrinsic(Intrinsic::GetLogger)) => return self.get_logger(call),
+            Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
+                return self.configure_logging(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
+                return self.root_log(level, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::WallTime)) if call.arguments.is_empty() => {
                 return Ok(Expr {
                     ty: Type::Float,
                     kind: ExprKind::Builtin(Builtin::WallTime, vec![]),
-                });
-            }
-            Some(Binding::Intrinsic(Intrinsic::GetLogger))
-                if let [name] = call.arguments.args.as_ref() =>
-            {
-                self.reject_builtin_keywords(call)?;
-                return Ok(Expr {
-                    ty: Type::Logger,
-                    kind: ExprKind::Builtin(
-                        Builtin::GetLogger,
-                        vec![self.expr_expected(name, Type::Str)?],
-                    ),
-                });
-            }
-            Some(Binding::Intrinsic(Intrinsic::BasicConfig))
-                if call.arguments.args.is_empty()
-                    && let [kw] = call.arguments.keywords.as_ref()
-                    && kw.arg.as_deref() == Some("level") =>
-            {
-                return Ok(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        Builtin::LogLevel,
-                        vec![self.expr_expected(&kw.value, Type::Int)?],
-                    ),
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Ndiff)) => {
@@ -5359,7 +5354,7 @@ impl<'a> Checker<'a> {
             if receiver.ty == Type::Path {
                 return self.path_method(receiver, attribute, call);
             }
-            if receiver.ty == Type::CompletedProcess {
+            if matches!(receiver.ty, Type::CompletedProcess(_)) {
                 return self.process_method(receiver, attribute, call);
             }
             if matches!(
@@ -5372,7 +5367,7 @@ impl<'a> Checker<'a> {
                 return self.regex_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Logger {
-                return self.logging_method(receiver, attribute, call);
+                return self.logger_method(receiver, attribute, call);
             }
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
@@ -5878,7 +5873,7 @@ impl<'a> Checker<'a> {
                 });
             }
             if matches!(name.id.as_str(), "str" | "print")
-                && (matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess)
+                && (matches!(args[0].ty, Type::Class(_) | Type::CompletedProcess(_))
                     || self.types.is_counter(args[0].ty))
             {
                 let text = self.record_text(args.into_iter().next().unwrap(), call)?;
@@ -6144,7 +6139,7 @@ scan("a\nb", Path("lines.txt"), "4")
             );
             let llvm = crate::compile(&source, &crate::CompileOptions::default()).unwrap();
             assert!(!llvm.contains("call ptr @imre_seq_new("));
-            assert!(!llvm.contains("call void @imre_seq_append("));
+            assert!(!llvm.contains("call i32 @imre_seq_append("));
             assert!(!llvm.contains("call ptr @imre_record_try_new("));
         }
     }

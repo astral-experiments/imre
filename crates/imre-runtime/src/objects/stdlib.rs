@@ -368,10 +368,12 @@ pub unsafe extern "C" fn imre_sort_by_keys(
     }
 }
 
-fn string_capacity(length: Option<usize>) -> usize {
-    length
-        .filter(|&length| length <= isize::MAX as usize)
-        .unwrap_or_else(|| fail("MemoryError", "string is too large"))
+fn string_buffer(length: Option<usize>) -> Option<Str> {
+    let buffer = length.and_then(|length| Str::try_with_capacity(length).ok());
+    if buffer.is_none() {
+        super::exceptions::sequence_allocation_failed();
+    }
+    buffer
 }
 
 /// Joins an exact string sequence, retaining a single item without copying it.
@@ -392,15 +394,17 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
                 Rc::increment_strong_count(value);
                 return value;
             }
-            let separators = string_capacity(
-                separator
-                    .len()
-                    .checked_mul(values.values.len().saturating_sub(1)),
-            );
-            let length = values.values.iter().try_fold(separators, |length, &word| {
-                length.checked_add((&*(word as *const Str)).len())
-            });
-            let mut result = Str::with_capacity(string_capacity(length));
+            let length = separator
+                .len()
+                .checked_mul(values.values.len().saturating_sub(1))
+                .and_then(|separators| {
+                    values.values.iter().try_fold(separators, |length, &word| {
+                        length.checked_add((&*(word as *const Str)).len())
+                    })
+                });
+            let Some(mut result) = string_buffer(length) else {
+                return std::ptr::null();
+            };
             for (index, &word) in values.values.iter().enumerate() {
                 if index != 0 {
                     result.push_str(separator);
@@ -560,7 +564,9 @@ pub unsafe extern "C" fn imre_str_replace(
                 .checked_mul(count)
                 .and_then(|extra| length.checked_add(extra))
         });
-    let mut result = Str::with_capacity(string_capacity(length));
+    let Some(mut result) = string_buffer(length) else {
+        return std::ptr::null();
+    };
     let mut copied = 0;
     for (index, _) in value.match_indices(old.as_str()) {
         result.push_str(&value[copied..index]);

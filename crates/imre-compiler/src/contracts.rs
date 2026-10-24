@@ -61,12 +61,12 @@ impl Builtin {
                 match operation {
                     TextOperation::Split(_)
                     | TextOperation::Partition
+                    | TextOperation::Unquote
                     | TextOperation::ShlexSplit => true,
                     TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
                     | TextOperation::Find
-                    | TextOperation::Unquote
                     | TextOperation::Dedent => false,
                 },
                 PreservesLists,
@@ -110,6 +110,10 @@ impl Builtin {
                 },
                 PreservesLists,
             ),
+            Self::Logging(operation) => Contract::new(
+                matches!(operation, crate::ir::LogOperation::Configure),
+                PreservesLists,
+            ),
             Self::Process(operation) => match operation {
                 ProcessOperation::RunUntilComplete
                 | ProcessOperation::CloseLoop
@@ -123,8 +127,7 @@ impl Builtin {
                 ProcessOperation::Executable
                 | ProcessOperation::CheckOutput
                 | ProcessOperation::RunToStderr
-                | ProcessOperation::Run
-                | ProcessOperation::RunTimeout
+                | ProcessOperation::Run { .. }
                 | ProcessOperation::AsyncSpawn { .. }
                 | ProcessOperation::AsyncStatus { wait: false }
                 | ProcessOperation::Coroutine { .. }
@@ -197,6 +200,8 @@ impl Builtin {
             | Self::ListSliceSum
             | Self::Slice
             | Self::StringFormat
+            | Self::StringJoin
+            | Self::StringReplace
             | Self::StringGet
             | Self::StringIntList
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
@@ -231,9 +236,6 @@ impl Builtin {
             | Self::LiteralStringView
             | Self::RStrip
             | Self::RegexCompile(_)
-            | Self::GetLogger
-            | Self::LogLevel
-            | Self::LogWrite(_)
             | Self::RegexSearch
             | Self::RegexGroupDict
             | Self::RegexMatchStart
@@ -247,15 +249,13 @@ impl Builtin {
             | Self::StringListSortSuffix(_)
             | Self::StringListNonempty
             | Self::Str
-            | Self::StrEnumIdentity
+            | Self::NominalIdentity
             | Self::StrEnumMember { .. }
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString
-            | Self::StringJoin
             | Self::StringListContains
             | Self::StringContains
-            | Self::StringReplace
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
             Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
@@ -462,6 +462,20 @@ pub(crate) const LIST_BORROW_INDEX: RuntimeCall<BorrowedIntOrError, 2> = Runtime
     params: [INT_LIST, RuntimeParam::NativeIndex],
     result: BorrowedIntOrError,
 };
+pub(crate) const BYTE_OUTPUT_APPEND: RuntimeCall<StatusOrError, 2> = RuntimeCall {
+    symbol: "imre_byte_output_append",
+    params: [RuntimeParam::Value(Type::ByteOutput), TAGGED_INT],
+    result: StatusOrError,
+};
+pub(crate) const BYTE_OUTPUT_APPEND_PAIR: RuntimeCall<StatusOrError, 3> = RuntimeCall {
+    symbol: "imre_byte_output_append_pair",
+    params: [
+        RuntimeParam::Value(Type::ByteOutput),
+        TAGGED_INT,
+        TAGGED_INT,
+    ],
+    result: StatusOrError,
+};
 pub(crate) const LIST_APPEND: RuntimeCall<StatusOrError, 2> = RuntimeCall {
     symbol: "imre_list_append",
     params: [INT_LIST, TAGGED_INT],
@@ -528,8 +542,12 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_subprocess_error_field"
                 | "imre_print_int"
                 | "imre_print_float"
+                | "imre_log_config"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
+                | "imre_str_unquote"
+                | "imre_str_join"
+                | "imre_str_replace"
                 | "imre_print_str"
                 | "imre_print_bytes"
                 | "imre_bytes_count"

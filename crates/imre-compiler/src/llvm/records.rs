@@ -63,7 +63,7 @@ fn bytes(output: &mut String, name: &str, value: &str) {
 /// offsets, and ownership operations do not depend on generated value behavior.
 pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut String) -> String {
     let (kind, flags, class_name, qualified_name, fields) = match ty {
-        Type::Class(_) | Type::CompletedProcess => {
+        Type::Class(_) | Type::CompletedProcess(_) => {
             let process;
             let metadata = if let Type::Class(class) = ty {
                 let Some(metadata) = module.class_metadata.get(class) else {
@@ -71,6 +71,9 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                 };
                 metadata
             } else {
+                let Type::CompletedProcess(capture) = ty else {
+                    unreachable!()
+                };
                 process = crate::ir::ClassMetadata {
                     enum_members: Vec::new(),
                     name: "CompletedProcess".to_owned(),
@@ -84,7 +87,11 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                         .map(|name| crate::ir::ClassFieldMetadata {
                             name: name.to_owned(),
                             compare: false,
-                            repr: true,
+                            repr: match name {
+                                "stdout" => capture.stdout,
+                                "stderr" => capture.stderr,
+                                _ => true,
+                            },
                         })
                         .collect(),
                 };

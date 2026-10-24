@@ -59,6 +59,13 @@ impl Emitter<'_, '_> {
                 ));
                 return tuple;
             }
+            PosixPathOperation::Normpath | PosixPathOperation::Abspath => {
+                let absolute = u8::from(operation == PosixPathOperation::Abspath);
+                self.checked_instruction(format!(
+                    "call ptr @imre_posix_normalize(ptr {}, i32 {bytes}, i32 {absolute})",
+                    first.operand
+                ))
+            }
         };
         self.owned(Value {
             ty: returns,

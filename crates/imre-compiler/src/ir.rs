@@ -44,8 +44,8 @@ pub(crate) enum Type {
     BinaryIO,
     /// A sealed, immutable POSIX filesystem path with UTF-8 components.
     Path,
-    /// A sealed text-process result with four concrete, readonly fields.
-    CompletedProcess,
+    /// A sealed process result whose capture modes fix each field’s ownership.
+    CompletedProcess(ProcessCapture),
     /// Async process handle, with bits for the captured stdout and stderr slots.
     AsyncProcess(u8),
     Coroutine(usize),
@@ -65,6 +65,38 @@ pub(crate) enum Type {
     JsonValue,
     JsonObject,
     None,
+}
+
+/// Each captured stream has one exact text or byte representation. An inherited
+/// or redirected stream has no returned payload or owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct ProcessCapture {
+    pub stdout: bool,
+    pub stderr: bool,
+    pub text: bool,
+}
+
+impl ProcessCapture {
+    pub(crate) const TEXT: Self = Self {
+        stdout: true,
+        stderr: true,
+        text: true,
+    };
+    pub(crate) const BYTES: Self = Self {
+        stdout: true,
+        stderr: true,
+        text: false,
+    };
+
+    pub(crate) fn stream(self, stdout: bool) -> Type {
+        if !(if stdout { self.stdout } else { self.stderr }) {
+            Type::None
+        } else if self.text {
+            Type::Str
+        } else {
+            Type::Bytes
+        }
+    }
 }
 
 impl std::fmt::Display for Type {
@@ -102,7 +134,8 @@ impl std::fmt::Display for Type {
             Self::TextIO => "typing.TextIO",
             Self::BinaryIO => "typing.BinaryIO",
             Self::Path => "pathlib.Path",
-            Self::CompletedProcess => "subprocess.CompletedProcess[str]",
+            Self::CompletedProcess(capture) if capture.text => "subprocess.CompletedProcess[str]",
+            Self::CompletedProcess(_) => "subprocess.CompletedProcess[bytes]",
             Self::AsyncProcess(_) => "asyncio.subprocess.Process",
             Self::Coroutine(_) => "Coroutine",
             Self::EventLoop => "asyncio.AbstractEventLoop",
@@ -390,7 +423,7 @@ pub(crate) enum Builtin {
     StrEnumValue,
     EnumLookup(usize),
     EnumString,
-    StrEnumIdentity,
+    NominalIdentity,
     LiteralStringView,
     StringListContains,
     StringContains,
@@ -416,9 +449,7 @@ pub(crate) enum Builtin {
     },
     SysExit,
     WallTime,
-    GetLogger,
-    LogLevel,
-    LogWrite(u8),
+    Logging(LogOperation),
     Input,
     Int,
     Float,
@@ -768,6 +799,23 @@ pub(crate) enum PosixPathOperation {
     Basename,
     Dirname,
     Splitext,
+    Normpath,
+    Abspath,
+}
+
+/// Operations on the native logging registry and its named loggers.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LogOperation {
+    Get,
+    Configure,
+    Name,
+    Level,
+    Root,
+    Parent,
+    EffectiveLevel,
+    SetLevel,
+    Enabled,
+    Emit,
 }
 
 /// Synchronous process operations cannot invoke language callbacks.
@@ -776,8 +824,9 @@ pub(crate) enum ProcessOperation {
     Executable,
     RunToStderr,
     CheckOutput,
-    Run,
-    RunTimeout,
+    Run {
+        streams: u32,
+    },
     AsyncSpawn {
         stdout: u8,
         stderr: u8,
@@ -854,6 +903,7 @@ pub(crate) enum InstanceType {
 impl InstanceType {
     pub(crate) fn accepts(self, ty: Type) -> bool {
         match self {
+            Self::Exact(Type::CompletedProcess(_)) => matches!(ty, Type::CompletedProcess(_)),
             Self::Exact(Type::Int) => matches!(ty, Type::Int | Type::Bool),
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))

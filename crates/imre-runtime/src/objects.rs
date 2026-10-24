@@ -19,7 +19,7 @@ mod json;
 mod logging;
 mod mappings;
 mod paths;
-mod posixpath;
+pub(crate) mod posixpath;
 mod processes;
 pub(crate) mod records;
 mod regexes;
@@ -318,21 +318,27 @@ pub unsafe extern "C" fn imre_seq_set_index(
 /// # Safety
 /// The rooted word matches this sequence's element kind and preserves acyclicity.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_seq_append(value: *const Object, word: usize, kind: u32) {
-    // SAFETY: acquiring first also handles values rooted only by this container.
-    let new = unsafe { replacement(value, word, kind) };
-    // SAFETY: no callback or escaped buffer can overlap this mutation.
-    unsafe {
+pub unsafe extern "C" fn imre_seq_append(value: *const Object, word: usize, kind: u32) -> i32 {
+    // SAFETY: the borrowed word stays rooted while the backing buffer moves.
+    // Acquiring a word cannot call user code or displace any existing owner.
+    let appended = unsafe {
         object(value).0.with_mut(|storage| {
             let sequence = storage.sequence_mut();
+            sequence.check_kind(kind);
+            if sequence.values.try_reserve(1).is_err() {
+                return false;
+            }
             sequence
                 .values
-                .try_reserve(1)
-                .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
-            sequence.values.push(new.into_word());
+                .push(sequence.kind.acquire(word).into_word());
             sequence.update_header();
+            true
         })
     };
+    if !appended {
+        exceptions::sequence_allocation_failed();
+    }
+    i32::from(appended)
 }
 
 /// # Safety

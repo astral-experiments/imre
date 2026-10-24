@@ -139,7 +139,7 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn enum_identity(
+    pub(super) fn nominal_identity(
         &mut self,
         left: &ast::Expr,
         right: &ast::Expr,
@@ -148,16 +148,16 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let left = self.expr(left)?;
         let right = self.expr(right)?;
-        if ![left.ty, right.ty].into_iter().all(|ty| {
-            matches!(
-                self.types.payload(ty).unwrap_or(ty),
-                Type::StrEnum(_) | Type::Enum(_)
-            )
-        }) {
+        let types = [left.ty, right.ty].map(|ty| self.types.payload(ty).unwrap_or(ty));
+        if !(types
+            .iter()
+            .all(|ty| matches!(ty, Type::StrEnum(_) | Type::Enum(_)))
+            || types == [Type::Logger; 2])
+        {
             return Err(error(
                 self.source,
                 node,
-                "identity comparisons require None or nominal StrEnum members",
+                "identity comparisons require None, enum members, or loggers",
             ));
         }
         Ok(Self::identity_result(
@@ -169,7 +169,7 @@ impl Checker<'_> {
     pub(super) fn identity_result(values: Vec<Expr>, negate: bool) -> Expr {
         let identity = Expr {
             ty: Type::Bool,
-            kind: ExprKind::Builtin(Builtin::StrEnumIdentity, values),
+            kind: ExprKind::Builtin(Builtin::NominalIdentity, values),
         };
         if negate {
             Expr {

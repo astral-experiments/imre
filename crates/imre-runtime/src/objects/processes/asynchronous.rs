@@ -38,19 +38,13 @@ pub(in crate::objects) struct AsyncProcess {
     pipes: [bool; 2],
 }
 
-fn stdio(mode: u32) -> Stdio {
-    match mode {
-        0 => Stdio::inherit(),
-        1 => Stdio::piped(),
-        2 => Stdio::null(),
-        _ => fail("SystemError", "unknown async subprocess output mode"),
-    }
-}
-
 impl AsyncProcess {
     fn spawn(launch: Launch, cwd: Option<&CString>, stdout: u32, stderr: u32) -> Result<Self> {
+        if stdout > 2 || stderr > 2 {
+            fail("SystemError", "unknown async subprocess output mode");
+        }
         let child = launch
-            .spawn_with_output(cwd, stdio(stdout), stdio(stderr))
+            .spawn(cwd, stdout | (stderr << 4))
             .map_err(os_error)?;
         let guard = ChildGuard {
             child,

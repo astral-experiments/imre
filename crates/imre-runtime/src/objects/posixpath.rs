@@ -1,6 +1,9 @@
 //! Raw POSIX spellings. Only ASCII slash and dot are special, including in byte paths.
 
+use std::collections::TryReserveError;
+use std::ffi::OsString;
 use std::ops::Range;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, sequence_allocation_failed};
@@ -182,5 +185,87 @@ pub unsafe extern "C" fn imre_posix_splitext(path: *const (), bytes: u32, out: *
         }
     } else {
         sequence_allocation_failed();
+    }
+}
+
+/// Normalize components lexically. For relative abspath, supply the absolute cwd;
+/// for an absolute path or for normpath, pass none.
+/// The output buffer doubles as the component stack, so arbitrary bytes need no decoding.
+pub(crate) fn normalize(path: &[u8], cwd: Option<&[u8]>) -> Result<Vec<u8>, TryReserveError> {
+    let first = cwd.unwrap_or(path);
+    let root = if first.starts_with(b"//") && !first.starts_with(b"///") {
+        2
+    } else {
+        usize::from(first.starts_with(b"/"))
+    };
+    let mut output = Vec::new();
+    output.try_reserve(root.max(1))?;
+    output.resize(root, b'/');
+    for part in cwd
+        .into_iter()
+        .chain([path])
+        .flat_map(|p| p.split(|&b| b == b'/'))
+    {
+        match part {
+            b"" | b"." => continue,
+            b".." => {
+                let tail = &output[root..];
+                let last = tail.rsplit(|&b| b == b'/').next().unwrap_or_default();
+                if !last.is_empty() && last != b".." {
+                    let end = root + (tail.len() - last.len()).saturating_sub(1);
+                    output.truncate(end);
+                    continue;
+                }
+                if root != 0 {
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        let separator = output.len() > root;
+        output.try_reserve(part.len() + usize::from(separator))?;
+        if separator {
+            output.push(b'/');
+        }
+        output.extend_from_slice(part);
+    }
+    if output.is_empty() {
+        output.push(b'.');
+    }
+    Ok(output)
+}
+
+/// # Safety
+/// The caller roots an exact str (tag 0) or bytes (tag 1). Both operations return
+/// an owned handle of the input's type, or null with a pending exception.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_posix_normalize(
+    path: *const (),
+    bytes: u32,
+    absolute: u32,
+) -> *const () {
+    // SAFETY: the caller keeps the spelling of the indicated type alive.
+    let spelling = unsafe { Spelling::borrow(path, bytes) };
+    let path = spelling.bytes();
+    let cwd = if absolute != 0 && !path.starts_with(b"/") {
+        match std::env::current_dir() {
+            Ok(cwd) => Some(cwd),
+            Err(error) => return super::files::errno_error(error).returning(std::ptr::null()),
+        }
+    } else {
+        None
+    };
+    let Ok(output) = normalize(path, cwd.as_ref().map(|p| p.as_os_str().as_bytes())) else {
+        super::exceptions::sequence_allocation_failed();
+        return std::ptr::null();
+    };
+    if bytes != 0 {
+        Rc::into_raw(Rc::new(output)).cast()
+    } else {
+        // An undecodable cwd component canceled by `..` never reaches the text result.
+        match super::paths::path_utf8(OsString::from_vec(output)) {
+            Ok(text) => Rc::into_raw(Rc::new(text)).cast(),
+            Err(error) => error.returning(std::ptr::null()),
+        }
     }
 }

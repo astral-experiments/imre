@@ -5,8 +5,9 @@ use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
 use crate::contracts::{
-    LIST_APPEND, LIST_APPEND_PAIR, LIST_BORROW_INDEX, LIST_COPY_INDEX, LIST_GET, LIST_GET_INDEX,
-    LIST_POP, LIST_SET, LIST_SET_INDEX, runtime_call_may_raise,
+    BYTE_OUTPUT_APPEND, BYTE_OUTPUT_APPEND_PAIR, LIST_APPEND, LIST_APPEND_PAIR, LIST_BORROW_INDEX,
+    LIST_COPY_INDEX, LIST_GET, LIST_GET_INDEX, LIST_POP, LIST_SET, LIST_SET_INDEX,
+    runtime_call_may_raise,
 };
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
@@ -62,7 +63,7 @@ impl Type {
             | Self::ExitCode
             | Self::TimeoutExpired
             | Self::Path
-            | Self::CompletedProcess
+            | Self::CompletedProcess(_)
             | Self::EventLoop
             | Self::Coroutine(_)
             | Self::Task(_)
@@ -105,7 +106,7 @@ impl Type {
             | Self::ExitCode
             | Self::TimeoutExpired
             | Self::Path
-            | Self::CompletedProcess
+            | Self::CompletedProcess(_)
             | Self::EventLoop
             | Self::Coroutine(_)
             | Self::Task(_)
@@ -518,7 +519,7 @@ impl Emitter<'_, '_> {
     /// Integer-list writes return one on success and zero with a pending error
     /// on failure. The same clear-pending entry contract as reads applies, and
     /// existing expression owners remain live until this status is checked.
-    fn checked_int_list_status(&mut self, instruction: impl AsRef<str>) {
+    fn checked_status(&mut self, instruction: impl AsRef<str>) {
         let status = self.instruction(instruction);
         let failed = self.instruction(format!("icmp eq i32 {status}, 0"));
         self.check_failed(&failed);
@@ -661,7 +662,7 @@ impl Emitter<'_, '_> {
             Type::Str | Type::StrLiteral(_) => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
-            Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess => {
+            Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(_) => {
                 "record"
             }
             Type::List(_)
@@ -1739,9 +1740,9 @@ impl Emitter<'_, '_> {
         let first = self.operand(first);
         let second = self.operand(second);
         if receiver.value.ty == Type::ByteOutput {
-            self.void_call(
-                "imre_byte_output_append_pair",
-                &[&receiver.value, &first.value, &second.value],
+            self.runtime_call(
+                &BYTE_OUTPUT_APPEND_PAIR,
+                [&receiver.value, &first.value, &second.value],
             );
         } else {
             self.runtime_call(
@@ -3183,7 +3184,7 @@ impl Emitter<'_, '_> {
                 | Type::ExitCode
                 | Type::TimeoutExpired
                 | Type::TextIO
-                | Type::CompletedProcess
+                | Type::CompletedProcess(_)
                 | Type::BinaryIO => self.instruction(format!(
                     "icmp {predicate} {} {}, {}",
                     left.ty.llvm(),
@@ -3497,14 +3498,15 @@ impl Emitter<'_, '_> {
             Builtin::StrEnumName | Builtin::StrEnumValue => {
                 self.enum_text(&args[0].value, matches!(builtin, Builtin::StrEnumName))
             }
-            Builtin::StrEnumIdentity => Value {
-                ty: Type::Bool,
-                operand: self.instruction(format!(
-                    "icmp eq i64 {}, {}",
-                    args[0].value.operand, args[1].value.operand
-                )),
-                small_integer: false,
-            },
+            Builtin::NominalIdentity => {
+                let left = self.word(&args[0].value);
+                let right = self.word(&args[1].value);
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp eq i64 {left}, {right}")),
+                    small_integer: false,
+                }
+            }
             Builtin::LiteralStringView
             | Builtin::DictAsBase
             | Builtin::RecordView
@@ -3535,17 +3537,27 @@ impl Emitter<'_, '_> {
             }
             Builtin::Text(operation) => self.text_builtin(*operation, &args, returns),
             Builtin::RegexCompile(pattern) => self.pooled_literal(pattern.as_bytes(), returns),
-            Builtin::GetLogger => self.call("imre_logger_get", returns, &[&args[0].value]),
-            Builtin::LogLevel => {
-                self.void_call("imre_logger_configure", &[&args[0].value]);
-                none()
-            }
-            Builtin::LogWrite(level) => {
-                self.line(format!(
-                    "call void @imre_logger_write(ptr {}, i32 {level}, ptr {})",
-                    args[0].value.operand, args[1].value.operand
-                ));
-                none()
+            Builtin::Logging(operation) => {
+                use crate::ir::LogOperation::*;
+                let name = match operation {
+                    Get => "imre_log_get",
+                    Configure => "imre_log_config",
+                    Name => "imre_log_name",
+                    Parent => "imre_log_parent",
+                    Root => "imre_log_root",
+                    Level => "imre_log_level",
+                    EffectiveLevel => "imre_log_effective_level",
+                    SetLevel => "imre_log_set_level",
+                    Enabled => "imre_log_enabled",
+                    Emit => "imre_log_emit",
+                };
+                let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
+                if returns == Type::None {
+                    self.void_call(name, &values);
+                    none()
+                } else {
+                    self.call(name, returns, &values)
+                }
             }
             Builtin::RegexSearch | Builtin::RegexMatchStart => {
                 let operation = if matches!(builtin, Builtin::RegexMatchStart) {
@@ -4605,7 +4617,7 @@ impl Emitter<'_, '_> {
                     | Type::JsonObject
                     | Type::RegexMatch
                     | Type::BinaryIO
-                    | Type::CompletedProcess
+                    | Type::CompletedProcess(_)
                     | Type::Tuple(_)
                     | Type::Optional(_)
                     | Type::Callable(_)
@@ -4822,7 +4834,7 @@ impl Emitter<'_, '_> {
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
-            | Type::CompletedProcess
+            | Type::CompletedProcess(_)
             | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
         }
     }
@@ -4876,7 +4888,7 @@ impl Emitter<'_, '_> {
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
-            | Type::CompletedProcess
+            | Type::CompletedProcess(_)
             | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
         Value {
@@ -5041,13 +5053,13 @@ impl Emitter<'_, '_> {
 
     fn append(&mut self, list: &Value, value: &Value) {
         if list.ty == Type::ByteOutput {
-            self.void_call("imre_byte_output_append", &[list, value]);
+            self.runtime_call(&BYTE_OUTPUT_APPEND, [list, value]);
         } else if list.ty == Type::ListInt {
             self.runtime_call(&LIST_APPEND, [list, value]);
         } else {
             let word = self.word(value);
-            self.line(format!(
-                "call void @imre_seq_append(ptr {}, i64 {word}, i32 {})",
+            self.checked_status(format!(
+                "call i32 @imre_seq_append(ptr {}, i64 {word}, i32 {})",
                 list.operand,
                 representation_kind(value.ty, &self.module.types)
             ));
@@ -5393,7 +5405,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Bytes => 8,
         Type::Union(_) => 9,
         Type::ListInt => 4,
-        Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess => 6,
+        Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(_) => 6,
         Type::List(_)
         | Type::Dict(_)
         | Type::Set(_)
@@ -5430,7 +5442,15 @@ fn record_name(ty: Type) -> String {
         Type::Class(id) => format!("class_{id}"),
         Type::Tuple(id) => format!("tuple_{id}"),
         Type::Callable(_) => "callable".to_owned(),
-        Type::CompletedProcess => "completed_process".to_owned(),
+        Type::CompletedProcess(c) if c == crate::ir::ProcessCapture::TEXT => {
+            "completed_process".to_owned()
+        }
+        Type::CompletedProcess(c) => format!(
+            "completed_process_{}{}{}",
+            u8::from(c.text),
+            u8::from(c.stdout),
+            u8::from(c.stderr)
+        ),
         _ => unreachable!("only fixed record types have layout names"),
     }
 }
@@ -5455,19 +5475,31 @@ fn record_layouts(module: &Module, output: &mut Output) {
         .iter()
         .enumerate()
         .map(|(id, fields)| (Type::Class(id), fields.clone()));
-    let process = (
-        Type::CompletedProcess,
-        vec![
-            module.types.list(Type::Str),
-            Type::Int,
-            Type::Str,
-            Type::Str,
-        ],
-    );
-    for (ty, fields) in classes
-        .chain(module.types.tuples())
-        .chain(std::iter::once(process))
-    {
+    let mut captures = std::collections::BTreeSet::from([crate::ir::ProcessCapture::TEXT]);
+    for function in module.functions.iter().chain([&module.entry]) {
+        for ty in function.locals.iter().chain([&function.returns]) {
+            if let Type::CompletedProcess(c) = ty {
+                captures.insert(*c);
+            }
+        }
+        crate::ir::walk_expressions(&function.body, &mut |value| {
+            if let Type::CompletedProcess(c) = value.ty {
+                captures.insert(c);
+            }
+        });
+    }
+    let processes = captures.into_iter().map(|c| {
+        (
+            Type::CompletedProcess(c),
+            vec![
+                module.types.list(Type::Str),
+                Type::Int,
+                c.stream(true),
+                c.stream(false),
+            ],
+        )
+    });
+    for (ty, fields) in classes.chain(module.types.tuples()).chain(processes) {
         let name = record_name(ty);
         let storage = fields
             .iter()
@@ -5522,7 +5554,7 @@ fn write_declarations(units: &mut Output) {
     units.common().push_str(
         r#"
 declare ptr @imre_subprocess_check_output(ptr)
-declare ptr @imre_subprocess_run(ptr, ptr, ptr, i32, ptr)
+declare ptr @imre_subprocess_run_modes(ptr, ptr, ptr, i32, i32, i32, i64, ptr)
 declare ptr @imre_async_coroutine(ptr, ptr, i32)
 declare ptr @imre_context_new(ptr, ptr)
 declare void @imre_context_enter(ptr)
@@ -5558,8 +5590,6 @@ declare i64 @imre_projected_hash(ptr)
 declare ptr @imre_async_process_spawn(ptr, ptr, ptr, i32, i32)
 declare i64 @imre_async_process_status(ptr, i1 zeroext)
 declare ptr @imre_async_process_communicate(ptr, ptr)
-declare ptr @imre_subprocess_run_timeout(ptr, ptr, ptr, i32, ptr, ptr)
-declare ptr @imre_subprocess_run_timeout_int(ptr, ptr, ptr, i32, i64, ptr)
 declare ptr @imre_environ_copy()
 declare ptr @imre_environ_get(ptr, ptr)
 declare ptr @imre_getcwd()
@@ -5579,6 +5609,7 @@ declare ptr @imre_posix_join(ptr, i64, i32)
 declare ptr @imre_posix_join_error(i32)
 declare ptr @imre_posix_component(ptr, i32, i32)
 declare void @imre_posix_splitext(ptr, i32, ptr)
+declare ptr @imre_posix_normalize(ptr, i32, i32)
 declare i32 @imre_path_is_absolute(ptr)
 declare ptr @imre_path_absolute(ptr)
 declare ptr @imre_path_resolve(ptr, i32)
@@ -5632,8 +5663,6 @@ declare ptr @imre_bytes_count(i64)
 declare ptr @imre_bytes_list(ptr)
 declare ptr @imre_byte_output_new()
 declare void @imre_byte_output_reserve_range(ptr, i64, i64, i64, i64)
-declare void @imre_byte_output_append(ptr, i64)
-declare void @imre_byte_output_append_pair(ptr, i64, i64)
 declare ptr @imre_byte_output_finish(ptr)
 declare ptr @imre_bytes_concat(ptr, ptr)
 declare ptr @imre_bytes_repeat(ptr, i64)
@@ -5707,7 +5736,7 @@ declare i64 @imre_seq_get_index(ptr, i64)
 declare i64 @imre_seq_borrow_index_proven(ptr, i64) nounwind
 declare ptr @imre_seq_data_readonly(ptr) nounwind
 declare void @imre_seq_set_index(ptr, i64, i64, i32)
-declare void @imre_seq_append(ptr, i64, i32)
+declare i32 @imre_seq_append(ptr, i64, i32)
 declare i64 @imre_seq_pop(ptr)
 declare i64 @imre_seq_len(ptr) nounwind
 declare i32 @imre_seq_resolve_header(ptr) nounwind
@@ -5864,9 +5893,16 @@ declare ptr @imre_str_static_literal(ptr, i64)
 declare ptr @imre_regex_compile(ptr, i64)
 declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_match(ptr, ptr)
-declare ptr @imre_logger_get(ptr)
-declare void @imre_logger_configure(i64)
-declare void @imre_logger_write(ptr, i32, ptr)
+declare ptr @imre_log_get(i64)
+declare void @imre_log_config(i64, i64, i64, i1)
+declare ptr @imre_log_name(ptr)
+declare i64 @imre_log_parent(ptr)
+declare ptr @imre_log_root(ptr)
+declare i64 @imre_log_level(ptr)
+declare i64 @imre_log_effective_level(ptr)
+declare void @imre_log_set_level(ptr, i64)
+declare i1 @imre_log_enabled(ptr, i64)
+declare void @imre_log_emit(ptr, i64, ptr)
 declare ptr @imre_regex_group(ptr, i64, i32)
 declare ptr @imre_regex_groupdict(ptr)
 declare i32 @imre_regex_present(ptr, i64, i32)
@@ -5903,7 +5939,9 @@ declare void @imre_list_release(ptr)
 "#);
     writeln!(
         output,
-        "{LIST_GET}
+        "{BYTE_OUTPUT_APPEND}
+{BYTE_OUTPUT_APPEND_PAIR}
+{LIST_GET}
 {LIST_SET}
 {LIST_GET_INDEX}
 {LIST_SET_INDEX}
@@ -6853,7 +6891,11 @@ def total(text: str) -> int:
         let eligible = function_body(
             "def encode(value: int) -> bytes:\n    out: list[int] = []\n    out.extend(divmod(value, 256))\n    return bytes(out)\n",
         );
-        assert!(eligible.contains("call void @imre_byte_output_append_pair("));
+        let mut instructions = eligible.lines();
+        instructions
+            .find(|line| line.contains("call i32 @imre_byte_output_append_pair("))
+            .expect("private byte append");
+        assert!(instructions.next().unwrap().contains("icmp eq i32"));
         assert!(eligible.contains("call ptr @imre_byte_output_finish("));
         assert!(!eligible.contains("call ptr @imre_bytes_list("));
 
@@ -6927,7 +6969,10 @@ def total(text: str) -> int:
             "def push(output: list[str], first: str, second: str) -> None:\n    output.append(first)\n    output.append(second)\n",
         );
         assert!(!body.contains("call i32 @imre_list_append_pair("));
-        assert_eq!(body.matches("call void @imre_seq_append(").count(), 2);
+        assert_eq!(body.matches("call i32 @imre_seq_append(").count(), 2);
+        for call in body.split("call i32 @imre_seq_append(").skip(1) {
+            assert!(call.lines().nth(1).unwrap().contains("icmp eq i32"));
+        }
         let body = function_body(
             "def push(outputs: list[list[int]], first: int, second: int) -> None:\n    outputs[0].append(first)\n    outputs[0].append(second)\n",
         );
