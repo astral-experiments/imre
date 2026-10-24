@@ -1153,19 +1153,26 @@ pub unsafe extern "C" fn relar_list_copy_index(
     )
 }
 
+fn try_append_int(list: &mut Vec<Int>, value: &Int) -> bool {
+    if list.try_reserve(1).is_err() {
+        objects::exceptions::sequence_allocation_failed();
+        return false;
+    }
+    list.push(value.clone());
+    true
+}
+
 /// # Safety
 /// The arguments must be live list and integer handles.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_list_append(list: *const List, value: usize) {
+pub unsafe extern "C" fn relar_list_append(list: *const List, value: usize) -> i32 {
     // SAFETY: the caller roots both handles; allocation and acquisition cannot
     // reenter the runtime, and no storage reference escapes the closure.
     unsafe {
         let value = Int::borrow(value);
-        (&*list).0.with_mut(|list| {
-            list.try_reserve(1)
-                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
-            list.push((*value).clone());
-        });
+        (&*list)
+            .0
+            .with_mut(|list| i32::from(try_append_int(list, &value)))
     }
 }
 
@@ -1176,23 +1183,30 @@ pub unsafe extern "C" fn relar_list_append(list: *const List, value: usize) {
 /// Root the exact list and both canonical integer handles throughout the call.
 /// Each stored element acquires its own owner, including repeated BigInts.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_list_append_pair(list: *const List, first: usize, second: usize) {
+pub unsafe extern "C" fn relar_list_append_pair(
+    list: *const List,
+    first: usize,
+    second: usize,
+) -> i32 {
     // SAFETY: these borrowed words remain rooted even when resizing moves the
     // list's buffer. Acquisition and allocation cannot call user code.
     unsafe {
         let first = Int::borrow(first);
         let second = Int::borrow(second);
         (&*list).0.with_mut(|list| {
-            list.try_reserve(2)
-                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+            if list.capacity() - list.len() < 2 {
+                // The first source append can fit even if growing for the second fails.
+                return i32::from(try_append_int(list, &first) && try_append_int(list, &second));
+            }
             let length = list.len();
-            // Successful reservation proves that both slots fit. Cloning exact
+            // The capacity check proves that both slots fit. Cloning exact
             // Int owners cannot unwind; publish only after both are initialized.
             let output = list.as_mut_ptr().add(length);
             output.write((*first).clone());
             output.add(1).write((*second).clone());
             list.set_len(length + 2);
-        });
+            1
+        })
     }
 }
 
@@ -1524,10 +1538,16 @@ mod tests {
         // SAFETY: both inputs and the exact list remain rooted. The second call
         // borrows its repeated input from the list itself across buffer growth.
         unsafe {
-            relar_list_append_pair(Rc::as_ptr(&list), big_word, negative);
+            assert_eq!(
+                relar_list_append_pair(Rc::as_ptr(&list), big_word, negative),
+                1
+            );
             assert_eq!(Rc::strong_count(&big), 2);
             let borrowed = list.0.with(|values| values[1].0);
-            relar_list_append_pair(Rc::as_ptr(&list), borrowed, borrowed);
+            assert_eq!(
+                relar_list_append_pair(Rc::as_ptr(&list), borrowed, borrowed),
+                1
+            );
             assert_eq!(Rc::strong_count(&big), 4);
             list.0.with(|values| {
                 assert_eq!(values.len(), 5);

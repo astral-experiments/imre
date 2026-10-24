@@ -3,7 +3,7 @@
 use std::fmt;
 
 use crate::contracts::{
-    BorrowedIntOrError, InfallibleVoid, OwnedIntOrError, RuntimeCall, RuntimeParam, StatusOrError,
+    BorrowedIntOrError, OwnedIntOrError, RuntimeCall, RuntimeParam, StatusOrError,
 };
 use crate::ir::Type;
 
@@ -88,18 +88,6 @@ impl RuntimeReturn for BorrowedIntOrError {
             value: emitter.decode_word(word, Type::Int),
             ownership: Ownership::Borrowed,
         }
-    }
-}
-
-impl RuntimeReturn for InfallibleVoid {
-    type Output = ();
-
-    fn llvm(&self) -> &'static str {
-        "void"
-    }
-
-    fn emit(&self, emitter: &mut Emitter<'_, '_>, instruction: String) {
-        emitter.line(instruction);
     }
 }
 
