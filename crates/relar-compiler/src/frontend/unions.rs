@@ -20,6 +20,13 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
+        if matches!((value.ty, ty), (Type::Class(parent), Type::Class(child)) if self.classes.parsers.child_of(child, parent))
+        {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::NamespaceView, vec![value]),
+            };
+        }
         if matches!(ty, Type::StrLiteral(_)) && matches!(value.ty, Type::Str | Type::StrLiteral(_))
         {
             return literals::view(value, ty);

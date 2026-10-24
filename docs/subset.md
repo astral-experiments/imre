@@ -168,6 +168,17 @@ Defaults match Python's separators, escaping and nonfinite number spellings.
 Dynamic hooks, arbitrary mapping keys, and general `Any` remain outside this
 boundary.
 
+`json.load(stream)` reads a UTF-8 text stream from its current position. A
+literal `get` on a JSON object can supply an integer default or a fresh `[]`.
+An array selected into `list[dict[str, Any]]` exposes read-only row views that
+can outlive the file. The list supports indexing, iteration, concatenation,
+and slicing. Item assignment and mutating list methods are rejected, including
+through aliases and function parameters. Lookup checks the row's actual JSON
+kind when it is used. Typed scalar or list fields check the selected field's
+kind at assignment. Immutable JSON can participate in dataclass equality and
+representation. Adding JSON values follows Python's numeric and sequence rules,
+and `isinstance(result, int)` can guard the result before storing it as an integer.
+
 `from relar.json import decode, encode` exposes explicit Relar APIs. `decode(text, Schema)` takes a string and a statically resolved record class, `list[T]`, or `dict[str, T]`, returning that exact type. Scalar and optional roots are not accepted by the decoder. Import aliases and first-party re-exports preserve the intrinsic identity. The native decoder constructs existing typed records, lists, and dictionaries directly, without exposing unknown values or `Any`.
 
 ```python
@@ -543,7 +554,7 @@ Temporary-directory objects cannot be stored, passed, returned, manually entered
 
 ## UTF-8 files and process arguments
 
-`open(path, "r", encoding="utf-8")` and `open(path, "w", encoding="utf-8")` return a sealed `typing.TextIO` handle. The path is a string or native `Path` expression; mode and encoding must be the shown literals. Read mode opens an existing file; write mode creates or truncates a file. There is no locale-dependent default encoding. Handles can be passed, returned, stored in fields or containers, and aliased; every alias observes the same open/closed state.
+`open(path, "r", encoding="utf-8")` and `open(path, "w", encoding="utf-8")` return a sealed `typing.TextIO` handle. The path is a string or native `Path`. Reading defaults to strict UTF-8, so `open(path)` and `open(path, "r")` are equivalent. Writing requires an explicit UTF-8 encoding and creates or truncates the file. Handles can be passed, returned, stored in fields or containers, and aliased; every alias observes the same open/closed state.
 
 `read()` consumes the remaining file and decodes strict UTF-8, translating CRLF and bare CR to LF. Further reads at EOF return the empty string. `write(text)` writes UTF-8 and returns the number of Unicode scalar characters, including embedded NULs. `flush()` makes buffered output visible to the operating system; it does not promise durable storage. `close()` flushes and closes, marks the shared handle closed even on a close failure, and succeeds on repeated calls. `.closed` is read-only. Entering, reading, writing, or flushing a closed handle raises `ValueError`. Reading a write-only handle or writing a read-only handle raises `io.UnsupportedOperation`, which matches both `OSError` and `ValueError`.
 
@@ -584,7 +595,9 @@ if args.output:
 
 The accepted declarations use one ASCII long option per `add_argument`, `str` or `Path` conversion, a matching literal default, `None`, `required`, `nargs="+"`, or `action="store_true"`. A list or tuple supplies constant string choices. Constructor options include a literal `prog`, a literal description or `__doc__`, and `RawDescriptionHelpFormatter`. In the default configuration the displayed program name is the entry script's basename. The parser reads the current `sys.argv[1:]` and handles repeated options, unique long-option abbreviations, and `--`. Help layout and coloring follow CPython 3.14. Help and usage errors follow the native exception cleanup path and raise catch-only `SystemExit` with status 0 or 2.
 
-Keep the builder local, with its declarations immediately followed by an assignment or return of `parse_args()`. Positionals, user-defined actions, subparsers, and dynamically assembled options are outside this grammar.
+A parser can require a subcommand with `add_subparsers(dest="command", required=True)`. Each literal `add_parser("name", help="...")` introduces a child parser with its own options. The namespace carries the selected command and that child's fields. A `match args.command` case or `if args.command == "name"` branch selects its concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
+
+Keep each builder local. Declare parent options first, followed by each subparser and its options, then assign or return `parse_args()`. Dynamic declarations, ordinary positionals, and nested or optional subcommands are outside this grammar.
 
 ## Synchronous subprocesses
 
@@ -613,9 +626,26 @@ The call waits for the child, captures stdout and stderr independently, and inhe
 
 The result has the exact type `subprocess.CompletedProcess[str]`; bare `CompletedProcess` denotes the same sealed type. Its read-only fields are `args: list[str]`, `returncode: int`, `stdout: str`, and `stderr: str`. Empty captures are empty strings, and signal termination produces a negative return code. Results can be stored in classes, containers, and optionals. Equality compares identity; `str`, `repr`, formatted output, and `isinstance` support the sealed result. `args` retains the original argument list, so later list mutation remains visible through that field. Calling `check_returncode()` immediately checks the stored status; escaping that bound method is unsupported.
 
-`check=True` or a failing `check_returncode()` raises the catch-only `subprocess.CalledProcessError`, which matches `subprocess.SubprocessError` and `Exception`. It exposes read-only `returncode: int`, `cmd: list[str]`, and `stdout`, `output`, and `stderr` strings; `stdout` and `output` expose the same capture. `cmd` aliases the original argument list, and the diagnostic reflects its current contents. These fixed getters raise `AttributeError` on unrelated exception instances. Missing executables and invalid working directories retain their ordinary operating-system error categories; they are not subprocess status errors.
+`check=True` or a failing `check_returncode()` raises the catch-only `subprocess.CalledProcessError`, which matches `subprocess.SubprocessError` and `Exception`. It exposes read-only `returncode: int` and `cmd: list[str]`. For a failed capture, `stdout`, `output`, and `stderr` are strings. Both `stdout` and `output` expose the same capture. `cmd` aliases the original argument list, and the diagnostic reflects its current contents. These fixed getters raise `AttributeError` on unrelated exception instances. Missing executables and invalid working directories retain their ordinary operating-system error categories; they are not subprocess status errors.
 
 `os.environ.get(key)` and `os.getenv(key)` read a string from the environment and return `None` for a missing key. Both accept an optional `default` of type `str | None`. A string default gives a `str` result. `os.getcwd()` returns the current directory, and `os.fspath(path)` accepts a `str`, `bytes`, or native `Path`. `print(text, file=sys.stderr)` writes a string and a newline to standard error.
+
+`shlex.split(text)` returns POSIX shell words with Python’s default quoting,
+escaping, and comment handling. A discarded `subprocess.run(argv, check=True,
+stdout=sys.stderr)` forwards both child streams to the parent’s stderr while
+the child is running. Failure raises `CalledProcessError` with uncaptured
+streams set to `None`. In a handler around a direct captured call or
+`check_returncode()`, the stream fields on the caught error have type `str`.
+When redirection is possible, including through an indirect call, their type
+is `str | None`.
+
+For programs that explicitly launch Python helpers, `sys.executable` is the
+absolute interpreter path selected by `RELAR_PYTHON`, or the first executable
+`python3` on `PATH`. It is an empty string if neither is available. The
+native program itself has no Python runtime dependency. `__file__` refers to
+the module’s source location at build time, so neighboring resources must
+remain available when the program accesses them. `sys.exit(status)` raises
+`SystemExit` and runs the usual exception cleanup.
 
 `os.environ.copy()` returns an independent `dict[str, str]` snapshot. Passing a dictionary as `env` replaces the child's environment; use a snapshot to preserve inherited variables before making overrides. `env=None` inherits the existing environment. Snapshotting undecodable Unix names or values raises `UnicodeDecodeError`; surrogateescaped strings remain outside Relar's string domain. NUL-containing arguments, directories, or environment entries, and environment keys containing `=`, raise `ValueError`. Relar accepts an empty environment name through `execve`, as does CPython's fork/exec path. CPython's `posix_spawn` path raises `ValueError` for that name.
 
@@ -623,7 +653,7 @@ The optional `timeout` keyword accepts signed integer literals or expressions of
 
 An `except subprocess.TimeoutExpired as error` binding has these exact field types. Stored generic exception values can be narrowed with `isinstance(error, subprocess.TimeoutExpired)` before accessing timeout fields. `cmd` retains the original list and `stdout` aliases `output`. Launch precedes timeout validation, so a missing executable takes precedence over an invalid timeout. Zero and negative timeouts, including negative infinity, launch the child and expire immediately; NaN raises `ValueError`, while positive infinity or an unrepresentable polling duration raises `OverflowError`. Exceptions can be retained and re-raised through the existing sealed exception storage; constructing or annotating a `TimeoutExpired` value directly is unsupported.
 
-Other subprocess modes are rejected, including `shell`, `Popen`, input data, stream redirection, descriptor options, arbitrary encodings, and custom path or mapping protocols. Result construction, field replacement, exception construction, inheritance, and general access or mutation through `os.environ` are unsupported. This API adds process execution without embedding a Python interpreter or exposing an asynchronous process handle.
+Other subprocess modes are rejected, including `shell`, `Popen`, input data, arbitrary stream redirection, descriptor options, arbitrary encodings, and custom path or mapping protocols. Result construction, field replacement, exception construction, inheritance, and general access or mutation through `os.environ` are unsupported. This API adds process execution without embedding a Python interpreter or exposing an asynchronous process handle.
 
 ## Structural pattern matching
 
@@ -764,6 +794,8 @@ Direct `mapping.keys()` operands and sets of the same key type support `|`, incl
 Tuple types name each position, for example `tuple[str, int, list[Counter]]`; `tuple[()]` is empty. A tuple's slots cannot be reassigned, but a referenced list or instance can still be mutated. Indexes must be in-range integer literals, optionally negative. Variable indexes, computed indexes, variadic tuple annotations, tuple concatenation, and tuple repetition are rejected. Tuple equality and inequality require the same concrete immutable shape accepted for dictionary keys. Ordered scalar tuple shapes additionally support lexicographic `<`, `<=`, `>`, and `>=`, including nested tuples and fields whose exact type is `None`. Nullable tuple fields permit equality but exclude ordering. Lists of matching immutable scalar tuples support `==` and `!=`. They compare lengths and then tuple values in order. Mutable tuple fields and float fields are outside this comparison.
 
 Fixed tuples, lists, strings, and bytes support the nested and starred assignment patterns described in [assignment and container expansion](#assignment-and-container-expansion). Concrete list lengths are checked at runtime; fixed-tuple shapes are checked during compilation.
+
+A plain `for` loop can iterate a fixed tuple with one element type, including a module constant. The tuple is evaluated once before the body runs.
 
 `for value in values` evaluates a concrete list once and retains that original list even if the source name or field is later replaced. It reads the current length and acquires the next element at each step. Appending, removing, or replacing elements through an alias therefore has Python's index-based list-iteration behavior. The current item remains owned if the body removes it from the list. `enumerate(values, start)` captures the list before evaluating its optional integer start and yields fixed `(int, T)` tuples; its counter supports arbitrary precision and is independent of visible target rebinding. Both forms support `break`, `continue`, nested loops, and early returns. A target first introduced by a loop remains potentially uninitialized afterward because the loop may be empty. Escaping iterator values and user-defined iteration protocols are not supported.
 

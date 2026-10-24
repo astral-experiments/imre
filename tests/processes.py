@@ -90,6 +90,33 @@ for name, value in {"args": "['other']", "returncode": "0", "stdout": "'text'", 
     REJECTED[f"write_{name}"] = f"result = {CALL}\nresult.{name} = {value}"
 REJECTED["write_error_field"] = "error: Exception = ValueError('message')\nerror.stdout = 'text'"
 
+REDIRECT = """from sys import stderr
+def redirect() -> None:
+    run(['command'], stdout=stderr, check=True)
+"""
+REJECTED["indirect_error_stream"] = REDIRECT + """try:
+    redirect()
+except CalledProcessError as error:
+    print(len(error.stderr))
+"""
+REJECTED["rebound_error_stream"] = REDIRECT + """try:
+    redirect()
+except CalledProcessError as redirected:
+    try:
+        run(['command'], capture_output=True, text=True, check=True)
+    except CalledProcessError as captured:
+        captured = redirected
+        print(len(captured.stderr))
+"""
+REJECTED["reraised_error_stream"] = REDIRECT + """try:
+    redirect()
+except CalledProcessError:
+    try:
+        raise
+    except CalledProcessError as again:
+        print(len(again.output))
+"""
+
 INVALID_ENV = """import os
 import subprocess
 from sys import argv

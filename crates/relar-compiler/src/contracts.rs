@@ -57,7 +57,9 @@ impl Builtin {
         match self {
             Self::Text(operation) => Contract::new(
                 match operation {
-                    TextOperation::Split(_) | TextOperation::Partition => true,
+                    TextOperation::Split(_)
+                    | TextOperation::Partition
+                    | TextOperation::ShlexSplit => true,
                     TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
@@ -108,7 +110,10 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
-                ProcessOperation::Run
+                ProcessOperation::Executable
+                | ProcessOperation::Exit
+                | ProcessOperation::RunToStderr
+                | ProcessOperation::Run
                 | ProcessOperation::RunTimeout
                 | ProcessOperation::EnvironCopy
                 | ProcessOperation::EnvironGet
@@ -208,7 +213,7 @@ impl Builtin {
             | Self::FileReadline
             | Self::GzipOpen
             | Self::Input
-            | Self::ParseArgs
+            | Self::ParseArgs(_)
             | Self::Pop
             | Self::Print
             | Self::SortRestore
@@ -228,6 +233,9 @@ impl Builtin {
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)
             | Self::KeyUnion
+            | Self::KeySet
+            | Self::KeyIntersection
+            | Self::NamespaceView
             | Self::ListAllI32
             | Self::ListDistinct
             | Self::ListExtendUnhinted

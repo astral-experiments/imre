@@ -198,6 +198,7 @@ const RESERVED: &[&str] = &[
     "False",
     "__name__",
     "__doc__",
+    "__file__",
 ];
 
 /// These numbers are the sealed exception categories in the runtime ABI.
@@ -359,6 +360,9 @@ pub(crate) fn lower_with_owners(
             callable_definitions.push(class.definition);
         }
     }
+    for (module, function, _) in &mut definitions {
+        assignments::alias_builtin_parameters(function, &graph.modules[*module].bindings);
+    }
     inference.solve(
         graph,
         &mut definitions,
@@ -366,6 +370,30 @@ pub(crate) fn lower_with_owners(
         &mut classes,
         &types,
     )?;
+    for (module, function, signature) in &definitions {
+        let annotated = function
+            .parameters
+            .iter_non_variadic_params()
+            .zip(&signature.params)
+            .filter_map(|(p, inferred)| p.annotation().map(|value| (value, inferred.ty)))
+            .chain(
+                function
+                    .returns
+                    .as_deref()
+                    .map(|value| (value, signature.returns)),
+            );
+        for (annotation, ty) in annotated {
+            if graph.resolve(*module, annotation)
+                == Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
+                && !matches!(ty, Type::Class(id) if classes.parsers.namespace(id))
+            {
+                return Err(graph.modules[*module].error(
+                    annotation,
+                    "argparse.Namespace requires an inferred native parser namespace",
+                ));
+            }
+        }
+    }
     let initializer_start = definitions.len();
     let helpers = Helpers::new(definitions.len() + graph.initializer_modules().count());
     let globals = ModuleValues::default();
@@ -639,6 +667,10 @@ fn signature(
         } else {
             parameter
                 .annotation()
+                .filter(|value| {
+                    graph.resolve(module, value)
+                        != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
+                })
                 .map(|value| {
                     if let ast::Expr::Subscript(sequence) = value
                         && graph.resolve(module, &sequence.value)
@@ -710,6 +742,9 @@ fn signature(
     let returns = function
         .returns
         .as_deref()
+        .filter(|value| {
+            graph.resolve(module, value) != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
+        })
         .map(|value| {
             if let ast::Expr::Subscript(subscript) = value
                 && graph.resolve(module, &subscript.value)
@@ -968,6 +1003,9 @@ fn annotation_at(
             })
         }
         ast::Expr::Subscript(value) => match &*value.value {
+            item if graph.resolve(module, item) == Some(Binding::Intrinsic(Intrinsic::Final)) => {
+                nested(&value.slice)
+            }
             ast::Expr::Name(name) if name.id == "list" => Ok(types.list(nested(&value.slice)?)),
             ast::Expr::Name(name) if name.id == "set" => {
                 let element = nested(&value.slice)?;
@@ -1146,6 +1184,7 @@ struct Checker<'a> {
     narrowed: assignments::Narrowed,
     regex_guards: Vec<(usize, regex::CaptureNames)>,
     namespace_guards: Vec<(usize, usize)>,
+    captured_process_errors: Vec<usize>,
     returns: Type,
     names: HashMap<String, usize>,
     local_functions: HashMap<String, local_functions::Binding>,
@@ -1154,6 +1193,7 @@ struct Checker<'a> {
     calls: HashSet<usize>,
     class_reads: std::cell::RefCell<HashSet<DefinitionId>>,
     loop_breaks: Vec<Option<LocalState>>,
+    block_depth: usize,
     in_finally: bool,
     reachable: bool,
     module_scope: bool,
@@ -1191,6 +1231,7 @@ impl<'a> Checker<'a> {
             narrowed: assignments::Narrowed::new(),
             regex_guards: Vec::new(),
             namespace_guards: Vec::new(),
+            captured_process_errors: Vec::new(),
             returns: Type::None,
             names: HashMap::new(),
             local_functions: HashMap::new(),
@@ -1199,6 +1240,7 @@ impl<'a> Checker<'a> {
             calls: HashSet::new(),
             class_reads: Default::default(),
             loop_breaks: Vec::new(),
+            block_depth: 0,
             in_finally: false,
             reachable: true,
             module_scope: false,
@@ -1337,6 +1379,13 @@ impl<'a> Checker<'a> {
     fn coerce(&self, value: Expr, expected: Type, node: &impl Ranged) -> Result<Expr, String> {
         if value.ty == expected {
             return Ok(value);
+        }
+        if matches!((value.ty, expected), (Type::Class(child), Type::Class(parent)) if self.classes.parsers.child_of(child, parent))
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(Builtin::NamespaceView, vec![value]),
+            });
         }
         let target = self.types.payload(expected).unwrap_or(expected);
         if matches!(value.ty, Type::JsonValue | Type::JsonRoot)
@@ -1987,6 +2036,10 @@ impl<'a> Checker<'a> {
             // the container while retaining ordinary loop ownership and exits.
             iterable.ty = self.types.tuple(vec![Type::Str; values.len()]);
             iterable.kind = ExprKind::Tuple(std::mem::take(values));
+        }
+        if matches!(&input, Iteration::Container { iterable, items: false, start: None }
+            if matches!(iterable.ty, Type::Tuple(_)))
+        {
             input =
                 Iteration::Prepared(self.prepare_iteration(input, loop_.iter.as_ref(), false)?);
         }
@@ -2448,6 +2501,7 @@ impl<'a> Checker<'a> {
 
     /// Checks dead syntax too, but merges definite assignment only from reachable exits.
     fn block(&mut self, statements: &[ast::Stmt]) -> Result<(Vec<Statement>, bool), String> {
+        self.block_depth += 1;
         let mut body = Vec::new();
         let mut falls_through = true;
         let reachable = self.reachable;
@@ -2457,12 +2511,38 @@ impl<'a> Checker<'a> {
             if let ast::Stmt::Assign(assignment) = statement
                 && let [ast::Expr::Name(name)] = assignment.targets.as_slice()
                 && !self.names.contains_key(name.id.as_str())
-                && matches!(&*assignment.value, ast::Expr::List(list) if list.elts.is_empty())
-                && let Some(value) =
-                    inference::first_append(name.id.as_str(), &statements[index + 1..])
-                && let Some(element) = self.graph.session.scalar_type(self.module, value)
             {
-                self.declare(name.id.as_str(), self.types.list(element), name)?;
+                let later = &statements[index + 1..];
+                let empty_list =
+                    matches!(&*assignment.value, ast::Expr::List(list) if list.elts.is_empty());
+                let empty_dict =
+                    matches!(&*assignment.value, ast::Expr::Dict(dict) if dict.items.is_empty());
+                let returned = || {
+                    later.iter().any(|statement| matches!(statement, ast::Stmt::Return(ret) if matches!(ret.value.as_deref(), Some(ast::Expr::Name(value)) if value.id == name.id)))
+                };
+                let context = if (empty_list && self.types.element(self.returns).is_some()
+                    || empty_dict && self.types.mapping(self.returns).is_some())
+                    && returned()
+                {
+                    Some(self.returns)
+                } else if empty_list
+                    && let Some(value) = inference::first_append(name.id.as_str(), later)
+                {
+                    let element = match value {
+                        ast::Expr::Call(call)
+                            if let Some(class) = self.class_reference(&call.func) =>
+                        {
+                            Some(Type::Class(class))
+                        }
+                        _ => self.graph.session.scalar_type(self.module, value),
+                    };
+                    element.map(|ty| self.types.list(ty))
+                } else {
+                    None
+                };
+                if let Some(ty) = context {
+                    self.declare(name.id.as_str(), ty, name)?;
+                }
             }
             self.reachable = reachable && falls_through;
             let sum = zip_sums::rhs(statement);
@@ -2477,6 +2557,7 @@ impl<'a> Checker<'a> {
         }
         self.reachable = reachable;
         self.zip_sum_rhs = enclosing_sum;
+        self.block_depth -= 1;
         Ok((body, falls_through))
     }
 
@@ -2504,6 +2585,27 @@ impl<'a> Checker<'a> {
                     self.types,
                     self.class,
                 )?;
+                // A new outermost annotation dominates every subsequent read.
+                // Evaluate its RHS with the old binding; closures and nested
+                // suites keep their fixed slots across calls and control flow.
+                if !self.module_scope
+                    && self.block_depth == 1
+                    && self.local_functions.is_empty()
+                    && let Some(&old) = self.names.get(name.id.as_str())
+                    && self.locals[old] != ty
+                    && let Some(rhs) = &assign.value
+                {
+                    let value = self.expr_expected(rhs, ty)?;
+                    let slot = self.hidden(ty);
+                    self.names.insert(name.id.to_string(), slot);
+                    self.assigned_value(slot, &value);
+                    self.assigned.remove(&old);
+                    self.narrowed.remove_mut(&old);
+                    return Ok((
+                        vec![Statement::Assign(slot, value), Statement::Clear(old)],
+                        true,
+                    ));
+                }
                 let slot = self.declare(name.id.as_str(), ty, statement)?;
                 if let Some(value) = &assign.value {
                     let value = self.expr_expected(value, ty)?;
@@ -2589,11 +2691,26 @@ impl<'a> Checker<'a> {
             }
             ast::Stmt::Expr(expression) => {
                 if let ast::Expr::Call(call) = &*expression.value
+                    && self.resolve(&call.func)
+                        == Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
+                    && call
+                        .arguments
+                        .keywords
+                        .iter()
+                        .any(|kw| kw.arg.as_ref().is_some_and(|name| name == "stdout"))
+                {
+                    Some(Statement::Expr(self.process_to_stderr(call)?))
+                } else if let ast::Expr::Call(call) = &*expression.value
                     && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::AssertNever))
                 {
                     return Ok((vec![self.assert_never(call, false)?], false));
+                } else if let ast::Expr::Call(call) = &*expression.value
+                    && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::SysExit))
+                {
+                    return Ok((vec![Statement::Expr(self.expr(&expression.value)?)], false));
+                } else {
+                    Some(Statement::Expr(self.expr(&expression.value)?))
                 }
-                Some(Statement::Expr(self.expr(&expression.value)?))
             }
             ast::Stmt::Delete(delete) => {
                 let mut statements = Vec::new();
@@ -2955,7 +3072,15 @@ impl<'a> Checker<'a> {
                 })
                 .transpose()?;
             let before_handler = name.and_then(|_| self.take_breaks());
+            let capture_depth = self.captured_process_errors.len();
+            if let (Some(slot), Some(target)) = (name, &handler.name)
+                && processes::captures_errors(&try_.body, &body)
+                && !narrowing::assigned_names(&handler.body).contains(target.as_str())
+            {
+                self.captured_process_errors.push(slot);
+            }
             let (handler_body, falls) = self.block(&handler.body)?;
+            self.captured_process_errors.truncate(capture_depth);
             if let Some(name) = name {
                 self.assigned.remove(&name);
                 self.narrowed.remove_mut(&name);
@@ -3086,9 +3211,7 @@ impl<'a> Checker<'a> {
                 self.regex_guards.push(guard);
             }
             let namespace_depth = self.namespace_guards.len();
-            if let Some(guard) = self.namespace_guard(test, body) {
-                self.namespace_guards.push(guard);
-            }
+            self.enter_namespace_guards(test, body);
             let (yes, yes_falls) = self.block(body)?;
             self.namespace_guards.truncate(namespace_depth);
             self.regex_guards.truncate(guard_depth);
@@ -3280,6 +3403,12 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
             });
         }
+        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::SysExecutable)) {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::Executable), vec![]),
+            });
+        }
         let (ty, kind) = match expression {
             ast::Expr::NumberLiteral(value) => match &value.value {
                 ast::Number::Int(value) => (Type::Int, ExprKind::Int(value.to_string())),
@@ -3316,6 +3445,15 @@ impl<'a> Checker<'a> {
                     (Type::None, ExprKind::None)
                 }
             }
+            ast::Expr::Name(name) if name.id == "__file__" => (
+                Type::Str,
+                ExprKind::Str(
+                    self.graph
+                        .module_filename(self.module)
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+            ),
             ast::Expr::Name(name) if name.id == "__name__" => {
                 let name = if self.module == self.graph.entry {
                     "__main__"
@@ -3381,20 +3519,28 @@ impl<'a> Checker<'a> {
                 (ty, ExprKind::Tuple(values))
             }
             ast::Expr::BinOp(binary) => {
-                let (mut left, mut right) = if binary.op == ast::Operator::BitOr {
-                    let (left, left_key) = self.union_operand(&binary.left)?;
-                    let (right, right_key) = self.union_operand(&binary.right)?;
-                    if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
-                        self.expect(left_key, right_key, binary)?;
-                        return Ok(Expr {
-                            ty: self.types.set(left_key),
-                            kind: ExprKind::Builtin(Builtin::KeyUnion, vec![left, right]),
-                        });
-                    }
-                    (left, right)
-                } else {
-                    (self.expr(&binary.left)?, self.expr(&binary.right)?)
-                };
+                let (mut left, mut right) =
+                    if matches!(binary.op, ast::Operator::BitOr | ast::Operator::BitAnd) {
+                        let (left, left_key) = self.union_operand(&binary.left)?;
+                        let (right, right_key) = self.union_operand(&binary.right)?;
+                        if let (Some(left_key), Some(right_key)) = (left_key, right_key) {
+                            self.expect(left_key, right_key, binary)?;
+                            return Ok(Expr {
+                                ty: self.types.set(left_key),
+                                kind: ExprKind::Builtin(
+                                    if binary.op == ast::Operator::BitAnd {
+                                        Builtin::KeyIntersection
+                                    } else {
+                                        Builtin::KeyUnion
+                                    },
+                                    vec![left, right],
+                                ),
+                            });
+                        }
+                        (left, right)
+                    } else {
+                        (self.expr(&binary.left)?, self.expr(&binary.right)?)
+                    };
                 if binary.op == ast::Operator::Add
                     && left.ty == Type::JsonValue
                     && right.ty == Type::JsonValue
@@ -3822,7 +3968,8 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, Some(receiver), None);
                 }
                 let (receiver, field, ty) = self.field_value(attribute, receiver)?;
-                if let ExprKind::Local(slot) = receiver.kind
+                if let Some(name) = attribute.value.as_name_expr()
+                    && let Some(&slot) = self.names.get(name.id.as_str())
                     && self.namespace_guards.contains(&(slot, field))
                     && let Some(payload) = self.types.payload(ty)
                 {
@@ -3935,6 +4082,23 @@ impl<'a> Checker<'a> {
         key_view: Option<&mut bool>,
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
+        if matches!(&*call.func, ast::Expr::Name(name) if name.id == "set")
+            && let [input] = call.arguments.args.as_ref()
+            && call.arguments.keywords.is_empty()
+        {
+            let (source, key) = self.union_operand(input)?;
+            let key = key.ok_or_else(|| {
+                error(
+                    self.source,
+                    input,
+                    "set() requires a dictionary key view or a typed set",
+                )
+            })?;
+            return Ok(Expr {
+                ty: self.types.set(key),
+                kind: ExprKind::Builtin(Builtin::KeySet, vec![source]),
+            });
+        }
         if let Some(binding) = self.local_function_binding(&call.func) {
             let function = binding.target(self.source, &*call.func)?.clone();
             return self.call_local_function(call, &function);
@@ -4041,6 +4205,33 @@ impl<'a> Checker<'a> {
             }
             Some(Binding::Intrinsic(Intrinsic::Unquote)) => {
                 return self.text_function(call, "string", ir::TextOperation::Unquote);
+            }
+            Some(Binding::Intrinsic(Intrinsic::ShlexSplit)) => {
+                return self.text_function(call, "s", ir::TextOperation::ShlexSplit);
+            }
+            Some(Binding::Intrinsic(Intrinsic::SysExit)) => {
+                self.reject_builtin_keywords(call)?;
+                let code = match call.arguments.args.as_ref() {
+                    [] | [ast::Expr::NoneLiteral(_)] => Expr {
+                        ty: Type::None,
+                        kind: ExprKind::None,
+                    },
+                    [code] => self.expr_expected(code, Type::Int)?,
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "sys.exit accepts one integer status",
+                        ));
+                    }
+                };
+                return Ok(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(
+                        Builtin::Process(ir::ProcessOperation::Exit),
+                        vec![code],
+                    ),
+                });
             }
             _ => {}
         }

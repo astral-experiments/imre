@@ -3202,7 +3202,10 @@ impl Emitter<'_, '_> {
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
-        if matches!(builtin, Builtin::LiteralStringView | Builtin::DictAsBase) {
+        if matches!(
+            builtin,
+            Builtin::LiteralStringView | Builtin::DictAsBase | Builtin::NamespaceView
+        ) {
             let value = self.expr(&expressions[0]);
             return Value {
                 ty: returns,
@@ -3289,7 +3292,7 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::LiteralStringView | Builtin::DictAsBase => {
+            Builtin::LiteralStringView | Builtin::DictAsBase | Builtin::NamespaceView => {
                 unreachable!("representation-preserving views transfer the operand owner directly")
             }
             Builtin::StringListContains => {
@@ -3517,7 +3520,7 @@ impl Emitter<'_, '_> {
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("relar_input", Type::Str, &[]),
             Builtin::SysArgv => self.call("relar_sys_argv", returns, &[]),
-            Builtin::ParseArgs => {
+            Builtin::ParseArgs(children) => {
                 let Type::Class(class) = returns else {
                     unreachable!()
                 };
@@ -3525,10 +3528,26 @@ impl Emitter<'_, '_> {
                     unreachable!()
                 };
                 let layout = self.output.global_ref(format!("layout_class_{class}"));
+                let child_layouts = if children.is_empty() {
+                    "null".to_owned()
+                } else {
+                    let size = children.len();
+                    let slot = self.instruction(format!("alloca [{size} x ptr]"));
+                    let layouts = children
+                        .iter()
+                        .map(|child| {
+                            let layout = self.output.global_ref(format!("layout_class_{child}"));
+                            format!("ptr @{layout}")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.line(format!("store [{size} x ptr] [{layouts}], ptr {slot}"));
+                    slot
+                };
                 Value {
                     ty: returns,
                     operand: self.checked_instruction(format!(
-                        "call ptr @relar_argparse_parse(ptr @{layout}, ptr {}, ptr {}, ptr {})",
+                        "call ptr @relar_argparse_parse(ptr @{layout}, ptr {child_layouts}, ptr {}, ptr {}, ptr {})",
                         schema.value.operand, description.value.operand, argv.value.operand,
                     )),
                     small_integer: false,
@@ -3958,11 +3977,18 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::KeyUnion => self.call(
-                "relar_key_union",
-                returns,
-                &[&args[0].value, &args[1].value],
-            ),
+            Builtin::KeyUnion | Builtin::KeySet | Builtin::KeyIntersection => {
+                let function = if matches!(builtin, Builtin::KeyIntersection) {
+                    "relar_key_intersection"
+                } else {
+                    "relar_key_union"
+                };
+                self.call(
+                    function,
+                    returns,
+                    &[&args[0].value, &args.last().unwrap().value],
+                )
+            }
             Builtin::SortedStringKeys | Builtin::SortedRecordRows { .. } => {
                 let handles = self.entry_alloca(format!("[{} x ptr]", args.len()));
                 for (i, source) in args.iter().enumerate() {
@@ -5216,6 +5242,7 @@ declare ptr @relar_seq_repeat(ptr, i64)
 declare ptr @relar_dict_new(i32, i32)
 declare ptr @relar_default_list_dict_new(i32, i32)
 declare ptr @relar_key_union(ptr, ptr)
+declare ptr @relar_key_intersection(ptr, ptr)
 declare ptr @relar_sorted_string_keys(ptr, i64)
 declare ptr @relar_sorted_record_rows(ptr, i64, ptr, ptr)
 declare i64 @relar_dict_len(ptr)
@@ -5262,6 +5289,10 @@ declare ptr @relar_str_join(ptr, ptr)
 declare ptr @relar_str_format(ptr, ptr, i64)
 declare ptr @relar_str_replace(ptr, ptr, ptr)
 declare ptr @relar_str_dedent(ptr)
+declare ptr @relar_shlex_split(ptr)
+declare ptr @relar_sys_executable()
+declare void @relar_sys_exit(i64)
+declare void @relar_subprocess_to_stderr(ptr, i32)
 declare ptr @relar_float_format(double, i32, i32)
 declare double @llvm.fabs.f64(double)
 declare ptr @relar_int_str(i64)
@@ -5278,7 +5309,7 @@ declare i32 @relar_text_flush(ptr)
 declare i32 @relar_text_close(ptr)
 declare i32 @relar_text_closed(ptr)
 declare void @relar_args_init(i32, ptr)
-declare ptr @relar_argparse_parse(ptr, ptr, ptr, ptr)
+declare ptr @relar_argparse_parse(ptr, ptr, ptr, ptr, ptr)
 declare ptr @relar_sys_argv()
 declare void @relar_args_clear()
 declare void @relar_int_retain(i64)

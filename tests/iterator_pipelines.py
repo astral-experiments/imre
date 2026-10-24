@@ -23,7 +23,7 @@ REJECTED = {
     "groupby_float_key": "from itertools import groupby\nfor key, group in groupby([0.0]):\n    members = list(group)\n",
     "groupby_file_source": 'from itertools import groupby\nwith open("source", "r", encoding="utf-8") as stream:\n    for key, group in groupby(stream):\n        members = list(group)\n',
     "generator_escaped": "values = (value for value in range(3))\n",
-    "min_rebound": "def f(min: int) -> int:\n    return min\nprint(f(2))\n",
+    "shadowed_reducer_call": "def f(min: int) -> int:\n    return min(x for x in range(2))\nprint(f(2))\n",
     "generator_returned": "def values():\n    return (value for value in range(3))\nprint(1)\n",
     "generator_stored": "values = [(value for value in range(3))]\n",
     "generator_argument": "def take(value: int) -> int:\n    return value\nprint(take(value for value in range(3)))\n",
