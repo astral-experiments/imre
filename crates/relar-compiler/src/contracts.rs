@@ -73,6 +73,9 @@ impl Builtin {
                     | PathOperation::Absolute
                     | PathOperation::Resolve
                     | PathOperation::WriteText
+                    | PathOperation::WithName
+                    | PathOperation::ReadBytes
+                    | PathOperation::WriteBytes
                     | PathOperation::Mkdir
                     | PathOperation::Unlink
                     | PathOperation::Rmdir
@@ -444,6 +447,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_sys_argv"
                 | "relar_path_read_text"
                 | "relar_path_write_text"
+                | "relar_path_with_name"
+                | "relar_path_read_bytes"
+                | "relar_path_write_bytes"
                 | "relar_path_mkdir"
                 | "relar_path_unlink"
                 | "relar_path_rmdir"

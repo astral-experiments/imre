@@ -221,17 +221,14 @@ pub(super) fn os_error(error: io::Error) -> Error {
     Error::new(kind, error.to_string())
 }
 
-/// Opens a UTF-8 text stream: mode 0 reads, mode 1 creates/truncates for writing.
+/// Opens a UTF-8 text stream in read, write, append, or exclusive-create mode.
 /// Returns an owned Object or null with a pending error.
 ///
 /// # Safety
-/// `path` must be a rooted string. `mode` must be compiler-validated as 0 or 1.
+/// `path` must be a rooted string. `mode` must be compiler-validated as 0 through 3.
 /// Like other fallible entries, pending state must be clear on entry.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_text_open(path: *const Str, mode: u32) -> *const Object {
-    if mode > 1 {
-        fail("SystemError", "invalid text file mode");
-    }
     // SAFETY: the caller roots the immutable path throughout opening the stream.
     finish(
         open(unsafe { &*path }, mode, false, false),
@@ -311,23 +308,37 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
     })
 }
 
-/// Uses the same strict UTF-8 and universal-newline rules as an explicit text
-/// stream, closing before returning even if decoding fails. A close failure
-/// replaces an earlier read failure, as a `with` statement's exit would.
-pub(super) fn read_path_text(path: &str) -> Result<Str> {
-    let mut state = open_state(path, 0, false, false)?;
-    let result = state.read();
+/// A close failure takes precedence over a read or write failure, matching
+/// the stream context manager used by pathlib for a whole-file operation.
+fn with_path_file<T>(
+    path: &str,
+    mode: u32,
+    binary: bool,
+    operation: impl FnOnce(&mut FileState) -> Result<T>,
+) -> Result<T> {
+    let mut state = open_state(path, mode, binary, false)?;
+    let result = operation(&mut state);
     let closed = state.stream.take().unwrap().close().map_err(os_error);
     closed.and(result)
+}
+
+pub(super) fn read_path_text(path: &str) -> Result<Str> {
+    with_path_file(path, 0, false, FileState::read)
+}
+
+pub(super) fn read_path_bytes(path: &str) -> Result<Bytes> {
+    with_path_file(path, 0, true, |state| state.input()?.read_bytes(None))
+}
+
+pub(super) fn write_path_bytes(path: &str, bytes: &[u8]) -> Result<usize> {
+    with_path_file(path, 1, true, |state| state.write_bytes(bytes))?;
+    Ok(Int::from_usize(bytes.len()).into_raw())
 }
 
 /// Completes buffered output and closes the descriptor before returning the
 /// character count, so a final flush error remains a catchable language error.
 pub(super) fn write_path_text(path: &str, text: &str) -> Result<usize> {
-    let mut state = open_state(path, 1, false, false)?;
-    let result = state.write(text);
-    let closed = state.stream.take().unwrap().close().map_err(os_error);
-    closed.and(result)?;
+    with_path_file(path, 1, false, |state| state.write(text))?;
     Ok(Int::from_usize(text.chars().count()).into_raw())
 }
 

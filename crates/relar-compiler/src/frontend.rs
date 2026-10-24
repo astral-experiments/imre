@@ -4561,12 +4561,6 @@ impl<'a> Checker<'a> {
         let (ty, builtin) = match (gzip, mode.value.to_str()) {
             (true, "rt") => (Type::TextIO, Builtin::GzipOpen),
             (true, "rb") => (Type::BinaryIO, Builtin::GzipOpen),
-            (false, "r") => (Type::TextIO, Builtin::TextOpen(0)),
-            (false, "w") => (Type::TextIO, Builtin::TextOpen(1)),
-            (false, "rb") => (Type::BinaryIO, Builtin::BinaryOpen(0)),
-            (false, "wb") => (Type::BinaryIO, Builtin::BinaryOpen(1)),
-            (false, "ab") => (Type::BinaryIO, Builtin::BinaryOpen(2)),
-            (false, "xb") => (Type::BinaryIO, Builtin::BinaryOpen(3)),
             (true, _) => {
                 return Err(error(
                     self.source,
@@ -4574,13 +4568,13 @@ impl<'a> Checker<'a> {
                     "gzip.open supports literal 'rb' or 'rt' mode",
                 ));
             }
-            (false, _) => {
-                return Err(error(
+            (false, mode) => paths::file_open_mode(mode).ok_or_else(|| {
+                error(
                     self.source,
                     call,
                     "open supports literal 'r', 'w', 'rb', 'wb', 'ab', or 'xb' mode",
-                ));
-            }
+                )
+            })?,
         };
         if ty == Type::BinaryIO {
             self.reject_builtin_keywords(call)?;
@@ -4602,6 +4596,10 @@ impl<'a> Checker<'a> {
                 "text file I/O requires encoding='utf-8'",
             ));
         };
+        self.utf8_encoding_keyword(encoding)
+    }
+
+    fn utf8_encoding_keyword(&self, encoding: &ast::Keyword) -> Result<(), String> {
         if encoding
             .arg
             .as_ref()
