@@ -469,6 +469,20 @@ pub(crate) const LIST_BORROW_INDEX: RuntimeCall<BorrowedIntOrError, 2> = Runtime
     params: [INT_LIST, RuntimeParam::NativeIndex],
     result: BorrowedIntOrError,
 };
+pub(crate) const BYTE_OUTPUT_APPEND: RuntimeCall<StatusOrError, 2> = RuntimeCall {
+    symbol: "imre_byte_output_append",
+    params: [RuntimeParam::Value(Type::ByteOutput), TAGGED_INT],
+    result: StatusOrError,
+};
+pub(crate) const BYTE_OUTPUT_APPEND_PAIR: RuntimeCall<StatusOrError, 3> = RuntimeCall {
+    symbol: "imre_byte_output_append_pair",
+    params: [
+        RuntimeParam::Value(Type::ByteOutput),
+        TAGGED_INT,
+        TAGGED_INT,
+    ],
+    result: StatusOrError,
+};
 pub(crate) const LIST_APPEND: RuntimeCall<StatusOrError, 2> = RuntimeCall {
     symbol: "imre_list_append",
     params: [INT_LIST, TAGGED_INT],
