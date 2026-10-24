@@ -76,15 +76,10 @@ fn filters_and_suffix_sort_keep_raw_guides_lazy() {
             ]
         );
         diff.0.with(|s| {
-            assert!(
-                s.sequence_storage()
-                    .plan()
-                    .unwrap()
-                    .source
-                    .full
-                    .get()
-                    .is_none()
-            )
+            let Some(Deferred(View::Full(source))) = s.sequence_storage().plan() else {
+                unreachable!()
+            };
+            assert!(source.full.get().is_none());
         });
         assert_eq!(
             rows(&signed),
@@ -164,7 +159,9 @@ fn shared_strings_preserve_duplicate_counts_order_and_slice_ownership() {
         let removed = filter_rows(&diff, "- b", None, None, 2);
         let added = filter_rows(&diff, "+", None, None, 2);
         diff.0.with(|storage| {
-            let source = &storage.sequence_storage().plan().unwrap().source;
+            let Some(Deferred(View::Full(source))) = storage.sequence_storage().plan() else {
+                unreachable!()
+            };
             assert_eq!(source.left.values[2..], source.right.values[2..]);
             removed
                 .0
@@ -190,4 +187,43 @@ fn shared_strings_preserve_duplicate_counts_order_and_slice_ownership() {
         rows(&filter_rows(&diff, "-", None, Some("- z"), 2)),
         ["a", "y"]
     );
+}
+
+#[test]
+fn sorted_rows_reuse_only_live_ordered_sources_and_detach_on_write() {
+    let left = list(&["c", "c", "unchanged"]);
+    let right = list(&["b", "a", "unchanged"]);
+    let edit = string("- edited");
+    // SAFETY: all handles are rooted for each call and every returned reference
+    // is adopted once. The weak source is observed only through a strong owner.
+    unsafe {
+        let diff = Rc::from_raw(relar_ndiff_deferred(Rc::as_ptr(&left), Rc::as_ptr(&right)));
+        let signed = filter_rows(&diff, "+", Some("-"), None, 0);
+        let sorted = Rc::from_raw(relar_str_list_sorted_suffix(Rc::as_ptr(&signed), 2));
+        let copy = Rc::from_raw(relar_str_list_copy(Rc::as_ptr(&sorted)));
+        let removed = filter_rows(&copy, "-", None, None, 2);
+        let added = filter_rows(&copy, "+", None, None, 2);
+        assert_eq!(rows(&removed), ["c", "c"]);
+        assert_eq!(rows(&added), ["a", "b"]);
+        let weak = sorted.0.with(|s| {
+            let Some(Deferred(View::Sorted { origin, .. })) = s.sequence_storage().plan() else {
+                unreachable!()
+            };
+            let source = origin.upgrade().unwrap();
+            removed
+                .0
+                .with(|s| assert_eq!(s.sequence().values[..], source.left.values[..2]));
+            Weak::clone(origin)
+        });
+        relar_seq_append(Rc::as_ptr(&sorted), Rc::as_ptr(&edit) as usize, 3);
+        assert_eq!(
+            rows(&filter_rows(&sorted, "-", None, None, 2)),
+            ["c", "c", "edited"]
+        );
+        drop(diff);
+        drop(signed);
+        assert!(weak.upgrade().is_none());
+        assert_eq!(rows(&filter_rows(&copy, "-", None, None, 2)), ["c", "c"]);
+        assert_eq!(rows(&copy), ["+ a", "+ b", "- c", "- c"]);
+    }
 }

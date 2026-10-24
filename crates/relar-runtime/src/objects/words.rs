@@ -303,6 +303,24 @@ impl Words {
         *self.string_order.get_mut() = StringOrder::Unknown;
     }
 
+    /// Checks ascending order once for a resolved string sequence. A mutable
+    /// borrow clears the proof before exposing its element words.
+    pub(super) fn strings_ascending(&self) -> bool {
+        match self.string_order.get() {
+            StringOrder::Ascending => true,
+            StringOrder::Unsorted => false,
+            StringOrder::Unknown | StringOrder::Scanned => {
+                let sorted = self.strings().map(|(_, text)| text).is_sorted();
+                self.string_order.set(if sorted {
+                    StringOrder::Ascending
+                } else {
+                    StringOrder::Unsorted
+                });
+                sorted
+            }
+        }
+    }
+
     /// Tests exact string membership, checking for ascending order only after
     /// a previous search read a substantial part of the list.
     ///
@@ -321,23 +339,15 @@ impl Words {
         if self.values.len() < 64 {
             return scan().is_some();
         }
-        match self.string_order.get() {
-            StringOrder::Unknown => {
-                let hit = scan();
-                if hit.unwrap_or(self.values.len()) >= self.values.len() / 2 {
-                    self.string_order.set(StringOrder::Scanned);
-                }
-                return hit.is_some();
+        if self.string_order.get() == StringOrder::Unknown {
+            let hit = scan();
+            if hit.unwrap_or(self.values.len()) >= self.values.len() / 2 {
+                self.string_order.set(StringOrder::Scanned);
             }
-            StringOrder::Scanned => {
-                if !self.values.is_sorted_by(|&a, &b| text(a) <= text(b)) {
-                    self.string_order.set(StringOrder::Unsorted);
-                    return scan().is_some();
-                }
-                self.string_order.set(StringOrder::Ascending);
-            }
-            StringOrder::Ascending => {}
-            StringOrder::Unsorted => return scan().is_some(),
+            return hit.is_some();
+        }
+        if !self.strings_ascending() {
+            return scan().is_some();
         }
         self.values
             .binary_search_by(|&word| text(word).cmp(needle))

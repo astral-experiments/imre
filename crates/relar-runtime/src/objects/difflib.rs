@@ -314,11 +314,6 @@ fn changed(left: &[Line], right: &[Line], emit: &mut impl FnMut(&str, &str)) {
 /// an offset inside such a run can only shorten the block. Unequal counts
 /// or autojunk can change Python's choice, so those inputs use the matcher.
 fn sorted_line_blocks(left: &[Line], right: &[Line]) -> Option<Vec<Block>> {
-    if !left.iter().map(|line| line.text()).is_sorted()
-        || !right.iter().map(|line| line.text()).is_sorted()
-    {
-        return None;
-    }
     let mut blocks: Vec<Block> = Vec::new();
     let (mut i, mut j) = (0, 0);
     while i < left.len() && j < right.len() {
@@ -382,9 +377,14 @@ pub(super) enum Output {
     ProjectedChanges,
 }
 
-fn ndiff(left: &[Line], right: &[Line], output: Output, mut emit: impl FnMut(&str, &str)) {
+fn ndiff(
+    left: &[Line],
+    right: &[Line],
+    sorted: Option<Vec<Block>>,
+    output: Output,
+    mut emit: impl FnMut(&str, &str),
+) {
     let (mut i, mut j) = (0, 0);
-    let sorted = sorted_line_blocks(left, right);
     let exact_common_runs = sorted.is_some();
     let blocks = sorted.unwrap_or_else(|| {
         let a: Vec<_> = left.iter().map(|line| line.text()).collect();
@@ -418,13 +418,19 @@ fn ndiff(left: &[Line], right: &[Line], output: Output, mut emit: impl FnMut(&st
 /// # Safety
 /// Each buffer owns nonnullable strings for the duration of the call.
 pub(super) unsafe fn materialize_words(left: &Words, right: &Words, output: Output) -> Words {
+    let ordered = left.strings_ascending() && right.strings_ascending();
     // SAFETY: both input buffers remain rooted and immutable while their views are live.
     let (left, right) = unsafe { (Line::from_words(left), Line::from_words(right)) };
+    let sorted = if ordered {
+        sorted_line_blocks(left, right)
+    } else {
+        None
+    };
     let mut words = Words::new(3);
     if output == Output::Full {
         words.values.reserve(left.len().max(right.len()));
     }
-    ndiff(left, right, output, |prefix, line| {
+    ndiff(left, right, sorted, output, |prefix, line| {
         if output == Output::ProjectedChanges && !matches!(prefix, "- " | "+ ") {
             return;
         }

@@ -5,7 +5,7 @@
 use super::difflib::{Output, materialize_words};
 use super::{Object, Str, Words, object};
 use std::cell::OnceCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 #[cfg(test)]
 mod tests;
@@ -19,6 +19,14 @@ struct Snapshots {
 }
 
 impl Snapshots {
+    fn side(&self, prefix: &str) -> &Words {
+        if prefix.starts_with('+') {
+            &self.right
+        } else {
+            &self.left
+        }
+    }
+
     fn full(&self) -> &Words {
         self.full.get_or_init(|| {
             // SAFETY: both snapshots own exact immutable string handles.
@@ -43,25 +51,41 @@ impl Snapshots {
 }
 
 #[derive(Clone)]
-pub(super) struct Deferred {
-    source: Rc<Snapshots>,
-    signed_only: bool,
+pub(super) struct Deferred(View);
+
+#[derive(Clone)]
+enum View {
+    Full(Rc<Snapshots>),
+    Signed(Rc<Snapshots>),
+    /// Owns the sorted rows. An independent result must not pin input strings
+    /// that a caller has discarded just in case it later slices off the tags.
+    Sorted {
+        rows: Rc<Words>,
+        origin: Weak<Snapshots>,
+    },
 }
 
 impl Deferred {
     pub(super) fn ordered(&self) -> &Words {
-        if self.signed_only {
-            self.source.signed()
-        } else {
-            self.source.full()
+        match &self.0 {
+            View::Full(source) => source.full(),
+            View::Signed(source) => source.signed(),
+            View::Sorted { rows, .. } => rows,
         }
     }
 
     fn nonempty(&self) -> bool {
-        if self.signed_only {
-            !self.source.projected().values.is_empty()
-        } else {
-            !self.source.left.values.is_empty() || !self.source.right.values.is_empty()
+        match &self.0 {
+            View::Full(source) => !source.left.values.is_empty() || !source.right.values.is_empty(),
+            View::Signed(source) => !source.projected().values.is_empty(),
+            View::Sorted { rows, .. } => !rows.values.is_empty(),
+        }
+    }
+
+    fn signed(&self) -> Self {
+        match &self.0 {
+            View::Full(source) => Self(View::Signed(Rc::clone(source))),
+            View::Signed(_) | View::Sorted { .. } => self.clone(),
         }
     }
 }
@@ -170,13 +194,7 @@ pub unsafe extern "C" fn relar_ndiff_deferred(
         signed: OnceCell::new(),
         projected: OnceCell::new(),
     });
-    Rc::into_raw(
-        Words::deferred(Deferred {
-            source,
-            signed_only: false,
-        })
-        .into_object(),
-    )
+    Rc::into_raw(Words::deferred(Deferred(View::Full(source))).into_object())
 }
 
 /// # Safety
@@ -232,25 +250,26 @@ pub unsafe extern "C" fn relar_str_list_filter(
             let words = storage.sequence_storage();
             if let Some(plan) = words.plan() {
                 if strip == 0 && exclude.is_none() && both_signs(first, second) {
-                    return Words::deferred(Deferred {
-                        source: Rc::clone(&plan.source),
-                        signed_only: true,
-                    });
+                    return Words::deferred(plan.signed());
                 }
                 if same_sign(first, second) {
-                    let originals = (strip == 2).then_some(if first.starts_with('+') {
-                        &plan.source.right
-                    } else {
-                        &plan.source.left
-                    });
-                    return filter(
-                        plan.source.projected(),
-                        first,
-                        second,
-                        exclude,
-                        strip as usize,
-                        originals,
-                    );
+                    let origin;
+                    let (rows, originals) = match &plan.0 {
+                        View::Full(source) | View::Signed(source) => {
+                            (source.projected(), (strip == 2).then(|| source.side(first)))
+                        }
+                        View::Sorted { rows, origin: weak } => {
+                            origin = (strip == 2).then(|| weak.upgrade()).flatten();
+                            // Cutting off the tag recovers a source subsequence in
+                            // this sorted order only when that input side is sorted.
+                            let originals = origin
+                                .as_ref()
+                                .map(|s| s.side(first))
+                                .filter(|s| s.strings_ascending());
+                            (&**rows, originals)
+                        }
+                    };
+                    return filter(rows, first, second, exclude, strip as usize, originals);
                 }
             }
             filter(
@@ -279,14 +298,25 @@ pub unsafe extern "C" fn relar_str_list_sorted_suffix(
     let result = unsafe {
         object(list).0.with(|storage| {
             let words = storage.sequence_storage();
-            let input = match words.plan() {
-                Some(plan) if plan.signed_only && skip == 2 => plan.source.projected(),
-                _ => words.resolved(),
+            let source = match (skip, words.plan()) {
+                (2, Some(Deferred(View::Signed(source)))) => Some(source),
+                (2, Some(plan @ Deferred(View::Sorted { .. }))) => {
+                    return Words::deferred(plan.clone());
+                }
+                _ => None,
             };
+            let input = source.map_or_else(|| words.resolved(), |source| source.projected());
             let mut sorted = input.copy_strings();
             let key = |word: usize| suffix(&*(word as *const Str), skip as usize);
             sorted.values.sort_by(|&a, &b| key(a).cmp(key(b)));
-            sorted
+            if let Some(source) = source {
+                Words::deferred(Deferred(View::Sorted {
+                    rows: Rc::new(sorted),
+                    origin: Rc::downgrade(source),
+                }))
+            } else {
+                sorted
+            }
         })
     };
     Rc::into_raw(result.into_object())
