@@ -438,7 +438,6 @@ impl Loader {
     }
 
     fn finish(mut self, entry: ModuleId) -> Result<SourceGraph, String> {
-        self.session.check()?;
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
         Ok(SourceGraph {

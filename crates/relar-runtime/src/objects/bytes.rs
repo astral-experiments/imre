@@ -34,16 +34,27 @@ pub(super) fn native_size(value: &Int) -> Result<isize> {
 }
 
 /// Uses Ruff's byte repr rules, including quote choice and lowercase hex escapes.
-pub(super) fn repr(value: &[u8]) -> Str {
+fn repr(value: &[u8]) -> Str {
+    let mut output = String::new();
+    write_repr(&mut output, value);
+    Str::from(output)
+}
+
+pub(super) fn write_repr(output: &mut String, value: &[u8]) {
     let escaped = AsciiEscape::new_repr(value);
-    let quote = escaped.layout().quote.as_char();
-    let mut result = String::from("b");
-    result.push(quote);
+    let layout = escaped.layout();
+    if output.is_empty()
+        && let Some(size) = layout.len.and_then(|body| body.checked_add(3))
+    {
+        output.reserve_exact(size);
+    }
+    let quote = layout.quote.as_char();
+    output.push('b');
+    output.push(quote);
     escaped
-        .write_body(&mut result)
+        .write_body(output)
         .expect("writing to a String cannot fail");
-    result.push(quote);
-    Str::from(result)
+    output.push(quote);
 }
 
 /// # Safety
@@ -543,12 +554,12 @@ mod tests {
     fn list_conversion_copies_all_bytes_across_chunk_boundaries() {
         for length in [0, 1, 63, 64, 65, 127, 128, 129, 255, 256, 257, 1024] {
             let expected = (0..length).map(|index| index as u8).collect::<Vec<_>>();
-            let source = Rc::new(List(StorageCell::new(
+            let source = Rc::new(List::new(
                 expected
                     .iter()
                     .map(|&byte| Int::from_usize(usize::from(byte)))
                     .collect(),
-            )));
+            ));
             let alias = source.clone();
             // SAFETY: both aliases root the exact list and conversion returns
             // one independently owned immutable bytes object.
@@ -585,7 +596,7 @@ mod tests {
             for position in [0, 1, 63, 64, 65, 127, 128] {
                 let mut values = (0..129).map(|_| Int::from_usize(17)).collect::<Vec<_>>();
                 values[position] = invalid.clone();
-                let source = Rc::new(List(StorageCell::new(values)));
+                let source = Rc::new(List::new(values));
                 // SAFETY: the source roots every exact integer while failed
                 // conversion transfers only a pending exception owner.
                 unsafe {
@@ -606,5 +617,16 @@ mod tests {
                 assert_eq!(relar_error_pending(), 0);
             }
         }
+    }
+
+    #[test]
+    fn standalone_bytes_repr_uses_the_escaped_size() {
+        let input = vec![0; 16 * 1024];
+        let mut output = String::new();
+        write_repr(&mut output, &input);
+        assert_eq!(output.len(), 4 * input.len() + 3);
+        assert!(output.starts_with("b\x27\\x00"));
+        assert!(output.ends_with("\\x00\x27"));
+        assert!(output.capacity() < 128 * 1024);
     }
 }

@@ -327,7 +327,8 @@ pub unsafe extern "C" fn relar_str_join(
 /// Substitutes plain named fields in encounter order. A missing field can raise
 /// before a malformed brace later in the same template.
 fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> crate::Result<Str> {
-    let mut result = Str::with_capacity(template.len());
+    // A long template can consist entirely of fields with empty replacements.
+    let mut result = Str::default();
     let mut rest = template;
     while let Some(at) = memchr::memchr2(b'{', b'}', rest.as_bytes()) {
         result.push_str(&rest[..at]);
@@ -405,8 +406,7 @@ fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> 
                 ),
             ));
         }
-        let text = field(name)
-            .ok_or_else(|| Error::new(Kind::KeyError, super::exceptions::string_repr(name)))?;
+        let text = field(name).ok_or_else(|| Error::string_key(Str::new(name)))?;
         if !supported {
             return Err(Error::new(
                 Kind::ValueError,
@@ -509,6 +509,19 @@ pub extern "C" fn relar_float_format(value: f64, precision: u32, flags: u32) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_named_fields_do_not_reserve_the_template_length() {
+        let template = "{x}".repeat(20_000) + "{y}";
+        let result = format_named(&template, |name| match name {
+            "x" => Some(""),
+            "y" => Some("雪"),
+            _ => None,
+        })
+        .unwrap_or_else(|_| panic!("valid named fields"));
+        assert_eq!(result.as_str(), "雪");
+        assert!(!result.is_heap_allocated());
+    }
 
     #[test]
     fn stable_permutations_preserve_ties_in_both_directions() {

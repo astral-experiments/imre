@@ -250,6 +250,7 @@ fn pattern_elements(target: &ast::Expr) -> Option<&[ast::Expr]> {
 }
 
 /// Resolves the project-wide call graph without changing source-level namespaces.
+#[cfg(test)]
 pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     lower_with_owners(graph).map(|(module, _)| module)
 }
@@ -1141,14 +1142,14 @@ struct Checker<'a> {
     comprehension_targets: HashSet<String>,
     comprehension_depth: usize,
     comprehension_exports: HashMap<String, usize>,
-    narrowed: HashMap<usize, Type>,
+    narrowed: assignments::Narrowed,
     regex_guards: Vec<(usize, regex::CaptureNames)>,
     namespace_guards: Vec<(usize, usize)>,
     returns: Type,
     names: HashMap<String, usize>,
     local_functions: HashMap<String, local_functions::Binding>,
     locals: Vec<Type>,
-    assigned: HashSet<usize>,
+    assigned: assignments::Assigned,
     calls: HashSet<usize>,
     class_reads: std::cell::RefCell<HashSet<DefinitionId>>,
     loop_breaks: Vec<Option<LocalState>>,
@@ -1186,14 +1187,14 @@ impl<'a> Checker<'a> {
             comprehension_targets: HashSet::new(),
             comprehension_depth: 0,
             comprehension_exports: HashMap::new(),
-            narrowed: HashMap::new(),
+            narrowed: assignments::Narrowed::new(),
             regex_guards: Vec::new(),
             namespace_guards: Vec::new(),
             returns: Type::None,
             names: HashMap::new(),
             local_functions: HashMap::new(),
             locals: Vec::new(),
-            assigned: HashSet::new(),
+            assigned: assignments::Assigned::default(),
             calls: HashSet::new(),
             class_reads: Default::default(),
             loop_breaks: Vec::new(),
@@ -1697,7 +1698,7 @@ impl<'a> Checker<'a> {
                 } else {
                     self.types.payload(current).unwrap_or(current)
                 };
-                self.narrowed.insert(slot, narrowed);
+                self.narrowed.insert_mut(slot, narrowed);
             }
         }
         self.apply_instance_facts(test, truth);
@@ -1742,7 +1743,7 @@ impl<'a> Checker<'a> {
     fn invalidate_loop_facts(&mut self, body: &[ast::Stmt]) {
         for name in narrowing::assigned_names(body) {
             if let Some(slot) = self.names.get(&name) {
-                self.narrowed.remove(slot);
+                self.narrowed.remove_mut(slot);
             }
         }
         for name in narrowing::deleted_names(body) {
@@ -1754,14 +1755,14 @@ impl<'a> Checker<'a> {
 
     fn assigned_value(&mut self, slot: usize, value: &Expr) {
         self.assigned.insert(slot);
-        self.narrowed.remove(&slot);
+        self.narrowed.remove_mut(&slot);
         if let Some(payload) = self.types.payload(self.locals[slot]) {
             match value.kind {
                 ExprKind::Present(_) => {
-                    self.narrowed.insert(slot, payload);
+                    self.narrowed.insert_mut(slot, payload);
                 }
                 ExprKind::Absent(_) => {
-                    self.narrowed.insert(slot, Type::None);
+                    self.narrowed.insert_mut(slot, Type::None);
                 }
                 _ => {}
             }
@@ -1773,7 +1774,7 @@ impl<'a> Checker<'a> {
         if let ExprKind::Builtin(Builtin::UnionInject, args) = &value.kind
             && matches!(args[0].ty, Type::Str | Type::Bytes)
         {
-            self.narrowed.insert(slot, args[0].ty);
+            self.narrowed.insert_mut(slot, args[0].ty);
         }
     }
 
@@ -1978,7 +1979,7 @@ impl<'a> Checker<'a> {
         self.invalidate_loop_facts(&loop_.body);
         for name in narrowing::expression_assignments(&loop_.target) {
             if let Some(slot) = self.names.get(&name) {
-                self.narrowed.remove(slot);
+                self.narrowed.remove_mut(slot);
             }
         }
         self.lower_iteration(&loop_.target, input, &loop_.orelse, |checker| {
@@ -2014,7 +2015,7 @@ impl<'a> Checker<'a> {
                 clear.push(slot);
                 self.names.remove(target.id.as_str());
                 self.assigned.remove(&slot);
-                self.narrowed.remove(&slot);
+                self.narrowed.remove_mut(&slot);
             }
         }
         let mut result = vec![Statement::Scope { body, clear }];
@@ -2101,7 +2102,7 @@ impl<'a> Checker<'a> {
                 return Err(error(self.source, target, "range target must be a name"));
             };
             let target = self.declare(name.id.as_str(), Type::Int, target)?;
-            self.narrowed.remove(&target);
+            self.narrowed.remove_mut(&target);
             let facts = self.narrowed.clone();
             let before = self.assigned.clone();
             self.assigned.insert(target);
@@ -2323,11 +2324,11 @@ impl<'a> Checker<'a> {
         fn remove_target_facts(
             target: &ast::Expr,
             names: &HashMap<String, usize>,
-            facts: &mut HashMap<usize, Type>,
+            facts: &mut assignments::Narrowed,
         ) {
             if let ast::Expr::Name(name) = target {
                 if let Some(slot) = names.get(name.id.as_str()) {
-                    facts.remove(slot);
+                    facts.remove_mut(slot);
                 }
             } else if let ast::Expr::Starred(starred) = target {
                 remove_target_facts(&starred.value, names, facts);
@@ -2338,7 +2339,7 @@ impl<'a> Checker<'a> {
             }
             for name in narrowing::expression_assignments(target) {
                 if let Some(slot) = names.get(&name) {
-                    facts.remove(slot);
+                    facts.remove_mut(slot);
                 }
             }
         }
@@ -2611,7 +2612,7 @@ impl<'a> Checker<'a> {
                 self.invalidate_loop_facts(&loop_.body);
                 for name in narrowing::expression_assignments(&loop_.test) {
                     if let Some(slot) = self.names.get(&name) {
-                        self.narrowed.remove(slot);
+                        self.narrowed.remove_mut(slot);
                     }
                 }
                 let test = self.condition(&loop_.test)?;
@@ -2885,7 +2886,7 @@ impl<'a> Checker<'a> {
         let mut handler_facts = before_facts.clone();
         for name in narrowing::assigned_names(&try_.body) {
             if let Some(slot) = self.names.get(&name) {
-                handler_facts.remove(slot);
+                handler_facts.remove_mut(slot);
             }
         }
         let mut handlers = Vec::new();
@@ -2931,9 +2932,9 @@ impl<'a> Checker<'a> {
                 .map(|name| {
                     let slot = self.declare(name.as_str(), Type::Exception, handler)?;
                     self.assigned.insert(slot);
-                    self.narrowed.remove(&slot);
+                    self.narrowed.remove_mut(&slot);
                     if !kinds.is_empty() && kinds.iter().all(|kind| *kind == 27) {
-                        self.narrowed.insert(slot, Type::TimeoutExpired);
+                        self.narrowed.insert_mut(slot, Type::TimeoutExpired);
                     }
                     Ok::<_, String>(slot)
                 })
@@ -2942,11 +2943,11 @@ impl<'a> Checker<'a> {
             let (handler_body, falls) = self.block(&handler.body)?;
             if let Some(name) = name {
                 self.assigned.remove(&name);
-                self.narrowed.remove(&name);
+                self.narrowed.remove_mut(&name);
                 // The exception target is deleted even when a handler breaks.
                 if let Some(Some(exits)) = self.loop_breaks.last_mut() {
                     exits.assigned.remove(&name);
-                    exits.narrowed.remove(&name);
+                    exits.narrowed.remove_mut(&name);
                 }
                 self.include_breaks(before_handler);
             }
@@ -2976,7 +2977,7 @@ impl<'a> Checker<'a> {
                 && let Some(slot) = self.names.get(name.as_str())
             {
                 self.assigned.remove(slot);
-                self.narrowed.remove(slot);
+                self.narrowed.remove_mut(slot);
             }
         }
         for name in narrowing::deleted_names(&protected) {
@@ -2986,7 +2987,7 @@ impl<'a> Checker<'a> {
         }
         for name in narrowing::assigned_names(&protected) {
             if let Some(slot) = self.names.get(&name) {
-                self.narrowed.remove(slot);
+                self.narrowed.remove_mut(slot);
             }
         }
         // Pending breaks must pass through finally. Its own transfers replace
@@ -3012,12 +3013,16 @@ impl<'a> Checker<'a> {
                 .into_iter()
                 .filter_map(|name| self.names.get(&name).copied())
                 .collect::<HashSet<_>>();
-            pending.assigned.retain(|slot| !deleted.contains(slot));
-            pending
-                .narrowed
-                .retain(|slot, _| !written.contains(slot) && !deleted.contains(slot));
-            pending.assigned.extend(final_state.assigned);
-            pending.narrowed.extend(final_state.narrowed);
+            for slot in &deleted {
+                pending.assigned.remove(slot);
+            }
+            for slot in written.iter().chain(&deleted) {
+                pending.narrowed.remove_mut(slot);
+            }
+            pending.assigned.extend(&final_state.assigned);
+            for (&slot, &ty) in &final_state.narrowed {
+                pending.narrowed.insert_mut(slot, ty);
+            }
             self.include_breaks(Some(pending));
         }
         self.include_breaks(earlier_breaks);
@@ -3030,7 +3035,7 @@ impl<'a> Checker<'a> {
                     normal_assigned.remove(slot);
                 }
             }
-            self.assigned.extend(normal_assigned);
+            self.assigned.extend(&normal_assigned);
             // Facts from the successful body cannot describe an interrupted one.
             // Preserve only facts established while checking the shared finally.
         }

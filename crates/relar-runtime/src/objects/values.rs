@@ -32,31 +32,47 @@ pub(super) unsafe fn tuple_order(left: *const usize, right: *const usize) -> Ord
     if left == right {
         return Ordering::Equal;
     }
-    // SAFETY: the exact tuple type supplies this live immutable descriptor.
-    let layout = unsafe { descriptor(left) };
-    for index in 0..layout.length {
-        // SAFETY: both payloads have the same initialized concrete field layout.
-        let order = unsafe {
-            let kind = WordKind::new(*layout.kinds.add(index));
-            let left = kind.read_record_field(left.add(index));
-            let right = kind.read_record_field(right.add(index));
-            match kind.raw() {
-                0 => Ordering::Equal,
-                1 => left.cmp(&right),
-                10 => super::string_enums::compare(left, right),
-                2 if left & right & 1 != 0 => (left as isize).cmp(&(right as isize)),
-                2 => crate::relar_int_compare(left, right).cmp(&0),
-                3 => (&*(left as *const Str)).cmp(&*(right as *const Str)),
-                6 => tuple_order(left as *const usize, right as *const usize),
-                8 => (&*(left as *const Bytes)).cmp(&*(right as *const Bytes)),
-                _ => unreachable!("the checker proves ordered immutable tuple fields"),
+    let mut pending = Vec::new();
+    let mut current = (left, right, 0);
+    'tuples: loop {
+        let (left_tuple, right_tuple, position) = current;
+        // SAFETY: the exact tuple type supplies this live immutable descriptor.
+        let layout = unsafe { descriptor(left_tuple) };
+        for index in position..layout.length {
+            // SAFETY: both roots own corresponding tuples with the same layout.
+            let order = unsafe {
+                let kind = WordKind::new(*layout.kinds.add(index));
+                let left = kind.read_record_field(left_tuple.add(index));
+                let right = kind.read_record_field(right_tuple.add(index));
+                match kind.raw() {
+                    0 => Ordering::Equal,
+                    1 => left.cmp(&right),
+                    10 => super::string_enums::compare(left, right),
+                    2 if left & right & 1 != 0 => (left as isize).cmp(&(right as isize)),
+                    2 => crate::relar_int_compare(left, right).cmp(&0),
+                    3 => (&*(left as *const Str)).cmp(&*(right as *const Str)),
+                    6 if left == right => Ordering::Equal,
+                    6 => {
+                        // Resume the siblings only if this child compares equal.
+                        if index + 1 < layout.length {
+                            pending.push((left_tuple, right_tuple, index + 1));
+                        }
+                        current = (left as *const usize, right as *const usize, 0);
+                        continue 'tuples;
+                    }
+                    8 => (&*(left as *const Bytes)).cmp(&*(right as *const Bytes)),
+                    _ => unreachable!("the checker proves ordered immutable tuple fields"),
+                }
+            };
+            if order != Ordering::Equal {
+                return order;
             }
-        };
-        if order != Ordering::Equal {
-            return order;
         }
+        let Some(next) = pending.pop() else {
+            return Ordering::Equal;
+        };
+        current = next;
     }
-    Ordering::Equal
 }
 
 /// Uses Python 3.13+ dataclass equality: identical objects compare equal before
@@ -339,7 +355,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         }
                         Storage::Path { text, .. } => {
                             output.push_str("PosixPath(");
-                            output.push_str(&super::exceptions::string_repr(text));
+                            super::exceptions::push_string_repr(text, output);
                             output.push(')');
                             None
                         }
@@ -410,7 +426,7 @@ unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
                     write!(output, "{}", value.big()).unwrap();
                 }
             }
-            3 => output.push_str(&super::exceptions::string_repr(&*(word as *const Str))),
+            3 => super::exceptions::push_string_repr(&*(word as *const Str), output),
             4 => (&*(word as *const List)).0.with(|values| {
                 output.push('[');
                 for (index, value) in values.iter().enumerate() {
@@ -429,7 +445,7 @@ unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
                 };
                 output.push_str(&crate::floats::render(value));
             }
-            8 => output.push_str(&super::bytes::repr(&*(word as *const Bytes))),
+            8 => super::bytes::write_repr(output, &*(word as *const Bytes)),
             9 if word & 1 == 0 => {
                 write_scalar(output, word, WordKind::new(3));
             }
@@ -513,6 +529,59 @@ mod tests {
     use crate::objects::records::{
         RecordDescriptor, RecordField, RecordSemantics, relar_record_new, relar_record_release,
     };
+
+    #[test]
+    fn deeply_nested_tuple_order_resumes_only_after_equal_children() {
+        let semantics = RecordSemantics {
+            kind: TUPLE,
+            flags: GENERATED_EQ | GENERATED_REPR,
+            name: std::ptr::null(),
+            name_len: 0,
+            qualified_name: std::ptr::null(),
+            qualified_name_len: 0,
+            fields: std::ptr::null(),
+        };
+        let leaf_kinds = [2];
+        let pair_kinds = [6, 2];
+        let leaf_layout = RecordDescriptor {
+            length: 1,
+            kinds: leaf_kinds.as_ptr(),
+            semantics: &semantics,
+        };
+        let pair_layout = RecordDescriptor {
+            length: 2,
+            kinds: pair_kinds.as_ptr(),
+            semantics: &semantics,
+        };
+        let one = Int::small(1).unwrap().0;
+        // SAFETY: each parent takes ownership of its child. The leaves remain
+        // rooted until both complete tuples have been compared and released.
+        unsafe {
+            let mut roots = [
+                relar_record_new(&leaf_layout),
+                relar_record_new(&leaf_layout),
+            ];
+            let right_leaf = roots[1];
+            for root in &mut roots {
+                root.write(one);
+                for _ in 0..20_000 {
+                    let parent = relar_record_new(&pair_layout);
+                    parent.cast::<*mut usize>().write(*root);
+                    parent.add(1).write(one);
+                    *root = parent;
+                }
+            }
+            let [left, right] = roots;
+            assert_eq!(tuple_order(left, right), Ordering::Equal);
+            right.add(1).write(Int::small(0).unwrap().0);
+            assert_eq!(tuple_order(left, right), Ordering::Greater);
+            right_leaf.write(Int::small(2).unwrap().0);
+            assert_eq!(tuple_order(left, right), Ordering::Less);
+            assert_eq!(tuple_order(right, left), Ordering::Greater);
+            relar_record_release(left);
+            relar_record_release(right);
+        }
+    }
 
     #[test]
     fn deeply_nested_sequences_compare_with_bounded_stack() {
