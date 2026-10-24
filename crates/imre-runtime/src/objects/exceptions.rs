@@ -311,7 +311,8 @@ impl Drop for Exception {
 /// An owned error returned from a storage access before pending state is changed.
 pub(crate) struct Error {
     kind: Kind,
-    payload: Payload,
+    // A missing payload uses the preallocated MemoryError when raised.
+    payload: Option<Payload>,
 }
 
 impl Error {
@@ -321,21 +322,28 @@ impl Error {
         let code = unsafe { OwnedWord::from_owned(word, WordKind::new(2)) };
         Self {
             kind: Kind::SystemExit,
-            payload: Payload::Exit(Some(code)),
+            payload: Some(Payload::Exit(Some(code))),
         }
     }
 
     pub(crate) fn new(kind: Kind, message: impl Into<Str>) -> Self {
         Self {
             kind,
-            payload: Payload::Message(Rc::new(message.into())),
+            payload: Some(Payload::Message(Rc::new(message.into()))),
+        }
+    }
+
+    pub(super) fn allocation() -> Self {
+        Self {
+            kind: Kind::MemoryError,
+            payload: None,
         }
     }
 
     pub(super) fn key(key: OwnedWord) -> Self {
         Self {
             kind: Kind::KeyError,
-            payload: Payload::Key(key),
+            payload: Some(Payload::Key(key)),
         }
     }
 
@@ -354,7 +362,11 @@ impl Error {
     #[cold]
     #[inline(never)]
     pub(crate) fn raise(self) {
-        replace_pending(Some(new_exception(self.kind, self.payload)));
+        if let Some(payload) = self.payload {
+            replace_pending(Some(new_exception(self.kind, payload)));
+        } else {
+            sequence_allocation_failed();
+        }
     }
 
     /// Returns a failure sentinel after installing the owned exception.
