@@ -2,6 +2,7 @@
 
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, IsTerminal, Read, Write};
+use std::mem::MaybeUninit;
 
 use smallvec::SmallVec;
 
@@ -72,10 +73,14 @@ enum Source {
     Gzip(Box<GzipReader>),
 }
 
-impl Read for Source {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+impl Source {
+    /// Read one raw chunk into the already reserved result, initializing its prefix.
+    fn read_uninit(&mut self, buf: &mut [MaybeUninit<u8>]) -> io::Result<usize> {
         match self {
-            Self::Plain(file) => file.read(buf),
+            Self::Plain(file) => rustix::io::retry_on_intr(|| {
+                rustix::io::read(&*file, &mut *buf).map(|(initialized, _)| initialized.len())
+            })
+            .map_err(Into::into),
             Self::Gzip(gzip) => gzip.read(buf).map_err(|err| {
                 if err.kind() == io::ErrorKind::UnexpectedEof {
                     io::Error::other(GzipError(
@@ -90,8 +95,16 @@ impl Read for Source {
     }
 }
 
+impl Read for Source {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        // SAFETY: both raw readers only write initialized bytes into the prefix.
+        let buf = unsafe { &mut *(buf as *mut [u8] as *mut [MaybeUninit<u8>]) };
+        self.read_uninit(buf)
+    }
+}
+
 pub(super) struct Input {
-    raw: BufReader<Source>,
+    raw: BufReader<io::Take<Source>>,
     text: TextBuffer,
 }
 
@@ -105,13 +118,16 @@ impl Input {
         // TextIOWrapper reads 8192 bytes per decode. CPython 3.14's binary
         // BufferedReader reads 128 KiB ahead, exposing errors in that chunk.
         Self {
-            raw: BufReader::with_capacity(if binary { 128 * 1024 } else { 8192 }, source),
+            raw: BufReader::with_capacity(
+                if binary { 128 * 1024 } else { 8192 },
+                source.take(u64::MAX),
+            ),
             text: TextBuffer::default(),
         }
     }
 
     pub(super) fn into_file(self) -> File {
-        match self.raw.into_inner() {
+        match self.raw.into_inner().into_inner() {
             Source::Plain(file) => file,
             Source::Gzip(reader) => reader.into_file(),
         }
@@ -128,28 +144,7 @@ impl Input {
             bytes
                 .try_reserve_exact(limit)
                 .map_err(|_| Error::new(Kind::MemoryError, "bytes allocation failed"))?;
-            let mut bulk = limit;
-            if matches!(self.raw.get_ref(), Source::Plain(_)) {
-                // Split a large file read at the last whole block so BufReader
-                // keeps the surplus bytes from the final partial block.
-                let remaining = limit.saturating_sub(self.raw.buffer().len());
-                if remaining > self.raw.capacity() {
-                    bulk -= remaining % self.raw.capacity();
-                }
-            }
-            let read = self
-                .raw
-                .by_ref()
-                .take(bulk as u64)
-                .read_to_end(&mut bytes)
-                .map_err(os_error)?;
-            if read == bulk && read < limit {
-                self.raw
-                    .by_ref()
-                    .take((limit - read) as u64)
-                    .read_to_end(&mut bytes)
-                    .map_err(os_error)?;
-            }
+            self.read_sized(&mut bytes, limit).map_err(os_error)?;
             // CPython releases the unused part of a short read. Keeping the
             // requested capacity alive with a tiny result exhausts address space.
             if bytes.len() < limit {
@@ -159,6 +154,49 @@ impl Input {
             self.raw.read_to_end(&mut bytes).map_err(os_error)?;
         }
         Ok(bytes)
+    }
+
+    /// Match BufferedReader's raw request sizes after short reads, including
+    /// gzip member boundaries where looking one byte further can raise an error.
+    fn read_sized(&mut self, bytes: &mut Bytes, limit: usize) -> io::Result<()> {
+        let buffered = limit.min(self.raw.buffer().len());
+        bytes.extend_from_slice(&self.raw.buffer()[..buffered]);
+        self.raw.consume(buffered);
+        let capacity = self.raw.capacity();
+        while limit - bytes.len() >= capacity {
+            let start = bytes.len();
+            let remaining = limit - start;
+            let bulk = remaining - remaining % capacity;
+            let count = self
+                .raw
+                .get_mut()
+                .get_mut()
+                .read_uninit(&mut bytes.spare_capacity_mut()[..bulk])?;
+            if count == 0 {
+                return Ok(());
+            }
+            // SAFETY: the source initialized exactly the reported prefix.
+            unsafe { bytes.set_len(start + count) };
+        }
+        // Fill one final block. Each short raw read reduces the space left in
+        // that block, even when all of its returned bytes go straight to the caller.
+        let mut room = capacity;
+        while bytes.len() < limit {
+            self.raw.get_mut().set_limit(room as u64);
+            let read = self.raw.fill_buf().map(|chunk| {
+                let count = (limit - bytes.len()).min(chunk.len());
+                bytes.extend_from_slice(&chunk[..count]);
+                (count, chunk.len())
+            });
+            self.raw.get_mut().set_limit(u64::MAX);
+            let (count, filled) = read?;
+            if filled == 0 {
+                break;
+            }
+            self.raw.consume(count);
+            room -= filled;
+        }
+        Ok(())
     }
 
     pub(super) fn binary_line(&mut self) -> Result<Bytes> {
