@@ -5,7 +5,7 @@
 use super::{
     Error, Int, Kind, Object, Storage, StorageCell, Str, Words, acquire_rc, finish, object,
 };
-use std::{borrow::Cow, fmt::Write, ops::Range, ptr, rc::Rc};
+use std::{borrow::Cow, ops::Range, ptr, rc::Rc};
 
 pub(super) struct PatchSet {
     files: Rc<Object>,
@@ -19,44 +19,91 @@ pub(super) struct PatchedFile {
 
 pub(super) struct Hunk {
     input: Rc<Str>,
-    header: Str,
     source_start: Int,
+    text: HunkText,
+}
+
+enum HunkText {
+    /// The input already contains exactly the text `str(hunk)` must return.
+    Original { start: u32, end: u32, lines: u32 },
+    /// Normalized text or offsets too large for the compact form.
+    Full(Box<ParsedText>),
+}
+
+struct ParsedText {
+    start: usize,
+    header: Option<Str>,
     body: Range<usize>,
     normalized: Option<Str>,
     lines: usize,
 }
 
-impl Hunk {
+impl ParsedText {
     /// Merge adjacent original lines; copy only if their normalized text differs.
-    fn append(&mut self, span: Range<usize>, replacement: Option<&str>) {
+    fn append(&mut self, input: &str, span: Range<usize>, replacement: Option<&str>) {
         if let Some(text) = replacement {
             let normalized = self
                 .normalized
-                .get_or_insert_with(|| Str::new(&self.input[self.body.clone()]));
+                .get_or_insert_with(|| Str::new(&input[self.body.clone()]));
             normalized.push_str(text);
         } else if let Some(normalized) = &mut self.normalized {
-            normalized.push_str(&self.input[span.clone()]);
+            normalized.push_str(&input[span.clone()]);
         }
         self.body.end = span.end;
         self.lines += 1;
     }
 
+    fn finish(self) -> HunkText {
+        if self.header.is_none()
+            && self.normalized.is_none()
+            && let (Ok(start), Ok(end), Ok(lines)) = (
+                self.start.try_into(),
+                self.body.end.try_into(),
+                self.lines.try_into(),
+            )
+        {
+            HunkText::Original { start, end, lines }
+        } else {
+            HunkText::Full(Box::new(self))
+        }
+    }
+}
+
+impl Hunk {
+    fn lines(&self) -> usize {
+        match &self.text {
+            HunkText::Original { lines, .. } => *lines as usize,
+            HunkText::Full(text) => text.lines,
+        }
+    }
+
     fn text(&self) -> Str {
-        let body = self
-            .normalized
-            .as_deref()
-            .unwrap_or_else(|| &self.input[self.body.clone()]);
-        let mut result = Str::with_capacity(self.header.len() + body.len());
-        result.push_str(&self.header);
-        result.push_str(body);
-        result
+        match &self.text {
+            HunkText::Original { start, end, .. } => {
+                Str::new(&self.input[*start as usize..*end as usize])
+            }
+            HunkText::Full(text) => {
+                let header = text
+                    .header
+                    .as_deref()
+                    .unwrap_or_else(|| &self.input[text.start..text.body.start]);
+                let body = text
+                    .normalized
+                    .as_deref()
+                    .unwrap_or_else(|| &self.input[text.body.clone()]);
+                let mut result = Str::with_capacity(header.len() + body.len());
+                result.push_str(header);
+                result.push_str(body);
+                result
+            }
+        }
     }
 }
 
 struct File<'a> {
     source: &'a str,
     target: &'a str,
-    hunks: Vec<Hunk>,
+    hunks: Vec<(Int, ParsedText)>,
     single_added: bool,
     single_removed: bool,
 }
@@ -206,6 +253,37 @@ fn header(line: &str) -> Option<(Span<'_>, Span<'_>, &str)> {
     ))
 }
 
+/// An ordinary Git hunk can reuse its header. Only store a new spelling when
+/// unidiff would insert a count, normalize a decimal, or adjust the section.
+fn changed_header(line: &str, source: &Span<'_>, target: &Span<'_>, section: &str) -> Option<Str> {
+    let parts = [
+        "@@ -",
+        source.start,
+        ",",
+        source.count,
+        " +",
+        target.start,
+        ",",
+        target.count,
+        " @@",
+        if section.is_empty() { "" } else { " " },
+        section,
+        "\n",
+    ];
+    if parts
+        .iter()
+        .try_fold(line, |rest, part| rest.strip_prefix(part))
+        == Some("")
+    {
+        return None;
+    }
+    let mut result = Str::with_capacity(parts.iter().map(|part| part.len()).sum());
+    for part in parts {
+        result.push_str(part);
+    }
+    Some(result)
+}
+
 fn git_paths(line: &str) -> Option<(&str, &str)> {
     let text = line
         .strip_prefix("diff --git ")?
@@ -317,27 +395,14 @@ fn parse(input: &Rc<Str>) -> Result<PatchSet, Error> {
             let count = |s: &str| s.parse::<usize>().unwrap_or(usize::MAX);
             let mut old = count(source.count);
             let mut new = count(target.count);
-            let mut normalized_header = Str::with_capacity(line.len() + 5);
-            write!(
-                normalized_header,
-                "@@ -{},{} +{},{} @@",
-                source.start, source.count, target.start, target.count
-            )
-            .unwrap();
-            if !section.is_empty() {
-                normalized_header.push(' ');
-                normalized_header.push_str(section);
-            }
-            normalized_header.push('\n');
             let start = source
                 .start
                 .parse::<usize>()
                 .map(Int::from_usize)
                 .unwrap_or_else(|_| Int::new(source.start.parse().expect("validated decimal")));
-            let mut hunk = Hunk {
-                input: Rc::clone(input),
-                header: normalized_header,
-                source_start: start,
+            let mut hunk = ParsedText {
+                start: span.start,
+                header: changed_header(line, &source, &target, section),
                 body: span.end..span.end,
                 normalized: None,
                 lines: 0,
@@ -369,7 +434,7 @@ fn parse(input: &Rc<Str>) -> Result<PatchSet, Error> {
                 new = new
                     .checked_sub(take_new)
                     .ok_or_else(|| parse_error("Hunk is longer than expected"))?;
-                hunk.append(span, replacement);
+                hunk.append(input, span, replacement);
                 if old == 0 && new == 0 {
                     break;
                 }
@@ -379,24 +444,24 @@ fn parse(input: &Rc<Str>) -> Result<PatchSet, Error> {
             }
             files[i].single_added = source.start == "0" && source.count == "0";
             files[i].single_removed = target.start == "0" && target.count == "0";
-            files[i].hunks.push(hunk);
+            files[i].hunks.push((start, hunk));
             metadata = false;
             continue;
         }
         if line.starts_with(NO_NEWLINE) {
             let i = current.ok_or_else(|| parse_error(format!("Unexpected marker: {line}")))?;
-            let hunk = files[i]
+            let (_, hunk) = files[i]
                 .hunks
                 .last_mut()
                 .ok_or_else(|| parse_error("Unexpected marker: No newline at end of file"))?;
             let canonical = "\\ No newline at end of file\n";
-            hunk.append(span, (line != canonical).then_some(canonical));
+            hunk.append(input, span, (line != canonical).then_some(canonical));
             continue;
         }
         if line == "\n"
-            && let Some(hunk) = current.and_then(|i| files[i].hunks.last_mut())
+            && let Some((_, hunk)) = current.and_then(|i| files[i].hunks.last_mut())
         {
-            hunk.append(span, None);
+            hunk.append(input, span, None);
             continue;
         }
         if !metadata {
@@ -423,11 +488,13 @@ fn parse(input: &Rc<Str>) -> Result<PatchSet, Error> {
     let files = sequence(files.into_iter().map(|file| {
         let is_modified = file.modified();
         let path = Rc::new(file.path());
-        let hunks = sequence(
-            file.hunks
-                .into_iter()
-                .map(|hunk| boxed(Storage::Hunk(Box::new(hunk)))),
-        );
+        let hunks = sequence(file.hunks.into_iter().map(|(source_start, text)| {
+            boxed(Storage::Hunk(Hunk {
+                input: Rc::clone(input),
+                source_start,
+                text: text.finish(),
+            }))
+        }));
         let result = boxed(Storage::PatchedFile(PatchedFile { path, hunks }));
         if is_modified {
             modified.push(Rc::clone(&result));
@@ -500,9 +567,26 @@ pub unsafe extern "C" fn imre_patch_len(node: *const Object) -> usize {
         object(node).0.with(|storage| match storage {
             Storage::PatchSet(set) => set.files.0.with(|s| s.sequence().values.len()),
             Storage::PatchedFile(file) => file.hunks.0.with(|s| s.sequence().values.len()),
-            Storage::Hunk(hunk) => hunk.lines,
+            Storage::Hunk(hunk) => hunk.lines(),
             _ => unreachable!("checked unidiff length"),
         })
     };
     Int::from_usize(len).into_raw()
+}
+
+#[cfg(all(test, target_pointer_width = "64"))]
+#[test]
+fn hunk_crossing_four_gib_keeps_its_full_offsets() {
+    let boundary = u32::MAX as usize;
+    let text = ParsedText {
+        start: boundary - 64,
+        header: None,
+        body: boundary - 32..boundary + 64,
+        normalized: None,
+        lines: 3,
+    };
+    let HunkText::Full(text) = text.finish() else {
+        panic!("a hunk crossing 4 GiB cannot use 32-bit offsets");
+    };
+    assert_eq!(text.body.end, boundary + 64);
 }

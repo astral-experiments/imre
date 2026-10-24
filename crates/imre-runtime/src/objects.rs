@@ -73,7 +73,7 @@ enum Storage {
     PathIterator(Box<paths::PathIterator>),
     PatchSet(patchset::PatchSet),
     PatchedFile(patchset::PatchedFile),
-    Hunk(Box<patchset::Hunk>),
+    Hunk(patchset::Hunk),
     RegexPattern(Box<regexes::Pattern>),
     Logger(Rc<Str>),
     RegexMatch(regexes::Match),
