@@ -1,5 +1,5 @@
 {
-  "schema": "relar-keyword-arguments-comparison-summary-v1",
+  "schema": "imre-keyword-arguments-comparison-summary-v1",
   "audit_sha256": "42242867cc4e85e86fe0bd9c3033a4cfa6acd8e16f3784fe0005c7b2d21df19c",
   "source_commit": "3b7377367a6c93b19aa8981ccd97131bc7442e83",
   "counts": {
@@ -17,7 +17,7 @@
       "workload": "empty",
       "median_ms": {
         "cpython": 27.1184645,
-        "relar": 2.1829545,
+        "imre": 2.1829545,
         "rust_bigint": 2.228099,
         "baseline": 2.170893
       },
@@ -29,7 +29,7 @@
           "p25_ns": 27020582.5,
           "p75_ns": 27252950.5
         },
-        "relar": {
+        "imre": {
           "median_ns": 2182954.5,
           "min_ns": 2041887,
           "max_ns": 3223149,
@@ -53,7 +53,7 @@
       },
       "new_vs_baseline_percent": 0.5556008518153632,
       "cpython_speedup": 12.422826265962025,
-      "relar_over_rust": 0.9797385573980331,
+      "imre_over_rust": 0.9797385573980331,
       "baseline_current_iqrs_overlap": true
     },
     {
@@ -61,7 +61,7 @@
       "workload": "boundary-128",
       "median_ms": {
         "cpython": 27.799589,
-        "relar": 2.756193,
+        "imre": 2.756193,
         "rust_bigint": 2.5680525,
         "baseline": 2.752357
       },
@@ -73,7 +73,7 @@
           "p25_ns": 27629269.25,
           "p75_ns": 28033264.5
         },
-        "relar": {
+        "imre": {
           "median_ns": 2756193.0,
           "min_ns": 2579289,
           "max_ns": 3849517,
@@ -97,7 +97,7 @@
       },
       "new_vs_baseline_percent": 0.13937145508378102,
       "cpython_speedup": 10.086227270731767,
-      "relar_over_rust": 1.0732619368178804,
+      "imre_over_rust": 1.0732619368178804,
       "baseline_current_iqrs_overlap": true
     },
     {
@@ -105,7 +105,7 @@
       "workload": "dense-2048",
       "median_ms": {
         "cpython": 33.147098,
-        "relar": 6.362172,
+        "imre": 6.362172,
         "rust_bigint": 5.8868605,
         "baseline": 6.3730315
       },
@@ -117,7 +117,7 @@
           "p25_ns": 32976688.5,
           "p75_ns": 33589838.25
         },
-        "relar": {
+        "imre": {
           "median_ns": 6362172.0,
           "min_ns": 6241035,
           "max_ns": 6837208,
@@ -141,7 +141,7 @@
       },
       "new_vs_baseline_percent": -0.17039771418044802,
       "cpython_speedup": 5.2100285877213,
-      "relar_over_rust": 1.0807410843182033,
+      "imre_over_rust": 1.0807410843182033,
       "baseline_current_iqrs_overlap": true
     },
     {
@@ -149,7 +149,7 @@
       "workload": "sparse-2048",
       "median_ms": {
         "cpython": 37.2554115,
-        "relar": 9.0883935,
+        "imre": 9.0883935,
         "rust_bigint": 8.3371785,
         "baseline": 9.1338935
       },
@@ -161,7 +161,7 @@
           "p25_ns": 37062222.25,
           "p75_ns": 37883739.75
         },
-        "relar": {
+        "imre": {
           "median_ns": 9088393.5,
           "min_ns": 8877241,
           "max_ns": 9913102,
@@ -185,7 +185,7 @@
       },
       "new_vs_baseline_percent": -0.4981446302171122,
       "cpython_speedup": 4.0992295833141466,
-      "relar_over_rust": 1.0901042241089116,
+      "imre_over_rust": 1.0901042241089116,
       "baseline_current_iqrs_overlap": true
     },
     {
@@ -193,7 +193,7 @@
       "workload": "dense-16384",
       "median_ms": {
         "cpython": 76.4345695,
-        "relar": 26.6227435,
+        "imre": 26.6227435,
         "rust_bigint": 22.899698,
         "baseline": 26.974986
       },
@@ -205,7 +205,7 @@
           "p25_ns": 75934686.5,
           "p75_ns": 76729519.0
         },
-        "relar": {
+        "imre": {
           "median_ns": 26622743.5,
           "min_ns": 25953255,
           "max_ns": 28709595,
@@ -229,7 +229,7 @@
       },
       "new_vs_baseline_percent": -1.3058116137669162,
       "cpython_speedup": 2.8710252758135164,
-      "relar_over_rust": 1.1625805501889153,
+      "imre_over_rust": 1.1625805501889153,
       "baseline_current_iqrs_overlap": true
     },
     {
@@ -237,7 +237,7 @@
       "workload": "sparse-16384",
       "median_ms": {
         "cpython": 110.552074,
-        "relar": 50.258769,
+        "imre": 50.258769,
         "rust_bigint": 42.1390805,
         "baseline": 51.0292995
       },
@@ -249,7 +249,7 @@
           "p25_ns": 109921430.5,
           "p75_ns": 111575792.0
         },
-        "relar": {
+        "imre": {
           "median_ns": 50258769.0,
           "min_ns": 49169357,
           "max_ns": 53412567,
@@ -273,7 +273,7 @@
       },
       "new_vs_baseline_percent": -1.509976636069632,
       "cpython_speedup": 2.199657416997221,
-      "relar_over_rust": 1.1926878423462515,
+      "imre_over_rust": 1.1926878423462515,
       "baseline_current_iqrs_overlap": true
     },
     {
@@ -281,7 +281,7 @@
       "workload": "empty",
       "median_ms": {
         "cpython": 27.11791,
-        "relar": 2.1037625,
+        "imre": 2.1037625,
         "rust_bigint": 2.157256,
         "baseline": 2.1108245
       },
@@ -293,7 +293,7 @@
           "p25_ns": 26958890.25,
           "p75_ns": 27323626.0
         },
-        "relar": {
+        "imre": {
           "median_ns": 2103762.5,
           "min_ns": 2019675,
           "max_ns": 3457716,
@@ -317,7 +317,7 @@
       },
       "new_vs_baseline_percent": -0.3345612105601359,
       "cpython_speedup": 12.890195542510146,
-      "relar_over_rust": 0.9752029893531412,
+      "imre_over_rust": 0.9752029893531412,
       "baseline_current_iqrs_overlap": true
     },
     {
@@ -325,7 +325,7 @@
       "workload": "boundary-128",
       "median_ms": {
         "cpython": 28.678494,
-        "relar": 2.7686805,
+        "imre": 2.7686805,
         "rust_bigint": 2.6315015,
         "baseline": 2.7906175
       },
@@ -337,7 +337,7 @@
           "p25_ns": 28126181.75,
           "p75_ns": 29126379.0
         },
-        "relar": {
+        "imre": {
           "median_ns": 2768680.5,
           "min_ns": 2593525,
           "max_ns": 4699632,
@@ -361,7 +361,7 @@
       },
       "new_vs_baseline_percent": -0.7860984172857854,
       "cpython_speedup": 10.358181090234138,
-      "relar_over_rust": 1.0521295541727793,
+      "imre_over_rust": 1.0521295541727793,
       "baseline_current_iqrs_overlap": true
     },
     {
@@ -369,7 +369,7 @@
       "workload": "dense-2048",
       "median_ms": {
         "cpython": 33.728338,
-        "relar": 5.762353,
+        "imre": 5.762353,
         "rust_bigint": 5.6658825,
         "baseline": 5.791271
       },
@@ -381,7 +381,7 @@
           "p25_ns": 33350345.25,
           "p75_ns": 34674666.75
         },
-        "relar": {
+        "imre": {
           "median_ns": 5762353.0,
           "min_ns": 5506645,
           "max_ns": 7630957,
@@ -405,7 +405,7 @@
       },
       "new_vs_baseline_percent": -0.49933771015032713,
       "cpython_speedup": 5.8532231538053985,
-      "relar_over_rust": 1.017026562058073,
+      "imre_over_rust": 1.017026562058073,
       "baseline_current_iqrs_overlap": true
     },
     {
@@ -413,7 +413,7 @@
       "workload": "sparse-2048",
       "median_ms": {
         "cpython": 37.131567,
-        "relar": 7.9767905,
+        "imre": 7.9767905,
         "rust_bigint": 7.789857,
         "baseline": 8.005739
       },
@@ -425,7 +425,7 @@
           "p25_ns": 37051392.75,
           "p75_ns": 37564979.5
         },
-        "relar": {
+        "imre": {
           "median_ns": 7976790.5,
           "min_ns": 7681911,
           "max_ns": 8758057,
@@ -449,7 +449,7 @@
       },
       "new_vs_baseline_percent": -0.3615968494601218,
       "cpython_speedup": 4.654950759957905,
-      "relar_over_rust": 1.0239970387132908,
+      "imre_over_rust": 1.0239970387132908,
       "baseline_current_iqrs_overlap": true
     },
     {
@@ -457,7 +457,7 @@
       "workload": "dense-16384",
       "median_ms": {
         "cpython": 76.647312,
-        "relar": 21.320031,
+        "imre": 21.320031,
         "rust_bigint": 20.3894155,
         "baseline": 21.4042515
       },
@@ -469,7 +469,7 @@
           "p25_ns": 76243069.25,
           "p75_ns": 77338295.0
         },
-        "relar": {
+        "imre": {
           "median_ns": 21320031.0,
           "min_ns": 21027079,
           "max_ns": 22598580,
@@ -493,7 +493,7 @@
       },
       "new_vs_baseline_percent": -0.3934755672255097,
       "cpython_speedup": 3.595084453676451,
-      "relar_over_rust": 1.0456420881706983,
+      "imre_over_rust": 1.0456420881706983,
       "baseline_current_iqrs_overlap": true
     },
     {
@@ -501,7 +501,7 @@
       "workload": "sparse-16384",
       "median_ms": {
         "cpython": 111.0903595,
-        "relar": 40.9827845,
+        "imre": 40.9827845,
         "rust_bigint": 37.3389625,
         "baseline": 41.0626895
       },
@@ -513,7 +513,7 @@
           "p25_ns": 110321241.5,
           "p75_ns": 112517727.0
         },
-        "relar": {
+        "imre": {
           "median_ns": 40982784.5,
           "min_ns": 40404921,
           "max_ns": 46773815,
@@ -537,7 +537,7 @@
       },
       "new_vs_baseline_percent": -0.1945927092768751,
       "cpython_speedup": 2.710659142743217,
-      "relar_over_rust": 1.0975876606105486,
+      "imre_over_rust": 1.0975876606105486,
       "baseline_current_iqrs_overlap": true
     }
   ],

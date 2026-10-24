@@ -77,7 +77,7 @@ def flags_audit(calls, module_objects):
     drivers = [(exe, argv) for exe, argv in calls if "-Wl,--gc-sections" in argv and "-Wl,-z,relro,-z,now" in argv]
     assert len(drivers) == 1, [(exe, argv[:10]) for exe, argv in calls]
     driver, args = drivers[0]
-    assert "-O3" in args and any(x.endswith("/librelar_runtime.a") for x in args)
+    assert "-O3" in args and any(x.endswith("/libimre_runtime.a") for x in args)
     if module_objects:
         assert sum(opt.endswith(".o") for opt in args) == 7, args
     else:
@@ -142,14 +142,14 @@ def main():
     if not __debug__ or any(n < 2 or n % 2 for n in (a.edit_pairs, a.cold_pairs, a.runtime_pairs)) or a.edit_pairs>1000:
         p.error("use even positive pair counts and enable assertions")
     os.sched_setaffinity(0, {a.cpu})
-    env = {k: v for k, v in os.environ.items() if k not in ("RELARFLAGS", "RELAR_ENCODED_FLAGS", "RELAR_CACHE_DIR")}
-    env["RELAR_CACHE_TRACE"] = "1"
+    env = {k: v for k, v in os.environ.items() if k not in ("IMREFLAGS", "IMRE_ENCODED_FLAGS", "IMRE_CACHE_DIR")}
+    env["IMRE_CACHE_TRACE"] = "1"
     compilers = {v: getattr(a, v).resolve() for v in NAMES}
     sources = {v: getattr(a, v + "_source").resolve() for v in NAMES}
     report_sources = {v: base / "examples/conformance_report" for v, base in sources.items()}
     digests = source_hashes(report_sources["parent"])
     assert digests == source_hashes(report_sources["child"])
-    archives = {v: sha(c.with_name("librelar_runtime.a").read_bytes()) for v, c in compilers.items()}
+    archives = {v: sha(c.with_name("libimre_runtime.a").read_bytes()) for v, c in compilers.items()}
     assert len(set(archives.values())) == 1
     data = {"revisions": {"parent": a.parent_revision, "child": a.child_revision}, "cpu": a.cpu,
             "cpu_model": next(s.split(":", 1)[1].strip() for s in Path("/proc/cpuinfo").read_text().splitlines()
@@ -201,9 +201,9 @@ def main():
             report.unlink(missing_ok=True)
             cmd = [compilers[variant], mode, case / "__main__.py", "--module-root", case.parent]
             cmd.extend(("--", *pg) if mode == "run" else ("-o", native))
-            timing, lines, observed = run(cmd, dict(env, RELAR_CACHE_DIR=str(cache)), audit)
-            events = [s.removeprefix("relar cache ") for s in lines if s.startswith("relar cache ")]
-            objects = [s.split(" ", 3)[2:] for s in lines if s.startswith("relar object ")]
+            timing, lines, observed = run(cmd, dict(env, IMRE_CACHE_DIR=str(cache)), audit)
+            events = [s.removeprefix("imre cache ") for s in lines if s.startswith("imre cache ")]
+            objects = [s.split(" ", 3)[2:] for s in lines if s.startswith("imre object ")]
             module_objects = variant == "child" or a.cached_parent
             if module_objects:
                 assert events == (["hit"] if state == "hit" else ["miss", "store"]), lines

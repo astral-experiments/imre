@@ -45,11 +45,45 @@ CASES = {
         ["--items", "a", "--debug", "--locations", ".", "foo//bar"],
         ["--items", "a", "--locations=/foo/./bar"],
     ],
+    "commands": [
+        [],
+        ["--help"],
+        ["unknown"],
+        ["--", "read"],
+        ["--", "--help"],
+        ["read", "--help"],
+        ["write", "--help"],
+        ["--label", "sample", "read"],
+        ["read", "--first", "dir/a", "--second", "dir/b"],
+        ["write"],
+        ["write", "--text", "okay"],
+        ["write", "--text"],
+        ["read", "--text", "a"],
+        ["--other", "write"],
+        ["--other", "write", "--text", "ok", "extra"],
+    ],
+    "positionals": [
+        [], ["check"], ["check", "base"], ["check", "base", "compare"],
+        ["format", "base", "compare", "-v"], ["-vv", "format", "/a", "./b"],
+        ["check", "--verbose", "base", "compare", "-cjson"],
+        ["check", "-vcjson", "base", "compare"],
+        ["check", "-c", "text", "base", "compare"],
+        ["check", "--mode=text", "base", "compare"],
+        ["check", "--", "-base", "--compare"],
+        ["check", "base", "compare", "extra"], ["other", "base", "compare"],
+        ["check", "base", "compare", "--mode", "missing"],
+        ["-vh"], ["-hv"], ["-v=1"], ["-hv=xx"], ["-vh=xx"], ["-hc"], ["-hc", "other"],
+        ["check", "base", "compare", "--"], ["check", "base", "compare", "-v", "--"],
+        ["check", "base", "compare", "extra", "--"], ["-vv=1"], ["-vx", "check", "b", "c"],
+        ["--mo", "json", "check", "base", "compare"],
+    ],
     "two": [[], ["--help"], ["--mo=lar"], ["--flag"], ["--paths", "one", "two"]],
 }
 REJECTED = {
     "computed_flag": 'parser.add_argument("--" + "item")',
-    "positional": 'parser.add_argument("input")',
+    "repeated_flag": 'parser.add_argument("-v", "--verbose")\n    parser.add_argument("-v")',
+    "positional_arity": 'parser.add_argument("input", nargs="+")',
+    "mixed_positionals": 'parser.add_argument("input", "--other")',
     "foreign_converter": 'parser.add_argument("--number", type=int)',
     "choice_expression": 'parser.add_argument("--key", choices=list("ab"))',
     "duplicate_destination": 'parser.add_argument("--a-b")\n    parser.add_argument("--a_b")',
@@ -90,7 +124,7 @@ def main():
     if args.sanitize:
         compile_flags += ["--sanitize"]
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-argparse-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-argparse-") as directory:
         for name, cases in CASES.items():
             source = FIXTURES / (name + ".py")
             native = Path(directory) / name
@@ -157,8 +191,27 @@ def main():
             )
             if check.returncode == 0:
                 raise AssertionError(statement)
+        # A field unique to one child is accessible only after dispatch.
+        source = Path(directory) / "unchecked_command.py"
+        commands = (FIXTURES / "commands.py").read_text()
+        for wrong in ["print(args.text)", "print(args.first)"]:
+            source.write_text(commands.replace("    print(args.label)", "    " + wrong))
+            checked = subprocess.run([args.compiler, "check", source], capture_output=True)
+            if checked.returncode == 0:
+                raise AssertionError(wrong)
+        source.write_text(commands.replace("    return args\n", "    print(args.text)\n    return args\n"))
+        checked = subprocess.run([args.compiler, "check", source], capture_output=True)
+        if checked.returncode == 0 or b"unknown field" not in checked.stderr:
+            raise AssertionError(checked.stderr)
+        source.write_text(
+            "import argparse\ndef count(args: argparse.Namespace) -> int:\n    return 1\n"
+            "print(count(0))  # ty: ignore[invalid-argument-type]\n"
+        )
+        checked = subprocess.run([args.compiler, "check", source], capture_output=True)
+        if checked.returncode == 0 or b"argparse.Namespace requires" not in checked.stderr:
+            raise AssertionError(checked.stderr)
     print(
-        f"Validated {checks} argparse process comparisons and {len(REJECTED) + 3} compile-time rejections"
+        f"Validated {checks} argparse process comparisons and {len(REJECTED) + 7} compile-time rejections"
     )
 
 

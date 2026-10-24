@@ -18,7 +18,7 @@ jobs:
     uses: $/.github/workflows/build-release-binaries.yml
 
   macos-arm64:
-    runs-on: ${{ github.repository == 'astral-sh/relar' && 'namespace-profile-macos-15' || 'macos-15' }}
+    runs-on: ${{ github.repository == 'astral-sh/imre' && 'namespace-profile-macos-15' || 'macos-15' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -27,33 +27,41 @@ jobs:
           python-version: '3.14.5'
       - run: cargo build --workspace --release --locked
       - run: cargo test --workspace --release --locked
+      - name: Build and install a Imre extension wheel
+        run: |
+          python3 -m pip install "wheel==0.45.1" "packaging==25.0"
+          python3 tests/extension_wheel.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+      - uses: ./.github/actions/test-google-crc32c
       - name: Compare Apple Silicon executables with CPython
         run: |
-          target/release/relar build tests/programs/control_flow.py -o "$RUNNER_TEMP/control_flow"
+          target/release/imre build tests/programs/control_flow.py -o "$RUNNER_TEMP/control_flow"
           lipo "$RUNNER_TEMP/control_flow" -verify_arch arm64
-          python3 tests/run_suites.py --workers 3 --log-dir "$RUNNER_TEMP/relar-suites" \
+          python3 tests/run_suites.py --workers 3 --log-dir "$RUNNER_TEMP/imre-suites" \
             --suites differential io files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
-            -- --compiler target/release/relar --runtime target/release/librelar_runtime.a --opt-levels 3
+            -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --opt-levels 3
 
-      - name: Compare Ruff’s conformance reports with CPython
+      - name: Compare Ruff’s reporters with CPython
         run: |
-          target/release/relar build examples/conformance_report/upstream/conformance.py -o "$RUNNER_TEMP/ruff-conformance"
+          target/release/imre build examples/conformance_report/upstream/conformance.py -o "$RUNNER_TEMP/ruff-conformance"
           python3 tests/ruff_program.py --binary "$RUNNER_TEMP/ruff-conformance"
-          target/release/relar build examples/conformance_report/__main__.py --module-root examples -o "$RUNNER_TEMP/conformance-report"
+          target/release/imre build examples/memory_report/upstream/memory_report.py -o "$RUNNER_TEMP/ruff-memory"
+          python3 tests/ruff_memory_compare.py --binary "$RUNNER_TEMP/ruff-memory"
+          python3 tests/ruff_memory_run.py --binary "$RUNNER_TEMP/ruff-memory"
+          target/release/imre build examples/conformance_report/__main__.py --module-root examples -o "$RUNNER_TEMP/conformance-report"
           python3 benchmarks/conformance_grouping_inputs.py \
             --archive benchmarks/results/2026-10-22-collector-ownership-study.tar.xz \
             --output "$RUNNER_TEMP/conformance-inputs" --check-reporter "$RUNNER_TEMP/conformance-report"
 
   windows-compiler:
-    runs-on: ${{ github.repository == 'astral-sh/relar' && 'namespace-profile-windows-2022-x86-64-16x32' || 'windows-2022' }}
+    runs-on: ${{ github.repository == 'astral-sh/imre' && 'namespace-profile-windows-2022-x86-64-16x32' || 'windows-2022' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       # The native runtime depends on POSIX process and filesystem APIs.
-      - run: cargo test -p relar-compiler --lib --locked
+      - run: cargo test -p imre-compiler --lib --locked
 
   check:
-    runs-on: ${{ github.repository == 'astral-sh/relar' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -62,8 +70,8 @@ jobs:
           python-version: '3.14.5'
       - name: Install the pinned Rust toolchain
         run: rustup show
-      - name: Install LLVM 18
-        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18
+      - name: Install LLVM 18 and the CRC32C build tools
+        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 cmake
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -71,11 +79,11 @@ jobs:
         env:
           CLANG: clang-18
         run: |
-          cargo build -p relar-runtime --locked
-          cargo test -p relar-compiler --lib --locked slice_sum_validation::bounded_slice_sums -- --exact --ignored --nocapture
+          cargo build -p imre-runtime --locked
+          cargo test -p imre-compiler --lib --locked slice_sum_validation::bounded_slice_sums -- --exact --ignored --nocapture
       - name: Free disk space for native test binaries
         run: cargo clean --profile dev
-      - run: cargo build --workspace --release --locked --features relar-compiler/verify-ir
+      - run: cargo build --workspace --release --locked --features imre-compiler/verify-ir
       - name: Get the pinned CPython unittest support
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -84,109 +92,132 @@ jobs:
           path: .cpython-stdlib-reference
           sparse-checkout: Lib/test
           persist-credentials: false
-      - name: Run vendored CPython methods against native Relar
+      - name: Check sys streams and exits with vendored CPython methods
+        run: python3 benchmarks/cpython_stdlib/native_sys.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+      - name: Run vendored CPython methods against native Imre
         run: |
-          python3 benchmarks/cpython_stdlib/native_paths.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --result "$RUNNER_TEMP/cpython-paths.json"
-          python3 benchmarks/cpython_stdlib/native_json.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"
-          python3 benchmarks/cpython_stdlib/native_os.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
-          python3 benchmarks/cpython_stdlib/native_os_path.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-os-path.json"
+          python3 benchmarks/cpython_stdlib/native_hashlib.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-hashlib.json"
+          python3 benchmarks/cpython_stdlib/native_paths.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --result "$RUNNER_TEMP/cpython-paths.json"
+          python3 benchmarks/cpython_stdlib/native_shutil.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil.json"
+          python3 benchmarks/cpython_stdlib/native_json.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"
+          python3 benchmarks/cpython_stdlib/native_json_values.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json-values.json"
+          python3 benchmarks/cpython_stdlib/native_os.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
+          python3 benchmarks/cpython_stdlib/native_os_path.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-os-path.json"
+      - name: Build and install a Imre extension wheel
+        run: |
+          python3 -m pip install "wheel==0.45.1" "packaging==25.0"
+          python3 tests/extension_wheel.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
+      - uses: ./.github/actions/test-google-crc32c
+        with:
+          cc: clang-18
+          cxx: clang++-18
       - name: Check native build caching, linker options, and status
         run: |
           # Exercise the distro toolchain without setup-python's LD_LIBRARY_PATH.
           for suite in build_cache module_objects link_cache build_output; do
-            env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin python3 "tests/$suite.py" --compiler target/release/relar
+            env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin python3 "tests/$suite.py" --compiler target/release/imre
           done
-      - name: Compare Ruff’s conformance reports with CPython
+      - name: Run vendored CPython Counter methods in native Imre
+        run: python3 benchmarks/cpython_stdlib/native_counter.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/cpython-counter.json"
+      - name: Compare Ruff’s reporters with CPython
         run: |
-          target/release/relar build examples/conformance_report/upstream/conformance.py -o "$RUNNER_TEMP/ruff-conformance"
+          target/release/imre build examples/conformance_report/upstream/conformance.py -o "$RUNNER_TEMP/ruff-conformance"
           python3 tests/ruff_program.py --binary "$RUNNER_TEMP/ruff-conformance"
-          target/release/relar build examples/conformance_report/__main__.py --module-root examples -o "$RUNNER_TEMP/conformance-report"
+          target/release/imre build examples/memory_report/upstream/memory_report.py -o "$RUNNER_TEMP/ruff-memory"
+          python3 tests/ruff_memory_compare.py --binary "$RUNNER_TEMP/ruff-memory"
+          python3 tests/ruff_memory_run.py --binary "$RUNNER_TEMP/ruff-memory"
+          target/release/imre build examples/conformance_report/__main__.py --module-root examples -o "$RUNNER_TEMP/conformance-report"
           python3 benchmarks/conformance_grouping_inputs.py \
             --archive benchmarks/results/2026-10-22-collector-ownership-study.tar.xz \
             --output "$RUNNER_TEMP/conformance-inputs" --check-reporter "$RUNNER_TEMP/conformance-report"
+      - name: Compare Ruff’s ecosystem check with CPython on local Git repositories
+        run: |
+          python3 -m pip install --no-deps tomli==2.5.0 tomli-w==1.2.0 unidiff==1.0.0
+          target/release/imre check --entry-profile examples/ruff_ecosystem/check-entry.json examples/ruff_ecosystem/ruff_ecosystem/__main__.py
+          python3 tests/ruff_ecosystem_live.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
       - name: Compare native suites with CPython
         run: |
-          python3 -m pip install --no-deps tomli==2.5.0
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-ordinary --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
-            -- --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-ordinary --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
+            -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
       - name: Validate guarded list lengths on bounded heaps
         run: |
-          python3 tests/validate_list_length.py --compiler target/release/relar \
-            --runtime target/release/librelar_runtime.a --clang clang-18
+          python3 tests/validate_list_length.py --compiler target/release/imre \
+            --runtime target/release/libimre_runtime.a --clang clang-18
       - name: Validate the independent Rust Base45 reference
         run: |
-          python3 benchmarks/reference/base45_codec/build.py --artifact-dir /tmp/relar-base45-reference --target-dir target/base45-reference
-          python3 benchmarks/base45_validate.py --rust /tmp/relar-base45-reference/base45-reference --output /tmp/relar-base45-reference/validation.json
+          python3 benchmarks/reference/base45_codec/build.py --artifact-dir /tmp/imre-base45-reference --target-dir target/base45-reference
+          python3 benchmarks/base45_validate.py --rust /tmp/imre-base45-reference/base45-reference --output /tmp/imre-base45-reference/validation.json
       - name: Validate the independent Rust Luhn reference
         run: |
-          python3 benchmarks/reference/luhn_checksum/build.py --artifact-dir /tmp/relar-luhn-reference --target-dir target/luhn-reference
-          python3 benchmarks/luhn_validate.py --rust /tmp/relar-luhn-reference/luhn-reference --output /tmp/relar-luhn-reference/validation.json
+          python3 benchmarks/reference/luhn_checksum/build.py --artifact-dir /tmp/imre-luhn-reference --target-dir target/luhn-reference
+          python3 benchmarks/luhn_validate.py --rust /tmp/imre-luhn-reference/luhn-reference --output /tmp/imre-luhn-reference/validation.json
       - name: Build the runtime with AddressSanitizer
         env:
           RUSTC_BOOTSTRAP: '1'
           RUSTFLAGS: -Zsanitizer=address -Cforce-frame-pointers=yes
         run: |
-          relar_target="$(rustc -vV | sed -n 's/^host: //p')"
-          cargo build -p relar-runtime --release --locked --target "$relar_target" --target-dir target/asan
+          imre_target="$(rustc -vV | sed -n 's/^host: //p')"
+          cargo build -p imre-runtime --features corosensei/sanitizer --release --locked --target "$imre_target" --target-dir target/asan
       - name: Check generated code and runtime with AddressSanitizer
         run: |
-          relar_target="$(rustc -vV | sed -n 's/^host: //p')"
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-asan-o1 --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
-            -- --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 1
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-asan-o0 --suites containers tuple_keys fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions files paths processes argparse_cli \
-            -- --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 0
+          imre_target="$(rustc -vV | sed -n 's/^host: //p')"
+          python3 tests/extension_wheel.py --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-asan-o1 --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
+            -- --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize --opt-levels 1
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-asan-o0 --suites containers tuple_keys fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions files paths processes argparse_cli \
+            -- --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize --opt-levels 0
       - name: Validate the route planner against an independent oracle
         run: |
-          target/release/relar build examples/route_planner.py
+          target/release/imre build examples/route_planner.py
           python3 benchmarks/validate.py --binary ./route_planner
       - name: Validate the dependency planner against an independent oracle
         run: |
-          target/release/relar build examples/dependency_planner/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/dependency-planner
+          target/release/imre build examples/dependency_planner/__main__.py --module-root examples --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o /tmp/dependency-planner
           python3 benchmarks/dependency_validate.py --binary /tmp/dependency-planner
       - name: Validate the Rust planner references and integer boundaries
         run: |
-          python3 benchmarks/reference/dependency_planner/build.py --artifact-dir /tmp/relar-rust-reference --target-dir target/rust-reference
-          python3 benchmarks/reference/dependency_planner/check_boundaries.py --python python3 --relar /tmp/dependency-planner --rust-bigint /tmp/relar-rust-reference/planner-bigint --rust-i64 /tmp/relar-rust-reference/planner-i64 --output /tmp/relar-rust-reference/validation.json
+          python3 benchmarks/reference/dependency_planner/build.py --artifact-dir /tmp/imre-rust-reference --target-dir target/rust-reference
+          python3 benchmarks/reference/dependency_planner/check_boundaries.py --python python3 --imre /tmp/dependency-planner --rust-bigint /tmp/imre-rust-reference/planner-bigint --rust-i64 /tmp/imre-rust-reference/planner-i64 --output /tmp/imre-rust-reference/validation.json
       - name: Validate the incremental planner and numeric reference boundaries
         run: |
-          target/release/relar build examples/incremental_planner/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/incremental-planner
-          python3 benchmarks/reference/incremental_planner/build.py --artifact-dir /tmp/relar-incremental-reference --target-dir target/incremental-reference
+          target/release/imre build examples/incremental_planner/__main__.py --module-root examples --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o /tmp/incremental-planner
+          python3 benchmarks/reference/incremental_planner/build.py --artifact-dir /tmp/imre-incremental-reference --target-dir target/incremental-reference
           # Checked i64 compares only in-range cases and must reject every excluded overflow case.
-          python3 benchmarks/incremental_validate.py --python python3 --binary /tmp/incremental-planner --rust-bigint /tmp/relar-incremental-reference/planner-bigint --rust-i64 /tmp/relar-incremental-reference/planner-i64 --output /tmp/relar-incremental-reference/validation.json
+          python3 benchmarks/incremental_validate.py --python python3 --binary /tmp/incremental-planner --rust-bigint /tmp/imre-incremental-reference/planner-bigint --rust-i64 /tmp/imre-incremental-reference/planner-i64 --output /tmp/imre-incremental-reference/validation.json
       - name: Validate framed batches and recovery against CPython and Rust
         run: |
-          target/release/relar build examples/batch_planner/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/batch-planner
-          python3 benchmarks/reference/incremental_planner/build.py --batch --artifact-dir /tmp/relar-batch-reference --target-dir target/incremental-reference
-          python3 benchmarks/batch_validate.py --python python3 --binary /tmp/batch-planner --rust-bigint /tmp/relar-batch-reference/planner-batch-bigint --output /tmp/relar-batch-reference/validation.json
+          target/release/imre build examples/batch_planner/__main__.py --module-root examples --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o /tmp/batch-planner
+          python3 benchmarks/reference/incremental_planner/build.py --batch --artifact-dir /tmp/imre-batch-reference --target-dir target/incremental-reference
+          python3 benchmarks/batch_validate.py --python python3 --binary /tmp/batch-planner --rust-bigint /tmp/imre-batch-reference/planner-batch-bigint --output /tmp/imre-batch-reference/validation.json
       - name: Validate file manifests and complete reports against CPython and Rust
         run: |
-          target/release/relar build examples/manifest_planner/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/manifest-planner
-          python3 benchmarks/reference/incremental_planner/build.py --manifest --artifact-dir /tmp/relar-manifest-reference --target-dir target/incremental-reference
-          python3 benchmarks/manifest_validate.py --python python3 --binary /tmp/manifest-planner --rust-bigint /tmp/relar-manifest-reference/planner-manifest-bigint --output /tmp/relar-manifest-reference/validation.json
+          target/release/imre build examples/manifest_planner/__main__.py --module-root examples --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o /tmp/manifest-planner
+          python3 benchmarks/reference/incremental_planner/build.py --manifest --artifact-dir /tmp/imre-manifest-reference --target-dir target/incremental-reference
+          python3 benchmarks/manifest_validate.py --python python3 --binary /tmp/manifest-planner --rust-bigint /tmp/imre-manifest-reference/planner-manifest-bigint --output /tmp/imre-manifest-reference/validation.json
       - name: Validate inventory reconciliation against CPython and Rust
         run: |
-          target/release/relar build examples/inventory_reconciliation/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/inventory-reconciliation
-          python3 benchmarks/reference/inventory_reconciliation/build.py --artifact-dir /tmp/relar-inventory-reference --target-dir target/inventory-reference
-          python3 benchmarks/inventory_validate.py --python python3 --binary /tmp/inventory-reconciliation --rust-bigint /tmp/relar-inventory-reference/inventory-bigint --output /tmp/relar-inventory-reference/validation.json
+          target/release/imre build examples/inventory_reconciliation/__main__.py --module-root examples --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o /tmp/inventory-reconciliation
+          python3 benchmarks/reference/inventory_reconciliation/build.py --artifact-dir /tmp/imre-inventory-reference --target-dir target/inventory-reference
+          python3 benchmarks/inventory_validate.py --python python3 --binary /tmp/inventory-reconciliation --rust-bigint /tmp/imre-inventory-reference/inventory-bigint --output /tmp/imre-inventory-reference/validation.json
       - name: Validate telemetry queries against CPython and Rust
         run: |
-          target/release/relar build examples/telemetry_comparison/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/telemetry-comparison
-          python3 benchmarks/reference/telemetry_comparison/build.py --artifact-dir /tmp/relar-telemetry-reference --target-dir target/telemetry-reference
-          python3 benchmarks/telemetry_validate.py --python python3 --binary /tmp/telemetry-comparison --rust /tmp/relar-telemetry-reference/telemetry-reference --output /tmp/relar-telemetry-reference/validation.json
+          target/release/imre build examples/telemetry_comparison/__main__.py --module-root examples --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o /tmp/telemetry-comparison
+          python3 benchmarks/reference/telemetry_comparison/build.py --artifact-dir /tmp/imre-telemetry-reference --target-dir target/telemetry-reference
+          python3 benchmarks/telemetry_validate.py --python python3 --binary /tmp/telemetry-comparison --rust /tmp/imre-telemetry-reference/telemetry-reference --output /tmp/imre-telemetry-reference/validation.json
       - name: Validate callable record pipelines against CPython and Rust
         run: |
-          target/release/relar build examples/record_pipeline/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/record-pipeline
-          python3 benchmarks/reference/record_pipeline/build.py --artifact-dir /tmp/relar-record-reference
-          python3 benchmarks/record_validate.py --python python3 --binary /tmp/record-pipeline --rust /tmp/relar-record-reference/record-reference
+          target/release/imre build examples/record_pipeline/__main__.py --module-root examples --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o /tmp/record-pipeline
+          python3 benchmarks/reference/record_pipeline/build.py --artifact-dir /tmp/imre-record-reference
+          python3 benchmarks/record_validate.py --python python3 --binary /tmp/record-pipeline --rust /tmp/imre-record-reference/record-reference
       - name: Validate memory report comparison against CPython and Rust
         run: |
-          target/release/relar build examples/memory_report/__main__.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/memory-report
-          target/release/relar build examples/memory_report/compute.py --module-root examples --runtime target/release/librelar_runtime.a --clang clang-18 --opt-level 3 -o /tmp/memory-report-compute
-          python3 benchmarks/reference/memory_report/build.py --artifact-dir /tmp/relar-memory-reference
-          python3 benchmarks/memory_validate.py --python python3 --binary /tmp/memory-report --compute-binary /tmp/memory-report-compute --rust /tmp/relar-memory-reference/memory-report-reference
+          target/release/imre build examples/memory_report/__main__.py --module-root examples --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o /tmp/memory-report
+          target/release/imre build examples/memory_report/compute.py --module-root examples --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o /tmp/memory-report-compute
+          python3 benchmarks/reference/memory_report/build.py --artifact-dir /tmp/imre-memory-reference
+          python3 benchmarks/memory_validate.py --python python3 --binary /tmp/memory-report --compute-binary /tmp/memory-report-compute --rust /tmp/imre-memory-reference/memory-report-reference
 
   thinlto:
-    runs-on: ${{ github.repository == 'astral-sh/relar' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -195,16 +226,16 @@ jobs:
           python-version: '3.14.5'
       - name: Install LLVM 18
         run: sudo apt-get update && sudo apt-get install -y clang-18
-      - run: cargo build -p relar-compiler --release --locked
+      - run: cargo build -p imre-compiler --release --locked
       - name: Build the bitcode runtime for ThinLTO
         env:
           RUSTFLAGS: -Clinker-plugin-lto
-        run: cargo build -p relar-runtime --release --locked --target-dir target/lto
+        run: cargo build -p imre-runtime --release --locked --target-dir target/lto
       - name: Check ThinLTO linking and native semantics
         run: |
-          relar_target="$(rustc -vV | sed -n 's/^host: //p')"
-          relar_lld_dir="$(rustc --print sysroot)/lib/rustlib/$relar_target/bin"
-          python3 tests/lto.py --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --rust-lld "$relar_lld_dir/rust-lld" --python python3
+          imre_target="$(rustc -vV | sed -n 's/^host: //p')"
+          imre_lld_dir="$(rustc --print sysroot)/lib/rustlib/$imre_target/bin"
+          python3 tests/lto.py --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --rust-lld "$imre_lld_dir/rust-lld" --python python3
           if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
             suites=(module_values)
           else
@@ -216,5 +247,5 @@ jobs:
               paths processes argparse_cli
             )
           fi
-          python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-thinlto --suites "${suites[@]}" \
-            -- --compiler target/release/relar --runtime target/lto/release/librelar_runtime.a --clang clang-18 --target "$relar_target" --lto-linker "$relar_lld_dir/gcc-ld/ld.lld" --opt-levels 3
+          python3 tests/run_suites.py --workers 4 --log-dir /tmp/imre-suites-thinlto --suites "${suites[@]}" \
+            -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$imre_lld_dir/gcc-ld/ld.lld" --opt-levels 3

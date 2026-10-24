@@ -3,7 +3,7 @@
 This implementation uses the same file protocol, query passes, arbitrary-precision
 results, diagnostics, and repetition checksum as the
 [Python example](../../../examples/telemetry_comparison/README.md). It links no
-Relar runtime code. Inputs are parsed into `BigInt` records. If timestamps and
+Imre runtime code. Inputs are parsed into `BigInt` records. If timestamps and
 values fit `i64` and the threshold fits `i128`, queries use contiguous native
 records and checked `i128` reductions; overflow restarts that query with `BigInt`.
 The checksum promotes from `i128` to `BigInt` on overflow. Large inputs therefore
@@ -38,16 +38,16 @@ separate artifact directories.
 
 ```sh
 python3 benchmarks/telemetry_benchmark.py \
-  --compiler "$TOOLS/relar" --runtime "$TOOLS/librelar_runtime.a" \
-  --relar-build-record "$TOOLS/build-record.json" \
+  --compiler "$TOOLS/imre" --runtime "$TOOLS/libimre_runtime.a" \
+  --imre-build-record "$TOOLS/build-record.json" \
   --rust "$RUST/telemetry-reference" --rust-build-record "$RUST/build-record.json" \
   --python python3.14 --clang clang-18 --target x86_64-unknown-linux-gnu \
   --prepare-only --artifact-dir benchmarks/local/telemetry-prepared \
   --output benchmarks/local/telemetry-prepared.json
 
 python3 benchmarks/telemetry_benchmark.py \
-  --compiler "$TOOLS/relar" --runtime "$TOOLS/librelar_runtime.a" \
-  --relar-build-record "$TOOLS/build-record.json" \
+  --compiler "$TOOLS/imre" --runtime "$TOOLS/libimre_runtime.a" \
+  --imre-build-record "$TOOLS/build-record.json" \
   --rust "$RUST/telemetry-reference" --rust-build-record "$RUST/build-record.json" \
   --python python3.14 --clang clang-18 --target x86_64-unknown-linux-gnu \
   --prepared-record benchmarks/local/telemetry-prepared.json \
@@ -55,15 +55,15 @@ python3 benchmarks/telemetry_benchmark.py \
   --output benchmarks/local/telemetry-normal.json
 ```
 
-Preparation compiles the Python package and validates the exact Relar/Rust
+Preparation compiles the Python package and validates the exact Imre/Rust
 executables against the independent oracle and CPython. Timing rechecks every
 recorded source, tool, binary, LLVM, and validation hash before and after running.
-For ThinLTO, select the corresponding Rust build and Relar runtime and add
+For ThinLTO, select the corresponding Rust build and Imre runtime and add
 `--lto-linker /path/to/ld.lld` to both commands. Matching modes are required.
 The compile command always passes an explicit target, defaulting to the Rust
-host when `--target` is omitted. Relar's build target must match that host, and the
+host when `--target` is omitted. Imre's build target must match that host, and the
 produced executable's ELF class, byte order, and machine must match the Rust
-executable. Relar's emitted LLVM text has no target directive; it is retained and
+executable. Imre's emitted LLVM text has no target directive; it is retained and
 hashed without treating it as target evidence.
 
 Defaults are 16, 256, and 4,096 samples, with report, full-scan predicates/search,

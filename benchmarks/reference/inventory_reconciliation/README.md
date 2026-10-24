@@ -18,7 +18,7 @@ Local Ohm build with the task's configured wrapper and a distinct stable target:
 
 ```sh
 python3 benchmarks/reference/inventory_reconciliation/build.py \
-  --toolchain ohm --cargo-wrapper /tmp/relar-cargo.sh \
+  --toolchain ohm --cargo-wrapper /tmp/imre-cargo.sh \
   --artifact-dir benchmarks/local/inventory-reference-normal \
   --target-dir "$INVENTORY_TARGET" --build-cache "$SHARED_BUILD_CACHE"
 ```
@@ -45,4 +45,4 @@ python3 benchmarks/inventory_validate.py --python python3.14 \
   --output benchmarks/local/inventory-reference-validation.json
 ```
 
-Add `--binary /path/to/relar-inventory` to check all three engines. The independent oracle validates complete files/status/output, including an explicit Linux `/dev/full` failure; it does not import the compiled package or copy the mutable fulfillment algorithm.
+Add `--binary /path/to/imre-inventory` to check all three engines. The independent oracle validates complete files/status/output, including an explicit Linux `/dev/full` failure; it does not import the compiled package or copy the mutable fulfillment algorithm.

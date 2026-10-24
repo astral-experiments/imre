@@ -324,8 +324,8 @@ def main() -> None:
     protected = {path.resolve() for path in (args.binary, args.rust) if path}
     if args.output.resolve() in protected:
         parser.error("--output must not replace a validated binary")
-    with tempfile.TemporaryDirectory(prefix="relar-luhn-validation-") as temporary:
-        for name, binary in (("relar", args.binary), ("rust", args.rust)):
+    with tempfile.TemporaryDirectory(prefix="imre-luhn-validation-") as temporary:
+        for name, binary in (("imre", args.binary), ("rust", args.rust)):
             if binary:
                 binary = binary.resolve(strict=True)
                 before = digest(binary.read_bytes())

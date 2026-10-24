@@ -1,0 +1,26 @@
+{
+  "ruff_versions": ["0.15.0", "0.16.1"],
+  "projects": [
+    {
+      "owner": "bokeh",
+      "name": "bokeh",
+      "revision": "9e3f702c7bb7bfa22faaba25be5157a3af7fed64",
+      "sha256": ["b71423b1175517213f70ed0d870587dc9caab9fce7bf90eb0f338aec46f7e007", "e9760cc5020d2516dd2696324f6dcd5dd7dde0a760898f3c7f65bfc2e7592517"],
+      "report": {"bytes": 42221, "sha256": "91cb9083b21f8251008ad2fe37e5ee4b9e8061fae67c0dcd06047f8ae1727b4d"}
+    },
+    {
+      "owner": "apache",
+      "name": "superset",
+      "revision": "db8ab20f90cf929d249da39d50fc09a44bf5f727",
+      "sha256": ["0547a5a462144fe5553e57f02286d9ff979576477f651688b2dcf2ffa9071288", "4894f0a5b87f26d793433635ca20fe69157c7dac4c6778752f2ffc65fe470640"],
+      "report": {"bytes": 38840, "sha256": "4484aebbd1202d84e7bba93bbe9349dd9f2e6ca8bc18760a5e976840e2d39b9c"}
+    },
+    {
+      "owner": "zulip",
+      "name": "zulip",
+      "revision": "6bef8cb6bdc0029f98bcc14d6ca58b8285d06234",
+      "sha256": ["89f22fbfed4771bf2b5d0640971be4742375e99112b49e322721f2c9fbfa4172", "b7c1d3c34328bd50d2b69bbddb6197d2268747029f3004a8ecde1d2cd2b63af1"],
+      "report": {"bytes": 26666, "sha256": "8533df9477d8d73e3f6912996d929b4ba74c925412fb1271de00388b5edb6e03"}
+    }
+  ]
+}

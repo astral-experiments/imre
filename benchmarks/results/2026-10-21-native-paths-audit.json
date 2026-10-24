@@ -22,14 +22,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.0027959064999999996,
+            "imre": 0.0027959064999999996,
             "port": 0.057687517,
             "original": 0.073435573,
             "rust": 0.0027871659999999998
           },
-          "original_over_relar": 26.265389418422973,
-          "port_over_relar": 20.632849131399784,
-          "relar_over_rust": 1.0031359811363945,
+          "original_over_imre": 26.265389418422973,
+          "port_over_imre": 20.632849131399784,
+          "imre_over_rust": 1.0031359811363945,
           "original_over_rust": 26.3477571841792,
           "port_over_rust": 20.697553357065924,
           "counts": {
@@ -47,14 +47,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.0031633464999999998,
+            "imre": 0.0031633464999999998,
             "port": 0.0637501215,
             "original": 0.074323938,
             "rust": 0.0032335815
           },
-          "original_over_relar": 23.495351520928867,
-          "port_over_relar": 20.152746940621274,
-          "relar_over_rust": 0.9782795021557366,
+          "original_over_imre": 23.495351520928867,
+          "port_over_imre": 20.152746940621274,
+          "imre_over_rust": 0.9782795021557366,
           "original_over_rust": 22.985020788868322,
           "port_over_rust": 19.715019244141523,
           "counts": {
@@ -63,7 +63,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.8838445298357293,
+            "imre": 0.8838445298357293,
             "port": 0.9049005028170808,
             "original": 0.9880473905997822,
             "rust": 0.8619439466733713
@@ -78,14 +78,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.003679191,
+            "imre": 0.003679191,
             "port": 0.0696186595,
             "original": 0.07574769349999999,
             "rust": 0.003953186
           },
-          "original_over_relar": 20.588138397816255,
-          "port_over_relar": 18.92227380965,
-          "relar_over_rust": 0.930690081367282,
+          "original_over_imre": 20.588138397816255,
+          "port_over_imre": 18.92227380965,
+          "imre_over_rust": 0.930690081367282,
           "original_over_rust": 19.161176200664475,
           "port_over_rust": 17.610772551557147,
           "counts": {
@@ -94,7 +94,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.759924260523577,
+            "imre": 0.759924260523577,
             "port": 0.8286214847328395,
             "original": 0.9694760276760112,
             "rust": 0.7050429704041246
@@ -109,14 +109,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.022441841,
+            "imre": 0.022441841,
             "port": 0.3480774755,
             "original": 0.108087863,
             "rust": 0.018631270499999998
           },
-          "original_over_relar": 4.816354549522029,
-          "port_over_relar": 15.510201480350922,
-          "relar_over_rust": 1.2045255314177314,
+          "original_over_imre": 4.816354549522029,
+          "port_over_imre": 15.510201480350922,
+          "imre_over_rust": 1.2045255314177314,
           "original_over_rust": 5.801422023259231,
           "port_over_rust": 18.68243368051578,
           "counts": {
@@ -125,7 +125,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.12458454277436506,
+            "imre": 0.12458454277436506,
             "port": 0.1657318300103564,
             "original": 0.6794062807958373,
             "rust": 0.1495961319438736
@@ -140,14 +140,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.0166752875,
+            "imre": 0.0166752875,
             "port": 0.345872859,
             "original": 0.0997846405,
             "rust": 0.0156086275
           },
-          "original_over_relar": 5.983983214682206,
-          "port_over_relar": 20.741642925196942,
-          "relar_over_rust": 1.0683378471297365,
+          "original_over_imre": 5.983983214682206,
+          "port_over_imre": 20.741642925196942,
+          "imre_over_rust": 1.0683378471297365,
           "original_over_rust": 6.392915744834067,
           "port_over_rust": 22.15908214863863,
           "counts": {
@@ -156,7 +156,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.16766766390084725,
+            "imre": 0.16766766390084725,
             "port": 0.16678821566626598,
             "original": 0.7359406481000451,
             "rust": 0.17856573231695097
@@ -171,14 +171,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.17991262,
+            "imre": 0.17991262,
             "port": 2.5126535125,
             "original": 0.436319931,
             "rust": 0.129634848
           },
-          "original_over_relar": 2.42517690532215,
-          "port_over_relar": 13.96596588110384,
-          "relar_over_rust": 1.3878414853388805,
+          "original_over_imre": 2.42517690532215,
+          "port_over_imre": 13.96596588110384,
+          "imre_over_rust": 1.3878414853388805,
           "original_over_rust": 3.3657611184918426,
           "port_over_rust": 19.382546832623277,
           "counts": {
@@ -187,7 +187,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.015540357869281209,
+            "imre": 0.015540357869281209,
             "port": 0.022958802999703286,
             "original": 0.16830671207637316,
             "rust": 0.021500129347935826
@@ -202,14 +202,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.106035009,
+            "imre": 0.106035009,
             "port": 2.431766932,
             "original": 0.291380991,
             "rust": 0.09767029699999999
           },
-          "original_over_relar": 2.747969691783588,
-          "port_over_relar": 22.93362310178141,
-          "relar_over_rust": 1.0856423319773463,
+          "original_over_imre": 2.747969691783588,
+          "port_over_imre": 22.93362310178141,
+          "imre_over_rust": 1.0856423319773463,
           "original_over_rust": 2.983312224391004,
           "port_over_rust": 24.897712064907516,
           "counts": {
@@ -218,7 +218,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.026367767837884557,
+            "imre": 0.026367767837884557,
             "port": 0.023722469551206153,
             "original": 0.2520259566280355,
             "rust": 0.028536475116892498
@@ -743,14 +743,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.165088763,
+            "imre": 0.165088763,
             "port": 2.395241426,
             "original": 0.3515849715,
             "rust": 0.133238622
           },
-          "original_over_relar": 2.1296723357240253,
-          "port_over_relar": 14.508809579002056,
-          "relar_over_rust": 1.2390458601410632,
+          "original_over_imre": 2.1296723357240253,
+          "port_over_imre": 14.508809579002056,
+          "imre_over_rust": 1.2390458601410632,
           "original_over_rust": 2.638761691035802,
           "port_over_rust": 17.9770804444375,
           "counts": {
@@ -759,7 +759,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.016935777149169138,
+            "imre": 0.016935777149169138,
             "port": 0.02408421813926994,
             "original": 0.20887005689320257,
             "rust": 0.020918604216726287
@@ -1284,14 +1284,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.11018111350000001,
+            "imre": 0.11018111350000001,
             "port": 2.362503523,
             "original": 0.2932847475,
             "rust": 0.115901771
           },
-          "original_over_relar": 2.6618422902396968,
-          "port_over_relar": 21.442000792631305,
-          "relar_over_rust": 0.9506421907910277,
+          "original_over_imre": 2.6618422902396968,
+          "port_over_imre": 21.442000792631305,
+          "imre_over_rust": 0.9506421907910277,
           "original_over_rust": 2.5304595863336723,
           "port_over_rust": 20.38367060844998,
           "counts": {
@@ -1300,7 +1300,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.02537555131896538,
+            "imre": 0.02537555131896538,
             "port": 0.024417960201280935,
             "original": 0.2503900172988028,
             "rust": 0.024047656700603822
@@ -1321,14 +1321,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.14020499250000001,
+            "imre": 0.14020499250000001,
             "port": 2.4239477835,
             "original": 0.335262286,
             "rust": 0.1214388925
           },
-          "original_over_relar": 2.391229299484467,
-          "port_over_relar": 17.288598218069872,
-          "relar_over_rust": 1.1545312182421295,
+          "original_over_imre": 2.391229299484467,
+          "port_over_imre": 17.288598218069872,
+          "imre_over_rust": 1.1545312182421295,
           "original_over_rust": 2.760748876230076,
           "port_over_rust": 19.96022636240692,
           "counts": {
@@ -1337,7 +1337,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.019941561638755476,
+            "imre": 0.019941561638755476,
             "port": 0.023798993275632167,
             "original": 0.21903917042431667,
             "rust": 0.022951180981825896
@@ -1358,14 +1358,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.091444686,
+            "imre": 0.091444686,
             "port": 2.393225677,
             "original": 0.2610855575,
             "rust": 0.10010862549999999
           },
-          "original_over_relar": 2.8551200613231917,
-          "port_over_relar": 26.171293069998626,
-          "relar_over_rust": 0.9134546153567956,
+          "original_over_imre": 2.8551200613231917,
+          "port_over_imre": 26.171293069998626,
+          "imre_over_rust": 0.9134546153567956,
           "original_over_rust": 2.6080225974134468,
           "port_over_rust": 23.906288444645565,
           "counts": {
@@ -1374,7 +1374,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.030574838432929824,
+            "imre": 0.030574838432929824,
             "port": 0.024104503622204784,
             "original": 0.2812701464729622,
             "rust": 0.027841417121444743
@@ -1901,12 +1901,12 @@
           },
           "rounds": 8,
           "seconds": {
-            "relar": 1.0597360065,
+            "imre": 1.0597360065,
             "original": 1.9048061185,
             "rust": 0.6514632855
           },
-          "original_over_relar": 1.7974345561693434,
-          "relar_over_rust": 1.626701043768951,
+          "original_over_imre": 1.7974345561693434,
+          "imre_over_rust": 1.626701043768951,
           "original_over_rust": 2.923888668627052,
           "counts": {
             "gates": 3,
@@ -1914,12 +1914,12 @@
             "samples": 36
           },
           "amortized_seconds": {
-            "relar": 0.1324670008125,
+            "imre": 0.1324670008125,
             "original": 0.2381007648125,
             "rust": 0.0814329106875
           },
           "preload_control_fraction": {
-            "relar": 0.03697571306406299,
+            "imre": 0.03697571306406299,
             "original": 0.061520900401286695,
             "rust": 0.05416825442882153
           },
@@ -2442,12 +2442,12 @@
             },
             "rounds": 0,
             "seconds": {
-              "relar": 0.0391844945,
+              "imre": 0.0391844945,
               "original": 0.1171853875,
               "rust": 0.035288629
             },
-            "original_over_relar": 2.990606080167756,
-            "relar_over_rust": 1.1104000243251162,
+            "original_over_imre": 2.990606080167756,
+            "imre_over_rust": 1.1104000243251162,
             "original_over_rust": 3.3207690641651166,
             "counts": {
               "gates": 3,
@@ -2471,12 +2471,12 @@
           },
           "rounds": 8,
           "seconds": {
-            "relar": 0.9802613245,
+            "imre": 0.9802613245,
             "original": 1.9616649824999999,
             "rust": 0.655002329
           },
-          "original_over_relar": 2.001165335682893,
-          "relar_over_rust": 1.4965768533931427,
+          "original_over_imre": 2.001165335682893,
+          "imre_over_rust": 1.4965768533931427,
           "original_over_rust": 2.9948977211957364,
           "counts": {
             "gates": 3,
@@ -2484,12 +2484,12 @@
             "samples": 36
           },
           "amortized_seconds": {
-            "relar": 0.1225326655625,
+            "imre": 0.1225326655625,
             "original": 0.24520812281249998,
             "rust": 0.081875291125
           },
           "preload_control_fraction": {
-            "relar": 0.030530951545258072,
+            "imre": 0.030530951545258072,
             "original": 0.051164558880022734,
             "rust": 0.044900063248477395
           },
@@ -2508,12 +2508,12 @@
             },
             "rounds": 0,
             "seconds": {
-              "relar": 0.029928311,
+              "imre": 0.029928311,
               "original": 0.1003677235,
               "rust": 0.029409645999999998
             },
-            "original_over_relar": 3.3536046688368084,
-            "relar_over_rust": 1.017635880418282,
+            "original_over_imre": 3.3536046688368084,
+            "imre_over_rust": 1.017635880418282,
             "original_over_rust": 3.412748439746606,
             "counts": {
               "gates": 3,
@@ -2535,14 +2535,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.0027344365,
+            "imre": 0.0027344365,
             "port": 0.0571467175,
             "original": 0.073194271,
             "rust": 0.0026166935
           },
-          "original_over_relar": 26.767588495838176,
-          "port_over_relar": 20.898900925291187,
-          "relar_over_rust": 1.0449968634079612,
+          "original_over_imre": 26.767588495838176,
+          "port_over_imre": 20.898900925291187,
+          "imre_over_rust": 1.0449968634079612,
           "original_over_rust": 27.97204601914592,
           "port_over_rust": 21.839285915603032,
           "counts": {
@@ -2560,14 +2560,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.0028303655000000002,
+            "imre": 0.0028303655000000002,
             "port": 0.0629923225,
             "original": 0.0718947355,
             "rust": 0.002889801
           },
-          "original_over_relar": 25.401219559805966,
-          "port_over_relar": 22.255896809087023,
-          "relar_over_rust": 0.97943266681685,
+          "original_over_imre": 25.401219559805966,
+          "port_over_imre": 22.255896809087023,
+          "imre_over_rust": 0.97943266681685,
           "original_over_rust": 24.878784213861092,
           "port_over_rust": 21.79815236412473,
           "counts": {
@@ -2576,7 +2576,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.9661072041755737,
+            "imre": 0.9661072041755737,
             "port": 0.9072013101279127,
             "original": 1.018075530718101,
             "rust": 0.9054926273470042
@@ -2591,14 +2591,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.0033916855,
+            "imre": 0.0033916855,
             "port": 0.067005376,
             "original": 0.0734848315,
             "rust": 0.003206456
           },
-          "original_over_relar": 21.666169077292103,
-          "port_over_relar": 19.75577511535194,
-          "relar_over_rust": 1.0577676724707903,
+          "original_over_imre": 21.666169077292103,
+          "port_over_imre": 19.75577511535194,
+          "imre_over_rust": 1.0577676724707903,
           "original_over_rust": 22.917773236245875,
           "port_over_rust": 20.89702026162218,
           "counts": {
@@ -2607,7 +2607,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.8062175870964451,
+            "imre": 0.8062175870964451,
             "port": 0.8528676490077453,
             "original": 0.9960459799108338,
             "rust": 0.8160702969259519
@@ -2622,14 +2622,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.0210787925,
+            "imre": 0.0210787925,
             "port": 0.349635864,
             "original": 0.10770084399999999,
             "rust": 0.01713577
           },
-          "original_over_relar": 5.1094408752304,
-          "port_over_relar": 16.58709169417556,
-          "relar_over_rust": 1.2301047749823903,
+          "original_over_imre": 5.1094408752304,
+          "port_over_imre": 16.58709169417556,
+          "imre_over_rust": 1.2301047749823903,
           "original_over_rust": 6.28514761811112,
           "port_over_rust": 20.4038606960761,
           "counts": {
@@ -2638,7 +2638,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.12972453237062798,
+            "imre": 0.12972453237062798,
             "port": 0.16344638346368265,
             "original": 0.6796072183055503,
             "rust": 0.1527035843735064
@@ -2653,14 +2653,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.0165053415,
+            "imre": 0.0165053415,
             "port": 0.344120083,
             "original": 0.09946927450000001,
             "rust": 0.0141877055
           },
-          "original_over_relar": 6.026489939635603,
-          "port_over_relar": 20.849013211874475,
-          "relar_over_rust": 1.16335523739198,
+          "original_over_imre": 6.026489939635603,
+          "port_over_imre": 20.849013211874475,
+          "imre_over_rust": 1.16335523739198,
           "original_over_rust": 7.010948634365156,
           "port_over_rust": 24.254808714488753,
           "counts": {
@@ -2669,7 +2669,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.1656697924123533,
+            "imre": 0.1656697924123533,
             "port": 0.1660662086379887,
             "original": 0.7358480432065482,
             "rust": 0.18443387480801599
@@ -2684,14 +2684,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.161603618,
+            "imre": 0.161603618,
             "port": 2.4759343535,
             "original": 0.4215616375,
             "rust": 0.113027493
           },
-          "original_over_relar": 2.6086150961050882,
-          "port_over_relar": 15.321032933185938,
-          "relar_over_rust": 1.4297726483237136,
+          "original_over_imre": 2.6086150961050882,
+          "port_over_imre": 15.321032933185938,
+          "imre_over_rust": 1.4297726483237136,
           "original_over_rust": 3.7297265144153906,
           "port_over_rust": 21.90559383193609,
           "counts": {
@@ -2700,7 +2700,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.0169206391158891,
+            "imre": 0.0169206391158891,
             "port": 0.02308086941772788,
             "original": 0.17362649845006356,
             "rust": 0.023150947000125002
@@ -2715,14 +2715,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.103267302,
+            "imre": 0.103267302,
             "port": 2.4548556870000002,
             "original": 0.2901299065,
             "rust": 0.0865351235
           },
-          "original_over_relar": 2.8095040819406707,
-          "port_over_relar": 23.771858463001195,
-          "relar_over_rust": 1.1933570765632524,
+          "original_over_imre": 2.8095040819406707,
+          "port_over_imre": 23.771858463001195,
+          "imre_over_rust": 1.1933570765632524,
           "original_over_rust": 3.352741577817243,
           "port_over_rust": 28.368315519882515,
           "counts": {
@@ -2731,7 +2731,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.02647920926606565,
+            "imre": 0.02647920926606565,
             "port": 0.023279053755635288,
             "original": 0.25228102777470823,
             "rust": 0.03023851349793243
@@ -3256,14 +3256,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.1480014035,
+            "imre": 0.1480014035,
             "port": 2.3842652424999997,
             "original": 0.348398447,
             "rust": 0.115854926
           },
-          "original_over_relar": 2.3540212373729283,
-          "port_over_relar": 16.109747516684866,
-          "relar_over_rust": 1.2774718228208959,
+          "original_over_imre": 2.3540212373729283,
+          "port_over_imre": 16.109747516684866,
+          "imre_over_rust": 1.2774718228208959,
           "original_over_rust": 3.0071958010658952,
           "port_over_rust": 20.579748525323815,
           "counts": {
@@ -3272,7 +3272,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.01847574708979027,
+            "imre": 0.01847574708979027,
             "port": 0.023968271852203543,
             "original": 0.2100878222341789,
             "rust": 0.022585949431274076
@@ -3797,14 +3797,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.1048827745,
+            "imre": 0.1048827745,
             "port": 2.3311477485000003,
             "original": 0.287387773,
             "rust": 0.101911325
           },
-          "original_over_relar": 2.7400855323483078,
-          "port_over_relar": 22.226221222818626,
-          "relar_over_rust": 1.0291572060318124,
+          "original_over_imre": 2.7400855323483078,
+          "port_over_imre": 22.226221222818626,
+          "imre_over_rust": 1.0291572060318124,
           "original_over_rust": 2.819978770759776,
           "port_over_rust": 22.874275734320992,
           "counts": {
@@ -3813,7 +3813,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.026071359315537557,
+            "imre": 0.026071359315537557,
             "port": 0.024514412497779952,
             "original": 0.25468818744769633,
             "rust": 0.02567617975725465
@@ -3834,14 +3834,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.12557650850000002,
+            "imre": 0.12557650850000002,
             "port": 2.4395858995,
             "original": 0.33857200249999997,
             "rust": 0.107250438
           },
-          "original_over_relar": 2.6961412332944414,
-          "port_over_relar": 19.427088144435864,
-          "relar_over_rust": 1.1708717543885463,
+          "original_over_imre": 2.6961412332944414,
+          "port_over_imre": 19.427088144435864,
+          "imre_over_rust": 1.1708717543885463,
           "original_over_rust": 3.1568356159067616,
           "port_over_rust": 22.74662877833655,
           "counts": {
@@ -3850,7 +3850,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.021775063924475965,
+            "imre": 0.021775063924475965,
             "port": 0.023424761354667766,
             "original": 0.21618524408260842,
             "rust": 0.024397974952792265
@@ -3871,14 +3871,14 @@
           },
           "rounds": null,
           "seconds": {
-            "relar": 0.0887128685,
+            "imre": 0.0887128685,
             "port": 2.3720032375,
             "original": 0.2559869505,
             "rust": 0.086235635
           },
-          "original_over_relar": 2.8855672782128554,
-          "port_over_relar": 26.73798376275027,
-          "relar_over_rust": 1.028726332217534,
+          "original_over_imre": 2.8855672782128554,
+          "port_over_imre": 26.73798376275027,
+          "imre_over_rust": 1.028726332217534,
           "original_over_rust": 2.968459042482843,
           "port_over_rust": 27.506067967146063,
           "counts": {
@@ -3887,7 +3887,7 @@
             "samples": 48
           },
           "startup_control_fraction": {
-            "relar": 0.030823448122410786,
+            "imre": 0.030823448122410786,
             "port": 0.024092175169301386,
             "original": 0.28592969624832504,
             "rust": 0.030343529099078354
@@ -4414,12 +4414,12 @@
           },
           "rounds": 8,
           "seconds": {
-            "relar": 0.9205715285,
+            "imre": 0.9205715285,
             "original": 1.8815830679999999,
             "rust": 0.5854720275
           },
-          "original_over_relar": 2.0439292436796235,
-          "relar_over_rust": 1.5723578330990373,
+          "original_over_imre": 2.0439292436796235,
+          "imre_over_rust": 1.5723578330990373,
           "original_over_rust": 3.2137881565998465,
           "counts": {
             "gates": 3,
@@ -4427,12 +4427,12 @@
             "samples": 36
           },
           "amortized_seconds": {
-            "relar": 0.1150714410625,
+            "imre": 0.1150714410625,
             "original": 0.23519788349999998,
             "rust": 0.0731840034375
           },
           "preload_control_fraction": {
-            "relar": 0.042663329012570035,
+            "imre": 0.042663329012570035,
             "original": 0.06268325752174551,
             "rust": 0.06297951271463605
           },
@@ -4955,12 +4955,12 @@
             },
             "rounds": 0,
             "seconds": {
-              "relar": 0.039274645999999996,
+              "imre": 0.039274645999999996,
               "original": 0.117943756,
               "rust": 0.036872743
             },
-            "original_over_relar": 3.003050772246299,
-            "relar_over_rust": 1.065140339572784,
+            "original_over_imre": 3.003050772246299,
+            "imre_over_rust": 1.065140339572784,
             "original_over_rust": 3.1986705193047342,
             "counts": {
               "gates": 3,
@@ -4984,12 +4984,12 @@
           },
           "rounds": 8,
           "seconds": {
-            "relar": 0.843513973,
+            "imre": 0.843513973,
             "original": 1.953213896,
             "rust": 0.6116990710000001
           },
-          "original_over_relar": 2.3155679200586285,
-          "relar_over_rust": 1.3789688639236135,
+          "original_over_imre": 2.3155679200586285,
+          "imre_over_rust": 1.3789688639236135,
           "original_over_rust": 3.1930960640612116,
           "counts": {
             "gates": 3,
@@ -4997,12 +4997,12 @@
             "samples": 36
           },
           "amortized_seconds": {
-            "relar": 0.105439246625,
+            "imre": 0.105439246625,
             "original": 0.244151737,
             "rust": 0.07646238387500001
           },
           "preload_control_fraction": {
-            "relar": 0.03571380198108467,
+            "imre": 0.03571380198108467,
             "original": 0.05230063343763964,
             "rust": 0.04780089816418897
           },
@@ -5021,12 +5021,12 @@
             },
             "rounds": 0,
             "seconds": {
-              "relar": 0.030125091,
+              "imre": 0.030125091,
               "original": 0.10215432399999999,
               "rust": 0.029239765
             },
-            "original_over_relar": 3.3910046611975377,
-            "relar_over_rust": 1.0302781503202916,
+            "original_over_imre": 3.3910046611975377,
+            "imre_over_rust": 1.0302781503202916,
             "original_over_rust": 3.493678010066086,
             "counts": {
               "gates": 3,
@@ -5042,7 +5042,7 @@
     "normal": {
       "preparation": "1ebd4c3a2e667b70e09ad1d16480b8bad9675f6ef5eb67a18c428b997580965c",
       "timing": "7a705acce5133f64dadd42b7a0e53cf7bb831872fdfe56820aeab2c41a25a8ad",
-      "compiler": "/tmp/relar-path-build/relar",
+      "compiler": "/tmp/imre-path-build/imre",
       "binary_sha256": "717b787ff2abc42dfe0a6579062f69d3280757a464694646a28ded36bedb8abd",
       "compute_binary_sha256": "d7fa1ab2059bb5f9c4def3f8bcdf817d6c313e7f38f583c042e96998833af735",
       "runtime_sha256": "dc760e22650aa55cbfaa81977ce24f52d320c4237a26592d1b708b8ec79a191f",
@@ -5051,7 +5051,7 @@
     "thinlto": {
       "preparation": "3ad0f8396eb64eddcaa51fccbb3db1966711e6a44d5e4e948051ec5a077240f5",
       "timing": "d77523a66d374b9b75666cfc0daf5d8af4d81edb86a82d2591265202c68dcdb1",
-      "compiler": "/tmp/relar-path-build/relar",
+      "compiler": "/tmp/imre-path-build/imre",
       "binary_sha256": "578cf14c273ae6a41c04289baab43e7143521fa88bb27c6be98a6cb6077230dc",
       "compute_binary_sha256": "7830231a6271185680257524a833836cd659eeda6dc4bd2e6a9e1a8b4f2b915c",
       "runtime_sha256": "0bc48d96377eb67ab82f34acc38db03e6e81f8ec1ba8f2aef6b69ec51740765b",
@@ -5064,36 +5064,36 @@
   "audit_script_sha256": "23a102e983f450a5b7e940ddf9822efe21dd16c803096060c50be9503ba2a73d",
   "guarded_inputs": {
     "/tmp/2026-10-21-native-paths-audit.py": "23a102e983f450a5b7e940ddf9822efe21dd16c803096060c50be9503ba2a73d",
-    "/tmp/relar-path-timing-context.json": "62adf70c966d3458e5c0f3b6f1f6933a7af95dda89dada2538fc318ffb5aef66",
-    "/tmp/relar-path-timing-normal.log": "d0e1ba2a769bea67e711ca45740f51eeb9d5ab9247b03737418068e20c16a6df",
-    "/tmp/relar-path-timing-thinlto.log": "e6911d121f11e5f9836631df8b00df7adeb24b1dcae99c72175c4a782125a30a",
-    "/tmp/relar-path-benchmark-normal-prepared.json": "1ebd4c3a2e667b70e09ad1d16480b8bad9675f6ef5eb67a18c428b997580965c",
-    "/tmp/relar-path-timing-normal.json": "7a705acce5133f64dadd42b7a0e53cf7bb831872fdfe56820aeab2c41a25a8ad",
-    "/tmp/relar-path-build/relar": "56e4dd548b149e7676be67cb1803d7dc940605ebcc1172e118a87318b525947f",
+    "/tmp/imre-path-timing-context.json": "62adf70c966d3458e5c0f3b6f1f6933a7af95dda89dada2538fc318ffb5aef66",
+    "/tmp/imre-path-timing-normal.log": "d0e1ba2a769bea67e711ca45740f51eeb9d5ab9247b03737418068e20c16a6df",
+    "/tmp/imre-path-timing-thinlto.log": "e6911d121f11e5f9836631df8b00df7adeb24b1dcae99c72175c4a782125a30a",
+    "/tmp/imre-path-benchmark-normal-prepared.json": "1ebd4c3a2e667b70e09ad1d16480b8bad9675f6ef5eb67a18c428b997580965c",
+    "/tmp/imre-path-timing-normal.json": "7a705acce5133f64dadd42b7a0e53cf7bb831872fdfe56820aeab2c41a25a8ad",
+    "/tmp/imre-path-build/imre": "56e4dd548b149e7676be67cb1803d7dc940605ebcc1172e118a87318b525947f",
     "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
     "/usr/lib/llvm-18/bin/clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
-    "/tmp/relar-path-memory-rust-normal/memory-report-reference": "b1e0f8619ae629b31322458acfdd2681c1a5c3defd30566e9033d6ec13cfeb56",
-    "/tmp/relar-path-build/normal_runtime.a": "dc760e22650aa55cbfaa81977ce24f52d320c4237a26592d1b708b8ec79a191f",
-    "/tmp/relar-path-memory-rust-normal/build-record.json": "ffabf304b7a03f4062df7ae8041294d3aaec1cb971f60e27410d7e7bc1a5725c",
-    "/tmp/relar-path-build/build-record.json": "330e22343cebf54c349fde602ed784dab71cce8dd90660f039505aaa7743ed42",
-    "/tmp/relar-path-benchmark-normal/memory-report": "717b787ff2abc42dfe0a6579062f69d3280757a464694646a28ded36bedb8abd",
-    "/tmp/relar-path-benchmark-normal/memory-report.ll": "4d935e6155439ea900795a5165a90c96df5f9c5a4da8af695396a633b7596460",
-    "/tmp/relar-path-benchmark-normal/validation.json": "7f1b87fd0f7bb552d4acf04aaf28a3696188c95791edd1d37bb85329b7bbec31",
-    "/tmp/relar-path-benchmark-normal/memory-compute": "d7fa1ab2059bb5f9c4def3f8bcdf817d6c313e7f38f583c042e96998833af735",
-    "/tmp/relar-path-benchmark-normal/memory-compute.ll": "06dbd3957b46e273404bacba8b3a558ece065c8a77ce269a274ec55d9ccf0146",
-    "/tmp/relar-path-benchmark-normal/compute-validation.json": "243bd9c1367187b5459397c275a3c72fa231dd3853e48366fda7c53c4e9bb20a",
-    "/tmp/relar-path-timing-thinlto.json": "d77523a66d374b9b75666cfc0daf5d8af4d81edb86a82d2591265202c68dcdb1",
-    "/tmp/relar-path-benchmark-thinlto-prepared.json": "3ad0f8396eb64eddcaa51fccbb3db1966711e6a44d5e4e948051ec5a077240f5",
-    "/tmp/relar-path-memory-rust-thinlto/memory-report-reference": "e42565e1f94fb69db36dad14d29d5345fb5643a29611390df2c12dcf2e6e0782",
-    "/tmp/relar-path-build/thinlto_runtime.a": "0bc48d96377eb67ab82f34acc38db03e6e81f8ec1ba8f2aef6b69ec51740765b",
-    "/tmp/relar-path-memory-rust-thinlto/build-record.json": "2df1576ad32b95620193ae327b080828ff8a8667879b58f995b1ec20de5dabf5",
+    "/tmp/imre-path-memory-rust-normal/memory-report-reference": "b1e0f8619ae629b31322458acfdd2681c1a5c3defd30566e9033d6ec13cfeb56",
+    "/tmp/imre-path-build/normal_runtime.a": "dc760e22650aa55cbfaa81977ce24f52d320c4237a26592d1b708b8ec79a191f",
+    "/tmp/imre-path-memory-rust-normal/build-record.json": "ffabf304b7a03f4062df7ae8041294d3aaec1cb971f60e27410d7e7bc1a5725c",
+    "/tmp/imre-path-build/build-record.json": "330e22343cebf54c349fde602ed784dab71cce8dd90660f039505aaa7743ed42",
+    "/tmp/imre-path-benchmark-normal/memory-report": "717b787ff2abc42dfe0a6579062f69d3280757a464694646a28ded36bedb8abd",
+    "/tmp/imre-path-benchmark-normal/memory-report.ll": "4d935e6155439ea900795a5165a90c96df5f9c5a4da8af695396a633b7596460",
+    "/tmp/imre-path-benchmark-normal/validation.json": "7f1b87fd0f7bb552d4acf04aaf28a3696188c95791edd1d37bb85329b7bbec31",
+    "/tmp/imre-path-benchmark-normal/memory-compute": "d7fa1ab2059bb5f9c4def3f8bcdf817d6c313e7f38f583c042e96998833af735",
+    "/tmp/imre-path-benchmark-normal/memory-compute.ll": "06dbd3957b46e273404bacba8b3a558ece065c8a77ce269a274ec55d9ccf0146",
+    "/tmp/imre-path-benchmark-normal/compute-validation.json": "243bd9c1367187b5459397c275a3c72fa231dd3853e48366fda7c53c4e9bb20a",
+    "/tmp/imre-path-timing-thinlto.json": "d77523a66d374b9b75666cfc0daf5d8af4d81edb86a82d2591265202c68dcdb1",
+    "/tmp/imre-path-benchmark-thinlto-prepared.json": "3ad0f8396eb64eddcaa51fccbb3db1966711e6a44d5e4e948051ec5a077240f5",
+    "/tmp/imre-path-memory-rust-thinlto/memory-report-reference": "e42565e1f94fb69db36dad14d29d5345fb5643a29611390df2c12dcf2e6e0782",
+    "/tmp/imre-path-build/thinlto_runtime.a": "0bc48d96377eb67ab82f34acc38db03e6e81f8ec1ba8f2aef6b69ec51740765b",
+    "/tmp/imre-path-memory-rust-thinlto/build-record.json": "2df1576ad32b95620193ae327b080828ff8a8667879b58f995b1ec20de5dabf5",
     "/home/dev-user/.local/share/ohm/toolchains/ohm-1.98.1-1/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld": "bf1b9bc68d0f70523a95618cb9be2e4d04698564229838cfe29eb913bba7ce67",
-    "/tmp/relar-path-benchmark-thinlto/memory-report": "578cf14c273ae6a41c04289baab43e7143521fa88bb27c6be98a6cb6077230dc",
-    "/tmp/relar-path-benchmark-thinlto/memory-report.ll": "4d935e6155439ea900795a5165a90c96df5f9c5a4da8af695396a633b7596460",
-    "/tmp/relar-path-benchmark-thinlto/validation.json": "7f1b87fd0f7bb552d4acf04aaf28a3696188c95791edd1d37bb85329b7bbec31",
-    "/tmp/relar-path-benchmark-thinlto/memory-compute": "7830231a6271185680257524a833836cd659eeda6dc4bd2e6a9e1a8b4f2b915c",
-    "/tmp/relar-path-benchmark-thinlto/memory-compute.ll": "06dbd3957b46e273404bacba8b3a558ece065c8a77ce269a274ec55d9ccf0146",
-    "/tmp/relar-path-benchmark-thinlto/compute-validation.json": "243bd9c1367187b5459397c275a3c72fa231dd3853e48366fda7c53c4e9bb20a"
+    "/tmp/imre-path-benchmark-thinlto/memory-report": "578cf14c273ae6a41c04289baab43e7143521fa88bb27c6be98a6cb6077230dc",
+    "/tmp/imre-path-benchmark-thinlto/memory-report.ll": "4d935e6155439ea900795a5165a90c96df5f9c5a4da8af695396a633b7596460",
+    "/tmp/imre-path-benchmark-thinlto/validation.json": "7f1b87fd0f7bb552d4acf04aaf28a3696188c95791edd1d37bb85329b7bbec31",
+    "/tmp/imre-path-benchmark-thinlto/memory-compute": "7830231a6271185680257524a833836cd659eeda6dc4bd2e6a9e1a8b4f2b915c",
+    "/tmp/imre-path-benchmark-thinlto/memory-compute.ll": "06dbd3957b46e273404bacba8b3a558ece065c8a77ce269a274ec55d9ccf0146",
+    "/tmp/imre-path-benchmark-thinlto/compute-validation.json": "243bd9c1367187b5459397c275a3c72fa231dd3853e48366fda7c53c4e9bb20a"
   },
   "limits": "Reuses the independently reviewed Git-bound application oracle. Captures cannot reconstruct historical host isolation or prove which instructions ran. Native identities are rehashed without execution; repeated-compute estimates include preload/startup/final output and subtract no control."
 }

@@ -170,7 +170,7 @@ fn collect_file_stats(cases: &[TestCase], sources: &[SourceText]) -> Result<Vec<
         let input = Path::new(&*source.path);
         let path = input
             .canonicalize()
-            .or_else(|_| relar_benchmark_platform::resolve(input))?;
+            .or_else(|_| imre_benchmark_platform::resolve(input))?;
         let path = path
             .into_os_string()
             .into_string()

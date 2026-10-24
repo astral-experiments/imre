@@ -90,7 +90,7 @@ def main() -> None:
         build_flags += ["--target", args.target]
     compiler, runtime = str(args.compiler.resolve()), str(args.runtime.resolve())
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-imports-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-imports-") as directory:
         temporary = Path(directory)
         root = temporary / "project"
         shutil.copytree(FIXTURES, root)

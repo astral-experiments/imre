@@ -90,7 +90,7 @@
   "methods": {
     "affinity": "Driver and children inherit affinity to CPU 0.",
     "io": "Exact captured input is supplied through a stdin pipe; complete stdout is captured through a pipe. Every run compares full output and hashes after measurement.",
-    "untraced": "Three sequential runs per engine/workload; order alternates CPython/Relar, Relar/CPython, CPython/Relar. time.perf_counter_ns measures wall time. Differences in resource.getrusage(RUSAGE_CHILDREN) measure child user/system CPU seconds and voluntary/involuntary context switches.",
+    "untraced": "Three sequential runs per engine/workload; order alternates CPython/Imre, Imre/CPython, CPython/Imre. time.perf_counter_ns measures wall time. Differences in resource.getrusage(RUSAGE_CHILDREN) measure child user/system CPU seconds and voluntary/involuntary context switches.",
     "strace": "One separate strace -f -c -o <summary-file> run per engine/workload, outside the ptrace sandbox. The entire summary is retained. Syscall times are diagnostic and include tracing effects.",
     "cpython_command": [
       "python3.14",
@@ -148,7 +148,7 @@
               "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
             },
             {
-              "engine": "relar",
+              "engine": "imre",
               "iteration": 0,
               "wall_ns": 579083322,
               "user_seconds": 0.085707,
@@ -158,7 +158,7 @@
               "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
             },
             {
-              "engine": "relar",
+              "engine": "imre",
               "iteration": 1,
               "wall_ns": 584419460,
               "user_seconds": 0.08216999999999997,
@@ -188,7 +188,7 @@
               "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
             },
             {
-              "engine": "relar",
+              "engine": "imre",
               "iteration": 2,
               "wall_ns": 568658093,
               "user_seconds": 0.078596,
@@ -199,7 +199,7 @@
             }
           ],
           "strace": {
-            "relar": {
+            "imre": {
               "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
               "summary": "% time     seconds  usecs/call     calls    errors syscall\n------ ----------- ----------- --------- --------- ----------------\n 99.92    0.615155           7     83574           write\n  0.03    0.000194           8        22           mmap\n  0.02    0.000126           2        57           brk\n  0.01    0.000092           1        56           read\n  0.01    0.000050          10         5           mprotect\n  0.00    0.000023           3         7           munmap\n  0.00    0.000005           5         1           getrandom\n  0.00    0.000004           1         4           close\n  0.00    0.000004           4         1           prlimit64\n  0.00    0.000003           3         1           arch_prctl\n  0.00    0.000003           3         1           set_tid_address\n  0.00    0.000003           3         1           set_robust_list\n  0.00    0.000003           3         1           rseq\n  0.00    0.000000           0         4           fstat\n  0.00    0.000000           0         2           pread64\n  0.00    0.000000           0         1         1 access\n  0.00    0.000000           0         2           mremap\n  0.00    0.000000           0         1           execve\n  0.00    0.000000           0         4           openat\n------ ----------- ----------- --------- --------- ----------------\n100.00    0.615665           7     83745         1 total\n",
               "write_calls": 83574,
@@ -215,7 +215,7 @@
             }
           },
           "untraced_medians": {
-            "relar": {
+            "imre": {
               "wall_ns": 579083322,
               "user_seconds": 0.08216999999999997,
               "system_seconds": 0.283142,
@@ -250,7 +250,7 @@
               "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
             },
             {
-              "engine": "relar",
+              "engine": "imre",
               "iteration": 0,
               "wall_ns": 524128703,
               "user_seconds": 0.06336699999999995,
@@ -260,7 +260,7 @@
               "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
             },
             {
-              "engine": "relar",
+              "engine": "imre",
               "iteration": 1,
               "wall_ns": 522816854,
               "user_seconds": 0.06279499999999993,
@@ -290,7 +290,7 @@
               "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
             },
             {
-              "engine": "relar",
+              "engine": "imre",
               "iteration": 2,
               "wall_ns": 532569462,
               "user_seconds": 0.05798100000000006,
@@ -301,7 +301,7 @@
             }
           ],
           "strace": {
-            "relar": {
+            "imre": {
               "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
               "summary": "% time     seconds  usecs/call     calls    errors syscall\n------ ----------- ----------- --------- --------- ----------------\n 99.74    0.628896           7     81934           write\n  0.09    0.000569         569         1           execve\n  0.06    0.000368          16        22           mmap\n  0.03    0.000180           5        31           read\n  0.03    0.000172          24         7           munmap\n  0.02    0.000144           3        47           brk\n  0.01    0.000067          16         4           openat\n  0.01    0.000059          11         5           mprotect\n  0.00    0.000031          15         2           mremap\n  0.00    0.000021           5         4           fstat\n  0.00    0.000016           4         4           close\n  0.00    0.000011           5         2           pread64\n  0.00    0.000007           7         1         1 access\n  0.00    0.000004           4         1           arch_prctl\n  0.00    0.000004           4         1           set_robust_list\n  0.00    0.000004           4         1           getrandom\n  0.00    0.000003           3         1           set_tid_address\n  0.00    0.000003           3         1           prlimit64\n  0.00    0.000003           3         1           rseq\n------ ----------- ----------- --------- --------- ----------------\n100.00    0.630562           7     82070         1 total\n",
               "write_calls": 81934,
@@ -317,7 +317,7 @@
             }
           },
           "untraced_medians": {
-            "relar": {
+            "imre": {
               "wall_ns": 524128703,
               "user_seconds": 0.06279499999999993,
               "system_seconds": 0.26548099999999986,
@@ -374,7 +374,7 @@
               "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
             },
             {
-              "engine": "relar",
+              "engine": "imre",
               "iteration": 0,
               "wall_ns": 52789800,
               "user_seconds": 0.04102899999999998,
@@ -384,7 +384,7 @@
               "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
             },
             {
-              "engine": "relar",
+              "engine": "imre",
               "iteration": 1,
               "wall_ns": 51143338,
               "user_seconds": 0.03595699999999999,
@@ -414,7 +414,7 @@
               "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818"
             },
             {
-              "engine": "relar",
+              "engine": "imre",
               "iteration": 2,
               "wall_ns": 56877331,
               "user_seconds": 0.04360299999999995,
@@ -425,7 +425,7 @@
             }
           ],
           "strace": {
-            "relar": {
+            "imre": {
               "stdout_sha256": "18db2075482ee85726a45cc93565da8120c087235d150a84273e641af73a3818",
               "summary": "% time     seconds  usecs/call     calls    errors syscall\n------ ----------- ----------- --------- --------- ----------------\n 29.93    0.000530         530         1           execve\n 17.50    0.000310          14        22           mmap\n 14.17    0.000251           3        76           write\n  9.77    0.000173          24         7           munmap\n  6.61    0.000117           2        58           brk\n  6.32    0.000112           2        56           read\n  3.95    0.000070          17         4           openat\n  3.50    0.000062          62         1           set_tid_address\n  3.16    0.000056          11         5           mprotect\n  1.24    0.000022          11         2           mremap\n  1.02    0.000018           4         4           fstat\n  0.73    0.000013           3         4           close\n  0.51    0.000009           4         2           pread64\n  0.40    0.000007           7         1         1 access\n  0.28    0.000005           5         1         1 ioctl\n  0.23    0.000004           4         1           getrandom\n  0.17    0.000003           3         1           arch_prctl\n  0.17    0.000003           3         1           set_robust_list\n  0.17    0.000003           3         1           prlimit64\n  0.17    0.000003           3         1           rseq\n------ ----------- ----------- --------- --------- ----------------\n100.00    0.001771           7       249         2 total\n",
               "write_calls": 76,
@@ -441,7 +441,7 @@
             }
           },
           "untraced_medians": {
-            "relar": {
+            "imre": {
               "wall_ns": 52789800,
               "user_seconds": 0.04102899999999998,
               "system_seconds": 0.01014799999999999,
@@ -476,7 +476,7 @@
               "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
             },
             {
-              "engine": "relar",
+              "engine": "imre",
               "iteration": 0,
               "wall_ns": 35522025,
               "user_seconds": 0.022382000000000013,
@@ -486,7 +486,7 @@
               "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
             },
             {
-              "engine": "relar",
+              "engine": "imre",
               "iteration": 1,
               "wall_ns": 34521885,
               "user_seconds": 0.02279399999999998,
@@ -516,7 +516,7 @@
               "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0"
             },
             {
-              "engine": "relar",
+              "engine": "imre",
               "iteration": 2,
               "wall_ns": 36037165,
               "user_seconds": 0.02522000000000002,
@@ -527,7 +527,7 @@
             }
           ],
           "strace": {
-            "relar": {
+            "imre": {
               "stdout_sha256": "066f814831a5b335bb23fb175f87b145e27a37098171c539cd957de8da3723a0",
               "summary": "% time     seconds  usecs/call     calls    errors syscall\n------ ----------- ----------- --------- --------- ----------------\n 36.04    0.000430          19        22           mmap\n 18.19    0.000217           7        31           read\n 11.65    0.000139           2        47           brk\n  8.55    0.000102           1        61           write\n  7.21    0.000086          21         4           openat\n  6.29    0.000075          15         5           mprotect\n  3.10    0.000037           5         7           munmap\n  2.26    0.000027           6         4           fstat\n  1.51    0.000018           4         4           close\n  1.26    0.000015           7         2           pread64\n  0.75    0.000009           9         1         1 access\n  0.75    0.000009           4         2           mremap\n  0.50    0.000006           6         1           arch_prctl\n  0.42    0.000005           5         1           set_robust_list\n  0.34    0.000004           4         1         1 ioctl\n  0.34    0.000004           4         1           set_tid_address\n  0.34    0.000004           4         1           rseq\n  0.25    0.000003           3         1           prlimit64\n  0.25    0.000003           3         1           getrandom\n  0.00    0.000000           0         1           execve\n------ ----------- ----------- --------- --------- ----------------\n100.00    0.001193           6       198         2 total\n",
               "write_calls": 61,
@@ -543,7 +543,7 @@
             }
           },
           "untraced_medians": {
-            "relar": {
+            "imre": {
               "wall_ns": 35522025,
               "user_seconds": 0.02279399999999998,
               "system_seconds": 0.00891900000000001,

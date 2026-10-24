@@ -29,6 +29,12 @@ def scalar_rebinding() -> None:
         print(number(held))
 
 
+def kibibytes(bytes: int) -> float:
+    bytes: float = float(bytes)
+    bytes /= 1024.0
+    return abs(bytes)
+
+
 def guard_rebinding() -> None:
     value = 1.5
     captured = 0.0
@@ -134,6 +140,7 @@ def summarize(source: BinaryIO) -> bytes:
 
 
 scalar_rebinding()
+print(kibibytes(bytes=-2048))
 guard_rebinding()
 for integer in [1, 9007199254740992, 9007199254740993]:
     print(numeric_patterns(integer))

@@ -40,7 +40,7 @@ ORIGINAL_PUBLISH = """
 import tempfile
 from pathlib import Path
 def publish_report(path, rendered):
-    with tempfile.TemporaryDirectory(dir=path.parent, prefix='.relar-report-') as name:
+    with tempfile.TemporaryDirectory(dir=path.parent, prefix='.imre-report-') as name:
         staged = Path(name) / 'report.md'
         staged.write_text(rendered, encoding='utf-8')
         staged.replace(path)
@@ -546,7 +546,7 @@ def main():
     args.python = str(Path(shutil.which(args.python) or args.python).resolve(strict=True))
     commands = {"original": original_command(args.python), "port": python_command(args.python)}
     if args.binary:
-        commands["relar"] = [str(args.binary.resolve(strict=True))]
+        commands["imre"] = [str(args.binary.resolve(strict=True))]
     if args.rust:
         commands["rust"] = [str(args.rust.resolve(strict=True))]
     result = validate_commands(commands)
@@ -555,7 +555,7 @@ def main():
     result["processes"] = prepared.validate_commands(prepared_commands, args.python)
     if args.compute_binary:
         compute_commands = {"original": compute_original_command(args.python), "port": compute_python_command(args.python),
-                            "relar": [str(args.compute_binary.resolve(strict=True))]}
+                            "imre": [str(args.compute_binary.resolve(strict=True))]}
         if args.rust:
             compute_commands["rust"] = [str(args.rust.resolve(strict=True)), "compute"]
         result["compute"] = validate_compute_commands(compute_commands)

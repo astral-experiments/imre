@@ -8,7 +8,7 @@
     "warmup_rounds_per_workload": 2,
     "engines": [
       "cpython",
-      "relar",
+      "imre",
       "rust_bigint",
       "baseline"
     ],
@@ -21,13 +21,13 @@
     "ratios": "Ratios of independently calculated per-engine medians, not medians of per-round ratios."
   },
   "session": {
-    "path": "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/session.json",
+    "path": "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/session.json",
     "sha256": "aeee00e73d30bd06985b35cebf90cbc7343c7c924226940961b22b724c9cf5c4"
   },
   "modes": {
     "normal": {
       "record": {
-        "path": "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal.json",
+        "path": "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/normal.json",
         "sha256": "cd1998f95f409fa704d609f289e725d07829c80da1ee26a6fc1ce63156aade5c"
       },
       "started_at_utc": "2026-10-19T03:30:02.875157+00:00",
@@ -90,13 +90,13 @@
         "terminal_errors": 65,
         "engines": [
           "cpython",
-          "relar",
+          "imre",
           "rust_bigint",
           "baseline"
         ],
         "device_error_check": true
       },
-      "relar_change_percent_range": [
+      "imre_change_percent_range": [
         -0.8052914283727675,
         1.5903486308384895
       ],
@@ -105,14 +105,14 @@
           "workload": "empty",
           "median_ms": {
             "cpython": 27.101965,
-            "relar": 2.20275,
+            "imre": 2.20275,
             "rust_bigint": 2.2474585,
             "baseline": 2.2145865
           },
-          "cpython_over_relar": 12.303695380774032,
-          "relar_over_rust": 0.9801070854033567,
-          "relar_over_previous": 0.9946552099003584,
-          "relar_change_percent": -0.5344790099641616,
+          "cpython_over_imre": 12.303695380774032,
+          "imre_over_rust": 0.9801070854033567,
+          "imre_over_previous": 0.9946552099003584,
+          "imre_change_percent": -0.5344790099641616,
           "statistics_ns": {
             "cpython": {
               "median_ns": 27101965.0,
@@ -121,7 +121,7 @@
               "p25_ns": 26960961.75,
               "p75_ns": 27438672.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 2202750.0,
               "min_ns": 2063065,
               "max_ns": 3705735,
@@ -149,7 +149,7 @@
               "median": 27.101965,
               "q3": 27.43867225
             },
-            "relar": {
+            "imre": {
               "q1": 2.1223225,
               "median": 2.20275,
               "q3": 2.32764125
@@ -166,17 +166,17 @@
             }
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 12.303695380774032,
+            "cpython_over_imre": 12.303695380774032,
             "cpython_over_rust_bigint": 12.05893901934118,
             "cpython_over_baseline": 12.237934711513866,
-            "relar_over_cpython": 0.08127639453449224,
-            "relar_over_rust_bigint": 0.9801070854033567,
-            "relar_over_baseline": 0.9946552099003584,
+            "imre_over_cpython": 0.08127639453449224,
+            "imre_over_rust_bigint": 0.9801070854033567,
+            "imre_over_baseline": 0.9946552099003584,
             "rust_bigint_over_cpython": 0.08292603506793696,
-            "rust_bigint_over_relar": 1.0202966746112814,
+            "rust_bigint_over_imre": 1.0202966746112814,
             "rust_bigint_over_baseline": 1.0148434030461218,
             "baseline_over_cpython": 0.08171313408455808,
-            "baseline_over_relar": 1.0053735103847463,
+            "baseline_over_imre": 1.0053735103847463,
             "baseline_over_rust_bigint": 0.9853737010049352
           },
           "iqr_overlap_vs_previous": true,
@@ -186,14 +186,14 @@
           "workload": "boundary-128",
           "median_ms": {
             "cpython": 28.3015395,
-            "relar": 2.853187,
+            "imre": 2.853187,
             "rust_bigint": 2.657792,
             "baseline": 2.87635
           },
-          "cpython_over_relar": 9.919272553814384,
-          "relar_over_rust": 1.0735177922124832,
-          "relar_over_previous": 0.9919470857162723,
-          "relar_change_percent": -0.8052914283727675,
+          "cpython_over_imre": 9.919272553814384,
+          "imre_over_rust": 1.0735177922124832,
+          "imre_over_previous": 0.9919470857162723,
+          "imre_change_percent": -0.8052914283727675,
           "statistics_ns": {
             "cpython": {
               "median_ns": 28301539.5,
@@ -202,7 +202,7 @@
               "p25_ns": 28092164.5,
               "p75_ns": 28663291.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 2853187.0,
               "min_ns": 2692947,
               "max_ns": 13512749,
@@ -230,7 +230,7 @@
               "median": 28.3015395,
               "q3": 28.6632915
             },
-            "relar": {
+            "imre": {
               "q1": 2.8003245,
               "median": 2.853187,
               "q3": 3.07478375
@@ -247,17 +247,17 @@
             }
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 9.919272553814384,
+            "cpython_over_imre": 9.919272553814384,
             "cpython_over_rust_bigint": 10.648515572324696,
             "cpython_over_baseline": 9.839393502181585,
-            "relar_over_cpython": 0.10081384442001821,
-            "relar_over_rust_bigint": 1.0735177922124832,
-            "relar_over_baseline": 0.9919470857162723,
+            "imre_over_cpython": 0.10081384442001821,
+            "imre_over_rust_bigint": 1.0735177922124832,
+            "imre_over_baseline": 0.9919470857162723,
             "rust_bigint_over_cpython": 0.09390980303385969,
-            "rust_bigint_over_relar": 0.9315169317678792,
+            "rust_bigint_over_imre": 0.9315169317678792,
             "rust_bigint_over_baseline": 0.9240155057625116,
             "baseline_over_cpython": 0.1016322804630469,
-            "baseline_over_relar": 1.008118290178667,
+            "baseline_over_imre": 1.008118290178667,
             "baseline_over_rust_bigint": 1.082232921161626
           },
           "iqr_overlap_vs_previous": true,
@@ -267,14 +267,14 @@
           "workload": "dense-2048",
           "median_ms": {
             "cpython": 33.54049,
-            "relar": 6.5428605,
+            "imre": 6.5428605,
             "rust_bigint": 6.0234085,
             "baseline": 6.541865
           },
-          "cpython_over_relar": 5.126273133899156,
-          "relar_over_rust": 1.0862388795314148,
-          "relar_over_previous": 1.000152173730274,
-          "relar_change_percent": 0.015217373027409664,
+          "cpython_over_imre": 5.126273133899156,
+          "imre_over_rust": 1.0862388795314148,
+          "imre_over_previous": 1.000152173730274,
+          "imre_change_percent": 0.015217373027409664,
           "statistics_ns": {
             "cpython": {
               "median_ns": 33540490.0,
@@ -283,7 +283,7 @@
               "p25_ns": 33371521.25,
               "p75_ns": 34002682.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 6542860.5,
               "min_ns": 5429958,
               "max_ns": 7032494,
@@ -311,7 +311,7 @@
               "median": 33.54049,
               "q3": 34.0026825
             },
-            "relar": {
+            "imre": {
               "q1": 6.43162225,
               "median": 6.5428605,
               "q3": 6.74754275
@@ -328,17 +328,17 @@
             }
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 5.126273133899156,
+            "cpython_over_imre": 5.126273133899156,
             "cpython_over_rust_bigint": 5.5683571851386136,
             "cpython_over_baseline": 5.127053218004346,
-            "relar_over_cpython": 0.19507349177069266,
-            "relar_over_rust_bigint": 1.0862388795314148,
-            "relar_over_baseline": 1.000152173730274,
+            "imre_over_cpython": 0.19507349177069266,
+            "imre_over_rust_bigint": 1.0862388795314148,
+            "imre_over_baseline": 1.000152173730274,
             "rust_bigint_over_cpython": 0.1795861807624158,
-            "rust_bigint_over_relar": 0.9206078136619297,
+            "rust_bigint_over_imre": 0.9206078136619297,
             "rust_bigint_over_baseline": 0.9207479059870541,
             "baseline_over_cpython": 0.19504381122637146,
-            "baseline_over_relar": 0.9998478494230467,
+            "baseline_over_imre": 0.9998478494230467,
             "baseline_over_rust_bigint": 1.086073607659185
           },
           "iqr_overlap_vs_previous": true,
@@ -348,14 +348,14 @@
           "workload": "sparse-2048",
           "median_ms": {
             "cpython": 37.483524,
-            "relar": 9.310503,
+            "imre": 9.310503,
             "rust_bigint": 8.4346315,
             "baseline": 9.1647515
           },
-          "cpython_over_relar": 4.025939737090466,
-          "relar_over_rust": 1.1038422958963885,
-          "relar_over_previous": 1.015903486308385,
-          "relar_change_percent": 1.5903486308384895,
+          "cpython_over_imre": 4.025939737090466,
+          "imre_over_rust": 1.1038422958963885,
+          "imre_over_previous": 1.015903486308385,
+          "imre_change_percent": 1.5903486308384895,
           "statistics_ns": {
             "cpython": {
               "median_ns": 37483524.0,
@@ -364,7 +364,7 @@
               "p25_ns": 37190422.25,
               "p75_ns": 37876004.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 9310503.0,
               "min_ns": 8945919,
               "max_ns": 9812232,
@@ -392,7 +392,7 @@
               "median": 37.483524,
               "q3": 37.87600425
             },
-            "relar": {
+            "imre": {
               "q1": 9.203609,
               "median": 9.310503,
               "q3": 9.43345725
@@ -409,17 +409,17 @@
             }
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 4.025939737090466,
+            "cpython_over_imre": 4.025939737090466,
             "cpython_over_rust_bigint": 4.444002562530444,
             "cpython_over_baseline": 4.089966214577667,
-            "relar_over_cpython": 0.24838921228430924,
-            "relar_over_rust_bigint": 1.1038422958963885,
-            "relar_over_baseline": 1.015903486308385,
+            "imre_over_cpython": 0.24838921228430924,
+            "imre_over_rust_bigint": 1.1038422958963885,
+            "imre_over_baseline": 1.015903486308385,
             "rust_bigint_over_cpython": 0.22502237249624663,
-            "rust_bigint_over_relar": 0.9059265111670122,
+            "rust_bigint_over_imre": 0.9059265111670122,
             "rust_bigint_over_baseline": 0.9203339010337597,
             "baseline_over_cpython": 0.2445007972035927,
-            "baseline_over_relar": 0.9843454752122415,
+            "baseline_over_imre": 0.9843454752122415,
             "baseline_over_rust_bigint": 1.0865621693135024
           },
           "iqr_overlap_vs_previous": true,
@@ -429,14 +429,14 @@
           "workload": "dense-16384",
           "median_ms": {
             "cpython": 76.9145745,
-            "relar": 27.2876595,
+            "imre": 27.2876595,
             "rust_bigint": 23.0490075,
             "baseline": 26.897959
           },
-          "cpython_over_relar": 2.8186578075704882,
-          "relar_over_rust": 1.1838973760583835,
-          "relar_over_previous": 1.014488106699843,
-          "relar_change_percent": 1.4488106699843017,
+          "cpython_over_imre": 2.8186578075704882,
+          "imre_over_rust": 1.1838973760583835,
+          "imre_over_previous": 1.014488106699843,
+          "imre_change_percent": 1.4488106699843017,
           "statistics_ns": {
             "cpython": {
               "median_ns": 76914574.5,
@@ -445,7 +445,7 @@
               "p25_ns": 76526619.0,
               "p75_ns": 77726760.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 27287659.5,
               "min_ns": 26920480,
               "max_ns": 37498239,
@@ -473,7 +473,7 @@
               "median": 76.9145745,
               "q3": 77.72676
             },
-            "relar": {
+            "imre": {
               "q1": 27.125949,
               "median": 27.2876595,
               "q3": 27.568961
@@ -490,17 +490,17 @@
             }
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.8186578075704882,
+            "cpython_over_imre": 2.8186578075704882,
             "cpython_over_rust_bigint": 3.3370015823891768,
             "cpython_over_baseline": 2.859494822636915,
-            "relar_over_cpython": 0.3547787877315762,
-            "relar_over_rust_bigint": 1.1838973760583835,
-            "relar_over_baseline": 1.014488106699843,
+            "imre_over_cpython": 0.3547787877315762,
+            "imre_over_rust_bigint": 1.1838973760583835,
+            "imre_over_baseline": 1.014488106699843,
             "rust_bigint_over_cpython": 0.29967022049897707,
-            "rust_bigint_over_relar": 0.8446678067058114,
+            "rust_bigint_over_imre": 0.8446678067058114,
             "rust_bigint_over_baseline": 0.8569054440152876,
             "baseline_over_cpython": 0.349712121205325,
-            "baseline_over_relar": 0.9857188008374261,
+            "baseline_over_imre": 0.9857188008374261,
             "baseline_over_rust_bigint": 1.1669899018428451
           },
           "iqr_overlap_vs_previous": true,
@@ -510,14 +510,14 @@
           "workload": "sparse-16384",
           "median_ms": {
             "cpython": 111.204683,
-            "relar": 51.2648955,
+            "imre": 51.2648955,
             "rust_bigint": 42.5792365,
             "baseline": 50.603388
           },
-          "cpython_over_relar": 2.1692170034756044,
-          "relar_over_rust": 1.2039881339816885,
-          "relar_over_previous": 1.0130723954688567,
-          "relar_change_percent": 1.3072395468856746,
+          "cpython_over_imre": 2.1692170034756044,
+          "imre_over_rust": 1.2039881339816885,
+          "imre_over_previous": 1.0130723954688567,
+          "imre_change_percent": 1.3072395468856746,
           "statistics_ns": {
             "cpython": {
               "median_ns": 111204683.0,
@@ -526,7 +526,7 @@
               "p25_ns": 110781590.75,
               "p75_ns": 112110084.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 51264895.5,
               "min_ns": 49744047,
               "max_ns": 55972501,
@@ -554,7 +554,7 @@
               "median": 111.204683,
               "q3": 112.11008425
             },
-            "relar": {
+            "imre": {
               "q1": 50.8557295,
               "median": 51.2648955,
               "q3": 51.9998195
@@ -571,17 +571,17 @@
             }
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.1692170034756044,
+            "cpython_over_imre": 2.1692170034756044,
             "cpython_over_rust_bigint": 2.611711532215943,
             "cpython_over_baseline": 2.197573866002806,
-            "relar_over_cpython": 0.46099583324202276,
-            "relar_over_rust_bigint": 1.2039881339816885,
-            "relar_over_baseline": 1.0130723954688567,
+            "imre_over_cpython": 0.46099583324202276,
+            "imre_over_rust_bigint": 1.2039881339816885,
+            "imre_over_baseline": 1.0130723954688567,
             "rust_bigint_over_cpython": 0.38289067826397205,
-            "rust_bigint_over_relar": 0.8305729697625152,
+            "rust_bigint_over_imre": 0.8305729697625152,
             "rust_bigint_over_baseline": 0.8414305480889935,
             "baseline_over_cpython": 0.45504727530224603,
-            "baseline_over_relar": 0.9870962869708766,
+            "baseline_over_imre": 0.9870962869708766,
             "baseline_over_rust_bigint": 1.188452216610319
           },
           "iqr_overlap_vs_previous": true,
@@ -596,7 +596,7 @@
     },
     "lto": {
       "record": {
-        "path": "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto.json",
+        "path": "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/lto.json",
         "sha256": "d182335e16c44138ad9d0f072fb2cac5a87c5bacc51e489c06651235cc42749a"
       },
       "started_at_utc": "2026-10-19T03:30:52.602268+00:00",
@@ -659,13 +659,13 @@
         "terminal_errors": 65,
         "engines": [
           "cpython",
-          "relar",
+          "imre",
           "rust_bigint",
           "baseline"
         ],
         "device_error_check": true
       },
-      "relar_change_percent_range": [
+      "imre_change_percent_range": [
         -0.2343005131541176,
         2.265947234816723
       ],
@@ -674,14 +674,14 @@
           "workload": "empty",
           "median_ms": {
             "cpython": 27.373748,
-            "relar": 2.231417,
+            "imre": 2.231417,
             "rust_bigint": 2.2397275,
             "baseline": 2.2366575
           },
-          "cpython_over_relar": 12.267428275396307,
-          "relar_over_rust": 0.9962895039686748,
-          "relar_over_previous": 0.9976569948684588,
-          "relar_change_percent": -0.2343005131541176,
+          "cpython_over_imre": 12.267428275396307,
+          "imre_over_rust": 0.9962895039686748,
+          "imre_over_previous": 0.9976569948684588,
+          "imre_change_percent": -0.2343005131541176,
           "statistics_ns": {
             "cpython": {
               "median_ns": 27373748.0,
@@ -690,7 +690,7 @@
               "p25_ns": 27054175.0,
               "p75_ns": 27713581.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 2231417.0,
               "min_ns": 2056611,
               "max_ns": 2801219,
@@ -718,7 +718,7 @@
               "median": 27.373748,
               "q3": 27.71358125
             },
-            "relar": {
+            "imre": {
               "q1": 2.16532375,
               "median": 2.231417,
               "q3": 2.3094865
@@ -735,17 +735,17 @@
             }
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 12.267428275396307,
+            "cpython_over_imre": 12.267428275396307,
             "cpython_over_rust_bigint": 12.221910031465882,
             "cpython_over_baseline": 12.23868562799624,
-            "relar_over_cpython": 0.08151667794998332,
-            "relar_over_rust_bigint": 0.9962895039686748,
-            "relar_over_baseline": 0.9976569948684588,
+            "imre_over_cpython": 0.08151667794998332,
+            "imre_over_rust_bigint": 0.9962895039686748,
+            "imre_over_baseline": 0.9976569948684588,
             "rust_bigint_over_cpython": 0.08182027174356979,
-            "rust_bigint_over_relar": 1.0037243150876776,
+            "rust_bigint_over_imre": 1.0037243150876776,
             "rust_bigint_over_baseline": 1.0013725838667744,
             "baseline_over_cpython": 0.08170812049559308,
-            "baseline_over_relar": 1.002348507697127,
+            "baseline_over_imre": 1.002348507697127,
             "baseline_over_rust_bigint": 0.998629297537312
           },
           "iqr_overlap_vs_previous": true,
@@ -755,14 +755,14 @@
           "workload": "boundary-128",
           "median_ms": {
             "cpython": 28.306758,
-            "relar": 2.8375625,
+            "imre": 2.8375625,
             "rust_bigint": 2.6822825,
             "baseline": 2.7746895
           },
-          "cpython_over_relar": 9.97573022620647,
-          "relar_over_rust": 1.0578909939575716,
-          "relar_over_previous": 1.0226594723481672,
-          "relar_change_percent": 2.265947234816723,
+          "cpython_over_imre": 9.97573022620647,
+          "imre_over_rust": 1.0578909939575716,
+          "imre_over_previous": 1.0226594723481672,
+          "imre_change_percent": 2.265947234816723,
           "statistics_ns": {
             "cpython": {
               "median_ns": 28306758.0,
@@ -771,7 +771,7 @@
               "p25_ns": 27842851.75,
               "p75_ns": 28859334.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 2837562.5,
               "min_ns": 2576561,
               "max_ns": 4025250,
@@ -799,7 +799,7 @@
               "median": 28.306758,
               "q3": 28.859334
             },
-            "relar": {
+            "imre": {
               "q1": 2.7239645,
               "median": 2.8375625,
               "q3": 2.9708375
@@ -816,17 +816,17 @@
             }
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 9.97573022620647,
+            "cpython_over_imre": 9.97573022620647,
             "cpython_over_rust_bigint": 10.553235164454154,
             "cpython_over_baseline": 10.201775009419974,
-            "relar_over_cpython": 0.10024328819287606,
-            "relar_over_rust_bigint": 1.0578909939575716,
-            "relar_over_baseline": 1.0226594723481672,
+            "imre_over_cpython": 0.10024328819287606,
+            "imre_over_rust_bigint": 1.0578909939575716,
+            "imre_over_baseline": 1.0226594723481672,
             "rust_bigint_over_cpython": 0.09475767235513159,
-            "rust_bigint_over_relar": 0.9452769762780555,
+            "rust_bigint_over_imre": 0.9452769762780555,
             "rust_bigint_over_baseline": 0.9666964537833873,
             "baseline_over_cpython": 0.09802215781828495,
-            "baseline_over_relar": 0.9778426025858461,
+            "baseline_over_imre": 0.9778426025858461,
             "baseline_over_rust_bigint": 1.0344508827835994
           },
           "iqr_overlap_vs_previous": true,
@@ -836,14 +836,14 @@
           "workload": "dense-2048",
           "median_ms": {
             "cpython": 33.4900195,
-            "relar": 5.725804,
+            "imre": 5.725804,
             "rust_bigint": 5.5721415,
             "baseline": 5.682718
           },
-          "cpython_over_relar": 5.848963656457678,
-          "relar_over_rust": 1.0275769199328482,
-          "relar_over_previous": 1.007581935264076,
-          "relar_change_percent": 0.7581935264076023,
+          "cpython_over_imre": 5.848963656457678,
+          "imre_over_rust": 1.0275769199328482,
+          "imre_over_previous": 1.007581935264076,
+          "imre_change_percent": 0.7581935264076023,
           "statistics_ns": {
             "cpython": {
               "median_ns": 33490019.5,
@@ -852,7 +852,7 @@
               "p25_ns": 33316815.75,
               "p75_ns": 33846190.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 5725804.0,
               "min_ns": 4767913,
               "max_ns": 6046164,
@@ -880,7 +880,7 @@
               "median": 33.4900195,
               "q3": 33.84619025
             },
-            "relar": {
+            "imre": {
               "q1": 5.67768125,
               "median": 5.725804,
               "q3": 5.786475
@@ -897,17 +897,17 @@
             }
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 5.848963656457678,
+            "cpython_over_imre": 5.848963656457678,
             "cpython_over_rust_bigint": 6.01026005890195,
             "cpython_over_baseline": 5.893310120262874,
-            "relar_over_cpython": 0.17097045882580034,
-            "relar_over_rust_bigint": 1.0275769199328482,
-            "relar_over_baseline": 1.007581935264076,
+            "imre_over_cpython": 0.17097045882580034,
+            "imre_over_rust_bigint": 1.0275769199328482,
+            "imre_over_baseline": 1.007581935264076,
             "rust_bigint_over_cpython": 0.1663821515541369,
-            "rust_bigint_over_relar": 0.9731631575233801,
+            "rust_bigint_over_imre": 0.9731631575233801,
             "rust_bigint_over_baseline": 0.9805416175851063,
             "baseline_over_cpython": 0.16968392628138063,
-            "baseline_over_relar": 0.9924751179048392,
+            "baseline_over_imre": 0.9924751179048392,
             "baseline_over_rust_bigint": 1.019844524766645
           },
           "iqr_overlap_vs_previous": true,
@@ -917,14 +917,14 @@
           "workload": "sparse-2048",
           "median_ms": {
             "cpython": 37.304891,
-            "relar": 7.9753995,
+            "imre": 7.9753995,
             "rust_bigint": 7.7049605,
             "baseline": 7.9256825
           },
-          "cpython_over_relar": 4.677494964358838,
-          "relar_over_rust": 1.0350993363301473,
-          "relar_over_previous": 1.0062728982645974,
-          "relar_change_percent": 0.6272898264597426,
+          "cpython_over_imre": 4.677494964358838,
+          "imre_over_rust": 1.0350993363301473,
+          "imre_over_previous": 1.0062728982645974,
+          "imre_change_percent": 0.6272898264597426,
           "statistics_ns": {
             "cpython": {
               "median_ns": 37304891.0,
@@ -933,7 +933,7 @@
               "p25_ns": 37093831.25,
               "p75_ns": 37812064.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 7975399.5,
               "min_ns": 7846410,
               "max_ns": 10486549,
@@ -961,7 +961,7 @@
               "median": 37.304891,
               "q3": 37.81206425
             },
-            "relar": {
+            "imre": {
               "q1": 7.919428,
               "median": 7.9753995,
               "q3": 8.05664375
@@ -978,17 +978,17 @@
             }
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 4.677494964358838,
+            "cpython_over_imre": 4.677494964358838,
             "cpython_over_rust_bigint": 4.84167193329544,
             "cpython_over_baseline": 4.706836414403428,
-            "relar_over_cpython": 0.21378964758267222,
-            "relar_over_rust_bigint": 1.0350993363301473,
-            "relar_over_baseline": 1.0062728982645974,
+            "imre_over_cpython": 0.21378964758267222,
+            "imre_over_rust_bigint": 1.0350993363301473,
+            "imre_over_baseline": 1.0062728982645974,
             "rust_bigint_over_cpython": 0.20654022283565981,
-            "rust_bigint_over_relar": 0.9660908522513512,
+            "rust_bigint_over_imre": 0.9660908522513512,
             "rust_bigint_over_baseline": 0.9721510418818821,
             "baseline_over_cpython": 0.21245692689465304,
-            "baseline_over_relar": 0.9937662056928935,
+            "baseline_over_imre": 0.9937662056928935,
             "baseline_over_rust_bigint": 1.0286467399800427
           },
           "iqr_overlap_vs_previous": true,
@@ -998,14 +998,14 @@
           "workload": "dense-16384",
           "median_ms": {
             "cpython": 76.863462,
-            "relar": 21.583054,
+            "imre": 21.583054,
             "rust_bigint": 20.348558,
             "baseline": 21.3734175
           },
-          "cpython_over_relar": 3.561287573111757,
-          "relar_over_rust": 1.0606674929987667,
-          "relar_over_previous": 1.0098082817125524,
-          "relar_change_percent": 0.9808281712552436,
+          "cpython_over_imre": 3.561287573111757,
+          "imre_over_rust": 1.0606674929987667,
+          "imre_over_previous": 1.0098082817125524,
+          "imre_change_percent": 0.9808281712552436,
           "statistics_ns": {
             "cpython": {
               "median_ns": 76863462.0,
@@ -1014,7 +1014,7 @@
               "p25_ns": 76441232.25,
               "p75_ns": 77368733.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 21583054.0,
               "min_ns": 21254392,
               "max_ns": 22759055,
@@ -1042,7 +1042,7 @@
               "median": 76.863462,
               "q3": 77.3687335
             },
-            "relar": {
+            "imre": {
               "q1": 21.49647275,
               "median": 21.583054,
               "q3": 21.748078
@@ -1059,17 +1059,17 @@
             }
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 3.561287573111757,
+            "cpython_over_imre": 3.561287573111757,
             "cpython_over_rust_bigint": 3.7773419620201096,
             "cpython_over_baseline": 3.5962176848882494,
-            "relar_over_cpython": 0.28079731823684967,
-            "relar_over_rust_bigint": 1.0606674929987667,
-            "relar_over_baseline": 1.0098082817125524,
+            "imre_over_cpython": 0.28079731823684967,
+            "imre_over_rust_bigint": 1.0606674929987667,
+            "imre_over_baseline": 1.0098082817125524,
             "rust_bigint_over_cpython": 0.26473642313951457,
-            "rust_bigint_over_relar": 0.9428025338768091,
+            "rust_bigint_over_imre": 0.9428025338768091,
             "rust_bigint_over_baseline": 0.9520498067283811,
             "baseline_over_cpython": 0.27806993002735164,
-            "baseline_over_relar": 0.9902869862624631,
+            "baseline_over_imre": 0.9902869862624631,
             "baseline_over_rust_bigint": 1.050365215068311
           },
           "iqr_overlap_vs_previous": true,
@@ -1079,14 +1079,14 @@
           "workload": "sparse-16384",
           "median_ms": {
             "cpython": 111.0254805,
-            "relar": 41.1586405,
+            "imre": 41.1586405,
             "rust_bigint": 37.385175,
             "baseline": 40.8562165
           },
-          "cpython_over_relar": 2.697501160175589,
-          "relar_over_rust": 1.100934809051984,
-          "relar_over_previous": 1.0074021538435896,
-          "relar_change_percent": 0.7402153843589554,
+          "cpython_over_imre": 2.697501160175589,
+          "imre_over_rust": 1.100934809051984,
+          "imre_over_previous": 1.0074021538435896,
+          "imre_change_percent": 0.7402153843589554,
           "statistics_ns": {
             "cpython": {
               "median_ns": 111025480.5,
@@ -1095,7 +1095,7 @@
               "p25_ns": 110588501.25,
               "p75_ns": 111370465.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 41158640.5,
               "min_ns": 40422675,
               "max_ns": 43699429,
@@ -1123,7 +1123,7 @@
               "median": 111.0254805,
               "q3": 111.37046525
             },
-            "relar": {
+            "imre": {
               "q1": 40.847643,
               "median": 41.1586405,
               "q3": 41.3734785
@@ -1140,17 +1140,17 @@
             }
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.697501160175589,
+            "cpython_over_imre": 2.697501160175589,
             "cpython_over_rust_bigint": 2.9697729246954174,
             "cpython_over_baseline": 2.7174684787564702,
-            "relar_over_cpython": 0.3707134642844441,
-            "relar_over_rust_bigint": 1.100934809051984,
-            "relar_over_baseline": 1.0074021538435896,
+            "imre_over_cpython": 0.3707134642844441,
+            "imre_over_rust_bigint": 1.100934809051984,
+            "imre_over_baseline": 1.0074021538435896,
             "rust_bigint_over_cpython": 0.33672608154125483,
-            "rust_bigint_over_relar": 0.908318995618915,
+            "rust_bigint_over_imre": 0.908318995618915,
             "rust_bigint_over_baseline": 0.915042512563541,
             "baseline_over_cpython": 0.3679895490296932,
-            "baseline_over_relar": 0.9926522354400894,
+            "baseline_over_imre": 0.9926522354400894,
             "baseline_over_rust_bigint": 1.0928453992792597
           },
           "iqr_overlap_vs_previous": true,
@@ -1182,7 +1182,7 @@
   "statistics_method": "Exact Fraction interpolation on integer nanoseconds at p*(n-1), inclusive Q1/median/Q3; ratios of per-engine medians. IQR overlap is descriptive, not a significance test.",
   "independent_audit_checks": 158530,
   "independent_audit_input_summary": {
-    "path": "/tmp/relar-four-feature-inventory/summary-audited-input.json",
+    "path": "/tmp/imre-four-feature-inventory/summary-audited-input.json",
     "sha256": "9514de3e1e8f9c45b797557d4e346a52dd2882855759da179b55f39af1797f0d",
     "bytes": 10647,
     "note": "Exact provisional summary verified by the independent audit, retained before publication added its audited quartiles and provenance."

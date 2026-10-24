@@ -19,6 +19,8 @@ print(path.is_dir())
 output = Path("output.txt")
 print(output.write_text("α\r\nβ\r🙂\0end", encoding="utf-8"))
 print(output.read_text(encoding="utf-8"))
+print(output.write_text("UTF-8 default λ🙂"))
+print(output.read_text())
 print(Path("empty.txt").read_text(encoding="utf-8"))
 with open(Path("binary.dat"), "wb") as stream:
     print(stream.write(b"\xff\x00\n"))

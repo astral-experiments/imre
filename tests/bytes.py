@@ -15,6 +15,9 @@ from files import run_with_failing_output
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "bytes"
 
 REJECTED = {
+    "hashlib_sha256_text": 'from hashlib import sha256\nprint(sha256("text").hexdigest())\n',
+    "hashlib_sha256_escape": 'from hashlib import sha256\nhash_obj = sha256(b"data")\n',
+    "hashlib_hexdigest_args": 'from hashlib import sha256\nprint(sha256().hexdigest(3))\n',
     "bytes_unicode_literal": 'value = b"é"\n',
     "bytes_mixed_literal": 'value = b"a" "b"\n',
     "bytes_string_annotation": 'value: bytes = "wrong"\n',
@@ -131,7 +134,7 @@ def main() -> None:
     if args.sanitize:
         flags.append("--sanitize")
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-bytes-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-bytes-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))

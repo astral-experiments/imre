@@ -23,8 +23,8 @@ helpers = existing.helpers
 shared = existing.shared
 validator = SimpleNamespace(**runpy.run_path(str(HERE / "manifest_validate.py")))
 incremental = validator.batch.incremental
-CONTROL_ENGINES = ("cpython", "baseline", "relar")
-MANIFEST_ENGINES = ("cpython", "relar", "rust_bigint")
+CONTROL_ENGINES = ("cpython", "baseline", "imre")
+MANIFEST_ENGINES = ("cpython", "imre", "rust_bigint")
 
 
 def text_hash(value: str) -> str:
@@ -213,8 +213,8 @@ def benchmark(args: argparse.Namespace) -> dict:
     if args.target is not None:
         flags += ["--target", args.target]
         recorded_flags += ["--target", args.target]
-    if args.relar_build_record is not None:
-        inputs["relar_build_record"] = args.relar_build_record.resolve(strict=True)
+    if args.imre_build_record is not None:
+        inputs["imre_build_record"] = args.imre_build_record.resolve(strict=True)
     python_info = json.loads(
         shared.run(
             [shared.executable(args.python), "-I", "-c", shared.PYTHON_INFO],
@@ -268,33 +268,33 @@ def benchmark(args: argparse.Namespace) -> dict:
         *(REFERENCE / name for name in rust_sources),
         REFERENCE / "build.py",
     ]
-    relar_record = None
-    if args.relar_build_record is not None:
-        original = json.loads(inputs["relar_build_record"].read_text())
+    imre_record = None
+    if args.imre_build_record is not None:
+        original = json.loads(inputs["imre_build_record"].read_text())
         if not {hashes["compiler"], hashes["runtime"]} <= set(
             original.get("sha256", {}).values()
         ):
             raise ValueError(
-                "Relar build record does not identify the selected compiler/runtime"
+                "Imre build record does not identify the selected compiler/runtime"
             )
         if thin_lto and original.get("runtime_lto_rustflags") != "-Clinker-plugin-lto":
             raise ValueError(
-                "Relar build record must identify the linker-plugin-LTO runtime build"
+                "Imre build record must identify the linker-plugin-LTO runtime build"
             )
-        runtime_name = "librelar_runtime_lto.a" if thin_lto else "librelar_runtime.a"
+        runtime_name = "libimre_runtime_lto.a" if thin_lto else "libimre_runtime.a"
         if not any(
             Path(name).name == runtime_name and digest == hashes["runtime"]
             for name, digest in original["sha256"].items()
         ):
-            raise ValueError("Relar build record identifies a different runtime mode")
+            raise ValueError("Imre build record identifies a different runtime mode")
         for name, digest in original.get("source_sha256", {}).items():
             path = ROOT / name
             if shared.sha256(path) != digest:
-                raise ValueError(f"Relar build source changed: {name}")
-            inputs[f"relar_source:{name}"] = path
-            hashes[f"relar_source:{name}"] = digest
+                raise ValueError(f"Imre build source changed: {name}")
+            inputs[f"imre_source:{name}"] = path
+            hashes[f"imre_source:{name}"] = digest
             protected.append(path)
-        relar_record = {
+        imre_record = {
             key: original[key]
             for key in (
                 "git_head",
@@ -341,7 +341,7 @@ def benchmark(args: argparse.Namespace) -> dict:
         name: shared.run([str(inputs[key]), "--version"], b"", args.timeout)[
             "stdout"
         ].strip()
-        for name, key in (("relar", "compiler"), ("clang", "clang"))
+        for name, key in (("imre", "compiler"), ("clang", "clang"))
     }
     tools["lto_linker"] = (
         shared.run([str(inputs["lto_linker"]), "--version"], b"", args.timeout)[
@@ -398,11 +398,11 @@ def benchmark(args: argparse.Namespace) -> dict:
         "control": {
             "cpython": incremental.python_command(str(inputs["python"])),
             "baseline": [str(inputs["baseline"])],
-            "relar": [str(outputs["control_binary"])],
+            "imre": [str(outputs["control_binary"])],
         },
         "manifest": {
             "cpython": validator.python_command(str(inputs["python"])),
-            "relar": [str(outputs["manifest_binary"])],
+            "imre": [str(outputs["manifest_binary"])],
             "rust_bigint": [str(inputs["rust_bigint"])],
         },
     }
@@ -463,7 +463,7 @@ def benchmark(args: argparse.Namespace) -> dict:
             if name in {*outputs, "baseline", "rust_bigint"}
         },
         "rust_build_record": reference_record,
-        "relar_build_provenance": relar_record,
+        "imre_build_provenance": imre_record,
         "baseline_provenance": {
             "record_sha256": hashes["baseline_record"],
             **{
@@ -475,7 +475,7 @@ def benchmark(args: argparse.Namespace) -> dict:
                     "tools",
                     "options",
                     "compilation",
-                    "relar_build_provenance",
+                    "imre_build_provenance",
                 )
             },
             "compile_commands": baseline["method"]["compile_commands"],
@@ -524,7 +524,7 @@ def benchmark(args: argparse.Namespace) -> dict:
                         "<package-root>",
                     ],
                     "baseline": ["<baseline-binary>"],
-                    "relar": ["<control-binary>"],
+                    "imre": ["<control-binary>"],
                 },
                 "manifest": {
                     "cpython": [
@@ -536,7 +536,7 @@ def benchmark(args: argparse.Namespace) -> dict:
                         "manifest.txt",
                         "reports/plan.txt",
                     ],
-                    "relar": ["<manifest-binary>", "manifest.txt", "reports/plan.txt"],
+                    "imre": ["<manifest-binary>", "manifest.txt", "reports/plan.txt"],
                     "rust_bigint": [
                         "<rust-manifest-bigint>",
                         "manifest.txt",
@@ -544,7 +544,7 @@ def benchmark(args: argparse.Namespace) -> dict:
                     ],
                 },
             },
-            "scope": "control compares identical source/input under old/new Relar; manifest comparisons measure a new whole program, not isolated file API overhead. Rust shares the original direct-port graph algorithm/parser with native containers and Result recovery. No C or general language-speed inference.",
+            "scope": "control compares identical source/input under old/new Imre; manifest comparisons measure a new whole program, not isolated file API overhead. Rust shares the original direct-port graph algorithm/parser with native containers and Result recovery. No C or general language-speed inference.",
         },
         "validation": validation,
         "workloads": workloads,
@@ -562,7 +562,7 @@ def main() -> None:
         "rust-build-record",
     ):
         parser.add_argument("--" + option, type=Path, required=True)
-    parser.add_argument("--relar-build-record", type=Path, required=True)
+    parser.add_argument("--imre-build-record", type=Path, required=True)
     parser.add_argument("--rust-source-root", type=Path, default=REFERENCE)
     parser.add_argument("--python", default="python3.14")
     parser.add_argument("--clang", default="clang")

@@ -1,16 +1,18 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Ruff diagnostic classification with string enums
 
-Relar now compiles Ruff’s `Source`, `Classification`, and `Change` declarations, the enum methods and their string-valued `Literal` arguments. The typed reporter uses Ruff’s original `TestCase.classify`, `TestCase.change`, `TestCase.diagnostics_by_source` and `compute_stats`. [Pinned Ruff source](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/conformance.py) · [Relar reporter](../../examples/conformance_report/model.py)
+Imre now compiles Ruff’s `Source`, `Classification`, and `Change` declarations, the enum methods and their string-valued `Literal` arguments. The typed reporter uses Ruff’s original `TestCase.classify`, `TestCase.change`, `TestCase.diagnostics_by_source` and `compute_stats`. [Pinned Ruff source](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/conformance.py) · [Imre reporter](../../examples/conformance_report/model.py)
 
-Classifying both diagnostic captures took **36.46 μs ordinary and 30.71 μs with ThinLTO**. That is 18.0× and 11.7× faster than the previous Relar string implementation. Those speedups include general compiler improvements and the reporter’s change from strings to Ruff’s enum source. Both builds met the 2× median target against the original independent Rust reporter on every classification, complete-report, repeated-report and live-checkout workload.
+Classifying both diagnostic captures took **36.46 μs ordinary and 30.71 μs with ThinLTO**. That is 18.0× and 11.7× faster than the previous Imre string implementation. Those speedups include general compiler improvements and the reporter’s change from strings to Ruff’s enum source. Both builds met the 2× median target against the original independent Rust reporter on every classification, complete-report, repeated-report and live-checkout workload.
 
-Rust also benefits from applying Relar’s small-list shortcuts directly in its classifier. Against the Rust control for lists of one or two diagnostics, Relar took **2.65× ordinary and 3.55× with ThinLTO**. The complete changed-diff reporter took 1.63× ordinary and 1.52× with ThinLTO against that same implementation.
+Rust also benefits from applying Imre’s small-list shortcuts directly in its classifier. Against the Rust control for lists of one or two diagnostics, Imre took **2.65× ordinary and 3.55× with ThinLTO**. The complete changed-diff reporter took 1.63× ordinary and 1.52× with ThinLTO against that same implementation.
 
 ## Classification
 
 Microseconds per traversal of all 1,269 preloaded groups on both the old and new captures. Each subprocess runs 512 traversals and consumes all eight statistics counters. The table subtracts the median of zero-traversal subprocesses before dividing by 512.
 
-| Build and input | Upstream CPython | Typed CPython | Codon | Previous Relar | Relar | Rust | Relar/Rust |
+| Build and input | Upstream CPython | Typed CPython | Codon | Previous Imre | Imre | Rust | Imre/Rust |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary, both captures | 2,319.30 | 2,369.38 | 142.89 | 654.97 | 36.46 | 154.24 | 0.236× |
 | ThinLTO, both captures | 2,317.18 | 2,334.53 | 137.51 | 358.35 | 30.71 | 112.76 | 0.272× |
@@ -28,9 +30,9 @@ This native comparison runs the original string port on its original compiler, t
 
 The original Rust implementation collects distinct source lines in a `HashSet`. One additional implementation returns the known cardinality for a single diagnostic. The other also compares two line numbers directly when a list has two diagnostics. All three keep the ordinary set path for larger groups and produce the same classifications, counts and complete reports.
 
-The table gives microseconds per traversal in separate native comparisons. Each observation pairs two fresh subprocesses of the same engine, one with zero traversals and one with 2,048. Their order alternates. Each cell is the median of twelve such pairs, divided by 2,048. The original Rust and Relar executables run again in each arm.
+The table gives microseconds per traversal in separate native comparisons. Each observation pairs two fresh subprocesses of the same engine, one with zero traversals and one with 2,048. Their order alternates. Each cell is the median of twelve such pairs, divided by 2,048. The original Rust and Imre executables run again in each arm.
 
-| Build and control | Relar (μs) | Original Rust (μs) | Shortcut Rust (μs) | Relar/shortcut Rust |
+| Build and control | Imre (μs) | Original Rust (μs) | Shortcut Rust (μs) | Imre/shortcut Rust |
 | --- | ---: | ---: | ---: | ---: |
 | Ordinary, one item | 35.44 | 156.00 | 20.62 | 1.718× |
 | Ordinary, one or two items | 34.48 | 153.22 | 12.99 | 2.654× |
@@ -41,7 +43,7 @@ The table gives microseconds per traversal in separate native comparisons. Each 
 
 Milliseconds from process creation through reading the captured inputs, computing the full report, writing the output and exiting.
 
-| Build and input | Upstream CPython | Typed CPython | Codon | Previous Relar | Relar | Rust | Relar/Rust |
+| Build and input | Upstream CPython | Typed CPython | Codon | Previous Imre | Imre | Rust | Imre/Rust |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary, unchanged GitHub | 142.85 | 274.14 | 59.56 | 37.61 | 35.71 | 22.90 | 1.559× |
 | Ordinary, changed GitHub | 146.98 | 277.24 | 61.70 | 39.12 | 38.23 | 24.43 | 1.565× |
@@ -54,7 +56,7 @@ Milliseconds from process creation through reading the captured inputs, computin
 
 Milliseconds per complete report over preloaded text and JSON. Each process computes four reports. Each column subtracts its own zero-report median and divides by four.
 
-| Build and input | Upstream CPython | Typed CPython | Codon | Previous Relar | Relar | Rust | Relar/Rust |
+| Build and input | Upstream CPython | Typed CPython | Codon | Previous Imre | Imre | Rust | Imre/Rust |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary, unchanged GitHub | 49.58 | 168.14 | 31.82 | 18.36 | 17.37 | 9.89 | 1.756× |
 | Ordinary, changed GitHub | 51.05 | 169.59 | 34.00 | 19.68 | 18.69 | 11.03 | 1.695× |
@@ -67,7 +69,7 @@ Milliseconds per complete report over preloaded text and JSON. Each process comp
 
 Milliseconds for discovering the typing checkout, reading its TOML, running both pinned ty executables, rendering the report and atomically publishing it.
 
-| Build and input | Upstream CPython | Typed CPython | Codon | Previous Relar | Relar | Rust | Relar/Rust |
+| Build and input | Upstream CPython | Typed CPython | Codon | Previous Imre | Imre | Rust | Imre/Rust |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary, unchanged GitHub | 963.97 | 1,306.48 | 953.07 | 886.17 | 883.51 | 870.06 | 1.015× |
 | Ordinary, changed GitHub | 1,007.18 | 1,347.53 | 991.98 | 914.30 | 911.30 | 895.62 | 1.018× |
@@ -80,7 +82,7 @@ Milliseconds for discovering the typing checkout, reading its TOML, running both
 
 Milliseconds on the same checkout and captured diagnostics. This native panel repeats both complete and zero/four-pass timings across twelve balanced rounds. Every sample verifies the output file against Ruff.
 
-| Build and workload | Relar (ms) | Original Rust (ms) | One/two-item Rust (ms) | Relar/one-or-two |
+| Build and workload | Imre (ms) | Original Rust (ms) | One/two-item Rust (ms) | Imre/one-or-two |
 | --- | ---: | ---: | ---: | ---: |
 | Ordinary, complete | 34.91 | 21.60 | 21.43 | 1.629× |
 | Ordinary, repeated | 17.84 | 10.67 | 10.42 | 1.711× |
@@ -93,25 +95,25 @@ Ordinary binaries ran under Callgrind and DHAT for zero and 64 traversals. The t
 
 | Implementation | Instructions | Allocations | Allocated bytes |
 | --- | ---: | ---: | ---: |
-| Previous Relar | 5,703,023 | 8,298 | 622,296 |
-| Relar | 291,851 | 18 | 1,296 |
+| Previous Imre | 5,703,023 | 8,298 | 622,296 |
+| Imre | 291,851 | 18 | 1,296 |
 | Original Rust | 1,701,018 | 2,074 | 107,884 |
 | Rust, one item | 252,602 | 95 | 4,976 |
 | Rust, one or two items | 165,707 | 4 | 244 |
 
-Relar uses known cardinalities for short, pure integer projections, borrows stable list elements and reads inline storage through runtime-provided offsets. An exhaustive enum match can inline its bounded producer. The general algorithms still handle larger lists, unsupported projections and Python integers outside the immediate range.
+Imre uses known cardinalities for short, pure integer projections, borrows stable list elements and reads inline storage through runtime-provided offsets. An exhaustive enum match can inline its bounded producer. The general algorithms still handle larger lists, unsupported projections and Python integers outside the immediate range.
 
 ## Independent uv check
 
-Relar also compiled uv’s original `Variant` class and `variant_sort_key` function. On 6,110 downloads from the pinned Python catalog, both O0 and O3 matched CPython’s stable source ordering and variant labels byte for byte. The four ranks contained 2,222, 1,059, 929 and 1,900 downloads. The output SHA-256 was `7ee31ec51f968ed117c875f4dc536ab53e42d703107a5dc678209cea98281661`. [uv acceptance driver](../uv_variant_validate.py)
+Imre also compiled uv’s original `Variant` class and `variant_sort_key` function. On 6,110 downloads from the pinned Python catalog, both O0 and O3 matched CPython’s stable source ordering and variant labels byte for byte. The four ranks contained 2,222, 1,059, 929 and 1,900 downloads. The output SHA-256 was `7ee31ec51f968ed117c875f4dc536ab53e42d703107a5dc678209cea98281661`. [uv acceptance driver](../uv_variant_validate.py)
 
 ## Corpus and reproducibility
 
 The input is the 146-file `python/typing` conformance suite at `835b70f3f795f8e061b1f7621178515b0a77a0ad`, paired with ty 0.0.60 and 0.0.90 diagnostics. The 1,269 groups include 1,020 unchanged, 100 changed, 107 added and 42 removed. All four classification results occur on each side. Every executable emitted the same sorted case keys, both classifications, change kinds and statistics. The transcript SHA-256 is `18416a260461cdbfa659cef624f2f17bc5bd804d24818e6fc94a17c84a34c5ce`. [Pinned corpus](https://github.com/python/typing/tree/835b70f3f795f8e061b1f7621178515b0a77a0ad/conformance)
 
-The baseline is `0d61459957cf483404c48150c543032d87cf91c2` and the timed compiler is `d5d48a88cd5b4a0af26080caf09d4d11b7eec599`. The six-engine matrix has 2,016 measured subprocesses and 168 warmups over two link modes and 14 workloads per mode. Within each mode, six balanced engine orders repeat twice. Ordinary and ThinLTO use fresh processes on logical CPU 31 of the same AMD EPYC Milan host. CPython 3.14.5 runs with its JIT disabled. Clang 18.1.3 links ordinary binaries with GNU ld 2.42 and ThinLTO binaries with LLD 22.1.8. All three Rust implementations and Relar’s runtime use the same Ohm rustc 1.98.1-dev and LLVM 22.1.8 in each comparator arm. [Measured code change](https://github.com/astral-sh/relar/compare/0d61459957cf483404c48150c543032d87cf91c2...d5d48a88cd5b4a0af26080caf09d4d11b7eec599)
+The baseline is `0d61459957cf483404c48150c543032d87cf91c2` and the timed compiler is `d5d48a88cd5b4a0af26080caf09d4d11b7eec599`. The six-engine matrix has 2,016 measured subprocesses and 168 warmups over two link modes and 14 workloads per mode. Within each mode, six balanced engine orders repeat twice. Ordinary and ThinLTO use fresh processes on logical CPU 31 of the same AMD EPYC Milan host. CPython 3.14.5 runs with its JIT disabled. Clang 18.1.3 links ordinary binaries with GNU ld 2.42 and ThinLTO binaries with LLD 22.1.8. All three Rust implementations and Imre’s runtime use the same Ohm rustc 1.98.1-dev and LLVM 22.1.8 in each comparator arm. [Measured code change](https://github.com/astral-sh/imre/compare/0d61459957cf483404c48150c543032d87cf91c2...d5d48a88cd5b4a0af26080caf09d4d11b7eec599)
 
-A subsequent fix for stored enum instance methods shipped as `9778ef24b8e504da5402f4d8adef39e5b60e54a4`. On a fresh checkout, the CLI, repeated reporter and classification kernel reproduced all nine original LLVM outputs in ordinary, ThinLTO and ASan builds. A canonical link under each measured LLVM basename and runtime archive reproduced each complete measured ELF byte for byte. The independent links also matched every executable section. Their GNU build IDs and debug metadata differed. ASan retained the randomized LLVM input filename in read-only data. The verifier recorded these differences and checked 90 corrected process outputs, including real live checkouts. [Correction](https://github.com/astral-sh/relar/compare/d5d48a88cd5b4a0af26080caf09d4d11b7eec599...9778ef24b8e504da5402f4d8adef39e5b60e54a4)
+A subsequent fix for stored enum instance methods shipped as `9778ef24b8e504da5402f4d8adef39e5b60e54a4`. On a fresh checkout, the CLI, repeated reporter and classification kernel reproduced all nine original LLVM outputs in ordinary, ThinLTO and ASan builds. A canonical link under each measured LLVM basename and runtime archive reproduced each complete measured ELF byte for byte. The independent links also matched every executable section. Their GNU build IDs and debug metadata differed. ASan retained the randomized LLVM input filename in read-only data. The verifier recorded these differences and checked 90 corrected process outputs, including real live checkouts. [Correction](https://github.com/astral-sh/imre/compare/d5d48a88cd5b4a0af26080caf09d4d11b7eec599...9778ef24b8e504da5402f4d8adef39e5b60e54a4)
 
 Codon 0.20.4 uses its native `Enum` with explicit lowercase values and a text conversion method. Its benchmark adapter also lowers the restricted literal annotations to `str`. A native probe covers all ten members and their title methods. Codon uses the same release compiler flags in both panels, with the matching native platform library. The upstream CPython adapter supplies the captured paths and diagnostics to Ruff’s original classification and rendering implementation. [Codon adapter](../codon_native/README.md) · [Reporter adaptations](../../examples/conformance_report/README.md)
 

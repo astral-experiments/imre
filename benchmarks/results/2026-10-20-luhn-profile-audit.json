@@ -13,7 +13,7 @@
   "benchmark_record_sha256": "26b3b7ad62cddddae43e659080a533ae41a3079bb143096e098fe2d675c3bf57",
   "timing_status_sha256": "6d1c5559c624b3e693df4f03192943a27bd8805d4c10af07cca0a8bbb208cb78",
   "binary_sha256": {
-    "relar": "14fb73da2b9b539b760b4c98c85573e55a1f03da84a90e4aeb519c47ec7f5fd0",
+    "imre": "14fb73da2b9b539b760b4c98c85573e55a1f03da84a90e4aeb519c47ec7f5fd0",
     "rust": "6ecadfe19c5db5427f79b93d4d74299ed5f481a972465bc1834353dbba47c5bc"
   },
   "workload": {
@@ -26,7 +26,7 @@
     "stdout": "OK\n128\n"
   },
   "profiles": {
-    "relar-callgrind": {
+    "imre-callgrind": {
       "instructions": 212067563,
       "self_cost_sum": 212067563,
       "cost_rows": 23182,
@@ -40,7 +40,7 @@
           "instructions": 54969408
         },
         {
-          "name": "relar_int_parse",
+          "name": "imre_int_parse",
           "instructions": 24641653
         },
         {
@@ -48,7 +48,7 @@
           "instructions": 24114147
         },
         {
-          "name": "relar_mapping_iter_next",
+          "name": "imre_mapping_iter_next",
           "instructions": 20974848
         },
         {
@@ -72,12 +72,12 @@
           "instructions": 10092775
         },
         {
-          "name": "<relar_runtime::objects::words::WordKind>::release",
+          "name": "<imre_runtime::objects::words::WordKind>::release",
           "instructions": 7340255
         }
       ]
     },
-    "relar-dhat": {
+    "imre-dhat": {
       "allocated_bytes": 23105570,
       "allocated_blocks": 395039,
       "peak_live_bytes": 123793,

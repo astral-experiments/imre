@@ -47,6 +47,8 @@ REJECTED = {
     "path_order": "print(Path('a') < Path('b'))",
     "mixed_path_set": "values = {Path('a'), 'a'}",
     "mixed_path_dict_key": "values = {Path('a'): 1, 'a': 2}",
+    "sysconfig_path": "import sysconfig\nsysconfig.get_path('stdlib')",
+    "which_mode_type": "import shutil\nshutil.which('tool', mode='x')",
     "path_constructor_value": "constructor = Path\nprint(constructor('a'))",
     "subclass": "class Custom(Path):\n    pass",
     "escaped_iterdir": "values = Path('.').iterdir()",
@@ -62,7 +64,7 @@ REJECTED = {
     "glob_absolute": "for value in Path('.').glob('/tmp'):\n    print(value)",
     "glob_options": "for value in Path('.').glob('*', case_sensitive=False):\n    print(value)",
     "predicate_options": "print(Path('.').exists(follow_symlinks=False))",
-    "write_default_encoding": "Path('a').write_text('data')",
+    "write_non_utf8_encoding": "Path('a').write_text('data', encoding='latin-1')",
     "read_encoding": "Path('a').read_text(encoding='latin-1')",
     "read_dynamic_encoding": "encoding = 'utf-8'\nPath('a').read_text(encoding=encoding)",
     "write_bytes": "Path('a').write_text(b'data', encoding='utf-8')",
@@ -81,7 +83,7 @@ REJECTED = {
     "unsupported_import": "from pathlib import PureWindowsPath\nPureWindowsPath('a')",
 }
 
-# Native paths retain Relar's Unicode-scalar string domain. Unix surrogateescape
+# Native paths retain Imre's Unicode-scalar string domain. Unix surrogateescape
 # names cannot be represented; exercise the explicit boundary and retry cleanup.
 INVALID_NAMES = """from pathlib import Path
 for turn in range(4):
@@ -135,6 +137,7 @@ def seed(directory: Path) -> None:
     (directory / "repeated-link").symlink_to("directory-link/../directory-link")
     (directory / "trailing-link").symlink_to("input.txt/")
     (directory / "absolute-link").symlink_to("/tmp", target_is_directory=True)
+    (directory / "command").touch(mode=0o755)
     (directory / "denied").mkdir()
     (directory / "denied" / "secret.json").write_text("secret")
     (directory / "denied").chmod(0)
@@ -182,7 +185,7 @@ def main() -> None:
     version = files.run([args.python, "-I", "-c", "import sys; print(sys.version_info >= (3, 14))"], FIXTURES)
     files.check_result(version, None, "CPython version")
     assert version.stdout.strip() == b"True", "path validation requires a CPython 3.14+ oracle; pass --python"
-    with tempfile.TemporaryDirectory(prefix="relar-paths-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-paths-") as directory:
         temporary = Path(directory)
         for name, source in REJECTED.items():
             path = temporary / f"reject-{name}.py"
@@ -214,10 +217,10 @@ def main() -> None:
                 binary = project / f"native-O{level}"
                 built = files.run([compiler, "build", str(source), "--module-root", str(source.parent), "-o", str(binary), "--opt-level", level, *flags], temporary)
                 assert built.returncode == 0 and not built.stderr, (name, level, built.stderr.decode())
-                native_dir = project / f"relar-O{level}"
+                native_dir = project / f"imre-O{level}"
                 seed(native_dir)
                 actual = files.run([str(binary)], native_dir, limit_descriptors=name == "cleanup", runner=runner)
-                files.check_result(actual, None, f"Relar {name} O{level}")
+                files.check_result(actual, None, f"Imre {name} O{level}")
                 assert actual.stdout == stdout, (name, level, actual.stdout, stdout)
                 assert snapshot(native_dir) == expected_files, (name, level, "filesystem effects differ")
                 checks += 1

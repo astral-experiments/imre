@@ -39,6 +39,10 @@ REJECTED = {
     "wrong_optional_type": "value: int | None = None\nprint((value := False))\n",
     "attribute_target": "class Item:\n    value: int\n    def __init__(self) -> None:\n        self.value = 1\nitem = Item()\nprint((item.value := 2))\n",
     "builtin_target": "print((int := 1))\n",
+    "conditional_type_change": "def scale(value: int, flag: bool) -> float:\n    if flag:\n        value: float = float(value)\n    return float(value)\n",
+    "loop_type_change": "def scale(value: int) -> float:\n    while value > 0:\n        value: float = float(value)\n    return float(value)\n",
+    "captured_type_change": "def scale(value: int) -> float:\n    def read() -> int:\n        return value\n    value: float = float(value)\n    return float(read())\n",
+    "shadowed_class_operand": "def test(bytes: int) -> bool:\n    return isinstance(4, bytes)\n",
     "recursive_comprehension": "def recurse() -> list[int]:\n    saved = 0\n    return [(saved := recurse()[0]) for index in range(0)]\n",
 }
 
@@ -125,7 +129,7 @@ def main(
     if args.sanitize:
         flags.append("--sanitize")
     checks = 0
-    with tempfile.TemporaryDirectory(prefix=f"relar-{fixtures.name}-") as directory:
+    with tempfile.TemporaryDirectory(prefix=f"imre-{fixtures.name}-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(fixtures, project, ignore=shutil.ignore_patterns("__pycache__"))
