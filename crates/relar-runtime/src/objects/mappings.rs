@@ -95,33 +95,47 @@ impl Hash for TupleKey {
 /// # Safety
 /// The rooted tuple has only exact immutable scalar, optional, or tuple fields.
 unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
-    // SAFETY: the owner roots its immutable descriptor and every field.
-    let layout = unsafe { super::records::descriptor(value) };
-    // Tuple equality requires the same descriptor, which identifies the length
-    // and every field kind. Hash the shared shape once for the entire tuple.
-    std::ptr::from_ref(layout).hash(state);
-    for index in 0..layout.length {
-        // SAFETY: the static layout covers each initialized concrete field.
-        unsafe {
-            let kind = WordKind::new(*layout.kinds.add(index));
-            let word = kind.read_record_field(value.add(index));
-            let raw = kind.raw();
-            if raw & NULLABLE != 0 {
-                (word != 0).hash(state);
-                if word == 0 {
-                    continue;
+    let mut pending = Vec::new();
+    let mut current = (value, 0);
+    'tuples: loop {
+        let (value, position) = current;
+        // SAFETY: the root owns every tuple in the traversal and its descriptor.
+        let layout = unsafe { super::records::descriptor(value) };
+        if position == 0 {
+            // Tuple equality requires the same descriptor. Hash it once per tuple.
+            std::ptr::from_ref(layout).hash(state);
+        }
+        for index in position..layout.length {
+            // SAFETY: the static layout covers each initialized concrete field.
+            unsafe {
+                let kind = WordKind::new(*layout.kinds.add(index));
+                let word = kind.read_record_field(value.add(index));
+                let raw = kind.raw();
+                if raw & NULLABLE != 0 {
+                    (word != 0).hash(state);
+                    if word == 0 {
+                        continue;
+                    }
+                }
+                match raw & !NULLABLE {
+                    0 | 1 | 10 => word.hash(state),
+                    2 => IntKey::borrow(word).hash(state),
+                    3 => (&*(word as *const Str)).hash(state),
+                    5 => PathKey::borrow(word).hash(state),
+                    6 => {
+                        if index + 1 < layout.length {
+                            pending.push((value, index + 1));
+                        }
+                        current = (word as *const usize, 0);
+                        continue 'tuples;
+                    }
+                    8 => (&*(word as *const Bytes)).hash(state),
+                    _ => unreachable!("the checker excludes mutable and float tuple keys"),
                 }
             }
-            match raw & !NULLABLE {
-                0 | 1 | 10 => word.hash(state),
-                2 => IntKey::borrow(word).hash(state),
-                3 => (&*(word as *const Str)).hash(state),
-                5 => PathKey::borrow(word).hash(state),
-                6 => hash_tuple(word as *const usize, state),
-                8 => (&*(word as *const Bytes)).hash(state),
-                _ => unreachable!("the checker excludes mutable and float tuple keys"),
-            }
         }
+        let Some(next) = pending.pop() else { return };
+        current = next;
     }
 }
 
@@ -1417,6 +1431,55 @@ mod tests {
 
     fn integer(value: i64) -> usize {
         Int::small(value).unwrap().into_raw()
+    }
+
+    #[test]
+    fn deeply_nested_tuple_keys_hash_every_field_in_order() {
+        use crate::objects::records::{
+            RecordDescriptor, RecordSemantics, relar_record_new, relar_record_release,
+        };
+        use std::hash::DefaultHasher;
+
+        let semantics = RecordSemantics {
+            kind: 1,
+            flags: 3,
+            name: std::ptr::null(),
+            name_len: 0,
+            qualified_name: std::ptr::null(),
+            qualified_name_len: 0,
+            fields: std::ptr::null(),
+        };
+        let kinds = [6 | NULLABLE, 2];
+        let layout = RecordDescriptor {
+            length: 2,
+            kinds: kinds.as_ptr(),
+            semantics: &semantics,
+        };
+        let mut expected = DefaultHasher::new();
+        let mut observed = DefaultHasher::new();
+        // SAFETY: each tuple transfers its child owner to the next tuple. The
+        // leaf's nullable child is zero, and the metadata outlives the whole key.
+        unsafe {
+            let mut key = relar_record_new(&layout);
+            key.add(1).write(integer(7));
+            for i in 0..20_000 {
+                let parent = relar_record_new(&layout);
+                parent.write(key as usize);
+                parent.add(1).write(integer(i));
+                key = parent;
+                std::ptr::from_ref(&layout).hash(&mut expected);
+                true.hash(&mut expected);
+            }
+            std::ptr::from_ref(&layout).hash(&mut expected);
+            false.hash(&mut expected);
+            IntKey::borrow(integer(7)).hash(&mut expected);
+            for i in 0..20_000 {
+                IntKey::borrow(integer(i)).hash(&mut expected);
+            }
+            hash_tuple(key, &mut observed);
+            relar_record_release(key);
+        }
+        assert_eq!(observed.finish(), expected.finish());
     }
 
     #[test]
