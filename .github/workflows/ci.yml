@@ -27,6 +27,11 @@ jobs:
           python-version: '3.14.5'
       - run: cargo build --workspace --release --locked
       - run: cargo test --workspace --release --locked
+      - name: Build and install a Relar extension wheel
+        run: |
+          python3 -m pip install "wheel==0.45.1" "packaging==25.0"
+          python3 tests/extension_wheel.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+      - uses: ./.github/actions/test-google-crc32c
       - name: Compare Apple Silicon executables with CPython
         run: |
           target/release/relar build tests/programs/control_flow.py -o "$RUNNER_TEMP/control_flow"
@@ -35,10 +40,13 @@ jobs:
             --suites differential io files bytes paths processes argparse_cli workspaces base45 containers comprehensions tuple_keys callables \
             -- --compiler target/release/relar --runtime target/release/librelar_runtime.a --opt-levels 3
 
-      - name: Compare Ruff’s conformance reports with CPython
+      - name: Compare Ruff’s reporters with CPython
         run: |
           target/release/relar build examples/conformance_report/upstream/conformance.py -o "$RUNNER_TEMP/ruff-conformance"
           python3 tests/ruff_program.py --binary "$RUNNER_TEMP/ruff-conformance"
+          target/release/relar build examples/memory_report/upstream/memory_report.py -o "$RUNNER_TEMP/ruff-memory"
+          python3 tests/ruff_memory_compare.py --binary "$RUNNER_TEMP/ruff-memory"
+          python3 tests/ruff_memory_run.py --binary "$RUNNER_TEMP/ruff-memory"
           target/release/relar build examples/conformance_report/__main__.py --module-root examples -o "$RUNNER_TEMP/conformance-report"
           python3 benchmarks/conformance_grouping_inputs.py \
             --archive benchmarks/results/2026-10-22-collector-ownership-study.tar.xz \
@@ -62,8 +70,8 @@ jobs:
           python-version: '3.14.5'
       - name: Install the pinned Rust toolchain
         run: rustup show
-      - name: Install LLVM 18
-        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18
+      - name: Install LLVM 18 and the CRC32C build tools
+        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 cmake
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -95,6 +103,14 @@ jobs:
           python3 benchmarks/cpython_stdlib/native_json_values.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json-values.json"
           python3 benchmarks/cpython_stdlib/native_os.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
           python3 benchmarks/cpython_stdlib/native_os_path.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-os-path.json"
+      - name: Build and install a Relar extension wheel
+        run: |
+          python3 -m pip install "wheel==0.45.1" "packaging==25.0"
+          python3 tests/extension_wheel.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
+      - uses: ./.github/actions/test-google-crc32c
+        with:
+          cc: clang-18
+          cxx: clang++-18
       - name: Check native build caching, linker options, and status
         run: |
           # Exercise the distro toolchain without setup-python's LD_LIBRARY_PATH.
@@ -103,10 +119,13 @@ jobs:
           done
       - name: Run vendored CPython Counter methods in native Relar
         run: python3 benchmarks/cpython_stdlib/native_counter.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --result "$RUNNER_TEMP/cpython-counter.json"
-      - name: Compare Ruff’s conformance reports with CPython
+      - name: Compare Ruff’s reporters with CPython
         run: |
           target/release/relar build examples/conformance_report/upstream/conformance.py -o "$RUNNER_TEMP/ruff-conformance"
           python3 tests/ruff_program.py --binary "$RUNNER_TEMP/ruff-conformance"
+          target/release/relar build examples/memory_report/upstream/memory_report.py -o "$RUNNER_TEMP/ruff-memory"
+          python3 tests/ruff_memory_compare.py --binary "$RUNNER_TEMP/ruff-memory"
+          python3 tests/ruff_memory_run.py --binary "$RUNNER_TEMP/ruff-memory"
           target/release/relar build examples/conformance_report/__main__.py --module-root examples -o "$RUNNER_TEMP/conformance-report"
           python3 benchmarks/conformance_grouping_inputs.py \
             --archive benchmarks/results/2026-10-22-collector-ownership-study.tar.xz \
@@ -142,6 +161,7 @@ jobs:
       - name: Check generated code and runtime with AddressSanitizer
         run: |
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"
+          python3 tests/extension_wheel.py --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-asan-o1 --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
             -- --compiler target/release/relar --runtime "target/asan/$relar_target/release/librelar_runtime.a" --clang clang-18 --sanitize --opt-levels 1
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-asan-o0 --suites containers tuple_keys fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions files paths processes argparse_cli \

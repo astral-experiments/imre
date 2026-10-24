@@ -373,6 +373,15 @@ pub(crate) enum Compare {
 pub(crate) enum Builtin {
     DirectoryContextView,
     Document(DocumentOp),
+    /// Runs the static archive's module initializer in ordinary import order.
+    ExtensionImport(String),
+    /// Calls a checked declaration in a rebuilt extension's method table.
+    ExtensionCall {
+        module: String,
+        method: String,
+        kinds: Vec<u8>,
+        result_kind: u8,
+    },
     StrEnumMember {
         class: usize,
         member: usize,

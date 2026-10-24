@@ -51,11 +51,12 @@ pub(crate) struct Session {
     files: Vec<File>,
     rules: Arc<RuleSelection>,
     root: PathBuf,
+    extension_roots: Vec<PathBuf>,
     used_hints: Cell<bool>,
 }
 
 impl Session {
-    pub(crate) fn new(root: &Path) -> Result<Self, String> {
+    pub(crate) fn new(root: &Path, extension_roots: &[PathBuf]) -> Result<Self, String> {
         let root = root.to_str().ok_or("module paths must be valid UTF-8")?;
         let system = InMemorySystem::default();
         system
@@ -115,10 +116,18 @@ impl Session {
         ).map_err(|error| error.to_string())?;
         let mut settings = ProgramSettings::empty(&vendored);
         settings.python_version.version = ruff_python_ast::PythonVersion::PY312;
-        settings.search_paths =
-            ty_module_resolver::SearchPathSettings::new(vec![SystemPathBuf::from(root)])
-                .to_search_paths(&system, &vendored, &ty_module_resolver::FallibleStrategy)
+        let mut roots = vec![SystemPathBuf::from(root)];
+        for path in extension_roots {
+            let path = path.to_str().ok_or("extension paths must be valid UTF-8")?;
+            system
+                .fs()
+                .create_directory_all(path)
                 .map_err(|error| error.to_string())?;
+            roots.push(SystemPathBuf::from(path));
+        }
+        settings.search_paths = ty_module_resolver::SearchPathSettings::new(roots)
+            .to_search_paths(&system, &vendored, &ty_module_resolver::FallibleStrategy)
+            .map_err(|error| error.to_string())?;
         // The closed checker enforces these type contracts and fixed tuple bounds.
         // Invalid indices and zero slice steps can also be runtime errors. Disable
         // these ty diagnostics before it expands types to construct their messages.
@@ -155,6 +164,7 @@ impl Session {
             files: Vec::new(),
             rules: Arc::new(rules),
             root: PathBuf::from(root),
+            extension_roots: extension_roots.to_vec(),
             used_hints: Cell::new(false),
         })
     }
@@ -218,7 +228,7 @@ impl Session {
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
     /// passed the loader's preflight in this snapshot.
     fn diagnostic_copy(&self) -> Result<Self, String> {
-        let mut copy = Self::new(&self.root)?;
+        let mut copy = Self::new(&self.root, &self.extension_roots)?;
         for &file in &self.files {
             let path = file
                 .path(&self.db)
@@ -403,6 +413,7 @@ impl CachedSession {
     // A changed search root, import miss or file identity can change name resolution.
     fn same_files(&self, fresh: &Session, inputs: &crate::SourceInputs) -> bool {
         self.session.root == fresh.root
+            && self.session.extension_roots == fresh.extension_roots
             && self.inputs.missing == inputs.missing
             && self.inputs.files.len() == inputs.files.len()
             && self
@@ -816,7 +827,7 @@ mod diagnostic_mode_tests {
     #[test]
     fn enabling_diagnostics_invalidates_quiet_checks() {
         let root = Path::new("/project");
-        let mut session = Session::new(root).unwrap();
+        let mut session = Session::new(root, &[]).unwrap();
         session
             .add(&root.join("main.py"), "def f(x: int) -> None:\n    x()\n")
             .unwrap();

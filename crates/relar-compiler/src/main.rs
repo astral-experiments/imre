@@ -25,13 +25,15 @@ enum Allocator {
 
 const JEMALLOC_RUNTIME: &str = "librelar_runtime_jemalloc.a";
 
-const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--reachable-only] [--entry-profile FILE] [--watch | -w]
+const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--entry-profile FILE] [--watch | -w]
+       relar extension-header
        relar build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]
        relar run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]
 
 Build options:
   --module-root DIRECTORY  --runtime LIBRARY.a  --emit-llvm FILE.ll
   --reachable-only         Compile definitions reachable from program entry and module initialization
+  --extension-path DIRECTORY  Search an installed Relar wheel directory (repeatable)
   --clang CLANG  --opt-level 0|1|2|3  --sanitize  --no-cache  --whole-program
   -q, --quiet              Suppress build status
   -v, --verbose            Show individual module decisions
@@ -73,6 +75,13 @@ fn run() -> Result<ExitCode, String> {
             "relar {} (Ruff/ty 0.0.14; LLVM AOT)",
             env!("CARGO_PKG_VERSION")
         );
+        return Ok(ExitCode::SUCCESS);
+    }
+    if command == "extension-header" {
+        if args.next().is_some() {
+            return Err("relar extension-header takes no arguments".into());
+        }
+        print!("{}", include_str!("../../relar-runtime/include/Python.h"));
         return Ok(ExitCode::SUCCESS);
     }
     let execute = command == "run";
@@ -222,13 +231,18 @@ fn run() -> Result<ExitCode, String> {
                 &link,
             )
         });
+    // Wheel archives and their optional library manifests must be reread at link time.
+    // Generated module objects are still keyed by their complete LLVM IR.
+    let executable_cache = cache
+        .as_ref()
+        .filter(|_| options.extension_paths.is_empty());
     if let Some(cache) = &cache {
         if identity(&output)?.starts_with(&cache.root) {
             return Err("output cannot overwrite the executable cache".into());
         }
         // A verbose link must invoke the driver so its printed command is accurate.
         if !link.verbose
-            && let Some((file, sources)) = cache.lookup()
+            && let Some((file, sources)) = executable_cache.and_then(|cache| cache.lookup())
         {
             validate_paths(
                 sources.files.iter().map(|(p, _, _)| p.as_path()),
@@ -247,7 +261,11 @@ fn run() -> Result<ExitCode, String> {
             }
             return Ok(ExitCode::SUCCESS);
         }
-        build_cache::trace(if link.verbose { "relink" } else { "miss" });
+        build_cache::trace(if link.verbose || executable_cache.is_none() {
+            "relink"
+        } else {
+            "miss"
+        });
     } else {
         build_cache::trace("bypass");
     }
@@ -256,22 +274,37 @@ fn run() -> Result<ExitCode, String> {
         Whole(String),
         Units(Vec<CodegenUnit>),
     }
-    let (code, input_paths, sources) = if split {
+    let (code, input_paths, sources, extension_archives) = if split {
         let c = relar_compiler::compile_file_units(&source_path, module_root.as_deref(), &options)?;
-        (Code::Units(c.units), c.input_paths, c.source_inputs)
+        (
+            Code::Units(c.units),
+            c.input_paths,
+            c.source_inputs,
+            c.extension_archives,
+        )
     } else {
         let c = relar_compiler::compile_file(&source_path, module_root.as_deref(), &options)?;
-        (Code::Whole(c.llvm_ir), c.input_paths, c.source_inputs)
+        (
+            Code::Whole(c.llvm_ir),
+            c.input_paths,
+            c.source_inputs,
+            c.extension_archives,
+        )
     };
+    let (library_manifests, native_libraries) = extension_libraries(&extension_archives)?;
     validate_paths(
-        input_paths.iter().map(PathBuf::as_path),
+        input_paths
+            .iter()
+            .chain(&extension_archives)
+            .chain(&library_manifests)
+            .map(PathBuf::as_path),
         &runtime,
         &output,
         llvm_path.as_deref(),
         lto_linker.as_deref().or(native_lld),
         bundled.as_ref().map(|tools| tools.clang.as_path()),
     )?;
-    let stage = cache.as_ref().and_then(|c| c.stage());
+    let stage = executable_cache.and_then(|c| c.stage());
     let staged_output = stage.as_ref().map(|s| s.path().join("program"));
     let mut temporary = None;
     let mut scratch = None;
@@ -305,7 +338,9 @@ fn run() -> Result<ExitCode, String> {
                     .expect("native toolchain for module objects"),
                 &optimization,
                 dir.path(),
-                stage.as_ref().and(cache.as_ref()),
+                cache
+                    .as_ref()
+                    .filter(|_| stage.is_some() || !options.extension_paths.is_empty()),
                 |name, hit| progress.unit(name, hit),
             )?;
             progress.linking();
@@ -328,7 +363,9 @@ fn run() -> Result<ExitCode, String> {
         .arg(format!("-O{}", optimization.to_string_lossy()))
         .arg("-Wno-override-module")
         .args(&native_inputs)
-        .arg(&runtime);
+        .args(&extension_archives)
+        .arg(&runtime)
+        .args(native_libraries);
     if let Some(stage) = &stage {
         let mut depfile = OsString::from("--dependency-file=");
         depfile.push(stage.path().join("link.d"));
@@ -431,6 +468,47 @@ fn run() -> Result<ExitCode, String> {
         return run_program(&output, directory, &source_path, args);
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// Read only library names, never arbitrary driver or linker options, from a wheel.
+/// Keep input manifests protected by the same output alias check as the archives.
+fn extension_libraries(archives: &[PathBuf]) -> Result<(Vec<PathBuf>, Vec<String>), String> {
+    let mut manifests = Vec::new();
+    let mut libraries = Vec::new();
+    for archive in archives {
+        let path = archive.with_extension("libs");
+        let canonical = match path.canonicalize() {
+            Ok(canonical) => canonical,
+            Err(e) if e.kind() == ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("{}: {e}", path.display())),
+        };
+        if canonical.parent() != archive.parent() {
+            return Err(format!(
+                "link library manifest resolves outside the archive directory: {}",
+                path.display()
+            ));
+        }
+        let contents =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        for name in contents.lines().filter(|line| !line.is_empty()) {
+            if !name.starts_with(|ch: char| ch.is_ascii_alphanumeric() || ch == '_')
+                || !name
+                    .bytes()
+                    .all(|ch| ch.is_ascii_alphanumeric() || b"._+-".contains(&ch))
+            {
+                return Err(format!(
+                    "{}: invalid native link library name {name:?}",
+                    path.display()
+                ));
+            }
+            let arg = format!("-l{name}");
+            if !libraries.contains(&arg) {
+                libraries.push(arg);
+            }
+        }
+        manifests.push(path);
+    }
+    Ok((manifests, libraries))
 }
 
 fn validate_paths<'a>(

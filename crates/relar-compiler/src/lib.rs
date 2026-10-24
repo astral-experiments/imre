@@ -36,6 +36,8 @@ pub struct CompileOptions {
     pub reachable_only: bool,
     /// Marks generated functions for LLVM's AddressSanitizer pass.
     pub address_sanitizer: bool,
+    /// Explicit installation roots containing rebuilt native modules and their type stubs.
+    pub extension_paths: Vec<PathBuf>,
 }
 
 impl CompileOptions {
@@ -45,12 +47,13 @@ impl CompileOptions {
         module_root: Option<&Path>,
         filesystem: watch::FileSystem<'_>,
     ) -> Result<modules::SourceGraph, String> {
-        modules::SourceGraph::load_profile_with(
+        modules::SourceGraph::load_with(
             path,
             module_root,
+            &self.extension_paths,
+            filesystem,
             self.reachable_only || self.entry_profile.is_some(),
             self.entry_profile.as_deref(),
-            filesystem,
         )
     }
 }
@@ -80,6 +83,8 @@ pub struct Compilation {
     pub llvm_ir: String,
     pub input_paths: Vec<PathBuf>,
     pub source_inputs: SourceInputs,
+    /// Native archives reached by the static import graph, in link order.
+    pub extension_archives: Vec<PathBuf>,
 }
 
 /// Files and failed import lookups observed by the source loader.
@@ -116,6 +121,22 @@ pub fn check_file_with_options(
     check_file_with(path, module_root, options, None, Default::default())
 }
 
+/// Checks first-party code against the declarations in explicitly installed extension wheels.
+pub fn check_file_with_extensions(
+    path: &Path,
+    module_root: Option<&Path>,
+    extension_paths: &[PathBuf],
+) -> Result<(), String> {
+    check_file_with_options(
+        path,
+        module_root,
+        &CompileOptions {
+            extension_paths: extension_paths.to_vec(),
+            ..CompileOptions::default()
+        },
+    )
+}
+
 fn check_file_with(
     path: &Path,
     module_root: Option<&Path>,
@@ -140,6 +161,11 @@ pub fn compile_file(
     let ranges = ranges::analyze(&module);
     Ok(Compilation {
         llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer)?,
+        extension_archives: graph
+            .modules
+            .iter()
+            .filter_map(|m| m.archive.clone())
+            .collect(),
         source_inputs: graph.inputs,
         input_paths: graph
             .modules
@@ -159,6 +185,8 @@ pub struct UnitCompilation {
     pub units: Vec<CodegenUnit>,
     pub input_paths: Vec<PathBuf>,
     pub source_inputs: SourceInputs,
+    /// Native archives reached by the static import graph, in link order.
+    pub extension_archives: Vec<PathBuf>,
 }
 
 /// Reuses ty's semantic queries across revisions of a first-party program in this process.
@@ -201,6 +229,25 @@ impl IncrementalCompiler {
         report: impl FnMut(Result<(), String>),
     ) -> Result<(), String> {
         watch::check(&mut self.cache, path, module_root, options, report)
+    }
+
+    /// Watches the current revision and declarations in installed extension wheels.
+    pub fn watch_file_with_extensions(
+        &mut self,
+        path: &Path,
+        module_root: Option<&Path>,
+        extension_paths: &[PathBuf],
+        report: impl FnMut(Result<(), String>),
+    ) -> Result<(), String> {
+        self.watch_file_with_options(
+            path,
+            module_root,
+            &CompileOptions {
+                extension_paths: extension_paths.to_vec(),
+                ..CompileOptions::default()
+            },
+            report,
+        )
     }
 
     /// Checks the current revision and emits the same codegen units as [`compile_file_units`].
@@ -249,6 +296,11 @@ fn compile_file_units_with(
             &names,
             graph.entry,
         )?,
+        extension_archives: graph
+            .modules
+            .iter()
+            .filter_map(|m| m.archive.clone())
+            .collect(),
         input_paths: graph
             .modules
             .into_iter()

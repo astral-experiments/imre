@@ -647,7 +647,42 @@ pub(crate) fn lower_with_owners(
                 checker.assigned.insert(slot);
                 params.push(slot);
             }
-            let (mut body, falls_through) = if classes.keyword_copies.contains(&signature.id) {
+            let (mut body, falls_through) = if module.archive.is_some() {
+                let args = params.iter().map(|&slot| checker.local(slot)).collect();
+                let kind = |ty| match ty {
+                    Type::None => Ok(0),
+                    Type::Int => Ok(1),
+                    Type::Bytes => Ok(2),
+                    Type::ListInt => Ok(3),
+                    Type::Callable(_)
+                        if types.signature(ty) == Some((vec![Type::Int], Type::Int)) =>
+                    {
+                        Ok(4)
+                    }
+                    _ => Err(error(
+                        &module.source,
+                        definition,
+                        "native declarations currently support None, int, bytes, list[int], and Callable[[int], int]",
+                    )),
+                };
+                let call = Builtin::ExtensionCall {
+                    module: module.name.rsplit('.').next().unwrap().to_owned(),
+                    method: definition.name.to_string(),
+                    kinds: signature
+                        .params
+                        .iter()
+                        .map(|p| kind(p.ty))
+                        .collect::<Result<_, _>>()?,
+                    result_kind: kind(signature.returns)?,
+                };
+                (
+                    vec![Statement::Return(Expr {
+                        ty: signature.returns,
+                        kind: ExprKind::Builtin(call, args),
+                    })],
+                    false,
+                )
+            } else if classes.keyword_copies.contains(&signature.id) {
                 let class = signature.method.unwrap().class;
                 let value = checker.dispatch_record(
                     class,
@@ -831,12 +866,28 @@ pub(crate) fn lower_with_owners(
         }
     }
     for initialization in &initializations {
+        let module = &graph.modules[initialization.module];
+        let mut body = initialization.function.body.clone();
+        if module.archive.is_some() {
+            body.insert(
+                0,
+                Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(
+                        Builtin::ExtensionImport(
+                            module.name.rsplit('.').next().unwrap().to_owned(),
+                        ),
+                        vec![],
+                    ),
+                }),
+            );
+        }
         owners.push(initialization.module);
         functions.push(ir::Function {
             params: Vec::new(),
             returns: Type::None,
             locals: initialization.function.locals.clone(),
-            body: initialization.function.body.clone(),
+            body,
         });
         call_graph.push(initialization.calls.clone());
         class_reads.push(HashSet::new());
@@ -4018,16 +4069,17 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
             });
         }
-        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::SysPlatform)) {
+        if let Some(Binding::Intrinsic(
+            intrinsic @ (Intrinsic::SysExecutable | Intrinsic::SysPlatform),
+        )) = self.resolve(expression)
+        {
+            let operation = match intrinsic {
+                Intrinsic::SysExecutable => Builtin::Process(ir::ProcessOperation::Executable),
+                _ => Builtin::SysPlatform,
+            };
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::SysPlatform, Vec::new()),
-            });
-        }
-        if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::SysExecutable)) {
-            return Ok(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::Executable), vec![]),
+                kind: ExprKind::Builtin(operation, Vec::new()),
             });
         }
         let (ty, kind) = match expression {

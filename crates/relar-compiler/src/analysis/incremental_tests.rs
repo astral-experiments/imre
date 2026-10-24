@@ -100,7 +100,7 @@ fn ty_rechecks_an_importer_when_a_used_parameter_is_renamed() {
     let mut cache = AnalysisCache::default();
     // Exercise ty in isolation: ordinary Relar lowering also rejects this bad keyword.
     let mut ty_check = || {
-        let mut graph = crate::modules::SourceGraph::load(&entry, None).unwrap();
+        let mut graph = crate::modules::SourceGraph::load(&entry, None, &[]).unwrap();
         let fresh = graph.session.check_scopes(None, &[]);
         let (incremental, ran) =
             with_checked_files(|| cache.check_scopes(&mut graph.session, &graph.inputs, None, &[]));
