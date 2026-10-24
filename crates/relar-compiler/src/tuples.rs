@@ -3,11 +3,12 @@
 //! Each component is an ordinary owned local. Arguments and elements are evaluated
 //! once in their original order, into owned temporaries, before any old component
 //! is replaced. This preserves snapshots of mutable fields and aliases of mutable
-//! elements. Tuples used as whole values keep the existing boxed representation.
+//! elements. A read-only key can probe with these components. An insertion
+//! materializes the tuple only when its identity can escape at most once.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use crate::ir::{Builtin, Expr, ExprKind, Function, Module, Statement, Type};
+use crate::ir::{Builtin, Expr, ExprKind, Function, Module, Statement, TUPLE_PROBE_ARITY, Type};
 
 struct Producer {
     params: Vec<usize>,
@@ -17,11 +18,13 @@ struct Producer {
 struct Candidate {
     eligible: bool,
     fields: Option<Vec<Type>>,
+    literal_key: bool,
+    probed: bool,
+    stored: bool,
 }
 
-/// Optimizes only projection/length-only locals built by literals or a function
-/// consisting solely of `return (elements...)`. Producer functions and every
-/// escaping tuple retain their original signatures and boxed runtime ABI.
+/// Splits locals built by literals or by a function that only returns a tuple.
+/// Producer functions retain their original signatures and boxed runtime ABI.
 pub(crate) fn scalarize(module: &mut Module) {
     let producers = module
         .functions
@@ -92,13 +95,23 @@ fn scalarize_function(
                 && !function.params.contains(&slot)
                 && !types.may_own_file(*ty, class_fields, true),
             fields: None,
+            literal_key: true,
+            probed: false,
+            stored: false,
         })
         .collect::<Vec<_>>();
-    inspect(&function.body, &mut candidates, producers);
+    inspect(
+        &function.body,
+        &mut candidates,
+        producers,
+        &mut HashSet::new(),
+    );
     let mut components = vec![None; candidates.len()];
     for (slot, candidate) in candidates.into_iter().enumerate() {
         if candidate.eligible
+            && (!candidate.stored || candidate.probed)
             && let Some(fields) = candidate.fields
+            && (!candidate.probed || candidate.literal_key)
         {
             components[slot] = Some(
                 fields
@@ -137,9 +150,16 @@ fn tuple_elements<'a>(
     }
 }
 
-/// A local is eligible only when every assignment has a known tuple shape and
-/// every read is a direct field projection or len; whole-value aliases escape.
-fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[Option<Producer>]) {
+/// `fresh` lists unconditional tuple assignments in this block or its parents
+/// since the innermost loop header. A single insertion dominated by one of
+/// these assignments can never publish two distinct objects for one source key.
+fn inspect(
+    statements: &[Statement],
+    candidates: &mut [Candidate],
+    producers: &[Option<Producer>],
+    fresh: &mut HashSet<usize>,
+) {
+    let mut introduced = Vec::new();
     for statement in statements {
         match statement {
             Statement::Assign(slot, value) => {
@@ -149,7 +169,14 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
                     if candidate.fields.as_ref().is_some_and(|old| old != &fields) {
                         candidate.eligible = false;
                     }
+                    // Keep calls at probe-producing assignments: inlining their
+                    // arguments can change destructor order if a later one fails.
+                    candidate.literal_key &= matches!(value.kind, ExprKind::Tuple(_))
+                        && TUPLE_PROBE_ARITY.contains(&fields.len());
                     candidate.fields = Some(fields);
+                    if candidate.eligible && candidate.literal_key && fresh.insert(*slot) {
+                        introduced.push(*slot);
+                    }
                 } else {
                     candidates[*slot].eligible = false;
                 }
@@ -177,6 +204,17 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
             // Clearing the aggregate releases exactly the component owners.
             // It neither observes tuple identity nor lets the aggregate escape.
             Statement::Clear(_) => {}
+            Statement::SetItem(dict, key, value)
+                if matches!(dict.ty, Type::Dict(_))
+                    && let ExprKind::Local(slot) = key.kind
+                    && matches!(key.ty, Type::Tuple(_)) =>
+            {
+                let candidate = &mut candidates[slot];
+                candidate.eligible &= !candidate.stored && fresh.contains(&slot);
+                candidate.stored = true;
+                inspect_expression(dict, candidates, producers);
+                inspect_expression(value, candidates, producers);
+            }
             Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
                 for value in [a, b, c] {
                     inspect_expression(value, candidates, producers);
@@ -191,15 +229,15 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
             }
             Statement::If(condition, yes, no) => {
                 inspect_expression(condition, candidates, producers);
-                inspect(yes, candidates, producers);
-                inspect(no, candidates, producers);
+                inspect(yes, candidates, producers, fresh);
+                inspect(no, candidates, producers, fresh);
             }
             Statement::While(condition, body, orelse) => {
                 inspect_expression(condition, candidates, producers);
-                inspect(body, candidates, producers);
-                inspect(orelse, candidates, producers);
+                inspect(body, candidates, producers, &mut HashSet::new());
+                inspect(orelse, candidates, producers, fresh);
             }
-            Statement::Scope { body, .. } => inspect(body, candidates, producers),
+            Statement::Scope { body, .. } => inspect(body, candidates, producers, fresh),
             Statement::Try {
                 body,
                 handlers,
@@ -207,10 +245,10 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
                 finalbody,
             } => {
                 for body in [body, orelse, finalbody] {
-                    inspect(body, candidates, producers);
+                    inspect(body, candidates, producers, fresh);
                 }
                 for handler in handlers {
-                    inspect(&handler.body, candidates, producers);
+                    inspect(&handler.body, candidates, producers, fresh);
                 }
             }
             Statement::Raise(value) => {
@@ -229,11 +267,14 @@ fn inspect(statements: &[Statement], candidates: &mut [Candidate], producers: &[
                 for arg in args {
                     inspect_expression(arg, candidates, producers);
                 }
-                inspect(body, candidates, producers);
-                inspect(orelse, candidates, producers);
+                inspect(body, candidates, producers, &mut HashSet::new());
+                inspect(orelse, candidates, producers, fresh);
             }
             Statement::Break | Statement::Continue | Statement::Exhaust => {}
         }
+    }
+    for slot in introduced {
+        fresh.remove(&slot);
     }
 }
 
@@ -244,7 +285,7 @@ fn inspect_expression(
 ) {
     match &expression.kind {
         ExprKind::Scope { body, value, .. } => {
-            inspect(body, candidates, producers);
+            inspect(body, candidates, producers, &mut HashSet::new());
             inspect_expression(value, candidates, producers);
         }
         ExprKind::Local(slot) => candidates[*slot].eligible = false,
@@ -257,6 +298,17 @@ fn inspect_expression(
                     ..
                 }]
             ) => {}
+        ExprKind::Builtin(builtin, args) if let Some(key) = builtin.tuple_probe_index() => {
+            for (index, arg) in args.iter().enumerate() {
+                if index == key
+                    && let ExprKind::Local(slot) = arg.kind
+                {
+                    candidates[slot].probed = true;
+                } else {
+                    inspect_expression(arg, candidates, producers);
+                }
+            }
+        }
         _ => children(expression, |child| {
             inspect_expression(child, candidates, producers)
         }),
@@ -463,6 +515,22 @@ fn rewrite_expression(
         return;
     }
     let replacement = match &expression.kind {
+        // The only surviving whole reads are a read-only probe (stack storage)
+        // or its single insertion (owned storage). Both use the saved fields.
+        ExprKind::Local(slot) => components
+            .get(*slot)
+            .and_then(Option::as_ref)
+            .map(|fields| {
+                ExprKind::Tuple(
+                    fields
+                        .iter()
+                        .map(|&slot| Expr {
+                            ty: locals[slot],
+                            kind: ExprKind::Local(slot),
+                        })
+                        .collect(),
+                )
+            }),
         ExprKind::Field(receiver, field) => {
             if let ExprKind::Local(slot) = receiver.kind {
                 components
