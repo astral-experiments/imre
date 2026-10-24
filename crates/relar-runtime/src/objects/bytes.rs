@@ -39,7 +39,7 @@ pub extern "C" fn relar_byte_output_new() -> *const Object {
 /// filling its output, and a failed hint must leave the next append unchanged.
 ///
 /// # Safety
-/// Root the private builder and all three canonical range arguments.
+/// The builder is rooted or null. Root all three canonical range arguments.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_byte_output_reserve_range(
     output: *const Object,
@@ -48,6 +48,9 @@ pub unsafe extern "C" fn relar_byte_output_reserve_range(
     step: usize,
     per_iteration: usize,
 ) {
+    if output.is_null() {
+        return;
+    }
     // SAFETY: the caller supplies the same captured operands as the range loop.
     let Some(trips) = (unsafe { crate::small_range_trips(start, stop, step) }) else {
         return;
@@ -97,6 +100,7 @@ unsafe fn append_bytes<const N: usize>(output: *const Object, words: [usize; N])
 /// Root the private output and the exact integer throughout the append.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_byte_output_append(output: *const Object, word: usize) {
+    // SAFETY: the caller roots both the output and the canonical integer.
     unsafe { append_bytes(output, [word]) }
 }
 
@@ -108,6 +112,7 @@ pub unsafe extern "C" fn relar_byte_output_append_pair(
     first: usize,
     second: usize,
 ) {
+    // SAFETY: the caller roots the output and both canonical integers.
     unsafe { append_bytes(output, [first, second]) }
 }
 
@@ -704,6 +709,7 @@ mod tests {
         // SAFETY: the sole owner roots this private builder through conversion.
         unsafe {
             let output = Rc::from_raw(relar_byte_output_new());
+            relar_byte_output_reserve_range(std::ptr::null(), 1, 2001, 3, 2);
             relar_byte_output_reserve_range(Rc::as_ptr(&output), 1, 2001, 3, usize::MAX);
             output.0.with(|storage| {
                 let Storage::ByteOutput(output) = storage else {
