@@ -37,7 +37,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "relar-record-reference"
+name = "imre-record-reference"
 version = "0.1.0"
 dependencies = [
  "num-bigint",

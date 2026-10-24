@@ -19,8 +19,8 @@ env:
 
 jobs:
   plan:
-    if: github.repository == 'astral-sh/relar' && github.ref == 'refs/heads/main'
-    runs-on: ${{ github.repository == 'astral-sh/relar' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    if: github.repository == 'astral-sh/imre' && github.ref == 'refs/heads/main'
+    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     permissions:
       contents: read
     outputs:
@@ -37,7 +37,7 @@ jobs:
           enable-cache: false
       - id: plan
         run: |
-          tag=$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "relar-compiler").version')
+          tag=$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "imre-compiler").version')
           uv run --only-dev --python 3.12 dist plan --tag="$tag" --output-format=json > plan-dist-manifest.json
           echo "manifest=$(jq -c . plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
       - name: Check release tag
@@ -71,7 +71,7 @@ jobs:
   publish-github:
     needs: [plan, build-release-artifacts]
     if: ${{ !inputs.dry-run }}
-    runs-on: ${{ github.repository == 'astral-sh/relar' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     permissions:
       contents: write
     steps:
@@ -98,10 +98,10 @@ jobs:
 
   publish-mirror:
     needs: [plan, publish-github]
-    runs-on: ${{ github.repository == 'astral-sh/relar' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
+    runs-on: ${{ github.repository == 'astral-sh/imre' && 'github-ubuntu-24.04-x86_64-4' || 'ubuntu-24.04' }}
     environment: release
     concurrency:
-      group: relar-publish-mirror
+      group: imre-publish-mirror
       queue: max
     permissions:
       contents: read
@@ -113,14 +113,14 @@ jobs:
       - name: Download and verify public release assets
         run: |
           gh release download "$RELEASE_TAG" --dir public \
-            --pattern 'relar-*.tar.gz' --pattern 'relar-*.tar.gz.sha256' \
-            --pattern relar-installer.sh --pattern sha256.sum
+            --pattern 'imre-*.tar.gz' --pattern 'imre-*.tar.gz.sha256' \
+            --pattern imre-installer.sh --pattern sha256.sum
           cd public
           sha256sum --check --strict sha256.sum
-          for archive in relar-*.tar.gz; do
+          for archive in imre-*.tar.gz; do
             sha256sum --check --strict "$archive.sha256"
           done
-          cp relar-installer.sh install.sh
+          cp imre-installer.sh install.sh
           sha256sum --binary install.sh *.tar.gz.sha256 >> sha256.sum
       - name: Publish to Astral Labs
         shell: bash
@@ -134,12 +134,12 @@ jobs:
           PRERELEASE: ${{ fromJson(needs.plan.outputs.val).announcement_is_prerelease }}
         run: |
           aws s3 cp --recursive --cache-control 'public, max-age=31536000, immutable' \
-            . "s3://$R2_BUCKET/relar/releases/$RELEASE_TAG/"
-          curl -LsSf --retry 3 "https://labs.astral.sh/relar/releases/$RELEASE_TAG/install.sh" | cmp - install.sh
+            . "s3://$R2_BUCKET/imre/releases/$RELEASE_TAG/"
+          curl -LsSf --retry 3 "https://labs.astral.sh/imre/releases/$RELEASE_TAG/install.sh" | cmp - install.sh
           if [[ "$PRERELEASE" == false ]]; then
             latest=$(gh release view --json tagName --jq .tagName)
             if [[ "$RELEASE_TAG" == "$latest" ]]; then
               aws s3 cp --cache-control 'public, max-age=300' \
-                install.sh "s3://$R2_BUCKET/relar/install.sh"
+                install.sh "s3://$R2_BUCKET/imre/install.sh"
             fi
           fi

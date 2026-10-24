@@ -1,6 +1,6 @@
 //! Benchmark-only native OS/TOML boundaries shared by Codon and the Rust oracle.
 //!
-//! This crate never loads Python or Relar and contains no report computation.
+//! This crate never loads Python or Imre and contains no report computation.
 
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString, c_char};
@@ -341,7 +341,7 @@ fn call(operation: i32, request: &str) -> Result<String> {
 /// # Safety
 /// `request` must point to a valid NUL-terminated UTF-8 C string for this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_benchmark_platform_call(
+pub unsafe extern "C" fn imre_benchmark_platform_call(
     operation: i32,
     request: *const c_char,
 ) -> *mut c_char {
@@ -372,12 +372,12 @@ pub unsafe extern "C" fn relar_benchmark_platform_call(
         .into_raw()
 }
 
-/// Release a result allocated by [`relar_benchmark_platform_call`].
+/// Release a result allocated by [`imre_benchmark_platform_call`].
 ///
 /// # Safety
 /// `result` must be a live returned pointer and must be freed exactly once.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_benchmark_platform_free(result: *mut c_char) {
+pub unsafe extern "C" fn imre_benchmark_platform_free(result: *mut c_char) {
     if !result.is_null() {
         drop(unsafe { CString::from_raw(result) });
     }

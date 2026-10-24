@@ -1,27 +1,29 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Compiling a real ty memory-report comparator
 
 The typed port of Ruff/ty’s two-file memory-report comparator runs within **1.13–1.46× Rust’s time** on the large cases, meeting the ≤2× target in both ordinary and ThinLTO builds. These cases decode **65,024 items per input file**, compare the reports, and write the complete Markdown result. The unchanged upstream script also runs as a separate CPython reference.
 
-This is a typed port of the useful comparison mode, with explicit report/item records and `relar.json.decode(text, MemoryReport)`. It is not a claim that the entire original script compiles unchanged. The [example guide](../../examples/memory_report/README.md) documents the supported CLI and schema; the [Rust reference guide](../reference/memory_report/README.md) describes the independent implementation and reproduction commands.
+This is a typed port of the useful comparison mode, with explicit report/item records and `imre.json.decode(text, MemoryReport)`. It is not a claim that the entire original script compiles unchanged. The [example guide](../../examples/memory_report/README.md) documents the supported CLI and schema; the [Rust reference guide](../reference/memory_report/README.md) describes the independent implementation and reproduction commands.
 
 ## Large inputs
 
-Complete-program median milliseconds; 12 measured rounds per engine. Lower Relar/Rust is better.
+Complete-program median milliseconds; 12 measured rounds per engine. Lower Imre/Rust is better.
 
-| Build | Case | Original CPython | Typed CPython | Relar | Rust | Relar/Rust | Relar empty control |
+| Build | Case | Original CPython | Typed CPython | Imre | Rust | Imre/Rust | Imre empty control |
 |---|---|---:|---:|---:|---:|---:|---:|
 | Ordinary | Full comparison | 428.651 | 2507.637 | 179.899 | 123.148 | 1.461× | 1.60% |
 | Ordinary | Unchanged report | 295.035 | 2442.423 | 107.331 | 95.115 | 1.128× | 2.68% |
 | ThinLTO | Full comparison | 439.783 | 2518.968 | 163.696 | 113.035 | 1.448× | 1.74% |
 | ThinLTO | Unchanged report | 287.379 | 2409.657 | 103.436 | 85.775 | 1.206× | 2.75% |
 
-The empty control reads and decodes two valid empty reports and writes a result. It is **not all fixed cost**: it excludes nonempty parsing and comparison. Its median is only 1.60–2.75% of Relar’s large-case median, so startup does not explain the large-case result. No control time is subtracted.
+The empty control reads and decodes two valid empty reports and writes a result. It is **not all fixed cost**: it excludes nonempty parsing and comparison. Its median is only 1.60–2.75% of Imre’s large-case median, so startup does not explain the large-case result. No control time is subtracted.
 
 ## All measured cases
 
 The two genuine captures come from ty 0.0.89 and 0.0.90, running on identical source snapshots: this repository’s inventory example (168 items/file), and Ruff’s scripts directory (254 items/file). The scaled cases are explicitly synthetic: 32 or 256 copies of the genuine Ruff capture, with distinct item-name suffixes and scaled totals (8,128 or 65,024 items/file). “Unchanged” compares old with old; both files are still read and decoded in full. Exact producer commands, versions, source hashes, original JSON, and warning logs are retained in the [capture provenance](../../examples/memory_report/sample/provenance.json).
 
-| Build | Case | Original CPython ms | Typed CPython ms | Relar ms | Rust ms | Relar/Rust |
+| Build | Case | Original CPython ms | Typed CPython ms | Imre ms | Rust ms | Imre/Rust |
 |---|---|---:|---:|---:|---:|---:|
 | Ordinary | `real-inventory` | 75.918 | 55.086 | 3.187 | 3.012 | 1.058× |
 | Ordinary | `real-ruff-scripts` | 75.417 | 57.988 | 3.534 | 3.313 | 1.067× |
@@ -38,7 +40,7 @@ The two genuine captures come from ty 0.0.89 and 0.0.90, running on identical so
 
 Empty-control medians (ms):
 
-| Build | Original CPython | Typed CPython | Relar | Rust |
+| Build | Original CPython | Typed CPython | Imre | Rust |
 |---|---:|---:|---:|---:|
 | Ordinary | 74.393 | 48.009 | 2.882 | 2.695 |
 | ThinLTO | 75.142 | 49.088 | 2.848 | 2.752 |
@@ -51,7 +53,7 @@ The first runnable port already met the target. Profiling then identified two re
 
 The exploratory baseline used four measured rounds; the final result uses twelve. These are separate sessions, so the following before/after medians are descriptive rather than isolated causal estimates.
 
-| Build | Large case | Baseline Relar ms | Final Relar ms | Reduction |
+| Build | Large case | Baseline Imre ms | Final Imre ms | Reduction |
 |---|---|---:|---:|---:|
 | Ordinary | `scaled-full-256` | 199.929 | 179.899 | 10.02% |
 | Ordinary | `scaled-unchanged-256` | 125.191 | 107.331 | 14.27% |
@@ -60,14 +62,14 @@ The exploratory baseline used four measured rounds; the final result uses twelve
 
 Exact-binary Callgrind and DHAT runs used the 32-copy inputs in separate windows with no wall-timing runs:
 
-| Case | Relar instructions before → after | Reduction | Final Rust instructions | Relar / Rust allocation blocks |
+| Case | Imre instructions before → after | Reduction | Final Rust instructions | Imre / Rust allocation blocks |
 |---|---:|---:|---:|---:|
 | `scaled-full-32` | 150,096,383 → 126,014,790 | 16.04% | 85,523,395 | 53,713 / 16,503 |
 | `scaled-unchanged-32` | 106,665,569 → 87,021,924 | 18.42% | 74,296,962 | 48,925 / 16,327 |
 
 On the full 32-copy input, dictionary lookup calls fell from 40,640 to 24,384 (40%). Decoder entry/preflight work, including its outlined search calls, fell from 34,273,070 to 14,607,861 guest instructions. Allocation block counts did not change; the six-byte requested-allocation difference is exactly the longer executable path stored in `argv[0]`.
 
-JSON string scanning and typed record-map decoding remain prominent individual functions (11.58M and 9.27M self instructions on that input). Decoder-attributed allocation traffic remains 48,820 blocks / 2,281,528 requested bytes. Rust’s ordinary path deserializes contiguous native `i64` records, checks arithmetic, and falls back to arbitrary precision only on overflow; it borrows names while comparing and formats only displayed rows. Relar still pays for more runtime objects and allocations.
+JSON string scanning and typed record-map decoding remain prominent individual functions (11.58M and 9.27M self instructions on that input). Decoder-attributed allocation traffic remains 48,820 blocks / 2,281,528 requested bytes. Rust’s ordinary path deserializes contiguous native `i64` records, checks arithmetic, and falls back to arbitrary precision only on overflow; it borrows names while comparing and formats only displayed rows. Imre still pays for more runtime objects and allocations.
 
 Callgrind counts guest instructions, not hardware cycles or elapsed-time shares. DHAT records requested allocation traffic, not RSS. The two changes were measured together; full-versus-unchanged differences are not exact phase accounting.
 

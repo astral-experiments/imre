@@ -101,19 +101,19 @@ REJECTED.update(
 COMPATIBILITY_REJECTIONS = {
     "operator_in_dead_code": (
         "def unused(value: float | None) -> float:\n    return 0.0\n    return value + 1.0\n",
-        "Relar: arithmetic requires int or float operands",
+        "Imre: arithmetic requires int or float operands",
     ),
     "assignment_in_unused_function": (
         "def unused() -> None:\n    value: float = None\n",
-        "Relar: expected float, got None",
+        "Imre: expected float, got None",
     ),
     "argument_in_dead_code": (
         "def identity(value: float) -> float:\n    return value\ndef unused() -> float:\n    return 0.0\n    return identity(None)\n",
-        "Relar: expected float, got None",
+        "Imre: expected float, got None",
     ),
     "return_in_unused_function": (
         "def unused(value: float | None) -> float:\n    return value\n",
-        "Relar: expected float, got float | None",
+        "Imre: expected float, got float | None",
     ),
 }
 REJECTED.update(
@@ -206,7 +206,7 @@ def main() -> None:
     if args.sanitize:
         flags.append("--sanitize")
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-matching-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-matching-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))

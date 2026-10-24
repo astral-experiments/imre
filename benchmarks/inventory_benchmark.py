@@ -235,7 +235,7 @@ def benchmark(args) -> dict:
     inputs = {
         "compiler": Path(shared.executable(str(args.compiler))),
         "runtime": args.runtime.resolve(strict=True),
-        "relar_build_record": args.relar_build_record.resolve(strict=True),
+        "imre_build_record": args.imre_build_record.resolve(strict=True),
         "clang": Path(shared.executable(args.clang)),
         "rust_bigint": Path(shared.executable(str(args.rust_bigint))),
         "rust_record": args.rust_build_record.resolve(strict=True),
@@ -288,14 +288,14 @@ def benchmark(args) -> dict:
     hashes = {name: shared.sha256(path) for name, path in inputs.items()}
     reference = rust_record(inputs["rust_record"], rust_sources, hashes)
     prior.manifest.existing.check_build_mode(reference, thin)
-    build = json.loads(inputs["relar_build_record"].read_text())
+    build = json.loads(inputs["imre_build_record"].read_text())
     if not {hashes["compiler"], hashes["runtime"]} <= set(
         build.get("sha256", {}).values()
     ):
         raise ValueError(
-            "Relar build record does not identify selected compiler/runtime"
+            "Imre build record does not identify selected compiler/runtime"
         )
-    runtime_name = "librelar_runtime_lto.a" if thin else "librelar_runtime.a"
+    runtime_name = "libimre_runtime_lto.a" if thin else "libimre_runtime.a"
     if not any(
         Path(name).name == runtime_name and digest == hashes["runtime"]
         for name, digest in build["sha256"].items()
@@ -304,12 +304,12 @@ def benchmark(args) -> dict:
     if thin and build.get("runtime_lto_rustflags") != "-Clinker-plugin-lto":
         raise ValueError("ThinLTO runtime must record -Clinker-plugin-lto")
     if not build.get("source_sha256"):
-        raise ValueError("Relar source hashes are required")
+        raise ValueError("Imre source hashes are required")
     for name, digest in build["source_sha256"].items():
         path = ROOT / name
         if shared.sha256(path) != digest:
-            raise ValueError("Relar source differs from frozen build: " + name)
-        inputs["relar_source:" + name], hashes["relar_source:" + name] = path, digest
+            raise ValueError("Imre source differs from frozen build: " + name)
+        inputs["imre_source:" + name], hashes["imre_source:" + name] = path, digest
     target_flags = ["--target=" + args.target] if args.target else []
     target = shared.run(
         [str(inputs["clang"]), *target_flags, "-dumpmachine"], b"", args.timeout
@@ -469,7 +469,7 @@ def benchmark(args) -> dict:
         name: shared.run([str(inputs[key]), "--version"], b"", args.timeout)[
             "stdout"
         ].strip()
-        for name, key in (("relar", "compiler"), ("clang", "clang"))
+        for name, key in (("imre", "compiler"), ("clang", "clang"))
     }
     tools["lto_linker"] = (
         shared.run([str(inputs["lto_linker"]), "--version"], b"", args.timeout)[
@@ -511,7 +511,7 @@ def benchmark(args) -> dict:
     commands = {
         "inventory": {
             "cpython": validator.python_command(str(inputs["python"])),
-            "relar": [str(outputs["inventory_binary"])],
+            "imre": [str(outputs["inventory_binary"])],
             "rust_bigint": [str(inputs["rust_bigint"])],
         }
     }
@@ -525,7 +525,7 @@ def benchmark(args) -> dict:
         commands["control"] = {
             "cpython": incremental.python_command(str(inputs["python"])),
             "baseline": [str(inputs["baseline"])],
-            "relar": [str(outputs["control_binary"])],
+            "imre": [str(outputs["control_binary"])],
         }
         validation["control"] = incremental.validate_commands(
             commands["control"], args.timeout
@@ -600,7 +600,7 @@ def benchmark(args) -> dict:
             if name in {*outputs, "baseline", "inventory_baseline", "rust_bigint"}
         },
         "rust_build_record": reference,
-        "relar_build_provenance": prior.build_provenance(build),
+        "imre_build_provenance": prior.build_provenance(build),
         "baseline_provenance": {
             key: baseline[key]
             for key in (
@@ -610,7 +610,7 @@ def benchmark(args) -> dict:
                 "tools",
                 "options",
                 "compilation",
-                "relar_build_provenance",
+                "imre_build_provenance",
             )
         }
         if baseline
@@ -624,7 +624,7 @@ def benchmark(args) -> dict:
                 "tools",
                 "options",
                 "compilation",
-                "relar_build_provenance",
+                "imre_build_provenance",
             )
         }
         if inventory_baseline
@@ -677,7 +677,7 @@ def main() -> None:
     for option in (
         "compiler",
         "runtime",
-        "relar-build-record",
+        "imre-build-record",
         "rust-bigint",
         "rust-build-record",
     ):

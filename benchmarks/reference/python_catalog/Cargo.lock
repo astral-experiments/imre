@@ -92,7 +92,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "relar-python-catalog-reference"
+name = "imre-python-catalog-reference"
 version = "0.1.0"
 dependencies = [
  "flate2",

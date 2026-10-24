@@ -1,11 +1,11 @@
 {
-  "schema": "relar-unpacking-summary-v1",
+  "schema": "imre-unpacking-summary-v1",
   "status": "passed",
   "source_commit": "3cc767b401f988ece94e1eb4bb98c43cd06c02b2",
   "statistics_method": "Exact Fraction interpolation of sorted integer ns at p*(n-1), inclusive Q1/median/Q3; ratios of engine medians. IQR overlap is descriptive, not a significance test.",
   "comparison_families": {
-    "application": "Rewritten application on current Relar and CPython; preserved old application on baseline Relar. Changes combine source and compiler/runtime effects.",
-    "common-source": "Exact old application on current Relar, preserved Relar, and CPython. Current-versus-preserved Relar holds application source fixed."
+    "application": "Rewritten application on current Imre and CPython; preserved old application on baseline Imre. Changes combine source and compiler/runtime effects.",
+    "common-source": "Exact old application on current Imre, preserved Imre, and CPython. Current-versus-preserved Imre holds application source fixed."
   },
   "cross_family_caveat": "Families are sequential measurement batches; direct cross-family source-effect ratios are not paired or causal estimates.",
   "families": {
@@ -31,10 +31,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -42,17 +42,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -66,10 +66,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -77,17 +77,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -101,10 +101,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -112,17 +112,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -136,10 +136,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -147,17 +147,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -171,10 +171,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -182,17 +182,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -206,10 +206,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -217,17 +217,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         }
@@ -244,7 +244,7 @@
               "p25_ns": 26749697.75,
               "p75_ns": 27262939.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 2129107.5,
               "min_ns": 2060420,
               "max_ns": 4439683,
@@ -268,22 +268,22 @@
           },
           "median_ms": {
             "cpython": 27.006953,
-            "relar": 2.1291075,
+            "imre": 2.1291075,
             "rust_bigint": 2.1425025,
             "baseline": 2.123873
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 12.68463569829142,
+            "cpython_over_imre": 12.68463569829142,
             "cpython_over_rust_bigint": 12.605330915599865,
             "cpython_over_baseline": 12.715898266986773,
-            "relar_over_cpython": 0.07883553172399715,
-            "relar_over_rust_bigint": 0.9937479652882552,
-            "relar_over_baseline": 1.0024646012261562,
+            "imre_over_cpython": 0.07883553172399715,
+            "imre_over_rust_bigint": 0.9937479652882552,
+            "imre_over_baseline": 1.0024646012261562,
             "rust_bigint_over_cpython": 0.07933151511020144,
-            "rust_bigint_over_relar": 1.0062913685664063,
+            "rust_bigint_over_imre": 1.0062913685664063,
             "rust_bigint_over_baseline": 1.0087714755072454,
             "baseline_over_cpython": 0.07864171126598399,
-            "baseline_over_relar": 0.997541458099227,
+            "baseline_over_imre": 0.997541458099227,
             "baseline_over_rust_bigint": 0.9913047942767862
           },
           "new_vs_baseline_time_change_percent": 0.24646012261562156,
@@ -302,7 +302,7 @@
                 "denominator": 1
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 2086741,
                 "denominator": 1
@@ -361,7 +361,7 @@
               "p25_ns": 27313099.75,
               "p75_ns": 28037552.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 2739364.0,
               "min_ns": 2616696,
               "max_ns": 3941222,
@@ -385,22 +385,22 @@
           },
           "median_ms": {
             "cpython": 27.6184735,
-            "relar": 2.739364,
+            "imre": 2.739364,
             "rust_bigint": 2.541736,
             "baseline": 2.730924
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 10.082075072900134,
+            "cpython_over_imre": 10.082075072900134,
             "cpython_over_rust_bigint": 10.865988245828834,
             "cpython_over_baseline": 10.11323401896208,
-            "relar_over_cpython": 0.09918593075030016,
-            "relar_over_rust_bigint": 1.0777531576843544,
-            "relar_over_baseline": 1.0030905290663525,
+            "imre_over_cpython": 0.09918593075030016,
+            "imre_over_rust_bigint": 1.0777531576843544,
+            "imre_over_baseline": 1.0030905290663525,
             "rust_bigint_over_cpython": 0.09203028545368375,
-            "rust_bigint_over_relar": 0.9278562469244686,
+            "rust_bigint_over_imre": 0.9278562469244686,
             "rust_bigint_over_baseline": 0.9307238136249856,
             "baseline_over_cpython": 0.09888033819103,
-            "baseline_over_relar": 0.9969189928757186,
+            "baseline_over_imre": 0.9969189928757186,
             "baseline_over_rust_bigint": 1.074432592527312
           },
           "new_vs_baseline_time_change_percent": 0.3090529066352543,
@@ -419,7 +419,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 10812795,
                 "denominator": 4
@@ -478,7 +478,7 @@
               "p25_ns": 32746384.75,
               "p75_ns": 33506207.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 6313394.5,
               "min_ns": 6183553,
               "max_ns": 7414026,
@@ -502,22 +502,22 @@
           },
           "median_ms": {
             "cpython": 33.0816435,
-            "relar": 6.3133945,
+            "imre": 6.3133945,
             "rust_bigint": 5.8502805,
             "baseline": 6.218022
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 5.239913884678044,
+            "cpython_over_imre": 5.239913884678044,
             "cpython_over_rust_bigint": 5.654710658745337,
             "cpython_over_baseline": 5.320284087126099,
-            "relar_over_cpython": 0.19084283100989224,
-            "relar_over_rust_bigint": 1.0791609906567727,
-            "relar_over_baseline": 1.015338076964025,
+            "imre_over_cpython": 0.19084283100989224,
+            "imre_over_rust_bigint": 1.0791609906567727,
+            "imre_over_baseline": 1.015338076964025,
             "rust_bigint_over_cpython": 0.17684370790102977,
-            "rust_bigint_over_relar": 0.9266458004485543,
+            "rust_bigint_over_imre": 0.9266458004485543,
             "rust_bigint_over_baseline": 0.9408587650542246,
             "baseline_over_cpython": 0.187959887784898,
-            "baseline_over_relar": 0.9848936257666141,
+            "baseline_over_imre": 0.9848936257666141,
             "baseline_over_rust_bigint": 1.0628587808738401
           },
           "new_vs_baseline_time_change_percent": 1.5338076964025005,
@@ -536,7 +536,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 25027015,
                 "denominator": 4
@@ -595,7 +595,7 @@
               "p25_ns": 37431609.75,
               "p75_ns": 38993894.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 9440972.5,
               "min_ns": 9160028,
               "max_ns": 10525732,
@@ -619,22 +619,22 @@
           },
           "median_ms": {
             "cpython": 38.245385,
-            "relar": 9.4409725,
+            "imre": 9.4409725,
             "rust_bigint": 8.475318,
             "baseline": 9.0782665
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 4.0510005722397775,
+            "cpython_over_imre": 4.0510005722397775,
             "cpython_over_rust_bigint": 4.512560472657191,
             "cpython_over_baseline": 4.212851098830377,
-            "relar_over_cpython": 0.24685259411037436,
-            "relar_over_rust_bigint": 1.1139372587553646,
-            "relar_over_baseline": 1.0399532223470196,
+            "imre_over_cpython": 0.24685259411037436,
+            "imre_over_rust_bigint": 1.1139372587553646,
+            "imre_over_baseline": 1.0399532223470196,
             "rust_bigint_over_cpython": 0.22160367845689094,
-            "rust_bigint_over_relar": 0.8977166282393048,
+            "rust_bigint_over_imre": 0.8977166282393048,
             "rust_bigint_over_baseline": 0.9335833002919666,
             "baseline_over_cpython": 0.23736894006950118,
-            "baseline_over_relar": 0.9615817120534987,
+            "baseline_over_imre": 0.9615817120534987,
             "baseline_over_rust_bigint": 1.071141696394165
           },
           "new_vs_baseline_time_change_percent": 3.995322234701959,
@@ -653,7 +653,7 @@
                 "denominator": 1
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 37179525,
                 "denominator": 4
@@ -712,7 +712,7 @@
               "p25_ns": 76846573.25,
               "p75_ns": 79069521.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 26693965.5,
               "min_ns": 25933123,
               "max_ns": 64807279,
@@ -736,22 +736,22 @@
           },
           "median_ms": {
             "cpython": 77.6608405,
-            "relar": 26.6939655,
+            "imre": 26.6939655,
             "rust_bigint": 23.3371305,
             "baseline": 26.4342565
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.9093032468330717,
+            "cpython_over_imre": 2.9093032468330717,
             "cpython_over_rust_bigint": 3.327780187028564,
             "cpython_over_baseline": 2.9378863180812367,
-            "relar_over_cpython": 0.3437249111410274,
-            "relar_over_rust_bigint": 1.1438409490832646,
-            "relar_over_baseline": 1.0098247136249132,
+            "imre_over_cpython": 0.3437249111410274,
+            "imre_over_rust_bigint": 1.1438409490832646,
+            "imre_over_baseline": 1.0098247136249132,
             "rust_bigint_over_cpython": 0.30050061716754145,
-            "rust_bigint_over_relar": 0.8742474212008703,
+            "rust_bigint_over_imre": 0.8742474212008703,
             "rust_bigint_over_baseline": 0.8828366517514877,
             "baseline_over_cpython": 0.3403807675761634,
-            "baseline_over_relar": 0.9902708722688655,
+            "baseline_over_imre": 0.9902708722688655,
             "baseline_over_rust_bigint": 1.1327123743855312
           },
           "new_vs_baseline_time_change_percent": 0.9824713624913217,
@@ -770,7 +770,7 @@
                 "denominator": 1
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 105382243,
                 "denominator": 4
@@ -829,7 +829,7 @@
               "p25_ns": 111745037.0,
               "p75_ns": 113411305.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 52240948.0,
               "min_ns": 51315978,
               "max_ns": 54833223,
@@ -853,22 +853,22 @@
           },
           "median_ms": {
             "cpython": 112.345613,
-            "relar": 52.240948,
+            "imre": 52.240948,
             "rust_bigint": 43.051363,
             "baseline": 50.2470775
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.1505278388133386,
+            "cpython_over_imre": 2.1505278388133386,
             "cpython_over_rust_bigint": 2.609571571520279,
             "cpython_over_baseline": 2.2358636280886186,
-            "relar_over_cpython": 0.46500211806223357,
-            "relar_over_rust_bigint": 1.2134563079919212,
-            "relar_over_baseline": 1.0396813227595176,
+            "imre_over_cpython": 0.46500211806223357,
+            "imre_over_rust_bigint": 1.2134563079919212,
+            "imre_over_baseline": 1.0396813227595176,
             "rust_bigint_over_cpython": 0.3832046650544334,
-            "rust_bigint_over_relar": 0.8240923001627,
+            "rust_bigint_over_imre": 0.8240923001627,
             "rust_bigint_over_baseline": 0.8567933727090894,
             "baseline_over_cpython": 0.4472544691175436,
-            "baseline_over_relar": 0.961833186870958,
+            "baseline_over_imre": 0.961833186870958,
             "baseline_over_rust_bigint": 1.1671425478445363
           },
           "new_vs_baseline_time_change_percent": 3.9681322759517634,
@@ -887,7 +887,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 51766883,
                 "denominator": 1
@@ -967,10 +967,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -978,17 +978,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -1002,10 +1002,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1013,17 +1013,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -1037,10 +1037,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1048,17 +1048,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -1072,10 +1072,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1083,17 +1083,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -1107,10 +1107,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1118,17 +1118,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -1142,10 +1142,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1153,17 +1153,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         }
@@ -1180,7 +1180,7 @@
               "p25_ns": 26688925.25,
               "p75_ns": 26959070.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 2125080.0,
               "min_ns": 2025003,
               "max_ns": 3285953,
@@ -1204,22 +1204,22 @@
           },
           "median_ms": {
             "cpython": 26.78256,
-            "relar": 2.12508,
+            "imre": 2.12508,
             "rust_bigint": 2.1343765,
             "baseline": 2.116423
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 12.603083178045061,
+            "cpython_over_imre": 12.603083178045061,
             "cpython_over_rust_bigint": 12.548189131580113,
             "cpython_over_baseline": 12.654634730391798,
-            "relar_over_cpython": 0.07934566374536266,
-            "relar_over_rust_bigint": 0.9956443954475698,
-            "relar_over_baseline": 1.0040903921380555,
+            "imre_over_cpython": 0.07934566374536266,
+            "imre_over_rust_bigint": 0.9956443954475698,
+            "imre_over_baseline": 1.0040903921380555,
             "rust_bigint_over_cpython": 0.0796927739543942,
-            "rust_bigint_over_relar": 1.0043746588363731,
+            "rust_bigint_over_imre": 1.0043746588363731,
             "rust_bigint_over_baseline": 1.0084829450445398,
             "baseline_over_cpython": 0.07902243101480964,
-            "baseline_over_relar": 0.9959262710109738,
+            "baseline_over_imre": 0.9959262710109738,
             "baseline_over_rust_bigint": 0.9915884100110735
           },
           "new_vs_baseline_time_change_percent": 0.40903921380555097,
@@ -1238,7 +1238,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 2085375,
                 "denominator": 1
@@ -1297,7 +1297,7 @@
               "p25_ns": 27603748.25,
               "p75_ns": 27903955.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 2780560.5,
               "min_ns": 2673211,
               "max_ns": 3886453,
@@ -1321,22 +1321,22 @@
           },
           "median_ms": {
             "cpython": 27.761557,
-            "relar": 2.7805605,
+            "imre": 2.7805605,
             "rust_bigint": 2.5597195,
             "baseline": 2.7485265
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 9.984158589608102,
+            "cpython_over_imre": 9.984158589608102,
             "cpython_over_rust_bigint": 10.84554655305005,
             "cpython_over_baseline": 10.100523680597586,
-            "relar_over_cpython": 0.10015866545237358,
-            "relar_over_rust_bigint": 1.0862754688550835,
-            "relar_over_baseline": 1.0116549722187507,
+            "imre_over_cpython": 0.10015866545237358,
+            "imre_over_rust_bigint": 1.0862754688550835,
+            "imre_over_baseline": 1.0116549722187507,
             "rust_bigint_over_cpython": 0.09220374419201344,
-            "rust_bigint_over_relar": 0.9205768045687192,
+            "rust_bigint_over_imre": 0.9205768045687192,
             "rust_bigint_over_baseline": 0.9313061016511939,
             "baseline_over_cpython": 0.09900476763605154,
-            "baseline_over_relar": 0.9884793012056382,
+            "baseline_over_imre": 0.9884793012056382,
             "baseline_over_rust_bigint": 1.0737608163707
           },
           "new_vs_baseline_time_change_percent": 1.165497221875067,
@@ -1355,7 +1355,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 5501621,
                 "denominator": 2
@@ -1414,7 +1414,7 @@
               "p25_ns": 33002387.5,
               "p75_ns": 33563279.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 6349646.0,
               "min_ns": 6222674,
               "max_ns": 6656653,
@@ -1438,22 +1438,22 @@
           },
           "median_ms": {
             "cpython": 33.2929295,
-            "relar": 6.349646,
+            "imre": 6.349646,
             "rust_bigint": 5.8786635,
             "baseline": 6.2225855
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 5.2432733257885555,
+            "cpython_over_imre": 5.2432733257885555,
             "cpython_over_rust_bigint": 5.663350096497274,
             "cpython_over_baseline": 5.350337010234733,
-            "relar_over_cpython": 0.1907205552458218,
-            "relar_over_rust_bigint": 1.0801172749554384,
-            "relar_over_baseline": 1.0204192453442384,
+            "imre_over_cpython": 0.1907205552458218,
+            "imre_over_rust_bigint": 1.0801172749554384,
+            "imre_over_baseline": 1.0204192453442384,
             "rust_bigint_over_cpython": 0.17657393291269247,
-            "rust_bigint_over_relar": 0.9258253924706984,
+            "rust_bigint_over_imre": 0.9258253924706984,
             "rust_bigint_over_baseline": 0.9447300483054833,
             "baseline_over_cpython": 0.1869041142804811,
-            "baseline_over_relar": 0.9799893568869824,
+            "baseline_over_imre": 0.9799893568869824,
             "baseline_over_rust_bigint": 1.0585034336461001
           },
           "new_vs_baseline_time_change_percent": 2.0419245344238446,
@@ -1472,7 +1472,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 6294784,
                 "denominator": 1
@@ -1531,7 +1531,7 @@
               "p25_ns": 37347571.0,
               "p75_ns": 38704827.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 9249024.0,
               "min_ns": 9000720,
               "max_ns": 11723615,
@@ -1555,22 +1555,22 @@
           },
           "median_ms": {
             "cpython": 37.985668,
-            "relar": 9.249024,
+            "imre": 9.249024,
             "rust_bigint": 8.343437,
             "baseline": 9.031108
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 4.106992045863434,
+            "cpython_over_imre": 4.106992045863434,
             "cpython_over_rust_bigint": 4.552760211409279,
             "cpython_over_baseline": 4.206091655641811,
-            "relar_over_cpython": 0.24348720154138134,
-            "relar_over_rust_bigint": 1.108538843164993,
-            "relar_over_baseline": 1.0241294866587798,
+            "imre_over_cpython": 0.24348720154138134,
+            "imre_over_rust_bigint": 1.108538843164993,
+            "imre_over_baseline": 1.0241294866587798,
             "rust_bigint_over_cpython": 0.21964697316893309,
-            "rust_bigint_over_relar": 0.9020883717027872,
+            "rust_bigint_over_imre": 0.9020883717027872,
             "rust_bigint_over_baseline": 0.9238553010328301,
             "baseline_over_cpython": 0.23775040628481248,
-            "baseline_over_relar": 0.9764390275125245,
+            "baseline_over_imre": 0.9764390275125245,
             "baseline_over_rust_bigint": 1.0824205899798849
           },
           "new_vs_baseline_time_change_percent": 2.4129486658779786,
@@ -1589,7 +1589,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 9162405,
                 "denominator": 1
@@ -1648,7 +1648,7 @@
               "p25_ns": 76639182.25,
               "p75_ns": 78197972.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 26857347.5,
               "min_ns": 26239852,
               "max_ns": 30346775,
@@ -1672,22 +1672,22 @@
           },
           "median_ms": {
             "cpython": 77.1901815,
-            "relar": 26.8573475,
+            "imre": 26.8573475,
             "rust_bigint": 23.216734,
             "baseline": 26.3925515
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.8740806030826387,
+            "cpython_over_imre": 2.8740806030826387,
             "cpython_over_rust_bigint": 3.324764865721423,
             "cpython_over_baseline": 2.9246956854474644,
-            "relar_over_cpython": 0.3479373539236982,
-            "relar_over_rust_bigint": 1.1568098897975916,
-            "relar_over_baseline": 1.0176108778266475,
+            "imre_over_cpython": 0.3479373539236982,
+            "imre_over_rust_bigint": 1.1568098897975916,
+            "imre_over_baseline": 1.0176108778266475,
             "rust_bigint_over_cpython": 0.3007731494969992,
-            "rust_bigint_over_relar": 0.8644462748974,
+            "rust_bigint_over_imre": 0.8644462748974,
             "rust_bigint_over_baseline": 0.8796699326323186,
             "baseline_over_cpython": 0.34191591452599446,
-            "baseline_over_relar": 0.9826938978244222,
+            "baseline_over_imre": 0.9826938978244222,
             "baseline_over_rust_bigint": 1.1367900196470355
           },
           "new_vs_baseline_time_change_percent": 1.7610877826647497,
@@ -1706,7 +1706,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 106540863,
                 "denominator": 4
@@ -1765,7 +1765,7 @@
               "p25_ns": 110870639.25,
               "p75_ns": 113480344.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 50852260.5,
               "min_ns": 48923656,
               "max_ns": 52810349,
@@ -1789,22 +1789,22 @@
           },
           "median_ms": {
             "cpython": 111.789985,
-            "relar": 50.8522605,
+            "imre": 50.8522605,
             "rust_bigint": 42.5191535,
             "baseline": 49.7274445
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.198328725229432,
+            "cpython_over_imre": 2.198328725229432,
             "cpython_over_rust_bigint": 2.6291676996815094,
             "cpython_over_baseline": 2.2480540901312556,
-            "relar_over_cpython": 0.4548910217672898,
-            "relar_over_rust_bigint": 1.1959847813056768,
-            "relar_over_baseline": 1.0226196220479418,
+            "imre_over_cpython": 0.4548910217672898,
+            "imre_over_rust_bigint": 1.1959847813056768,
+            "imre_over_baseline": 1.0226196220479418,
             "rust_bigint_over_cpython": 0.3803485034907197,
-            "rust_bigint_over_relar": 0.836131040821676,
+            "rust_bigint_over_imre": 0.836131040821676,
             "rust_bigint_over_baseline": 0.8550440089476145,
             "baseline_over_cpython": 0.4448291544184392,
-            "baseline_over_relar": 0.9778807079775735,
+            "baseline_over_imre": 0.9778807079775735,
             "baseline_over_rust_bigint": 1.1695304446735988
           },
           "new_vs_baseline_time_change_percent": 2.2619622047941768,
@@ -1823,7 +1823,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 201807921,
                 "denominator": 4
@@ -1898,10 +1898,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1909,17 +1909,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -1933,10 +1933,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1944,17 +1944,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -1968,10 +1968,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -1979,17 +1979,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -2003,10 +2003,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2014,17 +2014,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -2038,10 +2038,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2049,17 +2049,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -2073,10 +2073,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2084,17 +2084,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         }
@@ -2111,7 +2111,7 @@
               "p25_ns": 26937239.75,
               "p75_ns": 27324825.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 2158367.0,
               "min_ns": 2059897,
               "max_ns": 3503808,
@@ -2135,22 +2135,22 @@
           },
           "median_ms": {
             "cpython": 27.139878,
-            "relar": 2.158367,
+            "imre": 2.158367,
             "rust_bigint": 2.24332,
             "baseline": 2.207343
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 12.574264710311082,
+            "cpython_over_imre": 12.574264710311082,
             "cpython_over_rust_bigint": 12.098085872724354,
             "cpython_over_baseline": 12.29526992406708,
-            "relar_over_cpython": 0.07952751298292497,
-            "relar_over_rust_bigint": 0.9621306813116274,
-            "relar_over_baseline": 0.9778122385148117,
+            "imre_over_cpython": 0.07952751298292497,
+            "imre_over_rust_bigint": 0.9621306813116274,
+            "imre_over_baseline": 0.9778122385148117,
             "rust_bigint_over_cpython": 0.08265770391451281,
-            "rust_bigint_over_relar": 1.0393598493676006,
+            "rust_bigint_over_imre": 1.0393598493676006,
             "rust_bigint_over_baseline": 1.016298780932551,
             "baseline_over_cpython": 0.08133208999686733,
-            "baseline_over_relar": 1.022691229063454,
+            "baseline_over_imre": 1.022691229063454,
             "baseline_over_rust_bigint": 0.9839626089902466
           },
           "new_vs_baseline_time_change_percent": -2.2187761485188306,
@@ -2169,7 +2169,7 @@
                 "denominator": 1
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 2124403,
                 "denominator": 1
@@ -2228,7 +2228,7 @@
               "p25_ns": 27729792.75,
               "p75_ns": 28260867.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 2711703.0,
               "min_ns": 2566743,
               "max_ns": 5617507,
@@ -2252,22 +2252,22 @@
           },
           "median_ms": {
             "cpython": 27.9377195,
-            "relar": 2.711703,
+            "imre": 2.711703,
             "rust_bigint": 2.591329,
             "baseline": 2.7695505
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 10.302647266311983,
+            "cpython_over_imre": 10.302647266311983,
             "cpython_over_rust_bigint": 10.781232139955984,
             "cpython_over_baseline": 10.087456249669396,
-            "relar_over_cpython": 0.09706243202849825,
-            "relar_over_rust_bigint": 1.0464526117679385,
-            "relar_over_baseline": 0.9791130365739855,
+            "imre_over_cpython": 0.09706243202849825,
+            "imre_over_rust_bigint": 1.0464526117679385,
+            "imre_over_baseline": 0.9791130365739855,
             "rust_bigint_over_cpython": 0.09275377684280924,
-            "rust_bigint_over_relar": 0.9556094454296802,
+            "rust_bigint_over_imre": 0.9556094454296802,
             "rust_bigint_over_baseline": 0.9356496658934365,
             "baseline_over_cpython": 0.0991330197871018,
-            "baseline_over_relar": 1.021332535310836,
+            "baseline_over_imre": 1.021332535310836,
             "baseline_over_rust_bigint": 1.0687760990595945
           },
           "new_vs_baseline_time_change_percent": -2.088696342601448,
@@ -2286,7 +2286,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 10656315,
                 "denominator": 4
@@ -2345,7 +2345,7 @@
               "p25_ns": 33236565.25,
               "p75_ns": 33686081.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 5626052.5,
               "min_ns": 5477045,
               "max_ns": 6083895,
@@ -2369,22 +2369,22 @@
           },
           "median_ms": {
             "cpython": 33.5341005,
-            "relar": 5.6260525,
+            "imre": 5.6260525,
             "rust_bigint": 5.5722615,
             "baseline": 5.7024905
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 5.960502590404196,
+            "cpython_over_imre": 5.960502590404196,
             "cpython_over_rust_bigint": 6.018041418192595,
             "cpython_over_baseline": 5.8806061141180335,
-            "relar_over_cpython": 0.16777108722507705,
-            "relar_over_rust_bigint": 1.0096533516957165,
-            "relar_over_baseline": 0.986595681308018,
+            "imre_over_cpython": 0.16777108722507705,
+            "imre_over_rust_bigint": 1.0096533516957165,
+            "imre_over_baseline": 0.986595681308018,
             "rust_bigint_over_cpython": 0.16616701855473953,
-            "rust_bigint_over_relar": 0.9904389445352669,
+            "rust_bigint_over_imre": 0.9904389445352669,
             "rust_bigint_over_baseline": 0.9771627852777659,
             "baseline_over_cpython": 0.1700504982979937,
-            "baseline_over_relar": 1.0135864356047157,
+            "baseline_over_imre": 1.0135864356047157,
             "baseline_over_rust_bigint": 1.0233709419416157
           },
           "new_vs_baseline_time_change_percent": -1.3404318691981998,
@@ -2403,7 +2403,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 11147435,
                 "denominator": 2
@@ -2462,7 +2462,7 @@
               "p25_ns": 37188434.0,
               "p75_ns": 38534388.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 8025548.0,
               "min_ns": 7816434,
               "max_ns": 9383374,
@@ -2486,22 +2486,22 @@
           },
           "median_ms": {
             "cpython": 37.773515,
-            "relar": 8.025548,
+            "imre": 8.025548,
             "rust_bigint": 7.8433135,
             "baseline": 8.0182395
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 4.706658660567478,
+            "cpython_over_imre": 4.706658660567478,
             "cpython_over_rust_bigint": 4.816014940624266,
             "cpython_over_baseline": 4.710948706383739,
-            "relar_over_cpython": 0.21246495064068038,
-            "relar_over_rust_bigint": 1.0232343766445138,
-            "relar_over_baseline": 1.0009114843725984,
+            "imre_over_cpython": 0.21246495064068038,
+            "imre_over_rust_bigint": 1.0232343766445138,
+            "imre_over_baseline": 1.0009114843725984,
             "rust_bigint_over_cpython": 0.20764055185227004,
-            "rust_bigint_over_relar": 0.9772932016604972,
+            "rust_bigint_over_imre": 0.9772932016604972,
             "rust_bigint_over_baseline": 0.9781839891412573,
             "baseline_over_cpython": 0.21227146851438103,
-            "baseline_over_relar": 0.9990893456745882,
+            "baseline_over_imre": 0.9990893456745882,
             "baseline_over_rust_bigint": 1.0223025638335124
           },
           "new_vs_baseline_time_change_percent": 0.0911484372598359,
@@ -2520,7 +2520,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 15866389,
                 "denominator": 2
@@ -2579,7 +2579,7 @@
               "p25_ns": 76010302.75,
               "p75_ns": 77481593.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 21089609.5,
               "min_ns": 20424675,
               "max_ns": 23627552,
@@ -2603,22 +2603,22 @@
           },
           "median_ms": {
             "cpython": 76.6392675,
-            "relar": 21.0896095,
+            "imre": 21.0896095,
             "rust_bigint": 20.6986605,
             "baseline": 21.371704
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 3.63398229350809,
+            "cpython_over_imre": 3.63398229350809,
             "cpython_over_rust_bigint": 3.702619669519194,
             "cpython_over_baseline": 3.586015766454561,
-            "relar_over_cpython": 0.27518020706552293,
-            "relar_over_rust_bigint": 1.0188876473431698,
-            "relar_over_baseline": 0.9868005611531958,
+            "imre_over_cpython": 0.27518020706552293,
+            "imre_over_rust_bigint": 1.0188876473431698,
+            "imre_over_baseline": 0.9868005611531958,
             "rust_bigint_over_cpython": 0.2700790492289087,
-            "rust_bigint_over_relar": 0.9814624827453539,
+            "rust_bigint_over_imre": 0.9814624827453539,
             "rust_bigint_over_baseline": 0.9685077287239239,
             "baseline_over_cpython": 0.2788610159928786,
-            "baseline_over_relar": 1.0133759944677971,
+            "baseline_over_imre": 1.0133759944677971,
             "baseline_over_rust_bigint": 1.0325162828773389
           },
           "new_vs_baseline_time_change_percent": -1.319943884680419,
@@ -2637,7 +2637,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 83257797,
                 "denominator": 4
@@ -2696,7 +2696,7 @@
               "p25_ns": 111893954.5,
               "p75_ns": 114572315.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 41584429.0,
               "min_ns": 40442942,
               "max_ns": 48783242,
@@ -2720,22 +2720,22 @@
           },
           "median_ms": {
             "cpython": 112.604831,
-            "relar": 41.584429,
+            "imre": 41.584429,
             "rust_bigint": 37.91684,
             "baseline": 40.840682
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.7078604590194084,
+            "cpython_over_imre": 2.7078604590194084,
             "cpython_over_rust_bigint": 2.96978416450316,
             "cpython_over_baseline": 2.7571731294790816,
-            "relar_over_cpython": 0.36929524808753544,
-            "relar_over_rust_bigint": 1.0967271797966287,
-            "relar_over_baseline": 1.0182109348712638,
+            "imre_over_cpython": 0.36929524808753544,
+            "imre_over_rust_bigint": 1.0967271797966287,
+            "imre_over_baseline": 1.0182109348712638,
             "rust_bigint_over_cpython": 0.3367248071266143,
-            "rust_bigint_over_relar": 0.9118037907890956,
+            "rust_bigint_over_imre": 0.9118037907890956,
             "rust_bigint_over_baseline": 0.9284085902385274,
             "baseline_over_cpython": 0.3626903183221331,
-            "baseline_over_relar": 0.9821147718536667,
+            "baseline_over_imre": 0.9821147718536667,
             "baseline_over_rust_bigint": 1.077111963971681
           },
           "new_vs_baseline_time_change_percent": 1.8210934871263795,
@@ -2754,7 +2754,7 @@
                 "denominator": 4
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 164463587,
                 "denominator": 4
@@ -2834,10 +2834,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2845,17 +2845,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -2869,10 +2869,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2880,17 +2880,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -2904,10 +2904,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2915,17 +2915,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -2939,10 +2939,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2950,17 +2950,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -2974,10 +2974,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -2985,17 +2985,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         },
@@ -3009,10 +3009,10 @@
             "cpython@1": 12,
             "cpython@2": 12,
             "cpython@3": 12,
-            "relar@0": 12,
-            "relar@1": 12,
-            "relar@2": 12,
-            "relar@3": 12,
+            "imre@0": 12,
+            "imre@1": 12,
+            "imre@2": 12,
+            "imre@3": 12,
             "rust_bigint@0": 12,
             "rust_bigint@1": 12,
             "rust_bigint@2": 12,
@@ -3020,17 +3020,17 @@
           },
           "within_round_predecessors": {
             "baseline->cpython": 12,
-            "baseline->relar": 12,
+            "baseline->imre": 12,
             "baseline->rust_bigint": 12,
             "cpython->baseline": 12,
-            "cpython->relar": 12,
+            "cpython->imre": 12,
             "cpython->rust_bigint": 12,
-            "relar->baseline": 12,
-            "relar->cpython": 12,
-            "relar->rust_bigint": 12,
+            "imre->baseline": 12,
+            "imre->cpython": 12,
+            "imre->rust_bigint": 12,
             "rust_bigint->baseline": 12,
             "rust_bigint->cpython": 12,
-            "rust_bigint->relar": 12
+            "rust_bigint->imre": 12
           },
           "each_permutation_count": 2
         }
@@ -3047,7 +3047,7 @@
               "p25_ns": 27117218.0,
               "p75_ns": 27500059.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 2337215.5,
               "min_ns": 2064746,
               "max_ns": 3515289,
@@ -3071,22 +3071,22 @@
           },
           "median_ms": {
             "cpython": 27.351855,
-            "relar": 2.3372155,
+            "imre": 2.3372155,
             "rust_bigint": 2.459262,
             "baseline": 2.409107
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 11.702752698670704,
+            "cpython_over_imre": 11.702752698670704,
             "cpython_over_rust_bigint": 11.121976836953525,
             "cpython_over_baseline": 11.353524355705247,
-            "relar_over_cpython": 0.08544998136323843,
-            "relar_over_rust_bigint": 0.9503727134400483,
-            "relar_over_baseline": 0.970158444602087,
+            "imre_over_cpython": 0.08544998136323843,
+            "imre_over_rust_bigint": 0.9503727134400483,
+            "imre_over_baseline": 0.970158444602087,
             "rust_bigint_over_cpython": 0.08991207360524542,
-            "rust_bigint_over_relar": 1.0522187620268648,
+            "rust_bigint_over_imre": 1.0522187620268648,
             "rust_bigint_over_baseline": 1.0208189175491167,
             "baseline_over_cpython": 0.08807837713383608,
-            "baseline_over_relar": 1.0307594656975363,
+            "baseline_over_imre": 1.0307594656975363,
             "baseline_over_rust_bigint": 0.9796056703189818
           },
           "new_vs_baseline_time_change_percent": -2.9841555397913,
@@ -3105,7 +3105,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 2262861,
                 "denominator": 1
@@ -3164,7 +3164,7 @@
               "p25_ns": 28401598.25,
               "p75_ns": 29072806.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 2988674.0,
               "min_ns": 2635660,
               "max_ns": 4695018,
@@ -3188,22 +3188,22 @@
           },
           "median_ms": {
             "cpython": 28.578916,
-            "relar": 2.988674,
+            "imre": 2.988674,
             "rust_bigint": 2.851617,
             "baseline": 2.975048
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 9.562406605738866,
+            "cpython_over_imre": 9.562406605738866,
             "cpython_over_rust_bigint": 10.022003656171218,
             "cpython_over_baseline": 9.606203328484112,
-            "relar_over_cpython": 0.10457618476502048,
-            "relar_over_rust_bigint": 1.048062906063472,
-            "relar_over_baseline": 1.0045800941699092,
+            "imre_over_cpython": 0.10457618476502048,
+            "imre_over_rust_bigint": 1.048062906063472,
+            "imre_over_baseline": 1.0045800941699092,
             "rust_bigint_over_cpython": 0.09978044653618073,
-            "rust_bigint_over_relar": 0.9541412010811484,
+            "rust_bigint_over_imre": 0.9541412010811484,
             "rust_bigint_over_baseline": 0.9585112576334903,
             "baseline_over_cpython": 0.10409939971131166,
-            "baseline_over_relar": 0.9954407874528972,
+            "baseline_over_imre": 0.9954407874528972,
             "baseline_over_rust_bigint": 1.0432845645119944
           },
           "new_vs_baseline_time_change_percent": 0.45800941699092323,
@@ -3222,7 +3222,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 2863971,
                 "denominator": 1
@@ -3281,7 +3281,7 @@
               "p25_ns": 33532276.25,
               "p75_ns": 34268794.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 5786381.0,
               "min_ns": 5576981,
               "max_ns": 8212832,
@@ -3305,22 +3305,22 @@
           },
           "median_ms": {
             "cpython": 33.81455,
-            "relar": 5.786381,
+            "imre": 5.786381,
             "rust_bigint": 5.6874615,
             "baseline": 5.814283
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 5.843816713762886,
+            "cpython_over_imre": 5.843816713762886,
             "cpython_over_rust_bigint": 5.945455630776578,
             "cpython_over_baseline": 5.8157729852502875,
-            "relar_over_cpython": 0.17112104109029988,
-            "relar_over_rust_bigint": 1.0173925572946736,
-            "relar_over_baseline": 0.9952011279808706,
+            "imre_over_cpython": 0.17112104109029988,
+            "imre_over_rust_bigint": 1.0173925572946736,
+            "imre_over_baseline": 0.9952011279808706,
             "rust_bigint_over_cpython": 0.16819568795089687,
-            "rust_bigint_over_relar": 0.982904772430298,
+            "rust_bigint_over_imre": 0.982904772430298,
             "rust_bigint_over_baseline": 0.9781879382204134,
             "baseline_over_cpython": 0.17194618884474286,
-            "baseline_over_relar": 1.004822012238738,
+            "baseline_over_imre": 1.004822012238738,
             "baseline_over_rust_bigint": 1.0222984366575492
           },
           "new_vs_baseline_time_change_percent": -0.479887201912943,
@@ -3339,7 +3339,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 22703083,
                 "denominator": 4
@@ -3398,7 +3398,7 @@
               "p25_ns": 37256364.25,
               "p75_ns": 37912813.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 7955927.5,
               "min_ns": 7703491,
               "max_ns": 8848455,
@@ -3422,22 +3422,22 @@
           },
           "median_ms": {
             "cpython": 37.5758475,
-            "relar": 7.9559275,
+            "imre": 7.9559275,
             "rust_bigint": 7.7172475,
             "baseline": 7.9154875
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 4.723000241015268,
+            "cpython_over_imre": 4.723000241015268,
             "cpython_over_rust_bigint": 4.869073785698852,
             "cpython_over_baseline": 4.7471299146135975,
-            "relar_over_cpython": 0.2117298219288334,
-            "relar_over_rust_bigint": 1.0309281256043688,
-            "relar_over_baseline": 1.0051089714941752,
+            "imre_over_cpython": 0.2117298219288334,
+            "imre_over_rust_bigint": 1.0309281256043688,
+            "imre_over_baseline": 1.0051089714941752,
             "rust_bigint_over_cpython": 0.20537786938804242,
-            "rust_bigint_over_relar": 0.9699997266189265,
+            "rust_bigint_over_imre": 0.9699997266189265,
             "rust_bigint_over_baseline": 0.9749554275715804,
             "baseline_over_cpython": 0.2106535986979402,
-            "baseline_over_relar": 0.9949169974211052,
+            "baseline_over_imre": 0.9949169974211052,
             "baseline_over_rust_bigint": 1.0256879152832665
           },
           "new_vs_baseline_time_change_percent": 0.5108971494175218,
@@ -3456,7 +3456,7 @@
                 "denominator": 1
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 31486089,
                 "denominator": 4
@@ -3515,7 +3515,7 @@
               "p25_ns": 76759103.75,
               "p75_ns": 78565131.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 21857112.0,
               "min_ns": 20964468,
               "max_ns": 23746862,
@@ -3539,22 +3539,22 @@
           },
           "median_ms": {
             "cpython": 77.6817135,
-            "relar": 21.857112,
+            "imre": 21.857112,
             "rust_bigint": 20.8632955,
             "baseline": 21.606775
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 3.5540703410404815,
+            "cpython_over_imre": 3.5540703410404815,
             "cpython_over_rust_bigint": 3.7233673606358115,
             "cpython_over_baseline": 3.595247948849377,
-            "relar_over_cpython": 0.28136753188380687,
-            "relar_over_rust_bigint": 1.0476346845588225,
-            "relar_over_baseline": 1.0115860418780684,
+            "imre_over_cpython": 0.28136753188380687,
+            "imre_over_rust_bigint": 1.0476346845588225,
+            "imre_over_baseline": 1.0115860418780684,
             "rust_bigint_over_cpython": 0.26857408983389636,
-            "rust_bigint_over_relar": 0.9545312070505929,
+            "rust_bigint_over_imre": 0.9545312070505929,
             "rust_bigint_over_baseline": 0.9655904455894042,
             "baseline_over_cpython": 0.2781449330414165,
-            "baseline_over_relar": 0.988546657033189,
+            "baseline_over_imre": 0.988546657033189,
             "baseline_over_rust_bigint": 1.0356357652126433
           },
           "new_vs_baseline_time_change_percent": 1.1586041878068443,
@@ -3573,7 +3573,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 42830823,
                 "denominator": 2
@@ -3632,7 +3632,7 @@
               "p25_ns": 112752150.5,
               "p75_ns": 116040161.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 41807551.5,
               "min_ns": 39140923,
               "max_ns": 50359413,
@@ -3656,22 +3656,22 @@
           },
           "median_ms": {
             "cpython": 113.559766,
-            "relar": 41.8075515,
+            "imre": 41.8075515,
             "rust_bigint": 38.0077365,
             "baseline": 41.519039
           },
           "ratios_of_medians": {
-            "cpython_over_relar": 2.7162501013722364,
+            "cpython_over_imre": 2.7162501013722364,
             "cpython_over_rust_bigint": 2.9878066009008455,
             "cpython_over_baseline": 2.735125107303182,
-            "relar_over_cpython": 0.3681546112027036,
-            "relar_over_rust_bigint": 1.0999747775035222,
-            "relar_over_baseline": 1.006948920469956,
+            "imre_over_cpython": 0.3681546112027036,
+            "imre_over_rust_bigint": 1.0999747775035222,
+            "imre_over_baseline": 1.006948920469956,
             "rust_bigint_over_cpython": 0.33469368455725773,
-            "rust_bigint_over_relar": 0.9091117546072986,
+            "rust_bigint_over_imre": 0.9091117546072986,
             "rust_bigint_over_baseline": 0.9154290998883668,
             "baseline_over_cpython": 0.36561398867271355,
-            "baseline_over_relar": 0.9930990337953659,
+            "baseline_over_imre": 0.9930990337953659,
             "baseline_over_rust_bigint": 1.0923838887380204
           },
           "new_vs_baseline_time_change_percent": 0.6948920469955988,
@@ -3690,7 +3690,7 @@
                 "denominator": 2
               }
             },
-            "relar": {
+            "imre": {
               "p25_ns": {
                 "numerator": 41338957,
                 "denominator": 1

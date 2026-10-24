@@ -112,7 +112,7 @@ def seed(directory: Path, python: str) -> None:
     (directory / "executable-text").write_bytes(b"printf unexpected > fallback.txt\n")
     (directory / "executable-text").chmod(0o755)
     (directory / "directory" / "bin").mkdir(parents=True)
-    (directory / "directory" / "bin" / "relar-process-child").symlink_to(python)
+    (directory / "directory" / "bin" / "imre-process-child").symlink_to(python)
     (directory / "directory" / "relative-executable").symlink_to(python)
 
 
@@ -140,12 +140,12 @@ def run(
     invalid: tuple[bytes, bytes] | None = None,
 ):
     environment = files.environment()
-    environment.update(RELAR_PROCESS_PARENT="inherited λ", RELAR_PROCESS_OVERRIDE="parent")
+    environment.update(IMRE_PROCESS_PARENT="inherited λ", IMRE_PROCESS_OVERRIDE="parent")
     if empty_name:
         environment[""] = "inherited empty name λ"
     else:
         environment.pop("", None)
-    environment.pop("RELAR_PROCESS_EMPTY", None)
+    environment.pop("IMRE_PROCESS_EMPTY", None)
     if invalid is not None:
         environment = {os.fsencode(key): os.fsencode(value) for key, value in environment.items()}
         environment[invalid[0]] = invalid[1]
@@ -186,7 +186,7 @@ def main() -> None:
     files.check_result(resolved, None, "CPython interpreter")
     python = str(Path(resolved.stdout.decode().strip()).resolve())
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-processes-") as directory, open(os.devnull, "rb") as original:
+    with tempfile.TemporaryDirectory(prefix="imre-processes-") as directory, open(os.devnull, "rb") as original:
         temporary = Path(directory)
         # Preserve an inherited descriptor above the child's deliberately lowered
         # soft limit. Closing only up to RLIMIT_NOFILE would leave this one open.
@@ -217,10 +217,10 @@ def main() -> None:
                     binary = project / f"native-O{level}"
                     built = files.run([compiler, "build", str(source), "--module-root", str(source.parent), "-o", str(binary), "--opt-level", level, *flags], temporary)
                     files.check_result(built, None, f"build {name} O{level}")
-                    native_dir = project / f"relar-O{level}" / "work"
+                    native_dir = project / f"imre-O{level}" / "work"
                     seed(native_dir, python)
                     actual = run([str(binary), *arguments], native_dir, **options)
-                    files.check_result(actual, None, f"Relar {name} O{level}")
+                    files.check_result(actual, None, f"Imre {name} O{level}")
                     assert actual.stdout == reference.stdout, (name, level, actual.stdout, reference.stdout)
                     assert snapshot(native_dir) == expected_files, (name, level, "filesystem effects differ")
                     checks += 1
@@ -249,7 +249,7 @@ def main() -> None:
             binary = temporary / f"invalid-environment-O{level}"
             built = files.run([compiler, "build", str(source), "-o", str(binary), "--opt-level", level, *flags], temporary)
             files.check_result(built, None, "build invalid environment boundary")
-            for invalid in [(b"RELAR_INVALID", b"\xff"), (b"RELAR_\xff", b"value")]:
+            for invalid in [(b"IMRE_INVALID", b"\xff"), (b"IMRE_\xff", b"value")]:
                 actual = run([str(binary), python], temporary, invalid=invalid)
                 files.check_result(actual, None, "invalid environment boundary")
                 assert actual.stdout == b"invalid environment\ninvalid environment\nrecovered\n\n", actual.stdout

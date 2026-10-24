@@ -624,6 +624,69 @@ dependencies = [
 ]
 
 [[package]]
+name = "imre-compiler"
+version = "0.1.2"
+dependencies = [
+ "blake3",
+ "libc",
+ "notify",
+ "regex",
+ "regex-syntax",
+ "rpds",
+ "ruff_db",
+ "ruff_python_ast",
+ "ruff_python_parser",
+ "ruff_text_size",
+ "salsa",
+ "salsa-macro-rules",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "ty_module_resolver",
+ "ty_python_core",
+ "ty_python_semantic",
+ "ty_site_packages",
+ "ty_vendored",
+]
+
+[[package]]
+name = "imre-runtime"
+version = "0.1.2"
+dependencies = [
+ "compact_str",
+ "flate2",
+ "getrandom 0.3.4",
+ "glidesort",
+ "hashbrown 0.17.1",
+ "icu_properties",
+ "itoa",
+ "libc",
+ "linux-raw-sys",
+ "memchr",
+ "num-bigint",
+ "num-traits",
+ "regex-automata",
+ "regex-syntax",
+ "ruff_python_literal",
+ "rustix",
+ "ryu",
+ "serde",
+ "serde_json",
+ "sha2",
+ "smallvec",
+ "toml",
+ "toml_parser",
+]
+
+[[package]]
+name = "imre-runtime-jemalloc"
+version = "0.1.2"
+dependencies = [
+ "imre-runtime",
+ "tikv-jemallocator",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1170,69 +1233,6 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
-
-[[package]]
-name = "relar-compiler"
-version = "0.1.2"
-dependencies = [
- "blake3",
- "libc",
- "notify",
- "regex",
- "regex-syntax",
- "rpds",
- "ruff_db",
- "ruff_python_ast",
- "ruff_python_parser",
- "ruff_text_size",
- "salsa",
- "salsa-macro-rules",
- "serde",
- "serde_json",
- "tempfile",
- "ty_module_resolver",
- "ty_python_core",
- "ty_python_semantic",
- "ty_site_packages",
- "ty_vendored",
-]
-
-[[package]]
-name = "relar-runtime"
-version = "0.1.2"
-dependencies = [
- "compact_str",
- "flate2",
- "getrandom 0.3.4",
- "glidesort",
- "hashbrown 0.17.1",
- "icu_properties",
- "itoa",
- "libc",
- "linux-raw-sys",
- "memchr",
- "num-bigint",
- "num-traits",
- "regex-automata",
- "regex-syntax",
- "ruff_python_literal",
- "rustix",
- "ryu",
- "serde",
- "serde_json",
- "sha2",
- "smallvec",
- "toml",
- "toml_parser",
-]
-
-[[package]]
-name = "relar-runtime-jemalloc"
-version = "0.1.2"
-dependencies = [
- "relar-runtime",
- "tikv-jemallocator",
-]
 
 [[package]]
 name = "rpds"

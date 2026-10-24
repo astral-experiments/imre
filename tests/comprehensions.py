@@ -214,7 +214,7 @@ def main() -> None:
     if args.sanitize:
         flags.append("--sanitize")
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-comprehensions-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-comprehensions-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))

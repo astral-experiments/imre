@@ -1,6 +1,6 @@
 # Executable prototype contract
 
-This is a deliberately restricted Python dialect for closed, statically typed source graphs, including selected unchanged pure-Python libraries. Relar targets 64-bit Linux with Clang 18 and Apple Silicon macOS with Apple Clang. Compilation uses Rust, Ruff, and ty; the executable links only the independent Rust runtime and system libraries. It does not import CPython or interpret unsupported operations.
+This is a deliberately restricted Python dialect for closed, statically typed source graphs, including selected unchanged pure-Python libraries. Imre targets 64-bit Linux with Clang 18 and Apple Silicon macOS with Apple Clang. Compilation uses Rust, Ruff, and ty; the executable links only the independent Rust runtime and system libraries. It does not import CPython or interpret unsupported operations.
 
 ## Accepted source
 
@@ -29,7 +29,7 @@ This is a deliberately restricted Python dialect for closed, statically typed so
 | Processes | Synchronous `subprocess.run` with string arguments, captured UTF-8 text, working directories, replacement environments, checked status, and `os.environ.copy()` snapshots |
 | Builtins | `print(value)` for one scalar, path, exception, or record; `repr(value)` for supported data values; `input()` without a prompt; `bool()` or `bool(value)`; `int(int_or_float_or_bool_or_string)`; `float()` or `float(int_or_float_or_bool_or_string_or_bytes)`; `str()` or `str(int_or_float_or_bool_or_string_or_bytes_or_None_or_path_or_exception_or_record)`; `abs(int_or_float_or_bool)`; `len(string_or_bytes_or_container)`; `list([iterable])`; `sorted(iterable, key=callback_or_None, reverse=bool)`; integer `sum(iterable[, start])`; `min(integer_generator)` and `max(integer_generator)`; `any(iterable)` and `all(iterable)`; immediate `map(callback, iterable)`, `filter(predicate_or_None, iterable)`, `zip(iterable, ..., strict=condition)`, `reversed(sequence)`, and `enumerate(iterable[, start])`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments at an iteration boundary |
 
-Booleans have a separate exact type: use `int(flag)` to store one in an integer list. A fresh local initialized with `rows = []` can take its element type from the first direct `rows.append(value)` statement later in the suite, including inside a loop or conditional. This inference supports scalar `int`, `bool`, `float`, `str`, and `bytes` operands. An empty list otherwise defaults to `list[int]` unless a typed storage, call, or return boundary supplies its element type. No annotation permits `Any`, an unrestricted union, an untyped object, or a foreign container to enter native storage. ty checks ordinary Python typing first; Relar additionally enforces exact types, definite assignment, fixed bindings, and every container write. Suppression comments cannot waive Relar's contract.
+Booleans have a separate exact type: use `int(flag)` to store one in an integer list. A fresh local initialized with `rows = []` can take its element type from the first direct `rows.append(value)` statement later in the suite, including inside a loop or conditional. This inference supports scalar `int`, `bool`, `float`, `str`, and `bytes` operands. An empty list otherwise defaults to `list[int]` unless a typed storage, call, or return boundary supplies its element type. No annotation permits `Any`, an unrestricted union, an untyped object, or a foreign container to enter native storage. ty checks ordinary Python typing first; Imre additionally enforces exact types, definite assignment, fixed bindings, and every container write. Suppression comments cannot waive Imre's contract.
 
 Indentation must use spaces; tabs and form feeds remain valid inside string data. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
 
@@ -168,11 +168,11 @@ Defaults match Python's separators, escaping and nonfinite number spellings.
 Dynamic hooks, arbitrary mapping keys, and general `Any` remain outside this
 boundary.
 
-`from relar.json import decode, encode` exposes explicit Relar APIs. `decode(text, Schema)` takes a string and a statically resolved record class, `list[T]`, or `dict[str, T]`, returning that exact type. Scalar and optional roots are not accepted by the decoder. Import aliases and first-party re-exports preserve the intrinsic identity. The native decoder constructs existing typed records, lists, and dictionaries directly, without exposing unknown values or `Any`.
+`from imre.json import decode, encode` exposes explicit Imre APIs. `decode(text, Schema)` takes a string and a statically resolved record class, `list[T]`, or `dict[str, T]`, returning that exact type. Scalar and optional roots are not accepted by the decoder. Import aliases and first-party re-exports preserve the intrinsic identity. The native decoder constructs existing typed records, lists, and dictionaries directly, without exposing unknown values or `Any`.
 
 ```python
 from dataclasses import dataclass, field
-from relar.json import decode, encode
+from imre.json import decode, encode
 
 @dataclass(slots=True)
 class Item:
@@ -199,7 +199,7 @@ Integer fields accept integer tokens of arbitrary precision, excluding booleans,
 
 `encode(value, /, *, indent=None, ensure_ascii=True)` returns a string from the same supported value shapes, including scalar and optional roots. It preserves record declaration order and dictionary insertion order. `indent` accepts `None` or an exact integer; zero and negative values insert newlines without indentation. `ensure_ascii` requires an exact boolean. Default compact output uses Python's `", "` and `": "` separators; indented output omits spaces after commas. Integers retain arbitrary precision, finite floats use Python-compatible decimal spelling, and nonfinite floats raise `ValueError`. Encoding enforces the same 128-container nesting limit. It walks concrete storage directly, invokes no user hooks, and does not build an intermediate dynamic JSON tree. The value and keyword expressions evaluate once in source order before encoding starts.
 
-The checked CPython implementation lives in `stdlib/relar/json.py`. Add `stdlib` to Python's import path when running the same source, for example `PYTHONPATH=stdlib python3 program.py` from this repository. The native compiler recognizes the sealed import without executing that module. It rejects a first-party file that shadows the intrinsic namespace.
+The checked CPython implementation lives in `stdlib/imre/json.py`. Add `stdlib` to Python's import path when running the same source, for example `PYTHONPATH=stdlib python3 program.py` from this repository. The native compiler recognizes the sealed import without executing that module. It rejects a first-party file that shadows the intrinsic namespace.
 
 ## Typed TOML boundary
 
@@ -211,11 +211,11 @@ insertion order after the stream is closed. Invalid UTF-8 raises
 `UnicodeDecodeError`. Syntax errors raise `tomllib.TOMLDecodeError`, a
 `ValueError` subclass. The native reader bounds TOML nesting at 64 containers.
 
-`from relar.toml import decode` provides `decode(text, Schema)` for complete TOML 1.1 documents. The schema is a statically resolved record class or `dict[str, T]`; TOML's document root is always a table. Import aliases, module imports, and first-party re-exports work as they do for typed JSON. The result uses ordinary concrete records and containers, with no exposed dynamic TOML value type.
+`from imre.toml import decode` provides `decode(text, Schema)` for complete TOML 1.1 documents. The schema is a statically resolved record class or `dict[str, T]`; TOML's document root is always a table. Import aliases, module imports, and first-party re-exports work as they do for typed JSON. The result uses ordinary concrete records and containers, with no exposed dynamic TOML value type.
 
 ```python
 from dataclasses import dataclass
-from relar.toml import decode
+from imre.toml import decode
 
 @dataclass(slots=True)
 class Group:
@@ -229,13 +229,13 @@ print(groups["concepts"].name)
 
 Nested schemas support exact `int`, `float`, `bool`, and `str` values, lists, string-keyed dictionaries, fixed records, and their supported optional forms. Records share typed JSON's structural-constructor checks, dataclass support, and native field layouts. Arrays of tables decode as lists of records or dictionaries. Dictionaries retain source insertion order. Bytes, tuples, sets, arbitrary unions, resource handles, and datetime annotations are unsupported.
 
-TOML scalar categories remain distinct: booleans cannot satisfy integer fields, and integer tokens cannot satisfy float fields. Decimal, hexadecimal, octal, and binary integers retain arbitrary precision through Relar's canonical integer representation. Floating-point tokens produce binary64 values, including signed zero, `inf`, and `nan`; overflow follows CPython's conversion to infinity. CPython's maintained parser retains its configured decimal integer conversion limit (4300 digits by default); native decoding has no corresponding digit limit. Applications that need larger decimal inputs under CPython can configure its standard integer conversion guard before decoding.
+TOML scalar categories remain distinct: booleans cannot satisfy integer fields, and integer tokens cannot satisfy float fields. Decimal, hexadecimal, octal, and binary integers retain arbitrary precision through Imre's canonical integer representation. Floating-point tokens produce binary64 values, including signed zero, `inf`, and `nan`; overflow follows CPython's conversion to infinity. CPython's maintained parser retains its configured decimal integer conversion limit (4300 digits by default); native decoding has no corresponding digit limit. Applications that need larger decimal inputs under CPython can configure its standard integer conversion guard before decoding.
 
 A missing field requires a constructor default, even when its annotation is optional. Scalar defaults and fresh list defaults follow the typed JSON rules. An optional list with a list factory receives a fresh `[]` when absent; an optional field defaulting to `None` receives `None`. TOML has no null token. Present values must match the optional payload's exact type. Decoding applies the compiler-proved field writes without executing arbitrary constructor code.
 
 The complete document is parsed before schema conversion. Unknown record fields are ignored after validation, and duplicate keys or tables are rejected even in ignored data. Valid date, local time, local datetime, and offset datetime values can appear in ignored fields; they cannot be exposed as strings, records, or dictionaries through a schema. Calendar validation follows CPython's representable range, excluding year zero and leap-second values. Invalid syntax, schema mismatches, missing required fields, and more than 64 nested table/array containers raise `ValueError`; the depth count includes the document table and ignored data. Error wording is not a parser-library compatibility promise.
 
-The CPython module is `stdlib/relar/toml.py`. Add `stdlib` to the import path as for typed JSON. Python 3.15+ uses its TOML 1.1 `tomllib`; earlier versions require `tomli>=2.4`, for example `python -m pip install 'tomli>=2.4'`. Native compilation uses the pinned Rust TOML parser and links no Python interpreter or compatibility module. This boundary currently provides decoding only.
+The CPython module is `stdlib/imre/toml.py`. Add `stdlib` to the import path as for typed JSON. Python 3.15+ uses its TOML 1.1 `tomllib`; earlier versions require `tomli>=2.4`, for example `python -m pip install 'tomli>=2.4'`. Native compilation uses the pinned Rust TOML parser and links no Python interpreter or compatibility module. This boundary currently provides decoding only.
 
 ## Native text operations
 
@@ -312,7 +312,7 @@ def first_or_zero(values: list[int] | None) -> int:
 
 A true optional local is narrowed to its payload. A false optional number or container may still be present, so falsity does not prove `None`; use an explicit None check when that distinction matters. Truth testing never changes storage requirements: assigning an integer or container to a `bool` annotation still fails.
 
-A loop can search a fixed tuple of up to eight differently typed fields. The tuple evaluates once before the first test. Relar checks the fresh loop variable at the corresponding field type each time.
+A loop can search a fixed tuple of up to eight differently typed fields. The tuple evaluates once before the first test. Imre checks the fresh loop variable at the corresponding field type each time.
 
 ```python
 for group in (old_diagnostics, new_diagnostics, expected_errors):
@@ -388,7 +388,7 @@ in a guard leaves later cases inspecting the original subject.
 
 `float` is an exact storage type. It uses IEEE 754 binary64 in native arguments, returns, locals, fields, tuples, lists, and dictionary values. Write `value: float = float(1)` to store an integer as a float. Mixed arithmetic performs Python's integer-to-float conversion and may raise `OverflowError` for an integer too large to convert. Augmented assignment must leave the target's exact type unchanged, so an integer slot cannot use `/=`.
 
-A direct call can pass an exact `int` to a `float` parameter when that parameter appears only in two-operand comparisons with the integer literal `0`. For example, a function that tests `delta == 0` and `delta > 0` accepts integer counts of any size. Relar evaluates the argument once and compares the integer exactly to obtain its sign. Float arguments retain their original binary64 values, including NaN and signed zero. The proof requires at least one comparison and excludes rebinding, captures, and uses of the value elsewhere. Other `float` parameters, calls through `Callable` values, and defaults require exact floats.
+A direct call can pass an exact `int` to a `float` parameter when that parameter appears only in two-operand comparisons with the integer literal `0`. For example, a function that tests `delta == 0` and `delta > 0` accepts integer counts of any size. Imre evaluates the argument once and compares the integer exactly to obtain its sign. Float arguments retain their original binary64 values, including NaN and signed zero. The proof requires at least one comparison and excludes rebinding, captures, and uses of the value elsewhere. Other `float` parameters, calls through `Callable` values, and defaults require exact floats.
 
 Native arithmetic uses no fast-math flags. Signed zeros, infinities, NaNs, and ordinary rounding remain observable. Float division by either signed zero raises `ZeroDivisionError`. Floor division and modulo follow Python's corrected remainder convention, including `1.0 // 0.1 == 9.0` and the divisor's sign on a zero remainder. Overflow in ordinary float arithmetic can produce infinity. Comparisons with NaN are false except `!=`; mixed integer/float comparisons compare exact values without rounding the integer to binary64.
 
@@ -418,7 +418,7 @@ String loops, comprehensions, and loop-head `enumerate` capture the original imm
 
 ## First-party module graphs
 
-`relar check` and `relar build` resolve imports under one module root. By default this is the entry file's directory, or the parent of its outermost package when enclosing directories contain `__init__.py`. `--module-root DIRECTORY` selects the root explicitly. An entry inside a package follows `python -m package.program` semantics: enclosing package initializers are loaded and relative imports are valid. A package `__main__.py` can be the entry; `__init__.py` itself cannot.
+`imre check` and `imre build` resolve imports under one module root. By default this is the entry file's directory, or the parent of its outermost package when enclosing directories contain `__init__.py`. `--module-root DIRECTORY` selects the root explicitly. An entry inside a package follows `python -m package.program` semantics: enclosing package initializers are loaded and relative imports are valid. A package `__main__.py` can be the entry; `__init__.py` itself cannot.
 
 For example, `import package.operations` binds `package`, `import package.operations as operations` binds the child module, and `from package.operations import solve as run` binds the same function under `run`. Module-qualified calls and imported calls resolve to their defining module's namespace. Imports precede executable initialization. Imported-module definitions may follow value assignments; calls made during initialization must only reach definitions and globals already initialized at that point, including through methods, constructors, and comprehension helpers. Fixed module, definition, and exported value bindings cannot be reassigned or shadowed by parameters or locals.
 
@@ -426,7 +426,7 @@ Imported modules, including package `__init__.py` files, run their typed top-lev
 
 An optional `if __name__ == "__main__":` guard without an `else` is supported. Every loaded module is type-checked and lowered for validation, including unused functions and inactive guards. The fixed `__name__` string is `"__main__"` in the entry and the qualified module name in imported code.
 
-Imports are resolved statically from `.py` files and packages with `__init__.py`. Wildcards, dynamic or function-local imports, namespace packages, import cycles, dependencies outside the module root, and general standard-library imports or shadowing are rejected. The compiler recognizes sealed bindings for `itertools.groupby`, `enum.StrEnum`, `enum.auto`, `typing.Literal`, `typing.assert_never`, `typing.TextIO`, `typing.BinaryIO`, `typing.Union`, `typing.Callable`, `typing.Self`, `collections.abc.Callable`, `dataclasses.dataclass`, `dataclasses.field`, `pathlib.Path`, `tempfile.TemporaryDirectory`, `subprocess.run`, `subprocess.CompletedProcess`, `subprocess.SubprocessError`, `subprocess.CalledProcessError`, `subprocess.TimeoutExpired`, `os.environ` for `copy()`, `sys.argv`, `io.UnsupportedOperation`, `urllib.parse.unquote`, `relar.json.decode`/`encode`, and `relar.toml.decode`; these do not execute standard-library Python code. Their import aliases and first-party re-exports preserve identity. A package can re-export definitions from its children; reading an unfinished parent's definitions through a circular import is rejected. Symlinks cannot escape the module root or give one source file multiple module identities. The source-string library APIs accept sealed bindings but remain isolated from filesystem imports, which use the path-based APIs.
+Imports are resolved statically from `.py` files and packages with `__init__.py`. Wildcards, dynamic or function-local imports, namespace packages, import cycles, dependencies outside the module root, and general standard-library imports or shadowing are rejected. The compiler recognizes sealed bindings for `itertools.groupby`, `enum.StrEnum`, `enum.auto`, `typing.Literal`, `typing.assert_never`, `typing.TextIO`, `typing.BinaryIO`, `typing.Union`, `typing.Callable`, `typing.Self`, `collections.abc.Callable`, `dataclasses.dataclass`, `dataclasses.field`, `pathlib.Path`, `tempfile.TemporaryDirectory`, `subprocess.run`, `subprocess.CompletedProcess`, `subprocess.SubprocessError`, `subprocess.CalledProcessError`, `subprocess.TimeoutExpired`, `os.environ` for `copy()`, `sys.argv`, `io.UnsupportedOperation`, `urllib.parse.unquote`, `imre.json.decode`/`encode`, and `imre.toml.decode`; these do not execute standard-library Python code. Their import aliases and first-party re-exports preserve identity. A package can re-export definitions from its children; reading an unfinished parent's definitions through a circular import is rejected. Symlinks cannot escape the module root or give one source file multiple module identities. The source-string library APIs accept sealed bindings but remain isolated from filesystem imports, which use the path-based APIs.
 
 The I/O surface is intentionally small. `input()` reads a UTF-8 line and removes its trailing LF. A preceding CR remains part of the value, matching CPython's piped input on both hosts. `int(str)` accepts signed decimal digits, optional underscores between digits, and surrounding Python numeric whitespace. Decimal classification is pinned to Unicode 16, matching CPython 3.14; mixed decimal digit families are accepted, while superscripts and other numeric lookalikes are rejected. Other bases remain unsupported. Surrogate escapes in non-raw string literals are rejected: Ruff's analysis AST substitutes replacement characters for them, which is unsuitable for executable semantics. Strings support `+` and local `+=`; `text.split()` groups Python whitespace and omits empty fields, returning `list[str]`. `text.splitlines()` recognizes LF, CR, CRLF, vertical tab, form feed, U+001C through U+001E, U+0085, U+2028, and U+2029. It returns no elements for empty input and no extra element for a final line break; U+001F remains ordinary text. Additional string operations and their accepted signatures are listed under [native text operations](#native-text-operations). Retained line endings, general formatting protocols, and arbitrary codecs remain unsupported. CPython's configurable integer conversion digit limit is not reproduced.
 
@@ -527,7 +527,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 output = Path("report.md")
-with TemporaryDirectory(dir=output.parent, prefix=".relar-") as name:
+with TemporaryDirectory(dir=output.parent, prefix=".imre-") as name:
     staged = Path(name) / "report.md"
     staged.write_text("Complete report\n", encoding="utf-8")
     staged.replace(output)
@@ -563,7 +563,7 @@ Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueErr
 
 ## Command-line options
 
-A function can declare an `argparse.ArgumentParser`, add literal long options in order, and return the result of `parse_args()`. Relar derives a read-only namespace with a concrete field for each option. Hyphens become underscores in field names. A choice of strings gives the field a string `Literal` type. A value option without a default or `required=True` produces an optional field.
+A function can declare an `argparse.ArgumentParser`, add literal long options in order, and return the result of `parse_args()`. Imre derives a read-only namespace with a concrete field for each option. Hyphens become underscores in field names. A choice of strings gives the field a string `Literal` type. A value option without a default or `required=True` produces an optional field.
 
 ```python
 from argparse import ArgumentParser
@@ -623,7 +623,7 @@ The result has the exact type `subprocess.CompletedProcess[str]`; bare `Complete
 
 `sys.exit()` raises `SystemExit` through the ordinary exception and `finally` paths. It accepts an optional `None`, boolean, integer or string. An uncaught string prints to stderr and exits with status 1. An omitted or `None` code exits with status 0. A caught `SystemExit.code` preserves the scalar for printing, truth tests, equality, and type tests.
 
-`os.environ.copy()` returns an independent `dict[str, str]` snapshot. Passing a dictionary as `env` replaces the child's environment; use a snapshot to preserve inherited variables before making overrides. `env=None` inherits the existing environment. Snapshotting undecodable Unix names or values raises `UnicodeDecodeError`; surrogateescaped strings remain outside Relar's string domain. NUL-containing arguments, directories, or environment entries, and environment keys containing `=`, raise `ValueError`. Relar accepts an empty environment name through `execve`, as does CPython's fork/exec path. CPython's `posix_spawn` path raises `ValueError` for that name.
+`os.environ.copy()` returns an independent `dict[str, str]` snapshot. Passing a dictionary as `env` replaces the child's environment; use a snapshot to preserve inherited variables before making overrides. `env=None` inherits the existing environment. Snapshotting undecodable Unix names or values raises `UnicodeDecodeError`; surrogateescaped strings remain outside Imre's string domain. NUL-containing arguments, directories, or environment entries, and environment keys containing `=`, raise `ValueError`. Imre accepts an empty environment name through `execve`, as does CPython's fork/exec path. CPython's `posix_spawn` path raises `ValueError` for that name.
 
 The optional `timeout` keyword accepts signed integer literals or expressions of exact type `float | None` in seconds. `None` waits without a deadline. A deadline expiry kills and reaps the direct child, closes the capture pipes, and raises catch-only `subprocess.TimeoutExpired`, which matches `SubprocessError` and `Exception`. Its read-only fields include `cmd: list[str]` and `stdout`, `output`, and `stderr: bytes | None`. The exception retains the original integer or float for its message and `.timeout` field. A program can read `.timeout` when all its deadline sites agree on a numeric type. Partial captures remain bytes even in text mode, so incomplete UTF-8 is preserved. During pipe capture, an observed empty stream is `b""`; a stream not observed before the deadline is `None`. If both pipes close and waiting for the child itself expires, all capture fields are `None`, even after earlier reads, matching CPython. The runtime does not wait indefinitely for descendants holding inherited pipes. This API terminates the direct child and does not manage a process group.
 
@@ -648,7 +648,7 @@ def describe(rows: dict[str, list[int]]) -> str:
 
 Captures own their values before the guard runs. A false or raising guard leaves those bindings in place. Subsequent cases inspect the original captured subject, including mutations to that container made by an earlier guard. Starred sequence rests are new shallow lists, and mapping rests are new shallow dictionaries retaining the original insertion order. Contained lists and class instances keep their identities. Hidden subject and pattern roots are released on normal exit, exceptions, returns, and loop transfers.
 
-Relar commits captures only after the complete pattern succeeds, so a failed pattern leaves existing bindings unchanged. Python deliberately leaves partial bindings from failed patterns unspecified; programs intended to run under both implementations must not observe them. This does not apply to failed guards, whose successful pattern bindings are retained in both implementations.
+Imre commits captures only after the complete pattern succeeds, so a failed pattern leaves existing bindings unchanged. Python deliberately leaves partial bindings from failed patterns unspecified; programs intended to run under both implementations must not observe them. This does not apply to failed guards, whose successful pattern bindings are retained in both implementations.
 
 Each capture has one concrete storage type, following ordinary assignment rules. OR alternatives must bind the same names with the same type, or types that join as `T | None`. Duplicate captures, unreachable alternatives after an irrefutable pattern, and an unguarded irrefutable case before the final case are rejected. A local used after a match must be assigned on every path reaching that use. A successful non-None pattern narrows an optional subject; a failed `None` pattern permits later cases to use its payload. Only a still-unmodified local subject receives those facts.
 
@@ -664,7 +664,7 @@ Class patterns resolve imported aliases to a fixed nominal identity and inspect 
 
 ## String enums and literal strings
 
-`enum.StrEnum` declares a closed set of string-valued members. Use a string literal, a previous member, or `auto()` on an ASCII member name. Imports and re-exports preserve the class identity. The first member with a given value supplies its canonical `.name`. Relar stores a member as an integer tag and shares the strings behind `.name` and `.value`.
+`enum.StrEnum` declares a closed set of string-valued members. Use a string literal, a previous member, or `auto()` on an ASCII member name. Imports and re-exports preserve the class identity. The first member with a given value supplies its canonical `.name`. Imre stores a member as an integer tag and shares the strings behind `.name` and `.value`.
 
 ```python
 from enum import StrEnum, auto
@@ -684,7 +684,7 @@ print(heading(Source.NEW, verb="added"))  # new: added
 
 `==` compares string values, including across enum classes. `is` compares the class and canonical member. `str(member)` returns its value and `repr(member)` includes the class, canonical name, and quoted value. Sorting and typed keys use the string value. A qualified member in a `match` pattern uses value equality. Covering all canonical members with unguarded cases satisfies a function’s return check. For a nullable subject, cover `None` as well or narrow it first. Enum methods use the ordinary typed method rules. A user-defined function or field declared as plain `str` requires an explicit `member.value` or `str(member)`. Dynamic enum construction and custom enum hooks are outside the supported subset.
 
-Use `typing.assert_never(member)` as a statement to check that every alternative of a local string enum has been handled. A nullable enum also requires handling `None`. Relar asks ty for the argument’s flow type at that line and accepts the call when it is `Never`. Adding a member without handling it makes the program fail to compile, including when the call carries a type-ignore comment. Calls inside a `finally` suite are rejected because that suite can also run during a return, break, or exception. For a member declared with `auto()` and then aliased, ty can require guards for both member names to prove exhaustion.
+Use `typing.assert_never(member)` as a statement to check that every alternative of a local string enum has been handled. A nullable enum also requires handling `None`. Imre asks ty for the argument’s flow type at that line and accepts the call when it is `Never`. Adding a member without handling it makes the program fail to compile, including when the call carries a type-ignore comment. Calls inside a `finally` suite are rejected because that suite can also run during a return, break, or exception. For a member declared with `auto()` and then aliased, ty can require guards for both member names to prove exhaustion.
 
 `Literal["added", "removed"]` accepts exactly the listed strings in parameters, returns, defaults, fields, and typed containers. A smaller set of allowed values can flow to a larger one or to `str`. A direct equality check against a fixed string can narrow a plain string local. Reassigning the local discards that proof. These annotations retain ordinary string storage and operations. Mutable containers keep their declared element types to protect writes through aliases.
 
@@ -853,15 +853,15 @@ Handlers cannot assume a fallible assignment completed. Definite assignment star
 
 `str(exception)` and `print(exception)` expose the message, including Python's special quoting for a one-string `KeyError`. Missing dictionary keys report the actual integer key or quoted string key. KeyError quoting follows Ruff's repr rules and pinned ICU Unicode data; newly assigned characters can print literally where a CPython build with older Unicode data emits an escape (for example U+1FAEA versus CPython 3.14). Other runtime-generated diagnostic messages are not a CPython text-compatibility promise; category matching and explicitly constructed messages are stable within this quoting rule. `assert` is always enabled independently of optimization, evaluates its optional string message only when false, and raises an empty-message `AssertionError` when no message is provided.
 
-Standard output uses bounded buffering for pipes and files, and flushes each printed line on a terminal. Pending output is also flushed before `input()` waits, before a reported runtime error exits, and before the generated process entry returns normally. If a write or flush returns an error, Relar reports `OSError`; fatal-error flushing is best effort and preserves the original exception category. Generated code explicitly flushes at process exit because its LLVM entry point does not run Rust's standard `main` lifecycle.
+Standard output uses bounded buffering for pipes and files, and flushes each printed line on a terminal. Pending output is also flushed before `input()` waits, before a reported runtime error exits, and before the generated process entry returns normally. If a write or flush returns an error, Imre reports `OSError`; fatal-error flushing is best effort and preserves the original exception category. Generated code explicitly flushes at process exit because its LLVM entry point does not run Rust's standard `main` lifecycle.
 
 Before creating file writers or initializing standard output, the runtime ignores `SIGPIPE` once so disconnected pipes produce catchable I/O errors. The sealed runtime has no user signal handlers or signal API.
 
 ## Link options
 
-`relar build` and `relar run` remove unreachable code and data at every optimization level.
-Relar passes `-dead_strip` to the macOS linker and `--gc-sections` to the Linux linker.
-Use `--no-gc-sections` to keep unused code. On Linux, Relar also enables full RELRO so the
+`imre build` and `imre run` remove unreachable code and data at every optimization level.
+Imre passes `-dead_strip` to the macOS linker and `--gc-sections` to the Linux linker.
+Use `--no-gc-sections` to keep unused code. On Linux, Imre also enables full RELRO so the
 loader can make the global offset table read-only after resolving dynamic symbols at startup.
 Select `-C relro-level=partial` for lazy binding or `-C relro-level=off` to disable RELRO.
 
@@ -870,18 +870,18 @@ Use Clang's `-Wl,` syntax for linker options. For example, this Linux build writ
 and prints the Clang invocation to standard error.
 
 ```sh
-relar build totals.py -C link-arg=-Wl,-Map=totals.map --verbose-link
+imre build totals.py -C link-arg=-Wl,-Map=totals.map --verbose-link
 ```
 
-Set `RELARFLAGS` to whitespace-separated build options. For arguments containing spaces,
-set `RELAR_ENCODED_FLAGS` to UTF-8 arguments separated by ASCII unit separators (`0x1f`).
-When set, the encoded variable replaces `RELARFLAGS`, even when empty. Relar reads these
+Set `IMREFLAGS` to whitespace-separated build options. For arguments containing spaces,
+set `IMRE_ENCODED_FLAGS` to UTF-8 arguments separated by ASCII unit separators (`0x1f`).
+When set, the encoded variable replaces `IMREFLAGS`, even when empty. Imre reads these
 options before the command line. The last value wins for individual settings, and
 repeated linker arguments accumulate in order. For example, this command enables section
 GC for one build.
 
 ```sh
-RELARFLAGS='--no-gc-sections' relar build totals.py --gc-sections
+IMREFLAGS='--no-gc-sections' imre build totals.py --gc-sections
 ```
 
 These variables apply to `build` and `run`. Use `--` on the `run` command line to pass
@@ -889,7 +889,7 @@ arguments to the compiled program.
 
 ## Incremental builds
 
-`relar build` and `relar run` share a per-user cache with the bundled native
+`imre build` and `imre run` share a per-user cache with the bundled native
 Linux toolchain and an ordinary runtime archive. Source builds on x86-64
 Debian and Ubuntu can also use the cache with distribution Clang 18 and GNU
 BFD as the system `ld`. Both commands
@@ -897,8 +897,8 @@ reuse the last executable when its sources, import lookups, build options, compi
 runtime, and native link inputs are still current. Program arguments and the output
 path can change between invocations.
 
-The Linux releases use the private Clang and LLD 18 in `relar-toolchain/bin`.
-Relar passes the bundled startup objects and libraries to Clang when linking for
+The Linux releases use the private Clang and LLD 18 in `imre-toolchain/bin`.
+Imre passes the bundled startup objects and libraries to Clang when linking for
 the host. Executables use the host's glibc. On x86-64 Debian and Ubuntu, a source
 build checks for `/usr/bin/ld.lld-18` and otherwise uses the system GNU linker.
 `--verbose-link` shows the selected driver arguments. Changing linkers relinks
@@ -906,10 +906,10 @@ with the existing module objects.
 
 LLVM's dependency file cannot represent every POSIX filename. When LLD reads an
 object path containing a literal backslash or a custom linker script outside the
-system library directories, Relar keeps the module objects and repeats the link
+system library directories, Imre keeps the module objects and repeats the link
 on the next invocation.
 
-After a source edit, Relar checks and lowers the entire import graph. It recompiles
+After a source edit, Imre checks and lowers the entire import graph. It recompiles
 the modules whose emitted LLVM changed and relinks the program. Changing a public
 signature or a shared layout can also recompile a caller. Changing only section GC
 or RELRO relinks with the existing objects. `--verbose-link` performs the link
@@ -920,12 +920,12 @@ reused module, or `-q` or `--quiet` to suppress progress. Set `NO_COLOR` for pla
 terminal output. `--whole-program` optimizes all modules together and uses a
 separate executable cache. `--no-cache` bypasses cache reads and writes while
 preserving the selected code generation mode. These options also work in
-`RELARFLAGS` and `RELAR_ENCODED_FLAGS`.
+`IMREFLAGS` and `IMRE_ENCODED_FLAGS`.
 
 Custom Clang drivers and raw `-C link-arg` arguments, explicit targets, emitted
 LLVM, sanitizers, ThinLTO, and unsupported toolchains use the whole-program
 backend without caching. By default, cache data lives under
-`$XDG_CACHE_HOME/relar/v1` or `~/.cache/relar/v1`. An absolute `RELAR_CACHE_DIR`
+`$XDG_CACHE_HOME/imre/v1` or `~/.cache/imre/v1`. An absolute `IMRE_CACHE_DIR`
 overrides the parent directory. Older objects stay available for reverts until
 that cache directory is cleared.
 
@@ -935,58 +935,58 @@ Install the Rust toolchain specified in `rust-toolchain.toml`, Clang 18, and CPy
 
 ```sh
 cargo build --workspace --release --locked
-target/release/relar check tests/programs/ownership.py
-target/release/relar build tests/programs/ownership.py -o /tmp/ownership --emit-llvm /tmp/ownership.ll
+target/release/imre check tests/programs/ownership.py
+target/release/imre build tests/programs/ownership.py -o /tmp/ownership --emit-llvm /tmp/ownership.ll
 /tmp/ownership
-python3 tests/differential.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/imports.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/classes.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/dataclass_records.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/containers.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/comprehensions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/unpacking.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/fstrings.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/calls.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/inference.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/iterables.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/luhn.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/expressions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/exceptions.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/files.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/processes.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/paths.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/toml_records.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
-python3 tests/io.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
+python3 tests/differential.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/imports.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/classes.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/dataclass_records.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/containers.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/comprehensions.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/unpacking.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/fstrings.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/calls.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/inference.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/iterables.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/luhn.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/expressions.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/exceptions.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/files.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/processes.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/paths.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/toml_records.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
+python3 tests/io.py --compiler target/release/imre --runtime target/release/libimre_runtime.a
 ```
 
-Build the compiler and runtime archive from the same revision. Relar finds the archive beside the compiler executable, or accepts an explicit path with `--runtime`. `--clang` selects the Clang driver and `--opt-level` selects 0 through 3 (default 3). Every input module, executable, runtime, explicit ThinLTO linker, and saved LLVM output must have a distinct file identity; symlinks and hard links cannot bypass the input overwrite check.
+Build the compiler and runtime archive from the same revision. Imre finds the archive beside the compiler executable, or accepts an explicit path with `--runtime`. `--clang` selects the Clang driver and `--opt-level` selects 0 through 3 (default 3). Every input module, executable, runtime, explicit ThinLTO linker, and saved LLVM output must have a distinct file identity; symlinks and hard links cannot bypass the input overwrite check.
 
-`--lto-linker PATH` enables optional cross-language ThinLTO and requires explicit `--runtime` and `--target TRIPLE`. Build that runtime with `RUSTFLAGS=-Clinker-plugin-lto` in a separate target directory, and select an LLVM linker that can read both the Rust and Clang bitcode. On Linux, use Clang 18 with the pinned Rust toolchain's bundled LLD. At optimization level 3, Relar raises LLVM's import and inlining budgets to 1,000 so runtime accessors can inline across the language boundary; this trades additional code size and link work for fewer runtime calls. Other optimization levels retain LLVM's normal budgets. `--target` also works without ThinLTO; it does not expand the supported runtime platforms.
+`--lto-linker PATH` enables optional cross-language ThinLTO and requires explicit `--runtime` and `--target TRIPLE`. Build that runtime with `RUSTFLAGS=-Clinker-plugin-lto` in a separate target directory, and select an LLVM linker that can read both the Rust and Clang bitcode. On Linux, use Clang 18 with the pinned Rust toolchain's bundled LLD. At optimization level 3, Imre raises LLVM's import and inlining budgets to 1,000 so runtime accessors can inline across the language boundary; this trades additional code size and link work for fewer runtime calls. Other optimization levels retain LLVM's normal budgets. `--target` also works without ThinLTO; it does not expand the supported runtime platforms.
 
-On Apple Silicon, build the bitcode runtime with `--target aarch64-apple-darwin` so Cargo builds host tools normally. Pass the resulting `target/lto/aarch64-apple-darwin/release/librelar_runtime.a` to `--runtime`. Use the Mach-O linker `ld64.lld` from an LLVM release that reads both the Rust bitcode and your macOS SDK.
+On Apple Silicon, build the bitcode runtime with `--target aarch64-apple-darwin` so Cargo builds host tools normally. Pass the resulting `target/lto/aarch64-apple-darwin/release/libimre_runtime.a` to `--runtime`. Use the Mach-O linker `ld64.lld` from an LLVM release that reads both the Rust bitcode and your macOS SDK.
 
 The following example builds the dependency planner on Linux.
 
 ```sh
-RUSTFLAGS=-Clinker-plugin-lto cargo build -p relar-runtime --release --locked --target-dir target/lto
-RELAR_TARGET="$(rustc -vV | sed -n 's/^host: //p')"
-RELAR_LTO_LINKER="$(rustc --print sysroot)/lib/rustlib/$RELAR_TARGET/bin/gcc-ld/ld.lld"
-target/release/relar build examples/dependency_planner/__main__.py \
-  --module-root examples --clang clang-18 --target "$RELAR_TARGET" \
-  --runtime target/lto/release/librelar_runtime.a --lto-linker "$RELAR_LTO_LINKER" \
+RUSTFLAGS=-Clinker-plugin-lto cargo build -p imre-runtime --release --locked --target-dir target/lto
+IMRE_TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+IMRE_LTO_LINKER="$(rustc --print sysroot)/lib/rustlib/$IMRE_TARGET/bin/gcc-ld/ld.lld"
+target/release/imre build examples/dependency_planner/__main__.py \
+  --module-root examples --clang clang-18 --target "$IMRE_TARGET" \
+  --runtime target/lto/release/libimre_runtime.a --lto-linker "$IMRE_LTO_LINKER" \
   -o /tmp/dependency-planner-lto
 ```
 
 All native test harnesses accept the same `--lto-linker` and `--target` options.
 
-`relar build` and `relar run` use the system allocator by default. On Linux,
+`imre build` and `imre run` use the system allocator by default. On Linux,
 `--allocator jemalloc` selects the statically linked jemalloc heap for runtime
 objects. `--allocator system` selects the platform heap explicitly. macOS and
 `--sanitize` use the system heap. The compiler looks beside its executable
-for `librelar_runtime.a` (system) or `librelar_runtime_jemalloc.a` (jemalloc).
+for `libimre_runtime.a` (system) or `libimre_runtime_jemalloc.a` (jemalloc).
 An explicit `--runtime` selects the allocator through the archive itself.
-For a Linux ThinLTO build with jemalloc, use `-p relar-runtime-jemalloc` in
-the Cargo command above and pass `--runtime target/lto/release/librelar_runtime_jemalloc.a`.
+For a Linux ThinLTO build with jemalloc, use `-p imre-runtime-jemalloc` in
+the Cargo command above and pass `--runtime target/lto/release/libimre_runtime_jemalloc.a`.
 Pass a system-allocator archive when supplying a custom runtime to `--sanitize`.
 
 `--sanitize` marks generated functions for AddressSanitizer and links its runtime. On macOS, use `--clang` to select a Clang with a matching sanitizer runtime when you also instrument the Rust archive. To instrument Rust runtime code, build a separate sanitizer archive. The test suites accept `--sanitize --opt-levels 1` to exercise this configuration, including leak checks on normal exits.
@@ -1034,7 +1034,7 @@ The paths suite compares lexical normalization, imports, value storage, filesyst
 The workspace suite compares path mutations and scoped temporary directories against CPython 3.14+, including exact file bytes, permissions, hard-link relationships, and symlink targets. It exercises argument order, default-directory selection, aliases, mixed managers, all control transfers, permission repair, opaque Unix filenames, and cleanup failures that replace pending returns or exceptions. Rejections protect the typed arguments and direct-with-only constructor. Every case runs under a reduced descriptor limit and accepts the same optimization, ThinLTO, and sanitizer flags as the other filesystem suites:
 
 ```sh
-python3 tests/workspaces.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --python python3.14 --clang clang-18
+python3 tests/workspaces.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --python python3.14 --clang clang-18
 ```
 
 The files suite compares complete filesystem effects, strict decoding, newline handling, write counts, alias-visible closure, all `with` exit reasons, failed cleanup, argument aliases, and descriptor recovery under a reduced open-file limit. Rejection cases protect the sealed import, file, context-manager, and argument surfaces. The existing suites also run generated-code and runtime AddressSanitizer checks at `-O1` in CI.
@@ -1042,5 +1042,5 @@ The files suite compares complete filesystem effects, strict decoding, newline h
 The bytes suite compares full byte-range repr/indexing, strict UTF-8 decoding errors, constructors, exact typed storage and keys, 896 empty/nonempty slices, iterator ownership, and failures during partial construction at `-O0` and `-O3`. Binary fixtures compare complete file contents, append/exclusive modes, imported handle aliases, closed/wrong-direction errors, and every context-manager exit path. It accepts the same target, ThinLTO, and sanitizer options as the other native suites:
 
 ```sh
-python3 tests/bytes.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
+python3 tests/bytes.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
 ```

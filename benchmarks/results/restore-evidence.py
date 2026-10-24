@@ -13,22 +13,24 @@ from contextvars import ContextVar
 import hashlib
 import io
 import json
+import lzma
 import os
 from pathlib import Path, PurePosixPath
 import re
 import struct
+import subprocess
 import tarfile
 import tempfile
 import zlib
 
 
 ORIGINAL_TOKENS = tuple(bytes.fromhex(value) for value in (
-    "656c6972", "456c6972", "454c4952", "6f6e7978", "4f6e7978", "4f4e5958",
+    "72656c6172", "52656c6172", "52454c4152",
 ))
-TARGET_TOKENS = (b"relar", b"Relar", b"RELAR") * 2
+TARGET_TOKENS = (b"imre", b"Imre", b"IMRE")
 OLD_PATTERN = re.compile(b"|".join(map(re.escape, ORIGINAL_TOKENS)))
 ANY_OLD_PATTERN = re.compile(
-    b"|".join(map(re.escape, (ORIGINAL_TOKENS[0], ORIGINAL_TOKENS[3]))), re.IGNORECASE,
+    re.escape(ORIGINAL_TOKENS[0]), re.IGNORECASE,
 )
 RESULTS = "benchmarks/results/"
 MANIFEST_PATH = RESULTS + "naming-provenance.json"
@@ -36,12 +38,12 @@ SCRIPT_PATH = RESULTS + "restore-evidence.py"
 README_PATH = RESULTS + "NAMING_PROVENANCE.md"
 PROVENANCE_PATHS = {MANIFEST_PATH, SCRIPT_PATH, README_PATH}
 NOTE = (
-    b"> Project naming is normalized to Relar; these are historical measurements. "
+    b"> Project naming is normalized to Imre; these are historical measurements. "
     b"See [capture provenance and exact restoration](NAMING_PROVENANCE.md).\n\n"
 )
 SELF_BYTES = Path(__file__).read_bytes()
 SELF_SHA256 = hashlib.sha256(SELF_BYTES).hexdigest()
-CACHE = Path(os.environ.get("RELAR_EVIDENCE_CACHE", "/tmp/relar-evidence-cache")) / SELF_SHA256
+CACHE = Path(os.environ.get("IMRE_EVIDENCE_CACHE", "/tmp/imre-evidence-cache")) / SELF_SHA256
 MAX_DEPTH = 32
 SHARD_BYTES = 8 * 1024 * 1024
 SHARD_THRESHOLD = 64 * 1024
@@ -146,7 +148,7 @@ def _rename(data: bytes, encoding: str = "bytes") -> tuple[bytes, dict]:
     width = 4 if encoding.startswith("utf-32") else 2 if encoding.startswith("utf-16") else 1
     pattern = re.compile(b"|".join(map(re.escape, originals)))
     insensitive = re.compile(
-        b"|".join(map(re.escape, (originals[0], originals[3]))), re.IGNORECASE,
+        re.escape(originals[0]), re.IGNORECASE,
     )
     if any(match.start() % width == 0 and match.group() not in originals for match in insensitive.finditer(data)):
         raise ValueError("Unsupported project-name capitalization")
@@ -231,12 +233,14 @@ def _kind(path: str, data: bytes) -> str:
     suffix = path.lower()
     if data.startswith(b"\x1f\x8b") or suffix.endswith((".gz", ".tgz")):
         return "gzip"
+    if data.startswith(b"\xfd7zXZ\x00") or suffix.endswith(".xz"):
+        return "xz"
     if suffix.endswith(".tar") or data[257:262] == b"ustar" or _header_valid(data[:512]):
         return "tar"
-    if data.startswith((b"PK\x03\x04", b"PK\x05\x06", b"BZh", b"\xfd7zXZ\x00", b"\x28\xb5\x2f\xfd")) or suffix.endswith((".zip", ".xz", ".bz2", ".zst")):
+    if data.startswith((b"PK\x03\x04", b"PK\x05\x06", b"BZh", b"\x28\xb5\x2f\xfd")) or suffix.endswith((".zip", ".bz2", ".zst")):
         raise ValueError("Unsupported archive encoding: " + path)
-    if data.startswith((b"\x7fELF", b"MZ", b"!<arch>\n", b"BC\xc0\xde", b"\xca\xfe\xba\xbe", b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf")):
-        raise ValueError("Compiled artifact is not a historical text view: " + path)
+    if data.startswith((b"# v2 git bundle\n", b"# v3 git bundle\n", b"\x7fELF", b"MZ", b"!<arch>\n", b"BC\xc0\xde", b"\xca\xfe\xba\xbe", b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf")):
+        return "opaque"
     return "text"
 
 
@@ -446,11 +450,34 @@ def _restore_gzip(data: bytes, rule: dict, depth: int) -> bytes:
     return original
 
 
+def _xz_compress(data: bytes, threaded: bool) -> bytes:
+    if threaded:
+        # The multiblock captures were produced by XZ Utils with its default block size.
+        return subprocess.run(
+            ["xz", "--threads=4", "-6", "--stdout"], input=data, stdout=subprocess.PIPE, check=True,
+        ).stdout
+    return lzma.compress(data, format=lzma.FORMAT_XZ, preset=6)
+
+
+def _normalize_xz(path: str, data: bytes, depth: int) -> tuple[bytes, dict]:
+    body = lzma.decompress(data, format=lzma.FORMAT_XZ)
+    normalized, payload = _normalize_node(path.removesuffix(".xz"), body, depth + 1)
+    threaded = bool(data[13] & 0xC0)
+    rule = {"kind": "xz", "threaded": threaded, "payload": payload}
+    if _xz_compress(body, threaded) != data:
+        rule["original_zlib_hex"] = zlib.compress(data, 9).hex()
+    return _xz_compress(normalized, threaded), rule
+
+
 def _normalize_node(path: str, raw: bytes, depth: int = 0, markdown: bool = False) -> tuple[bytes, dict]:
     if depth > MAX_DEPTH:
         raise ValueError("Archive nesting limit exceeded")
     kind = _kind(path, raw)
-    if kind == "tar":
+    if kind == "opaque":
+        normalized, rule = raw, {"kind": "opaque"}
+    elif kind == "xz":
+        normalized, rule = _normalize_xz(path, raw, depth)
+    elif kind == "tar":
         normalized, rule = _normalize_tar(path, raw, depth)
     elif kind == "gzip":
         normalized, rule = _normalize_gzip(path, raw, depth)
@@ -468,7 +495,17 @@ def _restore_node(normalized: bytes, wrapper: dict, depth: int = 0) -> bytes:
         raise ValueError("Archive nesting limit exceeded")
     _check_identity(normalized, wrapper, "normalized")
     rule = wrapper["restoration"]
-    if rule["kind"] == "text":
+    if rule["kind"] == "opaque":
+        restored = normalized
+    elif rule["kind"] == "xz":
+        body = _restore_node(lzma.decompress(normalized), rule["payload"], depth + 1)
+        if "original_zlib_hex" in rule:
+            restored = _unpack_hex(rule["original_zlib_hex"], wrapper["original_bytes"])
+            if lzma.decompress(restored) != body:
+                raise ValueError("Restored XZ stream disagrees with recursive payload")
+        else:
+            restored = _xz_compress(body, rule["threaded"])
+    elif rule["kind"] == "text":
         restored = _undo_text(normalized, rule)
     elif rule["kind"] == "tar":
         restored = _restore_tar(normalized, rule, depth)
@@ -570,7 +607,7 @@ def provenance_files(records: dict[str, dict], prior_support: dict[str, bytes] |
         return value
 
     manifest = {
-        "schema": 2, "project": "Relar", "kind": "historical-evidence-view",
+        "schema": 2, "project": "Imre", "kind": "historical-evidence-view",
         "policy": "Names are view aliases. Capture hashes, source revisions, timestamps, outputs, and measurements retain their original meaning. Restore one layer to recover exact original files and previous provenance support.",
         "restoration_utility": SCRIPT_PATH, "restoration_utility_sha256": SELF_SHA256,
         "token_code_original_hex": [value.hex() for value in ORIGINAL_TOKENS],
@@ -580,7 +617,7 @@ def provenance_files(records: dict[str, dict], prior_support: dict[str, bytes] |
         "files": externalize(records), "prior_support": externalize(prior),
         "support_blobs": {path: {"sha256": digest(data), "bytes": len(data)} for path, data in sorted(shards.items())},
     }
-    readme = b"""# Historical evidence naming\n\nThese files present historical evidence using the current Relar name. They do not claim new measurements or new captures. Recorded source revisions, hashes, commands, timestamps, outputs, and performance values keep their historical meaning. The manifest separately identifies the current view and the exact original bytes.\n\nVerify every current view and its inverse:\n\n```sh\npython3 benchmarks/results/restore-evidence.py verify\n```\n\nRestore one naming layer into a new directory:\n\n```sh\npython3 benchmarks/results/restore-evidence.py restore /tmp/relar-original-evidence\n```\n\nRestoration also reinstates any preceding provenance manifest, documentation, and utility. Run that restored utility in the restored tree to verify or recover an earlier layer separately. Original paths and prior support files are encoded in the current manifest.\n\nText recipes record only replaced occurrences, preserving preexisting current-name text. Tar recipes retain original metadata, headers, and padding plus recursively restored logical payloads. Gzip recipes preserve exact original headers and either reproducible compressed payloads or an encoded original stream. Every layer checks both byte lengths and SHA-256 identities.\n"""
+    readme = b"""# Historical evidence naming\n\nThese files present historical evidence using the current Imre name. They do not claim new measurements or new captures. Recorded source revisions, hashes, commands, timestamps, outputs, and performance values keep their historical meaning. The manifest separately identifies the current view and the exact original bytes.\n\nVerify every current view and its inverse:\n\n```sh\npython3 benchmarks/results/restore-evidence.py verify\n```\n\nRestore one naming layer into a new directory:\n\n```sh\npython3 benchmarks/results/restore-evidence.py restore /tmp/imre-original-evidence\n```\n\nRestoration also reinstates any preceding provenance manifest, documentation, and utility. Run that restored utility in the restored tree to verify or recover an earlier layer separately. Run capture-specific replay scripts and checksum audits from the restored directory. Their hashes describe the files as they were captured. Original paths and prior support files are encoded in the current manifest.\n\nText recipes record only replaced occurrences, preserving preexisting current-name text. Tar recipes retain original metadata, headers, and padding plus recursively restored logical payloads. Gzip recipes preserve exact original headers and either reproducible compressed payloads or an encoded original stream. XZ streams use the original compression layout or a stored original stream. Multiblock XZ restoration requires the xz command from XZ Utils. Embedded Git bundles retain their object identities. Every layer checks both byte lengths and SHA-256 identities.\n"""
     output = {MANIFEST_PATH: json_bytes(manifest), SCRIPT_PATH: SELF_BYTES, README_PATH: readme, **shards}
     if any(len(data) >= 90 * 1024 * 1024 for data in output.values()):
         raise ValueError("Generated provenance blob exceeds the publication size guard")

@@ -90,7 +90,7 @@ def main():
     if args.sanitize:
         compile_flags += ["--sanitize"]
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-argparse-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-argparse-") as directory:
         for name, cases in CASES.items():
             source = FIXTURES / (name + ".py")
             native = Path(directory) / name

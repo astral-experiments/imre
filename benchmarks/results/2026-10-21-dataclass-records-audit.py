@@ -20,9 +20,9 @@ from types import SimpleNamespace
 if sys.flags.optimize:
     raise SystemExit("audit requires assertions")
 sys.dont_write_bytecode = True
-ROOT = Path("/home/dev-user/code/oss/relar")
+ROOT = Path("/home/dev-user/code/oss/imre")
 REVISION = "f4aee96d255b4b4772e8d3fd2ba7169844cc58eb"
-ENGINES = ("relar", "port", "original", "rust")
+ENGINES = ("imre", "port", "original", "rust")
 PREFIX = Path("/tmp/2026-10-21-dataclass-records")
 LEGACY = Path("benchmarks/results/2026-10-21-memory-report-artifact-audit.py")
 
@@ -41,23 +41,23 @@ def report(result):
         "All four 65,024-item comparisons meet the target of at most 2× Rust's time. "
         "Each input file contains 65,024 items; these are distinct-name copies of captured ty reports.",
         "",
-        "| Build | Case | Relar (ms) | Rust (ms) | Relar/Rust | Upstream CPython/Relar | Typed CPython/Relar |",
+        "| Build | Case | Imre (ms) | Rust (ms) | Imre/Rust | Upstream CPython/Imre | Typed CPython/Imre |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for mode, rows in result["modes"].items():
         for row in rows:
             if row["label"].endswith("-256"):
                 s = row["seconds"]
-                lines.append(f"| {mode} | {row['label']} | {s['relar']*1000:.3f} | {s['rust']*1000:.3f} | "
-                             f"{row['relar_over_rust']:.3f}× | {row['original_over_relar']:.2f}× | {row['port_over_relar']:.2f}× |")
+                lines.append(f"| {mode} | {row['label']} | {s['imre']*1000:.3f} | {s['rust']*1000:.3f} | "
+                             f"{row['imre_over_rust']:.3f}× | {row['original_over_imre']:.2f}× | {row['port_over_imre']:.2f}× |")
     lines += [
         "", "Empty-report controls are reported without subtraction:", "",
-        "| Build | Relar (ms) | Rust (ms) | Upstream CPython (ms) | Typed CPython (ms) |",
+        "| Build | Imre (ms) | Rust (ms) | Upstream CPython (ms) | Typed CPython (ms) |",
         "| --- | ---: | ---: | ---: | ---: |",
     ]
     for mode, rows in result["modes"].items():
         s = rows[0]["seconds"]
-        lines.append(f"| {mode} | {s['relar']*1000:.3f} | {s['rust']*1000:.3f} | {s['original']*1000:.3f} | {s['port']*1000:.3f} |")
+        lines.append(f"| {mode} | {s['imre']*1000:.3f} | {s['rust']*1000:.3f} | {s['original']*1000:.3f} | {s['port']*1000:.3f} |")
     lines += [
         "",
         "Times are whole-process medians of 12 measured rounds after two warmups, pinned to CPU 31 "
@@ -93,20 +93,20 @@ def main():
     audit = SimpleNamespace(**runpy.run_path(str(ROOT / LEGACY)))
     audit.guard(__file__)
     audit.guard(ROOT / LEGACY, audit.sha(helper_bytes))
-    build_path = Path("/tmp/relar-dataclass-build/build-record.json")
+    build_path = Path("/tmp/imre-dataclass-build/build-record.json")
     build = audit.load(build_path)
     assert build["revision"] == REVISION and build["source_matches_revision"] and build["input_guards_passed"]
     for relative, digest in build["source_sha256"].items():
         assert audit.sha(audit.source(REVISION, relative)) == digest, relative
     counts = collections.Counter()
     modes, identities = {}, {}
-    context_path = Path("/tmp/relar-dataclass-timing-context.json")
+    context_path = Path("/tmp/imre-dataclass-timing-context.json")
     context = audit.load(context_path)
     assert set(context["commands"]) == {"normal", "thinlto"}
     previous_completed = datetime.fromisoformat(context["started_at"])
     with tempfile.TemporaryDirectory(prefix="dataclass-data-audit-") as temporary:
         oracle_root = Path(temporary)
-        first = audit.load("/tmp/relar-dataclass-prepared-normal.json")
+        first = audit.load("/tmp/imre-dataclass-prepared-normal.json")
         for name, path in first["source_and_tool_paths"].items():
             if name.startswith(("helper:", "example:", "stdlib:", "fixture:", "upstream:")):
                 relative = Path(path).relative_to(ROOT)
@@ -122,9 +122,9 @@ def main():
         application = validator.cases()
         assert len(application) == 72 and len(workloads) == 7
         for mode in ("normal", "thinlto"):
-            timing_path = Path(f"/tmp/relar-dataclass-timing-{mode}.json")
+            timing_path = Path(f"/tmp/imre-dataclass-timing-{mode}.json")
             timing = audit.load(timing_path)
-            prep_path = Path(f"/tmp/relar-dataclass-prepared-{mode}.json")
+            prep_path = Path(f"/tmp/imre-dataclass-prepared-{mode}.json")
             prep = audit.load(prep_path, timing["preparation_record_sha256"])
             assert timing["preparation"] == prep
             assert timing["revision"] == prep["revision"] == REVISION
@@ -147,7 +147,7 @@ def main():
             assert paths.keys() == hashes.keys()
             for name, path in paths.items():
                 audit.captured(path, hashes[name], REVISION)
-            assert Path(paths["relar_build_record"]) == build_path
+            assert Path(paths["imre_build_record"]) == build_path
             assert build["sha256"]["compiler"] == hashes["compiler"] and build["sha256"][mode + "_runtime"] == hashes["runtime"]
             for name in ("binary", "llvm", "validation"):
                 audit.guard(prep[name], prep[name + "_sha256"])
@@ -155,7 +155,7 @@ def main():
             if mode == "thinlto":
                 expected_command += ["--lto-linker", paths["lto_linker"]]
             assert prep["compile_command"] == expected_command
-            timing_command = ["python3", "benchmarks/memory_benchmark.py", "--compiler", paths["compiler"], "--runtime", paths["runtime"], "--relar-build-record", str(build_path), "--rust", paths["rust"], "--rust-build-record", paths["rust_build_record"], "--python", paths["python"], "--clang", paths["clang"], "--target", prep["effective_target"], "--artifact-dir", str(timing_path.with_suffix("")), "--output", str(timing_path)]
+            timing_command = ["python3", "benchmarks/memory_benchmark.py", "--compiler", paths["compiler"], "--runtime", paths["runtime"], "--imre-build-record", str(build_path), "--rust", paths["rust"], "--rust-build-record", paths["rust_build_record"], "--python", paths["python"], "--clang", paths["clang"], "--target", prep["effective_target"], "--artifact-dir", str(timing_path.with_suffix("")), "--output", str(timing_path)]
             if mode == "thinlto":
                 timing_command += ["--lto-linker", paths["lto_linker"]]
             timing_command += ["--prepared-record", str(prep_path), "--samples", "12", "--warmups", "2", "--copies", "32", "256", "--cpu", "31"]
@@ -225,15 +225,15 @@ def main():
                     recomputed = {"median_seconds": statistics.median(values), "min_seconds": min(values), "max_seconds": max(values), "p25_seconds": q[0], "p75_seconds": q[2]}
                     assert recomputed == row["summary"][engine]
                     seconds[engine] = recomputed["median_seconds"]
-                for left, right in (("original", "relar"), ("port", "relar"), ("relar", "rust"), ("original", "rust"), ("port", "rust")):
+                for left, right in (("original", "imre"), ("port", "imre"), ("imre", "rust"), ("original", "rust"), ("port", "rust")):
                     assert row[left + "_over_" + right] == seconds[left] / seconds[right]
                 fractions = {engine: computed[0]["seconds"][engine] / seconds[engine] for engine in ENGINES} if computed else None
                 if fractions is not None:
                     assert row["startup_control_fraction"] == fractions
                 computed.append({"label": row["label"], "records": row["records"], "seconds": seconds,
-                                 "relar_over_rust": seconds["relar"] / seconds["rust"],
-                                 "original_over_relar": seconds["original"] / seconds["relar"],
-                                 "port_over_relar": seconds["port"] / seconds["relar"],
+                                 "imre_over_rust": seconds["imre"] / seconds["rust"],
+                                 "original_over_imre": seconds["original"] / seconds["imre"],
+                                 "port_over_imre": seconds["port"] / seconds["imre"],
                                  "startup_control_fraction": fractions})
             modes[mode] = computed
             identities[mode] = {"preparation": audit.guard(prep_path), "timing": audit.guard(timing_path),
@@ -241,7 +241,7 @@ def main():
                                 "unchanged_reference_bindings": unchanged}
     targets = [row for rows in modes.values() for row in rows if row["label"].endswith("-256")]
     assert len(targets) == 4 and all(row["records"] == {"old.json": 65024, "project.json": 65024} for row in targets)
-    assert all(row["relar_over_rust"] <= 2 for row in targets), targets
+    assert all(row["imre_over_rust"] <= 2 for row in targets), targets
     for path, digest in list(audit.INPUTS.items()):
         audit.guard(path, digest)
     result = {"schema": 1, "status": "passed", "measurement_revision": REVISION,
@@ -257,7 +257,7 @@ def main():
     with args.report.open("x") as stream:
         stream.write(report(result))
     print(json.dumps({"output": str(args.output), "report": str(args.report), "counts": dict(counts),
-                      "large_relar_over_rust": [row["relar_over_rust"] for row in targets]}, indent=2))
+                      "large_imre_over_rust": [row["imre_over_rust"] for row in targets]}, indent=2))
 
 
 if __name__ == "__main__":

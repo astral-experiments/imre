@@ -204,7 +204,7 @@ def main() -> None:
     python = str(Path(args.python).resolve()) if "/" in args.python else args.python
     clang = str(Path(args.clang).resolve()) if "/" in args.clang else args.clang
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-classes-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-classes-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))

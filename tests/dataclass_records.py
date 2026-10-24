@@ -138,7 +138,7 @@ if __name__ == "__main__":
     if version == "True":
         run_suite(FIXTURES)
     else:
-        with tempfile.TemporaryDirectory(prefix="relar-dataclass-oracle-") as directory:
+        with tempfile.TemporaryDirectory(prefix="imre-dataclass-oracle-") as directory:
             fixtures = Path(directory) / "dataclasses"
             shutil.copytree(FIXTURES, fixtures, ignore=shutil.ignore_patterns("__pycache__"))
             (fixtures / "nan_alias.py").unlink()

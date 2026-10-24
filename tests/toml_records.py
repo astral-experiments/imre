@@ -15,12 +15,12 @@ assignments.BOOTSTRAP = (
     + assignments.BOOTSTRAP
 )
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "toml_records"
-IMPORT = "from relar.toml import decode\n"
+IMPORT = "from imre.toml import decode\n"
 ITEM = "class Item:\n    value: int\n    def __init__(self, value: int) -> None:\n        self.value = value\n"
 
 REJECTED = {
-    "unknown_intrinsic": "from relar.toml import loads\n",
-    "encoding_unavailable": "from relar.toml import encode\n",
+    "unknown_intrinsic": "from imre.toml import loads\n",
+    "encoding_unavailable": "from imre.toml import encode\n",
     "bytes_input": IMPORT + ITEM + 'decode(b"value=1", Item)\n',
     "missing_schema": IMPORT + 'decode("value=1")\n',
     "extra_argument": IMPORT + ITEM + 'decode("value=1", Item, False)\n',
@@ -53,8 +53,8 @@ for name, annotation in (
 IMPORTED_REJECTIONS = {
     "intrinsic_shadow": {
         "main.py": IMPORT,
-        "relar/__init__.py": "",
-        "relar/toml.py": "def decode(text: str, schema: int) -> int:\n    return schema\n",
+        "imre/__init__.py": "",
+        "imre/toml.py": "def decode(text: str, schema: int) -> int:\n    return schema\n",
     },
 }
 

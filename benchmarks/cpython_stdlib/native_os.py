@@ -1,4 +1,4 @@
-"""Run complete CPython os methods, routing getcwd and fspath to native Relar."""
+"""Run complete CPython os methods, routing getcwd and fspath to native Imre."""
 import argparse
 import os
 from pathlib import Path
@@ -16,7 +16,7 @@ from upstream import verify_upstream
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("relar", "runtime", "clang"):
+    for name in ("imre", "runtime", "clang"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--cpython-source", type=Path)
     parser.add_argument("--opt-level", choices=("0", "1", "2", "3"), default="3")
@@ -35,7 +35,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         binary = Path(tmp) / "os-driver"
         driver = HERE / "os_driver.py"
-        subprocess.run([args.relar.resolve(), "build", driver, "--no-cache", "--opt-level",
+        subprocess.run([args.imre.resolve(), "build", driver, "--no-cache", "--opt-level",
                         args.opt_level, "--clang", args.clang.resolve(), "--runtime",
                         args.runtime.resolve(), "-o", binary], cwd=tmp, check=True)
 

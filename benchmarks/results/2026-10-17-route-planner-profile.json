@@ -20,7 +20,7 @@
     "source_sha256": "220266102bfd11d0854e7cdb9809628e64ac5ddbfc97b17c95bc22798bec5fdb",
     "aggregation": "Sum exclusive instruction records across source locations by function name; exclude inclusive call-cost records. Function sums were checked against the Callgrind summary total. Call counts sum incoming calls= records.",
     "symbol_aliases": {
-      "relar_str_retain": "Shared machine-code address with relar_list_retain; this workload calls that entry for list retains."
+      "imre_str_retain": "Shared machine-code address with imre_list_retain; this workload calls that entry for list retains."
     },
     "limitations": "Hardware perf counters are disabled on this devbox (perf_event_paranoid=4). Instruction profiles are separate from uninstrumented timing runs. Generated Python functions may be inlined into callers."
   },
@@ -86,25 +86,25 @@
           "calls": 3
         },
         {
-          "name": "relar_list_release",
+          "name": "imre_list_release",
           "self_instructions": 240813924,
           "fraction": 0.1529759432583338,
           "calls": 28847354
         },
         {
-          "name": "relar_runtime::index",
+          "name": "imre_runtime::index",
           "self_instructions": 223783461,
           "fraction": 0.14215741956885167,
           "calls": 13163733
         },
         {
-          "name": "relar_list_get",
+          "name": "imre_list_get",
           "self_instructions": 203710188,
           "fraction": 0.1294059647507447,
           "calls": 9259554
         },
         {
-          "name": "relar_str_retain",
+          "name": "imre_str_retain",
           "self_instructions": 120721240,
           "fraction": 0.0766876152905332,
           "calls": 24144248
@@ -116,13 +116,13 @@
           "calls": 783326
         },
         {
-          "name": "relar_list_set",
+          "name": "imre_list_set",
           "self_instructions": 105412833,
           "fraction": 0.06696301979493602,
           "calls": 3904179
         },
         {
-          "name": "relar_int_binary",
+          "name": "imre_int_binary",
           "self_instructions": 57653084,
           "fraction": 0.03662385779093053,
           "calls": 1019612
@@ -134,7 +134,7 @@
           "calls": 196608
         },
         {
-          "name": "relar_list_append",
+          "name": "imre_list_append",
           "self_instructions": 18335095,
           "fraction": 0.011647285197496138,
           "calls": 591385
@@ -146,25 +146,25 @@
           "calls": 1
         },
         {
-          "name": "relar_list_repeat",
+          "name": "imre_list_repeat",
           "self_instructions": 8651226,
           "fraction": 0.005495651728556286,
           "calls": 6
         },
         {
-          "name": "relar_list_pop",
+          "name": "imre_list_pop",
           "self_instructions": 5898000,
           "fraction": 0.003746677510797311,
           "calls": 393200
         },
         {
-          "name": "relar_list_len",
+          "name": "imre_list_len",
           "self_instructions": 4718512,
           "fraction": 0.0029974131561253375,
           "calls": 589814
         },
         {
-          "name": "<alloc::rc::Rc<relar_runtime::List>>::drop_slow",
+          "name": "<alloc::rc::Rc<imre_runtime::List>>::drop_slow",
           "self_instructions": 3549432,
           "fraction": 0.0022547604358264363,
           "calls": 27
@@ -464,7 +464,7 @@
           "calls": 20
         },
         {
-          "name": "relar_list_new",
+          "name": "imre_list_new",
           "self_instructions": 462,
           "fraction": 2.934833858915493e-07,
           "calls": 21
@@ -494,7 +494,7 @@
           "calls": 14
         },
         {
-          "name": "relar_int_parse",
+          "name": "imre_int_parse",
           "self_instructions": 388,
           "fraction": 2.464752245149808e-07,
           "calls": 3
@@ -602,7 +602,7 @@
           "calls": 1
         },
         {
-          "name": "relar_print_int",
+          "name": "imre_print_int",
           "self_instructions": 270,
           "fraction": 1.7151626448207426e-07,
           "calls": 9
@@ -794,7 +794,7 @@
           "calls": 1
         },
         {
-          "name": "relar_input",
+          "name": "imre_input",
           "self_instructions": 141,
           "fraction": 8.956960478508323e-08,
           "calls": 3
@@ -824,7 +824,7 @@
           "calls": 2
         },
         {
-          "name": "<relar_runtime::Int>::new",
+          "name": "<imre_runtime::Int>::new",
           "self_instructions": 120,
           "fraction": 7.62294508809219e-08,
           "calls": 3
@@ -1184,7 +1184,7 @@
           "calls": 1
         },
         {
-          "name": "relar_str_release",
+          "name": "imre_str_release",
           "self_instructions": 33,
           "fraction": 2.096309899225352e-08,
           "calls": 3
@@ -2025,19 +2025,19 @@
           "calls": 1
         },
         {
-          "name": "relar_list_get",
+          "name": "imre_list_get",
           "self_instructions": 277786620,
           "fraction": 0.34229275318326274,
           "calls": 9259554
         },
         {
-          "name": "relar_list_set",
+          "name": "imre_list_set",
           "self_instructions": 124933728,
           "fraction": 0.15394517461844953,
           "calls": 3904179
         },
         {
-          "name": "relar_int_binary",
+          "name": "imre_int_binary",
           "self_instructions": 57653084,
           "fraction": 0.07104097689034092,
           "calls": 1019612
@@ -2049,31 +2049,31 @@
           "calls": 196608
         },
         {
-          "name": "relar_list_append",
+          "name": "imre_list_append",
           "self_instructions": 18335095,
           "fraction": 0.02259277335757451,
           "calls": 591385
         },
         {
-          "name": "relar_list_repeat",
+          "name": "imre_list_repeat",
           "self_instructions": 8651226,
           "fraction": 0.010660167742962658,
           "calls": 6
         },
         {
-          "name": "relar_list_pop",
+          "name": "imre_list_pop",
           "self_instructions": 5898000,
           "fraction": 0.0072676022274754766,
           "calls": 393200
         },
         {
-          "name": "relar_list_len",
+          "name": "imre_list_len",
           "self_instructions": 4718512,
           "fraction": 0.005814219790025393,
           "calls": 589814
         },
         {
-          "name": "<alloc::rc::Rc<relar_runtime::List>>::drop_slow",
+          "name": "<alloc::rc::Rc<imre_runtime::List>>::drop_slow",
           "self_instructions": 3549432,
           "fraction": 0.004373662243043868,
           "calls": 27
@@ -2373,13 +2373,13 @@
           "calls": 20
         },
         {
-          "name": "relar_list_new",
+          "name": "imre_list_new",
           "self_instructions": 462,
           "fraction": 5.692831856720363e-07,
           "calls": 21
         },
         {
-          "name": "relar_list_release",
+          "name": "imre_list_release",
           "self_instructions": 456,
           "fraction": 5.618898975464255e-07,
           "calls": 54
@@ -2409,7 +2409,7 @@
           "calls": 14
         },
         {
-          "name": "relar_int_parse",
+          "name": "imre_int_parse",
           "self_instructions": 388,
           "fraction": 4.780992987895024e-07,
           "calls": 3
@@ -2517,7 +2517,7 @@
           "calls": 1
         },
         {
-          "name": "relar_print_int",
+          "name": "imre_print_int",
           "self_instructions": 270,
           "fraction": 3.3269796565248873e-07,
           "calls": 9
@@ -2709,7 +2709,7 @@
           "calls": 1
         },
         {
-          "name": "relar_input",
+          "name": "imre_input",
           "self_instructions": 141,
           "fraction": 1.7374227095185523e-07,
           "calls": 3
@@ -2739,7 +2739,7 @@
           "calls": 2
         },
         {
-          "name": "<relar_runtime::Int>::new",
+          "name": "<imre_runtime::Int>::new",
           "self_instructions": 120,
           "fraction": 1.4786576251221723e-07,
           "calls": 3
@@ -3099,7 +3099,7 @@
           "calls": 1
         },
         {
-          "name": "relar_str_release",
+          "name": "imre_str_release",
           "self_instructions": 33,
           "fraction": 4.066308469085974e-08,
           "calls": 3
@@ -3141,7 +3141,7 @@
           "calls": 5
         },
         {
-          "name": "relar_str_retain",
+          "name": "imre_str_retain",
           "self_instructions": 30,
           "fraction": 3.696644062805431e-08,
           "calls": 6
@@ -3946,13 +3946,13 @@
           "calls": 1
         },
         {
-          "name": "relar_list_get",
+          "name": "imre_list_get",
           "self_instructions": 231488850,
           "fraction": 0.33070537754558615,
           "calls": 9259554
         },
         {
-          "name": "relar_list_set",
+          "name": "imre_list_set",
           "self_instructions": 105412833,
           "fraction": 0.15059295830194339,
           "calls": 3904179
@@ -3964,31 +3964,31 @@
           "calls": 196608
         },
         {
-          "name": "relar_list_append",
+          "name": "imre_list_append",
           "self_instructions": 18335095,
           "fraction": 0.026193548908766833,
           "calls": 591385
         },
         {
-          "name": "relar_list_repeat",
+          "name": "imre_list_repeat",
           "self_instructions": 8651226,
           "fraction": 0.01235915665295409,
           "calls": 6
         },
         {
-          "name": "relar_list_pop",
+          "name": "imre_list_pop",
           "self_instructions": 5898000,
           "fraction": 0.008425893155388985,
           "calls": 393200
         },
         {
-          "name": "relar_list_len",
+          "name": "imre_list_len",
           "self_instructions": 4718512,
           "fraction": 0.006740874527707831,
           "calls": 589814
         },
         {
-          "name": "<alloc::rc::Rc<relar_runtime::List>>::drop_slow",
+          "name": "<alloc::rc::Rc<imre_runtime::List>>::drop_slow",
           "self_instructions": 3549432,
           "fraction": 0.005070724787100481,
           "calls": 27
@@ -4288,13 +4288,13 @@
           "calls": 20
         },
         {
-          "name": "relar_list_new",
+          "name": "imre_list_new",
           "self_instructions": 462,
           "fraction": 6.600140111545796e-07,
           "calls": 21
         },
         {
-          "name": "relar_list_release",
+          "name": "imre_list_release",
           "self_instructions": 456,
           "fraction": 6.514424006201045e-07,
           "calls": 54
@@ -4324,7 +4324,7 @@
           "calls": 14
         },
         {
-          "name": "relar_int_parse",
+          "name": "imre_int_parse",
           "self_instructions": 388,
           "fraction": 5.542974812293872e-07,
           "calls": 3
@@ -4432,7 +4432,7 @@
           "calls": 1
         },
         {
-          "name": "relar_print_int",
+          "name": "imre_print_int",
           "self_instructions": 270,
           "fraction": 3.857224740513777e-07,
           "calls": 9
@@ -4624,7 +4624,7 @@
           "calls": 1
         },
         {
-          "name": "relar_input",
+          "name": "imre_input",
           "self_instructions": 141,
           "fraction": 2.014328475601639e-07,
           "calls": 3
@@ -4654,7 +4654,7 @@
           "calls": 2
         },
         {
-          "name": "<relar_runtime::Int>::new",
+          "name": "<imre_runtime::Int>::new",
           "self_instructions": 120,
           "fraction": 1.7143221068950122e-07,
           "calls": 3
@@ -5014,7 +5014,7 @@
           "calls": 1
         },
         {
-          "name": "relar_str_release",
+          "name": "imre_str_release",
           "self_instructions": 33,
           "fraction": 4.7143857939612834e-08,
           "calls": 3
@@ -5056,7 +5056,7 @@
           "calls": 5
         },
         {
-          "name": "relar_str_retain",
+          "name": "imre_str_retain",
           "self_instructions": 30,
           "fraction": 4.2858052672375305e-08,
           "calls": 6
@@ -5852,5 +5852,5 @@
       "original_uncompressed_trace_sha256": "5b7f4a213ad233239d3bad56a62a7fccbb67e138260c2ab35b20f63d56e52911"
     }
   },
-  "trace_path_normalization": "Environment-specific source/object prefixes are replaced by /relar/, /cargo-registry/, and /valgrind/. Instruction counts, call records, symbols, and all other trace content are unchanged. Trace hashes identify the published path-normalized files; original_uncompressed_trace_sha256 identifies the preserved local capture."
+  "trace_path_normalization": "Environment-specific source/object prefixes are replaced by /imre/, /cargo-registry/, and /valgrind/. Instruction counts, call records, symbols, and all other trace content are unchanged. Trace hashes identify the published path-normalized files; original_uncompressed_trace_sha256 identifies the preserved local capture."
 }

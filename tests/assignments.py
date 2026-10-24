@@ -125,7 +125,7 @@ def main(
     if args.sanitize:
         flags.append("--sanitize")
     checks = 0
-    with tempfile.TemporaryDirectory(prefix=f"relar-{fixtures.name}-") as directory:
+    with tempfile.TemporaryDirectory(prefix=f"imre-{fixtures.name}-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(fixtures, project, ignore=shutil.ignore_patterns("__pycache__"))

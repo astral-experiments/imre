@@ -4,11 +4,11 @@
   "created_at_utc": "2026-10-20T10:58:50.222419+00:00",
   "source_revision": "8b54eae6572a93926265d78562656dd395ad28b0",
   "derivation_script": {
-    "path": "/tmp/relar-luhn-performance-derive-profile.py",
+    "path": "/tmp/imre-luhn-performance-derive-profile.py",
     "sha256": "da78beb4f101306a5cb21b36495d95b557e17329ab8090aafc45ebddddf26299"
   },
   "auditor": {
-    "path": "/tmp/relar-luhn-performance-profile-audit.py",
+    "path": "/tmp/imre-luhn-performance-profile-audit.py",
     "sha256": "900f056edbc121f21bc7d1dc30222e55f1ff372498cd1ee7a48b4ed823c81c13"
   },
   "measurement_scope": [
@@ -21,17 +21,17 @@
   "profiles": {
     "short": {
       "provenance": {
-        "directory": "/tmp/relar-luhn-performance-short-profile",
+        "directory": "/tmp/imre-luhn-performance-short-profile",
         "summary": {
-          "path": "/tmp/relar-luhn-performance-short-profile/summary.json",
+          "path": "/tmp/imre-luhn-performance-short-profile/summary.json",
           "sha256": "576b520a7ba8b03954b08bd9e69b9b366bf2d77d94164d376cbaeb7950bb0253"
         },
         "manifest": {
-          "path": "/tmp/relar-luhn-performance-short-profile/manifest.json",
+          "path": "/tmp/imre-luhn-performance-short-profile/manifest.json",
           "sha256": "57280e1023b05e70b0e1b864199411afa1679271749ccd92d92578be2696dea1"
         },
         "audit": {
-          "path": "/tmp/relar-luhn-performance-short-profile-audit.json",
+          "path": "/tmp/imre-luhn-performance-short-profile-audit.json",
           "sha256": "4b20b0326e30577a5a5461602079b9eaed8219a93b83461abe73b4ba43bad479"
         },
         "manifest_members_verified": 47,
@@ -43,7 +43,7 @@
         "timing_revision": "8b54eae6572a93926265d78562656dd395ad28b0",
         "benchmark_record_sha256": "9279ec2e8a120885946bd355918869f801cc239483dfeb30ede626f10ff153b5",
         "binary_sha256": {
-          "relar": "de4607551b8c53b616c3acb6249bbcd38abfc8ebdb86c934455e41970c5316f5",
+          "imre": "de4607551b8c53b616c3acb6249bbcd38abfc8ebdb86c934455e41970c5316f5",
           "rust": "6ecadfe19c5db5427f79b93d4d74299ed5f481a972465bc1834353dbba47c5bc"
         },
         "llvm_sha256": "adf7ba8037b872b988ac760a52e65c9d8c75a1617c180a2875f69d0dc3d21618",
@@ -53,9 +53,9 @@
         "expected_stdout": "OK\n589824\n",
         "expected_output_hex": "39",
         "raw_profiles": {
-          "relar-callgrind": {
+          "imre-callgrind": {
             "raw": {
-              "path": "/tmp/relar-luhn-performance-short-profile/relar-callgrind/profile.callgrind",
+              "path": "/tmp/imre-luhn-performance-short-profile/imre-callgrind/profile.callgrind",
               "sha256": "acbb1ee4fc414c89ed76ceefec56525ac12f46daa8d207a9da656ed1edb9820f"
             },
             "reconciliation": {
@@ -68,7 +68,7 @@
               "all_function_self_and_call_edge_metrics_agree": true,
               "top_self_functions": [
                 {
-                  "name": "relar_str_int_list",
+                  "name": "imre_str_int_list",
                   "instructions": 22544393
                 },
                 {
@@ -76,15 +76,15 @@
                   "instructions": 15204352
                 },
                 {
-                  "name": "relar_list_slice_sum",
+                  "name": "imre_list_slice_sum",
                   "instructions": 13172736
                 },
                 {
-                  "name": "relar_list_release",
+                  "name": "imre_list_release",
                   "instructions": 11075584
                 },
                 {
-                  "name": "<relar_runtime::objects::sequences::SliceIndices>::new",
+                  "name": "<imre_runtime::objects::sequences::SliceIndices>::new",
                   "instructions": 4259840
                 },
                 {
@@ -92,7 +92,7 @@
                   "instructions": 2884523
                 },
                 {
-                  "name": "<relar_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
+                  "name": "<imre_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
                   "instructions": 327690
                 },
                 {
@@ -110,9 +110,9 @@
               ]
             }
           },
-          "relar-dhat": {
+          "imre-dhat": {
             "raw": {
-              "path": "/tmp/relar-luhn-performance-short-profile/relar-dhat/profile.json",
+              "path": "/tmp/imre-luhn-performance-short-profile/imre-dhat/profile.json",
               "sha256": "2fd7cb4b978a023ba58678a3478261a822da0b7a6ec13dde23afdc0e8901b1db"
             },
             "reconciliation": {
@@ -132,7 +132,7 @@
           },
           "rust-callgrind": {
             "raw": {
-              "path": "/tmp/relar-luhn-performance-short-profile/rust-callgrind/profile.callgrind",
+              "path": "/tmp/imre-luhn-performance-short-profile/rust-callgrind/profile.callgrind",
               "sha256": "869bbbcae90bdc91d773ca714a51b6f1aac4a24b9a328b1ac5eb13b76abee515"
             },
             "reconciliation": {
@@ -189,7 +189,7 @@
           },
           "rust-dhat": {
             "raw": {
-              "path": "/tmp/relar-luhn-performance-short-profile/rust-dhat/profile.json",
+              "path": "/tmp/imre-luhn-performance-short-profile/rust-dhat/profile.json",
               "sha256": "059cc2128269b4fa2950312b9dd91d759f6e0e6ccd7010bf70a58cc835f751a3"
             },
             "reconciliation": {
@@ -210,12 +210,12 @@
         }
       },
       "instructions": {
-        "relar": 69886356,
+        "imre": 69886356,
         "rust": 23285675
       },
-      "relar_over_rust_instruction_ratio": 3.001259615622051,
+      "imre_over_rust_instruction_ratio": 3.001259615622051,
       "allocation_totals": {
-        "relar": {
+        "imre": {
           "allocated_bytes": 18716,
           "allocated_blocks": 33,
           "peak_live_bytes": 10331,
@@ -245,7 +245,7 @@
             "fraction_of_checksum_subtree": 0.22834267753494977
           },
           {
-            "component": "relar_str_int_list",
+            "component": "imre_str_int_list",
             "instructions": 22545486,
             "calls": 65536,
             "instructions_per_checksum": 344.0168151855469,
@@ -253,7 +253,7 @@
             "fraction_of_checksum_subtree": 0.33859362369186957
           },
           {
-            "component": "<relar_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
+            "component": "<imre_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
             "instructions": 327680,
             "calls": 65536,
             "instructions_per_checksum": 5.0,
@@ -261,7 +261,7 @@
             "fraction_of_checksum_subtree": 0.00492117839514978
           },
           {
-            "component": "relar_list_slice_sum",
+            "component": "imre_list_slice_sum",
             "instructions": 17432576,
             "calls": 65536,
             "instructions_per_checksum": 266.0,
@@ -269,7 +269,7 @@
             "fraction_of_checksum_subtree": 0.26180669062196826
           },
           {
-            "component": "relar_list_release",
+            "component": "imre_list_release",
             "instructions": 11075584,
             "calls": 131072,
             "instructions_per_checksum": 169.0,
@@ -280,7 +280,7 @@
         "partition_method": "fn_3 self plus its four direct outgoing call-edge inclusive totals are disjoint dynamic call subtrees and exactly equal fn_3 incoming inclusive cost. Nested helper self costs and regions below are alternative breakdowns, never added again.",
         "top_process_self_functions": [
           {
-            "name": "relar_str_int_list",
+            "name": "imre_str_int_list",
             "self_instructions": 22544393,
             "self_fraction": 0.3225864716712372,
             "calls": 65536,
@@ -294,21 +294,21 @@
             "incoming_inclusive_instructions": 66585678
           },
           {
-            "name": "relar_list_slice_sum",
+            "name": "imre_list_slice_sum",
             "self_instructions": 13172736,
             "self_fraction": 0.1884879503518541,
             "calls": 65536,
             "incoming_inclusive_instructions": 17432576
           },
           {
-            "name": "relar_list_release",
+            "name": "imre_list_release",
             "self_instructions": 11075584,
             "self_fraction": 0.1584799184550415,
             "calls": 131072,
             "incoming_inclusive_instructions": 11075584
           },
           {
-            "name": "<relar_runtime::objects::sequences::SliceIndices>::new",
+            "name": "<imre_runtime::objects::sequences::SliceIndices>::new",
             "self_instructions": 4259840,
             "self_fraction": 0.06095381479040057,
             "calls": 65536,
@@ -322,7 +322,7 @@
             "incoming_inclusive_instructions": 69482034
           },
           {
-            "name": "<relar_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
+            "name": "<imre_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
             "self_instructions": 327690,
             "self_fraction": 0.004688898073323497,
             "calls": 65538,
@@ -495,7 +495,7 @@
                 },
                 {
                   "address": "0x106071",
-                  "assembly": "lea    0x5f38(%rip),%rbx        # 10bfb0 <relar_int_binary>",
+                  "assembly": "lea    0x5f38(%rip),%rbx        # 10bfb0 <imre_int_binary>",
                   "executions": 0
                 },
                 {
@@ -730,7 +730,7 @@
                 },
                 {
                   "address": "0x106125",
-                  "assembly": "addr32 call 121240 <_RNvMs6_NtCscJq9HK9IcCJ_5alloc2rcINtB5_2RcNtNtCselzjCC5m5fm_10num_bigint6bigint6BigIntE9drop_slowCs5N6zm3e4tnE_12relar_runtime>",
+                  "assembly": "addr32 call 121240 <_RNvMs6_NtCscJq9HK9IcCJ_5alloc2rcINtB5_2RcNtNtCselzjCC5m5fm_10num_bigint6bigint6BigIntE9drop_slowCs5N6zm3e4tnE_12imre_runtime>",
                   "executions": 0
                 },
                 {
@@ -785,7 +785,7 @@
                 },
                 {
                   "address": "0x10616c",
-                  "assembly": "call   1250c0 <_RINvMs0_NtNtCs5N6zm3e4tnE_12relar_runtime7objects10exceptionsNtB6_5Error9returningPINtNtCscJq9HK9IcCJ_5alloc3vec3VechEEBa_>",
+                  "assembly": "call   1250c0 <_RINvMs0_NtNtCs5N6zm3e4tnE_12imre_runtime7objects10exceptionsNtB6_5Error9returningPINtNtCscJq9HK9IcCJ_5alloc3vec3VechEEBa_>",
                   "executions": 0
                 },
                 {
@@ -800,7 +800,7 @@
               "instructions_per_checksum": 112.0
             }
           },
-          "relar_str_int_list": {
+          "imre_str_int_list": {
             "ascii_validation_vector_loop": {
               "half_open_address_range": [
                 "0x119400",
@@ -857,7 +857,7 @@
                 },
                 {
                   "address": "0x11942b",
-                  "assembly": "jne    119460 <relar_str_int_list+0x1b0>",
+                  "assembly": "jne    119460 <imre_str_int_list+0x1b0>",
                   "executions": 0
                 },
                 {
@@ -872,7 +872,7 @@
                 },
                 {
                   "address": "0x119434",
-                  "assembly": "jne    119400 <relar_str_int_list+0x150>",
+                  "assembly": "jne    119400 <imre_str_int_list+0x150>",
                   "executions": 0
                 }
               ]
@@ -1068,7 +1068,7 @@
                 },
                 {
                   "address": "0x1196f3",
-                  "assembly": "jne    119640 <relar_str_int_list+0x390>",
+                  "assembly": "jne    119640 <imre_str_int_list+0x390>",
                   "executions": 262144
                 }
               ]
@@ -1174,7 +1174,7 @@
                 },
                 {
                   "address": "0x1195f0",
-                  "assembly": "jne    1195a0 <relar_str_int_list+0x2f0>",
+                  "assembly": "jne    1195a0 <imre_str_int_list+0x2f0>",
                   "executions": 0
                 }
               ]
@@ -1184,7 +1184,7 @@
               "instructions_per_checksum": 196.00013732910156
             }
           },
-          "relar_list_slice_sum": {
+          "imre_list_slice_sum": {
             "reverse_stride_two_vector_loop": {
               "half_open_address_range": [
                 "0x118953",
@@ -1366,7 +1366,7 @@
                 },
                 {
                   "address": "0x118a03",
-                  "assembly": "jne    118953 <relar_list_slice_sum+0x3c3>",
+                  "assembly": "jne    118953 <imre_list_slice_sum+0x3c3>",
                   "executions": 65536
                 }
               ]
@@ -1452,7 +1452,7 @@
                 },
                 {
                   "address": "0x118a6e",
-                  "assembly": "jne    118a40 <relar_list_slice_sum+0x4b0>",
+                  "assembly": "jne    118a40 <imre_list_slice_sum+0x4b0>",
                   "executions": 196608
                 }
               ]
@@ -1528,7 +1528,7 @@
               "instructions_per_checksum": 110.0
             }
           },
-          "relar_list_release": {
+          "imre_list_release": {
             "immediate_value_vector_scan": {
               "half_open_address_range": [
                 "0x111d80",
@@ -1570,7 +1570,7 @@
                 },
                 {
                   "address": "0x111d9a",
-                  "assembly": "jne    111d80 <relar_list_release+0xc0>",
+                  "assembly": "jne    111d80 <imre_list_release+0xc0>",
                   "executions": 262144
                 }
               ]
@@ -1596,12 +1596,12 @@
                 },
                 {
                   "address": "0x111e6c",
-                  "assembly": "lea    0xf3cd(%rip),%r13        # 121240 <_RNvMs6_NtCscJq9HK9IcCJ_5alloc2rcINtB5_2RcNtNtCselzjCC5m5fm_10num_bigint6bigint6BigIntE9drop_slowCs5N6zm3e4tnE_12relar_runtime>",
+                  "assembly": "lea    0xf3cd(%rip),%r13        # 121240 <_RNvMs6_NtCscJq9HK9IcCJ_5alloc2rcINtB5_2RcNtNtCselzjCC5m5fm_10num_bigint6bigint6BigIntE9drop_slowCs5N6zm3e4tnE_12imre_runtime>",
                   "executions": 0
                 },
                 {
                   "address": "0x111e73",
-                  "assembly": "jmp    111e8d <relar_list_release+0x1cd>",
+                  "assembly": "jmp    111e8d <imre_list_release+0x1cd>",
                   "executions": 0
                 },
                 {
@@ -1621,7 +1621,7 @@
                 },
                 {
                   "address": "0x111e87",
-                  "assembly": "je     111f88 <relar_list_release+0x2c8>",
+                  "assembly": "je     111f88 <imre_list_release+0x2c8>",
                   "executions": 0
                 },
                 {
@@ -1636,7 +1636,7 @@
                 },
                 {
                   "address": "0x111e93",
-                  "assembly": "jne    111e80 <relar_list_release+0x1c0>",
+                  "assembly": "jne    111e80 <imre_list_release+0x1c0>",
                   "executions": 0
                 },
                 {
@@ -1656,7 +1656,7 @@
                 },
                 {
                   "address": "0x111ea1",
-                  "assembly": "jne    111e80 <relar_list_release+0x1c0>",
+                  "assembly": "jne    111e80 <imre_list_release+0x1c0>",
                   "executions": 0
                 },
                 {
@@ -1671,7 +1671,7 @@
                 },
                 {
                   "address": "0x111ea9",
-                  "assembly": "jmp    111e80 <relar_list_release+0x1c0>",
+                  "assembly": "jmp    111e80 <imre_list_release+0x1c0>",
                   "executions": 0
                 }
               ]
@@ -1683,10 +1683,10 @@
           }
         },
         "slice_normalization": {
-          "name": "<relar_runtime::objects::sequences::SliceIndices>::new",
+          "name": "<imre_runtime::objects::sequences::SliceIndices>::new",
           "self_instructions": 4259840,
           "instructions_per_checksum": 65.0,
-          "included_within": "relar_list_slice_sum inclusive subtree"
+          "included_within": "imre_list_slice_sum inclusive subtree"
         },
         "digit_conversion_outgoing_edges": [
           {
@@ -1708,7 +1708,7 @@
         "actual_path": "The checksum reduction executes the scalar 15-instruction loop; no forced loop vectorization metadata occurs in retained native.ll. The digit conversion, reverse stride-two subtotal, and immediate-value destruction scan execute SIMD."
       },
       "allocations": {
-        "relar": {
+        "imre": {
           "categories": {
             "other_startup_and_protocol": {
               "bytes": 1020,
@@ -1781,8 +1781,8 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x20E90A: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x20E90A: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -1791,17 +1791,17 @@
               "bytes": 32,
               "blocks": 1,
               "frames": [
-                "0x484D953: calloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x484D953: calloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x49C3643: __cxa_thread_atexit_impl (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x22CE4A: UnknownInlinedFun (library/std/src/sys/thread_local/native/eager.rs:55)",
-                "0x22CE4A: get<core::cell::RefCell<core::option::Option<alloc::rc::Rc<relar_runtime::objects::Object, alloc::alloc::Global>>>> (library/std/src/sys/thread_local/native/eager.rs:38)",
+                "0x22CE4A: get<core::cell::RefCell<core::option::Option<alloc::rc::Rc<imre_runtime::objects::Object, alloc::alloc::Global>>>> (library/std/src/sys/thread_local/native/eager.rs:38)",
                 "0x22CE4A: {closure#0} (library/std/src/sys/thread_local/native/mod.rs:68)",
-                "0x22CE4A: call_once<relar_runtime::objects::args::ARGV::{constant#0}::{closure_env#0}, (core::option::Option<&mut core::option::Option<core::cell::RefCell<core::option::Option<alloc::rc::Rc<relar_runtime::objects::Object, alloc::alloc::Global>>>>>)> (library/core/src/ops/function.rs:250)",
+                "0x22CE4A: call_once<imre_runtime::objects::args::ARGV::{constant#0}::{closure_env#0}, (core::option::Option<&mut core::option::Option<core::cell::RefCell<core::option::Option<alloc::rc::Rc<imre_runtime::objects::Object, alloc::alloc::Global>>>>>)> (library/core/src/ops/function.rs:250)",
                 "0x22CE4A: UnknownInlinedFun (library/std/src/thread/local.rs:462)",
                 "0x22CE4A: UnknownInlinedFun (library/std/src/thread/local.rs:427)",
-                "0x22CE4A: relar_sys_argv (args.rs:71)",
-                "0x208AA6: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x22CE4A: imre_sys_argv (args.rs:71)",
+                "0x208AA6: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -1810,7 +1810,7 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x223B27: alloc (library/alloc/src/alloc.rs:101)",
                 "0x223B27: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x223B27: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -1821,9 +1821,9 @@
                 "0x22CAFF: try_reserve_exact<usize, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:384)",
                 "0x22CAFF: try_reserve_exact<usize, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1579)",
                 "0x22CAFF: decode (args.rs:44)",
-                "0x22CAFF: relar_sys_argv (args.rs:77)",
-                "0x208AA6: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x22CAFF: imre_sys_argv (args.rs:77)",
+                "0x208AA6: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -1832,7 +1832,7 @@
               "bytes": 163,
               "blocks": 3,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x231C34: alloc (library/alloc/src/alloc.rs:101)",
                 "0x231C34: do_alloc (heap.rs:412)",
                 "0x231C34: alloc (heap.rs:466)",
@@ -1842,9 +1842,9 @@
                 "0x22CCCB: new_panic (mod.rs:109)",
                 "0x22CCCB: new<&str> (lib.rs:192)",
                 "0x22CCCB: decode (args.rs:61)",
-                "0x22CCCB: relar_sys_argv (args.rs:77)",
-                "0x208AA6: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x22CCCB: imre_sys_argv (args.rs:77)",
+                "0x208AA6: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -1853,7 +1853,7 @@
               "bytes": 200,
               "blocks": 5,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x22CC71: alloc (library/alloc/src/alloc.rs:101)",
                 "0x22CC71: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x22CC71: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -1862,9 +1862,9 @@
                 "0x22CC71: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
                 "0x22CC71: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
                 "0x22CC71: decode (args.rs:61)",
-                "0x22CC71: relar_sys_argv (args.rs:77)",
-                "0x208AA6: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x22CC71: imre_sys_argv (args.rs:77)",
+                "0x208AA6: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -1873,18 +1873,18 @@
               "bytes": 64,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x22CA58: alloc (library/alloc/src/alloc.rs:101)",
                 "0x22CA58: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x22CA58: alloc_impl (library/alloc/src/alloc.rs:332)",
                 "0x22CA58: allocate (library/alloc/src/alloc.rs:449)",
                 "0x22CA58: box_new_uninit (library/alloc/src/boxed.rs:248)",
-                "0x22CA58: new<alloc::rc::RcInner<relar_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
-                "0x22CA58: new<relar_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
+                "0x22CA58: new<alloc::rc::RcInner<imre_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
+                "0x22CA58: new<imre_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
                 "0x22CA58: decode (args.rs:63)",
-                "0x22CA58: relar_sys_argv (args.rs:77)",
-                "0x208AA6: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x22CA58: imre_sys_argv (args.rs:77)",
+                "0x208AA6: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -1893,16 +1893,16 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x21E6FD: alloc (library/alloc/src/alloc.rs:101)",
                 "0x21E6FD: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x21E6FD: alloc_impl (library/alloc/src/alloc.rs:332)",
                 "0x21E6FD: allocate (library/alloc/src/alloc.rs:449)",
                 "0x21E6FD: box_new_uninit (library/alloc/src/boxed.rs:248)",
-                "0x21E6FD: new<relar_runtime::objects::files::FileState> (library/alloc/src/boxed.rs:286)",
-                "0x21E6FD: relar_runtime::objects::files::open (files.rs:233)",
-                "0x209696: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x21E6FD: new<imre_runtime::objects::files::FileState> (library/alloc/src/boxed.rs:286)",
+                "0x21E6FD: imre_runtime::objects::files::open (files.rs:233)",
+                "0x209696: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -1911,17 +1911,17 @@
               "bytes": 64,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x21E74E: alloc (library/alloc/src/alloc.rs:101)",
                 "0x21E74E: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x21E74E: alloc_impl (library/alloc/src/alloc.rs:332)",
                 "0x21E74E: allocate (library/alloc/src/alloc.rs:449)",
                 "0x21E74E: box_new_uninit (library/alloc/src/boxed.rs:248)",
-                "0x21E74E: new<alloc::rc::RcInner<relar_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
-                "0x21E74E: new<relar_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
-                "0x21E74E: relar_runtime::objects::files::open (files.rs:232)",
-                "0x209696: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x21E74E: new<alloc::rc::RcInner<imre_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
+                "0x21E74E: new<imre_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
+                "0x21E74E: imre_runtime::objects::files::open (files.rs:232)",
+                "0x209696: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -1930,12 +1930,12 @@
               "bytes": 16,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x18D28F: <alloc::raw_vec::RawVecInner>::finish_grow (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x1BBE43: <std::fs::File as std::io::Read>::read_to_end (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x21DE18: <relar_runtime::objects::files::FileState>::read_bytes (files.rs:116)",
-                "0x209700: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x18D28F: <alloc::raw_vec::RawVecInner>::finish_grow (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x1BBE43: <std::fs::File as std::io::Read>::read_to_end (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x21DE18: <imre_runtime::objects::files::FileState>::read_bytes (files.rs:116)",
+                "0x209700: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -1944,9 +1944,9 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x209826: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x209826: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -1955,7 +1955,7 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x225A86: alloc (library/alloc/src/alloc.rs:101)",
                 "0x225A86: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x225A86: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -1964,10 +1964,10 @@
                 "0x225A86: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
                 "0x225A86: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
                 "0x225A86: {closure#0} (bytes.rs:366)",
-                "0x225A86: map<&str, core::str::error::Utf8Error, *const compact_str::CompactString, relar_runtime::objects::bytes::relar_bytes_decode::{closure_env#0}> (library/core/src/result.rs:836)",
-                "0x225A86: relar_bytes_decode (bytes.rs:366)",
-                "0x2098BB: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x225A86: map<&str, core::str::error::Utf8Error, *const compact_str::CompactString, imre_runtime::objects::bytes::imre_bytes_decode::{closure_env#0}> (library/core/src/result.rs:836)",
+                "0x225A86: imre_bytes_decode (bytes.rs:366)",
+                "0x2098BB: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -1976,9 +1976,9 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x209A54: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x209A54: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -1987,9 +1987,9 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x209B79: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x209B79: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -1998,7 +1998,7 @@
               "bytes": 32,
               "blocks": 1,
               "frames": [
-                "0x484D953: calloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x484D953: calloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x49C3643: __cxa_thread_atexit_impl (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x221D06: UnknownInlinedFun (library/std/src/sys/thread_local/native/eager.rs:55)",
                 "0x221D06: UnknownInlinedFun (library/std/src/sys/thread_local/native/eager.rs:38)",
@@ -2006,10 +2006,10 @@
                 "0x221D06: UnknownInlinedFun (library/core/src/ops/function.rs:250)",
                 "0x221D06: UnknownInlinedFun (library/std/src/thread/local.rs:462)",
                 "0x221D06: UnknownInlinedFun (lib.rs:238)",
-                "0x221D06: relar_str_int_list (sequences.rs:418)",
-                "0x20DF73: fn_3 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20ACF9: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x221D06: imre_str_int_list (sequences.rs:418)",
+                "0x20DF73: fn_3 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20ACF9: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -2018,7 +2018,7 @@
               "bytes": 128,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x223B27: alloc (library/alloc/src/alloc.rs:101)",
                 "0x223B27: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x223B27: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -2026,12 +2026,12 @@
                 "0x223B27: <alloc::raw_vec::RawVecInner>::finish_grow (library/alloc/src/raw_vec/mod.rs:560)",
                 "0x2217DE: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:801)",
                 "0x2217DE: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:729)",
-                "0x2217DE: try_reserve_exact<relar_runtime::Int, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:384)",
-                "0x2217DE: try_reserve_exact<relar_runtime::Int, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1579)",
-                "0x2217DE: relar_str_int_list (sequences.rs:420)",
-                "0x20DF73: fn_3 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20ACF9: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x2217DE: try_reserve_exact<imre_runtime::Int, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:384)",
+                "0x2217DE: try_reserve_exact<imre_runtime::Int, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1579)",
+                "0x2217DE: imre_str_int_list (sequences.rs:420)",
+                "0x20DF73: fn_3 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20ACF9: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -2040,7 +2040,7 @@
               "bytes": 32,
               "blocks": 1,
               "frames": [
-                "0x484D953: calloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x484D953: calloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x49C3643: __cxa_thread_atexit_impl (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x221C0D: UnknownInlinedFun (library/std/src/sys/thread_local/native/eager.rs:55)",
                 "0x221C0D: UnknownInlinedFun (library/std/src/sys/thread_local/native/eager.rs:38)",
@@ -2048,10 +2048,10 @@
                 "0x221C0D: UnknownInlinedFun (library/core/src/ops/function.rs:250)",
                 "0x221C0D: UnknownInlinedFun (library/std/src/thread/local.rs:462)",
                 "0x221C0D: UnknownInlinedFun (lib.rs:187)",
-                "0x221C0D: relar_str_int_list (sequences.rs:458)",
-                "0x20DF73: fn_3 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20ACF9: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x221C0D: imre_str_int_list (sequences.rs:458)",
+                "0x20DF73: fn_3 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20ACF9: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -2060,7 +2060,7 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x221A0B: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
                 "0x221A0B: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
                 "0x221A0B: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -2069,10 +2069,10 @@
                 "0x221A0B: UnknownInlinedFun (library/alloc/src/boxed.rs:286)",
                 "0x221A0B: UnknownInlinedFun (library/alloc/src/rc.rs:426)",
                 "0x221A0B: UnknownInlinedFun (lib.rs:203)",
-                "0x221A0B: relar_str_int_list (sequences.rs:458)",
-                "0x20DF73: fn_3 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20ACF9: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x221A0B: imre_str_int_list (sequences.rs:458)",
+                "0x20DF73: fn_3 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20ACF9: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -2081,7 +2081,7 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x219B16: alloc (library/alloc/src/alloc.rs:101)",
                 "0x219B16: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x219B16: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -2089,9 +2089,9 @@
                 "0x219B16: box_new_uninit (library/alloc/src/boxed.rs:248)",
                 "0x219B16: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
                 "0x219B16: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
-                "0x219B16: relar_int_str (lib.rs:623)",
-                "0x20A408: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x219B16: imre_int_str (lib.rs:623)",
+                "0x20A408: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -2100,9 +2100,9 @@
               "bytes": 32,
               "blocks": 1,
               "frames": [
-                "0x484D953: calloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x20BCEB: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x484D953: calloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x20BCEB: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -2111,7 +2111,7 @@
               "bytes": 8192,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x21E54D: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
                 "0x21E54D: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
                 "0x21E54D: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -2122,9 +2122,9 @@
                 "0x21E54D: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
                 "0x21E54D: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
                 "0x21E54D: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
-                "0x21E54D: relar_runtime::objects::files::open (files.rs:230)",
-                "0x20C124: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x21E54D: imre_runtime::objects::files::open (files.rs:230)",
+                "0x20C124: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -2133,16 +2133,16 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x21E6FD: alloc (library/alloc/src/alloc.rs:101)",
                 "0x21E6FD: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x21E6FD: alloc_impl (library/alloc/src/alloc.rs:332)",
                 "0x21E6FD: allocate (library/alloc/src/alloc.rs:449)",
                 "0x21E6FD: box_new_uninit (library/alloc/src/boxed.rs:248)",
-                "0x21E6FD: new<relar_runtime::objects::files::FileState> (library/alloc/src/boxed.rs:286)",
-                "0x21E6FD: relar_runtime::objects::files::open (files.rs:233)",
-                "0x20C124: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x21E6FD: new<imre_runtime::objects::files::FileState> (library/alloc/src/boxed.rs:286)",
+                "0x21E6FD: imre_runtime::objects::files::open (files.rs:233)",
+                "0x20C124: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -2151,17 +2151,17 @@
               "bytes": 64,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x21E74E: alloc (library/alloc/src/alloc.rs:101)",
                 "0x21E74E: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x21E74E: alloc_impl (library/alloc/src/alloc.rs:332)",
                 "0x21E74E: allocate (library/alloc/src/alloc.rs:449)",
                 "0x21E74E: box_new_uninit (library/alloc/src/boxed.rs:248)",
-                "0x21E74E: new<alloc::rc::RcInner<relar_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
-                "0x21E74E: new<relar_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
-                "0x21E74E: relar_runtime::objects::files::open (files.rs:232)",
-                "0x20C124: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x21E74E: new<alloc::rc::RcInner<imre_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
+                "0x21E74E: new<imre_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
+                "0x21E74E: imre_runtime::objects::files::open (files.rs:232)",
+                "0x20C124: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -2170,9 +2170,9 @@
               "bytes": 1,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x20C213: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x20C213: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -2181,9 +2181,9 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x20C2CC: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x20C2CC: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -2192,9 +2192,9 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x20C624: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x20C624: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -2203,25 +2203,25 @@
               "bytes": 1024,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x17A51D: <std::sync::once::Once>::call_once_force::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !>::{closure#0}>::{closure#0} (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x185088: <std::sys::sync::once::futex::Once>::call (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x161C08: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x1A0CAA: std::io::stdio::stdout (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x17A51D: <std::sync::once::Once>::call_once_force::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !>::{closure#0}>::{closure#0} (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x185088: <std::sys::sync::once::futex::Once>::call (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x161C08: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x1A0CAA: std::io::stdio::stdout (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
                 "0x213D5A: {closure#0} (lib.rs:332)",
-                "0x213D5A: <relar_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
-                "0x210523: call_once<fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
-                "0x210523: {closure#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
-                "0x210523: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<relar_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
-                "0x185088: <std::sys::sync::once::futex::Once>::call (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x210F7B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>>> (library/std/src/sync/once.rs:226)",
-                "0x210F7B: force<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
-                "0x210F7B: deref<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
-                "0x210F7B: write_output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:345)",
-                "0x210F7B: output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:356)",
-                "0x210F7B: relar_runtime::output_bytes (lib.rs:363)",
-                "0x20C685: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x213D5A: <imre_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
+                "0x210523: call_once<fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
+                "0x210523: {closure#0}<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
+                "0x210523: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<imre_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
+                "0x185088: <std::sys::sync::once::futex::Once>::call (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x210F7B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>>> (library/std/src/sync/once.rs:226)",
+                "0x210F7B: force<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
+                "0x210F7B: deref<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
+                "0x210F7B: write_output<imre_runtime::output_bytes::{closure_env#0}> (lib.rs:345)",
+                "0x210F7B: output<imre_runtime::output_bytes::{closure_env#0}> (lib.rs:356)",
+                "0x210F7B: imre_runtime::output_bytes (lib.rs:363)",
+                "0x20C685: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -2230,7 +2230,7 @@
               "bytes": 8192,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x213D79: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
                 "0x213D79: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
                 "0x213D79: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -2242,19 +2242,19 @@
                 "0x213D79: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
                 "0x213D79: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
                 "0x213D79: {closure#0} (lib.rs:335)",
-                "0x213D79: <relar_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
-                "0x210523: call_once<fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
-                "0x210523: {closure#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
-                "0x210523: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<relar_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
-                "0x185088: <std::sys::sync::once::futex::Once>::call (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x210F7B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>>> (library/std/src/sync/once.rs:226)",
-                "0x210F7B: force<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
-                "0x210F7B: deref<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
-                "0x210F7B: write_output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:345)",
-                "0x210F7B: output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:356)",
-                "0x210F7B: relar_runtime::output_bytes (lib.rs:363)",
-                "0x20C685: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x213D79: <imre_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
+                "0x210523: call_once<fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
+                "0x210523: {closure#0}<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
+                "0x210523: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<imre_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
+                "0x185088: <std::sys::sync::once::futex::Once>::call (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x210F7B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>>> (library/std/src/sync/once.rs:226)",
+                "0x210F7B: force<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
+                "0x210F7B: deref<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
+                "0x210F7B: write_output<imre_runtime::output_bytes::{closure_env#0}> (lib.rs:345)",
+                "0x210F7B: output<imre_runtime::output_bytes::{closure_env#0}> (lib.rs:356)",
+                "0x210F7B: imre_runtime::output_bytes (lib.rs:363)",
+                "0x20C685: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             }
           ],
@@ -2302,11 +2302,11 @@
               "bytes": 472,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x4918F5E: fopen (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x4931195: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-                "0x17579D: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x17579D: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -2315,11 +2315,11 @@
               "bytes": 360,
               "blocks": 2,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x4919E64: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-                "0x17579D: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x17579D: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -2328,14 +2328,14 @@
               "bytes": 1024,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x4918294: _IO_file_doallocate (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x4928603: _IO_doallocbuf (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x4925963: _IO_file_underflow (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x4919EEF: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-                "0x17579D: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x17579D: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -2344,10 +2344,10 @@
               "bytes": 32,
               "blocks": 1,
               "frames": [
-                "0x484DB80: realloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x484DB80: realloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x4931059: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-                "0x17579D: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x17579D: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -2356,12 +2356,12 @@
               "bytes": 152,
               "blocks": 1,
               "frames": [
-                "0x484D953: calloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x484D953: calloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x492CF5A: ??? (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x492D29F: pthread_attr_setaffinity_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x49310E7: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-                "0x17579D: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x17579D: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -2370,11 +2370,11 @@
               "bytes": 32,
               "blocks": 1,
               "frames": [
-                "0x484DB80: realloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x484DB80: realloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x492D2B8: pthread_attr_setaffinity_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x49310E7: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-                "0x17579D: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x17579D: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -2383,10 +2383,10 @@
               "bytes": 4,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x17A2BB: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x1759A9: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x17A2BB: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x1759A9: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -2395,10 +2395,10 @@
               "bytes": 544,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x17A4BD: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x1759A9: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x17A4BD: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x1759A9: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -2407,13 +2407,13 @@
               "bytes": 120,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x12D836: luhn_reference::main (main.rs:191)",
                 "0x134BD2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
                 "0x134BD2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
                 "0x134070: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-                "0x175B4B: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x175B4B: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -2422,13 +2422,13 @@
               "bytes": 213,
               "blocks": 5,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x12DA8B: luhn_reference::main (main.rs:191)",
                 "0x134BD2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
                 "0x134BD2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
                 "0x134070: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-                "0x175B4B: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x175B4B: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -2437,7 +2437,7 @@
               "bytes": 120,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x13341B: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
                 "0x13341B: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
                 "0x13341B: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -2455,8 +2455,8 @@
                 "0x134BD2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
                 "0x134BD2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
                 "0x134070: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-                "0x175B4B: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x175B4B: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -2465,15 +2465,15 @@
               "bytes": 16,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x17BD7B: std::fs::read::inner (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x17BD7B: std::fs::read::inner (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
                 "0x12D8F0: UnknownInlinedFun (library/std/src/fs.rs:348)",
                 "0x12D8F0: luhn_reference::main (main.rs:199)",
                 "0x134BD2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
                 "0x134BD2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
                 "0x134070: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-                "0x175B4B: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x175B4B: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -2482,14 +2482,14 @@
               "bytes": 1024,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x146D65: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x146D65: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
                 "0x1307B9: luhn_reference::main (main.rs:200)",
                 "0x134BD2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
                 "0x134BD2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
                 "0x134070: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-                "0x175B4B: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x175B4B: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -2498,7 +2498,7 @@
               "bytes": 1,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x132FBA: alloc (library/alloc/src/alloc.rs:101)",
                 "0x132FBA: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x132FBA: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -2522,8 +2522,8 @@
                 "0x134BD2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
                 "0x134BD2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
                 "0x134070: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-                "0x175B4B: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x175B4B: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             }
           ],
@@ -2533,17 +2533,17 @@
     },
     "large": {
       "provenance": {
-        "directory": "/tmp/relar-luhn-performance-large-profile",
+        "directory": "/tmp/imre-luhn-performance-large-profile",
         "summary": {
-          "path": "/tmp/relar-luhn-performance-large-profile/summary.json",
+          "path": "/tmp/imre-luhn-performance-large-profile/summary.json",
           "sha256": "31ba9b31c6fcc5b8bf21bc141e71210bcf5ff46d99da15119096965d9e32fb99"
         },
         "manifest": {
-          "path": "/tmp/relar-luhn-performance-large-profile/manifest.json",
+          "path": "/tmp/imre-luhn-performance-large-profile/manifest.json",
           "sha256": "42bad4388de6ebbdaeba4b478c32aaacd9d75f039815b8620b700faf4230dad4"
         },
         "audit": {
-          "path": "/tmp/relar-luhn-performance-large-profile-audit.json",
+          "path": "/tmp/imre-luhn-performance-large-profile-audit.json",
           "sha256": "8f318ee9db4f2cd4262b3c54ed326b002609436cbdd8c877b3b44308444a6e51"
         },
         "manifest_members_verified": 47,
@@ -2555,7 +2555,7 @@
         "timing_revision": "8b54eae6572a93926265d78562656dd395ad28b0",
         "benchmark_record_sha256": "9279ec2e8a120885946bd355918869f801cc239483dfeb30ede626f10ff153b5",
         "binary_sha256": {
-          "relar": "de4607551b8c53b616c3acb6249bbcd38abfc8ebdb86c934455e41970c5316f5",
+          "imre": "de4607551b8c53b616c3acb6249bbcd38abfc8ebdb86c934455e41970c5316f5",
           "rust": "6ecadfe19c5db5427f79b93d4d74299ed5f481a972465bc1834353dbba47c5bc"
         },
         "llvm_sha256": "adf7ba8037b872b988ac760a52e65c9d8c75a1617c180a2875f69d0dc3d21618",
@@ -2565,9 +2565,9 @@
         "expected_stdout": "OK\n128\n",
         "expected_output_hex": "32",
         "raw_profiles": {
-          "relar-callgrind": {
+          "imre-callgrind": {
             "raw": {
-              "path": "/tmp/relar-luhn-performance-large-profile/relar-callgrind/profile.callgrind",
+              "path": "/tmp/imre-luhn-performance-large-profile/imre-callgrind/profile.callgrind",
               "sha256": "998ef42d8e5703367ee64104051add32b8ce64fd9165c3209bd798fcca5edbfb"
             },
             "reconciliation": {
@@ -2580,7 +2580,7 @@
               "all_function_self_and_call_edge_metrics_agree": true,
               "top_self_functions": [
                 {
-                  "name": "relar_str_int_list",
+                  "name": "imre_str_int_list",
                   "instructions": 2490377
                 },
                 {
@@ -2588,11 +2588,11 @@
                   "instructions": 1973248
                 },
                 {
-                  "name": "relar_list_slice_sum",
+                  "name": "imre_list_slice_sum",
                   "instructions": 1155264
                 },
                 {
-                  "name": "relar_list_release",
+                  "name": "imre_list_release",
                   "instructions": 467776
                 },
                 {
@@ -2622,9 +2622,9 @@
               ]
             }
           },
-          "relar-dhat": {
+          "imre-dhat": {
             "raw": {
-              "path": "/tmp/relar-luhn-performance-large-profile/relar-dhat/profile.json",
+              "path": "/tmp/imre-luhn-performance-large-profile/imre-dhat/profile.json",
               "sha256": "4177cf7480d70a244a4b8ef1e6b9af0ab45a69ba6704a5f49283b2e288453c71"
             },
             "reconciliation": {
@@ -2644,7 +2644,7 @@
           },
           "rust-callgrind": {
             "raw": {
-              "path": "/tmp/relar-luhn-performance-large-profile/rust-callgrind/profile.callgrind",
+              "path": "/tmp/imre-luhn-performance-large-profile/rust-callgrind/profile.callgrind",
               "sha256": "939ad0c5f03b9b1ad248ceb4f74cf8dd02c93e59f7de87c5161704468943b65f"
             },
             "reconciliation": {
@@ -2701,7 +2701,7 @@
           },
           "rust-dhat": {
             "raw": {
-              "path": "/tmp/relar-luhn-performance-large-profile/rust-dhat/profile.json",
+              "path": "/tmp/imre-luhn-performance-large-profile/rust-dhat/profile.json",
               "sha256": "b53d8002bc3f21adc7bd4b91b78ee2cdbac7691d6fdda08060d42a267bb9d080"
             },
             "reconciliation": {
@@ -2722,12 +2722,12 @@
         }
       },
       "instructions": {
-        "relar": 6514902,
+        "imre": 6514902,
         "rust": 5125319
       },
-      "relar_over_rust_instruction_ratio": 1.271121270695541,
+      "imre_over_rust_instruction_ratio": 1.271121270695541,
       "allocation_totals": {
-        "relar": {
+        "imre": {
           "allocated_bytes": 59532,
           "allocated_blocks": 34,
           "peak_live_bytes": 47051,
@@ -2757,7 +2757,7 @@
             "fraction_of_checksum_subtree": 0.3238959539925295
           },
           {
-            "component": "relar_str_int_list",
+            "component": "imre_str_int_list",
             "instructions": 2491460,
             "calls": 64,
             "instructions_per_checksum": 38929.0625,
@@ -2765,7 +2765,7 @@
             "fraction_of_checksum_subtree": 0.4089571171663306
           },
           {
-            "component": "<relar_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
+            "component": "<imre_runtime::objects::exceptions::PENDING_PRESENT::{K#0}::{closure#1} as core::ops::function::FnOnce<(core::option::Option<&mut core::option::Option<core::cell::Cell<bool>>>,)>>::call_once",
             "instructions": 320,
             "calls": 64,
             "instructions_per_checksum": 5.0,
@@ -2773,7 +2773,7 @@
             "fraction_of_checksum_subtree": 5.2525939606987786e-05
           },
           {
-            "component": "relar_list_slice_sum",
+            "component": "imre_list_slice_sum",
             "instructions": 1159424,
             "calls": 64,
             "instructions_per_checksum": 18116.0,
@@ -2781,7 +2781,7 @@
             "fraction_of_checksum_subtree": 0.19031198438403815
           },
           {
-            "component": "relar_list_release",
+            "component": "imre_list_release",
             "instructions": 467776,
             "calls": 128,
             "instructions_per_checksum": 7309.0,
@@ -2792,7 +2792,7 @@
         "partition_method": "fn_3 self plus its four direct outgoing call-edge inclusive totals are disjoint dynamic call subtrees and exactly equal fn_3 incoming inclusive cost. Nested helper self costs and regions below are alternative breakdowns, never added again.",
         "top_process_self_functions": [
           {
-            "name": "relar_str_int_list",
+            "name": "imre_str_int_list",
             "self_instructions": 2490377,
             "self_fraction": 0.38225855124144614,
             "calls": 64,
@@ -2806,14 +2806,14 @@
             "incoming_inclusive_instructions": 6092228
           },
           {
-            "name": "relar_list_slice_sum",
+            "name": "imre_list_slice_sum",
             "self_instructions": 1155264,
             "self_fraction": 0.1773263818857137,
             "calls": 64,
             "incoming_inclusive_instructions": 1159424
           },
           {
-            "name": "relar_list_release",
+            "name": "imre_list_release",
             "self_instructions": 467776,
             "self_fraction": 0.07180092655269411,
             "calls": 128,
@@ -3007,7 +3007,7 @@
                 },
                 {
                   "address": "0x106071",
-                  "assembly": "lea    0x5f38(%rip),%rbx        # 10bfb0 <relar_int_binary>",
+                  "assembly": "lea    0x5f38(%rip),%rbx        # 10bfb0 <imre_int_binary>",
                   "executions": 0
                 },
                 {
@@ -3242,7 +3242,7 @@
                 },
                 {
                   "address": "0x106125",
-                  "assembly": "addr32 call 121240 <_RNvMs6_NtCscJq9HK9IcCJ_5alloc2rcINtB5_2RcNtNtCselzjCC5m5fm_10num_bigint6bigint6BigIntE9drop_slowCs5N6zm3e4tnE_12relar_runtime>",
+                  "assembly": "addr32 call 121240 <_RNvMs6_NtCscJq9HK9IcCJ_5alloc2rcINtB5_2RcNtNtCselzjCC5m5fm_10num_bigint6bigint6BigIntE9drop_slowCs5N6zm3e4tnE_12imre_runtime>",
                   "executions": 0
                 },
                 {
@@ -3297,7 +3297,7 @@
                 },
                 {
                   "address": "0x10616c",
-                  "assembly": "call   1250c0 <_RINvMs0_NtNtCs5N6zm3e4tnE_12relar_runtime7objects10exceptionsNtB6_5Error9returningPINtNtCscJq9HK9IcCJ_5alloc3vec3VechEEBa_>",
+                  "assembly": "call   1250c0 <_RINvMs0_NtNtCs5N6zm3e4tnE_12imre_runtime7objects10exceptionsNtB6_5Error9returningPINtNtCscJq9HK9IcCJ_5alloc3vec3VechEEBa_>",
                   "executions": 0
                 },
                 {
@@ -3312,7 +3312,7 @@
               "instructions_per_checksum": 112.0
             }
           },
-          "relar_str_int_list": {
+          "imre_str_int_list": {
             "ascii_validation_vector_loop": {
               "half_open_address_range": [
                 "0x119400",
@@ -3369,7 +3369,7 @@
                 },
                 {
                   "address": "0x11942b",
-                  "assembly": "jne    119460 <relar_str_int_list+0x1b0>",
+                  "assembly": "jne    119460 <imre_str_int_list+0x1b0>",
                   "executions": 4096
                 },
                 {
@@ -3384,7 +3384,7 @@
                 },
                 {
                   "address": "0x119434",
-                  "assembly": "jne    119400 <relar_str_int_list+0x150>",
+                  "assembly": "jne    119400 <imre_str_int_list+0x150>",
                   "executions": 4096
                 }
               ]
@@ -3580,7 +3580,7 @@
                 },
                 {
                   "address": "0x1196f3",
-                  "assembly": "jne    119640 <relar_str_int_list+0x390>",
+                  "assembly": "jne    119640 <imre_str_int_list+0x390>",
                   "executions": 65536
                 }
               ]
@@ -3686,7 +3686,7 @@
                 },
                 {
                   "address": "0x1195f0",
-                  "assembly": "jne    1195a0 <relar_str_int_list+0x2f0>",
+                  "assembly": "jne    1195a0 <imre_str_int_list+0x2f0>",
                   "executions": 0
                 }
               ]
@@ -3696,7 +3696,7 @@
               "instructions_per_checksum": 192.140625
             }
           },
-          "relar_list_slice_sum": {
+          "imre_list_slice_sum": {
             "reverse_stride_two_vector_loop": {
               "half_open_address_range": [
                 "0x118953",
@@ -3878,7 +3878,7 @@
                 },
                 {
                   "address": "0x118a03",
-                  "assembly": "jne    118953 <relar_list_slice_sum+0x3c3>",
+                  "assembly": "jne    118953 <imre_list_slice_sum+0x3c3>",
                   "executions": 32704
                 }
               ]
@@ -3964,7 +3964,7 @@
                 },
                 {
                   "address": "0x118a6e",
-                  "assembly": "jne    118a40 <relar_list_slice_sum+0x4b0>",
+                  "assembly": "jne    118a40 <imre_list_slice_sum+0x4b0>",
                   "executions": 192
                 }
               ]
@@ -4040,7 +4040,7 @@
               "instructions_per_checksum": 110.0
             }
           },
-          "relar_list_release": {
+          "imre_list_release": {
             "immediate_value_vector_scan": {
               "half_open_address_range": [
                 "0x111d80",
@@ -4082,7 +4082,7 @@
                 },
                 {
                   "address": "0x111d9a",
-                  "assembly": "jne    111d80 <relar_list_release+0xc0>",
+                  "assembly": "jne    111d80 <imre_list_release+0xc0>",
                   "executions": 65536
                 }
               ]
@@ -4108,12 +4108,12 @@
                 },
                 {
                   "address": "0x111e6c",
-                  "assembly": "lea    0xf3cd(%rip),%r13        # 121240 <_RNvMs6_NtCscJq9HK9IcCJ_5alloc2rcINtB5_2RcNtNtCselzjCC5m5fm_10num_bigint6bigint6BigIntE9drop_slowCs5N6zm3e4tnE_12relar_runtime>",
+                  "assembly": "lea    0xf3cd(%rip),%r13        # 121240 <_RNvMs6_NtCscJq9HK9IcCJ_5alloc2rcINtB5_2RcNtNtCselzjCC5m5fm_10num_bigint6bigint6BigIntE9drop_slowCs5N6zm3e4tnE_12imre_runtime>",
                   "executions": 0
                 },
                 {
                   "address": "0x111e73",
-                  "assembly": "jmp    111e8d <relar_list_release+0x1cd>",
+                  "assembly": "jmp    111e8d <imre_list_release+0x1cd>",
                   "executions": 0
                 },
                 {
@@ -4133,7 +4133,7 @@
                 },
                 {
                   "address": "0x111e87",
-                  "assembly": "je     111f88 <relar_list_release+0x2c8>",
+                  "assembly": "je     111f88 <imre_list_release+0x2c8>",
                   "executions": 0
                 },
                 {
@@ -4148,7 +4148,7 @@
                 },
                 {
                   "address": "0x111e93",
-                  "assembly": "jne    111e80 <relar_list_release+0x1c0>",
+                  "assembly": "jne    111e80 <imre_list_release+0x1c0>",
                   "executions": 0
                 },
                 {
@@ -4168,7 +4168,7 @@
                 },
                 {
                   "address": "0x111ea1",
-                  "assembly": "jne    111e80 <relar_list_release+0x1c0>",
+                  "assembly": "jne    111e80 <imre_list_release+0x1c0>",
                   "executions": 0
                 },
                 {
@@ -4183,7 +4183,7 @@
                 },
                 {
                   "address": "0x111ea9",
-                  "assembly": "jmp    111e80 <relar_list_release+0x1c0>",
+                  "assembly": "jmp    111e80 <imre_list_release+0x1c0>",
                   "executions": 0
                 }
               ]
@@ -4195,10 +4195,10 @@
           }
         },
         "slice_normalization": {
-          "name": "<relar_runtime::objects::sequences::SliceIndices>::new",
+          "name": "<imre_runtime::objects::sequences::SliceIndices>::new",
           "self_instructions": 4160,
           "instructions_per_checksum": 65.0,
-          "included_within": "relar_list_slice_sum inclusive subtree"
+          "included_within": "imre_list_slice_sum inclusive subtree"
         },
         "digit_conversion_outgoing_edges": [
           {
@@ -4220,7 +4220,7 @@
         "actual_path": "The checksum reduction executes the scalar 15-instruction loop; no forced loop vectorization metadata occurs in retained native.ll. The digit conversion, reverse stride-two subtotal, and immediate-value destruction scan execute SIMD."
       },
       "allocations": {
-        "relar": {
+        "imre": {
           "categories": {
             "other_startup_and_protocol": {
               "bytes": 1020,
@@ -4294,8 +4294,8 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x20E90A: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x20E90A: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4304,17 +4304,17 @@
               "bytes": 32,
               "blocks": 1,
               "frames": [
-                "0x484D953: calloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x484D953: calloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x49C3643: __cxa_thread_atexit_impl (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x22CE4A: UnknownInlinedFun (library/std/src/sys/thread_local/native/eager.rs:55)",
-                "0x22CE4A: get<core::cell::RefCell<core::option::Option<alloc::rc::Rc<relar_runtime::objects::Object, alloc::alloc::Global>>>> (library/std/src/sys/thread_local/native/eager.rs:38)",
+                "0x22CE4A: get<core::cell::RefCell<core::option::Option<alloc::rc::Rc<imre_runtime::objects::Object, alloc::alloc::Global>>>> (library/std/src/sys/thread_local/native/eager.rs:38)",
                 "0x22CE4A: {closure#0} (library/std/src/sys/thread_local/native/mod.rs:68)",
-                "0x22CE4A: call_once<relar_runtime::objects::args::ARGV::{constant#0}::{closure_env#0}, (core::option::Option<&mut core::option::Option<core::cell::RefCell<core::option::Option<alloc::rc::Rc<relar_runtime::objects::Object, alloc::alloc::Global>>>>>)> (library/core/src/ops/function.rs:250)",
+                "0x22CE4A: call_once<imre_runtime::objects::args::ARGV::{constant#0}::{closure_env#0}, (core::option::Option<&mut core::option::Option<core::cell::RefCell<core::option::Option<alloc::rc::Rc<imre_runtime::objects::Object, alloc::alloc::Global>>>>>)> (library/core/src/ops/function.rs:250)",
                 "0x22CE4A: UnknownInlinedFun (library/std/src/thread/local.rs:462)",
                 "0x22CE4A: UnknownInlinedFun (library/std/src/thread/local.rs:427)",
-                "0x22CE4A: relar_sys_argv (args.rs:71)",
-                "0x208AA6: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x22CE4A: imre_sys_argv (args.rs:71)",
+                "0x208AA6: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4323,7 +4323,7 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x223B27: alloc (library/alloc/src/alloc.rs:101)",
                 "0x223B27: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x223B27: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -4334,9 +4334,9 @@
                 "0x22CAFF: try_reserve_exact<usize, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:384)",
                 "0x22CAFF: try_reserve_exact<usize, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1579)",
                 "0x22CAFF: decode (args.rs:44)",
-                "0x22CAFF: relar_sys_argv (args.rs:77)",
-                "0x208AA6: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x22CAFF: imre_sys_argv (args.rs:77)",
+                "0x208AA6: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4345,7 +4345,7 @@
               "bytes": 163,
               "blocks": 3,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x231C34: alloc (library/alloc/src/alloc.rs:101)",
                 "0x231C34: do_alloc (heap.rs:412)",
                 "0x231C34: alloc (heap.rs:466)",
@@ -4355,9 +4355,9 @@
                 "0x22CCCB: new_panic (mod.rs:109)",
                 "0x22CCCB: new<&str> (lib.rs:192)",
                 "0x22CCCB: decode (args.rs:61)",
-                "0x22CCCB: relar_sys_argv (args.rs:77)",
-                "0x208AA6: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x22CCCB: imre_sys_argv (args.rs:77)",
+                "0x208AA6: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4366,7 +4366,7 @@
               "bytes": 200,
               "blocks": 5,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x22CC71: alloc (library/alloc/src/alloc.rs:101)",
                 "0x22CC71: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x22CC71: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -4375,9 +4375,9 @@
                 "0x22CC71: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
                 "0x22CC71: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
                 "0x22CC71: decode (args.rs:61)",
-                "0x22CC71: relar_sys_argv (args.rs:77)",
-                "0x208AA6: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x22CC71: imre_sys_argv (args.rs:77)",
+                "0x208AA6: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4386,18 +4386,18 @@
               "bytes": 64,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x22CA58: alloc (library/alloc/src/alloc.rs:101)",
                 "0x22CA58: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x22CA58: alloc_impl (library/alloc/src/alloc.rs:332)",
                 "0x22CA58: allocate (library/alloc/src/alloc.rs:449)",
                 "0x22CA58: box_new_uninit (library/alloc/src/boxed.rs:248)",
-                "0x22CA58: new<alloc::rc::RcInner<relar_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
-                "0x22CA58: new<relar_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
+                "0x22CA58: new<alloc::rc::RcInner<imre_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
+                "0x22CA58: new<imre_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
                 "0x22CA58: decode (args.rs:63)",
-                "0x22CA58: relar_sys_argv (args.rs:77)",
-                "0x208AA6: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x22CA58: imre_sys_argv (args.rs:77)",
+                "0x208AA6: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4406,16 +4406,16 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x21E6FD: alloc (library/alloc/src/alloc.rs:101)",
                 "0x21E6FD: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x21E6FD: alloc_impl (library/alloc/src/alloc.rs:332)",
                 "0x21E6FD: allocate (library/alloc/src/alloc.rs:449)",
                 "0x21E6FD: box_new_uninit (library/alloc/src/boxed.rs:248)",
-                "0x21E6FD: new<relar_runtime::objects::files::FileState> (library/alloc/src/boxed.rs:286)",
-                "0x21E6FD: relar_runtime::objects::files::open (files.rs:233)",
-                "0x209696: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x21E6FD: new<imre_runtime::objects::files::FileState> (library/alloc/src/boxed.rs:286)",
+                "0x21E6FD: imre_runtime::objects::files::open (files.rs:233)",
+                "0x209696: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4424,17 +4424,17 @@
               "bytes": 64,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x21E74E: alloc (library/alloc/src/alloc.rs:101)",
                 "0x21E74E: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x21E74E: alloc_impl (library/alloc/src/alloc.rs:332)",
                 "0x21E74E: allocate (library/alloc/src/alloc.rs:449)",
                 "0x21E74E: box_new_uninit (library/alloc/src/boxed.rs:248)",
-                "0x21E74E: new<alloc::rc::RcInner<relar_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
-                "0x21E74E: new<relar_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
-                "0x21E74E: relar_runtime::objects::files::open (files.rs:232)",
-                "0x209696: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x21E74E: new<alloc::rc::RcInner<imre_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
+                "0x21E74E: new<imre_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
+                "0x21E74E: imre_runtime::objects::files::open (files.rs:232)",
+                "0x209696: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4443,12 +4443,12 @@
               "bytes": 4096,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x18D28F: <alloc::raw_vec::RawVecInner>::finish_grow (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x1BBE43: <std::fs::File as std::io::Read>::read_to_end (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x21DE18: <relar_runtime::objects::files::FileState>::read_bytes (files.rs:116)",
-                "0x209700: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x18D28F: <alloc::raw_vec::RawVecInner>::finish_grow (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x1BBE43: <std::fs::File as std::io::Read>::read_to_end (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x21DE18: <imre_runtime::objects::files::FileState>::read_bytes (files.rs:116)",
+                "0x209700: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4457,9 +4457,9 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x209826: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x209826: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4468,7 +4468,7 @@
               "bytes": 4096,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x231C34: alloc (library/alloc/src/alloc.rs:101)",
                 "0x231C34: do_alloc (heap.rs:412)",
                 "0x231C34: alloc (heap.rs:466)",
@@ -4479,10 +4479,10 @@
                 "0x225B7B: new<&str> (lib.rs:192)",
                 "0x225B7B: from (lib.rs:2150)",
                 "0x225B7B: {closure#0} (bytes.rs:366)",
-                "0x225B7B: map<&str, core::str::error::Utf8Error, *const compact_str::CompactString, relar_runtime::objects::bytes::relar_bytes_decode::{closure_env#0}> (library/core/src/result.rs:836)",
-                "0x225B7B: relar_bytes_decode (bytes.rs:366)",
-                "0x2098BB: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x225B7B: map<&str, core::str::error::Utf8Error, *const compact_str::CompactString, imre_runtime::objects::bytes::imre_bytes_decode::{closure_env#0}> (library/core/src/result.rs:836)",
+                "0x225B7B: imre_bytes_decode (bytes.rs:366)",
+                "0x2098BB: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4491,7 +4491,7 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x225A86: alloc (library/alloc/src/alloc.rs:101)",
                 "0x225A86: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x225A86: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -4500,10 +4500,10 @@
                 "0x225A86: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
                 "0x225A86: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
                 "0x225A86: {closure#0} (bytes.rs:366)",
-                "0x225A86: map<&str, core::str::error::Utf8Error, *const compact_str::CompactString, relar_runtime::objects::bytes::relar_bytes_decode::{closure_env#0}> (library/core/src/result.rs:836)",
-                "0x225A86: relar_bytes_decode (bytes.rs:366)",
-                "0x2098BB: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x225A86: map<&str, core::str::error::Utf8Error, *const compact_str::CompactString, imre_runtime::objects::bytes::imre_bytes_decode::{closure_env#0}> (library/core/src/result.rs:836)",
+                "0x225A86: imre_bytes_decode (bytes.rs:366)",
+                "0x2098BB: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4512,9 +4512,9 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x209A54: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x209A54: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4523,9 +4523,9 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x209B79: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x209B79: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4534,7 +4534,7 @@
               "bytes": 32,
               "blocks": 1,
               "frames": [
-                "0x484D953: calloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x484D953: calloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x49C3643: __cxa_thread_atexit_impl (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x221D06: UnknownInlinedFun (library/std/src/sys/thread_local/native/eager.rs:55)",
                 "0x221D06: UnknownInlinedFun (library/std/src/sys/thread_local/native/eager.rs:38)",
@@ -4542,10 +4542,10 @@
                 "0x221D06: UnknownInlinedFun (library/core/src/ops/function.rs:250)",
                 "0x221D06: UnknownInlinedFun (library/std/src/thread/local.rs:462)",
                 "0x221D06: UnknownInlinedFun (lib.rs:238)",
-                "0x221D06: relar_str_int_list (sequences.rs:418)",
-                "0x20DF73: fn_3 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20ACF9: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x221D06: imre_str_int_list (sequences.rs:418)",
+                "0x20DF73: fn_3 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20ACF9: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4554,7 +4554,7 @@
               "bytes": 32768,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x223B27: alloc (library/alloc/src/alloc.rs:101)",
                 "0x223B27: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x223B27: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -4562,12 +4562,12 @@
                 "0x223B27: <alloc::raw_vec::RawVecInner>::finish_grow (library/alloc/src/raw_vec/mod.rs:560)",
                 "0x2217DE: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:801)",
                 "0x2217DE: UnknownInlinedFun (library/alloc/src/raw_vec/mod.rs:729)",
-                "0x2217DE: try_reserve_exact<relar_runtime::Int, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:384)",
-                "0x2217DE: try_reserve_exact<relar_runtime::Int, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1579)",
-                "0x2217DE: relar_str_int_list (sequences.rs:420)",
-                "0x20DF73: fn_3 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20ACF9: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x2217DE: try_reserve_exact<imre_runtime::Int, alloc::alloc::Global> (library/alloc/src/raw_vec/mod.rs:384)",
+                "0x2217DE: try_reserve_exact<imre_runtime::Int, alloc::alloc::Global> (library/alloc/src/vec/mod.rs:1579)",
+                "0x2217DE: imre_str_int_list (sequences.rs:420)",
+                "0x20DF73: fn_3 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20ACF9: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4576,7 +4576,7 @@
               "bytes": 32,
               "blocks": 1,
               "frames": [
-                "0x484D953: calloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x484D953: calloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x49C3643: __cxa_thread_atexit_impl (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x221C0D: UnknownInlinedFun (library/std/src/sys/thread_local/native/eager.rs:55)",
                 "0x221C0D: UnknownInlinedFun (library/std/src/sys/thread_local/native/eager.rs:38)",
@@ -4584,10 +4584,10 @@
                 "0x221C0D: UnknownInlinedFun (library/core/src/ops/function.rs:250)",
                 "0x221C0D: UnknownInlinedFun (library/std/src/thread/local.rs:462)",
                 "0x221C0D: UnknownInlinedFun (lib.rs:187)",
-                "0x221C0D: relar_str_int_list (sequences.rs:458)",
-                "0x20DF73: fn_3 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20ACF9: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x221C0D: imre_str_int_list (sequences.rs:458)",
+                "0x20DF73: fn_3 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20ACF9: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4596,7 +4596,7 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x221A0B: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
                 "0x221A0B: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
                 "0x221A0B: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -4605,10 +4605,10 @@
                 "0x221A0B: UnknownInlinedFun (library/alloc/src/boxed.rs:286)",
                 "0x221A0B: UnknownInlinedFun (library/alloc/src/rc.rs:426)",
                 "0x221A0B: UnknownInlinedFun (lib.rs:203)",
-                "0x221A0B: relar_str_int_list (sequences.rs:458)",
-                "0x20DF73: fn_3 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20ACF9: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x221A0B: imre_str_int_list (sequences.rs:458)",
+                "0x20DF73: fn_3 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20ACF9: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4617,7 +4617,7 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x219B16: alloc (library/alloc/src/alloc.rs:101)",
                 "0x219B16: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x219B16: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -4625,9 +4625,9 @@
                 "0x219B16: box_new_uninit (library/alloc/src/boxed.rs:248)",
                 "0x219B16: new<alloc::rc::RcInner<compact_str::CompactString>> (library/alloc/src/boxed.rs:286)",
                 "0x219B16: new<compact_str::CompactString> (library/alloc/src/rc.rs:426)",
-                "0x219B16: relar_int_str (lib.rs:623)",
-                "0x20A408: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x219B16: imre_int_str (lib.rs:623)",
+                "0x20A408: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4636,9 +4636,9 @@
               "bytes": 32,
               "blocks": 1,
               "frames": [
-                "0x484D953: calloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x20BCEB: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x484D953: calloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x20BCEB: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4647,7 +4647,7 @@
               "bytes": 8192,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x21E54D: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
                 "0x21E54D: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
                 "0x21E54D: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -4658,9 +4658,9 @@
                 "0x21E54D: UnknownInlinedFun (library/alloc/src/vec/mod.rs:975)",
                 "0x21E54D: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
                 "0x21E54D: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
-                "0x21E54D: relar_runtime::objects::files::open (files.rs:230)",
-                "0x20C124: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x21E54D: imre_runtime::objects::files::open (files.rs:230)",
+                "0x20C124: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4669,16 +4669,16 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x21E6FD: alloc (library/alloc/src/alloc.rs:101)",
                 "0x21E6FD: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x21E6FD: alloc_impl (library/alloc/src/alloc.rs:332)",
                 "0x21E6FD: allocate (library/alloc/src/alloc.rs:449)",
                 "0x21E6FD: box_new_uninit (library/alloc/src/boxed.rs:248)",
-                "0x21E6FD: new<relar_runtime::objects::files::FileState> (library/alloc/src/boxed.rs:286)",
-                "0x21E6FD: relar_runtime::objects::files::open (files.rs:233)",
-                "0x20C124: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x21E6FD: new<imre_runtime::objects::files::FileState> (library/alloc/src/boxed.rs:286)",
+                "0x21E6FD: imre_runtime::objects::files::open (files.rs:233)",
+                "0x20C124: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4687,17 +4687,17 @@
               "bytes": 64,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x21E74E: alloc (library/alloc/src/alloc.rs:101)",
                 "0x21E74E: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x21E74E: alloc_impl (library/alloc/src/alloc.rs:332)",
                 "0x21E74E: allocate (library/alloc/src/alloc.rs:449)",
                 "0x21E74E: box_new_uninit (library/alloc/src/boxed.rs:248)",
-                "0x21E74E: new<alloc::rc::RcInner<relar_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
-                "0x21E74E: new<relar_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
-                "0x21E74E: relar_runtime::objects::files::open (files.rs:232)",
-                "0x20C124: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x21E74E: new<alloc::rc::RcInner<imre_runtime::objects::Object>> (library/alloc/src/boxed.rs:286)",
+                "0x21E74E: new<imre_runtime::objects::Object> (library/alloc/src/rc.rs:426)",
+                "0x21E74E: imre_runtime::objects::files::open (files.rs:232)",
+                "0x20C124: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4706,9 +4706,9 @@
               "bytes": 1,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x20C213: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x20C213: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4717,9 +4717,9 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x20C2CC: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x20C2CC: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4728,9 +4728,9 @@
               "bytes": 40,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x20C624: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x20C624: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4739,25 +4739,25 @@
               "bytes": 1024,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x17A51D: <std::sync::once::Once>::call_once_force::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !>::{closure#0}>::{closure#0} (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x185088: <std::sys::sync::once::futex::Once>::call (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x161C08: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x1A0CAA: std::io::stdio::stdout (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x17A51D: <std::sync::once::Once>::call_once_force::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !>::{closure#0}>::{closure#0} (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x185088: <std::sys::sync::once::futex::Once>::call (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x161C08: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x1A0CAA: std::io::stdio::stdout (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
                 "0x213D5A: {closure#0} (lib.rs:332)",
-                "0x213D5A: <relar_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
-                "0x210523: call_once<fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
-                "0x210523: {closure#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
-                "0x210523: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<relar_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
-                "0x185088: <std::sys::sync::once::futex::Once>::call (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x210F7B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>>> (library/std/src/sync/once.rs:226)",
-                "0x210F7B: force<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
-                "0x210F7B: deref<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
-                "0x210F7B: write_output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:345)",
-                "0x210F7B: output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:356)",
-                "0x210F7B: relar_runtime::output_bytes (lib.rs:363)",
-                "0x20C685: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x213D5A: <imre_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
+                "0x210523: call_once<fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
+                "0x210523: {closure#0}<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
+                "0x210523: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<imre_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
+                "0x185088: <std::sys::sync::once::futex::Once>::call (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x210F7B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>>> (library/std/src/sync/once.rs:226)",
+                "0x210F7B: force<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
+                "0x210F7B: deref<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
+                "0x210F7B: write_output<imre_runtime::output_bytes::{closure_env#0}> (lib.rs:345)",
+                "0x210F7B: output<imre_runtime::output_bytes::{closure_env#0}> (lib.rs:356)",
+                "0x210F7B: imre_runtime::output_bytes (lib.rs:363)",
+                "0x20C685: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             },
             {
@@ -4766,7 +4766,7 @@
               "bytes": 8192,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x213D79: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
                 "0x213D79: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
                 "0x213D79: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -4778,19 +4778,19 @@
                 "0x213D79: UnknownInlinedFun (library/alloc/src/vec/mod.rs:522)",
                 "0x213D79: UnknownInlinedFun (library/std/src/io/buffered/bufwriter.rs:122)",
                 "0x213D79: {closure#0} (lib.rs:335)",
-                "0x213D79: <relar_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
-                "0x210523: call_once<fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
-                "0x210523: {closure#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
-                "0x210523: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<relar_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
-                "0x185088: <std::sys::sync::once::futex::Once>::call (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x210F7B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>>> (library/std/src/sync/once.rs:226)",
-                "0x210F7B: force<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
-                "0x210F7B: deref<std::sync::poison::mutex::Mutex<relar_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<relar_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
-                "0x210F7B: write_output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:345)",
-                "0x210F7B: output<relar_runtime::output_bytes::{closure_env#0}> (lib.rs:356)",
-                "0x210F7B: relar_runtime::output_bytes (lib.rs:363)",
-                "0x20C685: fn_2 (in /tmp/relar-luhn-performance-v1-thinlto/luhn)",
-                "0x20E941: main (in /tmp/relar-luhn-performance-v1-thinlto/luhn)"
+                "0x213D79: <imre_runtime::OUTPUT::{closure#0} as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
+                "0x210523: call_once<fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>, ()> (library/core/src/ops/function.rs:250)",
+                "0x210523: {closure#0}<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:250)",
+                "0x210523: <std::sync::once::Once>::call_once_force::<<std::sync::lazy_lock::LazyLock<std::sync::poison::mutex::Mutex<imre_runtime::Output>>>::force::{closure#0}>::{closure#0} (library/std/src/sync/once.rs:226)",
+                "0x185088: <std::sys::sync::once::futex::Once>::call (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x210F7B: call_once_force<std::sync::lazy_lock::{impl#0}::force::{closure_env#0}<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>>> (library/std/src/sync/once.rs:226)",
+                "0x210F7B: force<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:242)",
+                "0x210F7B: deref<std::sync::poison::mutex::Mutex<imre_runtime::Output>, fn() -> std::sync::poison::mutex::Mutex<imre_runtime::Output>> (library/std/src/sync/lazy_lock.rs:357)",
+                "0x210F7B: write_output<imre_runtime::output_bytes::{closure_env#0}> (lib.rs:345)",
+                "0x210F7B: output<imre_runtime::output_bytes::{closure_env#0}> (lib.rs:356)",
+                "0x210F7B: imre_runtime::output_bytes (lib.rs:363)",
+                "0x20C685: fn_2 (in /tmp/imre-luhn-performance-v1-thinlto/luhn)",
+                "0x20E941: main (in /tmp/imre-luhn-performance-v1-thinlto/luhn)"
               ]
             }
           ],
@@ -4838,11 +4838,11 @@
               "bytes": 472,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x4918F5E: fopen (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x4931195: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-                "0x17579D: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x17579D: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -4851,11 +4851,11 @@
               "bytes": 360,
               "blocks": 2,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x4919E64: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-                "0x17579D: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x17579D: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -4864,14 +4864,14 @@
               "bytes": 1024,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x4918294: _IO_file_doallocate (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x4928603: _IO_doallocbuf (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x4925963: _IO_file_underflow (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x4919EEF: getdelim (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x49312EE: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-                "0x17579D: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x17579D: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -4880,10 +4880,10 @@
               "bytes": 32,
               "blocks": 1,
               "frames": [
-                "0x484DB80: realloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x484DB80: realloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x4931059: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-                "0x17579D: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x17579D: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -4892,12 +4892,12 @@
               "bytes": 152,
               "blocks": 1,
               "frames": [
-                "0x484D953: calloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x484D953: calloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x492CF5A: ??? (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x492D29F: pthread_attr_setaffinity_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x49310E7: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-                "0x17579D: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x17579D: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -4906,11 +4906,11 @@
               "bytes": 32,
               "blocks": 1,
               "frames": [
-                "0x484DB80: realloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x484DB80: realloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x492D2B8: pthread_attr_setaffinity_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
                 "0x49310E7: pthread_getattr_np (in /usr/lib/x86_64-linux-gnu/libc.so.6)",
-                "0x17579D: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x17579D: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -4919,10 +4919,10 @@
               "bytes": 4,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x17A2BB: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x1759A9: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x17A2BB: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x1759A9: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -4931,10 +4931,10 @@
               "bytes": 544,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x17A4BD: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x1759A9: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x17A4BD: std::sys::pal::unix::stack_overflow::thread_info::set_current_info (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x1759A9: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -4943,13 +4943,13 @@
               "bytes": 120,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x12D836: luhn_reference::main (main.rs:191)",
                 "0x134BD2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
                 "0x134BD2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
                 "0x134070: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-                "0x175B4B: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x175B4B: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -4958,13 +4958,13 @@
               "bytes": 210,
               "blocks": 5,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x12DA8B: luhn_reference::main (main.rs:191)",
                 "0x134BD2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
                 "0x134BD2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
                 "0x134070: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-                "0x175B4B: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x175B4B: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -4973,7 +4973,7 @@
               "bytes": 120,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x13341B: UnknownInlinedFun (library/alloc/src/alloc.rs:101)",
                 "0x13341B: UnknownInlinedFun (library/alloc/src/alloc.rs:210)",
                 "0x13341B: UnknownInlinedFun (library/alloc/src/alloc.rs:332)",
@@ -4991,8 +4991,8 @@
                 "0x134BD2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
                 "0x134BD2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
                 "0x134070: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-                "0x175B4B: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x175B4B: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -5001,15 +5001,15 @@
               "bytes": 4096,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x17BD7B: std::fs::read::inner (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x17BD7B: std::fs::read::inner (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
                 "0x12D8F0: UnknownInlinedFun (library/std/src/fs.rs:348)",
                 "0x12D8F0: luhn_reference::main (main.rs:199)",
                 "0x134BD2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
                 "0x134BD2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
                 "0x134070: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-                "0x175B4B: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x175B4B: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -5018,14 +5018,14 @@
               "bytes": 1024,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
-                "0x146D65: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x146D65: <std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::initialize::<<std::sync::once_lock::OnceLock<std::sync::reentrant_lock::ReentrantLock<core::cell::RefCell<std::io::buffered::linewriter::LineWriter<std::io::stdio::StdoutRaw>>>>>::get_or_init<std::io::stdio::stdout::{closure#0}>::{closure#0}, !> (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
                 "0x1307B9: luhn_reference::main (main.rs:200)",
                 "0x134BD2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
                 "0x134BD2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
                 "0x134070: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-                "0x175B4B: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x175B4B: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             },
             {
@@ -5034,7 +5034,7 @@
               "bytes": 1,
               "blocks": 1,
               "frames": [
-                "0x4846828: malloc (in /home/dev-user/.cache/relar/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
+                "0x4846828: malloc (in /home/dev-user/.cache/imre/profiling-tools/root/usr/libexec/valgrind/vgpreload_dhat-amd64-linux.so)",
                 "0x132FBA: alloc (library/alloc/src/alloc.rs:101)",
                 "0x132FBA: alloc_impl_runtime (library/alloc/src/alloc.rs:210)",
                 "0x132FBA: alloc_impl (library/alloc/src/alloc.rs:332)",
@@ -5058,8 +5058,8 @@
                 "0x134BD2: call_once<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error, alloc::alloc::Global>>, ()> (library/core/src/ops/function.rs:250)",
                 "0x134BD2: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>, core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>> (library/std/src/sys/backtrace.rs:166)",
                 "0x134070: std::rt::lang_start::<core::result::Result<(), alloc::boxed::Box<dyn core::error::Error>>>::{closure#0} (library/std/src/rt.rs:206)",
-                "0x175B4B: std::rt::lang_start_internal (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
-                "0x13293B: main (in /tmp/relar-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
+                "0x175B4B: std::rt::lang_start_internal (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)",
+                "0x13293B: main (in /tmp/imre-luhn-performance-validation-v3/references/luhn-thinlto/luhn-reference)"
               ]
             }
           ],
@@ -5070,41 +5070,41 @@
   },
   "disassembly": {
     "commands": {
-      "path": "/tmp/relar-luhn-performance-profile-disassembly/commands.json",
+      "path": "/tmp/imre-luhn-performance-profile-disassembly/commands.json",
       "sha256": "9afeef97d406a1ccddfcdb529a7ee55a35158179d84949e25a78e374e5662799"
     },
     "files": {
       "fn_3": {
-        "path": "/tmp/relar-luhn-performance-profile-disassembly/fn_3.asm",
+        "path": "/tmp/imre-luhn-performance-profile-disassembly/fn_3.asm",
         "sha256": "945d31a1c82223eb4ccb6a6d60a9b9d49c6909a094df9f96c00d217018f4e96c"
       },
-      "relar_str_int_list": {
-        "path": "/tmp/relar-luhn-performance-profile-disassembly/relar_str_int_list.asm",
+      "imre_str_int_list": {
+        "path": "/tmp/imre-luhn-performance-profile-disassembly/imre_str_int_list.asm",
         "sha256": "33edb3f5f5740857a3c4062b535b9f1d56df4d2c81d919a5f31a98987c18bfb8"
       },
-      "relar_list_slice_sum": {
-        "path": "/tmp/relar-luhn-performance-profile-disassembly/relar_list_slice_sum.asm",
+      "imre_list_slice_sum": {
+        "path": "/tmp/imre-luhn-performance-profile-disassembly/imre_list_slice_sum.asm",
         "sha256": "6e64366d8cffe973338389cfdf4bed02d9237835efaa861eef7e8efa8ff0eeed"
       },
-      "relar_list_release": {
-        "path": "/tmp/relar-luhn-performance-profile-disassembly/relar_list_release.asm",
+      "imre_list_release": {
+        "path": "/tmp/imre-luhn-performance-profile-disassembly/imre_list_release.asm",
         "sha256": "ad60240c589cc412ab1e151088e0d1bd7d070e568fbf663c28766994a24a18dc"
       }
     }
   },
   "original_large_baseline_comparison": {
     "provenance": {
-      "directory": "/tmp/relar-luhn-profile-final",
+      "directory": "/tmp/imre-luhn-profile-final",
       "summary": {
-        "path": "/tmp/relar-luhn-profile-final/summary.json",
+        "path": "/tmp/imre-luhn-profile-final/summary.json",
         "sha256": "d23c5c229621e46b05f834349227bb9620831f63f63e80f056c174659aa2aac4"
       },
       "manifest": {
-        "path": "/tmp/relar-luhn-profile-final/manifest.json",
+        "path": "/tmp/imre-luhn-profile-final/manifest.json",
         "sha256": "cf44c45003d22fe882e7628b0df065bb02ec5b5cf98a389cb46f398888f7dc66"
       },
       "audit": {
-        "path": "/tmp/relar-luhn-profile-audit.json",
+        "path": "/tmp/imre-luhn-profile-audit.json",
         "sha256": "da2a79eb7a5ed27bf2cc0f63be6a3c0fe81f07a6c168336d954281f230ef6d48"
       },
       "manifest_members_verified": 44,
@@ -5116,7 +5116,7 @@
       "timing_revision": "6fa8681c1734513cc278511427029dea9dca471c",
       "benchmark_record_sha256": "26b3b7ad62cddddae43e659080a533ae41a3079bb143096e098fe2d675c3bf57",
       "binary_sha256": {
-        "relar": "14fb73da2b9b539b760b4c98c85573e55a1f03da84a90e4aeb519c47ec7f5fd0",
+        "imre": "14fb73da2b9b539b760b4c98c85573e55a1f03da84a90e4aeb519c47ec7f5fd0",
         "rust": "6ecadfe19c5db5427f79b93d4d74299ed5f481a972465bc1834353dbba47c5bc"
       },
       "llvm_sha256": "33c78c648acd309cd9290f663da343e6593f6a92d3190acd43d26d03422c4a10",
@@ -5126,9 +5126,9 @@
       "expected_stdout": "OK\n128\n",
       "expected_output_hex": "32",
       "raw_profiles": {
-        "relar-callgrind": {
+        "imre-callgrind": {
           "raw": {
-            "path": "/tmp/relar-luhn-profile-final/relar-callgrind/profile.callgrind",
+            "path": "/tmp/imre-luhn-profile-final/imre-callgrind/profile.callgrind",
             "sha256": "b677c0613b84c0bad523653f19ae41a93874d23a7679ef3bb9f71673bbe5e583"
           },
           "reconciliation": {
@@ -5145,7 +5145,7 @@
                 "instructions": 54969408
               },
               {
-                "name": "relar_int_parse",
+                "name": "imre_int_parse",
                 "instructions": 24641653
               },
               {
@@ -5153,7 +5153,7 @@
                 "instructions": 24114147
               },
               {
-                "name": "relar_mapping_iter_next",
+                "name": "imre_mapping_iter_next",
                 "instructions": 20974848
               },
               {
@@ -5177,15 +5177,15 @@
                 "instructions": 10092775
               },
               {
-                "name": "<relar_runtime::objects::words::WordKind>::release",
+                "name": "<imre_runtime::objects::words::WordKind>::release",
                 "instructions": 7340255
               }
             ]
           }
         },
-        "relar-dhat": {
+        "imre-dhat": {
           "raw": {
-            "path": "/tmp/relar-luhn-profile-final/relar-dhat/profile.json",
+            "path": "/tmp/imre-luhn-profile-final/imre-dhat/profile.json",
             "sha256": "949ec74e9eb2fc1b0a01d4e52bd430671d66939e91dbd8aeafa88d298a8d38aa"
           },
           "reconciliation": {
@@ -5205,7 +5205,7 @@
         },
         "rust-callgrind": {
           "raw": {
-            "path": "/tmp/relar-luhn-profile-final/rust-callgrind/profile.callgrind",
+            "path": "/tmp/imre-luhn-profile-final/rust-callgrind/profile.callgrind",
             "sha256": "100a2394d8c1f1caff7c13cc5108ccfae35c8553a77646937576d720bf1a4153"
           },
           "reconciliation": {
@@ -5262,7 +5262,7 @@
         },
         "rust-dhat": {
           "raw": {
-            "path": "/tmp/relar-luhn-profile-final/rust-dhat/profile.json",
+            "path": "/tmp/imre-luhn-profile-final/rust-dhat/profile.json",
             "sha256": "5748b5439528311480e85c9cb41583b3207c09dd74926b635aabd3caf95c18bb"
           },
           "reconciliation": {
@@ -5283,7 +5283,7 @@
       }
     },
     "original_attribution": {
-      "path": "/tmp/relar-luhn-profile-analysis.json",
+      "path": "/tmp/imre-luhn-profile-analysis.json",
       "sha256": "f5f707535730002a0254d66033a154a1f56d472191e681792bad05e7dac5b619"
     },
     "same_unchanged_example_rust_and_profile_tool_keys": [
@@ -5404,18 +5404,18 @@
         "fraction_of_requested_blocks": 0.001620093205987257
       }
     },
-    "relar_instructions": {
+    "imre_instructions": {
       "baseline": 212067563,
       "current": 6514902,
       "baseline_over_current": 32.55115165201257,
       "reduction_fraction": 0.9692791207300289
     },
-    "relar_requested_bytes": {
+    "imre_requested_bytes": {
       "baseline": 23105570,
       "current": 59532,
       "reduction_fraction": 0.9974234784080203
     },
-    "relar_requested_blocks": {
+    "imre_requested_blocks": {
       "baseline": 395039,
       "current": 34,
       "reduction_fraction": 0.999913932548432
@@ -5430,11 +5430,11 @@
   },
   "separate_audited_wall_time": {
     "record": {
-      "path": "/tmp/relar-luhn-performance-v1-thinlto.json",
+      "path": "/tmp/imre-luhn-performance-v1-thinlto.json",
       "sha256": "9279ec2e8a120885946bd355918869f801cc239483dfeb30ede626f10ff153b5"
     },
     "audit": {
-      "path": "/tmp/relar-luhn-performance-benchmark-audit.json",
+      "path": "/tmp/imre-luhn-performance-benchmark-audit.json",
       "sha256": "77642ce0fea493fb1971d092020f6989ab8c6e70199481c1df8d8189c9d62819"
     },
     "unit": "seconds",
@@ -5444,7 +5444,7 @@
         "digits": 16,
         "repetitions": 1048576,
         "summary": {
-          "relar": {
+          "imre": {
             "median_seconds": 0.07590470499999999,
             "min_seconds": 0.074941894,
             "max_seconds": 0.078699798,
@@ -5473,16 +5473,16 @@
             "p75_seconds": 2.0805381365000004
           }
         },
-        "cpython_over_relar": 27.307361691215323,
-        "relar_over_rust": 2.9603716607888013,
-        "baseline_over_relar": 16.41032185685986
+        "cpython_over_imre": 27.307361691215323,
+        "imre_over_rust": 2.9603716607888013,
+        "baseline_over_imre": 16.41032185685986
       },
       {
         "label": "checksum-4096",
         "digits": 4096,
         "repetitions": 4096,
         "summary": {
-          "relar": {
+          "imre": {
             "median_seconds": 0.030554876,
             "min_seconds": 0.030156029,
             "max_seconds": 0.033253114,
@@ -5511,9 +5511,9 @@
             "p75_seconds": 1.46612801775
           }
         },
-        "cpython_over_relar": 47.342238027737366,
-        "relar_over_rust": 1.3526813070128654,
-        "baseline_over_relar": 29.213661659108023
+        "cpython_over_imre": 47.342238027737366,
+        "imre_over_rust": 1.3526813070128654,
+        "baseline_over_imre": 29.213661659108023
       }
     ],
     "note": "Elapsed-time batches and repetitions differ from instrumented profiles; no instruction-to-time conversion."
@@ -5527,7 +5527,7 @@
   ],
   "runtime_reuse_contract": {
     "source": {
-      "path": "/home/dev-user/code/oss/relar/crates/relar-runtime/src/lib.rs",
+      "path": "/home/dev-user/code/oss/imre/crates/imre-runtime/src/lib.rs",
       "sha256": "a75cea3f8a59937322a320bdd678007de17c4becdf73acd36af11238a2f4e976"
     },
     "maximum_empty_vector_buffers_per_thread": 2,
@@ -5542,14 +5542,14 @@
   "excluded_exploratory_evidence": [
     {
       "record": {
-        "path": "/tmp/relar-luhn-opt-r7-provenance-issue.json",
+        "path": "/tmp/imre-luhn-opt-r7-provenance-issue.json",
         "sha256": "2d5544eb146c9b6f07402ff9cd38d5efa39293ed6f79ac56760b96206ad1b570"
       },
       "reason": "R7's runtime was byte-identical to an uncommitted inlining experiment despite a different declared source. None of its timings or profiles enter this final attribution."
     },
     {
       "record": {
-        "path": "/tmp/relar-luhn-slice-inline-v3-analysis.json",
+        "path": "/tmp/imre-luhn-slice-inline-v3-analysis.json",
         "sha256": "00b8f62e55c82f04df9c64ef1cd5f03cb64da12c855ab6e7ee35582c68979c71"
       },
       "reason": "The normalization-inlining experiment was not integrated. Its instruction reduction is not evidence of an elapsed-time improvement and is excluded from final comparisons."
@@ -5559,7 +5559,7 @@
     "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
     "-I",
     "-B",
-    "/tmp/relar-luhn-performance-derive-profile.py"
+    "/tmp/imre-luhn-performance-derive-profile.py"
   ],
   "derivation_python": {
     "path": "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",

@@ -11,7 +11,7 @@ edges, validation precedence, minimum-ID ties, sink selection, reverse parent
 traversal, first-match name lookup, and the complete report. Each path-string
 concatenation constructs a fresh string. Input consumes one UTF-8 line at a time,
 removes LF, and splits with Python whitespace, including U+001C through U+001F.
-Numeric input follows Relar's ASCII decimal format, including optional signs and
+Numeric input follows Imre's ASCII decimal format, including optional signs and
 underscores between digits. Python's other Unicode decimal digits are outside
 this format.
 
@@ -58,7 +58,7 @@ overrides, including `CARGO_PROFILE_RELEASE_LTO=thin`, are honored and recorded.
 The helper unsets `CARGO_ENCODED_RUSTFLAGS` in this case so it cannot override
 those flags; inherited target flags remain cleared. The record preserves the
 requested budget, actual environment, and exact build-helper source. For a
-ThinLTO reference with the same budgets as Relar's optional O3 ThinLTO mode:
+ThinLTO reference with the same budgets as Imre's optional O3 ThinLTO mode:
 
 ```sh
 CARGO_PROFILE_RELEASE_LTO=thin \
@@ -67,7 +67,7 @@ CARGO_PROFILE_RELEASE_LTO=thin \
   --target-dir benchmarks/local/dependency-reference-lto-budget/target
 ```
 
-The five-way comparison uses a saved baseline Relar executable and its benchmark
+The five-way comparison uses a saved baseline Imre executable and its benchmark
 record, the current compiler/runtime, unchanged CPython source, and both Rust
 binaries. To create a baseline, run `benchmarks/dependency_benchmark.py` at the
 desired baseline revision with `--sizes 128 2048 16384 --shapes layered wide`,
@@ -78,8 +78,8 @@ compiler/runtime, run:
 python3 benchmarks/dependency_compare.py \
   --baseline benchmarks/local/baseline/dependency_planner \
   --baseline-record benchmarks/local/baseline.json \
-  --compiler target/release/relar \
-  --runtime target/release/librelar_runtime.a \
+  --compiler target/release/imre \
+  --runtime target/release/libimre_runtime.a \
   --rust-bigint benchmarks/local/dependency-reference/planner-bigint \
   --rust-i64 benchmarks/local/dependency-reference/planner-i64 \
   --rust-build-record benchmarks/local/dependency-reference/build-record.json \
@@ -87,7 +87,7 @@ python3 benchmarks/dependency_compare.py \
   --output benchmarks/local/dependency-comparison.json
 ```
 
-The harness compiles optimized Relar once at LLVM `-O3` before validation and
+The harness compiles optimized Imre once at LLVM `-O3` before validation and
 timing, saving its executable and IR under `benchmarks/local` by default. Build
 time is recorded separately; building the compiler/runtime itself is excluded.
 An existing Rust pair can be reused without rebuilding: pass its binary paths,
@@ -96,7 +96,7 @@ directory containing `build.py`. Its Rust source must still match this tracked
 reference byte for byte. The old binaries and source records remain untouched.
 
 Before timing, every implementation must match the independent planner oracle:
-135 cases for CPython, both Relar binaries, and Rust BigInt; 121 in-range cases for
+135 cases for CPython, both Imre binaries, and Rust BigInt; 121 in-range cases for
 checked i64. The 14 excluded cases and reasons are retained. Ten additional
 boundary cases check signed limits, accumulated overflow, schedulable components
 of cyclic graphs, graph-error precedence, signs/underscores, and embedded NUL
@@ -106,7 +106,7 @@ baseline:
 
 ```sh
 python3 benchmarks/reference/dependency_planner/check_boundaries.py \
-  --relar benchmarks/local/dependency-planner-optimized/dependency_planner \
+  --imre benchmarks/local/dependency-planner-optimized/dependency_planner \
   --rust-bigint benchmarks/local/dependency-reference/planner-bigint \
   --rust-i64 benchmarks/local/dependency-reference/planner-i64 \
   --python python3.14
@@ -146,4 +146,4 @@ This is a direct Rust port with different layouts and ownership operations.
 BigInt preserves the relevant arbitrary-precision fields; checked i64 has a
 narrower numerical contract. Small workloads include substantial process and I/O
 overhead. Compiler/backend versions are recorded and may differ between Rust and
-Relar. No C implementation is measured.
+Imre. No C implementation is measured.

@@ -81,7 +81,7 @@ REJECTED = {
     "unsupported_import": "from pathlib import PureWindowsPath\nPureWindowsPath('a')",
 }
 
-# Native paths retain Relar's Unicode-scalar string domain. Unix surrogateescape
+# Native paths retain Imre's Unicode-scalar string domain. Unix surrogateescape
 # names cannot be represented; exercise the explicit boundary and retry cleanup.
 INVALID_NAMES = """from pathlib import Path
 for turn in range(4):
@@ -182,7 +182,7 @@ def main() -> None:
     version = files.run([args.python, "-I", "-c", "import sys; print(sys.version_info >= (3, 14))"], FIXTURES)
     files.check_result(version, None, "CPython version")
     assert version.stdout.strip() == b"True", "path validation requires a CPython 3.14+ oracle; pass --python"
-    with tempfile.TemporaryDirectory(prefix="relar-paths-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-paths-") as directory:
         temporary = Path(directory)
         for name, source in REJECTED.items():
             path = temporary / f"reject-{name}.py"
@@ -214,10 +214,10 @@ def main() -> None:
                 binary = project / f"native-O{level}"
                 built = files.run([compiler, "build", str(source), "--module-root", str(source.parent), "-o", str(binary), "--opt-level", level, *flags], temporary)
                 assert built.returncode == 0 and not built.stderr, (name, level, built.stderr.decode())
-                native_dir = project / f"relar-O{level}"
+                native_dir = project / f"imre-O{level}"
                 seed(native_dir)
                 actual = files.run([str(binary)], native_dir, limit_descriptors=name == "cleanup", runner=runner)
-                files.check_result(actual, None, f"Relar {name} O{level}")
+                files.check_result(actual, None, f"Imre {name} O{level}")
                 assert actual.stdout == stdout, (name, level, actual.stdout, stdout)
                 assert snapshot(native_dir) == expected_files, (name, level, "filesystem effects differ")
                 checks += 1

@@ -13,11 +13,11 @@ from pathlib import Path
 COUNTER = """
 #include <stdint.h>
 #include <stdio.h>
-extern uint64_t __real_relar_list_len(const void *);
+extern uint64_t __real_imre_list_len(const void *);
 static unsigned calls;
-uint64_t __wrap_relar_list_len(const void *list) {
+uint64_t __wrap_imre_list_len(const void *list) {
     ++calls;
-    return __real_relar_list_len(list);
+    return __real_imre_list_len(list);
 }
 __attribute__((destructor)) static void report(void) {
     fprintf(stderr, "list_len_calls=%u\\n", calls);
@@ -68,7 +68,7 @@ def main() -> None:
             subprocess.run([
                 compiler.resolve(), "build", source, "--runtime", args.runtime.resolve(),
                 "--clang", args.clang, "--whole-program", "--no-cache", "-q",
-                "-C", f"link-arg={obj}", "-C", "link-arg=-Wl,--wrap=relar_list_len",
+                "-C", f"link-arg={obj}", "-C", "link-arg=-Wl,--wrap=imre_list_len",
                 "-o", binary,
             ], check=True)
             for mode in ("distinct", "alias", "private"):

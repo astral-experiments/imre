@@ -1,4 +1,4 @@
-from relar.json import decode, encode
+from imre.json import decode, encode
 
 
 def computed_value(value: int) -> int:
