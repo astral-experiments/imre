@@ -9,7 +9,7 @@ impl Emitter<'_, '_> {
                 let element = self.module.types.element(args[0].value.ty).unwrap();
                 let key = self.module.types.element(args[1].value.ty).unwrap();
                 let reverse = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
-                self.line(format!(
+                self.checked_line(format!(
                     "call void @relar_sort_by_keys(ptr {}, i32 {}, ptr {}, i32 {}, i32 {reverse})",
                     args[0].value.operand,
                     representation_kind(element, &self.module.types),

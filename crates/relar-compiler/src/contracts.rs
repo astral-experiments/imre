@@ -173,9 +173,8 @@ impl Builtin {
             | Self::StringReplace
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
-            Self::Append | Self::ListReserveRange | Self::SortByKeys => {
-                Contract::new(false, PreservesOwners)
-            }
+            Self::SortByKeys => Contract::new(true, PreservesOwners),
+            Self::Append | Self::ListReserveRange => Contract::new(false, PreservesOwners),
             Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize

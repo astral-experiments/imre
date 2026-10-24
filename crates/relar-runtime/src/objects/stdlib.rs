@@ -12,14 +12,20 @@ use super::{Bytes, Error, Kind, List, Object, Storage, StorageCell, Str, Words, 
 fn ordered_indices(
     length: usize,
     reverse: bool,
-    mut compare: impl FnMut(usize, usize) -> Ordering,
-) -> SmallVec<[usize; 4]> {
-    let mut order: SmallVec<_> = (0..length).collect();
-    order.sort_by(|&left, &right| {
+    compare: impl Fn(usize, usize) -> Ordering,
+) -> Option<SmallVec<[usize; 4]>> {
+    let mut indices = SmallVec::new();
+    indices.try_reserve_exact(length).ok()?;
+    indices.extend(0..length);
+    indices.sort_unstable_by(|&left, &right| {
         let order = compare(left, right);
         if reverse { order.reverse() } else { order }
     });
-    order
+    // Restore encounter order within equal-key runs, including reverse sorts.
+    for equal in indices.chunk_by_mut(|&left, &right| compare(left, right).is_eq()) {
+        equal.sort_unstable();
+    }
+    Some(indices)
 }
 
 /// Walks each cycle with owner-preserving swaps, marking visited indices in the permutation.
@@ -153,7 +159,7 @@ unsafe fn compare_int(left: usize, right: usize) -> Ordering {
 /// # Safety
 /// `keys` is a rooted list with the exact nonnullable scalar element kind.
 /// No mutation or callback overlaps the short immutable storage access.
-unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> SmallVec<[usize; 4]> {
+unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Option<SmallVec<[usize; 4]>> {
     if kind == 2 {
         // SAFETY: integer lists have their separate exact runtime allocation.
         return unsafe {
@@ -323,7 +329,10 @@ pub unsafe extern "C" fn relar_sort_by_keys(
         return;
     }
     // SAFETY: both exact list owners remain rooted throughout this operation.
-    let mut order = unsafe { key_order(keys, key_kind, reverse != 0) };
+    let Some(mut order) = (unsafe { key_order(keys, key_kind, reverse != 0) }) else {
+        super::exceptions::sequence_allocation_failed();
+        return;
+    };
     if element_kind == 2 {
         // SAFETY: all immutable key access has ended; swaps transfer existing owners.
         unsafe {
@@ -587,6 +596,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn permutation_growth_is_fallible_and_many_equal_keys_keep_their_positions() {
+        assert!(ordered_indices(usize::MAX, false, |a, b| a.cmp(&b)).is_none());
+        let keys: Vec<_> = (0..257).map(|index| index * 37 % 13).collect();
+        for reverse in [false, true] {
+            let mut expected: Vec<_> = (0..keys.len()).collect();
+            expected.sort_by(|&left, &right| {
+                let order = keys[left].cmp(&keys[right]);
+                if reverse { order.reverse() } else { order }
+            });
+            let actual =
+                ordered_indices(keys.len(), reverse, |a, b| keys[a].cmp(&keys[b])).unwrap();
+            assert_eq!(actual.as_slice(), expected);
+        }
+    }
+
+    #[test]
     fn distinct_word_sort_handles_run_boundaries() {
         for runs in 1..=10 {
             for length in [0, 1, 7, 8, 31, 129] {
@@ -616,7 +641,8 @@ mod tests {
     fn stable_permutations_preserve_ties_in_both_directions() {
         let keys = [2, 1, 2, 1, 0];
         for (reverse, expected) in [(false, [4, 1, 3, 0, 2]), (true, [0, 2, 1, 3, 4])] {
-            let mut order = ordered_indices(keys.len(), reverse, |a, b| keys[a].cmp(&keys[b]));
+            let mut order =
+                ordered_indices(keys.len(), reverse, |a, b| keys[a].cmp(&keys[b])).unwrap();
             let mut values = [0, 1, 2, 3, 4];
             permute(&mut values, &mut order);
             assert_eq!(values, expected);
@@ -626,7 +652,7 @@ mod tests {
     #[test]
     fn short_sorts_keep_the_permutation_inline() {
         for length in 0..=4 {
-            let mut order = ordered_indices(length, true, |left, right| left.cmp(&right));
+            let mut order = ordered_indices(length, true, |left, right| left.cmp(&right)).unwrap();
             assert!(!order.spilled());
             let mut values: Vec<_> = (0..length).collect();
             permute(&mut values, &mut order);
