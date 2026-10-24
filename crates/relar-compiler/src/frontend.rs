@@ -2854,10 +2854,7 @@ impl<'a> Checker<'a> {
         self.reachable &= body_falls;
         let (orelse, else_falls) = self.block(&try_.orelse)?;
         self.reachable = reachable;
-        let mut exits = Vec::new();
-        if body_falls && else_falls {
-            exits.push((self.assigned.clone(), self.narrowed.clone()));
-        }
+        let mut normal_exit = (body_falls && else_falls).then(|| self.local_state());
 
         let mut handler_assigned = before.clone();
         for name in narrowing::deleted_names(&try_.body) {
@@ -2935,7 +2932,11 @@ impl<'a> Checker<'a> {
                 }
             }
             if falls {
-                exits.push((self.assigned.clone(), self.narrowed.clone()));
+                if let Some(exit) = &mut normal_exit {
+                    exit.retain_common(&self.assigned, &self.narrowed);
+                } else {
+                    normal_exit = Some(self.local_state());
+                }
             }
             handlers.push(ir::ExceptHandler {
                 kinds,
@@ -2944,12 +2945,10 @@ impl<'a> Checker<'a> {
             });
         }
 
-        let mut normal_assigned = exits.first().map(|exit| exit.0.clone()).unwrap_or_default();
-        let mut normal_facts = exits.first().map(|exit| exit.1.clone()).unwrap_or_default();
-        for (assigned, facts) in &exits[1.min(exits.len())..] {
-            normal_assigned.retain(|slot| assigned.contains(slot));
-            normal_facts.retain(|slot, ty| facts.get(slot) == Some(ty));
-        }
+        let has_normal_exit = normal_exit.is_some();
+        let (mut normal_assigned, normal_facts) = normal_exit
+            .map(|exit| (exit.assigned, exit.narrowed))
+            .unwrap_or_default();
 
         self.assigned = before;
         self.narrowed = before_facts;
@@ -3034,7 +3033,7 @@ impl<'a> Checker<'a> {
                 orelse,
                 finalbody,
             }],
-            !exits.is_empty() && final_falls,
+            has_normal_exit && final_falls,
         ))
     }
 
