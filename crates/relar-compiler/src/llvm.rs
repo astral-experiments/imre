@@ -3670,6 +3670,11 @@ impl Emitter<'_, '_> {
             }
             Builtin::BytesIter => self.call("relar_bytes_iter", Type::Iterator, &[&args[0].value]),
             Builtin::StringIter => self.call("relar_str_iter", Type::Iterator, &[&args[0].value]),
+            Builtin::SplitLinesIter => self.call(
+                "relar_str_splitlines_iter",
+                Type::Iterator,
+                &[&args[0].value],
+            ),
             Builtin::StringReverseIter => {
                 self.call("relar_str_reverse_iter", Type::Iterator, &[&args[0].value])
             }
@@ -4888,6 +4893,7 @@ declare i64 @relar_str_find(ptr, ptr, i64)
 declare void @relar_str_partition(ptr, ptr, ptr)
 declare ptr @relar_str_unquote(ptr)
 declare ptr @relar_str_splitlines(ptr)
+declare ptr @relar_str_splitlines_iter(ptr)
 declare ptr @relar_str_rstrip(ptr, ptr)
 declare void @relar_list_extend_unhinted(ptr, i32)
 declare ptr @relar_sort_detach(ptr, i32)

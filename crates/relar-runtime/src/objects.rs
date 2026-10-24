@@ -44,6 +44,7 @@ enum Storage {
     Set(Box<mappings::Set>),
     MappingIterator(mappings::MappingIterator),
     StringIterator(sequences::StringIterator),
+    LineIterator(LineIterator),
     BytesIterator(bytes::BytesIterator),
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
@@ -839,6 +840,116 @@ fn plain_ascii_line(bytes: &[u8]) -> bool {
     }) && tail.iter().all(|byte| (32..128).contains(byte))
 }
 
+/// Python line offsets computed once per delimiter, with the common physical
+/// ASCII-line and ordinary CR/LF inputs staying on byte-oriented paths.
+struct LineOffsets {
+    start: usize,
+    boundaries: Boundaries,
+}
+
+enum Boundaries {
+    Single(usize),
+    CrLf,
+    Unicode,
+}
+
+impl LineOffsets {
+    fn new(value: &str) -> Self {
+        let single = value
+            .strip_suffix("\r\n")
+            .or_else(|| value.strip_suffix(['\r', '\n']))
+            .unwrap_or(value);
+        let bytes = value.as_bytes();
+        let boundaries = if plain_ascii_line(single.as_bytes()) {
+            Boundaries::Single(single.len())
+        } else if memchr::memchr3(0x0b, 0x0c, 0x1c, bytes).is_none()
+            && memchr::memchr3(0x1d, 0x1e, 0xc2, bytes).is_none()
+            && memchr::memchr(0xe2, bytes).is_none()
+        {
+            Boundaries::CrLf
+        } else {
+            Boundaries::Unicode
+        };
+        Self {
+            start: 0,
+            boundaries,
+        }
+    }
+
+    fn next(&mut self, value: &str) -> Option<std::ops::Range<usize>> {
+        let start = self.start;
+        if start == value.len() {
+            return None;
+        }
+        let remaining = &value[start..];
+        let boundary = match self.boundaries {
+            Boundaries::Single(end) => {
+                self.start = value.len();
+                return Some(start..end);
+            }
+            Boundaries::CrLf => {
+                memchr::memchr2(b'\r', b'\n', remaining.as_bytes()).map(|at| (at, 1))
+            }
+            Boundaries::Unicode => remaining.char_indices().find_map(|(at, c)| {
+                matches!(
+                    c,
+                    '\n' | '\r'
+                        | '\x0b'
+                        | '\x0c'
+                        | '\x1c'
+                        | '\x1d'
+                        | '\x1e'
+                        | '\u{85}'
+                        | '\u{2028}'
+                        | '\u{2029}'
+                )
+                .then_some((at, c.len_utf8()))
+            }),
+        };
+        let Some((offset, length)) = boundary else {
+            self.start = value.len();
+            return Some(start..self.start);
+        };
+        let end = start + offset;
+        self.start = end + length;
+        if value.as_bytes()[end] == b'\r' && value.as_bytes().get(self.start) == Some(&b'\n') {
+            self.start += 1;
+        }
+        Some(start..end)
+    }
+}
+
+struct LineIterator {
+    owner: Rc<Str>,
+    offsets: LineOffsets,
+}
+
+impl LineIterator {
+    fn next(&mut self) -> Option<(OwnedWord, Option<OwnedWord>)> {
+        let range = self.offsets.next(&self.owner)?;
+        let line = Rc::new(Str::new(&self.owner[range]));
+        // SAFETY: the new string transfers one owner of the exact element kind.
+        let line =
+            unsafe { OwnedWord::from_owned(Rc::into_raw(line) as usize, words::WordKind::new(3)) };
+        Some((line, None))
+    }
+}
+
+/// Creates a line cursor for an immediately iterated split. The source is read
+/// before the loop, and each step returns an independently owned Python string.
+///
+/// # Safety
+/// The caller roots a live string handle, and releases the iterator on every exit.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_splitlines_iter(value: *const Str) -> *const Object {
+    // SAFETY: acquire a strong reference while the caller still roots the input.
+    let owner: Rc<Str> = unsafe { acquire_rc(value as usize) };
+    let offsets = LineOffsets::new(&owner);
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::LineIterator(
+        LineIterator { owner, offsets },
+    )))))
+}
+
 /// Splits Python line boundaries without retaining separators. CRLF is one
 /// boundary; a final boundary creates no extra item, and U+001F is not a boundary.
 ///
@@ -848,66 +959,16 @@ fn plain_ascii_line(bytes: &[u8]) -> bool {
 pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { &*value };
+    let mut offsets = LineOffsets::new(value);
     let mut result = Words::new(3);
-    let mut push = |part: &str| {
+    while let Some(range) = offsets.next(value) {
         result
             .values
             .try_reserve(1)
             .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
         result
             .values
-            .push(Rc::into_raw(Rc::new(Str::new(part))) as usize);
-    };
-    let single = value
-        .strip_suffix("\r\n")
-        .or_else(|| value.strip_suffix(['\r', '\n']))
-        .unwrap_or(value);
-    if !value.is_empty() && plain_ascii_line(single.as_bytes()) {
-        push(single);
-        return Rc::into_raw(result.into_object());
-    }
-    let mut start = 0;
-    let bytes = value.as_bytes();
-    // These vectorized guards exclude every additional Python boundary. The
-    // UTF-8 lead bytes may also select the fallback for ordinary Unicode text.
-    let ordinary = memchr::memchr3(0x0b, 0x0c, 0x1c, bytes).is_none()
-        && memchr::memchr3(0x1d, 0x1e, 0xc2, bytes).is_none()
-        && memchr::memchr(0xe2, bytes).is_none();
-    if ordinary {
-        while let Some(offset) = memchr::memchr2(b'\r', b'\n', &bytes[start..]) {
-            let at = start + offset;
-            push(&value[start..at]);
-            start = at + 1;
-            if bytes[at] == b'\r' && bytes.get(start) == Some(&b'\n') {
-                start += 1;
-            }
-        }
-    } else {
-        let mut chars = value.char_indices().peekable();
-        while let Some((at, character)) = chars.next() {
-            if matches!(
-                character,
-                '\n' | '\r'
-                    | '\x0b'
-                    | '\x0c'
-                    | '\x1c'
-                    | '\x1d'
-                    | '\x1e'
-                    | '\u{85}'
-                    | '\u{2028}'
-                    | '\u{2029}'
-            ) {
-                push(&value[start..at]);
-                start = at + character.len_utf8();
-                if character == '\r' && chars.peek().is_some_and(|(_, next)| *next == '\n') {
-                    chars.next();
-                    start += 1;
-                }
-            }
-        }
-    }
-    if start < value.len() {
-        push(&value[start..]);
+            .push(Rc::into_raw(Rc::new(Str::new(&value[range]))) as usize);
     }
     Rc::into_raw(result.into_object())
 }
@@ -1748,11 +1809,11 @@ mod tests {
             ),
             ("é\x1f🦀\nlast", vec!["é\x1f🦀", "last"]),
         ] {
-            let source = Str::new(source);
+            let source = Rc::new(Str::new(source));
             // SAFETY: the source is rooted; the returned sequence transfers one
             // owner, and inspection copies strings without retaining storage refs.
             let actual = unsafe {
-                let result = Rc::from_raw(relar_str_splitlines(&source));
+                let result = Rc::from_raw(relar_str_splitlines(Rc::as_ptr(&source)));
                 result.0.with(|storage| {
                     storage
                         .sequence()
@@ -1763,6 +1824,25 @@ mod tests {
                 })
             };
             assert_eq!(actual, expected);
+            // SAFETY: the cursor retains its input; output strings are owned
+            // even after advancing the cursor, releasing it and dropping the input.
+            let lines = unsafe {
+                let cursor = relar_str_splitlines_iter(Rc::as_ptr(&source));
+                drop(source);
+                let mut result = Vec::new();
+                let mut word = 0;
+                while mappings::relar_mapping_iter_next(cursor, &mut word, std::ptr::null_mut())
+                    != 0
+                {
+                    result.push(Rc::from_raw(word as *const Str));
+                }
+                relar_object_release(cursor);
+                result
+            };
+            assert_eq!(
+                lines.iter().map(|line| line.as_str()).collect::<Vec<_>>(),
+                expected
+            );
         }
     }
 

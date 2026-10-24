@@ -257,6 +257,7 @@ impl Checker<'_> {
                     _ => None,
                 });
                 let source = self.expansion_input(&call.arguments.args[0], element)?;
+                let source = self.fuse_splitlines(source);
                 let mut input = self.prepare_iteration(source, call, false)?;
                 self.hint_empty_iteration(&input, element);
                 let start = if let Some(start) = call.arguments.args.get(1) {
@@ -399,6 +400,50 @@ impl Checker<'_> {
             elementless: element.is_none(),
             writes,
             clear,
+        })
+    }
+
+    /// Capture the immutable receiver once, before evaluating an enumerate start.
+    /// The fresh split list is unobservable at these direct iteration sites.
+    pub(super) fn fuse_splitlines(&mut self, input: Iteration) -> Iteration {
+        let Iteration::Container {
+            iterable:
+                Expr {
+                    kind: ExprKind::Builtin(Builtin::SplitLines, args),
+                    ..
+                },
+            items: false,
+            start: None,
+        } = input
+        else {
+            return input;
+        };
+        let iterator = self.hidden(Type::Iterator);
+        let value = self.hidden(Type::Str);
+        let ready = self.hidden(Type::Bool);
+        Iteration::Prepared(Prepared {
+            evaluate: vec![Statement::Assign(
+                iterator,
+                Expr {
+                    ty: Type::Iterator,
+                    kind: ExprKind::Builtin(Builtin::SplitLinesIter, args),
+                },
+            )],
+            acquire: Vec::new(),
+            next: vec![
+                Statement::Clear(value),
+                Statement::IterNext {
+                    iterator,
+                    key: value,
+                    value: None,
+                    ready,
+                },
+            ],
+            value,
+            ready,
+            elementless: false,
+            writes: HashSet::new(),
+            clear: vec![iterator, value, ready],
         })
     }
 

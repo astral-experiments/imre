@@ -1940,6 +1940,7 @@ impl<'a> Checker<'a> {
             Some(input) => input,
             None => self.iteration_input(&loop_.iter)?,
         };
+        input = self.fuse_splitlines(input);
         if let Iteration::Container {
             iterable,
             items: false,
@@ -4631,6 +4632,39 @@ mod tests {
             &crate::CompileOptions::default(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn splitlines_fuses_only_the_immediately_consumed_list() {
+        let llvm = crate::compile(
+            r#"
+from pathlib import Path
+
+def scan(text: str, path: Path, start: str) -> None:
+    for line in text.splitlines():
+        print(line)
+    for i, line in enumerate(path.read_text().splitlines(), int(start)):
+        print(i)
+        print(line)
+    lines = text.splitlines()
+    for line in lines:
+        print(line)
+    print(len(lines))
+scan("a\nb", Path("lines.txt"), "4")
+"#,
+            &crate::CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            llvm.matches("call ptr @relar_str_splitlines_iter(").count(),
+            2
+        );
+        assert_eq!(llvm.matches("call ptr @relar_str_splitlines(").count(), 1);
+        let (_, after_read) = llvm.split_once("call ptr @relar_path_read_text(").unwrap();
+        let (_, after_cursor) = after_read
+            .split_once("call ptr @relar_str_splitlines_iter(")
+            .unwrap();
+        assert!(after_cursor.contains("call i64 @relar_int_parse("));
     }
 
     #[test]
