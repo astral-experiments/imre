@@ -4,7 +4,7 @@ The `upstream` directory contains the complete CPython 3.14.5 test entries for `
 
 ## Native POSIX path cases
 
-The six selected upstream methods take a native Relar compiler and runtime.
+The five selected upstream methods take a native Relar compiler and runtime.
 
 ```sh
 python3 benchmarks/cpython_stdlib/native_paths.py \
@@ -12,7 +12,7 @@ python3 benchmarks/cpython_stdlib/native_paths.py \
     --clang /path/to/clang --opt-level 3 --result native-paths.json
 ```
 
-The runner verifies the upstream blob hashes and copies each complete method from CPython's `JoinTestBase` verbatim into a temporary source file. A typed fixture supplies the path constructor and `assertEqual`. Both operands, path operations, equality checks and assertion counts execute in the compiled program. The concrete POSIX fixture uses Relar's native `pathlib.Path`. The tests check the name, stem, suffix, parent, slash operator and `joinpath`. The latter two are the complete two-method `PosixPathJoinTest` class. Each result includes the upstream ID, the SHA-256 of the unmodified method and its assertion count. A rejected program or a failed native assertion gives the command a nonzero exit status.
+The runner verifies the upstream blob hashes and copies each complete method from CPython's `JoinTestBase` verbatim into a temporary source file. A typed fixture supplies the path constructor and `assertEqual`. Both operands, path operations, equality checks and assertion counts execute in the compiled program. The concrete POSIX fixture uses Relar's native `pathlib.Path`. The selected methods check the name, stem, suffix, parent and slash operator. Each result includes the upstream ID, the SHA-256 of the unmodified method and its assertion count. A rejected program or a failed native assertion gives the command a nonzero exit status.
 
 Methods that require setup, decorators, process fixtures or a richer assertion helper need a corresponding adapter before the benchmark can credit them. Each added adapter should preserve the entire upstream method, including every operand and exception assertion. Keep platform skips, deliberate compatibility exclusions, unavailable test infrastructure and actual native failures separate in reports.
 

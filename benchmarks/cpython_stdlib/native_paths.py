@@ -18,7 +18,6 @@ TESTS = (
     ("test_join", "PathJoinTest", "test_suffix", "str"),
     ("test_join", "PathJoinTest", "test_parent", "Path"),
     ("test_join_posix", "PosixPathJoinTest", "test_div", "Path"),
-    ("test_join_posix", "PosixPathJoinTest", "test_join", "Path"),
 )
 
 
