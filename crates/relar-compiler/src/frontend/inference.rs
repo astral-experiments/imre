@@ -46,6 +46,74 @@ pub(super) fn first_append<'ast>(
     appends.value
 }
 
+impl Checker<'_> {
+    /// Join direct assignments across an exhaustive conditional before its first
+    /// suite fixes a local's storage. This supplies a layout for empty-list arms
+    /// and nullable scalar arms while retaining normal definite-assignment checks.
+    pub(super) fn branch_layouts(
+        &mut self,
+        body: &[ast::Stmt],
+        clauses: &[ast::ElifElseClause],
+    ) -> Result<(), String> {
+        if !clauses.last().is_some_and(|c| c.test.is_none())
+            || !body.iter().any(|stmt| matches!(stmt, ast::Stmt::Assign(assign)
+                if matches!(assign.targets.as_slice(), [ast::Expr::Name(name)] if !self.names.contains_key(name.id.as_str()))))
+        {
+            return Ok(());
+        }
+        let mut arms: HashMap<&str, Vec<&ast::Expr>> = HashMap::new();
+        for suite in std::iter::once(body).chain(clauses.iter().map(|c| c.body.as_slice())) {
+            for stmt in suite {
+                if let ast::Stmt::Assign(a) = stmt
+                    && let [ast::Expr::Name(n)] = a.targets.as_slice()
+                    && !self.names.contains_key(n.id.as_str())
+                {
+                    arms.entry(n.id.as_str()).or_default().push(&a.value);
+                }
+            }
+        }
+        for (name, values) in arms {
+            if values.len() != clauses.len() + 1 {
+                continue;
+            }
+            let site = values[0];
+            if values.iter().all(|e| matches!(e, ast::Expr::List(_)))
+                && values
+                    .iter()
+                    .any(|e| matches!(e, ast::Expr::List(l) if l.elts.is_empty()))
+            {
+                let mut elements = values.iter().flat_map(|e| {
+                    let ast::Expr::List(list) = e else {
+                        unreachable!()
+                    };
+                    list.elts
+                        .iter()
+                        .map(|element| self.graph.session.scalar_type(self.module, element))
+                });
+                if let Some(Some(first)) = elements.next()
+                    && elements.all(|ty| ty == Some(first))
+                {
+                    self.declare(name, self.types.list(first), site)?;
+                }
+            } else if values
+                .iter()
+                .any(|e| matches!(e, ast::Expr::NoneLiteral(_)))
+            {
+                let mut concrete = values
+                    .iter()
+                    .filter(|e| !matches!(e, ast::Expr::NoneLiteral(_)))
+                    .map(|e| self.graph.session.scalar_type(self.module, e));
+                if let Some(Some(first)) = concrete.next()
+                    && concrete.all(|ty| ty == Some(first))
+                {
+                    self.declare(name, self.types.optional(first), site)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 const DEFERRED: &str = "inference is waiting for a function return type";
 
 struct Pending {
@@ -221,6 +289,7 @@ impl Inference {
                 );
                 checker.inference = Some(self);
                 checker.returns = signature.returns;
+                checker.asynchronous = signature.asynchronous;
                 checker.method_context(signature.method);
                 checker.inferred_returns = infer_return.then(Vec::new);
                 let result = (|| {

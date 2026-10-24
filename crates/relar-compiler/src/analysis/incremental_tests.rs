@@ -101,9 +101,9 @@ fn ty_rechecks_an_importer_when_a_used_parameter_is_renamed() {
     // Exercise ty in isolation: ordinary Relar lowering also rejects this bad keyword.
     let mut ty_check = || {
         let mut graph = crate::modules::SourceGraph::load(&entry, None, &[]).unwrap();
-        let fresh = graph.session.check();
+        let fresh = graph.session.check_scopes(None, &[]);
         let (incremental, ran) =
-            with_checked_files(|| cache.check(&mut graph.session, &graph.inputs));
+            with_checked_files(|| cache.check_scopes(&mut graph.session, &graph.inputs, None, &[]));
         assert_eq!(incremental, fresh);
         // The first request, the rename that makes the call invalid, and the repair all
         // execute the importer's diagnostic query as well as the provider's.

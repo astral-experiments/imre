@@ -837,6 +837,29 @@ pub unsafe extern "C" fn relar_str_equal(a: *const Str, b: *const Str) -> u32 {
     u32::from(unsafe { *a == *b })
 }
 
+/// # Safety
+/// Both words are absent zero or a rooted canonical integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_optional_int_equal(a: usize, b: usize) -> u32 {
+    if a == 0 || b == 0 {
+        return u32::from(a == b);
+    }
+    // SAFETY: both nonzero canonical inputs remain rooted through comparison.
+    u32::from(unsafe { relar_int_compare(a, b) } == 0)
+}
+
+/// # Safety
+/// Each argument must be null (Python `None`) or a live string handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_optional_str_equal(a: usize, b: usize) -> u32 {
+    if a == 0 || b == 0 {
+        u32::from(a == b)
+    } else {
+        // SAFETY: both handles are non-null, rooted strings.
+        unsafe { relar_str_equal(a as *const Str, b as *const Str) }
+    }
+}
+
 /// Parses Python's base-ten text grammar with Unicode 16.0 decimal digits.
 ///
 /// # Safety

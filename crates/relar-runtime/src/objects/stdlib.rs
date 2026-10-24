@@ -607,6 +607,16 @@ pub extern "C" fn relar_float_format(value: f64, precision: u32, flags: u32) -> 
     Rc::into_raw(Rc::new(result))
 }
 
+/// Seconds since the Unix epoch, including the subsecond fraction.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_wall_time() -> f64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs_f64(),
+        Err(before) => -before.duration().as_secs_f64(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

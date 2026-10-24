@@ -35,6 +35,62 @@ impl Prepared {
     }
 }
 
+impl Checker<'_> {
+    /// Generator creation captures arguments now. The first pull runs the body
+    /// and acquires the list yielded from; later pulls observe that same list.
+    pub(super) fn record_iteration(
+        &mut self,
+        value: &Expr,
+        node: &impl Ranged,
+    ) -> Result<Option<Prepared>, String> {
+        let (function, mut args, returns) = match (&value.kind, value.ty) {
+            (ExprKind::Call(id, args), _) if self.classes.generators.contains(id) => {
+                (*id, args.clone(), value.ty)
+            }
+            (_, Type::Class(class))
+                if let Some(method) = self.classes.methods[class].get("__iter__") =>
+            {
+                (
+                    method.id,
+                    ir::CallArgs::positional(vec![value.clone()]),
+                    method.returns,
+                )
+            }
+            _ => return Ok(None),
+        };
+        self.calls.insert(function);
+        let mut evaluate = Vec::new();
+        let mut roots = Vec::new();
+        for arg in &mut args.values {
+            let slot = self.hidden(arg.ty);
+            evaluate.push(Statement::Assign(
+                slot,
+                std::mem::replace(arg, self.local(slot)),
+            ));
+            roots.push(slot);
+        }
+        let call = Expr {
+            ty: returns,
+            kind: ExprKind::Call(function, args),
+        };
+        let mut prepared = self.prepare_container(call, false, node, false)?;
+        let started = self.hidden(Type::Bool);
+        let mut initialize = std::mem::replace(&mut prepared.evaluate, evaluate);
+        initialize.extend(std::mem::replace(
+            &mut prepared.acquire,
+            vec![Statement::Assign(started, boolean(false))],
+        ));
+        initialize.push(Statement::Assign(started, boolean(true)));
+        prepared.next.insert(
+            0,
+            Statement::If(not(self.local(started)), initialize, Vec::new()),
+        );
+        prepared.clear.push(started);
+        prepared.clear.extend(roots);
+        Ok(Some(prepared))
+    }
+}
+
 /// These constructors have observable acquisition timing and cannot be passed
 /// into an eager comprehension helper as ordinary captured container values.
 pub(super) fn is_pipeline_expression(checker: &Checker<'_>, expression: &ast::Expr) -> bool {
@@ -79,17 +135,6 @@ fn not(value: Expr) -> Expr {
     Expr {
         ty: Type::Bool,
         kind: ExprKind::Not(Box::new(value)),
-    }
-}
-
-fn truth(value: Expr) -> Expr {
-    if value.ty == Type::Bool {
-        value
-    } else {
-        Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Builtin(Builtin::Bool, vec![value]),
-        }
     }
 }
 
@@ -140,6 +185,50 @@ impl Checker<'_> {
         }
         if self.resolve(&call.func).is_some() {
             return Ok(None);
+        }
+        if let ast::Expr::Attribute(attribute) = &*call.func
+            && attribute.attr.as_str() == "values"
+            && self.class_reference(&attribute.value).is_none()
+        {
+            let raw = self.expr(&attribute.value)?;
+            if let Type::Class(class) = raw.ty {
+                return Ok(Some(Iteration::Container {
+                    iterable: self.class_method_call(call, attribute, class, Some(raw))?,
+                    items: false,
+                    start: None,
+                }));
+            }
+            let source = if matches!(raw.ty, Type::Document(_)) {
+                self.document_map(raw)
+            } else {
+                raw
+            };
+            let (_, item) = self.types.mapping(source.ty).ok_or_else(|| {
+                error(self.source, call, "values() requires a concrete dictionary")
+            })?;
+            if !call.arguments.is_empty() {
+                return Err(error(self.source, call, "dict.values() takes no arguments"));
+            }
+            let mut input = self.prepare_container(source, true, call, false)?;
+            let pair = input.value;
+            let value = self.hidden(item);
+            input.next.push(Statement::If(
+                self.local(input.ready),
+                vec![
+                    Statement::Assign(
+                        value,
+                        Expr {
+                            ty: item,
+                            kind: ExprKind::Field(Box::new(self.local(pair)), 1),
+                        },
+                    ),
+                    Statement::Clear(pair),
+                ],
+                Vec::new(),
+            ));
+            input.value = value;
+            input.clear.push(value);
+            return Ok(Some(Iteration::Prepared(input)));
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
             && matches!(attribute.attr.as_str(), "iterdir" | "glob")
@@ -209,7 +298,7 @@ impl Checker<'_> {
                             paths::operation(ir::PathOperation::Text, Type::Str, vec![item])
                         }
                         Type::Str => item,
-                        Type::Class(_) | Type::CompletedProcess => self.record_text(item),
+                        Type::Class(_) | Type::CompletedProcess => self.record_text(item, call)?,
                         Type::Int | Type::Bool | Type::Float | Type::None | Type::Bytes => Expr {
                             ty: Type::Str,
                             kind: ExprKind::Builtin(Builtin::Str, vec![item]),
@@ -512,9 +601,8 @@ impl Checker<'_> {
             .may_own_file(ty, &self.classes.fields, opaque_callables)
     }
 
-    /// Only file resources have observable final drops in the sealed language.
-    /// Their transitive owners retain CPython's iterator tuple cache, including
-    /// shared-result behavior; other exact tuples can be scalar-replaced.
+    /// Preserve CPython's iterator tuple lifetime when dropping a component can
+    /// close a file, remove a directory, or release a suspended frame.
     fn iterator_tuple_cache(
         &mut self,
         ty: Type,
@@ -724,7 +812,7 @@ impl Checker<'_> {
                         kind: ExprKind::Builtin(Builtin::FileReadline, vec![self.local(source)]),
                     },
                 ),
-                Statement::Assign(ready, truth(self.local(value))),
+                Statement::Assign(ready, self.truth_value(self.local(value))),
             ],
             value,
             ready,
@@ -1484,7 +1572,19 @@ impl Checker<'_> {
                         })
                 })
             });
-        let input_hint = callback_input.or(if filter { element } else { None });
+        // The destination describes surviving values. The truth predicate may
+        // still receive None from a generator, list display, or nested pipeline.
+        let input_hint = callback_input.or_else(|| {
+            if filter
+                && checked
+                    .as_ref()
+                    .is_some_and(|callback| callback.ty == Type::None)
+            {
+                element.map(|ty| self.types.optional(ty))
+            } else {
+                filter.then_some(element).flatten()
+            }
+        });
         let source = self.expansion_input(source, input_hint)?;
         let mut input = self.prepare_iteration(source, call, false)?;
         let input_type = self.locals[input.value];
@@ -1494,7 +1594,8 @@ impl Checker<'_> {
             if filter { None } else { element },
             checked,
         )?;
-        let operation = if filter && callback.ty == Type::None {
+        let truth_filter = filter && callback.ty == Type::None;
+        let operation = if truth_filter {
             input.evaluate.insert(0, Statement::Expr(callback));
             self.local(input.value)
         } else {
@@ -1509,7 +1610,7 @@ impl Checker<'_> {
             step.push(Statement::If(
                 self.local(input.ready),
                 vec![Statement::If(
-                    truth(operation),
+                    self.truth_value(operation),
                     vec![Statement::Assign(ready, boolean(true))],
                     vec![Statement::Clear(input.value)],
                 )],
@@ -1533,6 +1634,26 @@ impl Checker<'_> {
             ];
             input.ready = ready;
             input.clear.extend([ready, done]);
+            if truth_filter && let Some(payload) = self.types.payload(input_type) {
+                let value = self.hidden(payload);
+                input.next.push(Statement::If(
+                    self.local(ready),
+                    vec![
+                        Statement::Assign(
+                            value,
+                            Expr {
+                                ty: payload,
+                                kind: ExprKind::Unwrap(Box::new(self.local(input.value))),
+                            },
+                        ),
+                        Statement::Clear(input.value),
+                    ],
+                    Vec::new(),
+                ));
+                input.next.insert(0, Statement::Clear(value));
+                input.value = value;
+                input.clear.push(value);
+            }
         } else {
             let value = self.hidden(operation.ty);
             input.next.push(Statement::If(
@@ -1613,6 +1734,17 @@ impl Checker<'_> {
             *parameter,
             call,
         )?]);
+        if matches!(returns, Type::Coroutine(_)) {
+            let slot = self.hidden(callback.ty);
+            input
+                .evaluate
+                .insert(evaluation_index, Statement::Assign(slot, callback));
+            input.clear.push(slot);
+            return Ok((
+                self.indirect_coroutine(self.local(slot), args.values, returns),
+                Some(slot),
+            ));
+        }
         let (kind, captured) = if let ExprKind::Callable {
             function,
             receiver: None,
@@ -1711,11 +1843,44 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let name = if minimum { "min" } else { "max" };
         self.reject_builtin_keywords(call)?;
+        let order = if minimum {
+            Compare::Less
+        } else {
+            Compare::Greater
+        };
+        if let [first, second, others @ ..] = call.arguments.args.as_ref() {
+            let best = self.hidden(Type::Int);
+            let next = self.hidden(Type::Int);
+            let mut body = vec![Statement::Assign(
+                best,
+                self.expr_expected(first, Type::Int)?,
+            )];
+            for value in std::iter::once(second).chain(others) {
+                body.push(Statement::Assign(
+                    next,
+                    self.expr_expected(value, Type::Int)?,
+                ));
+                // Comparing two exact integers is infallible and runs no user code.
+                body.push(Statement::If(
+                    compare(order, self.local(next), self.local(best)),
+                    vec![Statement::Assign(best, self.local(next))],
+                    Vec::new(),
+                ));
+            }
+            return Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Scope {
+                    body,
+                    value: Box::new(self.local(best)),
+                    clear: vec![next, best],
+                },
+            });
+        }
         let [source @ ast::Expr::Generator(_)] = call.arguments.args.as_ref() else {
             return Err(error(
                 self.source,
                 call,
-                &format!("{name} requires one integer generator expression"),
+                &format!("{name} requires at least two integers or one integer generator"),
             ));
         };
         let input = self.expansion_input(source, Some(Type::Int))?;
@@ -1724,11 +1889,6 @@ impl Checker<'_> {
         let mut body = vec![Statement::Assign(empty, boolean(true))];
         body.extend(self.expand_items(input, call, |checker, item| {
             checker.expect(Type::Int, item.ty, call)?;
-            let order = if minimum {
-                Compare::Less
-            } else {
-                Compare::Greater
-            };
             let better = Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Boolean(
@@ -1795,7 +1955,7 @@ impl Checker<'_> {
             clear.push(captured);
             body.push(Statement::Assign(captured, iterable.clone()));
             for (index, ty) in fields.into_iter().enumerate() {
-                let value = truth(Expr {
+                let value = self.truth_value(Expr {
                     ty,
                     kind: ExprKind::Field(Box::new(self.local(captured)), index),
                 });
@@ -1810,8 +1970,9 @@ impl Checker<'_> {
                 ));
             }
         } else {
-            body.extend(self.expand_items(input, call, |_checker, value| {
-                let deciding = if all { not(truth(value)) } else { truth(value) };
+            body.extend(self.expand_items(input, call, |checker, value| {
+                let value = checker.truth_value(value);
+                let deciding = if all { not(value) } else { value };
                 Ok(vec![Statement::If(
                     deciding,
                     vec![Statement::Assign(result, boolean(!all)), Statement::Break],

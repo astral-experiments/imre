@@ -1,6 +1,7 @@
 //! Native parsing for a fixed declaration of long options. Parsing checks all
 //! input before constructing the compiler-described, owned namespace record.
 
+use std::borrow::Cow;
 use std::io::{self, Write};
 use std::rc::Rc;
 
@@ -25,6 +26,9 @@ enum Kind {
 #[derive(Deserialize)]
 struct OptionSpec {
     flag: String,
+    #[serde(default)]
+    aliases: Vec<String>,
+    enum_default: Option<usize>,
     kind: Kind,
     many: bool,
     required: bool,
@@ -65,6 +69,7 @@ enum Token<'a> {
     Ambiguous(Vec<&'a str>),
     Help(Option<&'a str>),
     Option(usize, Option<&'a str>),
+    Cluster(&'a str),
 }
 
 enum Word<'a> {
@@ -74,7 +79,7 @@ enum Word<'a> {
 
 struct Parsed<'a> {
     words: Vec<Word<'a>>,
-    extras: Vec<&'a str>,
+    extras: Vec<Cow<'a, str>>,
     child: Option<usize>,
 }
 
@@ -100,7 +105,11 @@ impl Parser {
         if matches!(flag, "-h" | "--help") {
             return Token::Help(explicit);
         }
-        if let Some(index) = self.options.iter().position(|option| option.flag == flag) {
+        if let Some(index) = self
+            .options
+            .iter()
+            .position(|option| option.flags().any(|s| s == flag))
+        {
             return Token::Option(index, explicit);
         }
         if flag.starts_with("--") || flag == "-" {
@@ -113,10 +122,11 @@ impl Parser {
                 .options
                 .iter()
                 .enumerate()
-                .filter(|(_, option)| option.flag.starts_with(flag));
+                .flat_map(|(index, option)| option.flags().map(move |flag| (index, flag)))
+                .filter(|(_, spelling)| spelling.starts_with(flag));
             let mut option = None;
             for (index, matched) in matches {
-                names.push(&matched.flag);
+                names.push(matched);
                 option = Some(index);
             }
             if names.len() > 1 {
@@ -128,14 +138,16 @@ impl Parser {
             if let Some(index) = option {
                 return Token::Option(index, explicit);
             }
-        } else if let Some(suffix) = arg.strip_prefix("-h") {
-            // argparse collects single-dash switches before invoking help.
-            let suffix = suffix.trim_start_matches('h');
-            return Token::Help(
-                suffix
-                    .strip_prefix('=')
-                    .or_else(|| suffix.starts_with('-').then_some(suffix)),
-            );
+        }
+        if let Some(first) = arg.get(..2)
+            && arg.len() > first.len()
+            && (first == "-h"
+                || self
+                    .options
+                    .iter()
+                    .any(|option| option.flags().any(|s| s == first)))
+        {
+            return Token::Cluster(&arg[1..]);
         }
         let numeric = tail
             .strip_prefix('.')
@@ -159,8 +171,16 @@ impl Parser {
         let mut index = 0;
         let mut selected = None;
         let mut end_options = false;
+        let mut after_positional = None;
+        let mut positionals = self
+            .options
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| o.positional())
+            .peekable();
         while let Some(&arg) = args.get(index) {
             index += 1;
+            let mut clustered_help = false;
             let (slot, explicit) = match if end_options {
                 Token::Value
             } else {
@@ -182,7 +202,15 @@ impl Parser {
                         format!("ambiguous option: {arg} could match {}", names.join(", ")),
                     ));
                 }
-                Token::End if self.subcommands.is_some() => {
+                Token::Value if let Some((slot, _)) = positionals.next() => {
+                    after_positional = Some(index);
+                    (slot, Some(arg))
+                }
+                Token::End
+                    if self.subcommands.is_some()
+                        || positionals.peek().is_some()
+                        || after_positional == Some(index - 1) =>
+                {
                     end_options = true;
                     continue;
                 }
@@ -214,12 +242,67 @@ impl Parser {
                     break;
                 }
                 Token::End => {
-                    extras.extend_from_slice(&args[index - 1..]);
+                    extras.extend(args[index - 1..].iter().copied().map(Cow::Borrowed));
                     break;
                 }
                 Token::Value | Token::Unknown => {
-                    extras.push(arg);
+                    extras.push(Cow::Borrowed(arg));
                     continue;
+                }
+                Token::Cluster(mut suffix) => {
+                    let mut take = None;
+                    while !suffix.is_empty() {
+                        let Some((letter, rest)) = suffix.split_at_checked(1) else {
+                            extras.push(Cow::Owned(format!("-{suffix}")));
+                            break;
+                        };
+                        let option = self.options.iter().enumerate().find(|(_, option)| {
+                            option
+                                .flags()
+                                .any(|flag| flag.strip_prefix('-') == Some(letter))
+                        });
+                        if letter != "h" && option.is_none() {
+                            extras.push(Cow::Owned(format!("-{suffix}")));
+                            break;
+                        }
+                        if let Some((slot, option)) = option
+                            && option.kind != Kind::Bool
+                        {
+                            take = Some((
+                                slot,
+                                (!rest.is_empty()).then(|| rest.strip_prefix('=').unwrap_or(rest)),
+                            ));
+                            break;
+                        }
+                        // argparse resolves the entire cluster (including errors)
+                        // before invoking its first action, which may be help.
+                        if rest.starts_with(['-', '=']) {
+                            let name = option.map_or_else(
+                                || "-h/--help".into(),
+                                |(_, option)| option.error_name(),
+                            );
+                            return Err(Stop::Error(
+                                self,
+                                format!(
+                                    "argument {name}: ignored explicit argument {}",
+                                    string_repr(rest.strip_prefix('=').unwrap_or(rest))
+                                ),
+                            ));
+                        }
+                        if let Some((slot, _)) = option {
+                            values[slot] = Some(Vec::new());
+                        } else {
+                            clustered_help = true;
+                        }
+                        suffix = rest;
+                    }
+                    let Some(take) = take else {
+                        if clustered_help {
+                            return Err(Stop::Help(self));
+                        }
+                        continue;
+                    };
+                    take
                 }
                 Token::Option(slot, value) => (slot, value),
             };
@@ -230,7 +313,7 @@ impl Parser {
                         self,
                         format!(
                             "argument {}: ignored explicit argument {}",
-                            option.flag,
+                            option.error_name(),
                             string_repr(value)
                         ),
                     ));
@@ -254,11 +337,14 @@ impl Parser {
                     };
                     return Err(Stop::Error(
                         self,
-                        format!("argument {}: {message}", option.flag),
+                        format!("argument {}: {message}", option.error_name()),
                     ));
                 }
                 args[start..index].to_vec()
             };
+            if clustered_help {
+                return Err(Stop::Help(self));
+            }
             if !option.choices.is_empty()
                 && let Some(value) = taken
                     .iter()
@@ -274,7 +360,7 @@ impl Parser {
                     self,
                     format!(
                         "argument {}: invalid choice: {} (choose from {choices})",
-                        option.flag,
+                        option.error_name(),
                         string_repr(value)
                     ),
                 ));
@@ -286,12 +372,12 @@ impl Parser {
             .iter()
             .zip(&values)
             .filter(|(option, value)| option.required && value.is_none())
-            .map(|(option, _)| option.flag.as_str())
+            .map(|(option, _)| option.error_name())
             .collect::<Vec<_>>();
         if let Some(commands) = &self.subcommands
             && selected.is_none()
         {
-            missing.push(&commands.dest);
+            missing.push(commands.dest.clone());
         }
         if !missing.is_empty() {
             return Err(Stop::Error(
@@ -332,7 +418,24 @@ fn scalar(kind: Kind, text: &str) -> usize {
 }
 
 impl OptionSpec {
+    fn flags(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.flag.as_str()).chain(self.aliases.iter().map(String::as_str))
+    }
+
+    fn positional(&self) -> bool {
+        !self.flag.starts_with('-')
+    }
+
+    fn error_name(&self) -> String {
+        self.flags().collect::<Vec<_>>().join("/")
+    }
+
     fn word(&self, args: Option<Vec<&str>>) -> usize {
+        if args.is_none()
+            && let Some(member) = self.enum_default
+        {
+            return (member << 3) | 5;
+        }
         if self.kind == Kind::Bool {
             let value = args
                 .is_some()

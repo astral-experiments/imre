@@ -3,6 +3,31 @@ from dataclasses import dataclass, field
 from typing import Self
 
 
+@dataclass
+class Totals:
+    counts: Counter[str] = field(default_factory=Counter)
+
+
+def check_typed_counts() -> None:
+    a = Totals()
+    b = Totals()
+    print(a.counts["missing"])
+    print(len(a.counts))
+    print(a.counts.get("missing") is None)
+    a.counts["stored"] += 0
+    print(a.counts == b.counts)
+    a.counts["one"] += 1
+    a.counts["big"] += (1 << 90)
+    a.counts.update(a.counts)
+    b.counts.update(a.counts)
+    print(a.counts == b.counts)
+    print(sum(a.counts.values(), -3))
+    print(len(set(a.counts.keys()).union(b.counts.keys())))
+    for name, count in b.counts.items():
+        print(name)
+        print(count)
+
+
 # Ruff's four fields and these five methods are unchanged from
 # python/ruff-ecosystem/ruff_ecosystem/check.py at 3e4fffb05a2b.
 @dataclass(frozen=True)
@@ -62,6 +87,7 @@ def bad(value: int) -> int:
 
 
 def main() -> None:
+    check_typed_counts()
     big = 1267650600228229401496703205377
     was = Producer()
     print(sum((was := Producer()).values()))

@@ -8,10 +8,15 @@
 
 mod argparse;
 mod args;
+mod asyncio;
 mod bytes;
+mod contexts;
+mod deferred_diff;
+mod difflib;
 pub(crate) mod exceptions;
 mod files;
 mod json;
+mod logging;
 mod mappings;
 mod paths;
 mod posixpath;
@@ -51,12 +56,21 @@ enum Storage {
     ByteOutput(bytes::ByteOutput),
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
+    AsyncProcess(Box<processes::AsyncProcess>),
+    AsyncTask(Rc<asyncio::Task>),
+    GeneratorContext(Rc<contexts::Manager>),
+    DirectoryContext(tempdirs::DirectoryContext),
+    Document(json::readonly::document::Value),
+    EventLoop(Rc<asyncio::EventLoop>),
+    TaskGroup(Rc<asyncio::Group>),
+    Semaphore(Rc<asyncio::Semaphore>),
     Path {
         text: paths::PathText,
         name: std::cell::OnceCell<Rc<Str>>,
     },
     PathIterator(Box<paths::PathIterator>),
     RegexPattern(Box<regexes::Pattern>),
+    Logger(Rc<Str>),
     RegexMatch(regexes::Match),
     Json(json::readonly::View),
 }
@@ -84,15 +98,22 @@ unsafe fn object<'a>(pointer: *const Object) -> &'a Object {
 }
 
 impl Storage {
-    fn sequence(&self) -> &Words {
+    fn sequence_storage(&self) -> &Words {
         match self {
             Self::Sequence(values) => values,
             _ => fail("SystemError", "expected a sequence object"),
         }
     }
+    fn sequence(&self) -> &Words {
+        self.sequence_storage().resolved()
+    }
     fn sequence_mut(&mut self) -> &mut Words {
         match self {
-            Self::Sequence(values) => values,
+            Self::Sequence(values) => {
+                values.resolve_mut();
+                values.forget_order();
+                values
+            }
             _ => fail("SystemError", "expected a sequence object"),
         }
     }
@@ -132,14 +153,9 @@ pub unsafe extern "C" fn relar_str_list_contains(needle: *const Str, list: *cons
     // SAFETY: the storage borrow prevents mutation and none of the compared
     // strings can invoke user code or release its live owner during equality.
     unsafe {
-        object(list).0.with(|storage| {
-            let words = storage.sequence();
-            debug_assert_eq!(words.kind.raw(), 3);
-            u32::from(words.values.iter().any(|&word| {
-                let item = word as *const Str;
-                item == needle || *item == *needle
-            }))
-        })
+        object(list)
+            .0
+            .with(|storage| u32::from(storage.sequence().contains_string(&*needle)))
     }
 }
 
@@ -203,7 +219,7 @@ pub unsafe extern "C" fn relar_seq_borrow_index_proven(value: *const Object, at:
                 // Exact kind is part of the same caller proof as the index.
                 std::hint::unreachable_unchecked()
             };
-            *values.values.get_unchecked(at)
+            *values.resolved().values.get_unchecked(at)
         })
     }
 }
@@ -227,7 +243,7 @@ pub unsafe extern "C" fn relar_seq_data_readonly(value: *const Object) -> *const
         let Storage::Sequence(values) = &*(*value).0.0.get() else {
             std::hint::unreachable_unchecked()
         };
-        values.values.as_ptr()
+        values.resolved().values.as_ptr()
     }
 }
 
@@ -421,6 +437,32 @@ pub unsafe extern "C" fn relar_str_concat(a: *const Str, b: *const Str) -> *cons
     result.push_str(left);
     result.push_str(right);
     Rc::into_raw(Rc::new(result))
+}
+
+/// # Safety
+/// The caller roots the string and tagged integer until the call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_repeat(value: *const Str, count: usize) -> *const Str {
+    // SAFETY: both arguments remain rooted for this non-reentrant operation.
+    let (text, count) = unsafe { (&*value, Int::borrow(count)) };
+    let result = (|| {
+        let count = bytes::native_size(&count)?.max(0) as usize;
+        if text.is_empty() || count == 0 {
+            return Ok(Rc::into_raw(Rc::new(Str::default())));
+        }
+        let length = text
+            .len()
+            .checked_mul(count)
+            .filter(|length| *length <= isize::MAX as usize)
+            .ok_or_else(|| Error::new(Kind::OverflowError, "repeated string is too long"))?;
+        let mut result =
+            Str::try_with_capacity(length).map_err(|_| Error::new(Kind::MemoryError, ""))?;
+        for _ in 0..count {
+            result.push_str(text);
+        }
+        Ok(Rc::into_raw(Rc::new(result)))
+    })();
+    finish(result, std::ptr::null())
 }
 
 /// One borrowed concatenation fragment. `usize::MAX` identifies a rooted Str
@@ -931,8 +973,13 @@ impl LineOffsets {
         let boundaries = if plain_ascii_line(single.as_bytes()) {
             Boundaries::Single(single.len())
         } else if memchr::memchr3(0x0b, 0x0c, 0x1c, bytes).is_none()
-            && memchr::memchr3(0x1d, 0x1e, 0xc2, bytes).is_none()
-            && memchr::memchr(0xe2, bytes).is_none()
+            && memchr::memchr2(0x1d, 0x1e, bytes).is_none()
+            && !memchr::memchr2_iter(0xc2, 0xe2, bytes).any(|at| {
+                matches!(
+                    &bytes[at..],
+                    [0xc2, 0x85, ..] | [0xe2, 0x80, 0xa8 | 0xa9, ..]
+                )
+            })
         {
             Boundaries::CrLf
         } else {
@@ -1035,16 +1082,18 @@ pub unsafe extern "C" fn relar_str_splitlines_iter(value: *const Str) -> *const 
 pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
     let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
-    let mut offsets = LineOffsets::new(&value);
+    split_lines(&value, |range| owned_line(&value, range))
+}
+
+fn split_lines(value: &str, own: impl Fn(std::ops::Range<usize>) -> Rc<Str>) -> *const Object {
+    let mut offsets = LineOffsets::new(value);
     let mut result = Words::new(3);
-    while let Some(range) = offsets.next(&value) {
+    while let Some(range) = offsets.next(value) {
         result
             .values
             .try_reserve(1)
             .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
-        result
-            .values
-            .push(Rc::into_raw(owned_line(&value, range)) as usize);
+        result.values.push(Rc::into_raw(own(range)) as usize);
     }
     Rc::into_raw(result.into_object())
 }

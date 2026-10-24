@@ -1,0 +1,22 @@
+{
+  "ruff_versions": ["0.15.0", "0.16.1"],
+  "flags": ["check", "--no-cache", "--no-fix", "--no-preview", "--isolated", "--output-format=concise", "--exit-zero", "--select=ALL", "."],
+  "projects": [
+    {
+      "owner": "sphinx-doc",
+      "name": "sphinx",
+      "revision": "32c61c4099066e36d4bcfbc42b6c1f2ba803f853",
+      "sha256": ["44aa7937637b177dd86468502172b0d6717562c4b91f753d14c5cce2de3d54f9", "280cbb12dcdaa9085bd26ba695e82228b3249b3f578076d05405970beb7dce0e"]
+    },
+    {
+      "owner": "PrefectHQ",
+      "name": "prefect",
+      "revision": "9f7529eefa3ed6a913ec420acd4bd86291ccdb3c",
+      "sha256": ["cf5de46c340e33952dab711ada3e6d65ba4827f29df612d7832fc13fc37fb6f2", "24435876843ebd2e2c765c47feee78fe1f4d2eb0fcd13a7172b38f6906a8b037"]
+    }
+  ],
+  "reports": {
+    "1": {"bytes": 14693, "sha256": "db031f2fc04ae6080dd05e6e9efe1ef694a3130cb65ca0576fae59cb8f908066"},
+    "10": {"bytes": 22848, "sha256": "f7c186af2c62ff90fce6e6cb60c25f2a94eb795128d9bd7f1be1214b2dac4f63"}
+  }
+}

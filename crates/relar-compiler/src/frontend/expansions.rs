@@ -232,6 +232,11 @@ impl Checker<'_> {
                         start: None,
                     });
                 }
+                let iterable = if matches!(iterable.ty, Type::Document(_)) {
+                    self.document_map(iterable)
+                } else {
+                    iterable
+                };
                 if self.types.mapping(iterable.ty).is_none() {
                     return Err(error(
                         self.source,
@@ -250,7 +255,10 @@ impl Checker<'_> {
             }
         }
         let hint = element.and_then(|element| self.expansion_hint(expression, element));
-        let iterable = self.boolean_operand(expression, hint)?;
+        let iterable = self.iteration_expression(expression, hint)?;
+        if let Some(prepared) = self.record_iteration(&iterable, expression)? {
+            return Ok(Iteration::Prepared(prepared));
+        }
         Ok(Iteration::Container {
             iterable,
             items: false,

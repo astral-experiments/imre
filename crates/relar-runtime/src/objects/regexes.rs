@@ -1,12 +1,14 @@
 //! Fixed string patterns and immutable snapshots of participating capture spans.
 
+mod captures;
+
+use captures::AnchoredCaptures;
 use std::cell::Cell;
 use std::ptr;
 use std::rc::Rc;
 
 use memchr::memmem::Finder;
 use regex_automata::meta::{self, Regex};
-use regex_automata::nfa::thompson::backtrack::{self, BoundedBacktracker};
 use regex_automata::util::primitives::NonMaxUsize;
 use regex_automata::{Anchored, Input, PatternID};
 use regex_syntax::hir::{Hir, HirKind, literal::Extractor};
@@ -19,14 +21,10 @@ pub(super) struct Pattern {
     regex: Regex,
     cache: meta::Cache,
     slots: Vec<Option<NonMaxUsize>>,
-    required: Option<Finder<'static>>,
-    anchored: Option<PrefixSearch>,
-}
-
-struct PrefixSearch {
-    first: u8,
-    engine: BoundedBacktracker,
-    cache: backtrack::Cache,
+    required: Vec<(Finder<'static>, Option<Vec<u8>>)>,
+    anchored: Option<AnchoredCaptures>,
+    final_newline_slot: Option<usize>,
+    named_groups: Vec<(usize, Rc<Str>)>,
 }
 
 /// Every match must contain this literal; branches and optional repetitions do
@@ -40,6 +38,20 @@ fn required_literal(hir: &Hir) -> Option<&[u8]> {
             .iter()
             .filter_map(required_literal)
             .max_by_key(|literal| literal.len()),
+        _ => None,
+    }
+}
+
+/// A match starting at the first byte must begin with this exact literal.
+/// Zero-width conditions may constrain the position further.
+fn leading_literal(hir: &Hir) -> Option<&[u8]> {
+    match hir.kind() {
+        HirKind::Literal(text) => Some(&text.0),
+        HirKind::Capture(capture) => leading_literal(&capture.sub),
+        HirKind::Concat(parts) => parts
+            .iter()
+            .find(|part| !matches!(part.kind(), HirKind::Empty | HirKind::Look(_)))
+            .and_then(leading_literal),
         _ => None,
     }
 }
@@ -59,39 +71,100 @@ impl Pattern {
             .longest_common_prefix()
             .and_then(|s| s.first().copied())
             .filter(u8::is_ascii);
-        let anchored = first.and_then(|first| {
-            let engine = BoundedBacktracker::new(source).ok()?;
-            let cache = engine.create_cache();
-            Some(PrefixSearch {
-                first,
-                engine,
-                cache,
+        let anchored = if first.is_some() || hir.properties().explicit_captures_len() != 0 {
+            AnchoredCaptures::new(&hir, first)
+        } else {
+            None
+        };
+        // At least one branch's mandatory substring must exist. An unguarded
+        // branch disables the shortcut, as does an unusually wide alternation.
+        let branches = match hir.kind() {
+            HirKind::Alternation(branches) => branches.as_slice(),
+            _ => std::slice::from_ref(&hir),
+        };
+        let required = branches
+            .iter()
+            // Translation uses impossible alternatives to preserve Python's branch
+            // priority. They cannot produce a match, even on the empty string.
+            .filter(|branch| branch.properties().minimum_len().is_some())
+            .enumerate()
+            .map(|(index, branch)| {
+                if index == 4 {
+                    return None;
+                }
+                required_literal(branch)
+                    .filter(|s| !s.is_empty() && !(s.len() == 1 && Some(s[0]) == first))
+                    .map(|s| {
+                        (
+                            Finder::new(s).into_owned(),
+                            leading_literal(branch).map(<[u8]>::to_vec),
+                        )
+                    })
             })
-        });
-        let required = required_literal(&hir)
-            .filter(|s| !s.is_empty() && !(s.len() == 1 && Some(s[0]) == first))
-            .map(|s| Finder::new(s).into_owned());
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default();
+        let final_newline_slot = regex
+            .group_info()
+            .to_index(PatternID::ZERO, "relar.eol")
+            .map(|index| index * 2);
+        let named_groups = regex
+            .group_info()
+            .pattern_names(PatternID::ZERO)
+            .enumerate()
+            .filter_map(|(index, name)| {
+                name.filter(|_| final_newline_slot != Some(index * 2))
+                    .map(|name| (index, Rc::new(Str::new(name))))
+            })
+            .collect();
         Self {
             regex,
             cache,
             slots,
             anchored,
             required,
+            final_newline_slot,
+            named_groups,
         }
+    }
+
+    fn could_match(&self, text: &[u8], at_start: bool) -> bool {
+        self.required.is_empty()
+            || self
+                .required
+                .iter()
+                .any(|(literal, prefix)| match (at_start, prefix) {
+                    (true, Some(prefix)) => text.starts_with(prefix),
+                    _ => literal.find(text).is_some(),
+                })
+    }
+
+    /// The start is already known for match(). A single bounded capture pass
+    /// avoids rediscovering the match boundaries before extracting its groups.
+    fn match_start(&mut self, text: &str) -> bool {
+        if !self.could_match(text.as_bytes(), true) {
+            return false;
+        }
+        let input = Input::new(text).anchored(Anchored::Yes);
+        if let Some(bounded) = &mut self.anchored
+            && let Ok(found) = bounded.search(&input, &mut self.slots)
+        {
+            return found.is_some();
+        }
+        self.regex
+            .search_slots_with(&mut self.cache, &input, &mut self.slots)
+            .is_some()
     }
 
     fn search(&mut self, text: &str) -> bool {
         let bytes = text.as_bytes();
-        if self
-            .required
-            .as_ref()
-            .is_some_and(|literal| literal.find(bytes).is_none())
-        {
+        if !self.could_match(bytes, false) {
             return false;
         }
         let mut start = 0;
-        if let Some(prefix) = &mut self.anchored {
-            let Some(at) = memchr::memchr(prefix.first, bytes) else {
+        if let Some(prefix) = &mut self.anchored
+            && let Some(first) = prefix.first
+        {
+            let Some(at) = memchr::memchr(first, bytes) else {
                 return false;
             };
             let input = Input::new(text)
@@ -100,13 +173,10 @@ impl Pattern {
             // One anchored attempt avoids the general engine's forward/reverse
             // search on hits. A size-limit error or further candidates fall back
             // to one unanchored search, which preserves the worst-case time bound.
-            match prefix
-                .engine
-                .try_search_slots(&mut prefix.cache, &input, &mut self.slots)
-            {
+            match prefix.search(&input, &mut self.slots) {
                 Ok(Some(_)) => return true,
                 Ok(None) => {
-                    let Some(next) = memchr::memchr(prefix.first, &bytes[at + 1..]) else {
+                    let Some(next) = memchr::memchr(first, &bytes[at + 1..]) else {
                         return false;
                     };
                     start = at + 1 + next;
@@ -228,6 +298,24 @@ pub unsafe extern "C" fn relar_regex_search(
     pattern: *const Object,
     text: *const Str,
 ) -> *const Object {
+    // SAFETY: both published entry points have the same rooted arguments.
+    unsafe { match_text(pattern, text, false) }
+}
+
+/// Match a fixed pattern at the start of the string.
+///
+/// # Safety
+/// The compiled pattern and string must both be rooted for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_regex_match(
+    pattern: *const Object,
+    text: *const Str,
+) -> *const Object {
+    // SAFETY: the arguments remain rooted until the match snapshot is complete.
+    unsafe { match_text(pattern, text, true) }
+}
+
+unsafe fn match_text(pattern: *const Object, text: *const Str, anchored: bool) -> *const Object {
     // SAFETY: both inputs outlive the search. Mutating engine scratch cannot call
     // user code, and only copied capture spans escape this private storage borrow.
     unsafe {
@@ -235,19 +323,40 @@ pub unsafe extern "C" fn relar_regex_search(
             let Storage::RegexPattern(compiled) = storage else {
                 fail("SystemError", "expected a compiled regex");
             };
-            if !compiled.search(&*text) {
+            let found = if anchored {
+                compiled.match_start((&*text).as_str())
+            } else {
+                compiled.search(&*text)
+            };
+            if !found {
                 return ptr::null();
+            }
+            let mut visible = compiled.slots.len();
+            if let Some(slot) = compiled.final_newline_slot {
+                if let Some(start) = compiled.slots[slot] {
+                    compiled.slots[1] = Some(start);
+                }
+                visible = slot;
             }
             handle(Storage::RegexMatch(Match {
                 pattern: acquire_rc(pattern as usize),
                 text: acquire_rc(text as usize),
-                spans: Spans::new(&compiled.slots, (&*text).len()),
+                spans: Spans::new(&compiled.slots[..visible], (&*text).len()),
             }))
         })
     }
 }
 
 impl Match {
+    /// Empty captures own an empty string. Only nonparticipating groups return null.
+    fn substring(&self, span: Option<(usize, usize)>) -> *const Str {
+        match span {
+            Some((0, end)) if end == self.text.len() => Rc::into_raw(Rc::clone(&self.text)),
+            Some((start, end)) => Rc::into_raw(Rc::new(Str::new(&self.text[start..end]))),
+            None => ptr::null(),
+        }
+    }
+
     /// Distinguishes an unknown selector (IndexError) from a nonparticipating group.
     #[inline(always)] // Keep the scalar span in the calling group or bound operation.
     unsafe fn span(&self, selector: usize, named: u32) -> Result<Option<(usize, usize)>, Error> {
@@ -306,16 +415,46 @@ pub unsafe extern "C" fn relar_regex_group(
     let result = unsafe {
         object(value).0.with(|storage| {
             let matched = storage.regex_match();
-            Ok(match matched.span(selector, named)? {
-                Some((start, end)) if start == 0 && end == matched.text.len() => {
-                    Rc::into_raw(Rc::clone(&matched.text))
-                }
-                Some((start, end)) => Rc::into_raw(Rc::new(Str::new(&matched.text[start..end]))),
-                None => ptr::null(),
-            })
+            Ok(matched.substring(matched.span(selector, named)?))
         })
     };
     finish(result, ptr::null())
+}
+
+/// Copies the named captures in declaration order into a fresh mutable mapping.
+///
+/// # Safety
+/// The caller roots a live match. It owns its pattern and matched text throughout.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_regex_groupdict(value: *const Object) -> *const Object {
+    use super::mappings::Mapping;
+    use super::words::{NULLABLE, OwnedWord, WordKind};
+    let key_kind = WordKind::new(3);
+    let value_kind = WordKind::new(3 | NULLABLE);
+    let mut entries = Mapping::new(key_kind.raw(), value_kind.raw());
+    // SAFETY: immutable match and pattern borrows cannot overlap a mutation.
+    // Each inserted word transfers exactly the owned Rc produced below, or None.
+    unsafe {
+        object(value).0.with(|storage| {
+            let matched = storage.regex_match();
+            matched.pattern.0.with(|storage| {
+                let Storage::RegexPattern(pattern) = storage else {
+                    unreachable!()
+                };
+                // Frozen capture names belong to the pattern. Each fresh
+                // dictionary retains those same immutable keys.
+                for (index, name) in &pattern.named_groups {
+                    let key = Rc::into_raw(Rc::clone(name)) as usize;
+                    let capture = matched.substring(matched.spans.get(*index).unwrap()) as usize;
+                    entries.insert_unique(
+                        OwnedWord::from_owned(key, key_kind),
+                        OwnedWord::from_owned(capture, value_kind),
+                    );
+                }
+            })
+        })
+    }
+    handle(Storage::Dictionary(Box::new(entries)))
 }
 
 /// Checks participation without allocating the capture substring.
@@ -414,14 +553,49 @@ mod tests {
     }
 
     #[test]
+    fn impossible_alternatives_do_not_disable_required_literals() {
+        let mut pattern = Pattern::new(r"^(one.+)|\P{any}|(.* two .*)|\P{any}|(three.*)");
+        assert!(!pattern.could_match(b"ordinary line", true));
+        for text in ["one!", "a two b", "three"] {
+            assert!(pattern.match_start(text));
+        }
+
+        let mut empty = Pattern::new(r"^(one.+)|\P{any}|()");
+        assert!(empty.match_start("ordinary line"));
+    }
+
+    #[test]
     fn failed_first_prefix_and_bounded_engine_limit_fall_back() {
         let mut pattern = Pattern::new("a[ab]+Z");
         assert!(pattern.search("a!abc abbaZ"));
         assert_eq!(pattern.slots[0].unwrap().get(), 6);
-        let limit = pattern.anchored.as_ref().unwrap().engine.max_haystack_len();
+        let limit = pattern.anchored.as_ref().unwrap().max_haystack_len();
         let long = format!("a{}Z", "b".repeat(limit + 1));
         assert!(pattern.search(&long));
         assert_eq!(pattern.slots[1].unwrap().get(), long.len());
+    }
+
+    #[test]
+    fn anchored_captures_without_a_fixed_prefix_match_the_general_engine() {
+        let mut pattern = Pattern::new(r"(?P<sign>[+-])? *(?P<code>[A-Z]+):(.+)");
+        let bounded = pattern.anchored.as_ref().unwrap();
+        assert_eq!(bounded.first, None);
+        let long = format!("B:{}", "x".repeat(bounded.max_haystack_len() + 1));
+        for text in ["-  XY:é", "B:x", "bad A:x", long.as_str()] {
+            let mut expected = vec![None; pattern.slots.len()];
+            let found = pattern
+                .regex
+                .search_slots_with(
+                    &mut pattern.cache,
+                    &Input::new(text).anchored(Anchored::Yes),
+                    &mut expected,
+                )
+                .is_some();
+            assert_eq!(pattern.match_start(text), found);
+            if found {
+                assert_eq!(pattern.slots, expected);
+            }
+        }
     }
 
     #[test]

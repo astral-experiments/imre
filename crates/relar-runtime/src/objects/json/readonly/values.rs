@@ -3,11 +3,15 @@
 use std::fmt::Write as _;
 
 use super::{Node, View};
-use crate::objects::exceptions::string_repr;
+use crate::objects::exceptions::push_string_repr;
 
 impl View {
     pub(in crate::objects) fn equal(&self, right: &Self) -> bool {
-        self.equal_at(self.index, right, right.index)
+        let left_root = self.snapshot_root();
+        let right_root = right.snapshot_root();
+        let left = left_root.as_ref().unwrap_or(self);
+        let right = right_root.as_ref().unwrap_or(right);
+        left.equal_at(left.index, right, right.index)
     }
 
     fn equal_at(&self, a: usize, other: &Self, b: usize) -> bool {
@@ -26,6 +30,7 @@ impl View {
         }
         match (left, right) {
             (Node::Null, Node::Null) => true,
+            (Node::Datetime(a), Node::Datetime(b)) => a == b,
             (Node::String(a), Node::String(b)) => a == b,
             (Node::Float(a), Node::Float(b)) => a == b,
             (Node::Integer(a), Node::Integer(b)) => a.0 == b.0 || a.big() == b.big(),
@@ -55,7 +60,7 @@ impl View {
     }
 
     pub(in crate::objects) fn write_repr(&self, output: &mut String) {
-        if let Some(items) = &self.root_items {
+        if let Some(items) = self.nodes.root_items() {
             // SAFETY: the root owns this ordinary list through the entire repr traversal.
             unsafe {
                 crate::objects::values::write_repr(
@@ -73,6 +78,7 @@ impl View {
         let node = &self.nodes[i];
         match node {
             Node::Null => output.push_str("None"),
+            Node::Datetime(value) => output.push_str(value),
             Node::Bool(b) => output.push_str(if *b { "True" } else { "False" }),
             Node::Integer(i) => {
                 if let Some(i) = i.as_small() {
@@ -82,7 +88,7 @@ impl View {
                 }
             }
             Node::Float(f) => output.push_str(&crate::floats::render(*f)),
-            Node::String(s) => output.push_str(&string_repr(s)),
+            Node::String(s) => push_string_repr(s, output),
             Node::Deferred(array) => array.view().write_repr(output),
             Node::Array(items) => {
                 output.push('[');
@@ -103,7 +109,7 @@ impl View {
                     if offset != 0 {
                         output.push_str(", ");
                     }
-                    output.push_str(&string_repr(name));
+                    push_string_repr(name, output);
                     output.push_str(": ");
                     self.write_at(node.lookup(name).unwrap(), output);
                 }

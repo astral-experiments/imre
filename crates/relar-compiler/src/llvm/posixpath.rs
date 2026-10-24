@@ -25,10 +25,25 @@ impl Emitter<'_, '_> {
                     args.len()
                 ))
             }
-            PosixPathOperation::MixedJoin { path_in_tail } => self.checked_instruction(format!(
-                "call ptr @relar_posix_join_error(i32 {})",
-                u8::from(path_in_tail)
-            )),
+            PosixPathOperation::MixedJoin { path_in_tail } => {
+                let mut unions = args[1..]
+                    .iter()
+                    .filter(|arg| matches!(arg.value.ty, Type::Union(_)));
+                let flag = if path_in_tail {
+                    "1".to_owned()
+                } else if let Some(first) = unions.next() {
+                    let path = [InstanceType::Exact(Type::Path)];
+                    let mut found = self.instance_test(&first.value, &path);
+                    for arg in unions {
+                        let next = self.instance_test(&arg.value, &path);
+                        found = self.instruction(format!("or i1 {found}, {next}"));
+                    }
+                    self.instruction(format!("zext i1 {found} to i32"))
+                } else {
+                    "0".to_owned()
+                };
+                self.checked_instruction(format!("call ptr @relar_posix_join_error(i32 {flag})"))
+            }
             PosixPathOperation::Basename | PosixPathOperation::Dirname => {
                 let head = u8::from(operation == PosixPathOperation::Dirname);
                 self.instruction(format!(

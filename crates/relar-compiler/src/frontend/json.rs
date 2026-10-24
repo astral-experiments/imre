@@ -6,6 +6,12 @@ use crate::ir::{JsonDefault, JsonField, JsonRecordSchema};
 /// Folds successive literal subscripts into one traversal. The keys have no
 /// evaluation effects; the first failing lookup still determines the exception.
 pub(super) fn select(value: Expr, ty: Type, key: Option<String>, literal: Option<Expr>) -> Expr {
+    if key.is_none()
+        && literal.is_none()
+        && matches!(value.kind, ExprKind::Builtin(Builtin::JsonGet { .. }, _))
+    {
+        return Expr { ty, ..value };
+    }
     let (mut path, mut args) = match value {
         Expr {
             ty: Type::JsonValue,
@@ -18,6 +24,49 @@ pub(super) fn select(value: Expr, ty: Type, key: Option<String>, literal: Option
     Expr {
         ty,
         kind: ExprKind::Builtin(Builtin::JsonSelect(path), args),
+    }
+}
+
+/// Literal defaults and reads of the same rooted local have no Python side
+/// effects. The runtime can add the selected values without boxing either one.
+pub(super) fn add(left: Expr, right: Expr) -> Expr {
+    fn field(expr: &Expr) -> Option<(&String, &Expr, &Expr, usize)> {
+        let ExprKind::Builtin(
+            Builtin::JsonGet {
+                key,
+                empty_list: false,
+            },
+            args,
+        ) = &expr.kind
+        else {
+            return None;
+        };
+        let [receiver, default] = args.as_slice() else {
+            return None;
+        };
+        let ExprKind::Local(slot) = receiver.kind else {
+            return None;
+        };
+        matches!(default.kind, ExprKind::Int(_)).then_some((key, receiver, default, slot))
+    }
+    let kind = if let (Some((a, receiver, left_default, x)), Some((b, _, right_default, y))) =
+        (field(&left), field(&right))
+        && x == y
+    {
+        ExprKind::Builtin(
+            Builtin::JsonAddFields(a.clone(), b.clone()),
+            vec![
+                receiver.clone(),
+                left_default.clone(),
+                right_default.clone(),
+            ],
+        )
+    } else {
+        ExprKind::Builtin(Builtin::JsonAdd, vec![left, right])
+    };
+    Expr {
+        ty: Type::JsonValue,
+        kind,
     }
 }
 
@@ -92,17 +141,18 @@ impl Checker<'_> {
             ));
         };
         check_string(key, self.source)?;
-        let receiver = Expr {
-            ty: receiver.ty,
-            kind: ExprKind::Builtin(Builtin::JsonGetReceiver, vec![receiver]),
-        };
-        let mut values = vec![receiver];
-        match rest {
-            [] => values.push(Expr {
-                ty: Type::None,
-                kind: ExprKind::None,
-            }),
-            [ast::Expr::List(list)] if list.elts.is_empty() => {}
+        let (empty_list, values) = match rest {
+            [] => (
+                false,
+                vec![
+                    receiver,
+                    Expr {
+                        ty: Type::None,
+                        kind: ExprKind::None,
+                    },
+                ],
+            ),
+            [ast::Expr::List(list)] if list.elts.is_empty() => (true, vec![receiver]),
             [default] => {
                 let default = self.expr(default)?;
                 if !matches!(
@@ -120,7 +170,17 @@ impl Checker<'_> {
                         "readonly JSON get requires a scalar or empty list default",
                     ));
                 }
-                values.push(default);
+                // Bind the receiver before an effectful default. Literal and local
+                // integer defaults retain the fast path for adding two fields.
+                let receiver = if matches!(default.kind, ExprKind::Int(_) | ExprKind::Local(_)) {
+                    receiver
+                } else {
+                    Expr {
+                        ty: receiver.ty,
+                        kind: ExprKind::Builtin(Builtin::JsonGetReceiver, vec![receiver]),
+                    }
+                };
+                (false, vec![receiver, default])
             }
             _ => {
                 return Err(error(
@@ -129,10 +189,16 @@ impl Checker<'_> {
                     "readonly JSON get takes a key and optional default",
                 ));
             }
-        }
+        };
         Ok(Expr {
             ty: Type::JsonValue,
-            kind: ExprKind::Builtin(Builtin::JsonGet(key.value.to_string()), values),
+            kind: ExprKind::Builtin(
+                Builtin::JsonGet {
+                    key: key.value.to_string(),
+                    empty_list,
+                },
+                values,
+            ),
         })
     }
 

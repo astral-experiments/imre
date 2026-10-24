@@ -4,8 +4,10 @@
 
 mod arrays;
 mod constants;
+pub(in crate::objects) mod document;
 mod elements;
 mod values;
+mod writer;
 
 use std::fmt;
 use std::rc::Rc;
@@ -26,6 +28,7 @@ pub(super) enum Node {
     Integer(Int),
     Float(f64),
     String(Rc<Str>),
+    Datetime(Str),
     Array(Vec<usize>),
     Deferred(Rc<arrays::Deferred>),
     Object(Vec<(Str, usize)>),
@@ -35,6 +38,7 @@ impl Node {
     fn truth(&self) -> bool {
         match self {
             Self::Null => false,
+            Self::Datetime(_) => true,
             Self::Bool(value) => *value,
             Self::Array(items) => !items.is_empty(),
             Self::Deferred(array) => array.truth(),
@@ -48,6 +52,7 @@ impl Node {
     fn kind(&self) -> &'static str {
         match self {
             Self::Null => "NoneType",
+            Self::Datetime(_) => "datetime",
             Self::Bool(_) => "bool",
             Self::Integer(_) => "int",
             Self::Float(_) => "float",
@@ -89,39 +94,90 @@ impl Node {
     }
 }
 
+#[derive(Clone)]
+pub(super) enum Nodes {
+    Document(Rc<Vec<Node>>),
+    /// Keep aliases of a mutable root array without enlarging every scalar view.
+    Root(Rc<Vec<Node>>, Rc<Object>),
+    /// Computed scalars and missing defaults do not need a second allocation.
+    Single(Node),
+}
+
+impl std::ops::Deref for Nodes {
+    type Target = [Node];
+    fn deref(&self) -> &[Node] {
+        match self {
+            Self::Document(nodes) | Self::Root(nodes, _) => nodes,
+            Self::Single(node) => std::slice::from_ref(node),
+        }
+    }
+}
+
+impl Nodes {
+    pub(super) fn root_items(&self) -> Option<&Rc<Object>> {
+        match self {
+            Self::Root(_, items) => Some(items),
+            _ => None,
+        }
+    }
+
+    fn child(&self) -> Self {
+        match self {
+            Self::Root(nodes, _) => Self::Document(Rc::clone(nodes)),
+            _ => self.clone(),
+        }
+    }
+}
+
 pub(in crate::objects) struct View {
-    pub(super) nodes: Rc<Vec<Node>>,
-    /// Only a document root exposes the original mutable array and its aliases.
-    pub(super) root_items: Option<Rc<Object>>,
+    pub(super) nodes: Nodes,
     pub(super) index: usize,
 }
 
 impl View {
-    fn handle(nodes: &Rc<Vec<Node>>, index: usize) -> *const Object {
-        Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Json(Self {
-            nodes: Rc::clone(nodes),
-            root_items: None,
-            index,
-        })))))
-    }
-
     fn single(node: Node) -> Self {
         Self {
-            nodes: Rc::new(vec![node]),
-            root_items: None,
+            nodes: Nodes::Single(node),
             index: 0,
         }
+    }
+
+    fn handle(nodes: &Nodes, index: usize) -> *const Object {
+        Self {
+            nodes: nodes.child(),
+            index,
+        }
+        .into_handle()
     }
 
     fn into_handle(self) -> *const Object {
         Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Json(self)))))
     }
 
-    fn expanded(&self) -> &Self {
-        match &self.nodes[self.index] {
-            Node::Deferred(array) => array.view(),
-            _ => self,
+    fn resolved(&self, index: usize) -> (&Self, usize) {
+        match &self.nodes[index] {
+            Node::Deferred(array) => {
+                let view = array.view();
+                (view, view.index)
+            }
+            _ => (self, index),
         }
+    }
+
+    fn expanded(&self) -> &Self {
+        self.resolved(self.index).0
+    }
+
+    /// Snapshot the current elements when an array projected to a native list
+    /// is used as an immutable value again. Its aliases may have mutated it.
+    fn snapshot_root(&self) -> Option<Self> {
+        self.nodes.root_items()?;
+        let mut nodes = Vec::new();
+        let index = self.copy_to(self.index, &mut nodes);
+        Some(Self {
+            nodes: Nodes::Document(Rc::new(nodes)),
+            index,
+        })
     }
 
     fn get_receiver(&self) -> Result<&Node, Error> {
@@ -143,20 +199,37 @@ impl View {
     /// Preserve nested array elements and object lookups when concatenating
     /// values borrowed from two independently owned documents.
     fn copy_to(&self, index: usize, destination: &mut Vec<Node>) -> usize {
-        let node = match &self.nodes[index] {
-            Node::Array(items) => Node::Array(
+        let node = match (&self.nodes[index], self.nodes.root_items()) {
+            (Node::Array(_), Some(items)) if index == self.index => {
+                // SAFETY: the list roots all immutable JSON views while their children are copied.
+                Node::Array(unsafe {
+                    items.0.with(|storage| {
+                        storage
+                            .sequence()
+                            .values
+                            .iter()
+                            .map(|&word| {
+                                with_view(word as *const Object, |child| {
+                                    child.copy_to(child.index, destination)
+                                })
+                            })
+                            .collect()
+                    })
+                })
+            }
+            (Node::Array(items), _) => Node::Array(
                 items
                     .iter()
                     .map(|&i| self.copy_to(i, destination))
                     .collect(),
             ),
-            Node::Object(fields) => Node::Object(
+            (Node::Object(fields), _) => Node::Object(
                 fields
                     .iter()
                     .map(|(key, i)| (key.clone(), self.copy_to(*i, destination)))
                     .collect(),
             ),
-            scalar => scalar.clone(),
+            (scalar, _) => scalar.clone(),
         };
         let index = destination.len();
         destination.push(node);
@@ -164,6 +237,12 @@ impl View {
     }
 
     fn add(&self, other: &Self) -> Result<Self, Error> {
+        if let Some(root) = self.snapshot_root() {
+            return root.add(other);
+        }
+        if let Some(root) = other.snapshot_root() {
+            return self.add(&root);
+        }
         if let Node::Deferred(array) = &self.nodes[self.index] {
             return array.view().add(other);
         }
@@ -198,8 +277,7 @@ impl View {
             let index = nodes.len();
             nodes.push(Node::Array(items));
             return Ok(Self {
-                nodes: Rc::new(nodes),
-                root_items: None,
+                nodes: Nodes::Document(Rc::new(nodes)),
                 index,
             });
         } else {
@@ -223,13 +301,13 @@ impl View {
     }
 
     fn array(&self, children: &[usize]) -> *const Object {
-        if let Some(items) = &self.root_items {
+        if let Some(items) = self.nodes.root_items() {
             return Rc::into_raw(Rc::clone(items));
         }
         Self::children(&self.nodes, children)
     }
 
-    fn children(nodes: &Rc<Vec<Node>>, children: &[usize]) -> *const Object {
+    fn children(nodes: &Nodes, children: &[usize]) -> *const Object {
         let mut result = Words::new(5);
         result
             .values
@@ -246,6 +324,10 @@ impl View {
             index = self.nodes[index].field(unsafe { std::str::from_utf8_unchecked(key) })?;
             path = tail;
         }
+        self.project(index, mode, literal)
+    }
+
+    fn project(&self, index: usize, mode: u32, literal: Option<&Str>) -> Result<usize, Error> {
         let node = &self.nodes[index];
         if mode & 256 != 0 && matches!(node, Node::Null) {
             return Ok(0);
@@ -253,13 +335,21 @@ impl View {
         let optional = mode & 256 != 0;
         let mode = mode & !256;
         match (mode, node) {
+            (0, _) | (1, Node::Object(_)) if index == self.index => Ok(Self {
+                nodes: self.nodes.clone(),
+                index,
+            }
+            .into_handle()
+                as usize),
             (0, _) | (1, Node::Object(_)) => Ok(Self::handle(&self.nodes, index) as usize),
             (2, Node::String(text)) => Ok(Rc::into_raw(Rc::clone(text)) as usize),
             (3, Node::Integer(integer)) => Ok(integer.clone().into_raw()),
             (4, _) => Ok(usize::from(
                 matches!(node, Node::String(text) if Some(text.as_ref()) == literal),
             )),
-            (5 | 6, Node::Deferred(array)) => array.view().select(&[], mode, literal),
+            (5 | 6, Node::Deferred(array)) => {
+                array.view().project(array.view().index, mode, literal)
+            }
             (5 | 6, Node::Array(children)) => Ok(if index == self.index {
                 self.array(children)
             } else {
@@ -405,8 +495,7 @@ fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
             push_node(&mut nodes, raw, source)?
         };
         return Ok(View {
-            nodes: Rc::new(nodes),
-            root_items: None,
+            nodes: Nodes::Document(Rc::new(nodes)),
             index,
         }
         .into_handle());
@@ -420,16 +509,16 @@ fn build(source: Source<'_>) -> Result<*const Object, serde_json::Error> {
     let index = nodes.len();
     nodes.push(Node::Array(Vec::new()));
     let nodes = Rc::new(nodes);
+    let children = Nodes::Document(Rc::clone(&nodes));
     let mut result = Words::new(5);
     result.values.extend(
         roots
             .into_iter()
-            .map(|index| View::handle(&nodes, index) as usize),
+            .map(|index| View::handle(&children, index) as usize),
     );
     Ok(View {
-        nodes,
+        nodes: Nodes::Root(nodes, result.into_object()),
         index,
-        root_items: Some(result.into_object()),
     }
     .into_handle())
 }
@@ -500,7 +589,7 @@ pub unsafe extern "C" fn relar_json_truth(value: *const Object) -> u32 {
             let Storage::Json(view) = storage else {
                 unreachable!("typed JSON owner")
             };
-            u32::from(view.root_items.as_ref().map_or_else(
+            u32::from(view.nodes.root_items().map_or_else(
                 || view.nodes[view.index].truth(),
                 |items| {
                     items
@@ -584,15 +673,16 @@ pub unsafe extern "C" fn relar_json_get(
     value: *const Object,
     key: *const u8,
     len: usize,
+    mode: u32,
     kind: u32,
     word: usize,
-) -> *const Object {
+) -> usize {
     // SAFETY: the receiver and any fallback handle stay live throughout this borrow.
     let result = unsafe {
         with_view(value, |view| {
             let key = std::str::from_utf8_unchecked(std::slice::from_raw_parts(key, len));
             if let Some(index) = view.get_index(key)? {
-                return Ok(View::handle(&view.nodes, index));
+                return view.project(index, mode, None);
             }
             let fallback = match kind {
                 0 => Node::Null,
@@ -607,10 +697,48 @@ pub unsafe extern "C" fn relar_json_get(
                 5 => Node::Float(f64::from_bits(word as u64)),
                 _ => unreachable!("checked JSON fallback type"),
             };
-            Ok(View::single(fallback).into_handle())
+            View::single(fallback).project(0, mode, None)
         })
     };
-    finish(result, std::ptr::null())
+    finish(result, 0)
+}
+
+/// # Safety
+/// The compiler supplies a rooted JSON owner, two immutable UTF-8 keys with
+/// their exact lengths, and two rooted nonzero integer fallback words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_json_add_fields(
+    value: *const Object,
+    a: *const u8,
+    a_len: usize,
+    a_default: usize,
+    b: *const u8,
+    b_len: usize,
+    b_default: usize,
+) -> *const Object {
+    // SAFETY: the immutable view and key/default arguments live for the whole sum.
+    let result = unsafe {
+        with_view(value, |view| {
+            let get = |p, len, fallback| {
+                let key = std::str::from_utf8_unchecked(std::slice::from_raw_parts(p, len));
+                Ok::<_, Error>(match view.get_index(key)? {
+                    Some(index) => View {
+                        nodes: view.nodes.child(),
+                        index,
+                    },
+                    None => View::single(Node::Integer((*Int::borrow(fallback)).clone())),
+                })
+            };
+            get(a, a_len, a_default)?.add(&get(b, b_len, b_default)?)
+        })
+    };
+    finish(result.map(View::into_handle), std::ptr::null())
+}
+
+/// Creates one separate read-only dictionary for a dataclass default factory.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_json_empty_object() -> *const Object {
+    View::single(Node::Object(Vec::new())).into_handle()
 }
 
 pub(super) fn keys(fields: &[(Str, usize)]) -> impl Iterator<Item = &Str> {
@@ -660,7 +788,7 @@ pub unsafe extern "C" fn relar_json_len(value: *const Object) -> usize {
         with_view(value, |view| {
             let view = view.expanded();
             let len = match &view.nodes[view.index] {
-                Node::Array(children) => view.root_items.as_ref().map_or_else(
+                Node::Array(children) => view.nodes.root_items().map_or_else(
                     || children.len(),
                     |items| items.0.with(|storage| storage.sequence().values.len()),
                 ),
@@ -696,7 +824,7 @@ pub unsafe extern "C" fn relar_json_index(value: *const Object, key: usize) -> *
                     )
                 })
             };
-            if let Some(items) = &view.root_items {
+            if let Some(items) = view.nodes.root_items() {
                 return items.0.with(|storage| {
                     let items = storage.sequence();
                     let index = crate::index(at()?, items.values.len())?;

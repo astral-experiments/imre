@@ -11,6 +11,41 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            PathOperation::ContextNew { temporary } => {
+                let operand = self.instruction(format!(
+                    "call ptr @relar_directory_context_new(i64 {}, i32 {})",
+                    args[0].value.operand,
+                    u32::from(temporary)
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            PathOperation::ContextEnter => {
+                let value = self.instruction(format!(
+                    "call i64 @relar_directory_context_enter(ptr {})",
+                    args[0].value.operand
+                ));
+                let concrete = self.module.types.payload(returns).unwrap_or(returns);
+                let word = if concrete == Type::Path {
+                    self.instruction(format!("and i64 {value}, -8"))
+                } else {
+                    value
+                };
+                self.unpack_word(word, returns)
+            }
+            PathOperation::ContextExit => {
+                self.checked_line(format!(
+                    "call void @relar_directory_context_exit(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
+            PathOperation::UnionText => {
+                self.call("relar_union_path_text", Type::Str, &[&args[0].value])
+            }
             PathOperation::Resolve => {
                 let strict = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
                 let operand = self.checked_instruction(format!(
@@ -64,11 +99,13 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 })
             }
-            PathOperation::Exists
+            PathOperation::OsExists
+            | PathOperation::Exists
             | PathOperation::IsFile
             | PathOperation::IsDir
             | PathOperation::IsAbsolute => {
                 let name = match operation {
+                    PathOperation::OsExists => "text_exists",
                     PathOperation::Exists => "exists",
                     PathOperation::IsFile => "is_file",
                     PathOperation::IsDir => "is_dir",
@@ -117,18 +154,19 @@ impl Emitter<'_, '_> {
             }
             _ => {
                 let name = match operation {
+                    PathOperation::Scripts => "relar_sysconfig_scripts",
                     PathOperation::Absolute => "relar_path_absolute",
                     PathOperation::New => "relar_path_new",
                     PathOperation::Join => "relar_path_join",
+                    PathOperation::WithName => "relar_path_with_name",
                     PathOperation::Text => "relar_path_text",
                     PathOperation::Name => "relar_path_name",
                     PathOperation::Stem => "relar_path_stem",
                     PathOperation::Suffix => "relar_path_suffix",
                     PathOperation::Parent => "relar_path_parent",
+                    PathOperation::ReadBytes => "relar_path_read_bytes",
                     PathOperation::ReadText => "relar_path_read_text",
                     PathOperation::WriteText => "relar_path_write_text",
-                    PathOperation::WithName => "relar_path_with_name",
-                    PathOperation::ReadBytes => "relar_path_read_bytes",
                     PathOperation::WriteBytes => "relar_path_write_bytes",
                     PathOperation::Replace => "relar_path_replace",
                     _ => unreachable!("special path ABIs were handled above"),

@@ -1,60 +1,66 @@
-//! A closed str/bytes sum reuses the alignment bit of its exact Rc payload.
+//! Closed text unions reuse two alignment bits of their exact Rc payload.
 //! Zero is reserved for absent optionals and partially initialized storage.
 
-use std::rc::Rc;
+use super::words::WordKind;
+use super::{Bytes, Object, Str, object};
 
-use super::{Bytes, Str};
+const _: () = assert!(
+    align_of::<Str>() >= 8
+        && align_of::<Bytes>() >= 8
+        && align_of::<Object>() >= 8
+        && align_of::<usize>() >= 8
+);
 
-const _: () = assert!(align_of::<Str>() >= 2 && align_of::<Bytes>() >= 2);
+/// Recovers the original address and the runtime descriptor for its owner.
+pub(super) fn member(value: usize) -> (usize, WordKind) {
+    let kind = match value & 7 {
+        0 => 3,                                      // str
+        1 => 8,                                      // bytes
+        2 => 5,                                      // list[str]
+        3 => 5,                                      // exception
+        4 => 6,                                      // fixed record
+        6 => 5,                                      // pathlib.Path
+        5 => return (value >> 3, WordKind::new(10)), // ordinary Enum tag
+        _ => unreachable!("invalid text union tag"),
+    };
+    (value & !7, WordKind::new(kind))
+}
 
 /// # Safety
-/// `value` is zero or a rooted Rc<Str> pointer (tag 0) or Rc<Bytes> pointer
-/// (tag 1). Pointer addresses were exposed before adding the low tag bit.
+/// `value` is zero or a rooted, correctly tagged text union member.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_union_retain(value: usize) {
-    if value == 0 {
-        return;
-    }
-    // SAFETY: clearing the tag restores the exact rooted allocation's address.
-    unsafe {
-        if value & 1 == 0 {
-            Rc::increment_strong_count(value as *const Str);
-        } else {
-            Rc::increment_strong_count((value & !1) as *const Bytes);
-        }
-    }
+    let (word, kind) = member(value);
+    // SAFETY: removing the tag restores the exact rooted allocation's address.
+    unsafe { kind.retain(word) }
 }
 
 /// # Safety
 /// Transfers one owner with the same encoding as `relar_union_retain`, or zero.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_union_release(value: usize) {
-    if value == 0 {
-        return;
-    }
+    let (word, kind) = member(value);
     // SAFETY: the caller transfers the owner selected by the immutable tag.
-    unsafe {
-        if value & 1 == 0 {
-            Rc::decrement_strong_count(value as *const Str);
-        } else {
-            Rc::decrement_strong_count((value & !1) as *const Bytes);
-        }
-    }
+    unsafe { kind.release(word) }
 }
 
 /// # Safety
-/// Borrows the exact rooted payload encoded by `relar_union_retain`; zero is false.
+/// Borrows the exact rooted union member. Zero is false.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_union_truthy(value: usize) -> u32 {
     if value == 0 {
         return 0;
     }
-    // SAFETY: neither exact immutable payload escapes the caller's root.
+    let (word, _) = member(value);
+    // SAFETY: the caller roots the selected member and no user code runs here.
     unsafe {
-        u32::from(if value & 1 == 0 {
-            !(*(value as *const Str)).is_empty()
-        } else {
-            !(*((value & !1) as *const Bytes)).is_empty()
+        u32::from(match value & 7 {
+            0 => !(*(word as *const Str)).is_empty(),
+            1 => !(*(word as *const Bytes)).is_empty(),
+            2 => object(word as *const Object)
+                .0
+                .with(|s| !s.sequence().values.is_empty()),
+            _ => true,
         })
     }
 }
@@ -62,7 +68,7 @@ pub unsafe extern "C" fn relar_union_truthy(value: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::objects::words::WordKind;
+    use std::rc::Rc;
 
     #[test]
     fn tagged_members_keep_exact_owners_and_truth_values() {

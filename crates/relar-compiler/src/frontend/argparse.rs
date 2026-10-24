@@ -91,28 +91,75 @@ fn keywords<'a>(
     Ok(values)
 }
 
+/// Resolve a sealed enum independently of its spelling or the importing module.
+fn enum_class(
+    classes: &Classes,
+    graph: &SourceGraph,
+    module: ModuleId,
+    expr: &ast::Expr,
+) -> Option<usize> {
+    let Binding::Definition(definition) = graph.resolve(module, expr)? else {
+        return None;
+    };
+    let class = classes.ids.get(&definition).copied()?;
+    classes.definitions[class]
+        .enum_members
+        .as_ref()
+        .map(|_| class)
+}
+
 fn option(
     call: &ast::ExprCall,
     graph: &SourceGraph,
     id: ModuleId,
     types: &Types,
+    classes: &Classes,
 ) -> Result<OptionField, String> {
     let module = &graph.modules[id];
-    let [flag] = call.arguments.args.as_ref() else {
-        return Err(module.error(call, "add_argument requires one literal long option"));
+    let Some((flag, rest)) = call.arguments.args.split_first() else {
+        return Err(module.error(
+            call,
+            "add_argument requires a literal option or positional name",
+        ));
     };
     let flag_name = literal(flag, module)?;
-    let Some(dest) = flag_name.strip_prefix("--") else {
-        return Err(module.error(flag, "argparse requires a long option starting with '--'"));
-    };
-    let dest = dest.replace('-', "_");
+    let positional = !flag_name.starts_with('-');
+    let aliases = rest
+        .iter()
+        .map(|expr| literal(expr, module))
+        .collect::<Result<Vec<_>, _>>()?;
+    if positional && (!aliases.is_empty() || flag_name.contains('-')) {
+        return Err(module.error(flag, "argparse positional arguments have one name"));
+    }
+    let spellings = std::iter::once(flag_name).chain(aliases.iter().copied());
+    let dest = if positional {
+        flag_name
+    } else {
+        spellings
+            .clone()
+            .find_map(|s| s.strip_prefix("--"))
+            .unwrap_or(flag_name.trim_start_matches('-'))
+    }
+    .replace('-', "_");
+    let mut seen = HashSet::new();
     if !dest.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
         || !dest.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
-        || flag_name == "--help"
+        || spellings.into_iter().any(|s| {
+            !seen.insert(s)
+                || !positional
+                    && (matches!(s, "-h" | "--help")
+                        || !(s.strip_prefix("--").is_some_and(|n| {
+                            !n.is_empty()
+                                && n.bytes()
+                                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
+                        }) || s.len() == 2
+                            && s.starts_with('-')
+                            && s.as_bytes()[1].is_ascii_alphabetic()))
+        })
     {
         return Err(module.error(
             flag,
-            "argparse option must specify an unambiguous ASCII field name",
+            "argparse arguments require distinct ASCII field names and flags",
         ));
     }
     let kw = keywords(
@@ -122,6 +169,16 @@ fn option(
         ],
         module,
     )?;
+    if positional
+        && ["required", "action", "nargs", "default"]
+            .iter()
+            .any(|k| kw.contains_key(k))
+    {
+        return Err(module.error(
+            call,
+            "ordinary argparse positionals take one required value",
+        ));
+    }
     let mut element = Type::Str;
     if let Some(&ty) = kw.get("type") {
         if graph.resolve(id, ty) == Some(Binding::Intrinsic(Intrinsic::Path)) {
@@ -130,7 +187,7 @@ fn option(
             return Err(module.error(ty, "argparse type must be str or pathlib.Path"));
         }
     }
-    let mut required = false;
+    let mut required = positional;
     if let Some(&expr) = kw.get("required") {
         let ast::Expr::BooleanLiteral(value) = expr else {
             return Err(module.error(expr, "argparse required must be a literal bool"));
@@ -159,29 +216,53 @@ fn option(
         element = Type::Bool;
     }
     let choices = if let Some(&choices) = kw.get("choices") {
-        let items = match choices {
-            ast::Expr::List(list) => list.elts.as_slice(),
-            ast::Expr::Tuple(tuple) => tuple.elts.as_slice(),
-            _ => {
-                return Err(module.error(
-                    choices,
-                    "argparse choices require a literal list or tuple of strings",
-                ));
+        let choices = match choices {
+            ast::Expr::ListComp(comp)
+                if let [clause] = comp.generators.as_slice()
+                    && !clause.is_async
+                    && clause.ifs.is_empty()
+                    && let ast::Expr::Name(target) = &clause.target
+                    && let ast::Expr::Attribute(attr) = &*comp.elt
+                    && attr.attr.as_str() == "value"
+                    && names(&attr.value, target.id.as_str())
+                    && let Some(class) = enum_class(classes, graph, id, &clause.iter) =>
+            {
+                classes.definitions[class]
+                    .enum_members
+                    .as_ref()
+                    .unwrap()
+                    .values
+                    .iter()
+                    .map(|(_, value)| value.as_str())
+                    .collect()
+            }
+            items => {
+                let items = match items {
+                    ast::Expr::List(list) => list.elts.as_slice(),
+                    ast::Expr::Tuple(tuple) => tuple.elts.as_slice(),
+                    _ => return Err(module.error(
+                        choices,
+                        "argparse choices require literal strings or the values of a sealed enum",
+                    )),
+                };
+                items
+                    .iter()
+                    .map(|item| literal(item, module))
+                    .collect::<Result<Vec<_>, _>>()?
             }
         };
-        if element != Type::Str || items.is_empty() {
+        if element != Type::Str || choices.is_empty() {
             return Err(module.error(
-                choices,
+                call,
                 "argparse choices require nonempty string choices and type str",
             ));
         }
-        items
-            .iter()
-            .map(|item| literal(item, module))
-            .collect::<Result<Vec<_>, _>>()?
+        choices
     } else {
         Vec::new()
     };
+    let mut enum_default = None;
+    let enum_default_text;
     let default = match kw.get("default").copied() {
         None if element == Type::Bool => Some("False"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
@@ -190,6 +271,29 @@ fn option(
         }
         Some(ast::Expr::BooleanLiteral(value)) if element == Type::Bool => {
             Some(if value.value { "True" } else { "False" })
+        }
+        Some(ast::Expr::Attribute(attr))
+            if !many
+                && element == Type::Str
+                && let Some(class) = enum_class(classes, graph, id, &attr.value)
+                && let Some(members) = &classes.definitions[class].enum_members
+                && members.plain
+                && let Some(&member) = members.names.get(attr.attr.as_str()) =>
+        {
+            // The parser stores a tagged enum only for an omitted nominal default.
+            // Explicit arguments remain strings, even if they name this same member.
+            let first = classes.definitions[..class]
+                .iter()
+                .filter_map(|c| c.enum_members.as_ref())
+                .map(|members| members.values.len())
+                .sum::<usize>()
+                + 1;
+            enum_default = Some((class, first + member));
+            enum_default_text = format!(
+                "{}.{}",
+                classes.definitions[class].name, members.values[member].0
+            );
+            Some(enum_default_text.as_str())
         }
         Some(ast::Expr::Call(path))
             if !many
@@ -200,12 +304,10 @@ fn option(
         {
             Some(literal(value, module)?)
         }
-        Some(value) => {
-            return Err(module.error(
-                value,
-                "argparse default must be None or a literal of the declared option type",
-            ));
-        }
+        Some(value) => return Err(module.error(
+            value,
+            "argparse default must be None, a fixed enum member, or a literal of the option type",
+        )),
     };
     let path_default = matches!(kw.get("default"), Some(ast::Expr::Call(_)));
     let help = kw
@@ -233,6 +335,10 @@ fn option(
     let optional = !required && default.is_none();
     let ty = if many {
         types.list(element)
+    } else if let Some((class, _)) = enum_default {
+        types
+            .union(&[Type::Str, Type::Enum(class)])
+            .ok_or_else(|| module.error(call, "argparse requires a sealed string/enum field"))?
     } else if !choices.is_empty() {
         let values = choices
             .iter()
@@ -247,7 +353,7 @@ fn option(
         name: dest,
         annotation: flag.clone(),
         ty: if optional { types.optional(ty) } else { ty },
-        option: json!({ "flag": flag_name, "kind": kind, "many": many, "required": required,
+        option: json!({ "flag": flag_name, "aliases": aliases, "enum_default": enum_default.map(|(_, tag)| tag), "kind": kind, "many": many, "required": required,
             "choices": choices, "converter": converter, "default": default, "path_default": path_default, "help": help, "optional": optional }),
     })
 }
@@ -283,6 +389,7 @@ fn namespace_class(
         fields: fields
             .iter()
             .map(|field| Field {
+                module: definition.module,
                 name: field.name.clone(),
                 annotation: field.annotation.clone(),
                 default: None,
@@ -293,6 +400,11 @@ fn namespace_class(
             .collect(),
         methods: Vec::new(),
         method_kinds: Vec::new(),
+        method_origins: Vec::new(),
+        bases: Vec::new(),
+        abstract_methods: Default::default(),
+        toml_hash: false,
+        abc: false,
         dataclass: Some(DataclassOptions {
             init: false,
             eq: true,
@@ -319,30 +431,6 @@ fn assigned_call<'a>(
         return None;
     };
     Some((name, method(&assign.value, receiver, operation)?))
-}
-
-fn read_options(
-    body: &[ast::Stmt],
-    index: &mut usize,
-    builder: &str,
-    graph: &SourceGraph,
-    module: ModuleId,
-    types: &Types,
-    mut names: HashSet<String>,
-) -> Result<Vec<OptionField>, String> {
-    let mut options = Vec::new();
-    while let Some(ast::Stmt::Expr(stmt)) = body.get(*index)
-        && let Some(add) = method(&stmt.value, builder, "add_argument")
-    {
-        let field = option(add, graph, module, types)?;
-        if !names.insert(field.name.clone()) {
-            return Err(graph.modules[module]
-                .error(add, "argparse arguments require unique destination fields"));
-        }
-        options.push(field);
-        *index += 1;
-    }
-    Ok(options)
 }
 
 struct ContainsName<'a>(&'a str, bool);
@@ -466,16 +554,36 @@ impl Parsers {
                         };
                     register(name, &builders)?;
                     builders.push(builder);
+                    let read_options = |builder: &str,
+                                        index: &mut usize,
+                                        mut names: HashSet<String>|
+                     -> Result<Vec<OptionField>, String> {
+                        let mut options = Vec::new();
+                        let mut spellings = HashSet::new();
+                        while let Some(ast::Stmt::Expr(stmt)) = function.body.get(*index)
+                            && let Some(add) = method(&stmt.value, builder, "add_argument")
+                        {
+                            let field = option(add, graph, module_id, types, classes)?;
+                            for value in &add.arguments.args {
+                                let name = literal(value, module)?;
+                                if !spellings.insert(name) {
+                                    return Err(module
+                                        .error(value, "argparse option spellings must be unique"));
+                                }
+                            }
+                            if !names.insert(field.name.clone()) {
+                                return Err(module.error(
+                                    add,
+                                    "argparse arguments require unique destination fields",
+                                ));
+                            }
+                            options.push(field);
+                            *index += 1;
+                        }
+                        Ok(options)
+                    };
                     let mut index = start + 1;
-                    let options = read_options(
-                        &function.body,
-                        &mut index,
-                        builder,
-                        graph,
-                        module_id,
-                        types,
-                        HashSet::new(),
-                    )?;
+                    let options = read_options(builder, &mut index, HashSet::new())?;
                     let mut root_names = options
                         .iter()
                         .map(|field| field.name.clone())
@@ -539,15 +647,8 @@ impl Parsers {
                                 ));
                             }
                             index += 1;
-                            let options = read_options(
-                                &function.body,
-                                &mut index,
-                                child.id.as_str(),
-                                graph,
-                                module_id,
-                                types,
-                                root_names.clone(),
-                            )?;
+                            let options =
+                                read_options(child.id.as_str(), &mut index, root_names.clone())?;
                             children.push(Subcommand {
                                 name: name.into(),
                                 help: help.map(str::to_owned),
@@ -756,7 +857,10 @@ impl Checker<'_> {
         else {
             return None;
         };
-        if !self.classes.parsers.namespace(class)
+        let frozen = self.classes.declarations.definitions[class]
+            .dataclass
+            .is_some_and(|d| d.frozen);
+        if !(self.classes.parsers.namespace(class) || frozen)
             || narrowing::assigned_names(body)
                 .iter()
                 .any(|written| written == name)

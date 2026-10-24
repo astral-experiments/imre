@@ -32,6 +32,9 @@ impl Checker<'_> {
                 "sorted requires one positional iterable",
             ));
         }
+        if let Some(sorted) = self.string_list_sorted_suffix(call, element)? {
+            return Ok(sorted);
+        }
         let mut body = Vec::new();
         let mut clear = Vec::new();
         let input = self.expansion_input(&call.arguments.args[0], element)?;
@@ -515,7 +518,14 @@ impl Checker<'_> {
         }
         let mut value = self.expr(&field.expression)?;
         if field.conversion != ast::ConversionFlag::Repr {
-            value = Self::enum_text(value);
+            value = if matches!(value.ty, Type::Enum(_)) {
+                Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::EnumString, vec![value]),
+                }
+            } else {
+                Self::enum_text(value)
+            };
         }
         if !specification.is_empty() {
             let sign = specification.strip_suffix('d').unwrap_or(&specification);
@@ -573,10 +583,13 @@ impl Checker<'_> {
         if field.conversion != ast::ConversionFlag::Repr
             && matches!(value.ty, Type::Class(_) | Type::CompletedProcess)
         {
-            return Ok(self.record_text(value));
+            return self.record_text(value, field);
+        }
+        if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Document(_)) {
+            return Ok(documents::op(ir::DocumentOp::Repr, Type::Str, vec![value]));
         }
         if field.conversion == ast::ConversionFlag::Repr || self.types.element(value.ty).is_some() {
-            if !dataclass_values::repr_supported(value.ty, self.types) {
+            if !dataclass_values::can_format(value.ty, self.types, self.classes) {
                 return Err(error(
                     self.source,
                     field,

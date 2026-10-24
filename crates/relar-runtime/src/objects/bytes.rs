@@ -530,6 +530,20 @@ pub unsafe extern "C" fn relar_bytes_decode(value: *const Bytes) -> *const Str {
     finish(result, std::ptr::null())
 }
 
+/// Splits a strict UTF-8 decode without copying the whole input.
+///
+/// # Safety
+/// The exact bytes remain rooted through validation and splitting.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_bytes_decode_splitlines(value: *const Bytes) -> *const Object {
+    // SAFETY: the caller roots the immutable bytes through the split.
+    let bytes = unsafe { &*value };
+    let result = std::str::from_utf8(bytes)
+        .map(|text| super::split_lines(text, |range| super::text::owned_string(&text[range])))
+        .map_err(|error| decode_error(bytes, error));
+    finish(result, std::ptr::null())
+}
+
 /// Validates UTF-8 before later comprehension captures and retains the input.
 /// The compiler may then gather characters from these immutable bytes without
 /// allocating an intermediate string. Failure matches ordinary bytes.decode().

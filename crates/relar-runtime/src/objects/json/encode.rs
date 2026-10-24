@@ -299,6 +299,10 @@ impl Encoder<'_> {
         let node = &view.nodes[index];
         match node {
             Node::Null => self.append("null"),
+            Node::Datetime(_) => Err(Error::new(
+                Kind::TypeError,
+                "Object of type datetime is not JSON serializable",
+            )),
             Node::Bool(value) => self.append(if *value { "true" } else { "false" }),
             Node::String(text) => self.string(text),
             Node::Integer(value) => self.integer(value),
@@ -311,7 +315,7 @@ impl Encoder<'_> {
                 self.emit()?;
                 self.begin('[', depth)?;
                 let nonempty = if index == view.index
-                    && let Some(items) = &view.root_items
+                    && let Some(items) = view.nodes.root_items()
                 {
                     // SAFETY: the rooted list cannot mutate during the callback-free encoding.
                     unsafe {

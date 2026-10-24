@@ -12,7 +12,12 @@ const SPACE: &str =
 
 pub(crate) struct FixedPattern {
     pub(crate) source: String,
-    pub(crate) groups: Vec<Option<String>>,
+    pub(crate) groups: Vec<Capture>,
+}
+
+pub(crate) struct Capture {
+    pub(crate) name: Option<String>,
+    pub(crate) required: bool,
 }
 
 pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, String> {
@@ -92,7 +97,13 @@ pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, St
                 output.push(c);
                 can_repeat = c == '.';
             }
-            '$' => return Err("the Python final-newline $ anchor is not supported".into()),
+            '$' if input.peek().is_none() => {
+                // Remember a consumed final newline so the runtime can exclude it
+                // from group zero. Dots are not valid in Python group names.
+                output.push_str(r"(?P<relar.eol>\n)?\z");
+                can_repeat = false;
+            }
+            '$' => return Err("the $ anchor is supported only at the end of a pattern".into()),
             '[' => {
                 class(&mut input, &mut output)?;
                 can_repeat = true;
@@ -139,8 +150,10 @@ pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, St
     let hir = regex_syntax::Parser::new()
         .parse(&output)
         .map_err(|e| e.to_string())?;
-    let mut nodes = vec![&hir];
-    while let Some(node) = nodes.pop() {
+    let mut required = vec![false; groups.len()];
+    required[0] = true;
+    let mut nodes = vec![(&hir, true)];
+    while let Some((node, always)) = nodes.pop() {
         if let HirKind::Repetition(repeat) = node.kind()
             && repeat.max != Some(1)
             && (repeat.sub.properties().minimum_len() == Some(0)
@@ -148,18 +161,35 @@ pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, St
         {
             return Err("repeating a nullable expression or capture is not supported".into());
         }
-        nodes.extend(node.kind().subs());
+        let always = match node.kind() {
+            HirKind::Capture(capture) => {
+                // The hidden final-newline capture is beyond Python's group count.
+                if let Some(required) = required.get_mut(capture.index as usize) {
+                    *required = always;
+                }
+                always
+            }
+            HirKind::Repetition(repeat) => always && repeat.min > 0,
+            HirKind::Alternation(_) => false,
+            _ => always,
+        };
+        nodes.extend(node.kind().subs().iter().map(|sub| (sub, always)));
     }
     let regex = regex::Regex::new(&output).map_err(|e| e.to_string())?;
     if !regex
         .capture_names()
+        .filter(|name| *name != Some("relar.eol"))
         .eq(groups.iter().map(Option::as_deref))
     {
         return Err("regex optimization would change the Python capture groups".into());
     }
     Ok(FixedPattern {
         source: output,
-        groups,
+        groups: groups
+            .into_iter()
+            .zip(required)
+            .map(|(name, required)| Capture { name, required })
+            .collect(),
     })
 }
 
@@ -202,6 +232,10 @@ enum Escape {
 fn escaped(input: &mut Input<'_>, output: &mut String, in_class: bool) -> Result<Escape, String> {
     let c = input.next().ok_or("incomplete regex escape")?;
     let value = match c {
+        'd' | 'D' => {
+            output.push_str(if c == 'd' { r"\p{Nd}" } else { r"\P{Nd}" });
+            return Ok(Escape::Class);
+        }
         's' | 'S' => {
             output.push('[');
             if c == 'S' {
@@ -301,7 +335,14 @@ mod tests {
         let pattern = r"\# \s* E # comment
              (?P<tag>[ #\]]+)";
         let translated = translate(pattern, true).unwrap();
-        assert_eq!(translated.groups, [None, Some("tag".to_string())]);
+        assert_eq!(
+            translated
+                .groups
+                .iter()
+                .map(|g| g.name.as_deref())
+                .collect::<Vec<_>>(),
+            [None, Some("tag")]
+        );
         let regex = Regex::new(&translated.source).unwrap();
         let caps = regex.captures("🌍#\u{1c}\u{85}E #]z").unwrap();
         assert_eq!(&caps["tag"], " #]");
@@ -357,7 +398,7 @@ mod tests {
     #[test]
     fn rejects_semantics_the_engine_does_not_share() {
         for source in [
-            r"a$",
+            r"a$b",
             r"\1",
             r"\w",
             r"\b",

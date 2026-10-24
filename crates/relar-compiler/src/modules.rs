@@ -5,11 +5,15 @@ use std::path::{Path, PathBuf};
 
 use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
-use ruff_text_size::Ranged;
+use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::Session;
 use crate::ir::PosixPathOperation;
 use crate::watch::FileSystem;
+
+mod empty_keywords;
+mod entry_profile;
+mod reachability;
 
 pub(crate) type ModuleId = usize;
 
@@ -52,9 +56,21 @@ pub(crate) enum IntrinsicModule {
     Sys,
     Typing,
     Dataclasses,
+    Difflib,
+    Logging,
+    Abc,
+    Asyncio,
+    Contextlib,
+    Functools,
+    Time,
+    Tomli,
+    TomliW,
+    Shutil,
+    Sysconfig,
+    Signal,
+    Unidiff,
     Pathlib,
     Shlex,
-    Shutil,
     Tempfile,
     Subprocess,
     Os,
@@ -84,12 +100,47 @@ pub(crate) enum Intrinsic {
     ArgparseNamespace,
     RawDescriptionHelpFormatter,
     FutureAnnotations,
+    TypeChecking,
+    GetLogger,
+    BasicConfig,
+    LogLevel(i64),
+    Abc,
+    AbstractMethod,
+    CreateSubprocessExec,
+    RunLoop,
+    NewLoop,
+    SetLoop,
+    EnsureTask,
+    CancelledError,
+    Gather,
+    TaskGroup,
+    Semaphore,
+    ContextManager,
+    FunctionCache,
+    TomlDumps,
+    TomliLoads,
+    TomliLoad,
+    TomliDump,
+    StandardEnum,
+    IsDataclass,
+    Pipe,
+    Devnull,
+    CheckOutput,
+    NullContext,
+    SignalNumber(i64),
+    WallTime,
+    PatchSet,
+    Awaitable,
+    TypeVar,
     Stderr,
     Stdout,
-    SysPlatform,
-    SysExit,
     SysExecutable,
+    SysPlatform,
+    GetSysconfigPath,
+    OsPathExists,
+    SysExit,
     ShlexSplit,
+    Ndiff,
     Final,
     Argv,
     TextIO,
@@ -98,6 +149,8 @@ pub(crate) enum Intrinsic {
     Literal,
     Callable,
     Sequence,
+    Iterable,
+    Iterator,
     UnsupportedOperation,
     GzipOpen,
     Sha256,
@@ -129,6 +182,7 @@ pub(crate) enum Intrinsic {
     TomlDecode,
     Dataclass,
     DataclassField,
+    AsDict,
     SelfType,
     AssertNever,
     Path,
@@ -152,13 +206,25 @@ impl IntrinsicModule {
     fn named(name: &str) -> Option<Self> {
         match name {
             "__future__" => Some(Self::Future),
+            "logging" => Some(Self::Logging),
+            "abc" => Some(Self::Abc),
+            "asyncio" => Some(Self::Asyncio),
+            "contextlib" => Some(Self::Contextlib),
+            "functools" => Some(Self::Functools),
+            "time" => Some(Self::Time),
+            "tomli" => Some(Self::Tomli),
+            "tomli_w" => Some(Self::TomliW),
+            "shutil" => Some(Self::Shutil),
+            "sysconfig" => Some(Self::Sysconfig),
+            "signal" => Some(Self::Signal),
+            "unidiff" => Some(Self::Unidiff),
             "argparse" => Some(Self::Argparse),
             "sys" => Some(Self::Sys),
             "typing" => Some(Self::Typing),
             "dataclasses" => Some(Self::Dataclasses),
+            "difflib" => Some(Self::Difflib),
             "pathlib" => Some(Self::Pathlib),
             "shlex" => Some(Self::Shlex),
-            "shutil" => Some(Self::Shutil),
             "tempfile" => Some(Self::Tempfile),
             "subprocess" => Some(Self::Subprocess),
             "os" => Some(Self::Os),
@@ -202,10 +268,43 @@ impl IntrinsicModule {
         }
         let symbol = match (self, name) {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
+            (Self::Logging, "getLogger") => Intrinsic::GetLogger,
+            (Self::Logging, "basicConfig") => Intrinsic::BasicConfig,
+            (Self::Logging, "DEBUG") => Intrinsic::LogLevel(10),
+            (Self::Logging, "INFO") => Intrinsic::LogLevel(20),
+            (Self::Abc, "ABC") => Intrinsic::Abc,
+            (Self::Abc, "abstractmethod") => Intrinsic::AbstractMethod,
+            (Self::Asyncio, "create_subprocess_exec") => Intrinsic::CreateSubprocessExec,
+            (Self::Asyncio, "run") => Intrinsic::RunLoop,
+            (Self::Asyncio, "new_event_loop") => Intrinsic::NewLoop,
+            (Self::Asyncio, "set_event_loop") => Intrinsic::SetLoop,
+            (Self::Asyncio, "ensure_future") => Intrinsic::EnsureTask,
+            (Self::Asyncio, "CancelledError") => Intrinsic::CancelledError,
+            (Self::Asyncio, "gather") => Intrinsic::Gather,
+            (Self::Asyncio, "TaskGroup") => Intrinsic::TaskGroup,
+            (Self::Asyncio, "Semaphore") => Intrinsic::Semaphore,
+            (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
+            (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
+            (Self::Time, "time") => Intrinsic::WallTime,
+            (Self::Signal, "SIGINT") => Intrinsic::SignalNumber(2),
+            (Self::Signal, "SIGTERM") => Intrinsic::SignalNumber(15),
+            (Self::Unidiff, "PatchSet") => Intrinsic::PatchSet,
+            (Self::CollectionsAbc, "Awaitable") => Intrinsic::Awaitable,
+            (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
+            (Self::Functools, "cache") => Intrinsic::FunctionCache,
+            (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
+            (Self::Tomli, "loads") => Intrinsic::TomliLoads,
+            (Self::Tomli, "load") => Intrinsic::TomliLoad,
+            (Self::TomliW, "dump") => Intrinsic::TomliDump,
+            (Self::Enum, "Enum") => Intrinsic::StandardEnum,
+            (Self::Dataclasses, "is_dataclass") => Intrinsic::IsDataclass,
+            (Self::Subprocess, "PIPE") => Intrinsic::Pipe,
+            (Self::Subprocess, "DEVNULL") => Intrinsic::Devnull,
+            (Self::Subprocess, "check_output") => Intrinsic::CheckOutput,
+            (Self::Typing, "TYPE_CHECKING") => Intrinsic::TypeChecking,
             (Self::Sys, "stderr") => Intrinsic::Stderr,
             (Self::Sys, "stdout") => Intrinsic::Stdout,
             (Self::Sys, "platform") => Intrinsic::SysPlatform,
-            (Self::Sys, "exit") => Intrinsic::SysExit,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "Namespace") => Intrinsic::ArgparseNamespace,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
@@ -213,7 +312,10 @@ impl IntrinsicModule {
             }
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
+            (Self::Sysconfig, "get_path") => Intrinsic::GetSysconfigPath,
+            (Self::Sys, "exit") => Intrinsic::SysExit,
             (Self::Shlex, "split") => Intrinsic::ShlexSplit,
+            (Self::Difflib, "ndiff") => Intrinsic::Ndiff,
             (Self::Typing, "Final") => Intrinsic::Final,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
@@ -224,6 +326,8 @@ impl IntrinsicModule {
             (Self::Typing, "assert_never") => Intrinsic::AssertNever,
             (Self::Typing | Self::CollectionsAbc, "Callable") => Intrinsic::Callable,
             (Self::Typing | Self::CollectionsAbc, "Sequence") => Intrinsic::Sequence,
+            (Self::Typing | Self::CollectionsAbc, "Iterable") => Intrinsic::Iterable,
+            (Self::Typing | Self::CollectionsAbc, "Iterator") => Intrinsic::Iterator,
             (Self::Io, "UnsupportedOperation") => Intrinsic::UnsupportedOperation,
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Hashlib, "sha256") => Intrinsic::Sha256,
@@ -254,6 +358,7 @@ impl IntrinsicModule {
             (Self::RelarToml, "decode") => Intrinsic::TomlDecode,
             (Self::Dataclasses, "dataclass") => Intrinsic::Dataclass,
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
+            (Self::Dataclasses, "asdict") => Intrinsic::AsDict,
             (Self::Pathlib, "Path") => Intrinsic::Path,
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Tempfile, "TemporaryDirectory") => Intrinsic::TemporaryDirectory,
@@ -270,6 +375,7 @@ impl IntrinsicModule {
             (Self::Os, "getenv") => Intrinsic::GetEnv,
             (Self::Os, "getcwd") => Intrinsic::GetCwd,
             (Self::Os, "fspath") => Intrinsic::FsPath,
+            (Self::PosixPath, "exists") => Intrinsic::OsPathExists,
             (Self::PosixPath, "join") => Intrinsic::PosixPath(PosixPathOperation::Join),
             (Self::PosixPath, "basename") => Intrinsic::PosixPath(PosixPathOperation::Basename),
             (Self::PosixPath, "dirname") => Intrinsic::PosixPath(PosixPathOperation::Dirname),
@@ -287,6 +393,8 @@ pub(crate) struct SourceModule {
     pub(crate) source: String,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
+    type_bindings: HashMap<String, Binding>,
+    pub(crate) type_guards: Vec<usize>,
     /// Fixed pattern declarations in the entry module precede ordinary executable statements.
     pub(crate) entry_globals: Vec<usize>,
     /// Executable entry statements, or inactive main guards that still require checking.
@@ -313,6 +421,10 @@ impl SourceModule {
 }
 
 pub(crate) struct SourceGraph {
+    pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
+    pub(crate) entry_profile: entry_profile::Profile,
+    pub(crate) mutable_documents: bool,
+    reachable: Option<reachability::Reachable>,
     pub(crate) inputs: crate::SourceInputs,
     pub(crate) session: Session,
     pub(crate) modules: Vec<SourceModule>,
@@ -325,12 +437,125 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// Keep read-only JSON views in programs that never parse or modify a TOML document.
+    fn uses_mutable_documents(&self) -> bool {
+        use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
+        struct Scan<'a> {
+            graph: &'a SourceGraph,
+            id: usize,
+            found: bool,
+        }
+        impl<'ast> Visitor<'ast> for Scan<'_> {
+            fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
+                if let ast::Stmt::FunctionDef(method) = stmt
+                    && !self.graph.includes_method(self.id, method)
+                    && !self.graph.modules[self.id]
+                        .bindings
+                        .contains_key(method.name.as_str())
+                {
+                    return;
+                }
+                walk_stmt(self, stmt);
+            }
+            fn visit_expr(&mut self, e: &'ast ast::Expr) {
+                if matches!(
+                    self.graph.resolve(self.id, e),
+                    Some(Binding::Intrinsic(
+                        Intrinsic::TomliLoads | Intrinsic::TomliLoad | Intrinsic::TomliDump
+                    ))
+                ) {
+                    self.found = true;
+                } else {
+                    walk_expr(self, e);
+                }
+            }
+        }
+        self.modules.iter().enumerate().any(|(id, m)| {
+            let mut scan = Scan {
+                graph: self,
+                id,
+                found: false,
+            };
+            for (statement, node) in m.parsed.syntax().body.iter().enumerate() {
+                if self.includes(DefinitionId {
+                    module: id,
+                    statement,
+                }) || !matches!(node, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
+                {
+                    scan.visit_stmt(node);
+                }
+            }
+            scan.found
+        })
+    }
+    pub(crate) fn reachable_only(&self) -> bool {
+        self.reachable.is_some()
+    }
+
+    pub(crate) fn includes(&self, definition: DefinitionId) -> bool {
+        self.reachable
+            .as_ref()
+            .is_none_or(|r| r.definitions.contains(&definition))
+    }
+
+    pub(crate) fn inherits_class_method(&self, class: DefinitionId, name: &str) -> bool {
+        self.reachable
+            .as_ref()
+            .is_none_or(|r| r.inherited_class_method(class, name))
+    }
+
+    pub(crate) fn includes_method(&self, module: ModuleId, method: &ast::StmtFunctionDef) -> bool {
+        self.reachable
+            .as_ref()
+            .is_none_or(|r| r.methods.contains(&(module, method.start())))
+    }
+
     pub(crate) fn module_filename(&self, module: ModuleId) -> &Path {
         if module == self.entry {
             &self.entry_filename
         } else {
             &self.modules[module].path
         }
+    }
+
+    /// Source ranges where the reachable profile or supported decorators replace ty diagnostics.
+    pub(crate) fn diagnostic_scopes(&self) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<TextRange>>) {
+        let context_decorators: Vec<Vec<_>> = self
+            .modules
+            .iter()
+            .enumerate()
+            .map(|(id, module)| {
+                module
+                    .parsed
+                    .syntax()
+                    .body
+                    .iter()
+                    .filter_map(|stmt| {
+                        if let ast::Stmt::ClassDef(c) = stmt {
+                            Some(&c.body)
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten()
+                    .filter_map(|stmt| {
+                        let ast::Stmt::FunctionDef(method) = stmt else {
+                            return None;
+                        };
+                        let [decorator] = method.decorator_list.as_slice() else {
+                            return None;
+                        };
+                        (self.resolve(id, &decorator.expression)
+                            == Some(Binding::Intrinsic(Intrinsic::ContextManager)))
+                        .then_some(decorator.range())
+                    })
+                    .collect()
+            })
+            .collect();
+        (
+            self.reachable.as_ref().map(|r| r.skipped.clone()),
+            context_decorators,
+        )
     }
 
     /// The entry needs its own initializer when it declares globals for later definitions.
@@ -344,6 +569,10 @@ impl SourceGraph {
     /// An isolated source API supports sealed imports only; first-party imports
     /// require the path API and its filesystem search root.
     pub(crate) fn single(source: &str) -> Result<Self, String> {
+        Self::single_with_mode(source, false)
+    }
+
+    pub(crate) fn single_with_mode(source: &str, reachable_only: bool) -> Result<Self, String> {
         let mut loader = Loader::new(PathBuf::from("/"), &[], FileSystem::default())?;
         loader.allow_imports = false;
         let filename = PathBuf::from("/input.py");
@@ -355,15 +584,23 @@ impl SourceGraph {
             source,
         )?;
         loader.scan(entry)?;
-        loader.finish(entry, filename)
+        loader.finish(entry, filename, reachable_only, None)
     }
 
+    #[cfg(test)]
     pub(crate) fn load(
         entry: &Path,
         module_root: Option<&Path>,
         extension_paths: &[PathBuf],
     ) -> Result<Self, String> {
-        Self::load_with(entry, module_root, extension_paths, FileSystem::default())
+        Self::load_with(
+            entry,
+            module_root,
+            extension_paths,
+            FileSystem::default(),
+            false,
+            None,
+        )
     }
 
     pub(crate) fn load_with(
@@ -371,6 +608,8 @@ impl SourceGraph {
         module_root: Option<&Path>,
         extension_paths: &[PathBuf],
         mut fs: FileSystem<'_>,
+        reachable_only: bool,
+        profile: Option<&Path>,
     ) -> Result<Self, String> {
         // __file__ preserves the invoked spelling, including symlinks and '..'.
         // Use the canonical path below for import resolution and containment.
@@ -438,12 +677,29 @@ impl SourceGraph {
             }
         }
         loader.scan(id)?;
-        loader.finish(id, filename)
+        loader.finish(id, filename, reachable_only, profile)
     }
 
     /// Resolves namespace paths while leaving local-value attributes to the expression checker.
     pub(crate) fn resolve(&self, module: ModuleId, expression: &ast::Expr) -> Option<Binding> {
         resolve_binding(&self.modules, module, expression)
+    }
+
+    /// A postponed annotation may reference a type imported under TYPE_CHECKING.
+    pub(crate) fn resolve_type(&self, module: ModuleId, expression: &ast::Expr) -> Option<Binding> {
+        match expression {
+            ast::Expr::Name(name) => self.modules[module]
+                .type_bindings
+                .get(name.id.as_str())
+                .copied()
+                .or_else(|| self.resolve(module, expression)),
+            ast::Expr::Attribute(attribute) => match self.resolve_type(module, &attribute.value)? {
+                Binding::Module(target) => self.modules[target].export(attribute.attr.as_str()),
+                Binding::IntrinsicModule(target) => target.symbol(attribute.attr.as_str()),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 }
 
@@ -547,23 +803,71 @@ impl<'a> Loader<'a> {
             root_index: 0,
             archive: None,
             bindings: HashMap::new(),
+            type_bindings: HashMap::new(),
+            type_guards: Vec::new(),
             entry_globals: Vec::new(),
             executable: Vec::new(),
         });
         Ok(id)
     }
 
-    fn finish(mut self, entry: ModuleId, entry_filename: PathBuf) -> Result<SourceGraph, String> {
+    fn finish(
+        mut self,
+        entry: ModuleId,
+        entry_filename: PathBuf,
+        reachable_only: bool,
+        profile: Option<&Path>,
+    ) -> Result<SourceGraph, String> {
+        // Resolve against the completed graph. Type-only imports neither run a
+        // module initializer nor introduce runtime bindings or import cycles.
+        for id in 0..self.modules.len() {
+            let parsed = self.modules[id].parsed.clone();
+            for index in self.modules[id].type_guards.clone() {
+                let ast::Stmt::If(guard) = &parsed.syntax().body[index] else {
+                    unreachable!()
+                };
+                for statement in &guard.body {
+                    let ast::Stmt::ImportFrom(import) = statement else {
+                        continue;
+                    };
+                    let name = self.import_name(id, import)?;
+                    for alias in &import.names {
+                        let binding = self
+                            .by_name
+                            .get(&name)
+                            .and_then(|&target| self.modules[target].export(alias.name.as_str()))
+                            .or_else(|| IntrinsicModule::named(&name)?.symbol(alias.name.as_str()));
+                        if let Some(binding) = binding {
+                            let local = alias.asname.as_ref().unwrap_or(&alias.name);
+                            self.modules[id]
+                                .type_bindings
+                                .insert(local.to_string(), binding);
+                        }
+                    }
+                }
+            }
+        }
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
-        Ok(SourceGraph {
+        let mut graph = SourceGraph {
+            empty_keywords: empty_keywords::EmptyKeywords::default(),
+            entry_profile: profile
+                .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
+                .transpose()?
+                .unwrap_or_default(),
+            mutable_documents: false,
+            reachable: None,
             entry_filename,
             inputs: self.inputs,
             session: self.session,
             modules: self.modules,
             entry,
             initialization: self.initialization,
-        })
+        };
+        graph.reachable = reachable_only.then(|| reachability::Reachable::collect(&graph));
+        graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
+        graph.mutable_documents = graph.uses_mutable_documents();
+        Ok(graph)
     }
 
     fn scan(&mut self, id: ModuleId) -> Result<(), String> {
@@ -581,6 +885,17 @@ impl<'a> Loader<'a> {
                     "native stubs allow type-only imports and fully annotated, required positional-only methods with an ellipsis body"));
             }
             match statement {
+                ast::Stmt::If(guard)
+                    if resolve_binding(&self.modules, id, &guard.test)
+                        == Some(Binding::Intrinsic(Intrinsic::TypeChecking))
+                        && guard.elif_else_clauses.is_empty()
+                        && guard
+                            .body
+                            .iter()
+                            .all(|s| matches!(s, ast::Stmt::ImportFrom(_))) =>
+                {
+                    self.modules[id].type_guards.push(index);
+                }
                 ast::Stmt::FunctionDef(function) => {
                     if executable && id == 0 {
                         return Err(self.modules[id].error(

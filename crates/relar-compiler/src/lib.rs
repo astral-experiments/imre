@@ -15,6 +15,7 @@ mod modules;
 mod narrowing;
 mod range_specialization;
 mod ranges;
+mod record_copies;
 mod reductions;
 #[cfg(test)]
 mod slice_sum_validation;
@@ -29,10 +30,32 @@ use std::path::{Path, PathBuf};
 
 #[derive(Default)]
 pub struct CompileOptions {
+    /// A file describing the branches to include in a closed executable.
+    pub entry_profile: Option<PathBuf>,
+    /// Limit native lowering to definitions a closed entry program can use.
+    pub reachable_only: bool,
     /// Marks generated functions for LLVM's AddressSanitizer pass.
     pub address_sanitizer: bool,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
     pub extension_paths: Vec<PathBuf>,
+}
+
+impl CompileOptions {
+    fn load_graph(
+        &self,
+        path: &Path,
+        module_root: Option<&Path>,
+        filesystem: watch::FileSystem<'_>,
+    ) -> Result<modules::SourceGraph, String> {
+        modules::SourceGraph::load_with(
+            path,
+            module_root,
+            &self.extension_paths,
+            filesystem,
+            self.reachable_only || self.entry_profile.is_some(),
+            self.entry_profile.as_deref(),
+        )
+    }
 }
 
 /// Checks source syntax, ty diagnostics, and Relar's exact type contract.
@@ -43,7 +66,13 @@ pub fn check(source: &str) -> Result<(), String> {
 
 /// Compiles a checked module to LLVM IR; the resulting executable uses no CPython.
 pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String> {
-    let (mut module, _) = checked_lower(&mut modules::SourceGraph::single(source)?)?;
+    if options.entry_profile.is_some() {
+        return Err("an entry profile requires a source file and its module name".to_owned());
+    }
+    let (mut module, _) = checked_lower(&mut modules::SourceGraph::single_with_mode(
+        source,
+        options.reachable_only,
+    )?)?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     llvm::emit(&module, &ranges, options.address_sanitizer)
@@ -80,7 +109,16 @@ impl SourceInputs {
 
 /// Checks a closed first-party module graph, inferring its package root when omitted.
 pub fn check_file(path: &Path, module_root: Option<&Path>) -> Result<(), String> {
-    check_file_with_extensions(path, module_root, &[])
+    check_file_with_options(path, module_root, &CompileOptions::default())
+}
+
+/// Checks a first-party entry using the same reachability policy as its native build.
+pub fn check_file_with_options(
+    path: &Path,
+    module_root: Option<&Path>,
+    options: &CompileOptions,
+) -> Result<(), String> {
+    check_file_with(path, module_root, options, None, Default::default())
 }
 
 /// Checks first-party code against the declarations in explicitly installed extension wheels.
@@ -89,18 +127,24 @@ pub fn check_file_with_extensions(
     module_root: Option<&Path>,
     extension_paths: &[PathBuf],
 ) -> Result<(), String> {
-    check_file_with(path, module_root, extension_paths, None, Default::default())
+    check_file_with_options(
+        path,
+        module_root,
+        &CompileOptions {
+            extension_paths: extension_paths.to_vec(),
+            ..CompileOptions::default()
+        },
+    )
 }
 
 fn check_file_with(
     path: &Path,
     module_root: Option<&Path>,
-    extension_paths: &[PathBuf],
+    options: &CompileOptions,
     cache: Option<&mut analysis::AnalysisCache>,
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
-    let mut graph =
-        modules::SourceGraph::load_with(path, module_root, extension_paths, filesystem)?;
+    let mut graph = options.load_graph(path, module_root, filesystem)?;
     let (module, _) = checked_lower_with(&mut graph, cache)?;
     verify_after(&module, "lowering")
 }
@@ -111,7 +155,7 @@ pub fn compile_file(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
-    let mut graph = modules::SourceGraph::load(path, module_root, &options.extension_paths)?;
+    let mut graph = options.load_graph(path, module_root, Default::default())?;
     let (mut module, _) = checked_lower(&mut graph)?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
@@ -127,6 +171,7 @@ pub fn compile_file(
             .modules
             .into_iter()
             .map(|module| module.path)
+            .chain(options.entry_profile.iter().cloned())
             .collect(),
     })
 }
@@ -158,7 +203,7 @@ impl IncrementalCompiler {
         check_file_with(
             path,
             module_root,
-            &[],
+            &CompileOptions::default(),
             Some(&mut self.cache),
             Default::default(),
         )
@@ -172,7 +217,18 @@ impl IncrementalCompiler {
         module_root: Option<&Path>,
         report: impl FnMut(Result<(), String>),
     ) -> Result<(), String> {
-        self.watch_file_with_extensions(path, module_root, &[], report)
+        self.watch_file_with_options(path, module_root, &CompileOptions::default(), report)
+    }
+
+    /// Watches the file graph used by a check with the given entry profile and import roots.
+    pub fn watch_file_with_options(
+        &mut self,
+        path: &Path,
+        module_root: Option<&Path>,
+        options: &CompileOptions,
+        report: impl FnMut(Result<(), String>),
+    ) -> Result<(), String> {
+        watch::check(&mut self.cache, path, module_root, options, report)
     }
 
     /// Watches the current revision and declarations in installed extension wheels.
@@ -183,7 +239,15 @@ impl IncrementalCompiler {
         extension_paths: &[PathBuf],
         report: impl FnMut(Result<(), String>),
     ) -> Result<(), String> {
-        watch::check(&mut self.cache, path, module_root, extension_paths, report)
+        self.watch_file_with_options(
+            path,
+            module_root,
+            &CompileOptions {
+                extension_paths: extension_paths.to_vec(),
+                ..CompileOptions::default()
+            },
+            report,
+        )
     }
 
     /// Checks the current revision and emits the same codegen units as [`compile_file_units`].
@@ -212,9 +276,11 @@ fn compile_file_units_with(
     options: &CompileOptions,
     cache: Option<&mut analysis::AnalysisCache>,
 ) -> Result<UnitCompilation, String> {
-    let mut graph = modules::SourceGraph::load(path, module_root, &options.extension_paths)?;
-    let (mut module, owners) = checked_lower_with(&mut graph, cache)?;
-    specialize(&mut module)?;
+    let mut graph = options.load_graph(path, module_root, Default::default())?;
+    let (mut module, mut owners) = checked_lower_with(&mut graph, cache)?;
+    for original in specialize(&mut module)? {
+        owners.push(owners[original]);
+    }
     let ranges = ranges::analyze(&module);
     let names = graph
         .modules
@@ -235,7 +301,12 @@ fn compile_file_units_with(
             .iter()
             .filter_map(|m| m.archive.clone())
             .collect(),
-        input_paths: graph.modules.into_iter().map(|m| m.path).collect(),
+        input_paths: graph
+            .modules
+            .into_iter()
+            .map(|m| m.path)
+            .chain(options.entry_profile.iter().cloned())
+            .collect(),
         source_inputs: graph.inputs,
     })
 }
@@ -245,7 +316,10 @@ fn checked_lower(
     graph: &mut modules::SourceGraph,
 ) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
     let lowered = frontend::lower_with_owners(graph)?;
-    graph.session.check()?;
+    let (skipped, decorators) = graph.diagnostic_scopes();
+    graph
+        .session
+        .check_scopes(skipped.as_deref(), &decorators)?;
     Ok(lowered)
 }
 
@@ -260,12 +334,20 @@ fn checked_lower_with(
     let lowered = frontend::lower_with_owners(graph);
     cache.retain_hints(graph, lowered.is_ok());
     let lowered = lowered?;
-    cache.check(&mut graph.session, &graph.inputs)?;
+    let (skipped, decorators) = graph.diagnostic_scopes();
+    cache.check_scopes(
+        &mut graph.session,
+        &graph.inputs,
+        skipped.as_deref(),
+        &decorators,
+    )?;
     Ok(lowered)
 }
 
-fn specialize(module: &mut ir::Module) -> Result<(), String> {
+fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
     verify_after(module, "lowering")?;
+    let reader_origins = record_copies::scalarize(module);
+    verify_after(module, "record copy scalarization")?;
     tuples::scalarize(module);
     verify_after(module, "tuple scalarization")?;
     list_bounds::specialize(module);
@@ -277,7 +359,8 @@ fn specialize(module: &mut ir::Module) -> Result<(), String> {
     reductions::specialize(module);
     verify_after(module, "reduction specialization")?;
     guarded_text::specialize(module);
-    verify_after(module, "guarded text specialization")
+    verify_after(module, "guarded text specialization")?;
+    Ok(reader_origins)
 }
 
 /// Names the first stage that produces malformed IR, before later passes consume it.

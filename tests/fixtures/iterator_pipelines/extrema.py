@@ -24,3 +24,8 @@ try:
     min(10 // observe(n, visits) for n in [2, 0, 7])
 except ZeroDivisionError:
     print(visits[-1])
+
+visits = []
+print(max(observe(1, visits), observe(large, visits), observe(-large, visits)))
+print(min(observe(-large, visits), observe(-large, visits)))
+print(repr(visits))
