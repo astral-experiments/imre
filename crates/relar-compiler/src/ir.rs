@@ -643,6 +643,7 @@ pub(crate) enum ProcessOperation {
     EnvironCopy,
     EnvironGet,
     GetCwd,
+    Which,
     CheckReturnCode,
     /// Reinterprets the same owned exception after a category proof or widening.
     ExceptionView,

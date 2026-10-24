@@ -90,6 +90,7 @@ jobs:
         run: |
           python3 benchmarks/cpython_stdlib/native_hashlib.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-hashlib.json"
           python3 benchmarks/cpython_stdlib/native_paths.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --opt-level 3 --result "$RUNNER_TEMP/cpython-paths.json"
+          python3 benchmarks/cpython_stdlib/native_shutil.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-shutil.json"
           python3 benchmarks/cpython_stdlib/native_json.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json.json"
           python3 benchmarks/cpython_stdlib/native_json_values.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-json-values.json"
           python3 benchmarks/cpython_stdlib/native_os.py --relar target/release/relar --runtime target/release/librelar_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference
