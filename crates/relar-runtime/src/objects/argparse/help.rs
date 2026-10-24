@@ -4,6 +4,7 @@ use std::collections::VecDeque;
 use std::fmt::Write;
 use std::io::IsTerminal;
 
+use super::super::python_whitespace;
 use super::{Kind, OptionSpec, Parser};
 
 pub(super) fn width() -> usize {
@@ -144,7 +145,12 @@ fn word_chunks(word: &str, chunks: &mut VecDeque<String>) {
 
 fn wrap(text: &str, width: usize) -> Vec<String> {
     let mut chunks = VecDeque::new();
-    for word in text.trim().split_ascii_whitespace() {
+    // argparse collapses ASCII regex whitespace, then strips Python whitespace.
+    for word in text
+        .trim_matches(python_whitespace)
+        .split([' ', '\t', '\n', '\r', '\x0b', '\x0c'])
+        .filter(|word| !word.is_empty())
+    {
         if !chunks.is_empty() {
             chunks.push_back(" ".into());
         }
@@ -152,10 +158,15 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
     }
     let mut lines = Vec::new();
     while !chunks.is_empty() {
-        if !lines.is_empty() && chunks.front().is_some_and(|chunk| chunk.trim().is_empty()) {
+        if !lines.is_empty()
+            && chunks
+                .front()
+                .is_some_and(|chunk| chunk.chars().all(python_whitespace))
+        {
             chunks.pop_front();
         }
         let mut line = String::new();
+        let mut last_start = 0;
         let mut size = 0;
         while let Some(chunk) = chunks.front() {
             let length = len(chunk);
@@ -163,6 +174,7 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
                 break;
             }
             size += length;
+            last_start = line.len();
             line.push_str(&chunks.pop_front().unwrap());
         }
         if let Some(chunk) = chunks.front_mut()
@@ -179,12 +191,16 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
                 .rfind('-')
                 .filter(|&pos| prefix[..pos].chars().any(|ch| ch != '-'))
                 .map_or(boundary, |pos| pos + 1);
+            last_start = line.len();
             line.push_str(&chunk[..end]);
             chunk.drain(..end);
         }
-        let line = line.trim_end_matches(' ');
+        // textwrap discards a trailing whitespace-only chunk in its entirety.
+        if line[last_start..].chars().all(python_whitespace) {
+            line.truncate(last_start);
+        }
         if !line.is_empty() {
-            lines.push(line.to_owned());
+            lines.push(line);
         }
     }
     lines
@@ -319,7 +335,7 @@ impl Parser {
             } else {
                 position
             };
-            if help.trim().is_empty() {
+            if help.chars().all(python_whitespace) {
                 if fits {
                     output.push_str(&" ".repeat(padding));
                     output.push('\n');
