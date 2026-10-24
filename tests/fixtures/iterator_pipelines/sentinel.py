@@ -46,6 +46,21 @@ def lambda_scope() -> None:
 
 rebinding()
 lambda_scope()
+
+
+def materialized_before_delete() -> None:
+    error = ValueError("first")
+    flags = [False, True]
+    for word in list(iter(lambda: str(error) if flags.pop() else "stop", "stop")):
+        print(word)
+        try:
+            raise ValueError("second")
+        except ValueError as error:
+            pass
+
+
+materialized_before_delete()
+
 for value in iter(lambda: exhausted(), "end"):
     print(value)
 else:

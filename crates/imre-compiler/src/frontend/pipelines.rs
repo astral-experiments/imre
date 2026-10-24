@@ -23,6 +23,15 @@ pub(super) struct Prepared {
 }
 
 impl Prepared {
+    /// Only reads during a pull can observe an exception binding cleared by the consumer.
+    pub(super) fn reads_on_pull(&self, slot: usize) -> bool {
+        let mut reads = false;
+        ir::walk_expressions(&self.next, &mut |expr| {
+            reads |= matches!(expr.kind, ExprKind::Local(read) if read == slot);
+        });
+        reads
+    }
+
     /// Pulls and binds one owned item, or exits the source loop on exhaustion.
     fn bind_next(next: &mut Vec<Statement>, ready: Expr, value: usize, bindings: Vec<Statement>) {
         next.push(Statement::If(

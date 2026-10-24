@@ -2315,7 +2315,11 @@ impl<'a> Checker<'a> {
     }
 
     /// Loop backedges can observe stores from a previous iteration.
-    fn invalidate_loop_facts(&mut self, body: &[ast::Stmt]) {
+    fn invalidate_loop_facts(
+        &mut self,
+        body: &[ast::Stmt],
+        source: Option<(&pipelines::Prepared, &ast::Expr)>,
+    ) -> Result<(), String> {
         for name in narrowing::assigned_names(body) {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
@@ -2323,9 +2327,19 @@ impl<'a> Checker<'a> {
         }
         for name in narrowing::deleted_names(body) {
             if let Some(slot) = self.names.get(&name) {
+                if let Some((input, node)) = source
+                    && input.reads_on_pull(*slot)
+                {
+                    return Err(error(
+                        self.source,
+                        node,
+                        &format!("iterator may read '{name}' after the loop body deletes it"),
+                    ));
+                }
                 self.assigned.remove(slot);
             }
         }
+        Ok(())
     }
 
     fn assigned_value(&mut self, slot: usize, value: &Expr) {
@@ -2588,7 +2602,13 @@ impl<'a> Checker<'a> {
             input =
                 Iteration::Prepared(self.prepare_iteration(input, loop_.iter.as_ref(), false)?);
         }
-        self.invalidate_loop_facts(&loop_.body);
+        self.invalidate_loop_facts(
+            &loop_.body,
+            match &input {
+                Iteration::Prepared(input) => Some((input, &loop_.iter)),
+                _ => None,
+            },
+        )?;
         for name in narrowing::expression_assignments(&loop_.target) {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
@@ -3331,7 +3351,7 @@ impl<'a> Checker<'a> {
             ast::Stmt::If(branch) => return self.if_chain(branch),
             ast::Stmt::Match(branch) => return self.match_statement(branch),
             ast::Stmt::While(loop_) => {
-                self.invalidate_loop_facts(&loop_.body);
+                self.invalidate_loop_facts(&loop_.body, None)?;
                 for name in narrowing::expression_assignments(&loop_.test) {
                     if let Some(slot) = self.names.get(&name) {
                         self.narrowed.remove_mut(slot);
