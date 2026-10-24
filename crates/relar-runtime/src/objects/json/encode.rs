@@ -303,6 +303,10 @@ impl Encoder<'_> {
             Node::String(text) => self.string(text),
             Node::Integer(value) => self.integer(value),
             Node::Float(value) => self.float(*value),
+            Node::Deferred(array) => {
+                let v = array.view();
+                self.document(v, v.index, depth)
+            }
             Node::Array(children) => {
                 self.emit()?;
                 self.begin('[', depth)?;

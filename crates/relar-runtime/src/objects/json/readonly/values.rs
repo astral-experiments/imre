@@ -11,6 +11,14 @@ impl View {
     }
 
     fn equal_at(&self, a: usize, other: &Self, b: usize) -> bool {
+        if let Node::Deferred(array) = &self.nodes[a] {
+            let v = array.view();
+            return v.equal_at(v.index, other, b);
+        }
+        if let Node::Deferred(array) = &other.nodes[b] {
+            let v = array.view();
+            return self.equal_at(a, v, v.index);
+        }
         let left = &self.nodes[a];
         let right = &other.nodes[b];
         if std::ptr::eq(left, right) {
@@ -75,6 +83,7 @@ impl View {
             }
             Node::Float(f) => output.push_str(&crate::floats::render(*f)),
             Node::String(s) => output.push_str(&string_repr(s)),
+            Node::Deferred(array) => array.view().write_repr(output),
             Node::Array(items) => {
                 output.push('[');
                 for (offset, &item) in items.iter().enumerate() {

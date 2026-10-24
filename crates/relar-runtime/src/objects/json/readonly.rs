@@ -2,6 +2,7 @@
 //! so nested values survive the source array; typed scalar results own only
 //! their native string or integer. No Python object graph or mutable alias is exposed.
 
+mod arrays;
 mod constants;
 mod values;
 
@@ -25,6 +26,7 @@ pub(super) enum Node {
     Float(f64),
     String(Rc<Str>),
     Array(Vec<usize>),
+    Deferred(Rc<arrays::Deferred>),
     Object(Vec<(Str, usize)>),
 }
 
@@ -34,6 +36,7 @@ impl Node {
             Self::Null => false,
             Self::Bool(value) => *value,
             Self::Array(items) => !items.is_empty(),
+            Self::Deferred(array) => array.truth(),
             Self::Integer(value) => value.as_small() != Some(0),
             Self::Float(value) => *value != 0.0,
             Self::String(value) => !value.is_empty(),
@@ -48,7 +51,7 @@ impl Node {
             Self::Integer(_) => "int",
             Self::Float(_) => "float",
             Self::String(_) => "str",
-            Self::Array(_) => "list",
+            Self::Array(_) | Self::Deferred(_) => "list",
             Self::Object(_) => "dict",
         }
     }
@@ -69,7 +72,7 @@ impl Node {
             Self::Object(_) => self
                 .lookup(key)
                 .ok_or_else(|| Error::string_key(Str::new(key))),
-            Self::Array(_) => Err(Error::new(
+            Self::Array(_) | Self::Deferred(_) => Err(Error::new(
                 Kind::TypeError,
                 "list indices must be integers or slices, not str",
             )),
@@ -113,6 +116,13 @@ impl View {
         Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Json(self)))))
     }
 
+    fn expanded(&self) -> &Self {
+        match &self.nodes[self.index] {
+            Node::Deferred(array) => array.view(),
+            _ => self,
+        }
+    }
+
     fn get_receiver(&self) -> Result<&Node, Error> {
         let node = &self.nodes[self.index];
         if matches!(node, Node::Object(_)) {
@@ -153,6 +163,12 @@ impl View {
     }
 
     fn add(&self, other: &Self) -> Result<Self, Error> {
+        if let Node::Deferred(array) = &self.nodes[self.index] {
+            return array.view().add(other);
+        }
+        if let Node::Deferred(array) = &other.nodes[other.index] {
+            return self.add(array.view());
+        }
         let left = &self.nodes[self.index];
         let right = &other.nodes[other.index];
         let integer = |node: &Node| match node {
@@ -242,6 +258,7 @@ impl View {
             (4, _) => Ok(usize::from(
                 matches!(node, Node::String(text) if Some(text.as_ref()) == literal),
             )),
+            (5 | 6, Node::Deferred(array)) => array.view().select(&[], mode, literal),
             (5 | 6, Node::Array(children)) => Ok(if index == self.index {
                 self.array(children)
             } else {
@@ -273,6 +290,7 @@ impl View {
 struct Source<'a> {
     text: &'a str,
     original: Option<&'a str>,
+    shared: Option<(&'a Rc<str>, usize)>,
 }
 
 impl Source<'_> {
@@ -296,15 +314,10 @@ fn push_node(
         b'{' => Node::Object(
             serde_json::Deserializer::from_str(raw).deserialize_map(Fields(nodes, source))?,
         ),
-        b'[' => {
-            let items: Vec<&RawValue> = serde_json::from_str(raw)?;
-            Node::Array(
-                items
-                    .into_iter()
-                    .map(|item| push_node(nodes, item, source))
-                    .collect::<Result<_, _>>()?,
-            )
-        }
+        b'[' => match arrays::Deferred::new(raw, source) {
+            Some(array) => Node::Deferred(array),
+            None => push_array(nodes, raw, source)?,
+        },
         b'"' => Node::String(Rc::new(Str::from(serde_json::from_str::<String>(raw)?))),
         b't' => Node::Bool(true),
         b'f' => Node::Bool(false),
@@ -333,6 +346,20 @@ fn push_node(
     let index = nodes.len();
     nodes.push(node);
     Ok(index)
+}
+
+fn push_array(
+    nodes: &mut Vec<Node>,
+    raw: &str,
+    source: Source<'_>,
+) -> Result<Node, serde_json::Error> {
+    let items: Vec<&RawValue> = serde_json::from_str(raw)?;
+    Ok(Node::Array(
+        items
+            .into_iter()
+            .map(|item| push_node(nodes, item, source))
+            .collect::<Result<_, _>>()?,
+    ))
 }
 
 struct Fields<'a, 'b>(&'a mut Vec<Node>, Source<'b>);
@@ -397,12 +424,14 @@ fn loads(text: &str) -> Result<*const Object, Error> {
     build(Source {
         text,
         original: None,
+        shared: None,
     })
     .or_else(|error| {
         if let Some(patched) = constants::normalize(text, &error) {
             build(Source {
                 text: &patched,
                 original: Some(text),
+                shared: None,
             })
             .map_err(|error| super::syntax::decode_error(text, error))
         } else {
@@ -583,6 +612,7 @@ pub unsafe extern "C" fn relar_json_iter(value: *const Object) -> *const Object 
     // SAFETY: iteration only borrows the immutable document to construct a rooted sequence.
     let result = unsafe {
         with_view(value, |view| {
+            let view = view.expanded();
             let mut items = Words::new(5);
             match &view.nodes[view.index] {
                 Node::Array(children) => return Ok(view.array(children)),
@@ -613,6 +643,7 @@ pub unsafe extern "C" fn relar_json_len(value: *const Object) -> usize {
     // SAFETY: no document borrow escapes the scalar result.
     let result = unsafe {
         with_view(value, |view| {
+            let view = view.expanded();
             let len = match &view.nodes[view.index] {
                 Node::Array(children) => view.root_items.as_ref().map_or_else(
                     || children.len(),
@@ -640,22 +671,30 @@ pub unsafe extern "C" fn relar_json_index(value: *const Object, key: usize) -> *
     // SAFETY: child handles are acquired before their parent borrow ends.
     let result = unsafe {
         with_view(value, |view| {
+            let view = view.expanded();
             let key = Int::borrow(key);
+            let at = || {
+                crate::decode_index(&key).map_err(|_| {
+                    Error::new(
+                        Kind::IndexError,
+                        "cannot fit 'int' into an index-sized integer",
+                    )
+                })
+            };
             if let Some(items) = &view.root_items {
                 return items.0.with(|storage| {
                     let items = storage.sequence();
-                    let index = crate::index(crate::decode_index(&key)?, items.values.len())?;
+                    let index = crate::index(at()?, items.values.len())?;
                     Ok(items.kind.acquire(items.values[index]).into_word() as *const Object)
                 });
             }
             match &view.nodes[view.index] {
                 Node::Array(children) => {
-                    let index = crate::index(crate::decode_index(&key)?, children.len())?;
+                    let index = crate::index(at()?, children.len())?;
                     Ok(View::handle(&view.nodes, children[index]))
                 }
                 Node::String(text) => {
-                    let index = crate::decode_index(&key)
-                        .and_then(|i| crate::index(i, text.chars().count()))
+                    let index = crate::index(at()?, text.chars().count())
                         .map_err(|_| Error::new(Kind::IndexError, "string index out of range"))?;
                     Ok(View::single(Node::String(Rc::new(Str::new(
                         text.chars().nth(index).unwrap().encode_utf8(&mut [0; 4]),

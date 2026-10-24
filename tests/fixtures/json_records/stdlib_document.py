@@ -37,6 +37,11 @@ def item_total_bytes(item: dict[str, Any]) -> int:
     assert isinstance(result, int)
     return result
 
+def bad_default() -> int:
+    print("evaluated default")
+    raise ValueError("bad default")
+
+
 text = '{"total_bytes": 1,"total_bytes": 999999999999999999999999999999, "struct_metadata_bytes": 0, "struct_fields_bytes": 0, "memo_metadata_bytes": 2, "memo_fields_bytes": 3, "structs": [{"metadata_bytes": 91, "fields_bytes": 7}, {"fields_bytes": true}]}'
 with open("report.json", "w") as out:
     out.write(text)
@@ -83,16 +88,12 @@ root[1] = before
 print(json.dumps(root))
 for encoded in ['[Infinity,-Infinity,NaN,0e0,0.000e00,0.0,"NaN"]', '[{},{"n":NaN}]', "NaN"]:
     print(json.dumps(json.loads(encoded)))
-for invalid in ["[NaN,]", "Infinity extra", "[nan]", '["NaN", Infin]']:
+for invalid in ["[NaN,]", "Infinity extra", "[nan]", '["NaN", Infin]',
+                "-NaN", "1NaN", "NaN1", "[0Infinity]", "[Infinity2]"]:
     try:
         json.loads(invalid)
     except ValueError as error:
         print(str(error))
-
-
-def bad_default() -> int:
-    print("evaluated default")
-    raise ValueError("bad default")
 
 
 for row in json.loads("[null,{}]"):
@@ -108,3 +109,10 @@ try:
     json.load(closed)
 except ValueError as error:
     print(str(error))
+
+
+for with_index in ["[]", '"é"']:
+    try:
+        json.loads(with_index)[999999999999999999999999999]
+    except IndexError as error:
+        print(str(error))

@@ -39,6 +39,25 @@ pub(super) fn normalize(text: &str, error: &serde_json::Error) -> Option<String>
                 at += 1;
                 continue;
             };
+            let start = if bytes[at] == b'I' && at > 0 && bytes[at - 1] == b'-' {
+                at - 1
+            } else {
+                at
+            };
+            // Substitution must not join two invalid tokens into one valid number.
+            // In particular, Python accepts -Infinity but rejects -NaN and NaN1.
+            let before = start == 0
+                || matches!(
+                    bytes[start - 1],
+                    b'[' | b',' | b':' | b' ' | b'\t' | b'\n' | b'\r'
+                );
+            let after = bytes
+                .get(at + token.len())
+                .is_none_or(|b| matches!(b, b']' | b'}' | b',' | b' ' | b'\t' | b'\n' | b'\r'));
+            if !before || !after {
+                at += token.len();
+                continue;
+            }
             let output = output.get_or_insert_with(|| bytes.to_vec());
             output[at..at + token.len()].copy_from_slice(token);
             at += token.len();
