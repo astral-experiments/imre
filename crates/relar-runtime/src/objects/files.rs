@@ -210,15 +210,36 @@ pub(super) fn os_error(error: io::Error) -> Error {
     {
         return Error::new(gzip.0, gzip.to_string());
     }
-    let kind = match error.kind() {
+    Error::new(os_error_kind(error.kind()), error.to_string())
+}
+
+fn os_error_kind(kind: io::ErrorKind) -> Kind {
+    match kind {
         io::ErrorKind::AlreadyExists => Kind::FileExistsError,
         io::ErrorKind::NotFound => Kind::FileNotFoundError,
         io::ErrorKind::PermissionDenied => Kind::PermissionError,
         io::ErrorKind::IsADirectory => Kind::IsADirectoryError,
         io::ErrorKind::NotADirectory => Kind::NotADirectoryError,
         _ => Kind::OSError,
+    }
+}
+
+/// Format a POSIX errno without a filename, as in OSError(errno, strerror).
+pub(super) fn errno_error(error: io::Error) -> Error {
+    let Some(errno) = error.raw_os_error() else {
+        return os_error(error);
     };
-    Error::new(kind, error.to_string())
+    let mut buffer = [0; 512];
+    // SAFETY: strerror_r writes a terminated string to this private buffer on success.
+    if unsafe { libc::strerror_r(errno, buffer.as_mut_ptr(), buffer.len()) } != 0 {
+        return os_error(error);
+    }
+    // SAFETY: the successful call initialized a terminated string.
+    let description = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }.to_string_lossy();
+    Error::new(
+        os_error_kind(error.kind()),
+        format!("[Errno {errno}] {description}"),
+    )
 }
 
 /// Opens a UTF-8 text stream: mode 0 reads, mode 1 creates/truncates for writing.
