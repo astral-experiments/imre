@@ -117,6 +117,10 @@ impl Builtin {
                 },
                 PreservesLists,
             ),
+            Self::Logging(operation) => Contract::new(
+                matches!(operation, crate::ir::LogOperation::Configure),
+                PreservesLists,
+            ),
             Self::Process(operation) => match operation {
                 ProcessOperation::RunUntilComplete
                 | ProcessOperation::CloseLoop
@@ -238,9 +242,6 @@ impl Builtin {
             | Self::LiteralStringView
             | Self::RStrip
             | Self::RegexCompile(_)
-            | Self::GetLogger
-            | Self::LogLevel
-            | Self::LogWrite(_)
             | Self::RegexSearch
             | Self::RegexGroupDict
             | Self::RegexMatchStart
@@ -254,7 +255,7 @@ impl Builtin {
             | Self::StringListSortSuffix(_)
             | Self::StringListNonempty
             | Self::Str
-            | Self::StrEnumIdentity
+            | Self::NominalIdentity
             | Self::StrEnumMember { .. }
             | Self::StrEnumName
             | Self::StrEnumValue
@@ -535,6 +536,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_subprocess_error_field"
                 | "imre_print_int"
                 | "imre_print_float"
+                | "imre_log_config"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_print_str"

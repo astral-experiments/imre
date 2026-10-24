@@ -3497,14 +3497,15 @@ impl Emitter<'_, '_> {
             Builtin::StrEnumName | Builtin::StrEnumValue => {
                 self.enum_text(&args[0].value, matches!(builtin, Builtin::StrEnumName))
             }
-            Builtin::StrEnumIdentity => Value {
-                ty: Type::Bool,
-                operand: self.instruction(format!(
-                    "icmp eq i64 {}, {}",
-                    args[0].value.operand, args[1].value.operand
-                )),
-                small_integer: false,
-            },
+            Builtin::NominalIdentity => {
+                let left = self.word(&args[0].value);
+                let right = self.word(&args[1].value);
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp eq i64 {left}, {right}")),
+                    small_integer: false,
+                }
+            }
             Builtin::LiteralStringView
             | Builtin::DictAsBase
             | Builtin::RecordView
@@ -3535,17 +3536,27 @@ impl Emitter<'_, '_> {
             }
             Builtin::Text(operation) => self.text_builtin(*operation, &args, returns),
             Builtin::RegexCompile(pattern) => self.pooled_literal(pattern.as_bytes(), returns),
-            Builtin::GetLogger => self.call("imre_logger_get", returns, &[&args[0].value]),
-            Builtin::LogLevel => {
-                self.void_call("imre_logger_configure", &[&args[0].value]);
-                none()
-            }
-            Builtin::LogWrite(level) => {
-                self.line(format!(
-                    "call void @imre_logger_write(ptr {}, i32 {level}, ptr {})",
-                    args[0].value.operand, args[1].value.operand
-                ));
-                none()
+            Builtin::Logging(operation) => {
+                use crate::ir::LogOperation::*;
+                let name = match operation {
+                    Get => "imre_log_get",
+                    Configure => "imre_log_config",
+                    Name => "imre_log_name",
+                    Parent => "imre_log_parent",
+                    Root => "imre_log_root",
+                    Level => "imre_log_level",
+                    EffectiveLevel => "imre_log_effective_level",
+                    SetLevel => "imre_log_set_level",
+                    Enabled => "imre_log_enabled",
+                    Emit => "imre_log_emit",
+                };
+                let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
+                if returns == Type::None {
+                    self.void_call(name, &values);
+                    none()
+                } else {
+                    self.call(name, returns, &values)
+                }
             }
             Builtin::RegexSearch | Builtin::RegexMatchStart => {
                 let operation = if matches!(builtin, Builtin::RegexMatchStart) {
@@ -5864,9 +5875,16 @@ declare ptr @imre_str_static_literal(ptr, i64)
 declare ptr @imre_regex_compile(ptr, i64)
 declare ptr @imre_regex_search(ptr, ptr)
 declare ptr @imre_regex_match(ptr, ptr)
-declare ptr @imre_logger_get(ptr)
-declare void @imre_logger_configure(i64)
-declare void @imre_logger_write(ptr, i32, ptr)
+declare ptr @imre_log_get(i64)
+declare void @imre_log_config(i64, i64, i64, i1)
+declare ptr @imre_log_name(ptr)
+declare i64 @imre_log_parent(ptr)
+declare ptr @imre_log_root(ptr)
+declare i64 @imre_log_level(ptr)
+declare i64 @imre_log_effective_level(ptr)
+declare void @imre_log_set_level(ptr, i64)
+declare i1 @imre_log_enabled(ptr, i64)
+declare void @imre_log_emit(ptr, i64, ptr)
 declare ptr @imre_regex_group(ptr, i64, i32)
 declare ptr @imre_regex_groupdict(ptr)
 declare i32 @imre_regex_present(ptr, i64, i32)

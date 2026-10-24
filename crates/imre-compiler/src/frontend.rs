@@ -1244,6 +1244,7 @@ fn annotation_at(
         Some(Binding::Intrinsic(Intrinsic::Counter)) => return Ok(types.counter(Type::Str)),
         Some(Binding::Intrinsic(Intrinsic::TextIO)) => return Ok(Type::TextIO),
         Some(Binding::Intrinsic(Intrinsic::BinaryIO)) => return Ok(Type::BinaryIO),
+        Some(Binding::Intrinsic(Intrinsic::Logger)) => return Ok(Type::Logger),
         Some(Binding::Intrinsic(Intrinsic::Path)) => return Ok(Type::Path),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
             return Ok(Type::CompletedProcess);
@@ -4069,18 +4070,23 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
             });
         }
-        if let Some(Binding::Intrinsic(
-            intrinsic @ (Intrinsic::SysExecutable | Intrinsic::SysPlatform),
-        )) = self.resolve(expression)
-        {
-            let operation = match intrinsic {
-                Intrinsic::SysExecutable => Builtin::Process(ir::ProcessOperation::Executable),
-                _ => Builtin::SysPlatform,
-            };
-            return Ok(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Builtin(operation, Vec::new()),
-            });
+        if let Some(Binding::Intrinsic(symbol)) = self.resolve(expression) {
+            match symbol {
+                Intrinsic::LogRoot => return Ok(self.root_logger()),
+                Intrinsic::SysExecutable | Intrinsic::SysPlatform => {
+                    let operation = match symbol {
+                        Intrinsic::SysExecutable => {
+                            Builtin::Process(ir::ProcessOperation::Executable)
+                        }
+                        _ => Builtin::SysPlatform,
+                    };
+                    return Ok(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(operation, Vec::new()),
+                    });
+                }
+                _ => {}
+            }
         }
         let (ty, kind) = match expression {
             ast::Expr::NumberLiteral(value) => match &value.value {
@@ -4364,7 +4370,7 @@ impl<'a> Checker<'a> {
                             self.expr(value)?
                         }
                         [left, right] => {
-                            return self.enum_identity(left, right, compare.ops[0], expression);
+                            return self.nominal_identity(left, right, compare.ops[0], expression);
                         }
                         _ => unreachable!(),
                     };
@@ -4749,6 +4755,9 @@ impl<'a> Checker<'a> {
                         }
                         _ => return self.class_attribute(attribute, class, Some(receiver), None),
                     }
+                }
+                if receiver.ty == Type::Logger {
+                    return self.logger_attribute(receiver, attribute);
                 }
                 if receiver.ty == Type::Path {
                     return self.path_attribute(receiver, attribute);
@@ -5136,36 +5145,18 @@ impl<'a> Checker<'a> {
                 };
                 return self.fspath_argument(path);
             }
+            Some(Binding::Intrinsic(Intrinsic::GetLogger)) => return self.get_logger(call),
+            Some(Binding::Intrinsic(Intrinsic::BasicConfig)) => {
+                return self.configure_logging(call);
+            }
+            Some(Binding::Intrinsic(Intrinsic::LogEmit(level))) => {
+                return self.root_log(level, call);
+            }
             Some(Binding::Intrinsic(Intrinsic::RegexCompile)) => return self.compile_regex(call),
             Some(Binding::Intrinsic(Intrinsic::WallTime)) if call.arguments.is_empty() => {
                 return Ok(Expr {
                     ty: Type::Float,
                     kind: ExprKind::Builtin(Builtin::WallTime, vec![]),
-                });
-            }
-            Some(Binding::Intrinsic(Intrinsic::GetLogger))
-                if let [name] = call.arguments.args.as_ref() =>
-            {
-                self.reject_builtin_keywords(call)?;
-                return Ok(Expr {
-                    ty: Type::Logger,
-                    kind: ExprKind::Builtin(
-                        Builtin::GetLogger,
-                        vec![self.expr_expected(name, Type::Str)?],
-                    ),
-                });
-            }
-            Some(Binding::Intrinsic(Intrinsic::BasicConfig))
-                if call.arguments.args.is_empty()
-                    && let [kw] = call.arguments.keywords.as_ref()
-                    && kw.arg.as_deref() == Some("level") =>
-            {
-                return Ok(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        Builtin::LogLevel,
-                        vec![self.expr_expected(&kw.value, Type::Int)?],
-                    ),
                 });
             }
             Some(Binding::Intrinsic(Intrinsic::Ndiff)) => {
@@ -5372,7 +5363,7 @@ impl<'a> Checker<'a> {
                 return self.regex_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Logger {
-                return self.logging_method(receiver, attribute, call);
+                return self.logger_method(receiver, attribute, call);
             }
             if attribute.attr.as_str() == "format"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
