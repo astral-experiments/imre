@@ -187,6 +187,7 @@ fn emit_program(
         entry_allocas: String::new(),
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
+        tuple_literals: BTreeMap::new(),
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
@@ -316,6 +317,7 @@ struct Emitter<'a, 'module> {
     entry_allocas: String,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
+    tuple_literals: BTreeMap<usize, Vec<String>>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
     integer_literals: BTreeMap<Vec<u8>, usize>,
@@ -2078,15 +2080,7 @@ impl Emitter<'_, '_> {
                 }
                 set
             }
-            ExprKind::Tuple(values) => {
-                let object = self.record(expression.ty);
-                for (field, value) in values.iter().enumerate() {
-                    let value = self.operand(value);
-                    self.set_field(&object, field, &value.value);
-                    self.release_operand(&value);
-                }
-                object
-            }
+            ExprKind::Tuple(values) => self.tuple(expression.ty, values),
             ExprKind::Present(expression_value) => {
                 let value = self.operand(expression_value);
                 let value = self.own_operand(value);
@@ -5407,6 +5401,40 @@ mod tests {
                 .0
                 .contains("call void @relar_object_release(")
         );
+    }
+
+    #[test]
+    fn immutable_tuple_literals_use_lazy_roots() {
+        let llvm = compile(
+            "def frozen() -> tuple[tuple[int, int], str]:\n    return ((-1, 2 + 3), 'x')\ndef dynamic(n: int) -> tuple[int, str]:\n    return (n, 'x')\ndef mutable() -> tuple[list[int], int]:\n    return ([0], 1)\nprint(frozen()[0][0])\nprint(dynamic(2)[0])\nprint(mutable()[0][0])\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            llvm.lines()
+                .filter(|line| line.starts_with("@tuple_literal_"))
+                .count(),
+            2
+        );
+        let cleanup = llvm
+            .split_once("define internal void @relar_clear_literals()")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        assert_eq!(
+            cleanup.matches("call void @relar_record_release(").count(),
+            2
+        );
+        let init = llvm
+            .split_once("define internal void @relar_init_literals()")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        assert!(!init.contains("@relar_record_new("));
     }
 
     #[test]
