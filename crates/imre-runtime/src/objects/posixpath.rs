@@ -7,20 +7,20 @@ use super::exceptions::{Error, Kind, sequence_allocation_failed};
 use super::{Bytes, Str};
 
 enum Spelling<'a> {
-    Text(&'a str),
-    Bytes(&'a [u8]),
+    Text(&'a Str),
+    Bytes(&'a Bytes),
 }
 
 enum OwnedSpelling {
-    Text(Str),
-    Bytes(Bytes),
+    Text(Rc<Str>),
+    Bytes(Rc<Bytes>),
 }
 
 impl OwnedSpelling {
     fn into_raw(self) -> *const () {
         match self {
-            Self::Text(text) => Rc::into_raw(Rc::new(text)).cast(),
-            Self::Bytes(bytes) => Rc::into_raw(Rc::new(bytes)).cast(),
+            Self::Text(text) => Rc::into_raw(text).cast(),
+            Self::Bytes(bytes) => Rc::into_raw(bytes).cast(),
         }
     }
 }
@@ -44,16 +44,36 @@ impl<'a> Spelling<'a> {
         }
     }
 
+    /// Each spelling borrows the payload of its caller's rooted Rc.
+    fn retain(&self) -> OwnedSpelling {
+        // SAFETY: borrow constructed these typed references from the original Rc payloads.
+        unsafe {
+            match self {
+                Self::Text(text) => {
+                    OwnedSpelling::Text(super::acquire_rc(std::ptr::from_ref(*text) as usize))
+                }
+                Self::Bytes(bytes) => {
+                    OwnedSpelling::Bytes(super::acquire_rc(std::ptr::from_ref(*bytes) as usize))
+                }
+            }
+        }
+    }
+
     /// All split offsets are adjacent to ASCII delimiters or at an endpoint.
     fn slice(&self, range: Range<usize>) -> Option<OwnedSpelling> {
+        if range == (0..self.bytes().len()) {
+            return Some(self.retain());
+        }
         match self {
-            Self::Text(s) => Str::try_new(&s[range]).ok().map(OwnedSpelling::Text),
+            Self::Text(s) => Str::try_new(&s[range])
+                .ok()
+                .map(|part| OwnedSpelling::Text(Rc::new(part))),
             Self::Bytes(b) => {
                 let part = &b[range];
                 let mut copy = Vec::new();
                 copy.try_reserve_exact(part.len()).ok()?;
                 copy.extend_from_slice(part);
-                Some(OwnedSpelling::Bytes(copy))
+                Some(OwnedSpelling::Bytes(Rc::new(copy)))
             }
         }
     }
@@ -87,13 +107,7 @@ pub unsafe extern "C" fn imre_posix_join(
         if final_part.bytes().starts_with(b"/") {
             // An absolute final path replaces the whole prefix. Return one owner
             // of that argument without allocating a copy.
-            match final_part {
-                // SAFETY: the spelling tag proves the rooted Rc payload type.
-                Spelling::Text(_) => unsafe { Rc::increment_strong_count(last.cast::<Str>()) },
-                // SAFETY: the spelling tag proves the rooted Rc payload type.
-                Spelling::Bytes(_) => unsafe { Rc::increment_strong_count(last.cast::<Bytes>()) },
-            }
-            return last;
+            return final_part.retain().into_raw();
         }
     }
     let mut output = Vec::new();
