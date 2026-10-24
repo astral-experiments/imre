@@ -3856,7 +3856,11 @@ impl Emitter<'_, '_> {
             Builtin::SetIter => self.call("relar_set_iter", Type::Iterator, &[&args[0].value]),
             Builtin::Append => {
                 self.append(&args[0].value, &args[1].value);
-                none()
+                // The list now owns the item. Drop the argument first so a
+                // temporary receiver destroys its items in reverse insertion order.
+                self.release_operand(&args[1]);
+                self.release_operand(&args[0]);
+                return none();
             }
             Builtin::Pop => {
                 if args[0].value.ty == Type::ListInt {
