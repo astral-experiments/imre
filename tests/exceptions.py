@@ -891,7 +891,7 @@ def main() -> None:
     if args.sanitize:
         flags += ["--sanitize"]
     passed = 0
-    with tempfile.TemporaryDirectory(prefix="relar-exceptions-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-exceptions-") as directory:
         temporary = Path(directory)
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"

@@ -233,7 +233,7 @@ def replay(args):
     assert 1 <= len(records) <= 2
     for path, expected in archive.index["records"].items():
         archive.bind(path, expected)
-    with tempfile.TemporaryDirectory(prefix="relar-evidence-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="imre-evidence-") as temporary:
         source = Path(temporary) / "source"
         archive.sources(source)
         spec = importlib.util.spec_from_file_location("native_tools_archive_audit", archive.directory / "native_tools_audit.py")

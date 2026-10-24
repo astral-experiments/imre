@@ -79,7 +79,7 @@ def main() -> None:
     if any(part.split() != [part] for parts in options for part in parts):
         raise ValueError("the line fixture requires single-token build options")
 
-    with tempfile.TemporaryDirectory(prefix="relar-uv-variant-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="imre-uv-variant-") as tmp:
         root = Path(tmp)
         program, inputs = root / "variant.py", root / "options.txt"
         program.write_text(

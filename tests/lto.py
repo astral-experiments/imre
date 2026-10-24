@@ -47,7 +47,7 @@ def main() -> None:
     python = str(Path(args.python).absolute()) if "/" in args.python else args.python
     flags = ["--runtime", runtime, "--target", args.target, "--clang", clang]
 
-    with tempfile.TemporaryDirectory(prefix="relar-lto-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-lto-") as directory:
         temporary = Path(directory)
         flavor = "ld64.lld" if sys.platform == "darwin" else "ld.lld"
         linker = temporary / "linker with spaces" / flavor

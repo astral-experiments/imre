@@ -153,7 +153,7 @@ def measure(args):
         "cpython": [str(args.python.absolute()), "-B", str(SOURCE)],
         **{
             name: [str(getattr(args, name).resolve())]
-            for name in ("relar", "codon", "rust")
+            for name in ("imre", "codon", "rust")
         },
     }
     result = {
@@ -205,14 +205,14 @@ def measure(args):
                 }
                 for name, values in samples.items()
             }
-            ratio = medians["relar"]["wall_ns"] / medians["rust"]["wall_ns"]
+            ratio = medians["imre"]["wall_ns"] / medians["rust"]["wall_ns"]
             result["cases"][copies] = {
                 **record,
                 "samples": samples,
                 "median": medians,
-                "relar_over_rust": ratio,
+                "imre_over_rust": ratio,
             }
-            print(f"{copies}× Relar / Rust {ratio:.3f}", flush=True)
+            print(f"{copies}× Imre / Rust {ratio:.3f}", flush=True)
     with gzip.GzipFile(filename=str(args.output), mode="wb", mtime=0) as output:
         output.write((json.dumps(result, indent=2) + "\n").encode())
 
@@ -225,7 +225,7 @@ def measure_preview(args):
     manifest = json.loads((HERE / "fixtures/ruff_ecosystem/preview.json").read_text())
     commands = {
         name: [str(getattr(args, name).resolve())]
-        for name in ("relar", "rust", "codon")
+        for name in ("imre", "rust", "codon")
     }
     env = dict(
         os.environ,
@@ -291,11 +291,11 @@ def measure_preview(args):
             }
             for engine, samples in record["samples"].items()
         }
-        record["relar_over_rust"] = (
-            record["median"]["relar"]["wall_ns"] / record["median"]["rust"]["wall_ns"]
+        record["imre_over_rust"] = (
+            record["median"]["imre"]["wall_ns"] / record["median"]["rust"]["wall_ns"]
         )
         print(
-            f"{project['name']}: Relar / Rust {record['relar_over_rust']:.3f}",
+            f"{project['name']}: Imre / Rust {record['imre_over_rust']:.3f}",
             flush=True,
         )
     with gzip.GzipFile(filename=str(args.output), mode="wb", mtime=0) as output:
@@ -309,13 +309,13 @@ def main():
     for name in ("old-ruff", "new-ruff", "checkouts", "output"):
         cap.add_argument("--" + name, type=Path, required=True)
     bench = subs.add_parser("bench")
-    for name in ("captures", "relar", "codon", "rust", "output"):
+    for name in ("captures", "imre", "codon", "rust", "output"):
         bench.add_argument("--" + name, type=Path, required=True)
     bench.add_argument("--python", type=Path, default=Path(sys.executable))
     bench.add_argument("--cpu", type=int, required=True)
     bench.add_argument("--rounds", type=int, default=4)
     preview = subs.add_parser("preview")
-    for name in ("captures", "relar", "codon", "rust", "output"):
+    for name in ("captures", "imre", "codon", "rust", "output"):
         preview.add_argument("--" + name, type=Path, required=True)
     preview.add_argument(
         "--python",

@@ -1,4 +1,4 @@
-"""Compare unchanged incremental-planner Python with Relar and two Rust modes."""
+"""Compare unchanged incremental-planner Python with Imre and two Rust modes."""
 
 import argparse
 import hashlib
@@ -17,7 +17,7 @@ REFERENCE = HERE / "reference/incremental_planner"
 helpers = SimpleNamespace(**runpy.run_path(str(HERE / "dependency_compare.py")))
 shared = helpers.shared
 validator = SimpleNamespace(**runpy.run_path(str(HERE / "incremental_validate.py")))
-ENGINES = ("cpython", "relar", "rust_bigint", "rust_i64")
+ENGINES = ("cpython", "imre", "rust_bigint", "rust_i64")
 ORDERS = tuple(
     tuple(ENGINES[(value + shift) % 4] for value in (0, 1, 3, 2)) for shift in range(4)
 )
@@ -111,8 +111,8 @@ def benchmark(args: argparse.Namespace) -> dict:
     if args.target is not None:
         flags += ["--target", args.target]
         recorded_flags += ["--target", args.target]
-    if args.relar_build_record is not None:
-        inputs["relar_build_record"] = args.relar_build_record.resolve(strict=True)
+    if args.imre_build_record is not None:
+        inputs["imre_build_record"] = args.imre_build_record.resolve(strict=True)
     python = shared.executable(args.python)
     python_info = json.loads(
         shared.run([python, "-I", "-c", shared.PYTHON_INFO], b"", args.timeout)[
@@ -142,23 +142,23 @@ def benchmark(args: argparse.Namespace) -> dict:
         *(source_root / name for name in rust_sources),
         *(REFERENCE / name for name in rust_sources),
     ]
-    relar_record = None
-    if args.relar_build_record is not None:
-        original = json.loads(inputs["relar_build_record"].read_text())
+    imre_record = None
+    if args.imre_build_record is not None:
+        original = json.loads(inputs["imre_build_record"].read_text())
         if not {hashes["compiler"], hashes["runtime"]} <= set(
             original.get("sha256", {}).values()
         ):
             raise ValueError(
-                "Relar build record does not identify the selected compiler/runtime"
+                "Imre build record does not identify the selected compiler/runtime"
             )
         for name, digest in original.get("source_sha256", {}).items():
             path = ROOT / name
             if shared.sha256(path) != digest:
-                raise ValueError(f"Relar build source changed: {name}")
-            inputs[f"relar_source:{name}"] = path
-            hashes[f"relar_source:{name}"] = digest
+                raise ValueError(f"Imre build source changed: {name}")
+            inputs[f"imre_source:{name}"] = path
+            hashes[f"imre_source:{name}"] = digest
             protected.append(path)
-        relar_record = {
+        imre_record = {
             key: original[key]
             for key in (
                 "git_head",
@@ -225,7 +225,7 @@ def benchmark(args: argparse.Namespace) -> dict:
     hashes.update({name: shared.sha256(inputs[name]) for name in ("binary", "llvm_ir")})
     commands = {
         "cpython": validator.python_command(str(inputs["python"])),
-        "relar": [str(binary)],
+        "imre": [str(binary)],
         "rust_bigint": [str(inputs["rust_bigint"])],
         "rust_i64": [str(inputs["rust_i64"])],
     }
@@ -267,9 +267,9 @@ def benchmark(args: argparse.Namespace) -> dict:
         ratios = {
             f"{a}_over_{b}": medians[a] / medians[b]
             for a, b in (
-                ("cpython", "relar"),
-                ("relar", "rust_bigint"),
-                ("relar", "rust_i64"),
+                ("cpython", "imre"),
+                ("imre", "rust_bigint"),
+                ("imre", "rust_i64"),
                 ("cpython", "rust_bigint"),
                 ("cpython", "rust_i64"),
                 ("rust_bigint", "rust_i64"),
@@ -329,9 +329,9 @@ def benchmark(args: argparse.Namespace) -> dict:
             for name in ("binary", "llvm_ir", "rust_bigint", "rust_i64")
         },
         "rust_build_record": rust_record,
-        "relar_build_provenance": relar_record,
+        "imre_build_provenance": imre_record,
         "tools": {
-            "relar": compiler_version,
+            "imre": compiler_version,
             "clang": clang_version,
             "lto_linker": linker_version,
             "cpython": python_info,
@@ -393,7 +393,7 @@ def benchmark(args: argparse.Namespace) -> dict:
                     validator.BOOTSTRAP,
                     "<package-root>",
                 ],
-                "relar": ["<relar-binary>"],
+                "imre": ["<imre-binary>"],
                 "rust_bigint": ["<rust-bigint-binary>"],
                 "rust_i64": ["<rust-i64-binary>"],
             },
@@ -408,7 +408,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", type=Path, required=True)
     parser.add_argument("--runtime", type=Path, required=True)
-    parser.add_argument("--relar-build-record", type=Path)
+    parser.add_argument("--imre-build-record", type=Path)
     parser.add_argument("--rust-bigint", type=Path, required=True)
     parser.add_argument("--rust-i64", type=Path, required=True)
     parser.add_argument("--rust-build-record", type=Path, required=True)

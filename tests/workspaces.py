@@ -181,7 +181,7 @@ def main() -> None:
     assert version.stdout.strip() == b"True", "workspace validation requires a CPython 3.14+ oracle; pass --python"
     assert os.geteuid() != 0, "permission cases require an unprivileged user"
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-workspaces-") as name:
+    with tempfile.TemporaryDirectory(prefix="imre-workspaces-") as name:
         temporary = Path(name)
         for label, source in REJECTED.items():
             path = temporary / f"reject-{label}.py"
@@ -216,10 +216,10 @@ def main() -> None:
                                    "-o", str(binary), "--opt-level", level, *flags], temporary)
                 assert built.returncode == 0 and not built.stderr, (label, level, built.stderr.decode())
                 for scenario in scenarios:
-                    native_dir = project / f"relar-O{level}-{scenario}"
+                    native_dir = project / f"imre-O{level}-{scenario}"
                     seed(native_dir)
                     actual = run([str(binary)], native_dir, scenario)
-                    files.check_result(actual, None, f"Relar {label}/{scenario} O{level}")
+                    files.check_result(actual, None, f"Imre {label}/{scenario} O{level}")
                     stdout, expected = references[scenario]
                     assert actual.stdout == stdout, (label, scenario, level, actual.stdout, stdout)
                     observed = snapshot(native_dir)

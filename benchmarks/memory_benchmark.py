@@ -1,4 +1,4 @@
-"""Compare real ty memory reports on Relar, typed CPython, upstream CPython and Rust."""
+"""Compare real ty memory reports on Imre, typed CPython, upstream CPython and Rust."""
 
 import argparse
 import itertools
@@ -89,12 +89,12 @@ def engine_orders(commands):
 
 
 def commands_for(prepared, paths):
-    return {"relar": [prepared["binary"]], "port": validator.python_command(str(paths["python"])),
+    return {"imre": [prepared["binary"]], "port": validator.python_command(str(paths["python"])),
             "original": validator.original_command(str(paths["python"])), "rust": [str(paths["rust"])]}
 
 
 def compute_commands_for(prepared, paths):
-    return {"relar": [prepared["compute_binary"]], "port": validator.compute_python_command(str(paths["python"])),
+    return {"imre": [prepared["compute_binary"]], "port": validator.compute_python_command(str(paths["python"])),
             "original": validator.compute_original_command(str(paths["python"])), "rust": [str(paths["rust"]), "compute"]}
 
 
@@ -141,7 +141,7 @@ def measure(workload, value, commands, directory, args, compute=False, prepared_
     summaries = {name: shared.summary(phases["samples"], name) for name in commands}
     return {**workload, "engine_orders": orders, "gates": gates, **phases, "summary": summaries,
             **{f"{left}_over_{right}": summaries[left]["median_seconds"] / summaries[right]["median_seconds"]
-               for left, right in (("original", "relar"), ("port", "relar"), ("relar", "rust"), ("original", "rust"), ("port", "rust"))
+               for left, right in (("original", "imre"), ("port", "imre"), ("imre", "rust"), ("original", "rust"), ("port", "rust"))
                if left in summaries and right in summaries}}
 
 
@@ -176,9 +176,9 @@ def source_paths(args):
     assert rust_record["llvm_budget"] == (1000 if args.lto_linker else None)
     if args.lto_linker:
         paths["lto_linker"] = args.lto_linker.resolve(strict=True)
-    if args.relar_build_record:
-        paths["relar_build_record"] = args.relar_build_record.resolve(strict=True)
-        build = json.loads(paths["relar_build_record"].read_text())
+    if args.imre_build_record:
+        paths["imre_build_record"] = args.imre_build_record.resolve(strict=True)
+        build = json.loads(paths["imre_build_record"].read_text())
         assert build["sha256"]["compiler"] == shared.sha256(paths["compiler"])
         key = "thinlto_runtime" if args.lto_linker else "normal_runtime"
         assert build["sha256"][key] == shared.sha256(paths["runtime"])
@@ -253,7 +253,7 @@ def argument_parser():
     parser.add_argument("--python", default="python3")
     parser.add_argument("--clang", default="clang-18")
     parser.add_argument("--rust-build-record", type=Path)
-    parser.add_argument("--relar-build-record", type=Path)
+    parser.add_argument("--imre-build-record", type=Path)
     parser.add_argument("--target")
     parser.add_argument("--lto-linker", type=Path)
     parser.add_argument("--prepare-only", action="store_true")
@@ -315,10 +315,10 @@ def main():
                   "directory_layouts": args.directory_layouts, "compute_rounds": args.compute_rounds,
                   "engine_orders": list(engine_orders(commands)), "python_environment": {"PYTHONHASHSEED": "0", "PYTHONPATH": "", "PYTHONHOME": None},
                   "method": "Whole-process time: startup, directory scanning when selected, all complete report reads and typed JSON parses, comparison, stable ranking, Markdown rendering, and sibling staging/write/close/atomic replacement. CPython calls the unchanged upstream comparison CLI through an atomic-output adapter; it also echoes the report to stderr in file mode, which is checked completely. Full output/filesystem validation is outside timing. Four measured Williams orders balance positions and directed within-round neighbors; cross-round transitions and warmups are not balanced. Empty-report controls are reported without subtraction and exclude nonempty parsing/comparison costs.",
-                  "comparison": "Relar and the typed CPython port use concrete report/item objects and typed JSON decoding. The CPython comparison adapter uses unchanged upstream parsing, dataclasses, dynamic JSON dictionaries, and rendering with matching atomic publication. Rust deserializes contiguous native i64 item records, checks arithmetic, and retries from retained input with arbitrary-precision integers on overflow; final row formatting preserves exact integer division rounding. Both ports deterministically retain first-appearance order for equal changes; upstream set-order ties are verified as equivalent and PYTHONHASHSEED=0 pins complete output. Scaled workloads are explicit distinct-name copies of captured reports; the application workloads execute exactly once per process. Separately labeled compute workloads repeat the same parse/compare/render pipeline over preloaded text.",
+                  "comparison": "Imre and the typed CPython port use concrete report/item objects and typed JSON decoding. The CPython comparison adapter uses unchanged upstream parsing, dataclasses, dynamic JSON dictionaries, and rendering with matching atomic publication. Rust deserializes contiguous native i64 item records, checks arithmetic, and retries from retained input with arbitrary-precision integers on overflow; final row formatting preserves exact integer division rounding. Both ports deterministically retain first-appearance order for equal changes; upstream set-order ties are verified as equivalent and PYTHONHASHSEED=0 pins complete output. Scaled workloads are explicit distinct-name copies of captured reports; the application workloads execute exactly once per process. Separately labeled compute workloads repeat the same parse/compare/render pipeline over preloaded text.",
                   "input_guards_passed": False,
                   "startup_control": measure(control, control_value, commands, artifact / control["label"], args), "workloads": [], "compute_workloads": [],
-                  "compute_method": "Separate entrypoints preload every named JSON text once, then repeat decoding all reports, matching/ranking projects, comparison, and Markdown rendering. Repeated compute workloads time Relar, upstream CPython, and Rust using all six engine permutations; the typed CPython port is also checked during preparation. Each repetition contributes the complete report's Unicode character count to a checksum; the checksum and full last report are validated outside timing. Rust black-boxes borrowed input and checksum contributions. Upstream CPython uses its unchanged dataclasses/render_summary over JSON decoded from preloaded text. Whole-process time divided by repetitions is an amortized compute estimate including preload/startup/final output, not a pure in-process timer. A zero-repetition preload control is reported without subtraction."}
+                  "compute_method": "Separate entrypoints preload every named JSON text once, then repeat decoding all reports, matching/ranking projects, comparison, and Markdown rendering. Repeated compute workloads time Imre, upstream CPython, and Rust using all six engine permutations; the typed CPython port is also checked during preparation. Each repetition contributes the complete report's Unicode character count to a checksum; the checksum and full last report are validated outside timing. Rust black-boxes borrowed input and checksum contributions. Upstream CPython uses its unchanged dataclasses/render_summary over JSON decoded from preloaded text. Whole-process time divided by repetitions is an amortized compute estimate including preload/startup/final output, not a pure in-process timer. A zero-repetition preload control is reported without subtraction."}
         compute_commands = {name: command for name, command in compute_commands_for(prepared, paths).items() if name != "port"}
         for workload, value in workloads(args.copies, args.directory_layouts):
             measured = measure(workload, value, commands, artifact / workload["label"], args)
@@ -326,7 +326,7 @@ def main():
                                                      for name, summary in measured["summary"].items()}
             record["workloads"].append(measured)
             args.output.write_text(json.dumps(record, indent=2) + "\n")
-            print(f"{measured['label']}: original/Relar={measured['original_over_relar']:.3f}, typed/Relar={measured['port_over_relar']:.3f}, Relar/Rust={measured['relar_over_rust']:.3f}", flush=True)
+            print(f"{measured['label']}: original/Imre={measured['original_over_imre']:.3f}, typed/Imre={measured['port_over_imre']:.3f}, Imre/Rust={measured['imre_over_rust']:.3f}", flush=True)
             if workload.get("mode") == "full":
                 control_value = validator.compute_case(value, 0)
                 control_description = {**workload, "label": control_value.label, "arguments": list(control_value.arguments), "rounds": 0,
@@ -340,7 +340,7 @@ def main():
                 computed["preload_control_fraction"] = {name: preload["summary"][name]["median_seconds"] / summary["median_seconds"] for name, summary in computed["summary"].items()}
                 record["compute_workloads"].append(computed)
                 args.output.write_text(json.dumps(record, indent=2) + "\n")
-                print(f"{computed['label']}: original/Relar={computed['original_over_relar']:.3f}, Relar/Rust={computed['relar_over_rust']:.3f}", flush=True)
+                print(f"{computed['label']}: original/Imre={computed['original_over_imre']:.3f}, Imre/Rust={computed['imre_over_rust']:.3f}", flush=True)
     assert hashes == {name: shared.sha256(path) for name, path in paths.items()}
     verify(prepared, paths, hashes, args, revision, dirty)
     if args.prepared_record:

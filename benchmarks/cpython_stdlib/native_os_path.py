@@ -1,4 +1,4 @@
-"""Run unmodified CPython POSIX lexical tests with native Relar for each path operation."""
+"""Run unmodified CPython POSIX lexical tests with native Imre for each path operation."""
 import argparse
 import ast
 from functools import partial
@@ -61,7 +61,7 @@ def invoke(program, calls, name, *args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for option in ("relar", "runtime", "clang", "result"):
+    for option in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + option, type=Path, required=True)
     parser.add_argument("--cpython-source", type=Path)
     args = parser.parse_args()
@@ -81,7 +81,7 @@ def main():
         work = Path(directory)
         source, program = work / "driver.py", work / "driver"
         source.write_text(driver_source())
-        subprocess.run([args.relar.resolve(), "build", source, "-o", program, "--no-cache",
+        subprocess.run([args.imre.resolve(), "build", source, "-o", program, "--no-cache",
                         "--opt-level", "3", "--runtime", args.runtime.resolve(),
                         "--clang", args.clang.resolve()], cwd=work, check=True, timeout=120)
         for name, expected in METHODS.items():

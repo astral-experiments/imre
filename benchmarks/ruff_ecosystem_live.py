@@ -46,7 +46,7 @@ def freeze(sources, out):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--python", type=Path, default=Path(sys.executable))
-    p.add_argument("--relar", type=Path)
+    p.add_argument("--imre", type=Path)
     p.add_argument("--old-ruff", type=Path, required=True)
     p.add_argument("--new-ruff", type=Path, required=True)
     p.add_argument("--cache", type=Path, required=True)
@@ -73,9 +73,9 @@ def main():
     command.extend(["check", args.old_ruff.resolve(), args.new_ruff.resolve()])
     arms = {"cpython": [args.python.absolute(), "-B", "-m", "ruff_ecosystem"]}
     if not args.cpython_only:
-        if args.relar is None:
-            p.error("--relar is required to compare both engines")
-        arms["relar"] = [args.relar.resolve()]
+        if args.imre is None:
+            p.error("--imre is required to compare both engines")
+        arms["imre"] = [args.imre.resolve()]
     samples = {arm: [] for arm in arms}
     for round_ in range(args.rounds):
         outputs = {}
@@ -92,7 +92,7 @@ def main():
             for project, revision in revisions.items():
                 if git(cache / project, "rev-parse", "HEAD") != revision:
                     raise ValueError(f"{project} moved during {arm}")
-        if "relar" in outputs and outputs["relar"] != outputs["cpython"]:
+        if "imre" in outputs and outputs["imre"] != outputs["cpython"]:
             raise ValueError(f"live reports differ in round {round_ + 1}; reports and stderr were saved to {out}")
     evidence = {"cpu": args.cpu, "force_preview": args.force_preview, "samples": samples, "revisions": revisions, "ruff": [
         subprocess.check_output([exe, "--version"], text=True).strip()

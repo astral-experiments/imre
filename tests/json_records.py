@@ -15,7 +15,7 @@ assignments.BOOTSTRAP = (
     + assignments.BOOTSTRAP
 )
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "json_records"
-IMPORT = "from relar.json import decode\n"
+IMPORT = "from imre.json import decode\n"
 ITEM = "class Item:\n    value: int\n    def __init__(self, value: int) -> None:\n        self.value = value\n"
 
 REJECTED = {
@@ -31,7 +31,7 @@ REJECTED = {
     "json_comparison": 'import json\nrows = json.loads("[]")\nprint(rows[0] == rows[1])\n',
     "json_instances": 'import json\nfor value in json.loads("[]"):\n    print(isinstance(value, str))\n',
     "json_options": 'import json\njson.loads("[]", strict=False)\n',
-    "unknown_intrinsic": "from relar.json import loads\n",
+    "unknown_intrinsic": "from imre.json import loads\n",
     "bytes_input": IMPORT + ITEM + 'item = decode(b"{}", Item)\n',
     "missing_schema": IMPORT + 'item = decode("{}")\n',
     "extra_argument": IMPORT + ITEM + 'item = decode("{}", Item, False)\n',
@@ -79,13 +79,13 @@ for name, expression in {
     "encode_unknown_keyword": 'encode(1, sort_keys=True)',
     "encode_missing_value": 'encode()',
 }.items():
-    REJECTED[name] = "from relar.json import encode\n" + expression + "\n"
+    REJECTED[name] = "from imre.json import encode\n" + expression + "\n"
 
 IMPORTED_REJECTIONS = {
     "intrinsic_shadow": {
-        "main.py": "from relar.json import decode\n",
-        "relar/__init__.py": "",
-        "relar/json.py": "def decode(text: str, schema: int) -> int:\n    return schema\n",
+        "main.py": "from imre.json import decode\n",
+        "imre/__init__.py": "",
+        "imre/json.py": "def decode(text: str, schema: int) -> int:\n    return schema\n",
     },
     "schema_namespace_shadow": {
         "main.py": IMPORT + 'import models as cls\n' + ITEM + '    @classmethod\n    def parse(cls, text: str) -> cls.Item:\n        return decode(text, cls.Item)\n',

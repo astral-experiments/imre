@@ -70,7 +70,7 @@ def main() -> None:
     if args.sanitize:
         flags += ["--sanitize"]
     checks = 0
-    with tempfile.TemporaryDirectory(prefix="relar-text-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-text-") as directory:
         temporary = Path(directory)
         for source in sorted(FIXTURES.glob("*.py")):
             expected = run([args.python, "-I", "-B", str(source)], temporary)

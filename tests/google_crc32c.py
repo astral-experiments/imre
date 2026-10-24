@@ -15,7 +15,7 @@ import pytest
 UPSTREAM = Path(__file__).resolve().parents[1] / "examples/google_crc32c/upstream"
 
 
-class RelarLeaf:
+class ImreLeaf:
     """Forward only the two C methods. Upstream retains its own Checksum classes."""
 
     def __init__(self, binary):
@@ -55,24 +55,24 @@ class TestResults:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("backend", choices=("cpython", "relar", "fallback"))
+    parser.add_argument("backend", choices=("cpython", "imre", "fallback"))
     parser.add_argument(
         "--cpython-package", type=Path, help="root containing the CPython accelerator"
     )
     parser.add_argument(
-        "--relar-binary", type=Path, help="compiled examples/google_crc32c/driver.py"
+        "--imre-binary", type=Path, help="compiled examples/google_crc32c/driver.py"
     )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     sys.dont_write_bytecode = True
     package = args.cpython_package if args.backend == "cpython" else UPSTREAM
-    if package is None or (args.backend == "relar" and args.relar_binary is None):
+    if package is None or (args.backend == "imre" and args.imre_binary is None):
         parser.error("supply the built artifact for the selected backend")
     sys.path.insert(0, str(package.resolve()))
     bridge = None
-    if args.backend == "relar":
-        bridge = RelarLeaf(args.relar_binary.resolve())
+    if args.backend == "imre":
+        bridge = ImreLeaf(args.imre_binary.resolve())
         leaf = ModuleType("google_crc32c._crc32c")
         leaf.value = lambda data: bridge.call("value", 0, data)
         leaf.extend = lambda crc, data: bridge.call("extend", crc, data)
@@ -129,7 +129,7 @@ def main():
         bridge.close()
         outcome["native_counts_acknowledged"] = True
         public = subprocess.check_output(
-            [args.relar_binary.resolve(), "public"], text=True
+            [args.imre_binary.resolve(), "public"], text=True
         )
         assert public == "public-api-ok\n"
         outcome["native_public_facade"] = "passed"

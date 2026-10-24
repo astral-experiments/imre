@@ -55,7 +55,7 @@ def validate(mode, reference, actual):
         ):
             continue
         raise AssertionError(
-            f"{mode} {case}\nCPython {reference[case]}\nRelar   {actual[case]}"
+            f"{mode} {case}\nCPython {reference[case]}\nImre   {actual[case]}"
         )
 
     def witness(case, expected, mutated):
@@ -90,11 +90,11 @@ def validate(mode, reference, actual):
 def main():
     runtime = Path(
         os.environ.get(
-            "RELAR_RUNTIME", TESTS.parent / "target/debug/librelar_runtime.a"
+            "IMRE_RUNTIME", TESTS.parent / "target/debug/libimre_runtime.a"
         )
     )
     assert runtime.is_file(), (
-        f"Build relar-runtime or set RELAR_RUNTIME to its absolute path: {runtime}"
+        f"Build imre-runtime or set IMRE_RUNTIME to its absolute path: {runtime}"
     )
     reference = observe([sys.executable, TESTS / "fixtures/bounded_slice_sum.py"])
     libraries = (

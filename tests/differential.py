@@ -1,4 +1,4 @@
-"""Run the same source on CPython and Relar, including semantic edge cases."""
+"""Run the same source on CPython and Imre, including semantic edge cases."""
 
 import argparse
 import os
@@ -130,7 +130,7 @@ def main() -> None:
     compiler = str(args.compiler.resolve())
     runtime = str(args.runtime.resolve())
     passed = 0
-    with tempfile.TemporaryDirectory(prefix="relar-differential-") as directory:
+    with tempfile.TemporaryDirectory(prefix="imre-differential-") as directory:
         temporary = Path(directory)
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"

@@ -52,8 +52,8 @@
     "revision": "822f103dae0407b065ad151cd0e808ba32d10907"
   },
   "pilot_limits": [
-    "The pilot drivers built Relar against working-tree application sources without a build-time source hash. Catalog source hashes listed here were captured by the contemporary Codon builds of that checkout.",
-    "The ordinary pre-optimization Relar executable is bound by the profiler's copied-binary hash. The pilot drivers did not persist hashes for the other three Relar pilot executables.",
+    "The pilot drivers built Imre against working-tree application sources without a build-time source hash. Catalog source hashes listed here were captured by the contemporary Codon builds of that checkout.",
+    "The ordinary pre-optimization Imre executable is bound by the profiler's copied-binary hash. The pilot drivers did not persist hashes for the other three Imre pilot executables.",
     "The preliminary 10x fixture repeated the same corpus and had the same output as 1x. The separately frozen benchmark and truncation-sensitive correctness cases cover full-input consumption."
   ],
   "pilots": {
@@ -61,11 +61,11 @@
       "cases": {
         "10x.ndjson": {
           "engines": {
-            "relar": {
+            "imre": {
               "median_ns": 1329897111.0,
               "median_peak_rss_kib": 15738.0
             },
-            "relar_thin": {
+            "imre_thin": {
               "median_ns": 897404000.5,
               "median_peak_rss_kib": 15978.0
             },
@@ -78,18 +78,18 @@
               "median_peak_rss_kib": 11868.0
             }
           },
-          "relar_over_rust": {
+          "imre_over_rust": {
             "normal": 1.778658,
             "thinlto": 1.708886
           }
         },
         "10x.ndjson.gz": {
           "engines": {
-            "relar": {
+            "imre": {
               "median_ns": 1527603481.0,
               "median_peak_rss_kib": 15980.0
             },
-            "relar_thin": {
+            "imre_thin": {
               "median_ns": 1083957997.0,
               "median_peak_rss_kib": 16094.0
             },
@@ -102,18 +102,18 @@
               "median_peak_rss_kib": 11508.0
             }
           },
-          "relar_over_rust": {
+          "imre_over_rust": {
             "normal": 1.603852,
             "thinlto": 1.528003
           }
         },
         "1x.ndjson": {
           "engines": {
-            "relar": {
+            "imre": {
               "median_ns": 195590066.5,
               "median_peak_rss_kib": 15926.0
             },
-            "relar_thin": {
+            "imre_thin": {
               "median_ns": 138181523.0,
               "median_peak_rss_kib": 15940.0
             },
@@ -126,18 +126,18 @@
               "median_peak_rss_kib": 11758.0
             }
           },
-          "relar_over_rust": {
+          "imre_over_rust": {
             "normal": 1.691998,
             "thinlto": 1.536671
           }
         },
         "1x.ndjson.gz": {
           "engines": {
-            "relar": {
+            "imre": {
               "median_ns": 199698976.0,
               "median_peak_rss_kib": 16230.0
             },
-            "relar_thin": {
+            "imre_thin": {
               "median_ns": 148001378.5,
               "median_peak_rss_kib": 16214.0
             },
@@ -150,7 +150,7 @@
               "median_peak_rss_kib": 11548.0
             }
           },
-          "relar_over_rust": {
+          "imre_over_rust": {
             "normal": 1.551628,
             "thinlto": 1.47694
           }
@@ -168,11 +168,11 @@
       "cases": {
         "10x.ndjson": {
           "engines": {
-            "relar": {
+            "imre": {
               "median_ns": 2496677110.5,
               "median_peak_rss_kib": 19920.0
             },
-            "relar_thin": {
+            "imre_thin": {
               "median_ns": 2105008624.5,
               "median_peak_rss_kib": 19898.0
             },
@@ -185,18 +185,18 @@
               "median_peak_rss_kib": 15900.0
             }
           },
-          "relar_over_rust": {
+          "imre_over_rust": {
             "normal": 2.101258,
             "thinlto": 2.12634
           }
         },
         "10x.ndjson.gz": {
           "engines": {
-            "relar": {
+            "imre": {
               "median_ns": 2481180686.5,
               "median_peak_rss_kib": 20210.0
             },
-            "relar_thin": {
+            "imre_thin": {
               "median_ns": 1850737172.5,
               "median_peak_rss_kib": 20186.0
             },
@@ -209,18 +209,18 @@
               "median_peak_rss_kib": 16268.0
             }
           },
-          "relar_over_rust": {
+          "imre_over_rust": {
             "normal": 1.609448,
             "thinlto": 2.023944
           }
         },
         "1x.ndjson": {
           "engines": {
-            "relar": {
+            "imre": {
               "median_ns": 283762662.5,
               "median_peak_rss_kib": 19892.0
             },
-            "relar_thin": {
+            "imre_thin": {
               "median_ns": 200316502.0,
               "median_peak_rss_kib": 20128.0
             },
@@ -233,18 +233,18 @@
               "median_peak_rss_kib": 15658.0
             }
           },
-          "relar_over_rust": {
+          "imre_over_rust": {
             "normal": 1.949074,
             "thinlto": 1.848281
           }
         },
         "1x.ndjson.gz": {
           "engines": {
-            "relar": {
+            "imre": {
               "median_ns": 290760086.5,
               "median_peak_rss_kib": 20298.0
             },
-            "relar_thin": {
+            "imre_thin": {
               "median_ns": 211454782.5,
               "median_peak_rss_kib": 20308.0
             },
@@ -257,7 +257,7 @@
               "median_peak_rss_kib": 15764.0
             }
           },
-          "relar_over_rust": {
+          "imre_over_rust": {
             "normal": 1.82855,
             "thinlto": 1.706233
           }
@@ -313,7 +313,7 @@
   "profiler_driver_sha256": "acd65d8feb0db2467b9d17a4019e671bfd793d1179156220b0cebe5d0906a6c8",
   "profiles": {
     "10x": {
-      "relar": {
+      "imre": {
         "binary_sha256": "23c71c7425133617902834821041c5f81d1a3baf5f27727a5fdca62e8ffc7b18",
         "callgrind": {
           "cpu": 20,
@@ -331,7 +331,7 @@
               "self_instructions": 760666710
             },
             {
-              "name": "<relar_runtime::objects::json::Seed as serde_core::de::DeserializeSeed>::deserialize::<&mut serde_json::de::Deserializer<serde_json::read::StrRead>>'2",
+              "name": "<imre_runtime::objects::json::Seed as serde_core::de::DeserializeSeed>::deserialize::<&mut serde_json::de::Deserializer<serde_json::read::StrRead>>'2",
               "self_instructions": 701193110
             }
           ],
@@ -345,23 +345,23 @@
           "selected_inclusive": [
             {
               "incoming_inclusive_instructions": 4082070253,
-              "name": "relar_json_decode"
+              "name": "imre_json_decode"
             },
             {
               "incoming_inclusive_instructions": 1323611179,
-              "name": "relar_str_split"
+              "name": "imre_str_split"
             },
             {
               "incoming_inclusive_instructions": 713500429,
-              "name": "relar_str_splitlines"
+              "name": "imre_str_splitlines"
             },
             {
               "incoming_inclusive_instructions": 256017676,
-              "name": "relar_str_rsplit_last"
+              "name": "imre_str_rsplit_last"
             },
             {
               "incoming_inclusive_instructions": 200723599,
-              "name": "relar_runtime::objects::relar_str_splitlines::{closure#0}"
+              "name": "imre_runtime::objects::imre_str_splitlines::{closure#0}"
             }
           ]
         },
@@ -381,27 +381,27 @@
           },
           "top_allocating_entries_by_block_count": [
             {
-              "entry": "relar_str_split",
+              "entry": "imre_str_split",
               "tb": 233364880,
               "tbk": 5251900
             },
             {
-              "entry": "relar_json_decode",
+              "entry": "imre_json_decode",
               "tb": 252198620,
               "tbk": 4026590
             },
             {
-              "entry": "relar_record_new",
+              "entry": "imre_record_new",
               "tb": 163294376,
               "tbk": 3304208
             },
             {
-              "entry": "relar_str_rsplit_last",
+              "entry": "imre_str_rsplit_last",
               "tb": 68436300,
               "tbk": 1174420
             },
             {
-              "entry": "relar_str_unquote",
+              "entry": "imre_str_unquote",
               "tb": 67797810,
               "tbk": 1162300
             }
@@ -495,7 +495,7 @@
       }
     },
     "1x": {
-      "relar": {
+      "imre": {
         "binary_sha256": "23c71c7425133617902834821041c5f81d1a3baf5f27727a5fdca62e8ffc7b18",
         "callgrind": {
           "cpu": 16,
@@ -513,7 +513,7 @@
               "self_instructions": 76066671
             },
             {
-              "name": "<relar_runtime::objects::json::Seed as serde_core::de::DeserializeSeed>::deserialize::<&mut serde_json::de::Deserializer<serde_json::read::StrRead>>'2",
+              "name": "<imre_runtime::objects::json::Seed as serde_core::de::DeserializeSeed>::deserialize::<&mut serde_json::de::Deserializer<serde_json::read::StrRead>>'2",
               "self_instructions": 70119311
             }
           ],
@@ -527,23 +527,23 @@
           "selected_inclusive": [
             {
               "incoming_inclusive_instructions": 408440315,
-              "name": "relar_json_decode"
+              "name": "imre_json_decode"
             },
             {
               "incoming_inclusive_instructions": 135767456,
-              "name": "relar_str_split"
+              "name": "imre_str_split"
             },
             {
               "incoming_inclusive_instructions": 71316781,
-              "name": "relar_str_splitlines"
+              "name": "imre_str_splitlines"
             },
             {
               "incoming_inclusive_instructions": 25686172,
-              "name": "relar_str_rsplit_last"
+              "name": "imre_str_rsplit_last"
             },
             {
               "incoming_inclusive_instructions": 20033369,
-              "name": "relar_runtime::objects::relar_str_splitlines::{closure#0}"
+              "name": "imre_runtime::objects::imre_str_splitlines::{closure#0}"
             }
           ]
         },
@@ -563,27 +563,27 @@
           },
           "top_allocating_entries_by_block_count": [
             {
-              "entry": "relar_str_split",
+              "entry": "imre_str_split",
               "tb": 23336488,
               "tbk": 525190
             },
             {
-              "entry": "relar_json_decode",
+              "entry": "imre_json_decode",
               "tb": 25219862,
               "tbk": 402659
             },
             {
-              "entry": "relar_record_new",
+              "entry": "imre_record_new",
               "tb": 18256856,
               "tbk": 365969
             },
             {
-              "entry": "relar_str_rsplit_last",
+              "entry": "imre_str_rsplit_last",
               "tb": 6843630,
               "tbk": 117442
             },
             {
-              "entry": "relar_str_unquote",
+              "entry": "imre_str_unquote",
               "tb": 6779781,
               "tbk": 116230
             }

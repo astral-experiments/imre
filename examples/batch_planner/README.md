@@ -56,12 +56,12 @@ app 7
 app
 ```
 
-Run the unchanged package on CPython, or compile it with Relar:
+Run the unchanged package on CPython, or compile it with Imre:
 
 ```sh
 PYTHONPATH=examples python3.14 -m batch_planner < batch-input.txt
-target/release/relar build examples/batch_planner/__main__.py \
-  --module-root examples --runtime target/release/librelar_runtime.a \
+target/release/imre build examples/batch_planner/__main__.py \
+  --module-root examples --runtime target/release/libimre_runtime.a \
   --clang clang-18 --opt-level 3 -o benchmarks/local/batch_planner
 benchmarks/local/batch_planner < batch-input.txt
 ```
@@ -98,16 +98,16 @@ their final error category. Successful processes must emit no stderr.
 
 The benchmark has two deliberately separate groups:
 
-- **Unchanged-program control:** frozen pre-exception Relar, newly compiled Relar,
+- **Unchanged-program control:** frozen pre-exception Imre, newly compiled Imre,
   and CPython execute identical original incremental source and captured inputs.
   This measures compiler/runtime regression on code with no exception handlers.
-- **Batch program:** Relar, CPython, and Rust BigInt execute valid and mixed batches.
+- **Batch program:** Imre, CPython, and Rust BigInt execute valid and mixed batches.
   A mixed batch adds three recoverable malformed frames after each valid frame.
   This measures framing, parsing, errors, cleanup, graph work, and reporting together.
 
 ```sh
 python3 benchmarks/batch_benchmark.py \
-  --compiler target/release/relar --runtime target/release/librelar_runtime.a \
+  --compiler target/release/imre --runtime target/release/libimre_runtime.a \
   --baseline benchmarks/local/incremental-artifacts-normal-final/incremental_planner \
   --baseline-record benchmarks/results/2026-10-17-incremental-planner-normal.json \
   --rust-bigint benchmarks/local/batch-reference-normal/planner-batch-bigint \
@@ -120,9 +120,9 @@ python3 benchmarks/batch_benchmark.py \
 Use the actual saved baseline record path if it differs. The harness verifies its
 exact binary and all six original Python source hashes, reconstructs every captured
 input through the independent oracle, and requires matching ordinary/ThinLTO mode
-and target. It compiles each new Relar program once outside timed work, then runs
+and target. It compiles each new Imre program once outside timed work, then runs
 the full original and batch correctness suites before measuring any workload.
-`--relar-build-record` additionally verifies frozen compiler/runtime and compiler
+`--imre-build-record` additionally verifies frozen compiler/runtime and compiler
 source identities. `--rust-source-root` supports saved sources with their original
 build record; those Rust sources must match the tracked reference exactly.
 
@@ -143,7 +143,7 @@ hash and byte count after exact comparison. Records retain source/tool/artifact
 hashes, compiler and CPython configuration, CPU/OS/affinity, medians, and spread.
 
 For ThinLTO, build a separate batch reference with
-`CARGO_PROFILE_RELEASE_LTO=thin` and `--llvm-budget 1000`, select the bitcode Relar
+`CARGO_PROFILE_RELEASE_LTO=thin` and `--llvm-budget 1000`, select the bitcode Imre
 runtime and matching prior ThinLTO baseline/record, and pass
 `--lto-linker /path/to/ld.lld --target x86_64-unknown-linux-gnu`. Use distinct artifact
 and JSON paths. The lexical linker name is preserved for LLD flavor while its

@@ -56,7 +56,7 @@ def load_upstream():
     previous = sys.modules.get("httpx")
     sys.modules["httpx"] = httpx
     try:
-        name = "_relar_upstream_cpython_catalog"
+        name = "_imre_upstream_cpython_catalog"
         spec = importlib.util.spec_from_file_location(name, UPSTREAM)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)

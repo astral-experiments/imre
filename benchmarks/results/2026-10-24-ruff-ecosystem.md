@@ -1,13 +1,15 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Ruff ecosystem diagnostic replay
 
-Two releases of Ruff checked the complete Sphinx and Prefect trees with all rules selected. Relar runs Ruff’s original report functions over 502,684 captured diagnostic lines at 1×. The 10× input repeats each project under ten distinct names for 5,026,840 lines. Each timed process reads the captures, filters and sorts diagnostics, computes the diff and renders Markdown.
+Two releases of Ruff checked the complete Sphinx and Prefect trees with all rules selected. Imre runs Ruff’s original report functions over 502,684 captured diagnostic lines at 1×. The 10× input repeats each project under ten distinct names for 5,026,840 lines. Each timed process reads the captures, filters and sorts diagnostics, computes the diff and renders Markdown.
 
-| Input | CPython 3.12.13 | Relar | Codon 0.20.4 | Rust | Relar / Rust |
+| Input | CPython 3.12.13 | Imre | Codon 0.20.4 | Rust | Imre / Rust |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | 1× | 2.447 s | 0.507 s | 1.490 s | 0.273 s | 1.86× |
 | 10× | 22.422 s | 4.119 s | 13.408 s | 2.404 s | 1.71× |
 
-| Peak RSS | CPython | Relar | Codon | Rust |
+| Peak RSS | CPython | Imre | Codon | Rust |
 | --- | ---: | ---: | ---: | ---: |
 | 1× | 153.5 MiB | 109.6 MiB | 169.9 MiB | 52.0 MiB |
 | 10× | 534.6 MiB | 507.1 MiB | 355.0 MiB | 60.5 MiB |

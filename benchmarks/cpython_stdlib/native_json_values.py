@@ -1,4 +1,4 @@
-"""Run original CPython JSON value tests against a standalone native Relar driver."""
+"""Run original CPython JSON value tests against a standalone native Imre driver."""
 import argparse
 import ast
 import importlib
@@ -101,7 +101,7 @@ class Native:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("relar", "runtime", "clang", "result"):
+    for name in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--cpython-source", type=Path)
     args = parser.parse_args()
@@ -109,22 +109,22 @@ def main():
         parser.error("use CPython 3.14.5 for the original unittest assertions")
     tests = {}
     report = {"cpython_commit": verify_upstream(), "assertions": "unmodified host unittest",
-              "json_operations": "native Relar", "behavioral_methods": sum(map(len, METHODS.values())),
+              "json_operations": "native Imre", "behavioral_methods": sum(map(len, METHODS.values())),
               "tests": tests}
     try:
         vendored_decode(args.cpython_source)
         driver = HERE / "json_values_driver.py"
-        report["sha256"] = {k: sha256(p) for k, p in (("driver", driver), ("relar", args.relar),
+        report["sha256"] = {k: sha256(p) for k, p in (("driver", driver), ("imre", args.imre),
             ("runtime", args.runtime), ("clang", args.clang))}
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             program, ir = directory / "driver", directory / "driver.ll"
-            subprocess.run([args.relar.resolve(), "build", driver, "-o", program, "--no-cache",
+            subprocess.run([args.imre.resolve(), "build", driver, "-o", program, "--no-cache",
                             "--opt-level", "3", "--clang", args.clang.resolve(),
                             "--runtime", args.runtime.resolve(), "--emit-llvm", ir], cwd=tmp,
                            check=True, timeout=120)
             generated = ir.read_text()
-            for call in ("ptr @relar_json_loads(", "ptr @relar_json_dumps(", "i32 @relar_json_dump("):
+            for call in ("ptr @imre_json_loads(", "ptr @imre_json_dumps(", "i32 @imre_json_dump("):
                 if "call " + call not in generated:
                     raise RuntimeError(f"native driver omits {call}")
             report["sha256"]["executable"] = sha256(program)

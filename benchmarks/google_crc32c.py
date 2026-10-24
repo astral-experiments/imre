@@ -83,7 +83,7 @@ def main():
     parser.add_argument("--cpython-package", required=True, type=Path)
     parser.add_argument("--direct", required=True, type=Path)
     parser.add_argument(
-        "--relar", type=Path, help="omit to measure the two baselines only"
+        "--imre", type=Path, help="omit to measure the two baselines only"
     )
     parser.add_argument(
         "--cpu", type=int, help="pin the parent and children to this Linux CPU"
@@ -108,8 +108,8 @@ def main():
         "direct_c": [args.direct.resolve()],
         "cpython": [sys.executable, "-u", "-B", DRIVER],
     }
-    if args.relar:
-        commands["relar"] = [args.relar.resolve()]
+    if args.imre:
+        commands["imre"] = [args.imre.resolve()]
     data = benchmark(commands, environment, args.rounds)
     document = {
         "platform": platform.platform(),

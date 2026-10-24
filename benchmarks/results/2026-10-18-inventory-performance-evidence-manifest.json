@@ -75,42 +75,42 @@
       "bytes": 2332,
       "source": "benchmarks/local/inventory-performance-profile-path-checks.py"
     },
-    "build/relar-dev3b/asan.log": {
+    "build/imre-dev3b/asan.log": {
       "sha256": "cad78f27f10d8a604cbf7642014615ebfe4b0ad88053b55e98acef33df9ea4ff",
       "bytes": 158,
       "source": "benchmarks/local/inventory-performance-tools-dev3b/asan.log"
     },
-    "build/relar-dev3b/build-record.json": {
+    "build/imre-dev3b/build-record.json": {
       "sha256": "d00d4b6d9ba4c6a4f0fff39adaeb0883f4228e47723563d436d65a865d13f6d9",
       "bytes": 676245,
       "source": "benchmarks/local/inventory-performance-tools-dev3b/build-record.json"
     },
-    "build/relar-dev3b/ordinary.log": {
+    "build/imre-dev3b/ordinary.log": {
       "sha256": "e21fc4fdce1f8c167a088ded13eacf3bb1448ec0e7d61e59b022c7b5b3d5a9b2",
       "bytes": 244,
       "source": "benchmarks/local/inventory-performance-tools-dev3b/ordinary.log"
     },
-    "build/relar-dev3b/thinlto.log": {
+    "build/imre-dev3b/thinlto.log": {
       "sha256": "4cc870d17b85d08ff9d5b95d403c18afadfe5afc7d40b2dd4b0bda34a126054c",
       "bytes": 158,
       "source": "benchmarks/local/inventory-performance-tools-dev3b/thinlto.log"
     },
-    "build/relar-final/asan.log": {
+    "build/imre-final/asan.log": {
       "sha256": "fc3b7d159f1d2fc41473b7c2bbe5d91f85d6f205fa7d64d51cc5dd094abc7929",
       "bytes": 158,
       "source": "benchmarks/local/inventory-performance-tools-final/asan.log"
     },
-    "build/relar-final/build-record.json": {
+    "build/imre-final/build-record.json": {
       "sha256": "f35904503c4c6e0f38255738d5a57bdea275e4e8e0212b3fb4d76d80c91e0476",
       "bytes": 675910,
       "source": "benchmarks/local/inventory-performance-tools-final/build-record.json"
     },
-    "build/relar-final/ordinary.log": {
+    "build/imre-final/ordinary.log": {
       "sha256": "336dd39767edab5fc9e9f6023c9b0e94124cdb5fdb89255a1297e4243a6f2297",
       "bytes": 244,
       "source": "benchmarks/local/inventory-performance-tools-final/ordinary.log"
     },
-    "build/relar-final/thinlto.log": {
+    "build/imre-final/thinlto.log": {
       "sha256": "e9d8678eb47472ae48fdba2e30e30b09ab9dc7974572f570b78fb502360f373c",
       "bytes": 158,
       "source": "benchmarks/local/inventory-performance-tools-final/thinlto.log"
@@ -143,12 +143,12 @@
     "commands/extra-validation.py": {
       "sha256": "7aacd39d3a5631c1bc37f8f8950c8ddc0bb4c51aea7bd29ea59857ce7fffb658",
       "bytes": 6523,
-      "source": "/tmp/relar-inventory-final-extra-validation.py"
+      "source": "/tmp/imre-inventory-final-extra-validation.py"
     },
     "commands/native-validation.py": {
       "sha256": "60c743ec180571084b6030009302236336df0a96e64b5e58694505a7a2ab3c80",
       "bytes": 4945,
-      "source": "/tmp/relar-inventory-performance-validation.py"
+      "source": "/tmp/imre-inventory-performance-validation.py"
     },
     "commands/package-evidence.py": {
       "sha256": "95eb5d340d2902ba06516b75fe36d3cfe74fced5290112a52c31eec521203d7d",
@@ -300,10 +300,10 @@
       "bytes": 183429,
       "source": "benchmarks/local/inventory-normal-final/inventory_reconciliation.ll"
     },
-    "profiles/baseline-lto/build-records/relar.json": {
+    "profiles/baseline-lto/build-records/imre.json": {
       "sha256": "cab3b5a462e9f3447ca3bbca75203113b7c4654e5d6e5f287bd54c708f99342f",
       "bytes": 647069,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/build-records/relar.json"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/build-records/imre.json"
     },
     "profiles/baseline-lto/build-records/rust_bigint.json": {
       "sha256": "98626e3315034bf7209e39604b781204f900fb669b605502bcc5edd2b3ae5a14",
@@ -315,45 +315,45 @@
       "bytes": 10066256,
       "source": "benchmarks/local/inventory-profile-baseline-lto/comparison.json"
     },
-    "profiles/baseline-lto/dense-16384.relar.callgrind.log": {
+    "profiles/baseline-lto/dense-16384.imre.callgrind.log": {
       "sha256": "fe20e088937ae4230f3c70fb6ce8f7c2a179a26fd768ed401f6293eb9ecf6f79",
       "bytes": 602,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.relar.callgrind.log"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.imre.callgrind.log"
     },
-    "profiles/baseline-lto/dense-16384.relar.callgrind.stderr": {
+    "profiles/baseline-lto/dense-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.relar.callgrind.stderr"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.imre.callgrind.stderr"
     },
-    "profiles/baseline-lto/dense-16384.relar.callgrind.stdout": {
+    "profiles/baseline-lto/dense-16384.imre.callgrind.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.relar.callgrind.stdout"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.imre.callgrind.stdout"
     },
-    "profiles/baseline-lto/dense-16384.relar.callgrind.trace": {
+    "profiles/baseline-lto/dense-16384.imre.callgrind.trace": {
       "sha256": "1a83effbd8511e0195c5c39627c896385cdb35c57eb7e65197df3cd3e343e16b",
       "bytes": 417949,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.relar.callgrind.trace"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.imre.callgrind.trace"
     },
-    "profiles/baseline-lto/dense-16384.relar.dhat.log": {
+    "profiles/baseline-lto/dense-16384.imre.dhat.log": {
       "sha256": "25e31a5880c4f61297ebf049b4baf598d8bf1ab0471ada97c424182a817b819b",
       "bytes": 1036,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.relar.dhat.log"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.imre.dhat.log"
     },
-    "profiles/baseline-lto/dense-16384.relar.dhat.stderr": {
+    "profiles/baseline-lto/dense-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.relar.dhat.stderr"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.imre.dhat.stderr"
     },
-    "profiles/baseline-lto/dense-16384.relar.dhat.stdout": {
+    "profiles/baseline-lto/dense-16384.imre.dhat.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.relar.dhat.stdout"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.imre.dhat.stdout"
     },
-    "profiles/baseline-lto/dense-16384.relar.dhat.trace": {
+    "profiles/baseline-lto/dense-16384.imre.dhat.trace": {
       "sha256": "0ae5cae507053419590269d686ec814095abcde8e2d5062a9ef6961ccf15dfad",
       "bytes": 86102,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.relar.dhat.trace"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.imre.dhat.trace"
     },
     "profiles/baseline-lto/dense-16384.rust_bigint.callgrind.log": {
       "sha256": "0162fd14b12467b124cb24f55d6677c76755cc63d61778e7372d53dd1da33b71",
@@ -395,35 +395,35 @@
       "bytes": 52119,
       "source": "benchmarks/local/inventory-profile-baseline-lto/dense-16384.rust_bigint.dhat.trace"
     },
-    "profiles/baseline-lto/files/dense-16384.relar.callgrind/orders.txt": {
+    "profiles/baseline-lto/files/dense-16384.imre.callgrind/orders.txt": {
       "sha256": "4931dde412ffd8aa49f073a7046ed974dcb9088fc098ee0f9cbf515021fe3d36",
       "bytes": 181790,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/files/dense-16384.relar.callgrind/orders.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/files/dense-16384.imre.callgrind/orders.txt"
     },
-    "profiles/baseline-lto/files/dense-16384.relar.callgrind/report.txt": {
+    "profiles/baseline-lto/files/dense-16384.imre.callgrind/report.txt": {
       "sha256": "774a72dd3b72c2292a8b9c409dc8a79ffdd4c683de7f2ffcab1155757c41ae5d",
       "bytes": 654942,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/files/dense-16384.relar.callgrind/report.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/files/dense-16384.imre.callgrind/report.txt"
     },
-    "profiles/baseline-lto/files/dense-16384.relar.callgrind/stock.txt": {
+    "profiles/baseline-lto/files/dense-16384.imre.callgrind/stock.txt": {
       "sha256": "462d16b90e4d634f069edba880cc991a13652b8fe0712830d3f90a1b8e024a6e",
       "bytes": 793,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/files/dense-16384.relar.callgrind/stock.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/files/dense-16384.imre.callgrind/stock.txt"
     },
-    "profiles/baseline-lto/files/dense-16384.relar.dhat/orders.txt": {
+    "profiles/baseline-lto/files/dense-16384.imre.dhat/orders.txt": {
       "sha256": "4931dde412ffd8aa49f073a7046ed974dcb9088fc098ee0f9cbf515021fe3d36",
       "bytes": 181790,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/files/dense-16384.relar.dhat/orders.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/files/dense-16384.imre.dhat/orders.txt"
     },
-    "profiles/baseline-lto/files/dense-16384.relar.dhat/report.txt": {
+    "profiles/baseline-lto/files/dense-16384.imre.dhat/report.txt": {
       "sha256": "774a72dd3b72c2292a8b9c409dc8a79ffdd4c683de7f2ffcab1155757c41ae5d",
       "bytes": 654942,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/files/dense-16384.relar.dhat/report.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/files/dense-16384.imre.dhat/report.txt"
     },
-    "profiles/baseline-lto/files/dense-16384.relar.dhat/stock.txt": {
+    "profiles/baseline-lto/files/dense-16384.imre.dhat/stock.txt": {
       "sha256": "462d16b90e4d634f069edba880cc991a13652b8fe0712830d3f90a1b8e024a6e",
       "bytes": 793,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/files/dense-16384.relar.dhat/stock.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/files/dense-16384.imre.dhat/stock.txt"
     },
     "profiles/baseline-lto/files/dense-16384.rust_bigint.callgrind/orders.txt": {
       "sha256": "4931dde412ffd8aa49f073a7046ed974dcb9088fc098ee0f9cbf515021fe3d36",
@@ -455,35 +455,35 @@
       "bytes": 793,
       "source": "benchmarks/local/inventory-profile-baseline-lto/files/dense-16384.rust_bigint.dhat/stock.txt"
     },
-    "profiles/baseline-lto/files/sparse-16384.relar.callgrind/orders.txt": {
+    "profiles/baseline-lto/files/sparse-16384.imre.callgrind/orders.txt": {
       "sha256": "5cc259363bfe3720885db6343eecaf10c555ba84cee5c1b11c4c7abc9bb9c478",
       "bytes": 242560,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/files/sparse-16384.relar.callgrind/orders.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/files/sparse-16384.imre.callgrind/orders.txt"
     },
-    "profiles/baseline-lto/files/sparse-16384.relar.callgrind/report.txt": {
+    "profiles/baseline-lto/files/sparse-16384.imre.callgrind/report.txt": {
       "sha256": "d1f666f0a0deab8399509219a027001e23f6614b90c6b46dae0987de65a51d7a",
       "bytes": 1438871,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/files/sparse-16384.relar.callgrind/report.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/files/sparse-16384.imre.callgrind/report.txt"
     },
-    "profiles/baseline-lto/files/sparse-16384.relar.callgrind/stock.txt": {
+    "profiles/baseline-lto/files/sparse-16384.imre.callgrind/stock.txt": {
       "sha256": "e10e381a069166d0f3a028fc668fc72b1938a83929f425b8de0e10e87e49db0f",
       "bytes": 203239,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/files/sparse-16384.relar.callgrind/stock.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/files/sparse-16384.imre.callgrind/stock.txt"
     },
-    "profiles/baseline-lto/files/sparse-16384.relar.dhat/orders.txt": {
+    "profiles/baseline-lto/files/sparse-16384.imre.dhat/orders.txt": {
       "sha256": "5cc259363bfe3720885db6343eecaf10c555ba84cee5c1b11c4c7abc9bb9c478",
       "bytes": 242560,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/files/sparse-16384.relar.dhat/orders.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/files/sparse-16384.imre.dhat/orders.txt"
     },
-    "profiles/baseline-lto/files/sparse-16384.relar.dhat/report.txt": {
+    "profiles/baseline-lto/files/sparse-16384.imre.dhat/report.txt": {
       "sha256": "d1f666f0a0deab8399509219a027001e23f6614b90c6b46dae0987de65a51d7a",
       "bytes": 1438871,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/files/sparse-16384.relar.dhat/report.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/files/sparse-16384.imre.dhat/report.txt"
     },
-    "profiles/baseline-lto/files/sparse-16384.relar.dhat/stock.txt": {
+    "profiles/baseline-lto/files/sparse-16384.imre.dhat/stock.txt": {
       "sha256": "e10e381a069166d0f3a028fc668fc72b1938a83929f425b8de0e10e87e49db0f",
       "bytes": 203239,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/files/sparse-16384.relar.dhat/stock.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/files/sparse-16384.imre.dhat/stock.txt"
     },
     "profiles/baseline-lto/files/sparse-16384.rust_bigint.callgrind/orders.txt": {
       "sha256": "5cc259363bfe3720885db6343eecaf10c555ba84cee5c1b11c4c7abc9bb9c478",
@@ -565,45 +565,45 @@
       "bytes": 3251,
       "source": "benchmarks/local/inventory-profile-baseline-lto/sources/validate.py"
     },
-    "profiles/baseline-lto/sparse-16384.relar.callgrind.log": {
+    "profiles/baseline-lto/sparse-16384.imre.callgrind.log": {
       "sha256": "c1e6b28fda7842fbfaefc95e344e17d6f357ba47dd37d4b43b08e1d33665917d",
       "bytes": 602,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.relar.callgrind.log"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.imre.callgrind.log"
     },
-    "profiles/baseline-lto/sparse-16384.relar.callgrind.stderr": {
+    "profiles/baseline-lto/sparse-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.relar.callgrind.stderr"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.imre.callgrind.stderr"
     },
-    "profiles/baseline-lto/sparse-16384.relar.callgrind.stdout": {
+    "profiles/baseline-lto/sparse-16384.imre.callgrind.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.relar.callgrind.stdout"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.imre.callgrind.stdout"
     },
-    "profiles/baseline-lto/sparse-16384.relar.callgrind.trace": {
+    "profiles/baseline-lto/sparse-16384.imre.callgrind.trace": {
       "sha256": "133a7ae1c644e73ca5ca168480a04b6032c5ad1b0fd72461a2b92f3d9c310268",
       "bytes": 439829,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.relar.callgrind.trace"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.imre.callgrind.trace"
     },
-    "profiles/baseline-lto/sparse-16384.relar.dhat.log": {
+    "profiles/baseline-lto/sparse-16384.imre.dhat.log": {
       "sha256": "b441645232edca9f5619f3da905d88fb68fed8401cd0b456c200c29bca20acb1",
       "bytes": 1040,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.relar.dhat.log"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.imre.dhat.log"
     },
-    "profiles/baseline-lto/sparse-16384.relar.dhat.stderr": {
+    "profiles/baseline-lto/sparse-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.relar.dhat.stderr"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.imre.dhat.stderr"
     },
-    "profiles/baseline-lto/sparse-16384.relar.dhat.stdout": {
+    "profiles/baseline-lto/sparse-16384.imre.dhat.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.relar.dhat.stdout"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.imre.dhat.stdout"
     },
-    "profiles/baseline-lto/sparse-16384.relar.dhat.trace": {
+    "profiles/baseline-lto/sparse-16384.imre.dhat.trace": {
       "sha256": "1d4db211c8c37dcb5de8ff389fc82e51e9a25fe8392ff3f87eed7906af399b6c",
       "bytes": 89563,
-      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.relar.dhat.trace"
+      "source": "benchmarks/local/inventory-profile-baseline-lto/sparse-16384.imre.dhat.trace"
     },
     "profiles/baseline-lto/sparse-16384.rust_bigint.callgrind.log": {
       "sha256": "2709b388e0a37f03906d79a98a060952bfc765328bffd43a42da1ab2380a436c",
@@ -655,10 +655,10 @@
       "bytes": 3810058,
       "source": "benchmarks/local/inventory-profile-baseline-lto/workloads.json"
     },
-    "profiles/baseline-normal/build-records/relar.json": {
+    "profiles/baseline-normal/build-records/imre.json": {
       "sha256": "cab3b5a462e9f3447ca3bbca75203113b7c4654e5d6e5f287bd54c708f99342f",
       "bytes": 647069,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/build-records/relar.json"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/build-records/imre.json"
     },
     "profiles/baseline-normal/build-records/rust_bigint.json": {
       "sha256": "42c856ea6f5cf26713bf601daf0e7074b5b010e08ee082eefa1656aa21ba5198",
@@ -670,45 +670,45 @@
       "bytes": 10065631,
       "source": "benchmarks/local/inventory-profile-baseline-normal/comparison.json"
     },
-    "profiles/baseline-normal/dense-16384.relar.callgrind.log": {
+    "profiles/baseline-normal/dense-16384.imre.callgrind.log": {
       "sha256": "3532b34a9883d42ff749b6faccdf15f2a963eda246f522aa7816f35f3c259ce4",
       "bytes": 605,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.relar.callgrind.log"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.imre.callgrind.log"
     },
-    "profiles/baseline-normal/dense-16384.relar.callgrind.stderr": {
+    "profiles/baseline-normal/dense-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.relar.callgrind.stderr"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.imre.callgrind.stderr"
     },
-    "profiles/baseline-normal/dense-16384.relar.callgrind.stdout": {
+    "profiles/baseline-normal/dense-16384.imre.callgrind.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.relar.callgrind.stdout"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.imre.callgrind.stdout"
     },
-    "profiles/baseline-normal/dense-16384.relar.callgrind.trace": {
+    "profiles/baseline-normal/dense-16384.imre.callgrind.trace": {
       "sha256": "59fb8aea13d6b134ba225a56cc49e4b87167ec474bf15a03d5599602ad67b418",
       "bytes": 364207,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.relar.callgrind.trace"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.imre.callgrind.trace"
     },
-    "profiles/baseline-normal/dense-16384.relar.dhat.log": {
+    "profiles/baseline-normal/dense-16384.imre.dhat.log": {
       "sha256": "ca251b137181eaee254f437a2017d1537a4cf2be51c184a932e667b1c4343b3d",
       "bytes": 1042,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.relar.dhat.log"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.imre.dhat.log"
     },
-    "profiles/baseline-normal/dense-16384.relar.dhat.stderr": {
+    "profiles/baseline-normal/dense-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.relar.dhat.stderr"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.imre.dhat.stderr"
     },
-    "profiles/baseline-normal/dense-16384.relar.dhat.stdout": {
+    "profiles/baseline-normal/dense-16384.imre.dhat.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.relar.dhat.stdout"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.imre.dhat.stdout"
     },
-    "profiles/baseline-normal/dense-16384.relar.dhat.trace": {
+    "profiles/baseline-normal/dense-16384.imre.dhat.trace": {
       "sha256": "9007953546d1578d6cdd0f84c41d5df30dec4f2f8435833319db0eadd1879148",
       "bytes": 94949,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.relar.dhat.trace"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.imre.dhat.trace"
     },
     "profiles/baseline-normal/dense-16384.rust_bigint.callgrind.log": {
       "sha256": "7b35689bcfd95f25e372eddf5d284d8212448759e0308162bb1b0d42b417de31",
@@ -750,35 +750,35 @@
       "bytes": 50982,
       "source": "benchmarks/local/inventory-profile-baseline-normal/dense-16384.rust_bigint.dhat.trace"
     },
-    "profiles/baseline-normal/files/dense-16384.relar.callgrind/orders.txt": {
+    "profiles/baseline-normal/files/dense-16384.imre.callgrind/orders.txt": {
       "sha256": "4931dde412ffd8aa49f073a7046ed974dcb9088fc098ee0f9cbf515021fe3d36",
       "bytes": 181790,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/files/dense-16384.relar.callgrind/orders.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/files/dense-16384.imre.callgrind/orders.txt"
     },
-    "profiles/baseline-normal/files/dense-16384.relar.callgrind/report.txt": {
+    "profiles/baseline-normal/files/dense-16384.imre.callgrind/report.txt": {
       "sha256": "774a72dd3b72c2292a8b9c409dc8a79ffdd4c683de7f2ffcab1155757c41ae5d",
       "bytes": 654942,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/files/dense-16384.relar.callgrind/report.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/files/dense-16384.imre.callgrind/report.txt"
     },
-    "profiles/baseline-normal/files/dense-16384.relar.callgrind/stock.txt": {
+    "profiles/baseline-normal/files/dense-16384.imre.callgrind/stock.txt": {
       "sha256": "462d16b90e4d634f069edba880cc991a13652b8fe0712830d3f90a1b8e024a6e",
       "bytes": 793,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/files/dense-16384.relar.callgrind/stock.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/files/dense-16384.imre.callgrind/stock.txt"
     },
-    "profiles/baseline-normal/files/dense-16384.relar.dhat/orders.txt": {
+    "profiles/baseline-normal/files/dense-16384.imre.dhat/orders.txt": {
       "sha256": "4931dde412ffd8aa49f073a7046ed974dcb9088fc098ee0f9cbf515021fe3d36",
       "bytes": 181790,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/files/dense-16384.relar.dhat/orders.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/files/dense-16384.imre.dhat/orders.txt"
     },
-    "profiles/baseline-normal/files/dense-16384.relar.dhat/report.txt": {
+    "profiles/baseline-normal/files/dense-16384.imre.dhat/report.txt": {
       "sha256": "774a72dd3b72c2292a8b9c409dc8a79ffdd4c683de7f2ffcab1155757c41ae5d",
       "bytes": 654942,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/files/dense-16384.relar.dhat/report.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/files/dense-16384.imre.dhat/report.txt"
     },
-    "profiles/baseline-normal/files/dense-16384.relar.dhat/stock.txt": {
+    "profiles/baseline-normal/files/dense-16384.imre.dhat/stock.txt": {
       "sha256": "462d16b90e4d634f069edba880cc991a13652b8fe0712830d3f90a1b8e024a6e",
       "bytes": 793,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/files/dense-16384.relar.dhat/stock.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/files/dense-16384.imre.dhat/stock.txt"
     },
     "profiles/baseline-normal/files/dense-16384.rust_bigint.callgrind/orders.txt": {
       "sha256": "4931dde412ffd8aa49f073a7046ed974dcb9088fc098ee0f9cbf515021fe3d36",
@@ -810,35 +810,35 @@
       "bytes": 793,
       "source": "benchmarks/local/inventory-profile-baseline-normal/files/dense-16384.rust_bigint.dhat/stock.txt"
     },
-    "profiles/baseline-normal/files/sparse-16384.relar.callgrind/orders.txt": {
+    "profiles/baseline-normal/files/sparse-16384.imre.callgrind/orders.txt": {
       "sha256": "5cc259363bfe3720885db6343eecaf10c555ba84cee5c1b11c4c7abc9bb9c478",
       "bytes": 242560,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/files/sparse-16384.relar.callgrind/orders.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/files/sparse-16384.imre.callgrind/orders.txt"
     },
-    "profiles/baseline-normal/files/sparse-16384.relar.callgrind/report.txt": {
+    "profiles/baseline-normal/files/sparse-16384.imre.callgrind/report.txt": {
       "sha256": "d1f666f0a0deab8399509219a027001e23f6614b90c6b46dae0987de65a51d7a",
       "bytes": 1438871,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/files/sparse-16384.relar.callgrind/report.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/files/sparse-16384.imre.callgrind/report.txt"
     },
-    "profiles/baseline-normal/files/sparse-16384.relar.callgrind/stock.txt": {
+    "profiles/baseline-normal/files/sparse-16384.imre.callgrind/stock.txt": {
       "sha256": "e10e381a069166d0f3a028fc668fc72b1938a83929f425b8de0e10e87e49db0f",
       "bytes": 203239,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/files/sparse-16384.relar.callgrind/stock.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/files/sparse-16384.imre.callgrind/stock.txt"
     },
-    "profiles/baseline-normal/files/sparse-16384.relar.dhat/orders.txt": {
+    "profiles/baseline-normal/files/sparse-16384.imre.dhat/orders.txt": {
       "sha256": "5cc259363bfe3720885db6343eecaf10c555ba84cee5c1b11c4c7abc9bb9c478",
       "bytes": 242560,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/files/sparse-16384.relar.dhat/orders.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/files/sparse-16384.imre.dhat/orders.txt"
     },
-    "profiles/baseline-normal/files/sparse-16384.relar.dhat/report.txt": {
+    "profiles/baseline-normal/files/sparse-16384.imre.dhat/report.txt": {
       "sha256": "d1f666f0a0deab8399509219a027001e23f6614b90c6b46dae0987de65a51d7a",
       "bytes": 1438871,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/files/sparse-16384.relar.dhat/report.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/files/sparse-16384.imre.dhat/report.txt"
     },
-    "profiles/baseline-normal/files/sparse-16384.relar.dhat/stock.txt": {
+    "profiles/baseline-normal/files/sparse-16384.imre.dhat/stock.txt": {
       "sha256": "e10e381a069166d0f3a028fc668fc72b1938a83929f425b8de0e10e87e49db0f",
       "bytes": 203239,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/files/sparse-16384.relar.dhat/stock.txt"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/files/sparse-16384.imre.dhat/stock.txt"
     },
     "profiles/baseline-normal/files/sparse-16384.rust_bigint.callgrind/orders.txt": {
       "sha256": "5cc259363bfe3720885db6343eecaf10c555ba84cee5c1b11c4c7abc9bb9c478",
@@ -920,45 +920,45 @@
       "bytes": 3251,
       "source": "benchmarks/local/inventory-profile-baseline-normal/sources/validate.py"
     },
-    "profiles/baseline-normal/sparse-16384.relar.callgrind.log": {
+    "profiles/baseline-normal/sparse-16384.imre.callgrind.log": {
       "sha256": "495ef5fd60d30956b7cc1e4c86a48db05ced9a7257869f19379ca1a0436e7d01",
       "bytes": 605,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.relar.callgrind.log"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.imre.callgrind.log"
     },
-    "profiles/baseline-normal/sparse-16384.relar.callgrind.stderr": {
+    "profiles/baseline-normal/sparse-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.relar.callgrind.stderr"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.imre.callgrind.stderr"
     },
-    "profiles/baseline-normal/sparse-16384.relar.callgrind.stdout": {
+    "profiles/baseline-normal/sparse-16384.imre.callgrind.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.relar.callgrind.stdout"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.imre.callgrind.stdout"
     },
-    "profiles/baseline-normal/sparse-16384.relar.callgrind.trace": {
+    "profiles/baseline-normal/sparse-16384.imre.callgrind.trace": {
       "sha256": "7882745069c65ac1d8e491bc18e2409a97cbdeb651b6a327189985cea54975f9",
       "bytes": 374330,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.relar.callgrind.trace"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.imre.callgrind.trace"
     },
-    "profiles/baseline-normal/sparse-16384.relar.dhat.log": {
+    "profiles/baseline-normal/sparse-16384.imre.dhat.log": {
       "sha256": "29984c93daf570457fa8009530bc35ba83ca598d436a399603640d84b92e6bac",
       "bytes": 1046,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.relar.dhat.log"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.imre.dhat.log"
     },
-    "profiles/baseline-normal/sparse-16384.relar.dhat.stderr": {
+    "profiles/baseline-normal/sparse-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.relar.dhat.stderr"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.imre.dhat.stderr"
     },
-    "profiles/baseline-normal/sparse-16384.relar.dhat.stdout": {
+    "profiles/baseline-normal/sparse-16384.imre.dhat.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.relar.dhat.stdout"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.imre.dhat.stdout"
     },
-    "profiles/baseline-normal/sparse-16384.relar.dhat.trace": {
+    "profiles/baseline-normal/sparse-16384.imre.dhat.trace": {
       "sha256": "ed1ad8b9a1c2afd409b2bdae8f55b1b34e8d6b46e481e36756c7b70fa912d502",
       "bytes": 98602,
-      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.relar.dhat.trace"
+      "source": "benchmarks/local/inventory-profile-baseline-normal/sparse-16384.imre.dhat.trace"
     },
     "profiles/baseline-normal/sparse-16384.rust_bigint.callgrind.log": {
       "sha256": "72e8b776d8d105a7f8cc980e33fbe437ccfbb5f93f02f6f97cfcbef528935e1a",
@@ -1015,115 +1015,115 @@
       "bytes": 3169,
       "source": "benchmarks/local/inventory-performance-final-profiling.json"
     },
-    "profiles/final-lto/build-records/relar.json": {
+    "profiles/final-lto/build-records/imre.json": {
       "sha256": "f35904503c4c6e0f38255738d5a57bdea275e4e8e0212b3fb4d76d80c91e0476",
       "bytes": 675910,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/build-records/relar.json"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/build-records/imre.json"
     },
     "profiles/final-lto/comparison.json": {
       "sha256": "e8551eb4c488a34787a4be9d9dda45a8ff5fdee3d1a1ab8201a41127e3116446",
       "bytes": 10897152,
       "source": "benchmarks/local/inventory-performance-final-profile-lto/comparison.json"
     },
-    "profiles/final-lto/dense-16384.relar.callgrind.log": {
+    "profiles/final-lto/dense-16384.imre.callgrind.log": {
       "sha256": "a6e9c425cf875e0e476b64e4ee539a6c56bae84f9afe7d9f295eb2a450b62d84",
       "bytes": 614,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.relar.callgrind.log"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.imre.callgrind.log"
     },
-    "profiles/final-lto/dense-16384.relar.callgrind.stderr": {
+    "profiles/final-lto/dense-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.relar.callgrind.stderr"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.imre.callgrind.stderr"
     },
-    "profiles/final-lto/dense-16384.relar.callgrind.stdout": {
+    "profiles/final-lto/dense-16384.imre.callgrind.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.relar.callgrind.stdout"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.imre.callgrind.stdout"
     },
-    "profiles/final-lto/dense-16384.relar.callgrind.trace": {
+    "profiles/final-lto/dense-16384.imre.callgrind.trace": {
       "sha256": "32d88ab136de689015f9cc40d4bcdbc34fbc70d2b4b7d84503f18d48bacc98b1",
       "bytes": 389430,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.relar.callgrind.trace"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.imre.callgrind.trace"
     },
-    "profiles/final-lto/dense-16384.relar.dhat.log": {
+    "profiles/final-lto/dense-16384.imre.dhat.log": {
       "sha256": "97ca463a49bfac296ff4635013316664be21f5b6de0b587cd37df6f1534654e1",
       "bytes": 1057,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.relar.dhat.log"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.imre.dhat.log"
     },
-    "profiles/final-lto/dense-16384.relar.dhat.stderr": {
+    "profiles/final-lto/dense-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.relar.dhat.stderr"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.imre.dhat.stderr"
     },
-    "profiles/final-lto/dense-16384.relar.dhat.stdout": {
+    "profiles/final-lto/dense-16384.imre.dhat.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.relar.dhat.stdout"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.imre.dhat.stdout"
     },
-    "profiles/final-lto/dense-16384.relar.dhat.trace": {
+    "profiles/final-lto/dense-16384.imre.dhat.trace": {
       "sha256": "94a9bb3a3e287f218be98b407c33efc464ff8b3cfd647dde6de4fe5247025159",
       "bytes": 52807,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.relar.dhat.trace"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/dense-16384.imre.dhat.trace"
     },
-    "profiles/final-lto/files/dense-16384.relar.callgrind/orders.txt": {
+    "profiles/final-lto/files/dense-16384.imre.callgrind/orders.txt": {
       "sha256": "4931dde412ffd8aa49f073a7046ed974dcb9088fc098ee0f9cbf515021fe3d36",
       "bytes": 181790,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/dense-16384.relar.callgrind/orders.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/dense-16384.imre.callgrind/orders.txt"
     },
-    "profiles/final-lto/files/dense-16384.relar.callgrind/report.txt": {
+    "profiles/final-lto/files/dense-16384.imre.callgrind/report.txt": {
       "sha256": "774a72dd3b72c2292a8b9c409dc8a79ffdd4c683de7f2ffcab1155757c41ae5d",
       "bytes": 654942,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/dense-16384.relar.callgrind/report.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/dense-16384.imre.callgrind/report.txt"
     },
-    "profiles/final-lto/files/dense-16384.relar.callgrind/stock.txt": {
+    "profiles/final-lto/files/dense-16384.imre.callgrind/stock.txt": {
       "sha256": "462d16b90e4d634f069edba880cc991a13652b8fe0712830d3f90a1b8e024a6e",
       "bytes": 793,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/dense-16384.relar.callgrind/stock.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/dense-16384.imre.callgrind/stock.txt"
     },
-    "profiles/final-lto/files/dense-16384.relar.dhat/orders.txt": {
+    "profiles/final-lto/files/dense-16384.imre.dhat/orders.txt": {
       "sha256": "4931dde412ffd8aa49f073a7046ed974dcb9088fc098ee0f9cbf515021fe3d36",
       "bytes": 181790,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/dense-16384.relar.dhat/orders.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/dense-16384.imre.dhat/orders.txt"
     },
-    "profiles/final-lto/files/dense-16384.relar.dhat/report.txt": {
+    "profiles/final-lto/files/dense-16384.imre.dhat/report.txt": {
       "sha256": "774a72dd3b72c2292a8b9c409dc8a79ffdd4c683de7f2ffcab1155757c41ae5d",
       "bytes": 654942,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/dense-16384.relar.dhat/report.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/dense-16384.imre.dhat/report.txt"
     },
-    "profiles/final-lto/files/dense-16384.relar.dhat/stock.txt": {
+    "profiles/final-lto/files/dense-16384.imre.dhat/stock.txt": {
       "sha256": "462d16b90e4d634f069edba880cc991a13652b8fe0712830d3f90a1b8e024a6e",
       "bytes": 793,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/dense-16384.relar.dhat/stock.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/dense-16384.imre.dhat/stock.txt"
     },
-    "profiles/final-lto/files/sparse-16384.relar.callgrind/orders.txt": {
+    "profiles/final-lto/files/sparse-16384.imre.callgrind/orders.txt": {
       "sha256": "5cc259363bfe3720885db6343eecaf10c555ba84cee5c1b11c4c7abc9bb9c478",
       "bytes": 242560,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/sparse-16384.relar.callgrind/orders.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/sparse-16384.imre.callgrind/orders.txt"
     },
-    "profiles/final-lto/files/sparse-16384.relar.callgrind/report.txt": {
+    "profiles/final-lto/files/sparse-16384.imre.callgrind/report.txt": {
       "sha256": "d1f666f0a0deab8399509219a027001e23f6614b90c6b46dae0987de65a51d7a",
       "bytes": 1438871,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/sparse-16384.relar.callgrind/report.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/sparse-16384.imre.callgrind/report.txt"
     },
-    "profiles/final-lto/files/sparse-16384.relar.callgrind/stock.txt": {
+    "profiles/final-lto/files/sparse-16384.imre.callgrind/stock.txt": {
       "sha256": "e10e381a069166d0f3a028fc668fc72b1938a83929f425b8de0e10e87e49db0f",
       "bytes": 203239,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/sparse-16384.relar.callgrind/stock.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/sparse-16384.imre.callgrind/stock.txt"
     },
-    "profiles/final-lto/files/sparse-16384.relar.dhat/orders.txt": {
+    "profiles/final-lto/files/sparse-16384.imre.dhat/orders.txt": {
       "sha256": "5cc259363bfe3720885db6343eecaf10c555ba84cee5c1b11c4c7abc9bb9c478",
       "bytes": 242560,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/sparse-16384.relar.dhat/orders.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/sparse-16384.imre.dhat/orders.txt"
     },
-    "profiles/final-lto/files/sparse-16384.relar.dhat/report.txt": {
+    "profiles/final-lto/files/sparse-16384.imre.dhat/report.txt": {
       "sha256": "d1f666f0a0deab8399509219a027001e23f6614b90c6b46dae0987de65a51d7a",
       "bytes": 1438871,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/sparse-16384.relar.dhat/report.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/sparse-16384.imre.dhat/report.txt"
     },
-    "profiles/final-lto/files/sparse-16384.relar.dhat/stock.txt": {
+    "profiles/final-lto/files/sparse-16384.imre.dhat/stock.txt": {
       "sha256": "e10e381a069166d0f3a028fc668fc72b1938a83929f425b8de0e10e87e49db0f",
       "bytes": 203239,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/sparse-16384.relar.dhat/stock.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/files/sparse-16384.imre.dhat/stock.txt"
     },
     "profiles/final-lto/manifest.json": {
       "sha256": "11e51f9cf0a9e4022ecd021e59e0a47e504e24183cf1af5d720bf639baff8875",
@@ -1175,45 +1175,45 @@
       "bytes": 3251,
       "source": "benchmarks/local/inventory-performance-final-profile-lto/sources/validate.py"
     },
-    "profiles/final-lto/sparse-16384.relar.callgrind.log": {
+    "profiles/final-lto/sparse-16384.imre.callgrind.log": {
       "sha256": "bf5cdd9d3759fffa0556444017c241c04cd40fa4c716989e2fa80e1701bd5dbf",
       "bytes": 614,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.relar.callgrind.log"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.imre.callgrind.log"
     },
-    "profiles/final-lto/sparse-16384.relar.callgrind.stderr": {
+    "profiles/final-lto/sparse-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.relar.callgrind.stderr"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.imre.callgrind.stderr"
     },
-    "profiles/final-lto/sparse-16384.relar.callgrind.stdout": {
+    "profiles/final-lto/sparse-16384.imre.callgrind.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.relar.callgrind.stdout"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.imre.callgrind.stdout"
     },
-    "profiles/final-lto/sparse-16384.relar.callgrind.trace": {
+    "profiles/final-lto/sparse-16384.imre.callgrind.trace": {
       "sha256": "a352235590d1f97ba7f32d8943c484f59100d48557fc77e4d6758194ba906f0e",
       "bytes": 408022,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.relar.callgrind.trace"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.imre.callgrind.trace"
     },
-    "profiles/final-lto/sparse-16384.relar.dhat.log": {
+    "profiles/final-lto/sparse-16384.imre.dhat.log": {
       "sha256": "5c30db4d55895a918628d7510b9a0455cc51a763e91882d620b8894a4a171986",
       "bytes": 1059,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.relar.dhat.log"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.imre.dhat.log"
     },
-    "profiles/final-lto/sparse-16384.relar.dhat.stderr": {
+    "profiles/final-lto/sparse-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.relar.dhat.stderr"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.imre.dhat.stderr"
     },
-    "profiles/final-lto/sparse-16384.relar.dhat.stdout": {
+    "profiles/final-lto/sparse-16384.imre.dhat.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.relar.dhat.stdout"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.imre.dhat.stdout"
     },
-    "profiles/final-lto/sparse-16384.relar.dhat.trace": {
+    "profiles/final-lto/sparse-16384.imre.dhat.trace": {
       "sha256": "9b8deb47f0983341d86c7443b9a36a3463fcec247d34bfdf4c8cb4c72c01a092",
       "bytes": 53434,
-      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.relar.dhat.trace"
+      "source": "benchmarks/local/inventory-performance-final-profile-lto/sparse-16384.imre.dhat.trace"
     },
     "profiles/final-lto/summary.json": {
       "sha256": "747dc8b557a7b6b3dc50b5302497fac327fa9b40be73360d70d7328c3ab42844",
@@ -1225,115 +1225,115 @@
       "bytes": 3995066,
       "source": "benchmarks/local/inventory-performance-final-profile-lto/workloads.json"
     },
-    "profiles/final-normal/build-records/relar.json": {
+    "profiles/final-normal/build-records/imre.json": {
       "sha256": "f35904503c4c6e0f38255738d5a57bdea275e4e8e0212b3fb4d76d80c91e0476",
       "bytes": 675910,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/build-records/relar.json"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/build-records/imre.json"
     },
     "profiles/final-normal/comparison.json": {
       "sha256": "8bf441194078ef3221a91c7801b83b070802b9e60f645c3568c8ed32bbd47c43",
       "bytes": 10896246,
       "source": "benchmarks/local/inventory-performance-final-profile-normal/comparison.json"
     },
-    "profiles/final-normal/dense-16384.relar.callgrind.log": {
+    "profiles/final-normal/dense-16384.imre.callgrind.log": {
       "sha256": "deca017bece681cc4ffe0dae258a413ba1c37866af9a61a883f2c457a347ceb0",
       "bytes": 617,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.relar.callgrind.log"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.imre.callgrind.log"
     },
-    "profiles/final-normal/dense-16384.relar.callgrind.stderr": {
+    "profiles/final-normal/dense-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.relar.callgrind.stderr"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.imre.callgrind.stderr"
     },
-    "profiles/final-normal/dense-16384.relar.callgrind.stdout": {
+    "profiles/final-normal/dense-16384.imre.callgrind.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.relar.callgrind.stdout"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.imre.callgrind.stdout"
     },
-    "profiles/final-normal/dense-16384.relar.callgrind.trace": {
+    "profiles/final-normal/dense-16384.imre.callgrind.trace": {
       "sha256": "d5637c9ee712ef126c20cc021b7519311e9e095470df42c53bb1c5312cff4938",
       "bytes": 353159,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.relar.callgrind.trace"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.imre.callgrind.trace"
     },
-    "profiles/final-normal/dense-16384.relar.dhat.log": {
+    "profiles/final-normal/dense-16384.imre.dhat.log": {
       "sha256": "9fe515aa785e6bd3b59454ef9999d4d7789882b77c641b9ce8771e9759034571",
       "bytes": 1063,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.relar.dhat.log"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.imre.dhat.log"
     },
-    "profiles/final-normal/dense-16384.relar.dhat.stderr": {
+    "profiles/final-normal/dense-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.relar.dhat.stderr"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.imre.dhat.stderr"
     },
-    "profiles/final-normal/dense-16384.relar.dhat.stdout": {
+    "profiles/final-normal/dense-16384.imre.dhat.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.relar.dhat.stdout"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.imre.dhat.stdout"
     },
-    "profiles/final-normal/dense-16384.relar.dhat.trace": {
+    "profiles/final-normal/dense-16384.imre.dhat.trace": {
       "sha256": "1e87cec052dbd7e95098877b8ba2b7a70eba74c117bf5e248eb38422d68c764e",
       "bytes": 59389,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.relar.dhat.trace"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/dense-16384.imre.dhat.trace"
     },
-    "profiles/final-normal/files/dense-16384.relar.callgrind/orders.txt": {
+    "profiles/final-normal/files/dense-16384.imre.callgrind/orders.txt": {
       "sha256": "4931dde412ffd8aa49f073a7046ed974dcb9088fc098ee0f9cbf515021fe3d36",
       "bytes": 181790,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/dense-16384.relar.callgrind/orders.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/dense-16384.imre.callgrind/orders.txt"
     },
-    "profiles/final-normal/files/dense-16384.relar.callgrind/report.txt": {
+    "profiles/final-normal/files/dense-16384.imre.callgrind/report.txt": {
       "sha256": "774a72dd3b72c2292a8b9c409dc8a79ffdd4c683de7f2ffcab1155757c41ae5d",
       "bytes": 654942,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/dense-16384.relar.callgrind/report.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/dense-16384.imre.callgrind/report.txt"
     },
-    "profiles/final-normal/files/dense-16384.relar.callgrind/stock.txt": {
+    "profiles/final-normal/files/dense-16384.imre.callgrind/stock.txt": {
       "sha256": "462d16b90e4d634f069edba880cc991a13652b8fe0712830d3f90a1b8e024a6e",
       "bytes": 793,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/dense-16384.relar.callgrind/stock.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/dense-16384.imre.callgrind/stock.txt"
     },
-    "profiles/final-normal/files/dense-16384.relar.dhat/orders.txt": {
+    "profiles/final-normal/files/dense-16384.imre.dhat/orders.txt": {
       "sha256": "4931dde412ffd8aa49f073a7046ed974dcb9088fc098ee0f9cbf515021fe3d36",
       "bytes": 181790,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/dense-16384.relar.dhat/orders.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/dense-16384.imre.dhat/orders.txt"
     },
-    "profiles/final-normal/files/dense-16384.relar.dhat/report.txt": {
+    "profiles/final-normal/files/dense-16384.imre.dhat/report.txt": {
       "sha256": "774a72dd3b72c2292a8b9c409dc8a79ffdd4c683de7f2ffcab1155757c41ae5d",
       "bytes": 654942,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/dense-16384.relar.dhat/report.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/dense-16384.imre.dhat/report.txt"
     },
-    "profiles/final-normal/files/dense-16384.relar.dhat/stock.txt": {
+    "profiles/final-normal/files/dense-16384.imre.dhat/stock.txt": {
       "sha256": "462d16b90e4d634f069edba880cc991a13652b8fe0712830d3f90a1b8e024a6e",
       "bytes": 793,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/dense-16384.relar.dhat/stock.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/dense-16384.imre.dhat/stock.txt"
     },
-    "profiles/final-normal/files/sparse-16384.relar.callgrind/orders.txt": {
+    "profiles/final-normal/files/sparse-16384.imre.callgrind/orders.txt": {
       "sha256": "5cc259363bfe3720885db6343eecaf10c555ba84cee5c1b11c4c7abc9bb9c478",
       "bytes": 242560,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/sparse-16384.relar.callgrind/orders.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/sparse-16384.imre.callgrind/orders.txt"
     },
-    "profiles/final-normal/files/sparse-16384.relar.callgrind/report.txt": {
+    "profiles/final-normal/files/sparse-16384.imre.callgrind/report.txt": {
       "sha256": "d1f666f0a0deab8399509219a027001e23f6614b90c6b46dae0987de65a51d7a",
       "bytes": 1438871,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/sparse-16384.relar.callgrind/report.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/sparse-16384.imre.callgrind/report.txt"
     },
-    "profiles/final-normal/files/sparse-16384.relar.callgrind/stock.txt": {
+    "profiles/final-normal/files/sparse-16384.imre.callgrind/stock.txt": {
       "sha256": "e10e381a069166d0f3a028fc668fc72b1938a83929f425b8de0e10e87e49db0f",
       "bytes": 203239,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/sparse-16384.relar.callgrind/stock.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/sparse-16384.imre.callgrind/stock.txt"
     },
-    "profiles/final-normal/files/sparse-16384.relar.dhat/orders.txt": {
+    "profiles/final-normal/files/sparse-16384.imre.dhat/orders.txt": {
       "sha256": "5cc259363bfe3720885db6343eecaf10c555ba84cee5c1b11c4c7abc9bb9c478",
       "bytes": 242560,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/sparse-16384.relar.dhat/orders.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/sparse-16384.imre.dhat/orders.txt"
     },
-    "profiles/final-normal/files/sparse-16384.relar.dhat/report.txt": {
+    "profiles/final-normal/files/sparse-16384.imre.dhat/report.txt": {
       "sha256": "d1f666f0a0deab8399509219a027001e23f6614b90c6b46dae0987de65a51d7a",
       "bytes": 1438871,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/sparse-16384.relar.dhat/report.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/sparse-16384.imre.dhat/report.txt"
     },
-    "profiles/final-normal/files/sparse-16384.relar.dhat/stock.txt": {
+    "profiles/final-normal/files/sparse-16384.imre.dhat/stock.txt": {
       "sha256": "e10e381a069166d0f3a028fc668fc72b1938a83929f425b8de0e10e87e49db0f",
       "bytes": 203239,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/sparse-16384.relar.dhat/stock.txt"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/files/sparse-16384.imre.dhat/stock.txt"
     },
     "profiles/final-normal/manifest.json": {
       "sha256": "82da2550b24bd99b75afb2eadad30455ca768aae4be88ff5c66bc41c270ec929",
@@ -1385,45 +1385,45 @@
       "bytes": 3251,
       "source": "benchmarks/local/inventory-performance-final-profile-normal/sources/validate.py"
     },
-    "profiles/final-normal/sparse-16384.relar.callgrind.log": {
+    "profiles/final-normal/sparse-16384.imre.callgrind.log": {
       "sha256": "7228afae7e096ee5972d244b4a89bfa510faa6aeb6f9ce8cc804ab9c82b1c7cb",
       "bytes": 617,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.relar.callgrind.log"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.imre.callgrind.log"
     },
-    "profiles/final-normal/sparse-16384.relar.callgrind.stderr": {
+    "profiles/final-normal/sparse-16384.imre.callgrind.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.relar.callgrind.stderr"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.imre.callgrind.stderr"
     },
-    "profiles/final-normal/sparse-16384.relar.callgrind.stdout": {
+    "profiles/final-normal/sparse-16384.imre.callgrind.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.relar.callgrind.stdout"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.imre.callgrind.stdout"
     },
-    "profiles/final-normal/sparse-16384.relar.callgrind.trace": {
+    "profiles/final-normal/sparse-16384.imre.callgrind.trace": {
       "sha256": "53469b16b3260fa4ba1fc90a0f2c0366b56212a4f1fdf4cddc5d4842ca8d3889",
       "bytes": 362471,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.relar.callgrind.trace"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.imre.callgrind.trace"
     },
-    "profiles/final-normal/sparse-16384.relar.dhat.log": {
+    "profiles/final-normal/sparse-16384.imre.dhat.log": {
       "sha256": "a5f71d73031c6cb6b88f31eb119ee1ed68d957dfc7e1d4d521c97e1782f8122d",
       "bytes": 1065,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.relar.dhat.log"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.imre.dhat.log"
     },
-    "profiles/final-normal/sparse-16384.relar.dhat.stderr": {
+    "profiles/final-normal/sparse-16384.imre.dhat.stderr": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.relar.dhat.stderr"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.imre.dhat.stderr"
     },
-    "profiles/final-normal/sparse-16384.relar.dhat.stdout": {
+    "profiles/final-normal/sparse-16384.imre.dhat.stdout": {
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "bytes": 0,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.relar.dhat.stdout"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.imre.dhat.stdout"
     },
-    "profiles/final-normal/sparse-16384.relar.dhat.trace": {
+    "profiles/final-normal/sparse-16384.imre.dhat.trace": {
       "sha256": "0f59e079582f0819864914eff89c72ca1186e155e6db30411f437bf466154f12",
       "bytes": 60093,
-      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.relar.dhat.trace"
+      "source": "benchmarks/local/inventory-performance-final-profile-normal/sparse-16384.imre.dhat.trace"
     },
     "profiles/final-normal/summary.json": {
       "sha256": "55d194acf558bb736d68f83c7ecc01a9ff5512ab2a8e510057886722153915db",
@@ -1585,125 +1585,125 @@
       "bytes": 3251,
       "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:benchmarks/validate.py"
     },
-    "source/crates/relar-compiler/Cargo.toml": {
+    "source/crates/imre-compiler/Cargo.toml": {
       "sha256": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
       "bytes": 592,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/Cargo.toml"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/Cargo.toml"
     },
-    "source/crates/relar-compiler/src/analysis.rs": {
+    "source/crates/imre-compiler/src/analysis.rs": {
       "sha256": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
       "bytes": 6991,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/src/analysis.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/src/analysis.rs"
     },
-    "source/crates/relar-compiler/src/classes.rs": {
+    "source/crates/imre-compiler/src/classes.rs": {
       "sha256": "8a57bbf41463e5384d86fc7d70be62fb8c26ef95b89bbcf7b575ea13be373785",
       "bytes": 9633,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/src/classes.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/src/classes.rs"
     },
-    "source/crates/relar-compiler/src/effects.rs": {
+    "source/crates/imre-compiler/src/effects.rs": {
       "sha256": "58d6d4604c2ec19402a696c6b168c63c924493424feab30f013874f10108f62f",
       "bytes": 13155,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/src/effects.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/src/effects.rs"
     },
-    "source/crates/relar-compiler/src/frontend.rs": {
+    "source/crates/imre-compiler/src/frontend.rs": {
       "sha256": "555b5f6c8d62a210d38b13aa783ae8bfc9470a8b1bf0db10667a41f7dab2d38b",
       "bytes": 102849,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/src/frontend.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/src/frontend.rs"
     },
-    "source/crates/relar-compiler/src/frontend/comprehensions.rs": {
+    "source/crates/imre-compiler/src/frontend/comprehensions.rs": {
       "sha256": "d90161413c8957a941deeafa82210aca3ff73d51058760a9362124d4ab20bc02",
       "bytes": 17966,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/src/frontend/comprehensions.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/src/frontend/comprehensions.rs"
     },
-    "source/crates/relar-compiler/src/ir.rs": {
+    "source/crates/imre-compiler/src/ir.rs": {
       "sha256": "a716274199e8cace1a95867148e752e62568cfd59f64aa1bd2c5c344eae3114c",
       "bytes": 9790,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/src/ir.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/src/ir.rs"
     },
-    "source/crates/relar-compiler/src/lib.rs": {
+    "source/crates/imre-compiler/src/lib.rs": {
       "sha256": "aff038d03eadb6f07481b29100e984e3f6de97c089404a574daf3c0f5653861d",
       "bytes": 5107,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/src/lib.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/src/lib.rs"
     },
-    "source/crates/relar-compiler/src/llvm.rs": {
+    "source/crates/imre-compiler/src/llvm.rs": {
       "sha256": "363ec32948210e7e1662705f2dbbb33ac7e47356c2245ac6d12d96446a039665",
       "bytes": 107445,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/src/llvm.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/src/llvm.rs"
     },
-    "source/crates/relar-compiler/src/main.rs": {
+    "source/crates/imre-compiler/src/main.rs": {
       "sha256": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
       "bytes": 7777,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/src/main.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/src/main.rs"
     },
-    "source/crates/relar-compiler/src/modules.rs": {
+    "source/crates/imre-compiler/src/modules.rs": {
       "sha256": "3c597d7ddfe35c2cd12a2189ce7c69cf81c7983e89193c47f00395019210de0a",
       "bytes": 22044,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/src/modules.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/src/modules.rs"
     },
-    "source/crates/relar-compiler/src/narrowing.rs": {
+    "source/crates/imre-compiler/src/narrowing.rs": {
       "sha256": "f37bbacad8279aa18aff36edbee90477187d8927ca12b0563b0bfedde791832d",
       "bytes": 4455,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/src/narrowing.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/src/narrowing.rs"
     },
-    "source/crates/relar-compiler/src/ranges.rs": {
+    "source/crates/imre-compiler/src/ranges.rs": {
       "sha256": "29c217f8ef942187f5e945385279ac2548ab645a13145345c2023befa6303060",
       "bytes": 58451,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/src/ranges.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/src/ranges.rs"
     },
-    "source/crates/relar-compiler/src/tuples.rs": {
+    "source/crates/imre-compiler/src/tuples.rs": {
       "sha256": "022bc95c1702a09f6f124754031d13c07ff94b4f721f72f6363bad2ff29211fa",
       "bytes": 19761,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/src/tuples.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/src/tuples.rs"
     },
-    "source/crates/relar-compiler/src/types.rs": {
+    "source/crates/imre-compiler/src/types.rs": {
       "sha256": "6ec28df90874d39206cfd36f025964e6e4fd1026bbfff9eba868e7a944d2cbbe",
       "bytes": 5866,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-compiler/src/types.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-compiler/src/types.rs"
     },
-    "source/crates/relar-runtime/Cargo.toml": {
+    "source/crates/imre-runtime/Cargo.toml": {
       "sha256": "504747307550bbb6a62804730b159c158cba5b35e22a533269db00f51f423ba8",
       "bytes": 374,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-runtime/Cargo.toml"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-runtime/Cargo.toml"
     },
-    "source/crates/relar-runtime/src/lib.rs": {
+    "source/crates/imre-runtime/src/lib.rs": {
       "sha256": "4ca207eb054a7a9023b08957058ebe4dae933410ea5cd1ede62550c18dab2988",
       "bytes": 41980,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-runtime/src/lib.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-runtime/src/lib.rs"
     },
-    "source/crates/relar-runtime/src/objects.rs": {
+    "source/crates/imre-runtime/src/objects.rs": {
       "sha256": "345c52b38ea32647cbeb220d853d3f0848906ae275b98a371fb05c021e61ee59",
       "bytes": 34886,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-runtime/src/objects.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-runtime/src/objects.rs"
     },
-    "source/crates/relar-runtime/src/objects/args.rs": {
+    "source/crates/imre-runtime/src/objects/args.rs": {
       "sha256": "0f7c2543368bc69da08613471c17dc7ac0981967e7840e3c30ef85dc6a044099",
       "bytes": 6684,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-runtime/src/objects/args.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-runtime/src/objects/args.rs"
     },
-    "source/crates/relar-runtime/src/objects/exceptions.rs": {
+    "source/crates/imre-runtime/src/objects/exceptions.rs": {
       "sha256": "003d465b3a28ac4cb991d2fa2a9b589add6a35ef714587ad6c705e0667b836af",
       "bytes": 27362,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-runtime/src/objects/exceptions.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-runtime/src/objects/exceptions.rs"
     },
-    "source/crates/relar-runtime/src/objects/files.rs": {
+    "source/crates/imre-runtime/src/objects/files.rs": {
       "sha256": "17abf6f1aec89723d6508e00756c53108e5c5ec912979eca0be884c4eb78aebd",
       "bytes": 23049,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-runtime/src/objects/files.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-runtime/src/objects/files.rs"
     },
-    "source/crates/relar-runtime/src/objects/mappings.rs": {
+    "source/crates/imre-runtime/src/objects/mappings.rs": {
       "sha256": "eca128f038aff16c93af24203b7d66fe652d27430b5cac02a25630758a590ec9",
       "bytes": 42817,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-runtime/src/objects/mappings.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-runtime/src/objects/mappings.rs"
     },
-    "source/crates/relar-runtime/src/objects/records.rs": {
+    "source/crates/imre-runtime/src/objects/records.rs": {
       "sha256": "9e8061a02eca605d6587da87dedb0ca7b2b868d98bef9abb5159bd4b7ceff75d",
       "bytes": 10110,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-runtime/src/objects/records.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-runtime/src/objects/records.rs"
     },
-    "source/crates/relar-runtime/src/objects/words.rs": {
+    "source/crates/imre-runtime/src/objects/words.rs": {
       "sha256": "251b21899a15b0d40c6de1f8452034d139bf7093aa112c5603c8896427f53ca8",
       "bytes": 6001,
-      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/relar-runtime/src/objects/words.rs"
+      "source": "git:7ec35cbd0a94ca82419061c725382b2e2a1d4a1e:crates/imre-runtime/src/objects/words.rs"
     },
     "source/docs/design.md": {
       "sha256": "dc2e5e6550d1f7ceadae820e04f71ca69d6a8e6635b5c0ce45c3a6845fae79d0",

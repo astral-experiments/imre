@@ -1,4 +1,4 @@
-"""Run CPython's original shutil.which filesystem fixtures against native Relar."""
+"""Run CPython's original shutil.which filesystem fixtures against native Imre."""
 import argparse
 import ast
 import json
@@ -60,7 +60,7 @@ def invoke(program, cmd, mode=OMITTED, path=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for opt in ("relar", "runtime", "clang", "result"):
+    for opt in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + opt, type=Path, required=True)
     parser.add_argument("--cpython-source", type=Path)
     args = parser.parse_args()
@@ -80,7 +80,7 @@ def main():
         work = Path(tmp)
         source, program = work / "driver.py", work / "driver"
         source.write_text(driver_source())
-        subprocess.run([args.relar.resolve(), "build", source, "-o", program, "--no-cache", "--opt-level", "3",
+        subprocess.run([args.imre.resolve(), "build", source, "-o", program, "--no-cache", "--opt-level", "3",
                         "--clang", args.clang.resolve(), "--runtime", args.runtime.resolve()], check=True, timeout=120)
         for cls in (suite.TestWhich, suite.TestWhichBytes):
             for name in unittest.defaultTestLoader.getTestCaseNames(cls):

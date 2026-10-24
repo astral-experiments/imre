@@ -46,7 +46,7 @@ def main():
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--root", type=Path, default=Path("/home/dev-user/code/oss/relar"))
+    parser.add_argument("--root", type=Path, default=Path("/home/dev-user/code/oss/imre"))
     parser.add_argument("--require-profile", action="store_true")
     args = parser.parse_args()
     args.root = args.root.resolve(strict=True)
@@ -194,7 +194,7 @@ def main():
             label = PurePosixPath(name).stem
             check(prepared["kind"] == "telemetry-preparation" and prepared["input_guards_passed"]
                   and prepared["revision"] == timed and not prepared["dirty"]
-                  and prepared["relar_build_record"] == build, "invalid preparation")
+                  and prepared["imre_build_record"] == build, "invalid preparation")
             preparations[members[name]["sha256"]] = prepared
             for key in ("llvm", "validation", "binary"):
                 basename = Path(prepared["validation_path" if key == "validation" else key]).name
@@ -246,7 +246,7 @@ def main():
         check(mode == identity["mode"], "timing runtime mode differs")
         recorded_runs.append((identity["record_sha256"], mode))
         for workload in [record["startup_control"], *record["workloads"]]:
-            for engine in ("cpython", "relar", "rust"):
+            for engine in ("cpython", "imre", "rust"):
                 for filename, expected in workload["expected_files"].items():
                     data = base64.b64decode(expected["base64"], validate=True)
                     check(digest(data) == expected["sha256"] and len(data) == expected["bytes"], "encoded expected file differs")
@@ -271,12 +271,12 @@ def main():
                                        ("preparation.json", summary["preparation_record_sha256"]),
                                        ("timing-status.json", summary["timing_status_sha256"]),
                                        ("native.ll", prepared["llvm_sha256"]),
-                                       ("relar-build-record.json", package["validation_build_sha256"]),
+                                       ("imre-build-record.json", package["validation_build_sha256"]),
                                        ("rust-build-record.json", prepared["source_and_tool_sha256"]["rust_build_record"])):
                 bound(prefix + "/" + basename, expected)
             for relative, expected in summary["snapshot_sha256"].items():
                 bound(prefix + "/" + relative, expected)
-            expected_runs = {(engine, tool, repeats) for engine in ("relar", "rust")
+            expected_runs = {(engine, tool, repeats) for engine in ("imre", "rust")
                              for tool, repeats in (("callgrind", 128), ("dhat", 128), ("dhat", 256))}
             check({(item["engine"], item["tool"], item["repetitions"]) for item in summary["profiles"]}
                   == expected_runs and len(summary["profiles"]) == 6, "profile run matrix differs")
@@ -284,7 +284,7 @@ def main():
                 bound(prefix + "/" + relative, value)
             for item in summary["profiles"]:
                 check(item["status"] == "validated" and item["returncode"] == 0, "unvalidated profile run")
-                expected = prepared["binary_sha256"] if item["engine"] == "relar" else prepared["source_and_tool_sha256"]["rust"]
+                expected = prepared["binary_sha256"] if item["engine"] == "imre" else prepared["source_and_tool_sha256"]["rust"]
                 check(item["binary_sha256"] == expected, "profile used another native binary")
                 directory = f"{prefix}/{item['engine']}-{item['tool']}-{item['repetitions']}"
                 for relative, value in item["files"].items():

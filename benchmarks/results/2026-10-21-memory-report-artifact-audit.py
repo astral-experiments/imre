@@ -24,11 +24,11 @@ from datetime import datetime
 if sys.flags.optimize:
     raise SystemExit('audit requires assertions; do not use -O')
 sys.dont_write_bytecode = True
-ROOT = Path('/home/dev-user/code/oss/relar')
+ROOT = Path('/home/dev-user/code/oss/imre')
 FINAL = '4fb67dcd36ae47c91be7e78fdc80cfd8b2f58b3a'
 BASE = '73ec04ba338bc0ce6dba7b7070d22c6fce0f2a6b'
 LIBRARY = {'baseline': 'c28b93960b40ffeb51402ce02ec6cbf0d80dcd3b', 'final': '7119fb22d97f7057e662d1735700256ff0c853be'}
-ENGINES = ('relar', 'port', 'original', 'rust')
+ENGINES = ('imre', 'port', 'original', 'rust')
 FIELDS = ('tb', 'tbk', 'gb', 'gbk', 'eb', 'ebk', 'rb', 'wb')
 INPUTS = {}
 GIT = {}
@@ -189,7 +189,7 @@ def main():
     counts = collections.Counter()
     with tempfile.TemporaryDirectory(prefix='memory-independent-audit-') as temporary:
         oracle_root = Path(temporary) / 'source'
-        final_prep = load('/tmp/relar-memory-prepared-normal-final-v1.json')
+        final_prep = load('/tmp/imre-memory-prepared-normal-final-v1.json')
         for name, path in final_prep['source_and_tool_paths'].items():
             if name.startswith(('helper:', 'example:', 'stdlib:', 'fixture:', 'upstream:')):
                 relative = Path(path).relative_to(ROOT)
@@ -209,9 +209,9 @@ def main():
             suffix = 'v2' if stage == 'baseline' else 'final-v1'
             sample_count = 4 if stage == 'baseline' else 12
             for mode in ('normal', 'thinlto'):
-                path = Path(f'/tmp/relar-memory-timing-{mode}-{suffix}.json')
+                path = Path(f'/tmp/imre-memory-timing-{mode}-{suffix}.json')
                 record = load(path)
-                prep = load(f'/tmp/relar-memory-prepared-{mode}-{suffix}.json', record['preparation_record_sha256'])
+                prep = load(f'/tmp/imre-memory-prepared-{mode}-{suffix}.json', record['preparation_record_sha256'])
                 assert record['preparation'] == prep
                 records[stage, mode], preps[stage, mode] = record, prep
                 assert prep['input_guards_passed'] and record['input_guards_passed']
@@ -237,7 +237,7 @@ def main():
                     with Path(binary).open('rb') as stream: header = stream.read(20)
                     assert header[:6] == b'\x7fELF\x02\x01' and struct.unpack('<H', header[18:20])[0] == 62
                 assert prep['native_elf'] == {'bits': 64, 'byte_order': 'little', 'machine': 62}
-                build = load(paths['relar_build_record'])
+                build = load(paths['imre_build_record'])
                 assert build['revision'] == LIBRARY[stage] and build['source_matches_revision'] and build['input_guards_passed']
                 assert build['sha256']['compiler'] == hashes['compiler'] and build['sha256'][mode + '_runtime'] == hashes['runtime']
                 for relative, digest in build['source_sha256'].items(): assert sha(source(build['revision'], relative)) == digest
@@ -291,13 +291,13 @@ def main():
                         statistics_row = {'median_seconds': statistics.median(values), 'min_seconds': min(values), 'max_seconds': max(values), 'p25_seconds': q[0], 'p75_seconds': q[2]}
                         assert statistics_row == row['summary'][engine]
                         medians[engine] = statistics_row['median_seconds']
-                    for left, right in (('original', 'relar'), ('port', 'relar'), ('relar', 'rust'), ('original', 'rust'), ('port', 'rust')):
+                    for left, right in (('original', 'imre'), ('port', 'imre'), ('imre', 'rust'), ('original', 'rust'), ('port', 'rust')):
                         assert row[left + '_over_' + right] == medians[left] / medians[right]
                     if computed:
                         fractions = {engine: computed[0]['seconds'][engine] / medians[engine] for engine in ENGINES}
                         assert fractions == row['startup_control_fraction']
                     else: fractions = None
-                    computed.append({'label': row['label'], 'seconds': medians, 'relar_over_rust': medians['relar'] / medians['rust'], 'control_fraction': fractions})
+                    computed.append({'label': row['label'], 'seconds': medians, 'imre_over_rust': medians['imre'] / medians['rust'], 'control_fraction': fractions})
                     counts[stage + '_gates'] += 4
                     counts[stage + '_warmups'] += 8
                     counts[stage + '_measured'] += sample_count * 4
@@ -312,18 +312,18 @@ def main():
         archive = None if args.skip_archive else audit_archive(args.prefix)
     for path, expected in list(INPUTS.items()): guard(path, expected)
     targets = [row for key, rows in summary.items() if key.startswith('final-') for row in rows if row['label'].endswith('-256')]
-    assert len(targets) == 4 and all(row['relar_over_rust'] <= 2 for row in targets)
+    assert len(targets) == 4 and all(row['imre_over_rust'] <= 2 for row in targets)
     result = {'schema': 1, 'status': 'passed', 'scope': 'Independent raw timing statistics/order/output replay, Git/build/preparation identities, raw Callgrind/DHAT recomputation, report claims' + (', and full archive/index membership.' if archive else '; archive not yet audited.'), 'measurement_revision': FINAL, 'counts': dict(counts), 'timings': summary, 'profiles': profiles, 'report': report_checks, 'archive': archive, 'all_four_large_cases_at_most_twice_rust': True, 'audit_script_sha256': INPUTS[str(Path(__file__).absolute())], 'guarded_inputs': INPUTS, 'limits': 'No engines executed. Historical process isolation is not reconstructed. Preparation records retain complete stream values and file hashes; final timing/profile files are independently read. Oracle logic comes from the separately reviewed exact Git-bound benchmark validator.'}
     with args.output.open('x') as stream: json.dump(result, stream, indent=2); stream.write('\n')
-    print(json.dumps({'output': str(args.output), 'sha256': guard(args.output), 'counts': result['counts'], 'archive': archive, 'targets': [{key: row[key] for key in ('label', 'relar_over_rust')} for row in targets]}, indent=2))
+    print(json.dumps({'output': str(args.output), 'sha256': guard(args.output), 'counts': result['counts'], 'archive': archive, 'targets': [{key: row[key] for key in ('label', 'imre_over_rust')} for row in targets]}, indent=2))
 
 
 def audit_profiles(validator, benchmark, preps, records):
     runs, bindings, provenance = {}, {}, {}
-    expected_keys = {(workload, engine, tool) for workload in ('scaled-full-32', 'scaled-unchanged-32') for engine in ('relar', 'rust') for tool in ('callgrind', 'dhat')}
+    expected_keys = {(workload, engine, tool) for workload in ('scaled-full-32', 'scaled-unchanged-32') for engine in ('imre', 'rust') for tool in ('callgrind', 'dhat')}
     workloads = {metadata['label']: (metadata, case) for metadata, case in benchmark['workloads']([32])}
     for stage, suffix in (('baseline', 'baseline-v2'), ('final', 'optimized-v1')):
-        directory = Path('/tmp/relar-memory-profile-' + suffix)
+        directory = Path('/tmp/imre-memory-profile-' + suffix)
         manifest = load(directory / 'manifest.json')
         actual = {path.relative_to(directory).as_posix() for path in directory.rglob('*') if path.is_file() and path.name != 'manifest.json'}
         assert actual == set(manifest)
@@ -339,7 +339,7 @@ def audit_profiles(validator, benchmark, preps, records):
         for identity in prov['inputs'].values(): captured(identity['path'], identity['sha256'], BASE if stage == 'baseline' else FINAL)
         assert prov['inputs']['binary']['sha256'] == prep['binary_sha256']
         assert prov['inputs']['llvm']['sha256'] == prep['llvm_sha256']
-        assert prov['inputs']['record']['sha256'] == guard('/tmp/relar-memory-prepared-thinlto-' + ('v2' if stage == 'baseline' else 'final-v1') + '.json')
+        assert prov['inputs']['record']['sha256'] == guard('/tmp/imre-memory-prepared-thinlto-' + ('v2' if stage == 'baseline' else 'final-v1') + '.json')
         assert len(prov['runs']) == len(captured_summary['runs']) == 8
         claimed = {(run['workload'], run['engine'], run['tool']): run for run in captured_summary['runs']}
         assert set(claimed) == expected_keys
@@ -357,8 +357,8 @@ def audit_profiles(validator, benchmark, preps, records):
             stem = '.'.join(key)
             for stream in ('stdout', 'stderr'):
                 assert raw(directory / (stem + '.' + stream), run[stream + '_sha256']) == run['result'][stream].encode()
-            binary = prep['binary'] if run['engine'] == 'relar' else prep['source_and_tool_paths']['rust']
-            identity = prep['binary_sha256'] if run['engine'] == 'relar' else prep['source_and_tool_sha256']['rust']
+            binary = prep['binary'] if run['engine'] == 'imre' else prep['source_and_tool_paths']['rust']
+            identity = prep['binary_sha256'] if run['engine'] == 'imre' else prep['source_and_tool_sha256']['rust']
             assert run['binary_sha256'] == identity and run['command'][-len(case.arguments)-1:] == [binary, *case.arguments]
             assert run['command'][0] == prov['inputs']['profiler:valgrind']['path']
             assert '--tool=' + run['tool'] in run['command']
@@ -389,48 +389,48 @@ def audit_profiles(validator, benchmark, preps, records):
             assert interval[1] <= timing[0] or timing[1] <= interval[0], 'profiling overlaps wall measurements'
         bindings[stage] = {name + '_sha256': guard(directory / (name + '.json')) for name in ('manifest', 'summary', 'provenance')}
     assert provenance['baseline']['workloads'] == provenance['final']['workloads']
-    comparison = load('/tmp/relar-memory-profile-comparison.json')
+    comparison = load('/tmp/imre-memory-profile-comparison.json')
     for stage, label in (('baseline', 'baseline'), ('final', 'optimized')):
         assert all(comparison[label][key] == value for key, value in bindings[stage].items())
     rows = []
     for workload in ('scaled-full-32', 'scaled-unchanged-32'):
-        for engine in ('relar', 'rust'):
+        for engine in ('imre', 'rust'):
             before, after = (runs[stage, workload, engine, 'callgrind']['total'] for stage in ('baseline', 'final'))
             old, new = (runs[stage, workload, engine, 'dhat']['totals'] for stage in ('baseline', 'final'))
             row = {'workload': workload, 'engine': engine, 'baseline_instructions': before, 'optimized_instructions': after, 'instruction_reduction_fraction': (before-after)/before, 'baseline_heap': old, 'optimized_heap': new, 'allocation_delta': {field: new[field]-old[field] for field in ('tb','tbk','gb','gbk')}}
             assert row in comparison['rows']
             rows.append(row)
-    details = load('/tmp/relar-memory-profile-details.json')
+    details = load('/tmp/imre-memory-profile-details.json')
     allocation = []
     for workload in ('scaled-full-32', 'scaled-unchanged-32'):
-        old, new = (runs[stage, workload, 'relar', 'dhat']['points'] for stage in ('baseline', 'final'))
+        old, new = (runs[stage, workload, 'imre', 'dhat']['points'] for stage in ('baseline', 'final'))
         assert len(old) == len(new)
         changes = [index for index, (left, right) in enumerate(zip(old, new, strict=True)) if any(left[field] != right[field] for field in ('tb','tbk'))]
         assert changes == [4]
         assert old[4]['tb'] == 51 and new[4]['tb'] == 57 and old[4]['tbk'] == new[4]['tbk'] == 1
-        assert all(any('relar_sys_argv' in frame for frame in point['stack']) for point in (old[4],new[4]))
+        assert all(any('imre_sys_argv' in frame for frame in point['stack']) for point in (old[4],new[4]))
         assert len(preps['final','thinlto']['binary'].encode()) - len(preps['baseline','thinlto']['binary'].encode()) == 6
         claim = next(item for item in details['argv_allocation_explanation'] if item['workload'] == workload)
         assert claim['baseline_stack'] == old[4]['stack'] and claim['optimized_stack'] == new[4]['stack']
         allocation.append({'workload': workload, 'changed_point': 4, 'byte_delta': 6, 'block_delta': 0, 'all_other_allocation_bytes_and_blocks_equal': True})
     lookup, decoder = {}, {}
-    name = '<relar_runtime::objects::mappings::Tables<usize>>::lookup'
+    name = '<imre_runtime::objects::mappings::Tables<usize>>::lookup'
     for stage, label in (('baseline','baseline'),('final','optimized')):
-        parsed = runs[stage,'scaled-full-32','relar','callgrind']
+        parsed = runs[stage,'scaled-full-32','imre','callgrind']
         lookup[label] = parsed['functions'][name]
         assert all(details['dictionary_lookup'][label][key] == value for key,value in lookup[label].items())
-        entry = parsed['functions']['relar_json_decode']['self_instructions']
-        search = sum(value for (caller,callee),value in parsed['edges'].items() if caller == 'relar_json_decode' and 'memchr' in callee)
+        entry = parsed['functions']['imre_json_decode']['self_instructions']
+        search = sum(value for (caller,callee),value in parsed['edges'].items() if caller == 'imre_json_decode' and 'memchr' in callee)
         decoder[label] = entry + search
         assert decoder[label] == details['decoder_entry_work'][label]['entry_plus_search_instructions']
-    final_functions = runs['final','scaled-full-32','relar','callgrind']['functions']
+    final_functions = runs['final','scaled-full-32','imre','callgrind']['functions']
     for item in details['remaining_top_functions']:
         assert final_functions[item['name']]['self_instructions'] == item['self_instructions']
-    points = runs['final','scaled-full-32','relar','dhat']['points']
+    points = runs['final','scaled-full-32','imre','dhat']['points']
     attributed = []
     for point in points:
-        names = [match[1] for frame in point['stack'] if (match := re.search(r'\b(relar_(?!runtime\b)[A-Za-z0-9_]+)\b', frame))]
-        if names and names[0] == 'relar_json_decode': attributed.append(point)
+        names = [match[1] for frame in point['stack'] if (match := re.search(r'\b(imre_(?!runtime\b)[A-Za-z0-9_]+)\b', frame))]
+        if names and names[0] == 'imre_json_decode': attributed.append(point)
     decoder_allocations = {field: sum(point[field] for point in attributed) for field in FIELDS}
     assert all(details['remaining_decoder_allocations'][field] == value for field,value in decoder_allocations.items())
     return {'runs': 16, 'rows': rows, 'bindings': bindings, 'argv_allocation': allocation, 'lookup': lookup, 'decoder_entry_instructions': decoder, 'decoder_allocations': decoder_allocations, 'top_functions': details['remaining_top_functions'][:2]}
@@ -442,36 +442,36 @@ def audit_report(prefix, summaries, profiles):
     render_path = Path(str(prefix) + '-render.json')
     render = load(render_path)
     assert render['output'] == str(report_path) and render['output_sha256'] == sha(report.encode())
-    assert '/tmp/relar-memory-render-report.py' in render['inputs']
+    assert '/tmp/imre-memory-render-report.py' in render['inputs']
     for path, expected in render['inputs'].items(): guard(path, expected)
     expected_rows = []
     large, small = [], []
     for mode, title in (('normal','Ordinary'),('thinlto','ThinLTO')):
         rows = summaries['final-' + mode]
         for row in rows[1:]:
-            seconds = row['seconds']; values = [seconds[engine]*1000 for engine in ('original','port','relar','rust')]
-            expected_rows.append(f"| {title} | `{row['label']}` | " + ' | '.join(f'{value:.3f}' for value in values) + f" | {row['relar_over_rust']:.3f}× |")
+            seconds = row['seconds']; values = [seconds[engine]*1000 for engine in ('original','port','imre','rust')]
+            expected_rows.append(f"| {title} | `{row['label']}` | " + ' | '.join(f'{value:.3f}' for value in values) + f" | {row['imre_over_rust']:.3f}× |")
             if row['label'].endswith('-256'):
                 large.append(row)
                 case = 'Full comparison' if '-full-' in row['label'] else 'Unchanged report'
-                expected_rows.append(f"| {title} | {case} | " + ' | '.join(f'{value:.3f}' for value in values) + f" | {row['relar_over_rust']:.3f}× | {row['control_fraction']['relar']:.2%} |")
-                old = next(item for item in summaries['baseline-' + mode] if item['label'] == row['label'])['seconds']['relar']
-                expected_rows.append(f"| {title} | `{row['label']}` | {old*1000:.3f} | {seconds['relar']*1000:.3f} | {1-seconds['relar']/old:.2%} |")
-            if row['label'].startswith('real-'): small.extend(row['control_fraction'][engine] for engine in ('relar','rust'))
-        expected_rows.append(f'| {title} | ' + ' | '.join(f"{rows[0]['seconds'][engine]*1000:.3f}" for engine in ('original','port','relar','rust')) + ' |')
+                expected_rows.append(f"| {title} | {case} | " + ' | '.join(f'{value:.3f}' for value in values) + f" | {row['imre_over_rust']:.3f}× | {row['control_fraction']['imre']:.2%} |")
+                old = next(item for item in summaries['baseline-' + mode] if item['label'] == row['label'])['seconds']['imre']
+                expected_rows.append(f"| {title} | `{row['label']}` | {old*1000:.3f} | {seconds['imre']*1000:.3f} | {1-seconds['imre']/old:.2%} |")
+            if row['label'].startswith('real-'): small.extend(row['control_fraction'][engine] for engine in ('imre','rust'))
+        expected_rows.append(f'| {title} | ' + ' | '.join(f"{rows[0]['seconds'][engine]*1000:.3f}" for engine in ('original','port','imre','rust')) + ' |')
     for workload in ('scaled-full-32','scaled-unchanged-32'):
-        relar = next(row for row in profiles['rows'] if row['workload'] == workload and row['engine'] == 'relar')
+        imre = next(row for row in profiles['rows'] if row['workload'] == workload and row['engine'] == 'imre')
         rust = next(row for row in profiles['rows'] if row['workload'] == workload and row['engine'] == 'rust')
-        expected_rows.append(f"| `{workload}` | {relar['baseline_instructions']:,} → {relar['optimized_instructions']:,} | {relar['instruction_reduction_fraction']:.2%} | {rust['optimized_instructions']:,} | {relar['optimized_heap']['tbk']:,} / {rust['optimized_heap']['tbk']:,} |")
+        expected_rows.append(f"| `{workload}` | {imre['baseline_instructions']:,} → {imre['optimized_instructions']:,} | {imre['instruction_reduction_fraction']:.2%} | {rust['optimized_instructions']:,} | {imre['optimized_heap']['tbk']:,} / {rust['optimized_heap']['tbk']:,} |")
     for stage in ('baseline','final'):
         for mode in ('normal','thinlto'):
-            path = f'/tmp/relar-memory-timing-{mode}-' + ('v2' if stage == 'baseline' else 'final-v1') + '.json'
+            path = f'/tmp/imre-memory-timing-{mode}-' + ('v2' if stage == 'baseline' else 'final-v1') + '.json'
             suffix = ('baseline-' if stage == 'baseline' else '') + mode
             expected_rows.append(f'| [{stage} {mode}]({prefix.name}-{suffix}.json.gz) | `{guard(path)}` |')
     actual_rows = [line for line in report.splitlines() if line.startswith(('| Ordinary |','| ThinLTO |','| `scaled-','| [baseline ','| [final '))]
     assert collections.Counter(actual_rows) == collections.Counter(expected_rows), ('report numeric table mismatch', set(expected_rows)-set(actual_rows), set(actual_rows)-set(expected_rows))
-    assert f"**{min(row['relar_over_rust'] for row in large):.2f}–{max(row['relar_over_rust'] for row in large):.2f}× Rust’s time**" in report
-    fractions = [row['control_fraction']['relar'] for row in large]
+    assert f"**{min(row['imre_over_rust'] for row in large):.2f}–{max(row['imre_over_rust'] for row in large):.2f}× Rust’s time**" in report
+    fractions = [row['control_fraction']['imre'] for row in large]
     assert f'{min(fractions)*100:.2f}–{max(fractions):.2%}' in report
     assert f'{min(small)*100:.2f}–{max(small):.2%}' in report
     before, after = (profiles['lookup'][label]['calls'] for label in ('baseline','optimized'))
@@ -483,9 +483,9 @@ def audit_report(prefix, summaries, profiles):
     for caveat in ('separate sessions','descriptive rather than isolated causal estimates','six-byte','`argv[0]`','startup-heavy','No control time is subtracted','not RSS','not hardware cycles','two changes were measured together','without `fsync`'):
         assert caveat in report, ('missing caveat',caveat)
     assert 'warm' in report and 'page cache' in report
-    units = raw('/tmp/relar-memory-build-optimized/units.log').decode()
+    units = raw('/tmp/imre-memory-build-optimized/units.log').decode()
     assert sum(map(int,re.findall(r'test result: ok\. (\d+) passed; 0 failed;',units))) == 241
-    return {'path': str(report_path), 'sha256': sha(report.encode()), 'render_sha256': guard(render_path), 'numeric_rows': len(expected_rows), 'large_ratio_range': [min(row['relar_over_rust'] for row in large),max(row['relar_over_rust'] for row in large)], 'small_native_control_fraction_range': [min(small),max(small)]}
+    return {'path': str(report_path), 'sha256': sha(report.encode()), 'render_sha256': guard(render_path), 'numeric_rows': len(expected_rows), 'large_ratio_range': [min(row['imre_over_rust'] for row in large),max(row['imre_over_rust'] for row in large)], 'small_native_control_fraction_range': [min(small),max(small)]}
 
 
 def audit_archive(prefix):
@@ -563,14 +563,14 @@ def audit_archive(prefix):
     assert source_count == package['logical_source_count'] and len(index['files']) == package['logical_file_count']
     for stage in ('baseline','final'):
         for mode in ('normal','thinlto'):
-            original = f'/tmp/relar-memory-timing-{mode}-' + ('v2' if stage == 'baseline' else 'final-v1') + '.json'
+            original = f'/tmp/imre-memory-timing-{mode}-' + ('v2' if stage == 'baseline' else 'final-v1') + '.json'
             suffix = ('baseline-' if stage == 'baseline' else '') + mode
             compressed = raw(str(prefix)+'-'+suffix+'.json.gz')
             assert gzip.decompress(compressed) == raw(original)
-    assert raw(str(prefix)+'-audit.json') == raw('/tmp/relar-memory-final-audit.json')
-    assert raw(str(prefix)+'-profile-comparison.json') == raw('/tmp/relar-memory-profile-comparison.json')
+    assert raw(str(prefix)+'-audit.json') == raw('/tmp/imre-memory-final-audit.json')
+    assert raw(str(prefix)+'-profile-comparison.json') == raw('/tmp/imre-memory-profile-comparison.json')
     assert package['report_sha256'] == guard(prefix.with_suffix('.md'))
-    assert package['renderer_sha256'] == guard('/tmp/relar-memory-render-report.py')
+    assert package['renderer_sha256'] == guard('/tmp/imre-memory-render-report.py')
     assert package['replay_sha256'] == guard('/tmp/2026-10-21-memory-report-audit.py')
     return {'sha256':guard(archive_path),'manifest_sha256':guard(manifest_path),'index_sha256':guard(index_path),'members':len(data),'logical_files':len(index['files']),'source_entries':source_count,'source_revisions':len(index['sources']),'native_exclusions':len(exclusions)}
 

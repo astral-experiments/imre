@@ -1,4 +1,4 @@
-"""Run the same public checks and sustained checksum loop on CPython and Relar."""
+"""Run the same public checks and sustained checksum loop on CPython and Imre."""
 
 from sys import argv
 

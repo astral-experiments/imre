@@ -1,4 +1,4 @@
-"""Run complete upstream pathlib test methods as standalone Relar programs."""
+"""Run complete upstream pathlib test methods as standalone Imre programs."""
 import argparse
 import ast
 import hashlib
@@ -65,7 +65,7 @@ def run(argv, cwd):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--relar", required=True, type=Path)
+    parser.add_argument("--imre", required=True, type=Path)
     parser.add_argument("--runtime", type=Path)
     parser.add_argument("--clang", type=Path)
     parser.add_argument("--opt-level", type=int, choices=(0, 1, 2, 3), default=0)
@@ -74,7 +74,7 @@ def main():
     if sys.platform not in ("darwin", "linux"):
         parser.error("the selected upstream fixture requires the native POSIX Path type")
     provenance = verify_upstream()
-    command = [args.relar.resolve(), "build", "--no-cache", "--opt-level", str(args.opt_level)]
+    command = [args.imre.resolve(), "build", "--no-cache", "--opt-level", str(args.opt_level)]
     if args.runtime:
         command.extend(["--runtime", args.runtime.resolve()])
     if args.clang:

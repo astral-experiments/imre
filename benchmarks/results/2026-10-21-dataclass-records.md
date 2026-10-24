@@ -1,3 +1,5 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Dataclass records in the real memory-report program
 
 The memory-report port now uses dataclasses, a class method returning `Self`, a read-only property, and frozen difference records. On the large inputs it takes **1.16–1.47× Rust’s time**, meeting the ≤2× target with ordinary linking and ThinLTO. It runs **2.39–2.83× faster than the unchanged upstream CPython script**.
@@ -6,9 +8,9 @@ These are the same two-file report comparisons and typed JSON semantics as the [
 
 ## Complete-program measurements
 
-Median milliseconds over 12 measured rounds per engine, after two warmups. Lower Relar/Rust is better. The genuine inventory and Ruff captures contain 168 and 254 items per input file. The scaled cases use 32 or 256 distinct-name copies of the genuine Ruff capture: 8,128 or **65,024 items per input file**. They are synthetic larger inputs. “Unchanged” still reads and decodes both complete files.
+Median milliseconds over 12 measured rounds per engine, after two warmups. Lower Imre/Rust is better. The genuine inventory and Ruff captures contain 168 and 254 items per input file. The scaled cases use 32 or 256 distinct-name copies of the genuine Ruff capture: 8,128 or **65,024 items per input file**. They are synthetic larger inputs. “Unchanged” still reads and decodes both complete files.
 
-| Build | Case | Original CPython | Typed CPython | Relar | Rust | Relar/Rust |
+| Build | Case | Original CPython | Typed CPython | Imre | Rust | Imre/Rust |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | Ordinary | `real-inventory` | 77.092 | 61.103 | 3.342 | 3.168 | 1.055× |
 | Ordinary | `real-ruff-scripts` | 75.711 | 64.423 | 4.639 | 4.395 | 1.056× |
@@ -23,11 +25,11 @@ Median milliseconds over 12 measured rounds per engine, after two warmups. Lower
 | ThinLTO | `scaled-full-256` | 429.301 | 2518.687 | 165.410 | 112.865 | 1.466× |
 | ThinLTO | `scaled-unchanged-256` | 291.963 | 2412.897 | 103.189 | 86.865 | 1.188× |
 
-Typed CPython includes the strict schema-conversion shim; the unchanged upstream script is the separate comparison above. Rust deserializes contiguous native integer records, uses checked arithmetic with an arbitrary-precision fallback, borrows names during comparison, and formats displayed rows. Relar retains arbitrary-precision integer semantics and its existing record allocation/ownership model.
+Typed CPython includes the strict schema-conversion shim; the unchanged upstream script is the separate comparison above. Rust deserializes contiguous native integer records, uses checked arithmetic with an arbitrary-precision fallback, borrows names during comparison, and formats displayed rows. Imre retains arbitrary-precision integer semantics and its existing record allocation/ownership model.
 
 Empty-report control medians, without subtraction:
 
-| Build | Original CPython | Typed CPython | Relar | Rust |
+| Build | Original CPython | Typed CPython | Imre | Rust |
 | --- | ---: | ---: | ---: | ---: |
 | Ordinary | 76.615 | 55.240 | 3.471 | 3.133 |
 | ThinLTO | 75.751 | 55.883 | 2.961 | 2.937 |
@@ -38,9 +40,9 @@ The empty control reads and decodes two valid empty reports and writes a result.
 
 The models use compile-time `@dataclass` constructors with scalar defaults, keyword-only fields, and fresh list factories. `MemoryReport.from_json(...)` resolves its class receiver statically; the change total is a read-only property; displayed difference records are frozen. These preserve fixed layouts and direct native calls. Generated equality/repr, static methods, dictionary/set factories, and other supported options are covered by semantic tests rather than exercised by this timed workload.
 
-Large Relar medians are within 1.4% of the previous measurements:
+Large Imre medians are within 1.4% of the previous measurements:
 
-| Build | Case | Previous Relar ms | Current Relar ms | Change |
+| Build | Case | Previous Imre ms | Current Imre ms | Change |
 | --- | --- | ---: | ---: | ---: |
 | Ordinary | `scaled-full-256` | 179.899 | 179.393 | -0.28% |
 | Ordinary | `scaled-unchanged-256` | 107.331 | 108.788 | +1.36% |
@@ -57,7 +59,7 @@ Each measurement includes process startup, imports where applicable, both file r
 
 Runs were pinned to CPU31 on an AMD EPYC-Milan devbox, with local builds, tests, and profiles finished before timing. This is a shared-host workload/toolchain comparison; sample spreads are not confidence intervals. CPython 3.14.5 has PGO/LTO enabled and JIT disabled. Native builds use optimization level 3, Clang 18, and the pinned Ohm 1.98.1-1 Rust toolchain; ordinary and ThinLTO Rust references use the matching mode, 16 codegen units, and the documented 1,000-instruction ThinLTO budget.
 
-Both preparations passed **72 application cases / 264 engine executions** each. The independent audit rechecked all 528 preparation results plus 56 gates, 112 warmups, and 672 measured captures, including retained streams/files, source/build/tool identities, command chronology, balanced order, raw statistics, and ratios. The complete application also passed 72 cases / 264 executions with the Relar executable built under AddressSanitizer and leak detection after timing.
+Both preparations passed **72 application cases / 264 engine executions** each. The independent audit rechecked all 528 preparation results plus 56 gates, 112 warmups, and 672 measured captures, including retained streams/files, source/build/tool identities, command chronology, balanced order, raw statistics, and ratios. The complete application also passed 72 cases / 264 executions with the Imre executable built under AddressSanitizer and leak detection after timing.
 
 The frozen implementation passed 247 Rust unit tests, formatting and Clippy, all 31 ordinary differential suites, and the six affected class/container/JSON/callback/formatting suites with ThinLTO and AddressSanitizer. The new dataclass suite covers 86 checks at `-O0`/`-O3`, including 46 rejected programs, ownership, exceptions, import aliases, lexical shadowing, and generated defaults. The shared-NaN dataclass oracle requires CPython 3.13+; older hosts skip only that fixture.
 

@@ -1,4 +1,4 @@
-"""Compare complete telemetry queries on Relar, CPython, and independent Rust."""
+"""Compare complete telemetry queries on Imre, CPython, and independent Rust."""
 
 import argparse
 import itertools
@@ -155,7 +155,7 @@ def measure(workload: dict, commands: dict, directory: Path, args) -> dict:
     ratios = {
         f"{left}_over_{right}": summaries[left]["median_seconds"]
         / summaries[right]["median_seconds"]
-        for left, right in (("cpython", "relar"), ("relar", "rust"), ("cpython", "rust"))
+        for left, right in (("cpython", "imre"), ("imre", "rust"), ("cpython", "rust"))
     }
     return {**workload, "gates": gates, **phases, "summary": summaries, **ratios}
 
@@ -213,7 +213,7 @@ def source_paths(args) -> tuple[dict[str, Path], dict, dict | None]:
     assert rust_record["native_artifact"]["fresh"] is False
     rust_target = rust_host(rust_record)
     assert args.target is None or args.target == rust_target, (
-        "Rust and Relar targets must match"
+        "Rust and Imre targets must match"
     )
     thinlto = args.lto_linker is not None
     assert rust_record["thinlto"] == thinlto
@@ -230,23 +230,23 @@ def source_paths(args) -> tuple[dict[str, Path], dict, dict | None]:
     assert environment["CARGO_ENCODED_RUSTFLAGS"] == (None if thinlto else "")
     if args.lto_linker:
         paths["lto_linker"] = args.lto_linker.absolute()
-    relar_record = None
-    if args.relar_build_record:
-        paths["relar_build_record"] = args.relar_build_record.resolve(strict=True)
-        relar_record = json.loads(paths["relar_build_record"].read_text())
+    imre_record = None
+    if args.imre_build_record:
+        paths["imre_build_record"] = args.imre_build_record.resolve(strict=True)
+        imre_record = json.loads(paths["imre_build_record"].read_text())
         runtime_key = "thinlto_runtime" if thinlto else "normal_runtime"
-        assert shared.sha256(paths["compiler"]) == relar_record["sha256"]["compiler"]
-        assert shared.sha256(paths["runtime"]) == relar_record["sha256"][runtime_key]
+        assert shared.sha256(paths["compiler"]) == imre_record["sha256"]["compiler"]
+        assert shared.sha256(paths["runtime"]) == imre_record["sha256"][runtime_key]
         for flag in ("source_matches_revision", "input_guards_passed"):
-            assert relar_record.get(flag, True) is True, flag
-        assert relar_record["target"] == rust_target
-        for name, value in relar_record["source_sha256"].items():
-            paths["relar_source:" + name] = ROOT / name
+            assert imre_record.get(flag, True) is True, flag
+        assert imre_record["target"] == rust_target
+        for name, value in imre_record["source_sha256"].items():
+            paths["imre_source:" + name] = ROOT / name
             assert shared.sha256(ROOT / name) == value
-    return paths, rust_record, relar_record
+    return paths, rust_record, imre_record
 
 
-def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> dict:
+def prepare(args, paths, hashes, rust_record, imre_record, revision, dirty) -> dict:
     artifacts = args.artifact_dir.resolve()
     binary, llvm, validation_path = (
         artifacts / "telemetry",
@@ -293,10 +293,10 @@ def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> 
     run_checked(validation_command)
     validation = json.loads(validation_path.read_text())
     assert validation["input_guards_passed"]
-    assert validation["source_and_binary_sha256"]["relar"] == shared.sha256(binary)
+    assert validation["source_and_binary_sha256"]["imre"] == shared.sha256(binary)
     assert validation["source_and_binary_sha256"]["rust"] == hashes["rust"]
     native_elf = elf_target(binary)
-    assert native_elf == elf_target(paths["rust"]), "Relar and Rust ELF targets differ"
+    assert native_elf == elf_target(paths["rust"]), "Imre and Rust ELF targets differ"
     assert hashes == {name: shared.sha256(path) for name, path in paths.items()}
     return {
         "schema": 1,
@@ -320,7 +320,7 @@ def prepare(args, paths, hashes, rust_record, relar_record, revision, dirty) -> 
         "thinlto": args.lto_linker is not None,
         "source_and_tool_paths": {name: str(path) for name, path in paths.items()},
         "source_and_tool_sha256": hashes,
-        "relar_build_record": relar_record,
+        "imre_build_record": imre_record,
         "rust_build_record": rust_record,
         "input_guards_passed": True,
     }
@@ -354,7 +354,7 @@ def verify_preparation(record: dict, args, paths, hashes, revision, dirty) -> No
     )
     assert record["validation"]["input_guards_passed"]
     assert (
-        record["validation"]["source_and_binary_sha256"]["relar"]
+        record["validation"]["source_and_binary_sha256"]["imre"]
         == record["binary_sha256"]
     )
     assert record["validation"]["source_and_binary_sha256"]["rust"] == hashes["rust"]
@@ -364,7 +364,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", required=True)
     parser.add_argument("--runtime", type=Path, required=True)
-    parser.add_argument("--relar-build-record", type=Path)
+    parser.add_argument("--imre-build-record", type=Path)
     parser.add_argument("--python", default="python3")
     parser.add_argument("--rust", type=Path, required=True)
     parser.add_argument("--rust-build-record", type=Path)
@@ -394,7 +394,7 @@ def main() -> None:
         args.scenarios
     ):
         parser.error("sizes and scenarios must not repeat")
-    paths, rust_record, relar_record = source_paths(args)
+    paths, rust_record, imre_record = source_paths(args)
     artifacts = args.artifact_dir.resolve()
     selected = workloads(args.sizes, args.batch_pairs, args.scenarios)
     labels = ["empty-control", *(item["label"] for item in selected)]
@@ -429,7 +429,7 @@ def main() -> None:
     prepared = (
         json.loads(args.prepared_record.read_text())
         if args.prepared_record
-        else prepare(args, paths, hashes, rust_record, relar_record, revision, dirty)
+        else prepare(args, paths, hashes, rust_record, imre_record, revision, dirty)
     )
     verify_preparation(prepared, args, paths, hashes, revision, dirty)
     for name in ("binary", "llvm", "validation_path"):
@@ -454,7 +454,7 @@ def main() -> None:
     )
     assert python_info["implementation"] == "cpython"
     commands = {
-        "relar": [prepared["binary"]],
+        "imre": [prepared["binary"]],
         "cpython": validator.python_command(str(paths["python"])),
         "rust": [str(paths["rust"])],
     }
@@ -493,7 +493,7 @@ def main() -> None:
         "engine_orders": tuple(itertools.permutations(commands)),
         "order_method": "Measured rounds repeat all six engine permutations, balancing positions and within-round directed predecessors. Warmup rounds follow the same schedule but eight warmups do not form a complete cycle. Cross-round transitions are not balanced.",
         "method": "Whole-process wall time, including startup, one read/parse/alignment of both inputs, repeated queries, and one complete report write. Rust black_box surrounds each repeated query and its result. Work is normalized by source-level inspected sample pairs per call; early-exit workloads repeat more calls. Empty-input startup/protocol controls are reported without subtraction. Input preparation and complete output/file checks occur outside the timing interval.",
-        "comparison": "The same query passes, thresholds, repetitions, arbitrary-precision results, and errors. Python holds typed Sample objects and generator expressions; independent Rust holds contiguous structs, uses native checked i128 reductions when values fit i64, and falls back to BigInt. Rust iterator loops and Relar generated loops need not have identical allocation/layout costs.",
+        "comparison": "The same query passes, thresholds, repetitions, arbitrary-precision results, and errors. Python holds typed Sample objects and generator expressions; independent Rust holds contiguous structs, uses native checked i128 reductions when values fit i64, and falls back to BigInt. Rust iterator loops and Imre generated loops need not have identical allocation/layout costs.",
         "startup_control": measure(
             control, commands, artifacts / "empty-control", args
         ),

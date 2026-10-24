@@ -31,7 +31,7 @@ def mutation(text: str) -> None:
     if found := DIAGNOSTIC.match(text):
         groups = found.groupdict()
         groups["code"] = None
-        print(repr((groups["code"] is None, "relar.eol" in groups)))
+        print(repr((groups["code"] is None, "imre.eol" in groups)))
         print(repr((found.group("code"), found.groups())))
 
 

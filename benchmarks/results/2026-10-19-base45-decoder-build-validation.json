@@ -6,55 +6,55 @@
     "Cargo.toml": "7a9d1c188ccc5a930c600ad503438d9ef4f590cdaf5f2a6488cb65e741f79c29",
     "Cargo.lock": "1e4053a4eb89af2554a43b30dac6e6f81d56097907d65bf48953a69e318e55ae",
     "rust-toolchain.toml": "7553618f800829444096beea3dce84c3d07585efda504c19adb6787369bbd9e8",
-    "crates/relar-compiler/src/analysis.rs": "9d7e36d7f1f1ca55a0815128316b979f647aa1fef4c58ee10baa474ceaa0885c",
-    "crates/relar-compiler/src/classes.rs": "61a7b33711262a841e59a47f417227e77b4ffef7e6369f6beec72bb2666a92ea",
-    "crates/relar-compiler/src/effects.rs": "f72474a5b4fd3b9ac5e9f58d25dbd19def1c6ce53a9b77d8b8a6fb87619cf032",
-    "crates/relar-compiler/src/frontend/assignments.rs": "a57afd5e332eac11967df5ba970f9531e34c68f9c750544a53998491c932a920",
-    "crates/relar-compiler/src/frontend/calls.rs": "96846d29ac6d0ccba178427a9defc548f4b5ab3461a0e24c0db546212b9db720",
-    "crates/relar-compiler/src/frontend/comprehensions.rs": "b17d65b1f9b9f878a2fd254755b2126f8b1b76388486409f6bb8e254f389d35f",
-    "crates/relar-compiler/src/frontend/expansions.rs": "e3d22ab30d8dd477b89a51e4efe582c0d48d92829abada21531ba27f2452a94c",
-    "crates/relar-compiler/src/frontend/matching.rs": "a773a2ea540e6f02c12e872aa22b605d34e06be7f8c37ac054e8bb3d1e3c926e",
-    "crates/relar-compiler/src/frontend/module_values.rs": "a7d6ef3f5ed4f446a59231290e809f8ce505f1f3bce816bb5ac4520bf9153668",
-    "crates/relar-compiler/src/frontend/truthiness.rs": "62faeca4d3f3497265711fb5cd8eacc6eb551a70845a17ff5735d25738a0ae11",
-    "crates/relar-compiler/src/frontend/unions.rs": "3b649582a176b5e8b3e11087f4e7673c03e52849dd72ef8eaa4eb4ccff4575d5",
-    "crates/relar-compiler/src/frontend/unpacking.rs": "d3a3e73ea6812f62300be034808aecc96610b24cce5cf8e4a2ade884d21840b8",
-    "crates/relar-compiler/src/frontend.rs": "4733fe5094e7435c08116656087996dfbe041c1b6471bec6548a08264e653e3c",
-    "crates/relar-compiler/src/ir.rs": "7603d1610a3ca92d7c0c38b9d5154fbf8f2875c2538ae9b895375dd564273898",
-    "crates/relar-compiler/src/lib.rs": "514938d64a888717471844b4a033ff071cc6646c85b0988eefda18f6695a768a",
-    "crates/relar-compiler/src/list_specialization.rs": "dff5ee5ce445bfba56bbbe43be7f8b41113f2a38389baa9ca1b8eb92c960e5f2",
-    "crates/relar-compiler/src/llvm/truthiness.rs": "bcc234584c40f685177d74dc21e6d7edb19170df8676c2f99e3ea30db765e18a",
-    "crates/relar-compiler/src/llvm/unions.rs": "4ec16463e9c0ad5734e7cf28313d7b7b70fa882bafe117bf2c065e822752f852",
-    "crates/relar-compiler/src/llvm.rs": "67953748aa49167e1a4eeaaa4f49629d04bc6c8c40fa1d6bbc6848d0447bf30b",
-    "crates/relar-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
-    "crates/relar-compiler/src/modules.rs": "cc69a54c52fca924b4f52920b61f9778918f486665bebcd06bf46733e47a66ac",
-    "crates/relar-compiler/src/narrowing.rs": "4e62079facab3e53ab356299d1d20325ca62ec9509eac5e193a2d70f22a4d2a7",
-    "crates/relar-compiler/src/range_specialization.rs": "38f56876e1f789bab8681ca00eb359da79e1403b991e091f265419f146d5e49d",
-    "crates/relar-compiler/src/ranges.rs": "26350885fdda8cae2e8fcf064d0f6b1941c09b28d39eff08b89865ac708c5621",
-    "crates/relar-compiler/src/tuples.rs": "5f0f1ae40c22c38cb841fa7a0d29d2172765fa8806cb9c8ae575f0415031ed89",
-    "crates/relar-compiler/src/types.rs": "f83a88a2a6bd0fde9ebf5c92bfb0cc009c373236b209df146031b2a795073b51",
-    "crates/relar-runtime/src/floats.rs": "99882a45e8d7d3e4f3d88221303d09f32c3c811f25f1b3e709646b0a59ace76e",
-    "crates/relar-runtime/src/lib.rs": "a98d13ac105feaefa27ff299fa9e05728099716d890b055edacffd11f3d2c9bb",
-    "crates/relar-runtime/src/objects/args.rs": "0f7c2543368bc69da08613471c17dc7ac0981967e7840e3c30ef85dc6a044099",
-    "crates/relar-runtime/src/objects/bytes.rs": "bd99bb28f640d2605c77c67fe1757dc43bd8f20d3a1b6e37e740fa9b78e4d87f",
-    "crates/relar-runtime/src/objects/exceptions.rs": "321a12eb3acaf16df308675fb0a0403a22afa8b86158a134277a0b98d0910503",
-    "crates/relar-runtime/src/objects/files.rs": "aeef4b559a3b712569e2de219832228c20e416814bc7e502604e22253170341d",
-    "crates/relar-runtime/src/objects/mappings.rs": "5954f4f939c1ec953acb2e1032007d03a591b8ee57cbfabe0adc4b2b44f0f9e0",
-    "crates/relar-runtime/src/objects/records.rs": "9e8061a02eca605d6587da87dedb0ca7b2b868d98bef9abb5159bd4b7ceff75d",
-    "crates/relar-runtime/src/objects/sequences.rs": "f3fbe51ead47bd87664fb8c35f5ba546ac3f41c4d58303314e13e96ecd434e71",
-    "crates/relar-runtime/src/objects/unions.rs": "ba98620a4482fe54aaa500ae2e49802a105896241ab77a2899e339611cf414da",
-    "crates/relar-runtime/src/objects/words.rs": "b1efd10f8d46dcf2ef17bfafc4fb52760617c8f7bd22581a0cd7743e8bbc68ff",
-    "crates/relar-runtime/src/objects.rs": "0df432dd87df2f451923fb53f0d4538bb989904691faa6e1844498852a83d717",
-    "crates/relar-compiler/Cargo.toml": "e6936e9d0c4e64f21889cfe158385a0c49067bb19672bc3d2df8dc1c7c1f173e",
-    "crates/relar-runtime/Cargo.toml": "147e0977af4370fc833c67726f1be51f72fe0b413efcaa7f8f35fdb6c82ac919"
+    "crates/imre-compiler/src/analysis.rs": "9d7e36d7f1f1ca55a0815128316b979f647aa1fef4c58ee10baa474ceaa0885c",
+    "crates/imre-compiler/src/classes.rs": "61a7b33711262a841e59a47f417227e77b4ffef7e6369f6beec72bb2666a92ea",
+    "crates/imre-compiler/src/effects.rs": "f72474a5b4fd3b9ac5e9f58d25dbd19def1c6ce53a9b77d8b8a6fb87619cf032",
+    "crates/imre-compiler/src/frontend/assignments.rs": "a57afd5e332eac11967df5ba970f9531e34c68f9c750544a53998491c932a920",
+    "crates/imre-compiler/src/frontend/calls.rs": "96846d29ac6d0ccba178427a9defc548f4b5ab3461a0e24c0db546212b9db720",
+    "crates/imre-compiler/src/frontend/comprehensions.rs": "b17d65b1f9b9f878a2fd254755b2126f8b1b76388486409f6bb8e254f389d35f",
+    "crates/imre-compiler/src/frontend/expansions.rs": "e3d22ab30d8dd477b89a51e4efe582c0d48d92829abada21531ba27f2452a94c",
+    "crates/imre-compiler/src/frontend/matching.rs": "a773a2ea540e6f02c12e872aa22b605d34e06be7f8c37ac054e8bb3d1e3c926e",
+    "crates/imre-compiler/src/frontend/module_values.rs": "a7d6ef3f5ed4f446a59231290e809f8ce505f1f3bce816bb5ac4520bf9153668",
+    "crates/imre-compiler/src/frontend/truthiness.rs": "62faeca4d3f3497265711fb5cd8eacc6eb551a70845a17ff5735d25738a0ae11",
+    "crates/imre-compiler/src/frontend/unions.rs": "3b649582a176b5e8b3e11087f4e7673c03e52849dd72ef8eaa4eb4ccff4575d5",
+    "crates/imre-compiler/src/frontend/unpacking.rs": "d3a3e73ea6812f62300be034808aecc96610b24cce5cf8e4a2ade884d21840b8",
+    "crates/imre-compiler/src/frontend.rs": "4733fe5094e7435c08116656087996dfbe041c1b6471bec6548a08264e653e3c",
+    "crates/imre-compiler/src/ir.rs": "7603d1610a3ca92d7c0c38b9d5154fbf8f2875c2538ae9b895375dd564273898",
+    "crates/imre-compiler/src/lib.rs": "514938d64a888717471844b4a033ff071cc6646c85b0988eefda18f6695a768a",
+    "crates/imre-compiler/src/list_specialization.rs": "dff5ee5ce445bfba56bbbe43be7f8b41113f2a38389baa9ca1b8eb92c960e5f2",
+    "crates/imre-compiler/src/llvm/truthiness.rs": "bcc234584c40f685177d74dc21e6d7edb19170df8676c2f99e3ea30db765e18a",
+    "crates/imre-compiler/src/llvm/unions.rs": "4ec16463e9c0ad5734e7cf28313d7b7b70fa882bafe117bf2c065e822752f852",
+    "crates/imre-compiler/src/llvm.rs": "67953748aa49167e1a4eeaaa4f49629d04bc6c8c40fa1d6bbc6848d0447bf30b",
+    "crates/imre-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+    "crates/imre-compiler/src/modules.rs": "cc69a54c52fca924b4f52920b61f9778918f486665bebcd06bf46733e47a66ac",
+    "crates/imre-compiler/src/narrowing.rs": "4e62079facab3e53ab356299d1d20325ca62ec9509eac5e193a2d70f22a4d2a7",
+    "crates/imre-compiler/src/range_specialization.rs": "38f56876e1f789bab8681ca00eb359da79e1403b991e091f265419f146d5e49d",
+    "crates/imre-compiler/src/ranges.rs": "26350885fdda8cae2e8fcf064d0f6b1941c09b28d39eff08b89865ac708c5621",
+    "crates/imre-compiler/src/tuples.rs": "5f0f1ae40c22c38cb841fa7a0d29d2172765fa8806cb9c8ae575f0415031ed89",
+    "crates/imre-compiler/src/types.rs": "f83a88a2a6bd0fde9ebf5c92bfb0cc009c373236b209df146031b2a795073b51",
+    "crates/imre-runtime/src/floats.rs": "99882a45e8d7d3e4f3d88221303d09f32c3c811f25f1b3e709646b0a59ace76e",
+    "crates/imre-runtime/src/lib.rs": "a98d13ac105feaefa27ff299fa9e05728099716d890b055edacffd11f3d2c9bb",
+    "crates/imre-runtime/src/objects/args.rs": "0f7c2543368bc69da08613471c17dc7ac0981967e7840e3c30ef85dc6a044099",
+    "crates/imre-runtime/src/objects/bytes.rs": "bd99bb28f640d2605c77c67fe1757dc43bd8f20d3a1b6e37e740fa9b78e4d87f",
+    "crates/imre-runtime/src/objects/exceptions.rs": "321a12eb3acaf16df308675fb0a0403a22afa8b86158a134277a0b98d0910503",
+    "crates/imre-runtime/src/objects/files.rs": "aeef4b559a3b712569e2de219832228c20e416814bc7e502604e22253170341d",
+    "crates/imre-runtime/src/objects/mappings.rs": "5954f4f939c1ec953acb2e1032007d03a591b8ee57cbfabe0adc4b2b44f0f9e0",
+    "crates/imre-runtime/src/objects/records.rs": "9e8061a02eca605d6587da87dedb0ca7b2b868d98bef9abb5159bd4b7ceff75d",
+    "crates/imre-runtime/src/objects/sequences.rs": "f3fbe51ead47bd87664fb8c35f5ba546ac3f41c4d58303314e13e96ecd434e71",
+    "crates/imre-runtime/src/objects/unions.rs": "ba98620a4482fe54aaa500ae2e49802a105896241ab77a2899e339611cf414da",
+    "crates/imre-runtime/src/objects/words.rs": "b1efd10f8d46dcf2ef17bfafc4fb52760617c8f7bd22581a0cd7743e8bbc68ff",
+    "crates/imre-runtime/src/objects.rs": "0df432dd87df2f451923fb53f0d4538bb989904691faa6e1844498852a83d717",
+    "crates/imre-compiler/Cargo.toml": "e6936e9d0c4e64f21889cfe158385a0c49067bb19672bc3d2df8dc1c7c1f173e",
+    "crates/imre-runtime/Cargo.toml": "147e0977af4370fc833c67726f1be51f72fe0b413efcaa7f8f35fdb6c82ac919"
   },
   "wrapper_sha256": "74f3f3596cf89fdecf9458d74fc47cfcf09533b8c10f3b569470f74ddbc80fd8",
-  "wrapper_contents": "#!/bin/sh\nexport CARGO_HOME=/home/dev-user/.cache/relar/cargo-home\nexport CARGO_TARGET_DIR=/home/dev-user/.cache/relar/target\nexport CARGO_BUILD_BUILD_DIR=/home/dev-user/.cache/ohm/shared-build\nexport CARGO_UNSTABLE_OHM_PROC_MACRO_TRUST=all\nexport CARGO_UNSTABLE_OHM_NATIVE_TOOL_TRUST=all\nexec cargo +ohm -Zohm-defaults=no \"$@\"\n",
+  "wrapper_contents": "#!/bin/sh\nexport CARGO_HOME=/home/dev-user/.cache/imre/cargo-home\nexport CARGO_TARGET_DIR=/home/dev-user/.cache/imre/target\nexport CARGO_BUILD_BUILD_DIR=/home/dev-user/.cache/ohm/shared-build\nexport CARGO_UNSTABLE_OHM_PROC_MACRO_TRUST=all\nexport CARGO_UNSTABLE_OHM_NATIVE_TOOL_TRUST=all\nexec cargo +ohm -Zohm-defaults=no \"$@\"\n",
   "commands": [
     {
       "label": "format",
       "command": [
         "sh",
-        "/tmp/relar-cargo.sh",
+        "/tmp/imre-cargo.sh",
         "fmt",
         "--all",
         "--check"
@@ -64,11 +64,11 @@
       "seconds": 0.5165788020240143,
       "returncode": 0,
       "stdout": {
-        "path": "/tmp/relar-decoder-build-validation/format.stdout",
+        "path": "/tmp/imre-decoder-build-validation/format.stdout",
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       "stderr": {
-        "path": "/tmp/relar-decoder-build-validation/format.stderr",
+        "path": "/tmp/imre-decoder-build-validation/format.stderr",
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       }
     },
@@ -76,7 +76,7 @@
       "label": "clippy",
       "command": [
         "sh",
-        "/tmp/relar-cargo.sh",
+        "/tmp/imre-cargo.sh",
         "clippy",
         "--workspace",
         "--all-targets",
@@ -90,11 +90,11 @@
       "seconds": 3.4903280599974096,
       "returncode": 0,
       "stdout": {
-        "path": "/tmp/relar-decoder-build-validation/clippy.stdout",
+        "path": "/tmp/imre-decoder-build-validation/clippy.stdout",
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       "stderr": {
-        "path": "/tmp/relar-decoder-build-validation/clippy.stderr",
+        "path": "/tmp/imre-decoder-build-validation/clippy.stderr",
         "sha256": "ab8ca02348a21f6fd88eb08af922e371af3f6fe1bc73fa5d06b5177e050f534c"
       }
     },
@@ -102,7 +102,7 @@
       "label": "unit",
       "command": [
         "sh",
-        "/tmp/relar-cargo.sh",
+        "/tmp/imre-cargo.sh",
         "test",
         "--workspace",
         "--locked"
@@ -112,11 +112,11 @@
       "seconds": 10.519030047988053,
       "returncode": 0,
       "stdout": {
-        "path": "/tmp/relar-decoder-build-validation/unit.stdout",
+        "path": "/tmp/imre-decoder-build-validation/unit.stdout",
         "sha256": "cb27367dc6a784f336f277b0fc7ceefa9e4190884c4007051c8de2bd34cd195f"
       },
       "stderr": {
-        "path": "/tmp/relar-decoder-build-validation/unit.stderr",
+        "path": "/tmp/imre-decoder-build-validation/unit.stderr",
         "sha256": "b0a03253399ff396819d54784a0b670b32e660593c5a760c559ca80147608461"
       }
     },
@@ -124,13 +124,13 @@
       "label": "integrated",
       "command": [
         "sh",
-        "/tmp/relar-cargo.sh",
+        "/tmp/imre-cargo.sh",
         "build",
         "--workspace",
         "--profile",
-        "relar-integrated",
+        "imre-integrated",
         "--config",
-        "profile.relar-integrated.inherits=\"release\"",
+        "profile.imre-integrated.inherits=\"release\"",
         "--locked"
       ],
       "started_at": "2026-10-19T20:04:49.407904+00:00",
@@ -138,11 +138,11 @@
       "seconds": 13.735449227970093,
       "returncode": 0,
       "stdout": {
-        "path": "/tmp/relar-decoder-build-validation/integrated.stdout",
+        "path": "/tmp/imre-decoder-build-validation/integrated.stdout",
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       "stderr": {
-        "path": "/tmp/relar-decoder-build-validation/integrated.stderr",
+        "path": "/tmp/imre-decoder-build-validation/integrated.stderr",
         "sha256": "0b11b4b4bd3a3e7455f0e9d9bba03979a05d0fcfc4e6ff84064180ae525a9db8"
       }
     },
@@ -152,14 +152,14 @@
         "env",
         "RUSTFLAGS=-Clinker-plugin-lto",
         "sh",
-        "/tmp/relar-cargo.sh",
+        "/tmp/imre-cargo.sh",
         "build",
         "-p",
-        "relar-runtime",
+        "imre-runtime",
         "--profile",
-        "relar-truthiness-lto",
+        "imre-truthiness-lto",
         "--config",
-        "profile.relar-truthiness-lto.inherits=\"release\"",
+        "profile.imre-truthiness-lto.inherits=\"release\"",
         "--locked"
       ],
       "started_at": "2026-10-19T20:05:03.158917+00:00",
@@ -167,11 +167,11 @@
       "seconds": 2.1894110970315523,
       "returncode": 0,
       "stdout": {
-        "path": "/tmp/relar-decoder-build-validation/thinlto.stdout",
+        "path": "/tmp/imre-decoder-build-validation/thinlto.stdout",
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       "stderr": {
-        "path": "/tmp/relar-decoder-build-validation/thinlto.stderr",
+        "path": "/tmp/imre-decoder-build-validation/thinlto.stderr",
         "sha256": "05eddf166e114756c6518a934a680db3d6e817b4550bb882525332b7b0f818b0"
       }
     },
@@ -182,16 +182,16 @@
         "RUSTC_BOOTSTRAP=1",
         "RUSTFLAGS=-Zsanitizer=address -Cforce-frame-pointers=yes",
         "sh",
-        "/tmp/relar-cargo.sh",
+        "/tmp/imre-cargo.sh",
         "build",
         "-p",
-        "relar-runtime",
+        "imre-runtime",
         "--target",
         "x86_64-unknown-linux-gnu",
         "--profile",
-        "relar-truthiness-asan",
+        "imre-truthiness-asan",
         "--config",
-        "profile.relar-truthiness-asan.inherits=\"release\"",
+        "profile.imre-truthiness-asan.inherits=\"release\"",
         "--locked"
       ],
       "started_at": "2026-10-19T20:05:05.372118+00:00",
@@ -199,11 +199,11 @@
       "seconds": 2.816808208008297,
       "returncode": 0,
       "stdout": {
-        "path": "/tmp/relar-decoder-build-validation/asan.stdout",
+        "path": "/tmp/imre-decoder-build-validation/asan.stdout",
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       "stderr": {
-        "path": "/tmp/relar-decoder-build-validation/asan.stderr",
+        "path": "/tmp/imre-decoder-build-validation/asan.stderr",
         "sha256": "9c50a34ef0afe046a760d65eff27583e5629d93c4b4b5d451c6eb5f4f292066d"
       }
     }
@@ -212,19 +212,19 @@
   "input_guards_passed": true,
   "artifacts": {
     "compiler": {
-      "path": "/home/dev-user/.cache/relar/target/relar-integrated/relar",
+      "path": "/home/dev-user/.cache/imre/target/imre-integrated/imre",
       "sha256": "1dff2a410981e07e511464ba8bfe309b7a02a17c7cc6f2b487bcbc830643c840"
     },
     "normal_runtime": {
-      "path": "/home/dev-user/.cache/relar/target/relar-integrated/librelar_runtime.a",
+      "path": "/home/dev-user/.cache/imre/target/imre-integrated/libimre_runtime.a",
       "sha256": "a4495751d819cd9b08315fe760aef762f94f9d8c23c99ed68ff12a06eaa7742b"
     },
     "thinlto_runtime": {
-      "path": "/home/dev-user/.cache/relar/target/relar-truthiness-lto/librelar_runtime.a",
+      "path": "/home/dev-user/.cache/imre/target/imre-truthiness-lto/libimre_runtime.a",
       "sha256": "2fcfde7ee3bc29408d12387132abe8990bfe98e289c94075af97d0a1a5d460c6"
     },
     "asan_runtime": {
-      "path": "/home/dev-user/.cache/relar/target/x86_64-unknown-linux-gnu/relar-truthiness-asan/librelar_runtime.a",
+      "path": "/home/dev-user/.cache/imre/target/x86_64-unknown-linux-gnu/imre-truthiness-asan/libimre_runtime.a",
       "sha256": "acba2d0744aedd4086ef1deaf81c967ffb4a946666dd78802dd35879ba36a9e8"
     }
   }

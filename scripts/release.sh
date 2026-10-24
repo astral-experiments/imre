@@ -3,7 +3,7 @@
 set -eu
 
 cd "$(dirname "$0")/.."
-workspace_version() { cargo metadata --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "relar-compiler").version'; }
+workspace_version() { cargo metadata --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "imre-compiler").version'; }
 
 # Rooster assumes 0.0.0 before the first tag. Start at the Cargo workspace version.
 if [[ -z $(git tag --list '[0-9]*') ]]; then

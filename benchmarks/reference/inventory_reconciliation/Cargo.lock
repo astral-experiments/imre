@@ -37,7 +37,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "relar-inventory-reference"
+name = "imre-inventory-reference"
 version = "0.1.0"
 dependencies = [
  "num-bigint",

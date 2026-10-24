@@ -38,7 +38,7 @@ def main():
         environment = {
             **os.environ,
             "PATH": str(tools) + os.pathsep + os.environ["PATH"],
-            "RELAR_PYTHON": python,
+            "IMRE_PYTHON": python,
             "MEMORY_SETUP_SCRIPT": str(source.with_name("setup_primer_project.py")),
             "PYTHONHASHSEED": "0",
             "NO_COLOR": "1",

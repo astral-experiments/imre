@@ -25,8 +25,8 @@ sys.dont_write_bytecode = True
 PREFIX = '2026-10-21-native-workspaces'
 REVISION = '7c5c426f9a890b8a805ffd1155ffd3371673ed04'
 BUILD_REVISION = '2e0eac85ad0eea462be9c4feeffa76497773822c'
-ENGINES = ('relar', 'port', 'original', 'rust')
-COMPUTE_ENGINES = ('relar', 'original', 'rust')
+ENGINES = ('imre', 'port', 'original', 'rust')
+COMPUTE_ENGINES = ('imre', 'original', 'rust')
 
 
 def sha(data):
@@ -198,7 +198,7 @@ def main():
     for name in build['source_sha256']:
         assert original_entries[name] == {key: source[name][key] for key in ('mode', 'git_blob')}
     build_root = Path(manifest['build']['path']).parent
-    for key, name in {'compiler': 'relar', 'normal_runtime': 'normal_runtime.a', 'thinlto_runtime': 'thinlto_runtime.a', 'asan_runtime': 'asan_runtime.a'}.items():
+    for key, name in {'compiler': 'imre', 'normal_runtime': 'normal_runtime.a', 'thinlto_runtime': 'thinlto_runtime.a', 'asan_runtime': 'asan_runtime.a'}.items():
         assert identity(build_root / name)['sha256'] == build['sha256'][key]
 
     def bind(path, expected):
@@ -224,7 +224,7 @@ def main():
         if revision == REVISION:
             return blob(source[str(name)])
         assert revision == BUILD_REVISION and name == 'tests/processes.py'
-        data = retained('/home/dev-user/.cache/relar-workspaces-20261021/validation/language/initial-processes.py')
+        data = retained('/home/dev-user/.cache/imre-workspaces-20261021/validation/language/initial-processes.py')
         assert git_id('blob', data) == original_entries[name]['git_blob']
         return data
     validation_suites = helpers['check_language_data'](
@@ -233,7 +233,7 @@ def main():
     general_checks = validation_suites['ordinary_general_checks']
     affected_counts = validation_suites['affected_checks']
 
-    context = load('/home/dev-user/.cache/relar-workspaces-20261021/timing-context.json')
+    context = load('/home/dev-user/.cache/imre-workspaces-20261021/timing-context.json')
     helpers['check_timing_context_data'](context, load, retained, bind)
     counts, modes = collections.Counter(), {}
     with tempfile.TemporaryDirectory(prefix='native-workspaces-portable-replay-') as temporary:
@@ -433,7 +433,7 @@ def main():
             command = row['command']
             retained(row['log'])
             if len(command) > 1 and command[1] == 'build':
-                assert command[0] == str(build_root / 'relar') and '--sanitize' in command
+                assert command[0] == str(build_root / 'imre') and '--sanitize' in command
                 assert option(command, '--runtime') == str(build_root / 'asan_runtime.a')
                 assert option(command, '--opt-level') == '1'
         cache = asan_path.parent.parent
@@ -469,7 +469,7 @@ def main():
             expected = (validator.compute_oracle(case) if compute else
                         validator.oracle(case) if filesystem else process_api.oracle(case))
             assert capture['command'] == [str(asan_path.parent / ('memory-compute' if compute else 'memory-report')), *case.arguments]
-            check_capture(validator, case, expected, capture, 'relar', compute=compute,
+            check_capture(validator, case, expected, capture, 'imre', compute=compute,
                           prepared_process=not compute and not filesystem)
             counts['asan_workload_executions'] += 1
         real_pointer = asan_prep['real_capture_validation']
@@ -479,7 +479,7 @@ def main():
         real_case = mode_cases['normal']['real-prepared-ty'][1]
         helpers['check_real_captures'](benchmark, validator, normal_prepared,
             normal_prepared['source_and_tool_paths'], real_case,
-            {'relar': [str(asan_path.parent / 'memory-report')]}, counts, retained,
+            {'imre': [str(asan_path.parent / 'memory-report')]}, counts, retained,
             lambda path: local_real_root / Path(path).relative_to(real_root),
             pointer=real_pointer, count_key='asan_real_capture_executions')
         assert {key: counts[key] for key in audit['counts']} == audit['counts']
