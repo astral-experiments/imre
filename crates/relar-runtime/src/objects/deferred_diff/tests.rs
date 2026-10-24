@@ -103,6 +103,60 @@ fn filters_and_suffix_sort_keep_raw_guides_lazy() {
 }
 
 #[test]
+fn sparse_projection_releases_inputs_and_restores_raw_guides() {
+    let mut common = vec![
+        "".to_owned(),
+        "".to_owned(),
+        "café".to_owned(),
+        "cafê".to_owned(),
+    ];
+    common.extend((10000..11100).map(|n| format!("row {n} 雪\0")));
+    common.push("x".repeat(300));
+    let mut left: Vec<_> = common.iter().map(String::as_str).collect();
+    let mut right = left.clone();
+    left.extend(["z abcdefgh", "z duplicate", "z duplicate"]);
+    right.extend(["z abcdEfgh", "z duplicate"]);
+    let (left, right) = (list(&left), list(&right));
+    // SAFETY: both input lists are rooted for each independent snapshot.
+    let make_diff =
+        || unsafe { Rc::from_raw(relar_ndiff_deferred(Rc::as_ptr(&left), Rc::as_ptr(&right))) };
+    let diff = make_diff();
+    let expected = rows(&make_diff());
+    // SAFETY: the rooted diff cannot mutate during this inspection.
+    let source = unsafe {
+        diff.0.with(|storage| {
+            let Some(Deferred(View::Full(source))) = storage.sequence_storage().plan() else {
+                unreachable!()
+            };
+            Rc::clone(source)
+        })
+    };
+    assert!(matches!(*source.inputs.borrow(), Inputs::Original(..)));
+    assert_eq!(
+        rows(&filter_rows(&diff, "+", None, None, 2)),
+        ["z abcdEfgh"]
+    );
+    {
+        let inputs = source.inputs.borrow();
+        let Inputs::Packed(packed) = &*inputs else {
+            panic!("sparse projection should pack")
+        };
+        let (left, right) = packed.unpack();
+        let last = left.values.len() - 1;
+        assert_eq!(left.values[last - 1], left.values[last]);
+        assert_eq!(left.values[last], *right.values.last().unwrap());
+    }
+    assert!(source.full.get().is_none());
+    drop((left, right));
+    assert_eq!(rows(&diff), expected);
+    assert!(matches!(*source.inputs.borrow(), Inputs::Materialized));
+    assert_eq!(
+        rows(&filter_rows(&diff, "-", None, None, 2)),
+        ["z abcdefgh", "z duplicate"]
+    );
+}
+
+#[test]
 fn raw_reads_and_writes_respect_snapshots_and_copy_identity() {
     let input = list(&["same"]);
     let extra = string("later");
@@ -162,13 +216,14 @@ fn shared_strings_preserve_duplicate_counts_order_and_slice_ownership() {
             let Some(Deferred(View::Full(source))) = storage.sequence_storage().plan() else {
                 unreachable!()
             };
-            assert_eq!(source.left.values[2..], source.right.values[2..]);
+            let (left, right) = (source.side("-").unwrap(), source.side("+").unwrap());
+            assert_eq!(left.values[2..], right.values[2..]);
             removed
                 .0
-                .with(|s| assert_eq!(s.sequence().values[..], source.left.values[..2]));
+                .with(|s| assert_eq!(s.sequence().values[..], left.values[..2]));
             added
                 .0
-                .with(|s| assert_eq!(s.sequence().values[..], source.right.values[..2]));
+                .with(|s| assert_eq!(s.sequence().values[..], right.values[..2]));
         });
         drop(diff);
         drop(left);
@@ -210,9 +265,12 @@ fn sorted_rows_reuse_only_live_ordered_sources_and_detach_on_write() {
                 unreachable!()
             };
             let source = origin.upgrade().unwrap();
-            removed
-                .0
-                .with(|s| assert_eq!(s.sequence().values[..], source.left.values[..2]));
+            removed.0.with(|s| {
+                assert_eq!(
+                    s.sequence().values[..],
+                    source.side("-").unwrap().values[..2]
+                )
+            });
             Weak::clone(origin)
         });
         relar_seq_append(Rc::as_ptr(&sorted), Rc::as_ptr(&edit) as usize, 3);
