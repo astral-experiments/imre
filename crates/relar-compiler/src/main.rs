@@ -25,7 +25,7 @@ enum Allocator {
 
 const JEMALLOC_RUNTIME: &str = "librelar_runtime_jemalloc.a";
 
-const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY]
+const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--watch]
        relar build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]
        relar run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]
 
@@ -40,6 +40,7 @@ Build options:
   -C link-arg=ARG (repeatable, passes one argument to Clang)
 
 Build writes the executable to the current directory using the source filename without its extension.
+Check --watch reports each revision to stderr until interrupted.
 Build and run share cached module objects and executables on supported native Linux toolchains.
 Use --whole-program to optimize all modules together.
 Override the cache location with RELAR_CACHE_DIR or bypass it with --no-cache.
@@ -86,6 +87,7 @@ fn run() -> Result<ExitCode, String> {
     let BuildOptions {
         source_path,
         help,
+        watch,
         no_cache,
         whole_program,
         verbosity,
@@ -107,7 +109,18 @@ fn run() -> Result<ExitCode, String> {
     }
     let source_path = source_path.ok_or(USAGE)?;
     if command == "check" {
-        relar_compiler::check_file(&source_path, module_root.as_deref())?;
+        if watch {
+            relar_compiler::IncrementalCompiler::default().watch_file(
+                &source_path,
+                module_root.as_deref(),
+                |result| match result {
+                    Ok(()) => eprintln!("Check passed"),
+                    Err(error) => eprintln!("{error}\nCheck failed"),
+                },
+            )?;
+        } else {
+            relar_compiler::check_file(&source_path, module_root.as_deref())?;
+        }
         return Ok(ExitCode::SUCCESS);
     }
     if !cfg!(any(
