@@ -166,7 +166,13 @@ impl TextBuffer {
         };
         let text = match str::from_utf8(bytes) {
             Ok(text) => text,
-            Err(err) if err.error_len().is_none() && !eof => {
+            // CPython's incremental decoder also waits for the third byte of
+            // a surrogate encoding before rejecting it, even in strict mode.
+            Err(err)
+                if !eof
+                    && (err.error_len().is_none()
+                        || matches!(&bytes[err.valid_up_to()..], [0xed, 0xa0..=0xbf])) =>
+            {
                 // SAFETY: valid_up_to is the byte length of the validated prefix.
                 unsafe { str::from_utf8_unchecked(&bytes[..err.valid_up_to()]) }
             }
