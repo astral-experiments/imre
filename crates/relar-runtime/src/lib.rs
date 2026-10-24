@@ -598,7 +598,11 @@ fn integer_shift(value: &Int, count: &Int, left: bool) -> Result<Int> {
             "too many digits in integer",
         ));
     }
-    Ok(Int::new(value.as_ref() << shift as usize))
+    let magnitude = value
+        .magnitude()
+        .try_shl(shift as usize)
+        .map_err(|_| Error::new(Kind::MemoryError, "integer shift allocation failed"))?;
+    Ok(Int::new(BigInt::from_biguint(value.sign(), magnitude)))
 }
 
 /// # Safety
@@ -1935,6 +1939,12 @@ mod tests {
                 BigInt::from(i64::MAX),
                 8,
                 Kind::OverflowError,
+            ),
+            (
+                BigInt::from(1),
+                BigInt::from(1_u64 << 62),
+                8,
+                Kind::MemoryError,
             ),
         ] {
             let value = Int::new(value);
