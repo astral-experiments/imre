@@ -1,8 +1,8 @@
 //! Typed immutable-key hash tables with insertion-ordered dictionary entries.
 //!
 //! Keys are monomorphized once per table; values are plain owned words with one
-//! shared descriptor. Sets store no value words. Active iterators keep their
-//! owner's entry directory stable through a compaction lease, never a Rust borrow.
+//! shared descriptor. Sets store no value words. Each iterator owns a cursor
+//! that the table can adjust when it removes vacant entries.
 
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
@@ -10,6 +10,7 @@ use std::sync::LazyLock;
 mod sorted_rows;
 
 use hashbrown::HashTable;
+use std::cell::Cell;
 use std::mem::ManuallyDrop;
 use std::rc::{Rc, Weak};
 
@@ -261,7 +262,7 @@ struct Entry<K, V> {
 struct Table<K, V> {
     index: HashTable<usize>,
     entries: Vec<Option<Entry<K, V>>>,
-    iterators: Weak<()>,
+    iterators: Vec<Weak<Cell<usize>>>,
 }
 
 // Every live entry needs at least eight bytes, including key-only set entries.
@@ -274,7 +275,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         Self {
             index: HashTable::new(),
             entries: Vec::new(),
-            iterators: Weak::new(),
+            iterators: Vec::new(),
         }
     }
 
@@ -339,12 +340,18 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     }
 
     fn compact(&mut self) {
-        if self.iterators.strong_count() != 0
-            || self.entries.len() < 32
-            || self.entries.len() - self.index.len() <= self.index.len()
-        {
+        if self.entries.len() < 32 || self.entries.len() - self.index.len() <= self.index.len() {
             return;
         }
+        // Each cursor points just past the last entry it examined. After
+        // compaction only the occupied slots in that prefix remain before it.
+        self.iterators.retain(|iterator| {
+            let Some(position) = iterator.upgrade() else {
+                return false;
+            };
+            position.set(self.entries[..position.get()].iter().flatten().count());
+            true
+        });
         self.entries.retain(Option::is_some);
         self.index.clear();
         let entries = &self.entries;
@@ -366,10 +373,12 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         }
     }
 
-    fn iterator_lease(&mut self) -> Rc<()> {
-        let lease = self.iterators.upgrade().unwrap_or_else(|| Rc::new(()));
-        self.iterators = Rc::downgrade(&lease);
-        lease
+    fn iterator_position(&mut self) -> Rc<Cell<usize>> {
+        self.iterators
+            .retain(|iterator| iterator.strong_count() != 0);
+        let position = Rc::new(Cell::new(0));
+        self.iterators.push(Rc::downgrade(&position));
+        position
     }
 
     unsafe fn lookup(&self, word: usize) -> Option<&Entry<K, V>> {
@@ -497,8 +506,8 @@ impl<V: Copy> Tables<V> {
     fn entry_count(&self) -> usize {
         table!(self, table => table.entries.len())
     }
-    fn lease(&mut self) -> Rc<()> {
-        table!(self, table => table.iterator_lease())
+    fn iterator_position(&mut self) -> Rc<Cell<usize>> {
+        table!(self, table => table.iterator_position())
     }
     unsafe fn lookup(&self, word: usize) -> Option<V> {
         // SAFETY: each dispatched table borrows its exact rooted key kind.
@@ -790,9 +799,8 @@ enum IteratorKind {
 }
 pub(super) struct MappingIterator {
     owner: Rc<Object>,
-    _lease: Rc<()>,
     expected_len: usize,
-    position: usize,
+    position: Rc<Cell<usize>>,
     remaining: usize,
     kind: IteratorKind,
     exhausted: bool,
@@ -821,13 +829,13 @@ impl MappingIterator {
                     storage
                         .set()
                         .tables
-                        .next(self.position)
+                        .next(self.position.get())
                         .map(|(position, key, ())| (position, key, None))
                 } else {
                     let mapping = storage.dictionary();
                     mapping
                         .tables
-                        .next(self.position)
+                        .next(self.position.get())
                         .map(|(position, key, word)| {
                             let value = (self.kind == IteratorKind::DictionaryItems)
                                 .then(|| mapping.value_kind.acquire(word));
@@ -852,7 +860,7 @@ impl MappingIterator {
             }
         };
         if let Some((position, key, value)) = result {
-            self.position = position;
+            self.position.set(position);
             self.remaining = self.remaining.saturating_sub(1);
             Ok(Some((key, value)))
         } else {
@@ -894,11 +902,11 @@ impl Storage {
             self.dictionary().tables.len()
         }
     }
-    fn iteration_lease(&mut self, kind: IteratorKind) -> Rc<()> {
+    fn iteration_position(&mut self, kind: IteratorKind) -> Rc<Cell<usize>> {
         if kind == IteratorKind::Set {
-            self.set_mut().tables.lease()
+            self.set_mut().tables.iterator_position()
         } else {
-            self.dictionary_mut().tables.lease()
+            self.dictionary_mut().tables.iterator_position()
         }
     }
     fn mapping_iterator_mut(&mut self) -> &mut MappingIterator {
@@ -1215,17 +1223,16 @@ pub unsafe extern "C" fn relar_dict_iter(value: *const Object, mode: u32) -> *co
 unsafe fn new_iterator(value: *const Object, kind: IteratorKind) -> *const Object {
     // SAFETY: acquire an independent root before reading mutable cursor metadata.
     let owner = unsafe { acquire_rc::<Object>(value as usize) };
-    // SAFETY: the independent owner roots storage; only a lease and size escape.
-    let (lease, length) = unsafe {
+    // SAFETY: the independent owner roots storage; only an owned cursor and size escape.
+    let (position, length) = unsafe {
         owner
             .0
-            .with_mut(|s| (s.iteration_lease(kind), s.iteration_len(kind)))
+            .with_mut(|s| (s.iteration_position(kind), s.iteration_len(kind)))
     };
     let iterator = MappingIterator {
         owner,
-        _lease: lease,
         expected_len: length,
-        position: 0,
+        position,
         remaining: length,
         kind,
         exhausted: false,
@@ -1960,23 +1967,21 @@ mod tests {
                 collect_keys(iterator),
                 (80..100).chain(100..179).collect::<Vec<_>>()
             );
-            assert_eq!(
+            assert!(
                 object(dictionary)
                     .0
-                    .with(|s| s.dictionary().tables.entry_count()),
-                179
+                    .with(|s| s.dictionary().tables.entry_count())
+                    < 179
             );
             relar_object_release(iterator);
             relar_dict_delete(dictionary, integer(0));
             for key in 80..100 {
                 relar_dict_delete(dictionary, integer(key));
             }
-            assert!(
-                object(dictionary)
-                    .0
-                    .with(|s| s.dictionary().tables.entry_count())
-                    < 100
-            );
+            assert!(object(dictionary).0.with(|s| {
+                let table = &s.dictionary().tables;
+                table.entry_count() <= 2 * table.len()
+            }));
             relar_dict_set(dictionary, integer(120), integer(999));
             let iterator = relar_dict_iter(dictionary, 0);
             assert_eq!(collect_keys(iterator), (100..179).collect::<Vec<_>>());
@@ -1992,6 +1997,46 @@ mod tests {
                     .collect::<Vec<_>>()
             );
             relar_object_release(iterator);
+            relar_object_release(dictionary);
+        }
+    }
+
+    #[test]
+    fn repeated_reinsertion_compacts_with_independent_live_cursors() {
+        let dictionary = relar_dict_new(2, 2);
+        // SAFETY: the dictionary and both iterators stay rooted. Keys and values
+        // are immediate integers and each output slot is initialized on success.
+        unsafe {
+            for key in 0..4 {
+                relar_dict_set(dictionary, integer(key), integer(key));
+            }
+            let first = relar_dict_iter(dictionary, 0);
+            let second = relar_dict_iter(dictionary, 0);
+            let next = |iterator| {
+                let mut key = 0;
+                assert_eq!(
+                    relar_mapping_iter_next(iterator, &mut key, std::ptr::null_mut()),
+                    1
+                );
+                Int(key).as_small().unwrap()
+            };
+            assert_eq!(next(first), 0);
+            assert_eq!(next(first), 1);
+            assert_eq!(next(second), 0);
+            for _ in 0..512 {
+                relar_dict_delete(dictionary, integer(0));
+                relar_dict_set(dictionary, integer(0), integer(0));
+            }
+            assert!(
+                object(dictionary)
+                    .0
+                    .with(|s| s.dictionary().tables.entry_count())
+                    <= 32
+            );
+            assert_eq!(next(first), 2);
+            assert_eq!(next(second), 1);
+            relar_object_release(first);
+            relar_object_release(second);
             relar_object_release(dictionary);
         }
     }
