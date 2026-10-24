@@ -2934,11 +2934,24 @@ impl Emitter<'_, '_> {
             self.release_operand(&right);
             return result;
         }
+        // A chain keeps its middle operand across the next expression. Limit
+        // short field borrows to one native comparison with passive operands.
+        let operand = if ops.len() == 1
+            && matches!(
+                values[0].ty,
+                Type::Str | Type::StrLiteral(_) | Type::Tuple(_)
+            )
+            && values.iter().all(read_only_field_operand)
+        {
+            Self::immediate_receiver
+        } else {
+            Self::operand
+        };
         let end = self.label();
         let mut incoming = Vec::new();
-        let mut left = self.operand(&values[0]);
+        let mut left = operand(self, &values[0]);
         for (i, &op) in ops.iter().enumerate() {
-            let right = self.operand(&values[i + 1]);
+            let right = operand(self, &values[i + 1]);
             let test = self.compare(op, &left.value, &right.value);
             self.release_operand(&left);
             if i + 1 == ops.len() {
@@ -3079,6 +3092,22 @@ impl Emitter<'_, '_> {
             return self.truth(&value);
         }
         let probe_index = builtin.tuple_probe_index();
+        // A later key or eager default can replace the receiver or any field
+        // along its path. A stack key assembled from local snapshots cannot.
+        let borrow_probe = probe_index.is_some_and(|key| {
+            expressions
+                .iter()
+                .enumerate()
+                .all(|(i, arg)| match &arg.kind {
+                    ExprKind::Tuple(fields) if i == key => {
+                        TUPLE_PROBE_ARITY.contains(&fields.len())
+                            && fields
+                                .iter()
+                                .all(|field| matches!(field.kind, ExprKind::Local(_)))
+                    }
+                    _ => read_only_field_operand(arg),
+                })
+        });
         let mut probe_fields = Vec::new();
         let args = expressions
             .iter()
@@ -3094,11 +3123,12 @@ impl Emitter<'_, '_> {
                         index + 1 == expressions.len(),
                         &mut probe_fields,
                     )
-                } else if index == 0
-                    && matches!(
-                        builtin,
-                        Builtin::Len | Builtin::Bool | Builtin::RegexCapture { .. }
-                    )
+                } else if borrow_probe
+                    || (index == 0
+                        && matches!(
+                            builtin,
+                            Builtin::Len | Builtin::Bool | Builtin::RegexCapture { .. }
+                        ))
                 {
                     self.immediate_receiver(arg)
                 } else {
@@ -4427,6 +4457,24 @@ impl Emitter<'_, '_> {
     }
 }
 
+/// Evaluating these expressions cannot rebind a local or mutate a record.
+/// Only local-rooted projections borrow; literals keep their usual ownership.
+fn read_only_field_operand(expression: &Expr) -> bool {
+    match &expression.kind {
+        ExprKind::Local(_)
+        | ExprKind::Str(_)
+        | ExprKind::Bool(_)
+        | ExprKind::None
+        | ExprKind::Int(_) => true,
+        ExprKind::Field(receiver, _) => read_only_field_operand(receiver),
+        ExprKind::Unwrap(inner) => {
+            matches!(inner.kind, ExprKind::Local(_))
+                && !matches!(expression.ty, Type::Bool | Type::Float)
+        }
+        _ => false,
+    }
+}
+
 /// Proves only that integer evaluation cannot mutate a list or invoke user
 /// code. Allocation, arithmetic errors, and current bounds checks remain in
 /// their original order. Both complete comparison operands must pass before
@@ -5397,6 +5445,28 @@ mod tests {
         );
         assert_eq!(body.matches("call ptr @relar_tuple_probe(").count(), 3);
         assert_eq!(body.matches("call ptr @relar_record_new(").count(), 1);
+    }
+
+    #[test]
+    fn short_field_borrows_end_before_mutating_defaults() {
+        let llvm = compile(
+            include_str!("../../../tests/fixtures/tuple_keys/field_borrows.py"),
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        let exercise = llvm.split_once("define internal i8 @fn_2(").unwrap().1;
+        let (reads, later) = exercise
+            .split_once("call i32 @relar_tuple_compare(")
+            .unwrap();
+        assert!(reads.contains("call i32 @relar_dict_try_get("));
+        let (before_default, _) = later.split_once("call ptr @fn_0(").unwrap();
+        for retain in [
+            "call void @relar_object_retain(",
+            "call void @relar_record_retain(",
+        ] {
+            assert!(!reads.contains(retain));
+            assert!(before_default.contains(retain));
+        }
     }
 
     #[test]
