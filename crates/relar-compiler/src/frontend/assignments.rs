@@ -15,6 +15,36 @@ pub(super) struct ConditionalFacts<'a> {
 impl<'a> ConditionalFacts<'a> {
     pub(super) fn capture(checker: &Checker<'_>, value: &'a ast::ExprIf) -> Self {
         struct Names<'a>(HashSet<&'a str>);
+        impl<'a> Names<'a> {
+            /// Names that apply_facts can narrow when testing this expression.
+            fn predicate(&mut self, test: &'a ast::Expr) {
+                match test {
+                    ast::Expr::Name(name) => {
+                        self.0.insert(name.id.as_str());
+                    }
+                    ast::Expr::Named(node) => self.visit_expr(&node.target),
+                    ast::Expr::UnaryOp(node) => self.predicate(&node.operand),
+                    ast::Expr::BoolOp(node) => {
+                        for value in &node.values {
+                            self.predicate(value);
+                        }
+                    }
+                    ast::Expr::Call(node) if matches!(&*node.func, ast::Expr::Name(name) if name.id == "bool" || name.id == "isinstance") => {
+                        if let Some(first) = node.arguments.args.first() {
+                            self.predicate(first);
+                        }
+                    }
+                    ast::Expr::Compare(node) => {
+                        for value in &node.operands {
+                            if matches!(value, ast::Expr::Name(_) | ast::Expr::Named(_)) {
+                                self.predicate(value);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         impl<'a> Visitor<'a> for Names<'a> {
             fn visit_expr(&mut self, expr: &'a ast::Expr) {
                 if let ast::Expr::Name(name) = expr {
@@ -32,12 +62,9 @@ impl<'a> ConditionalFacts<'a> {
         impl<'a> Visitor<'a> for FlowNames<'a> {
             fn visit_expr(&mut self, expr: &'a ast::Expr) {
                 match expr {
-                    ast::Expr::If(node) => self.names.visit_expr(&node.test),
+                    ast::Expr::If(node) => self.names.predicate(&node.test),
                     ast::Expr::Named(node) => self.names.visit_expr(&node.target),
-                    ast::Expr::BoolOp(_) => {
-                        self.names.visit_expr(expr);
-                        return;
-                    }
+                    ast::Expr::BoolOp(_) => self.names.predicate(expr),
                     _ => {}
                 }
                 walk_expr(self, expr);
@@ -45,7 +72,7 @@ impl<'a> ConditionalFacts<'a> {
             fn visit_comprehension(&mut self, node: &'a ast::Comprehension) {
                 self.names.visit_expr(&node.target);
                 for test in &node.ifs {
-                    self.names.visit_expr(test);
+                    self.names.predicate(test);
                 }
                 walk_comprehension(self, node);
             }
@@ -53,7 +80,7 @@ impl<'a> ConditionalFacts<'a> {
         let mut flow = FlowNames {
             names: Names(HashSet::new()),
         };
-        flow.names.visit_expr(&value.test);
+        flow.names.predicate(&value.test);
         let mut writes = HashSet::new();
         for expr in [&*value.test, &*value.body, &*value.orelse] {
             flow.visit_expr(expr);
