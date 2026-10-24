@@ -4,9 +4,14 @@ use std::collections::BTreeSet;
 
 use super::*;
 
-/// The callback borrows its record's receiver for the entire invocation. Plain
-/// functions use the same hidden-context ABI, ignoring the null context word.
-pub(super) fn adapters(module: &Module, sanitize: bool, output: &mut Output) {
+/// Bound adapters pass the record's receiver according to the target's native
+/// convention. Plain functions ignore the same ABI's null context word.
+pub(super) fn adapters(
+    module: &Module,
+    sanitize: bool,
+    resource_types: &HashSet<Type>,
+    output: &mut Output,
+) {
     let mut targets = BTreeSet::new();
     let mut invoked = false;
     let mut enum_receiver = false;
@@ -78,6 +83,9 @@ pub(super) fn adapters(module: &Module, sanitize: bool, output: &mut Output) {
         );
         if scalar {
             body.push_str("  %tag = ptrtoint ptr %context to i64\n");
+        } else if bound && resource_types.contains(&function.locals[function.params[0]]) {
+            // The callable record keeps its own receiver across invocations.
+            body.push_str("  call void @relar_record_retain(ptr %context)\n");
         }
         writeln!(
             body,
@@ -136,7 +144,8 @@ impl Emitter<'_, '_> {
     ) -> Value {
         let targets = self.callable_targets.get(callable.ty).to_vec();
         let callable = self.operand(callable);
-        let values = self.call_operands(args);
+        let mut values = self.call_operands(args);
+        self.transfer_call_operands(&mut values);
         let target = if let [target] = targets.as_slice() {
             format!(
                 "@{}",
