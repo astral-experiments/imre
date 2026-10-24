@@ -1,13 +1,14 @@
 //! POSIX executable lookup shares the caller's credentials and current working directory.
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::ffi::{CString, OsStr, OsString};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::ffi::OsString;
+use std::mem::MaybeUninit;
+use std::os::unix::ffi::OsStringExt;
 use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 
-use super::exceptions::{Error, Kind, Result, finish};
+use super::exceptions::{Error, Kind, finish, sequence_allocation_failed};
 use super::{Bytes, Int, Str};
 
 /// POSIX provides the default executable search path even when PATH is unset.
@@ -26,33 +27,58 @@ fn default_path() -> Vec<u8> {
     b"/bin:/usr/bin".to_vec()
 }
 
-/// Access uses the real UID/GID. Convert mode after exists() and before isdir(),
+enum LookupError {
+    Allocation,
+    ModeOverflow,
+}
+
+type LookupResult = Result<Option<Vec<u8>>, LookupError>;
+
+/// Access uses the real UID/GID. Convert mode after stat() and before the directory check,
 /// so a missing path can bypass an overflowing mode, just as CPython does.
-fn candidate(dir: &[u8], cmd: &[u8], mode: &Int) -> Result<Option<Vec<u8>>> {
-    let mut name = dir.to_vec();
-    if !dir.is_empty() && !dir.ends_with(b"/") {
+fn candidate(dir: &[u8], cmd: &[u8], mode: &Int) -> LookupResult {
+    if dir.contains(&0) || cmd.contains(&0) {
+        return Ok(None);
+    }
+    let separator = !dir.is_empty() && !dir.ends_with(b"/");
+    let capacity = dir
+        .len()
+        .saturating_add(cmd.len())
+        .saturating_add(usize::from(separator) + 1);
+    let mut name = Vec::new();
+    name.try_reserve_exact(capacity)
+        .map_err(|_| LookupError::Allocation)?;
+    name.extend_from_slice(dir);
+    if separator {
         name.push(b'/');
     }
     name.extend_from_slice(cmd);
-    let path = std::path::Path::new(OsStr::from_bytes(&name));
-    if !path.exists() {
+    name.push(0);
+    let path = name.as_ptr().cast();
+    let mut metadata = MaybeUninit::<libc::stat>::uninit();
+    // SAFETY: name is NUL-terminated and stable throughout each call. stat writes
+    // one struct on success and access retains neither the path nor any output.
+    if unsafe { libc::stat(path, metadata.as_mut_ptr()) } != 0 {
         return Ok(None);
     }
-    let mode = mode.big().to_i32().ok_or_else(|| {
-        Error::new(
-            Kind::OverflowError,
-            "Python int too large to convert to C int",
-        )
-    })?;
-    let Ok(c_name) = CString::new(name.as_slice()) else {
+    let mode = mode.big().to_i32().ok_or(LookupError::ModeOverflow)?;
+    // SAFETY: the terminated name still owns path and access retains no pointer.
+    if unsafe { libc::access(path, mode) } != 0 {
         return Ok(None);
-    };
-    // SAFETY: c_name owns its terminated path throughout access(), which retains nothing.
-    let allowed = unsafe { libc::access(c_name.as_ptr(), mode) } == 0;
-    Ok((allowed && !path.is_dir()).then_some(name))
+    }
+    // Match isdir() after access, including a failed second stat returning false.
+    // SAFETY: only a successful stat initializes the metadata used in this test.
+    if unsafe {
+        libc::stat(path, metadata.as_mut_ptr()) == 0
+            && metadata.assume_init().st_mode & libc::S_IFMT == libc::S_IFDIR
+    } {
+        return Ok(None);
+    }
+    name.pop();
+    Ok(Some(name))
 }
 
-fn which(cmd: &[u8], mode: &Int, path: Option<&[u8]>) -> Result<Option<Vec<u8>>> {
+fn which(cmd: &[u8], mode: &Int, path: Option<&[u8]>) -> LookupResult {
     if let Some(last) = cmd.iter().rposition(|&b| b == b'/') {
         // posixpath.split removes trailing separators from the head except when
         // every character is a slash. Joining it again preserves that root.
@@ -107,12 +133,20 @@ pub unsafe extern "C" fn imre_shutil_which(
     let result = unsafe {
         let path = (!path.is_null()).then(|| spelling(path, path_bytes));
         which(spelling(cmd, cmd_bytes), &Int::borrow(mode), path)
-    }
-    .and_then(|name| match name {
-        None => Ok(std::ptr::null()),
-        Some(name) if cmd_bytes != 0 => Ok(Rc::into_raw(Rc::new(name)).cast()),
-        Some(name) => super::paths::path_utf8(OsString::from_vec(name))
+    };
+    let result = match result {
+        Err(LookupError::Allocation) => {
+            sequence_allocation_failed();
+            return std::ptr::null();
+        }
+        Err(LookupError::ModeOverflow) => Err(Error::new(
+            Kind::OverflowError,
+            "Python int too large to convert to C int",
+        )),
+        Ok(None) => Ok(std::ptr::null()),
+        Ok(Some(name)) if cmd_bytes != 0 => Ok(Rc::into_raw(Rc::new(name)).cast()),
+        Ok(Some(name)) => super::paths::path_utf8(OsString::from_vec(name))
             .map(|text| Rc::into_raw(Rc::new(text)).cast()),
-    });
+    };
     finish(result, std::ptr::null())
 }
