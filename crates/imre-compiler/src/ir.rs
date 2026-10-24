@@ -486,6 +486,8 @@ pub(crate) enum Builtin {
     /// bounds, with no intervening mutation or user code. Returns an owned
     /// element of a generic typed list; the index is canonical and nonnegative.
     SequenceGetInBounds,
+    /// Transfers the next slot of a fresh append-only list to its sole consumer.
+    SequenceTakeInBounds,
     /// Reduces an exact integer list after evaluating its source and start.
     /// Integer addition cannot invoke callbacks or raise a recoverable error.
     ListSum,

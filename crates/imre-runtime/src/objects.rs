@@ -203,6 +203,22 @@ pub unsafe extern "C" fn imre_seq_get_index(value: *const Object, at: usize) -> 
     finish(owned.map(OwnedWord::into_word), 0)
 }
 
+/// Transfers a private list slot to its single forward iterator. Unvisited
+/// elements are still owned by the normal list destructor on every loop exit.
+///
+/// # Safety
+/// `value` is a rooted, ordinary typed list. No alias may observe a consumed
+/// slot and `at` must be a fresh in-bounds native index for this iterator.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_seq_take_index_proven(value: *const Object, at: usize) -> usize {
+    // SAFETY: the list owns each stored word; zero is the empty destructor state.
+    unsafe {
+        object(value)
+            .0
+            .with_mut(|storage| std::mem::take(&mut storage.sequence_mut().values[at]))
+    }
+}
+
 /// Borrows one concrete sequence word after its current bounds were proved.
 /// Zero remains an ordinary scalar or absent value, never an error sentinel.
 ///

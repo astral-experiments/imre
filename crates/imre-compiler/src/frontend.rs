@@ -18,6 +18,7 @@ mod callables;
 mod calls;
 mod closed_calls;
 mod comprehensions;
+mod consuming_lists;
 mod contexts;
 mod counter;
 mod dataclass_values;
@@ -640,6 +641,7 @@ pub(crate) fn lower_with_owners(
             );
             checker.returns = signature.returns;
             checker.joined_lines = joined_lines::find(&definition.body);
+            checker.consuming_lists = consuming_lists::find(&definition.body);
             checker.asynchronous = signature.asynchronous;
             checker.method_context(signature.method);
             let mut params = Vec::new();
@@ -1622,6 +1624,7 @@ struct Checker<'a> {
     /// Group dictionary locals whose complete set of reads resolves to capture slots.
     regex_fields: HashMap<usize, HashMap<String, usize>>,
     joined_lines: HashMap<TextRange, String>,
+    consuming_lists: HashSet<TextRange>,
     namespace_guards: Vec<(usize, usize)>,
     captured_process_errors: Vec<processes::CapturedFields>,
     returns: Type,
@@ -1677,6 +1680,7 @@ impl<'a> Checker<'a> {
             regex_locals: HashMap::new(),
             regex_fields: HashMap::new(),
             joined_lines: HashMap::new(),
+            consuming_lists: HashSet::new(),
             namespace_guards: Vec::new(),
             captured_process_errors: Vec::new(),
             returns: Type::None,
@@ -2602,7 +2606,7 @@ impl<'a> Checker<'a> {
             iterable.kind = ExprKind::Tuple(std::mem::take(values));
         }
         if matches!(&input, Iteration::Container { iterable, items: false, start: None }
-            if matches!(iterable.ty, Type::Tuple(_)))
+            if matches!(iterable.ty, Type::Tuple(_)) || self.consumes_list(iterable.ty, loop_.iter.range()))
         {
             input =
                 Iteration::Prepared(self.prepare_iteration(input, loop_.iter.as_ref(), false)?);

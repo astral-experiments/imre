@@ -57,6 +57,7 @@ impl Builtin {
         match self {
             // Even a zero-argument call may mutate a retained native list or reenter Python.
             Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
+            Self::SequenceTakeInBounds => Contract::new(false, Unknown),
             Self::Text(operation) => Contract::new(
                 match operation {
                     TextOperation::Split(_)
@@ -366,11 +367,13 @@ impl Builtin {
                     && (!matches!(self, Self::ListGetBoundedInBounds { .. })
                         || (matches!(args[0].kind, ExprKind::Local(_)) && index(&args[1])))
             }
-            Self::SequenceGetInBounds => matches!(args, [source, cursor]
+            Self::SequenceGetInBounds | Self::SequenceTakeInBounds => {
+                matches!(args, [source, cursor]
                 if matches!(source.ty, Type::List(_))
                     && types.element(source.ty) == Some(result)
                     && matches!(source.kind, ExprKind::Local(_))
-                    && cursor.ty == Type::Int && index(cursor)),
+                    && cursor.ty == Type::Int && index(cursor))
+            }
             Self::IntBounded { min, max } => {
                 signature(&[Type::Int], Type::Int)
                     && bounds(*min, *max)
