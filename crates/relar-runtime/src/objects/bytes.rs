@@ -19,6 +19,89 @@ fn allocate(length: usize) -> Result<Bytes> {
     Ok(value)
 }
 
+/// Private append-only integer list whose only consumer converts it to bytes.
+pub(super) struct ByteOutput {
+    bytes: Vec<u8>,
+    invalid: bool,
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_byte_output_new() -> *const Object {
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::ByteOutput(
+        ByteOutput {
+            bytes: Vec::new(),
+            invalid: false,
+        },
+    )))))
+}
+
+/// # Safety
+/// Root the private output and its canonical integer arguments for this call.
+unsafe fn append_bytes<const N: usize>(output: *const Object, words: [usize; N]) {
+    // SAFETY: only compiler-generated appends access this rooted private object.
+    unsafe {
+        super::object(output).0.with_mut(|storage| {
+            let Storage::ByteOutput(output) = storage else {
+                unreachable!()
+            };
+            if output.bytes.len() > super::MAX_LIST_LEN - N {
+                fail("MemoryError", "list allocation failed");
+            }
+            output
+                .bytes
+                .try_reserve(N)
+                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+            for word in words {
+                // Canonical 0..=255 are exactly the odd words in 1..=511.
+                // Invalid Ints have no observable destructor. Record the error
+                // without raising: a later producer exception must still win.
+                output.invalid |= word & !0x1fe != 1;
+                output.bytes.push((word >> 1) as u8);
+            }
+        });
+    }
+}
+
+/// # Safety
+/// Root the private output and the exact integer throughout the append.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_byte_output_append(output: *const Object, word: usize) {
+    unsafe { append_bytes(output, [word]) }
+}
+
+/// # Safety
+/// Root the private output and both already-evaluated exact integers.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_byte_output_append_pair(
+    output: *const Object,
+    first: usize,
+    second: usize,
+) {
+    unsafe { append_bytes(output, [first, second]) }
+}
+
+/// # Safety
+/// Root the private output at its sole consuming bytes() expression.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_byte_output_finish(output: *const Object) -> *const Bytes {
+    // SAFETY: no Python-visible reference can observe the buffer transfer.
+    let result = unsafe {
+        super::object(output).0.with_mut(|storage| {
+            let Storage::ByteOutput(output) = storage else {
+                unreachable!()
+            };
+            if output.invalid {
+                return Err(Error::new(
+                    Kind::ValueError,
+                    "bytes must be in range(0, 256)",
+                ));
+            }
+            Ok(Rc::into_raw(Rc::new(std::mem::take(&mut output.bytes))))
+        })
+    };
+    finish(result, std::ptr::null())
+}
+
 /// Converts a Python index-sized argument without truncating large integers.
 pub(super) fn native_size(value: &Int) -> Result<isize> {
     value
@@ -582,6 +665,25 @@ mod tests {
                 assert_eq!(Rc::strong_count(&source), 1);
                 assert_eq!(relar_error_pending(), 0);
             }
+        }
+    }
+
+    #[test]
+    fn byte_output_transfers_its_allocation_at_conversion() {
+        // SAFETY: the sole owner roots this private builder through conversion.
+        unsafe {
+            let output = Rc::from_raw(relar_byte_output_new());
+            relar_byte_output_append_pair(Rc::as_ptr(&output), 1, 511);
+            let buffer = output.0.with(|storage| {
+                let Storage::ByteOutput(output) = storage else {
+                    unreachable!()
+                };
+                output.bytes.as_ptr()
+            });
+            let result = Rc::from_raw(relar_byte_output_finish(Rc::as_ptr(&output)));
+            drop(output);
+            assert_eq!(result.as_ptr(), buffer);
+            assert_eq!(result.as_slice(), [0, 255]);
         }
     }
 

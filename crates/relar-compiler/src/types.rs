@@ -61,6 +61,7 @@ impl Types {
             | Type::ListInt
             | Type::StringKeys
             | Type::Iterator
+            | Type::ByteOutput
             | Type::Exception
             | Type::TimeoutExpired
             | Type::TextIO
@@ -271,6 +272,7 @@ impl Types {
             Type::Class(_)
             | Type::Callable(_)
             | Type::Iterator
+            | Type::ByteOutput
             | Type::Exception
             | Type::TimeoutExpired
             | Type::TextIO

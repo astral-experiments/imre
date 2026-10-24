@@ -424,6 +424,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_print_bytes"
                 | "relar_bytes_count"
                 | "relar_bytes_list"
+                | "relar_byte_output_finish"
                 | "relar_bytes_get"
                 | "relar_bytes_get_index"
                 | "relar_bytes_slice"

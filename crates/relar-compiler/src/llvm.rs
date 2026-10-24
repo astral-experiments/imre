@@ -16,6 +16,7 @@ use crate::ir::{
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
 
+mod byte_outputs;
 mod callables;
 mod conditionals;
 mod integer_regions;
@@ -52,6 +53,7 @@ impl Type {
             | Self::Set(_)
             | Self::StringKeys
             | Self::Iterator
+            | Self::ByteOutput
             | Self::Exception
             | Self::TimeoutExpired
             | Self::Path
@@ -82,6 +84,7 @@ impl Type {
             | Self::Set(_)
             | Self::StringKeys
             | Self::Iterator
+            | Self::ByteOutput
             | Self::Exception
             | Self::TimeoutExpired
             | Self::Path
@@ -536,6 +539,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::ByteOutput
             | Type::Exception
             | Type::TimeoutExpired
             | Type::Path
@@ -1354,6 +1358,7 @@ impl Emitter<'_, '_> {
     ) -> Result<String, String> {
         self.entry_allocas.clear();
         self.locals = function.locals.clone();
+        byte_outputs::select(function, &mut self.locals);
         self.borrowed_locals = borrows.locals.clone();
         self.rooted_locals = borrows.rooted.clone();
         self.length_roots = borrows.length_roots.clone();
@@ -1560,10 +1565,12 @@ impl Emitter<'_, '_> {
         let receiver = self.operand(receiver);
         let first = self.operand(first);
         let second = self.operand(second);
-        self.void_call(
-            "relar_list_append_pair",
-            &[&receiver.value, &first.value, &second.value],
-        );
+        let name = if receiver.value.ty == Type::ByteOutput {
+            "relar_byte_output_append_pair"
+        } else {
+            "relar_list_append_pair"
+        };
+        self.void_call(name, &[&receiver.value, &first.value, &second.value]);
         for operand in [&receiver, &first, &second] {
             self.release_operand(operand);
         }
@@ -1573,6 +1580,13 @@ impl Emitter<'_, '_> {
     fn statement(&mut self, statement: &Statement) {
         match statement {
             Statement::Assign(slot, expression) => {
+                if self.locals[*slot] == Type::ByteOutput
+                    && matches!(&expression.kind, ExprKind::List(values) if values.is_empty())
+                {
+                    let value = self.call("relar_byte_output_new", Type::ByteOutput, &[]);
+                    self.store(*slot, &value);
+                    return;
+                }
                 if self.borrowed_locals[*slot] {
                     let value = self.borrow_projection(expression);
                     self.store_borrowed(*slot, &value);
@@ -2943,6 +2957,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::ByteOutput
             | Type::Optional(_)
             | Type::Callable(_)
             | Type::RegexPattern
@@ -3415,6 +3430,9 @@ impl Emitter<'_, '_> {
                 Type::Bytes => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Int => self.call("relar_bytes_count", Type::Bytes, &[&args[0].value]),
                 Type::ListInt => self.call("relar_bytes_list", Type::Bytes, &[&args[0].value]),
+                Type::ByteOutput => {
+                    self.call("relar_byte_output_finish", Type::Bytes, &[&args[0].value])
+                }
                 _ => unreachable!("bytes conversion was checked"),
             },
             Builtin::Encode => self.call("relar_str_encode", Type::Bytes, &[&args[0].value]),
@@ -3704,6 +3722,7 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
+            Builtin::ListReserveRange if args[0].value.ty == Type::ByteOutput => none(),
             Builtin::ListReserveRange => {
                 let count = self.index_word(&args[4].value, true);
                 self.line(format!(
@@ -3963,6 +3982,7 @@ impl Emitter<'_, '_> {
                     | Type::Set(_)
                     | Type::StringKeys
                     | Type::Iterator
+                    | Type::ByteOutput
                     | Type::Exception
                     | Type::TimeoutExpired
                     | Type::Path
@@ -4157,6 +4177,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::ByteOutput
             | Type::Exception
             | Type::TimeoutExpired
             | Type::Path
@@ -4196,6 +4217,7 @@ impl Emitter<'_, '_> {
             | Type::Set(_)
             | Type::StringKeys
             | Type::Iterator
+            | Type::ByteOutput
             | Type::Exception
             | Type::TimeoutExpired
             | Type::Path
@@ -4369,7 +4391,9 @@ impl Emitter<'_, '_> {
     }
 
     fn append(&mut self, list: &Value, value: &Value) {
-        if list.ty == Type::ListInt {
+        if list.ty == Type::ByteOutput {
+            self.void_call("relar_byte_output_append", &[list, value]);
+        } else if list.ty == Type::ListInt {
             self.runtime_call(&LIST_APPEND, [list, value]);
         } else {
             let word = self.word(value);
@@ -4724,6 +4748,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Set(_)
         | Type::StringKeys
         | Type::Iterator
+        | Type::ByteOutput
         | Type::Exception
         | Type::TimeoutExpired
         | Type::Path
@@ -4890,6 +4915,10 @@ declare i64 @relar_bytes_get_index(ptr, i64)
 declare ptr @relar_bytes_slice(ptr, i64, i64, i64)
 declare ptr @relar_bytes_count(i64)
 declare ptr @relar_bytes_list(ptr)
+declare ptr @relar_byte_output_new()
+declare void @relar_byte_output_append(ptr, i64)
+declare void @relar_byte_output_append_pair(ptr, i64, i64)
+declare ptr @relar_byte_output_finish(ptr)
 declare ptr @relar_bytes_concat(ptr, ptr)
 declare ptr @relar_bytes_repeat(ptr, i64)
 declare ptr @relar_bytes_iter(ptr)
@@ -6027,6 +6056,33 @@ def total(text: str) -> int:
             "bounded arithmetic and access proofs do not guarantee backend vectorization"
         );
         assert!(!llvm.contains("llvm.loop.vectorize"));
+    }
+
+    #[test]
+    fn byte_output_requires_a_private_list_and_one_terminal_conversion() {
+        let eligible = function_body(
+            "def encode(value: int) -> bytes:\n    out: list[int] = []\n    out.extend(divmod(value, 256))\n    return bytes(out)\n",
+        );
+        assert!(eligible.contains("call void @relar_byte_output_append_pair("));
+        assert!(eligible.contains("call ptr @relar_byte_output_finish("));
+        assert!(!eligible.contains("call ptr @relar_bytes_list("));
+
+        for observer in [
+            "    alias = out\n    alias[0] = 0\n",
+            "    print(bytes(out))\n",
+            "    print(len(out))\n",
+            "    out = [0]\n",
+        ] {
+            let source = format!(
+                "def encode(value: int) -> bytes:\n    out: list[int] = []\n    out.append(value)\n{observer}    return bytes(out)\n"
+            );
+            let body = function_body(&source);
+            assert!(body.contains("call ptr @relar_bytes_list("), "{observer}");
+            assert!(
+                !body.contains("call ptr @relar_byte_output_new("),
+                "{observer}"
+            );
+        }
     }
 
     #[test]
