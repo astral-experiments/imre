@@ -326,6 +326,9 @@ const RESERVED: &[&str] = &[
 
 /// These numbers are the sealed exception categories in the runtime ABI.
 pub(crate) fn exception_kind(name: &str) -> Option<u32> {
+    if name == "StopIteration" {
+        return Some(35);
+    }
     if name == "ExceptionGroup" {
         return Some(34);
     }
@@ -1569,6 +1572,8 @@ enum Iteration {
 }
 
 struct Checker<'a> {
+    /// A later local assignment shadows builtin iter throughout a function.
+    local_iter: bool,
     context_method: bool,
     asynchronous: bool,
     /// Capture only the outer sum of an assignment with a neighboring sum.
@@ -1625,6 +1630,7 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            local_iter: false,
             zip_sum_rhs: None,
             asynchronous: false,
             context_method: false,
@@ -3059,6 +3065,7 @@ impl<'a> Checker<'a> {
         }
 
         if self.block_depth == 0 && !self.module_scope {
+            self.local_iter = narrowing::assigned_names(statements).contains("iter");
             self.nullable_assignments = assignments::nullable_assignments(self, statements);
         }
         self.block_depth += 1;
