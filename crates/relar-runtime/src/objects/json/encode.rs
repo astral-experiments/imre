@@ -79,7 +79,21 @@ impl Encoder {
             // At most six output bytes per input byte. Checking one UTF-8 chunk
             // at a time bounds spare capacity outside the per-character loop.
             let (chunk, tail) = rest.split_at(rest.floor_char_boundary(rest.len().min(4096)));
-            self.reserve(6 * chunk.len())?;
+            if 6 * chunk.len() > self.output.capacity() - self.output.len() {
+                // A worst-case reservation can fail even when the escaped chunk fits.
+                let needed = chunk
+                    .chars()
+                    .map(|character| match character {
+                        '"' | '\\' | '\u{8}' | '\u{c}' | '\n' | '\r' | '\t' => 2,
+                        '\0'..='\u{1f}' => 6,
+                        _ if self.ensure_ascii && !(' '..='~').contains(&character) => {
+                            6 * character.len_utf16()
+                        }
+                        _ => character.len_utf8(),
+                    })
+                    .sum();
+                self.reserve(needed)?;
+            }
             for character in chunk.chars() {
                 match character {
                     '"' => self.output.push_str("\\\""),
@@ -332,6 +346,29 @@ mod tests {
         assert!(encoder.string("\0𐐀").is_ok());
         assert!(encoder.end(']', true, 0).is_ok());
         assert_eq!(encoder.output, r#"["\u0000\ud801\udc00"]"#);
+    }
+
+    #[test]
+    fn escaped_string_uses_available_capacity() {
+        for ensure_ascii in [false, true] {
+            let prefix = "a".repeat(4094);
+            let input = format!("{prefix}é\\\"\u{b}\n𐐀");
+            let suffix = if ensure_ascii {
+                r#"\u00e9\\\"\u000b\n\ud801\udc00"#
+            } else {
+                r#"é\\\"\u000b\n𐐀"#
+            };
+            let expected = format!("\"{prefix}{suffix}\"");
+            let mut encoder = Encoder {
+                output: String::with_capacity(expected.len()),
+                indent: None,
+                ensure_ascii,
+            };
+            let capacity = encoder.output.capacity();
+            assert!(encoder.string(&input).is_ok());
+            assert_eq!(encoder.output, expected);
+            assert_eq!(encoder.output.capacity(), capacity);
+        }
     }
 
     #[test]
