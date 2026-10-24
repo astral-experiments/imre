@@ -116,7 +116,7 @@ On the pinned revisions, the 58-project report contained 693,937 bytes of Markdo
 
 | Frozen input | CPython 3.14 | Imre | Codon 0.20.4 | Rust | Imre / Rust |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 58 projects | 180.4 ms | 12.5 ms | 34.1 ms | 9.3 ms | 1.34× |
-| 580 projects | 747.6 ms | 107.2 ms | 232.7 ms | 65.8 ms | 1.63× |
+| 58 projects | 174.8 ms | 12.0 ms | 31.5 ms | 8.7 ms | 1.37× |
+| 580 projects | 749.9 ms | 107.0 ms | 233.1 ms | 62.9 ms | 1.70× |
 
-At 10×, median peak RSS was 37.8 MiB for Imre, 16.6 MiB for Rust, 87.2 MiB for Codon, and 107.1 MiB for CPython. Across the 58-project replay, the input and output optimizations cut heap allocations from 85,005 to 27,339 (Valgrind DHAT). The original Imre renderer allocated an owned string for each hunk line before joining it again. The compiler now groups the tail of a split when it can prove that the only use is a private list’s final join. Enabling just this optimization on the same generated LLVM program brought the 10× replay from 129.7 to 103.9 ms in a separate paired run. [Input hashes, individual report digests, peak memory, and raw timings](../../benchmarks/results/2026-10-24-ruff-ecosystem-format.json.gz)
+At 10×, median peak RSS was 37.8 MiB for Imre, 16.5 MiB for Rust, 88.3 MiB for Codon, and 107.1 MiB for CPython. Across the 58-project replay, the input and output optimizations cut heap allocations from 85,005 to 25,032 (Valgrind DHAT). The original Imre renderer allocated an owned string for each hunk line before joining it again. The compiler now groups the tail of a split when it can prove that the only use is a private list’s final join. Enabling just this optimization on the same generated LLVM program brought the 10× replay from 131.5 to 103.3 ms in a separate paired run. [Input hashes, individual report digests, peak memory, and raw timings](../../benchmarks/results/2026-10-24-ruff-ecosystem-format.json.gz)
