@@ -123,6 +123,9 @@ impl<'a> Shapes<'a> {
                 let name = node.func.as_name_expr().map(|name| name.id.as_str());
                 let args = &node.arguments.args;
                 match name {
+                    // Each yielded tuple adds a level around the input elements.
+                    Some("zip") => max_depth(args).max(1) + 1,
+                    Some("enumerate") => args.first().map_or(1, |e| rank(e).max(1)) + 1,
                     Some(
                         "tuple" | "list" | "set" | "frozenset" | "dict" | "sorted" | "iter"
                         | "reversed",
@@ -276,6 +279,21 @@ mod tests {
         ] {
             let last = wrap.replace("{p}", &format!("v{}", MAX_DEPTH - 1));
             assert!(limited(&format!("{body}result = {last}\n")), "{wrap}");
+        }
+    }
+
+    #[test]
+    fn bounds_tuples_yielded_by_zip_and_enumerate() {
+        for call in ["zip(input)", "zip([0], input)", "enumerate(input, 42)"] {
+            let mut body = String::from("v0 = [1]\n");
+            for i in 1..=MAX_DEPTH {
+                if i == MAX_DEPTH {
+                    assert!(!limited(&body), "{call}");
+                }
+                let wrapper = call.replace("input", &format!("v{}", i - 1));
+                body.push_str(&format!("v{i} = list({wrapper})\n"));
+            }
+            assert!(limited(&body), "{call}");
         }
     }
 
