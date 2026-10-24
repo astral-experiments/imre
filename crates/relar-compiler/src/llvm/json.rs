@@ -19,9 +19,8 @@ impl Emitter<'_, '_> {
             );
             bytes.extend(name.as_bytes());
         }
-        let id = self.strings.len();
         let size = bytes.len();
-        self.strings.push(bytes);
+        let name = self.byte_array(bytes);
         let payload = self.module.types.payload(result);
         let mode = match payload.unwrap_or(result) {
             Type::JsonValue => 0,
@@ -32,12 +31,12 @@ impl Emitter<'_, '_> {
             _ => unreachable!("checked JSON selection"),
         } | if payload.is_some() { 256 } else { 0 };
         let literal = args.get(1).map_or("null", |arg| arg.value.operand.as_str());
-        let word = self.checked_instruction(format!("call i64 @relar_json_select(ptr {}, ptr @str_{id}, i64 {size}, i32 {mode}, ptr {literal})", args[0].value.operand));
+        let word = self.checked_instruction(format!("call i64 @relar_json_select(ptr {}, ptr @{name}, i64 {size}, i32 {mode}, ptr {literal})", args[0].value.operand));
         self.decode_word(word, result)
     }
 }
 
-pub(super) fn schemas(module: &Module) -> String {
+pub(super) fn schemas(module: &Module, output: &mut Output) {
     let mut roots = Vec::new();
     for function in module.functions.iter().chain([&module.entry]) {
         ir::walk_expressions(&function.body, &mut |value| {
@@ -51,20 +50,17 @@ pub(super) fn schemas(module: &Module) -> String {
         });
     }
     if roots.is_empty() {
-        return String::new();
+        return;
     }
+    output.common().push_str("%json_schema = type { i32, i32, ptr, ptr, i64, ptr }\n%json_field = type { ptr, i64, ptr, i32, ptr, i64 }\n");
     let mut builder = Schemas {
         module,
         seen: HashSet::new(),
-        output: String::from(
-            "%json_schema = type { i32, i32, ptr, ptr, i64, ptr }\n\
-             %json_field = type { ptr, i64, ptr, i32, ptr, i64 }\n",
-        ),
+        output,
     };
     for ty in roots {
         builder.schema(ty);
     }
-    builder.output
 }
 
 pub(super) fn schema_name(ty: Type) -> String {
@@ -86,21 +82,22 @@ pub(super) fn schema_name(ty: Type) -> String {
 struct Schemas<'a> {
     module: &'a Module,
     seen: HashSet<Type>,
-    output: String,
+    output: &'a mut Output,
 }
 
 impl Schemas<'_> {
     fn bytes(&mut self, name: &str, value: &str) {
+        let output = self.output.entry_buffer();
         write!(
-            self.output,
+            output,
             "@{name} = private unnamed_addr constant [{} x i8] c\"",
             value.len()
         )
         .unwrap();
         for byte in value.bytes() {
-            write!(self.output, "\\{byte:02X}").unwrap();
+            write!(output, "\\{byte:02X}").unwrap();
         }
-        self.output.push_str("\"\n");
+        output.push_str("\"\n");
     }
 
     fn schema(&mut self, ty: Type) -> String {
@@ -161,7 +158,7 @@ impl Schemas<'_> {
                 let count = fields.len();
                 let fields_name = format!("json_fields_{class}");
                 writeln!(
-                    self.output,
+                    self.output.entry_buffer(),
                     "@{fields_name} = private constant [{count} x %json_field] [{}]",
                     fields.join(", ")
                 )
@@ -180,10 +177,15 @@ impl Schemas<'_> {
             value.map_or_else(|| "null".to_owned(), |value| format!("@{value}"))
         };
         writeln!(
-            self.output,
-            "@{name} = private constant %json_schema {{ i32 {kind}, i32 {}, ptr {}, ptr {}, i64 {count}, ptr {} }}",
-            representation_kind(ty, &self.module.types), pointer(child), pointer(layout), pointer(fields),
-        ).unwrap();
+            self.output
+                .global(self.output.entry, &name, "constant", "%json_schema"),
+            "{{ i32 {kind}, i32 {}, ptr {}, ptr {}, i64 {count}, ptr {} }}",
+            representation_kind(ty, &self.module.types),
+            pointer(child),
+            pointer(layout),
+            pointer(fields),
+        )
+        .unwrap();
         name
     }
 }
