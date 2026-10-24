@@ -20,7 +20,7 @@ use super::words::{NULLABLE, OwnedWord, WordKind};
 use super::{Bytes, Int, List, Object, Storage, StorageCell, Str, acquire_rc, fail, object};
 
 #[derive(Clone)]
-struct IntKey(Int);
+pub(super) struct IntKey(pub(super) Int);
 
 impl PartialEq for IntKey {
     fn eq(&self, other: &Self) -> bool {
