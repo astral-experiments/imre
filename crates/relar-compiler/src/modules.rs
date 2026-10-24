@@ -8,6 +8,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
 use crate::analysis::Session;
+use crate::ir::PosixPathOperation;
 use crate::watch::FileSystem;
 
 mod empty_keywords;
@@ -73,7 +74,7 @@ pub(crate) enum IntrinsicModule {
     Tempfile,
     Subprocess,
     Os,
-    OsPath,
+    PosixPath,
     Urllib,
     UrllibParse,
     Collections,
@@ -135,7 +136,6 @@ pub(crate) enum Intrinsic {
     SysExecutable,
     Platform,
     GetSysconfigPath,
-    OsPathJoin,
     OsPathExists,
     Which,
     SysExit,
@@ -193,6 +193,7 @@ pub(crate) enum Intrinsic {
     GetEnv,
     GetCwd,
     FsPath,
+    PosixPath(PosixPathOperation),
     Unquote,
 }
 
@@ -222,7 +223,7 @@ impl IntrinsicModule {
             "tempfile" => Some(Self::Tempfile),
             "subprocess" => Some(Self::Subprocess),
             "os" => Some(Self::Os),
-            "os.path" => Some(Self::OsPath),
+            "os.path" | "posixpath" => Some(Self::PosixPath),
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
             "collections" => Some(Self::Collections),
@@ -245,7 +246,7 @@ impl IntrinsicModule {
 
     fn symbol(self, name: &str) -> Option<Binding> {
         if self == Self::Os && name == "path" {
-            return Some(Binding::IntrinsicModule(Self::OsPath));
+            return Some(Binding::IntrinsicModule(Self::PosixPath));
         }
         if self == Self::Urllib && name == "parse" {
             return Some(Binding::IntrinsicModule(Self::UrllibParse));
@@ -306,8 +307,6 @@ impl IntrinsicModule {
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
             (Self::Sys, "platform") => Intrinsic::Platform,
             (Self::Sysconfig, "get_path") => Intrinsic::GetSysconfigPath,
-            (Self::OsPath, "join") => Intrinsic::OsPathJoin,
-            (Self::OsPath, "exists") => Intrinsic::OsPathExists,
             (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Sys, "exit") => Intrinsic::SysExit,
             (Self::Shlex, "split") => Intrinsic::ShlexSplit,
@@ -363,6 +362,11 @@ impl IntrinsicModule {
             (Self::Os, "getenv") => Intrinsic::GetEnv,
             (Self::Os, "getcwd") => Intrinsic::GetCwd,
             (Self::Os, "fspath") => Intrinsic::FsPath,
+            (Self::PosixPath, "exists") => Intrinsic::OsPathExists,
+            (Self::PosixPath, "join") => Intrinsic::PosixPath(PosixPathOperation::Join),
+            (Self::PosixPath, "basename") => Intrinsic::PosixPath(PosixPathOperation::Basename),
+            (Self::PosixPath, "dirname") => Intrinsic::PosixPath(PosixPathOperation::Dirname),
+            (Self::PosixPath, "splitext") => Intrinsic::PosixPath(PosixPathOperation::Splitext),
             (Self::UrllibParse, "unquote") => Intrinsic::Unquote,
             _ => return None,
         };

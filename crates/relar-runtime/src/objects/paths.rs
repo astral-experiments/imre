@@ -424,26 +424,6 @@ pub unsafe extern "C" fn relar_union_path_text(value: usize) -> *const Str {
 }
 
 /// # Safety
-/// Both arguments are rooted string handles. Unlike pathlib, a POSIX join
-/// preserves repeated separators, dots and an explicitly empty final component.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_os_path_join(base: *const Str, child: *const Str) -> *const Str {
-    // SAFETY: Both strings remain live until this lexical operation finishes.
-    let (base, child) = unsafe { (&*base, &*child) };
-    let joined = if child.starts_with('/') || base.is_empty() {
-        child.clone()
-    } else {
-        let mut joined = base.clone();
-        if !base.ends_with('/') {
-            joined.push('/');
-        }
-        joined.push_str(child);
-        joined
-    };
-    Rc::into_raw(Rc::new(joined))
-}
-
-/// # Safety
 /// The unnormalized path spelling is a live string through the filesystem call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_path_text_exists(path: *const Str) -> u32 {

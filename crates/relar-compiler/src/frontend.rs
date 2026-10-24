@@ -33,6 +33,7 @@ mod matching;
 mod module_values;
 mod paths;
 mod pipelines;
+mod posixpath;
 mod processes;
 mod projected_equality;
 mod record_inputs;
@@ -4998,7 +4999,6 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::RegexSearch)) => return self.search_regex(call),
             Some(Binding::Intrinsic(
                 intrinsic @ (Intrinsic::GetSysconfigPath
-                | Intrinsic::OsPathJoin
                 | Intrinsic::OsPathExists
                 | Intrinsic::Which),
             )) => {
@@ -5064,6 +5064,10 @@ impl<'a> Checker<'a> {
         }
         if let Some(class) = self.class_reference(&call.func) {
             return self.construct(call, class);
+        }
+        if let Some(Binding::Intrinsic(Intrinsic::PosixPath(operation))) = self.resolve(&call.func)
+        {
+            return self.posix_path(call, operation);
         }
         if matches!(
             self.resolve(&call.func),

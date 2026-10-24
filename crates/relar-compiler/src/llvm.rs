@@ -24,6 +24,7 @@ mod integer_regions;
 mod json;
 mod literals;
 mod paths;
+mod posixpath;
 mod processes;
 mod records;
 mod runtime;
@@ -3541,6 +3542,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
+            Builtin::PosixPath(operation) => self.posix_path_builtin(*operation, &args, returns),
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
             Builtin::WallTime => self.call("relar_wall_time", Type::Float, &[]),
             Builtin::JsonEmptyObject => self.call("relar_json_empty_object", returns, &[]),
@@ -5407,6 +5409,10 @@ declare ptr @relar_path_with_name(ptr, ptr)
 declare ptr @relar_path_stem(ptr)
 declare ptr @relar_path_suffix(ptr)
 declare ptr @relar_path_parent(ptr)
+declare ptr @relar_posix_join(ptr, i64, i32)
+declare ptr @relar_posix_join_error(i32)
+declare ptr @relar_posix_component(ptr, i32, i32)
+declare void @relar_posix_splitext(ptr, i32, ptr)
 declare i32 @relar_path_is_absolute(ptr)
 declare ptr @relar_path_absolute(ptr)
 declare ptr @relar_path_resolve(ptr, i32)
@@ -5417,7 +5423,6 @@ declare void @relar_directory_context_exit(ptr)
 declare ptr @relar_union_path_text(i64)
 declare ptr @relar_sys_platform()
 declare ptr @relar_sysconfig_scripts()
-declare ptr @relar_os_path_join(ptr, ptr)
 declare i32 @relar_path_text_exists(ptr)
 declare i64 @relar_shutil_which(ptr)
 declare i32 @relar_path_exists(ptr)

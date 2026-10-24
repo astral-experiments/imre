@@ -64,7 +64,7 @@ impl Checker<'_> {
         }
     }
 
-    fn path_text(&self, value: Expr, node: &impl Ranged) -> Result<Expr, String> {
+    pub(super) fn path_text(&self, value: Expr, node: &impl Ranged) -> Result<Expr, String> {
         match value.ty {
             Type::Str => Ok(value),
             Type::JsonValue => self.coerce(value, Type::Str, node),
@@ -138,7 +138,6 @@ impl Checker<'_> {
         Ok(result)
     }
 
-    /// Keep os.path joins lexical, including trailing separators and empty components.
     pub(super) fn system_path_call(
         &mut self,
         intrinsic: Intrinsic,
@@ -153,17 +152,6 @@ impl Checker<'_> {
             {
                 Ok(operation(PathOperation::Scripts, Type::Str, Vec::new()))
             }
-            (Intrinsic::OsPathJoin, [first, rest @ ..]) => {
-                let mut path = self.path_argument(first)?;
-                for child in rest {
-                    path = operation(
-                        PathOperation::OsJoin,
-                        Type::Str,
-                        vec![path, self.path_argument(child)?],
-                    );
-                }
-                Ok(path)
-            }
             (Intrinsic::OsPathExists, [arg]) => Ok(operation(
                 PathOperation::OsExists,
                 Type::Bool,
@@ -177,7 +165,7 @@ impl Checker<'_> {
             _ => Err(error(
                 self.source,
                 call,
-                "supported path calls are sysconfig.get_path('scripts'), os.path.join(path, *parts), os.path.exists(path), and shutil.which(command)",
+                "supported path calls are sysconfig.get_path('scripts'), os.path.exists(path), and shutil.which(command)",
             )),
         }
     }

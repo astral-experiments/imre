@@ -156,7 +156,6 @@ impl Emitter<'_, '_> {
                 let name = match operation {
                     PathOperation::Platform => "relar_sys_platform",
                     PathOperation::Scripts => "relar_sysconfig_scripts",
-                    PathOperation::OsJoin => "relar_os_path_join",
                     PathOperation::Which => "relar_shutil_which",
                     PathOperation::Absolute => "relar_path_absolute",
                     PathOperation::New => "relar_path_new",
