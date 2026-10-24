@@ -676,6 +676,9 @@ def seed(directory: Path, case: str) -> None:
     (directory / "output.txt").write_bytes(b"old data that must be truncated")
     (directory / "directory").mkdir()
     if case == "stream_reads":
+        (directory / "truncated-after-open.gz").write_bytes(
+            gzip.compress(b"x" * 300_000, compresslevel=0, mtime=0)
+        )
         (directory / "long-rows.txt").write_bytes(
             b"a" * 32768 + b"\n" + b"b" * 32769 + b"\r\n" + b"c" * 160000 + b"\rdone"
         )

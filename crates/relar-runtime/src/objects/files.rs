@@ -294,13 +294,11 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
     if metadata.is_dir() {
         return Err(Error::new(Kind::IsADirectoryError, "is a directory"));
     }
+    // CPython 3.14 bounds the device's preferred block size for buffered I/O.
+    let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
     let stream = match mode {
-        0 => Stream::Read(Input::new(file, gzip, binary)),
-        _ => {
-            // CPython 3.14 bounds the device's preferred block size for buffered I/O.
-            let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
-            Stream::Write(Output::new(file, capacity, binary))
-        }
+        0 => Stream::Read(Input::new(file, gzip, binary, capacity)),
+        _ => Stream::Write(Output::new(file, capacity, binary)),
     };
     Ok(FileState {
         stream: Some(stream),
