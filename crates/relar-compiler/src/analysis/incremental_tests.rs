@@ -5,10 +5,10 @@ use super::{DiagnosticCache, FILE_CHECKS};
 use crate::{CompileOptions, IncrementalCompiler, UnitCompilation, check_file, compile_file_units};
 use tempfile::tempdir;
 
-fn checked_files(f: impl FnOnce()) -> Vec<String> {
+fn with_checked_files<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
     FILE_CHECKS.with_borrow_mut(|checks| *checks = Some(Vec::new()));
-    f();
-    FILE_CHECKS.with_borrow_mut(|checks| {
+    let result = f();
+    let files = FILE_CHECKS.with_borrow_mut(|checks| {
         checks
             .take()
             .unwrap()
@@ -22,7 +22,8 @@ fn checked_files(f: impl FnOnce()) -> Vec<String> {
                     .to_owned()
             })
             .collect()
-    })
+    });
+    (result, files)
 }
 
 fn llvm(result: UnitCompilation) -> Vec<(String, String)> {
@@ -41,8 +42,8 @@ fn body_and_unrelated_export_reuse_importer_diagnostics() {
     fs::write(&entry, "from dep import score\nprint(score())\n").unwrap();
     let mut compiler = IncrementalCompiler::default();
     let options = CompileOptions::default();
-    let mut previous = None;
-    for (source, checked) in [
+    let mut previous: Option<Vec<(String, String)>> = None;
+    for (index, (source, checked)) in [
         (
             "def score(base: int = 1) -> int:\n    return base + 1\n",
             &["main.py", "dep.py"][..],
@@ -59,31 +60,34 @@ fn body_and_unrelated_export_reuse_importer_diagnostics() {
             "def score(base: int = 2) -> int:\n    return base + 2\ndef unrelated() -> int:\n    return 3\n",
             &["dep.py"][..],
         ),
-    ] {
+        (
+            "def score(base: int = 2) -> int:\n    return 6 // base\ndef unrelated() -> int:\n    return 3\n",
+            &["dep.py"][..],
+        ),
+    ].into_iter().enumerate() {
         fs::write(&dep, source).unwrap();
-        let mut current = None;
-        assert_eq!(
-            checked_files(|| {
-                current = Some(llvm(
-                    compiler.compile_file_units(&entry, None, &options).unwrap(),
-                ));
-            }),
-            checked
-        );
-        let current = current.unwrap();
+        let (current, ran) = with_checked_files(|| {
+            llvm(compiler.compile_file_units(&entry, None, &options).unwrap())
+        });
+        assert_eq!(ran, checked);
         assert_eq!(
             current,
             llvm(compile_file_units(&entry, None, &options).unwrap())
         );
         if let Some(previous) = previous {
-            assert_ne!(
-                current, previous,
-                "the changed value must reach code generation"
-            );
+            assert_eq!(current[0].0, "main");
+            if index == 1 {
+                assert!(current[0] == previous[0], "a body-only edit kept the caller's LLVM");
+            } else if index >= 3 {
+                // An inlined default value, then a newly throwing callee, each affects its caller.
+                assert!(current[0] != previous[0], "the caller's LLVM must change");
+            }
         }
         previous = Some(current);
     }
-    assert!(checked_files(|| compiler.check_file(&entry, None).unwrap()).is_empty());
+    let (result, ran) = with_checked_files(|| compiler.check_file(&entry, None));
+    result.unwrap();
+    assert!(ran.is_empty());
 }
 
 #[test]
@@ -98,8 +102,12 @@ fn ty_rechecks_an_importer_when_a_used_parameter_is_renamed() {
     let mut ty_check = || {
         let mut graph = crate::modules::SourceGraph::load(&entry, None).unwrap();
         let fresh = graph.session.check();
-        let incremental = cache.check(&mut graph.session, &graph.inputs);
+        let (incremental, ran) =
+            with_checked_files(|| cache.check(&mut graph.session, &graph.inputs));
         assert_eq!(incremental, fresh);
+        // The first request, the rename that makes the call invalid, and the repair all
+        // execute the importer's diagnostic query as well as the provider's.
+        assert_eq!(ran, ["main.py", "dep.py"]);
         incremental
     };
     ty_check().unwrap();
@@ -140,6 +148,12 @@ fn reachable_invalid_edits_and_import_topology_match_clean_diagnostics() {
     fs::write(
         &helper,
         "from dep import score\ndef other() -> int:\n    return score()\n",
+    )
+    .unwrap();
+    assert!(compare().is_err());
+    fs::write(
+        &helper,
+        "def other() -> int:\n    return 4\ndef bad() -> int:\n    return 'bad'\n",
     )
     .unwrap();
     assert!(compare().is_err());
