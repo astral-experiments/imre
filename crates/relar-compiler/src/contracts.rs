@@ -67,14 +67,7 @@ impl Builtin {
                 },
                 PreservesLists,
             ),
-            Self::PosixPath(operation) => Contract::new(
-                match operation {
-                    crate::ir::PosixPathOperation::MixedJoin { .. } => true,
-                    crate::ir::PosixPathOperation::Splitext => true, // Tuple allocation is fallible.
-                    _ => false,
-                },
-                PreservesLists,
-            ),
+            Self::PosixPath(_) => Contract::new(true, PreservesLists),
             Self::Path(operation) => Contract::new(
                 match operation {
                     PathOperation::ReadText

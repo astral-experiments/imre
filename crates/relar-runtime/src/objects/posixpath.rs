@@ -3,12 +3,26 @@
 use std::ops::Range;
 use std::rc::Rc;
 
-use super::exceptions::{Error, Kind};
+use super::exceptions::{Error, Kind, sequence_allocation_failed};
 use super::{Bytes, Str};
 
 enum Spelling<'a> {
     Text(&'a str),
     Bytes(&'a [u8]),
+}
+
+enum OwnedSpelling {
+    Text(Str),
+    Bytes(Bytes),
+}
+
+impl OwnedSpelling {
+    fn into_raw(self) -> *const () {
+        match self {
+            Self::Text(text) => Rc::into_raw(Rc::new(text)).cast(),
+            Self::Bytes(bytes) => Rc::into_raw(Rc::new(bytes)).cast(),
+        }
+    }
 }
 
 impl<'a> Spelling<'a> {
@@ -31,10 +45,16 @@ impl<'a> Spelling<'a> {
     }
 
     /// All split offsets are adjacent to ASCII delimiters or at an endpoint.
-    fn slice(&self, range: Range<usize>) -> *const () {
+    fn slice(&self, range: Range<usize>) -> Option<OwnedSpelling> {
         match self {
-            Self::Text(s) => Rc::into_raw(Rc::new(Str::from(&s[range]))).cast(),
-            Self::Bytes(b) => Rc::into_raw(Rc::new(b[range].to_vec())).cast(),
+            Self::Text(s) => Str::try_new(&s[range]).ok().map(OwnedSpelling::Text),
+            Self::Bytes(b) => {
+                let part = &b[range];
+                let mut copy = Vec::new();
+                copy.try_reserve_exact(part.len()).ok()?;
+                copy.extend_from_slice(part);
+                Some(OwnedSpelling::Bytes(copy))
+            }
         }
     }
 }
@@ -59,15 +79,41 @@ pub unsafe extern "C" fn relar_posix_join(
     count: usize,
     kind: u32,
 ) -> *const () {
-    let mut output = Vec::new();
     // SAFETY: the compiler passes an initialized array with exactly count entries.
-    for &path in unsafe { std::slice::from_raw_parts(paths, count) } {
+    let paths = unsafe { std::slice::from_raw_parts(paths, count) };
+    if let Some(&last) = paths.last() {
+        // SAFETY: every argument has already been evaluated and rooted.
+        let final_part = unsafe { Spelling::borrow(last, kind) };
+        if final_part.bytes().starts_with(b"/") {
+            // An absolute final path replaces the whole prefix. Return one owner
+            // of that argument without allocating a copy.
+            match final_part {
+                // SAFETY: the spelling tag proves the rooted Rc payload type.
+                Spelling::Text(_) => unsafe { Rc::increment_strong_count(last.cast::<Str>()) },
+                // SAFETY: the spelling tag proves the rooted Rc payload type.
+                Spelling::Bytes(_) => unsafe { Rc::increment_strong_count(last.cast::<Bytes>()) },
+            }
+            return last;
+        }
+    }
+    let mut output = Vec::new();
+    for &path in paths {
         // SAFETY: the compiler rooted each argument and proved a homogeneous tag.
         let part = unsafe { Spelling::borrow(path, kind) };
         let bytes = part.bytes();
         if bytes.starts_with(b"/") {
             output.clear();
-        } else if !output.is_empty() && output.last() != Some(&b'/') {
+        }
+        let separator = !output.is_empty() && output.last() != Some(&b'/');
+        // A slice is bounded by isize::MAX, so one separator still fits usize.
+        if output
+            .try_reserve(bytes.len() + usize::from(separator))
+            .is_err()
+        {
+            sequence_allocation_failed();
+            return std::ptr::null();
+        }
+        if separator {
             output.push(b'/');
         }
         output.extend_from_slice(bytes);
@@ -95,15 +141,22 @@ pub unsafe extern "C" fn relar_posix_component(
         .iter()
         .rposition(|&b| b == b'/')
         .map_or(0, |i| i + 1);
-    if head == 0 {
-        path.slice(cut..spelling.len())
+    let range = if head == 0 {
+        cut..spelling.len()
     } else {
         // A directory made entirely of slashes retains them all.
         let end = spelling[..cut]
             .iter()
             .rposition(|&b| b != b'/')
             .map_or(cut, |i| i + 1);
-        path.slice(0..end)
+        0..end
+    };
+    match path.slice(range) {
+        Some(result) => result.into_raw(),
+        None => {
+            sequence_allocation_failed();
+            std::ptr::null()
+        }
     }
 }
 
@@ -120,9 +173,18 @@ pub unsafe extern "C" fn relar_posix_splitext(path: *const (), bytes: u32, out: 
         .rposition(|&b| b == b'.')
         .filter(|&dot| last[..dot].iter().any(|&b| b != b'.'))
         .map_or(spelling.len(), |dot| spelling.len() - last.len() + dot);
-    // SAFETY: the fresh tuple has two pointer-width slots and takes both owners.
-    unsafe {
-        out.write(path.slice(0..cut));
-        out.add(1).write(path.slice(cut..spelling.len()));
+    // Keep both slices owned here until the complete tuple can be published.
+    let parts = path.slice(0..cut).and_then(|root| {
+        let ext = path.slice(cut..spelling.len())?;
+        Some((root, ext))
+    });
+    if let Some((root, ext)) = parts {
+        // SAFETY: the fresh tuple has two pointer-width slots and takes both owners.
+        unsafe {
+            out.write(root.into_raw());
+            out.add(1).write(ext.into_raw());
+        }
+    } else {
+        sequence_allocation_failed();
     }
 }
