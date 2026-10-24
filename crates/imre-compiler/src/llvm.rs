@@ -5,8 +5,9 @@ use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
 use crate::contracts::{
-    LIST_APPEND, LIST_APPEND_PAIR, LIST_BORROW_INDEX, LIST_COPY_INDEX, LIST_GET, LIST_GET_INDEX,
-    LIST_POP, LIST_SET, LIST_SET_INDEX, runtime_call_may_raise,
+    BYTE_OUTPUT_APPEND, BYTE_OUTPUT_APPEND_PAIR, LIST_APPEND, LIST_APPEND_PAIR, LIST_BORROW_INDEX,
+    LIST_COPY_INDEX, LIST_GET, LIST_GET_INDEX, LIST_POP, LIST_SET, LIST_SET_INDEX,
+    runtime_call_may_raise,
 };
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
@@ -1739,9 +1740,9 @@ impl Emitter<'_, '_> {
         let first = self.operand(first);
         let second = self.operand(second);
         if receiver.value.ty == Type::ByteOutput {
-            self.void_call(
-                "imre_byte_output_append_pair",
-                &[&receiver.value, &first.value, &second.value],
+            self.runtime_call(
+                &BYTE_OUTPUT_APPEND_PAIR,
+                [&receiver.value, &first.value, &second.value],
             );
         } else {
             self.runtime_call(
@@ -5052,7 +5053,7 @@ impl Emitter<'_, '_> {
 
     fn append(&mut self, list: &Value, value: &Value) {
         if list.ty == Type::ByteOutput {
-            self.void_call("imre_byte_output_append", &[list, value]);
+            self.runtime_call(&BYTE_OUTPUT_APPEND, [list, value]);
         } else if list.ty == Type::ListInt {
             self.runtime_call(&LIST_APPEND, [list, value]);
         } else {
@@ -5661,8 +5662,6 @@ declare ptr @imre_bytes_count(i64)
 declare ptr @imre_bytes_list(ptr)
 declare ptr @imre_byte_output_new()
 declare void @imre_byte_output_reserve_range(ptr, i64, i64, i64, i64)
-declare void @imre_byte_output_append(ptr, i64)
-declare void @imre_byte_output_append_pair(ptr, i64, i64)
 declare ptr @imre_byte_output_finish(ptr)
 declare ptr @imre_bytes_concat(ptr, ptr)
 declare ptr @imre_bytes_repeat(ptr, i64)
@@ -5939,7 +5938,9 @@ declare void @imre_list_release(ptr)
 "#);
     writeln!(
         output,
-        "{LIST_GET}
+        "{BYTE_OUTPUT_APPEND}
+{BYTE_OUTPUT_APPEND_PAIR}
+{LIST_GET}
 {LIST_SET}
 {LIST_GET_INDEX}
 {LIST_SET_INDEX}
@@ -6889,7 +6890,11 @@ def total(text: str) -> int:
         let eligible = function_body(
             "def encode(value: int) -> bytes:\n    out: list[int] = []\n    out.extend(divmod(value, 256))\n    return bytes(out)\n",
         );
-        assert!(eligible.contains("call void @imre_byte_output_append_pair("));
+        let mut instructions = eligible.lines();
+        instructions
+            .find(|line| line.contains("call i32 @imre_byte_output_append_pair("))
+            .expect("private byte append");
+        assert!(instructions.next().unwrap().contains("icmp eq i32"));
         assert!(eligible.contains("call ptr @imre_byte_output_finish("));
         assert!(!eligible.contains("call ptr @imre_bytes_list("));
 
