@@ -355,7 +355,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         }
                         Storage::Path { text, .. } => {
                             output.push_str("PosixPath(");
-                            output.push_str(&super::exceptions::string_repr(text));
+                            super::exceptions::push_string_repr(text, output);
                             output.push(')');
                             None
                         }
@@ -426,7 +426,7 @@ unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
                     write!(output, "{}", value.big()).unwrap();
                 }
             }
-            3 => output.push_str(&super::exceptions::string_repr(&*(word as *const Str))),
+            3 => super::exceptions::push_string_repr(&*(word as *const Str), output),
             4 => (&*(word as *const List)).0.with(|values| {
                 output.push('[');
                 for (index, value) in values.iter().enumerate() {
