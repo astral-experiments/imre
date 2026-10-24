@@ -82,13 +82,29 @@ impl Session {
             ty_module_resolver::SearchPathSettings::new(vec![SystemPathBuf::from(root)])
                 .to_search_paths(&system, &vendored, &ty_module_resolver::FallibleStrategy)
                 .map_err(|error| error.to_string())?;
+        // The closed checker enforces these type contracts and fixed tuple bounds.
+        // Invalid indices and zero slice steps can also be runtime errors. Disable
+        // these ty diagnostics before it expands types to construct their messages.
+        let registry = default_lint_registry();
+        let mut rules = RuleSelection::from_registry(registry);
+        for name in [
+            "unsupported-operator",
+            "invalid-assignment",
+            "invalid-argument-type",
+            "invalid-return-type",
+            "zero-stepsize-in-slice",
+            "index-out-of-bounds",
+            "unresolved-attribute",
+        ] {
+            rules.disable(registry.get(name).expect("registered ty lint"));
+        }
         let db = Database {
             storage: salsa::Storage::default(),
             files: Files::default(),
             system,
             vendored,
             settings,
-            rules: Arc::new(RuleSelection::from_registry(default_lint_registry())),
+            rules: Arc::new(rules),
             analysis: Arc::new(AnalysisSettings {
                 respect_type_ignore_comments: false,
                 ..AnalysisSettings::default()
@@ -196,30 +212,7 @@ impl Session {
                 self.db
                     .check_file(file)
                     .iter()
-                    .filter(|diagnostic| {
-                        // The closed checker proves operand, assignment, argument,
-                        // and return compatibility for every statement, including
-                        // dead and unused code. ty can conservatively retain None
-                        // after a successful float pattern; its flow types must
-                        // not override those exact checks.
-                        // Invalid index values and zero slice steps are runtime
-                        // errors. Exact index types and fixed tuple bounds are
-                        // still enforced by the closed checker.
-                        // Attribute reads also use closed layouts. In particular,
-                        // sealed exception payload getters guard their category
-                        // at runtime rather than depending on ty's narrowing.
-                        diagnostic.severity() >= Severity::Error
-                            && !matches!(
-                                diagnostic.id().as_str(),
-                                "unsupported-operator"
-                                    | "invalid-assignment"
-                                    | "invalid-argument-type"
-                                    | "invalid-return-type"
-                                    | "zero-stepsize-in-slice"
-                                    | "index-out-of-bounds"
-                                    | "unresolved-attribute"
-                            )
-                    })
+                    .filter(|diagnostic| diagnostic.severity() >= Severity::Error)
                     .map(|diagnostic| {
                         diagnostic
                             .display(&self.db, &DisplayDiagnosticConfig::new("relar"))
