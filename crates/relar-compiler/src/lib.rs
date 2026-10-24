@@ -256,6 +256,13 @@ mod tests {
     }
 
     #[test]
+    fn nested_conditional_values_join_assignments_from_every_arm() {
+        let source = "def f(flag: bool, value: int | None) -> int:\n    kept = 7\n    selected = (saved := kept) if flag else ((saved := value) if value is not None else (saved := 0))\n    return saved + selected + kept\n";
+        super::check(source).unwrap();
+        assert!(super::check(&source.replace("(saved := 0)", "0")).is_err());
+    }
+
+    #[test]
     fn elif_chains_count_toward_branch_depth() {
         let flat = format!("if False: pass\n{}", "elif False: pass\n".repeat(10_000));
         let nested = format!(

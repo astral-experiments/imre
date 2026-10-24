@@ -4,14 +4,19 @@ use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::rc::Rc;
 
-use super::{fail, words::WordKind};
+use super::{Object, fail, words::WordKind};
 
 pub(super) mod strings;
+
+enum Release {
+    Record(*const usize),
+    Object(Rc<Object>),
+}
 
 thread_local! {
     // The outer release owns the queue on its stack. This slot has no TLS
     // destructor, so records can also be released during thread teardown.
-    static RECORDS_TO_DROP: Cell<*const RefCell<Vec<*const usize>>> = const { Cell::new(std::ptr::null()) };
+    static PENDING_RELEASES: Cell<*const RefCell<Vec<Release>>> = const { Cell::new(std::ptr::null()) };
 }
 
 /// Compiler-emitted immutable metadata; every field occupies one eight-byte word.
@@ -267,6 +272,51 @@ pub unsafe extern "C" fn relar_record_release(payload: *const usize) {
     if payload.is_null() {
         return;
     }
+    PENDING_RELEASES.with(|slot| {
+        // SAFETY: a non-null pointer belongs to the enclosing release on this
+        // thread. The C ABI cannot unwind, and the outer call clears the slot
+        // before returning. No queue borrow spans a field release.
+        if let Some(pending) = unsafe { slot.get().as_ref() } {
+            pending.borrow_mut().push(Release::Record(payload));
+            return;
+        }
+        let pending = RefCell::new(Vec::new());
+        slot.set(&pending);
+        let mut current = Release::Record(payload);
+        loop {
+            let siblings = pending.borrow().len();
+            match current {
+                // SAFETY: each entry transfers one live owner of this record.
+                Release::Record(record) => unsafe { release_record_owner(record) },
+                Release::Object(object) => drop(object),
+            }
+            let mut pending = pending.borrow_mut();
+            // Children were enqueued in field or container order. Finish this
+            // subtree in that order before resuming the outstanding siblings.
+            pending[siblings..].reverse();
+            let Some(next) = pending.pop() else { break };
+            current = next;
+        }
+        slot.set(std::ptr::null());
+    });
+}
+
+/// Defer object drops during a record traversal. The last owner can flush a file
+/// or release further records through a container.
+pub(super) fn release_object_word(object: Rc<Object>) {
+    PENDING_RELEASES.with(|slot| {
+        // SAFETY: the outer record release owns the queue while this slot is set.
+        if let Some(pending) = unsafe { slot.get().as_ref() } {
+            pending.borrow_mut().push(Release::Object(object));
+        } else {
+            drop(object);
+        }
+    });
+}
+
+/// # Safety
+/// The caller transfers one live record owner on its execution thread.
+unsafe fn release_record_owner(payload: *const usize) {
     // SAFETY: the payload follows its live header, and this thread owns access.
     let header = unsafe { &*payload.cast::<Header>().sub(1) };
     let count = header.references.get();
@@ -277,32 +327,6 @@ pub unsafe extern "C" fn relar_record_release(payload: *const usize) {
     if count != 1 {
         return;
     }
-    RECORDS_TO_DROP.with(|slot| {
-        // SAFETY: a non-null pointer belongs to the enclosing release on this
-        // thread. The C ABI cannot unwind, and the outer call clears the slot
-        // before returning. No queue borrow spans a field release.
-        if let Some(pending) = unsafe { slot.get().as_ref() } {
-            pending.borrow_mut().push(payload);
-            return;
-        }
-        let pending = RefCell::new(Vec::new());
-        slot.set(&pending);
-        let mut next = Some(payload);
-        while let Some(current) = next {
-            // SAFETY: only the final owner enqueues a record. Its allocation and
-            // descriptor stay live until this worklist destroys it.
-            unsafe { destroy_record(current) };
-            next = pending.borrow_mut().pop();
-        }
-        slot.set(std::ptr::null());
-    });
-}
-
-/// # Safety
-/// The record has lost its final owner and its fields have not been released.
-unsafe fn destroy_record(payload: *const usize) {
-    // SAFETY: the allocation remains live until the field owners are released.
-    let header = unsafe { &*payload.cast::<Header>().sub(1) };
     // SAFETY: metadata remains immutable and live even while payloads are released.
     let descriptor = header.descriptor();
     if let Some(block) = header.block() {
@@ -327,7 +351,16 @@ unsafe fn destroy_record(payload: *const usize) {
 /// # Safety
 /// The caller transfers the final record's fields with their original descriptor.
 unsafe fn release_fields<const PACKED: bool>(payload: *const usize, descriptor: &RecordDescriptor) {
-    for index in 0..descriptor.length {
+    // Dataclass fields release in definition order. Tuples release their last
+    // element first. Both kinds use the same native record layout.
+    // SAFETY: semantic metadata, when present, lives as long as the descriptor.
+    let is_tuple = unsafe { descriptor.semantics.as_ref() }.is_some_and(|value| value.kind == 1);
+    for field in 0..descriptor.length {
+        let index = if is_tuple {
+            descriptor.length - 1 - field
+        } else {
+            field
+        };
         // SAFETY: each nonzero owning word transfers the field's final reference.
         unsafe {
             let kind = WordKind::new(descriptor.kinds.add(index).read());
