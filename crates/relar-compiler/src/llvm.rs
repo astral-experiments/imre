@@ -3795,6 +3795,7 @@ impl Emitter<'_, '_> {
             },
             Builtin::Encode => self.call("relar_str_encode", Type::Bytes, &[&args[0].value]),
             Builtin::Decode => self.call("relar_bytes_decode", Type::Str, &[&args[0].value]),
+            Builtin::Sha256Hex => self.call("relar_sha256_hex", Type::Str, &[&args[0].value]),
             Builtin::BytesValidateUtf8 => {
                 self.call("relar_bytes_validate_utf8", Type::Bytes, &[&args[0].value])
             }
@@ -5477,6 +5478,7 @@ declare ptr @relar_bytes_iter(ptr)
 declare ptr @relar_str_encode(ptr)
 declare ptr @relar_bytes_decode_splitlines(ptr)
 declare ptr @relar_bytes_decode(ptr)
+declare ptr @relar_sha256_hex(ptr)
 declare ptr @relar_bytes_validate_utf8(ptr)
 declare ptr @relar_binary_open(ptr, i32)
 declare ptr @relar_binary_read(ptr)

@@ -1,6 +1,10 @@
 # CPython standard-library compatibility benchmark
 
-The `upstream` directory contains the complete CPython 3.14.5 test entries for `sys`, `os`, `genericpath`, `posixpath`, `pathlib`, `json` and `subprocess`, including files in the two test packages. The [manifest](UPSTREAM.json) records the release commit and each unmodified Git blob. [Upstream source](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test) · [CPython license](upstream/LICENSE)
+The `upstream` directory contains the complete CPython 3.14.5 test entries for `sys`, `os`, `genericpath`, `posixpath`, `pathlib`, `json`, `subprocess` and `hashlib`, including files in the two test packages. The [manifest](UPSTREAM.json) records the release commit and each unmodified Git blob. [Upstream source](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test) · [CPython license](upstream/LICENSE)
+
+## Native SHA-256 vector calls
+
+`native_hashlib.py` takes the same arguments as the JSON runner. The four original `HashLibTestCase.test_case_sha256_*` methods and their shared helper run in full. Each method sends the public constructor's one-shot hexadecimal digest to native Relar. Raw digests, digest sizes, alternate constructors and file hashing execute on CPython. The JSON report counts the four native vector calls as mixed-method coverage and records the host calls separately.
 
 ## Native POSIX path cases
 
@@ -38,11 +42,11 @@ Use `--cpython-source /path/to/cpython-3.14.5` if the interpreter needs a source
 
 ## Full CPython reference run
 
-Use a CPython interpreter built from the exact release in the manifest with its normal test modules installed. Its `Lib/test` provides the shared `test.support`, helper programs and reference runner for the seven suites.
+Use a CPython interpreter built from the exact release in the manifest with its normal test modules installed. Its `Lib/test` provides the shared `test.support`, helper programs and reference runner for the vendored suites.
 
 ```sh
 /path/to/cpython-3.14.5/python -m test -j1 \
-    test_sys test_os test_genericpath test_posixpath test_pathlib test_json test_subprocess
+    test_sys test_os test_genericpath test_posixpath test_pathlib test_json test_subprocess test_hashlib
 ```
 
 This run records what upstream passes and skips on the host. Native compatibility uses the separate Relar results. An infrastructure error in a stripped interpreter is visible until it is reproduced with a test-enabled CPython build.

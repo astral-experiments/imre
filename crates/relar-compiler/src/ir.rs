@@ -474,6 +474,7 @@ pub(crate) enum Builtin {
     BytesIter,
     Encode,
     Decode,
+    Sha256Hex,
     /// Validates complete UTF-8 at the decode evaluation point and returns a
     /// retained bytes identity for an internal allocation-free character gather.
     BytesValidateUtf8,

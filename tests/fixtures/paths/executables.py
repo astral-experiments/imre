@@ -11,7 +11,7 @@ def joined(root: str | Path, tail: str | Path) -> str:
 
 def mixed(tail: str | Path) -> None:
     try:
-        os.path.join(b"root", tail)
+        os.path.join(b"root", tail)  # ty: ignore[no-matching-overload]
     except TypeError as error:
         print(str(error))
 
@@ -22,7 +22,8 @@ for first in ["", ".", "/", "//", "./a//"]:
     for tail in ["", ".", "/absolute", "relative//tail"]:
         print(os.path.join(first, tail))
 print(os.path.join(Path("a/b"), "c", "", "../..", ""))
-print(joined("./root//", Path("a/b")), joined(Path("a/b"), "./tail//"))
+print(joined("./root//", Path("a/b")))
+print(joined(Path("a/b"), "./tail//"))
 mixed("tail")
 mixed(Path("tail"))
 for path in ["", ".", "input.txt", "input.txt/", "file-link", "dangling-link", "bad\0name"]:
