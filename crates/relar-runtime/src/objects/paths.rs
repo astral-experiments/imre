@@ -369,7 +369,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
     Ok(resolved)
 }
 
-fn path_utf8(path: OsString) -> Result<Str> {
+pub(super) fn path_utf8(path: OsString) -> Result<Str> {
     path.into_string()
         .map(Str::from)
         .map_err(|_| Error::new(Kind::UnicodeDecodeError, "resolved path is not valid UTF-8"))

@@ -88,6 +88,53 @@ fn timeout_field_type(graph: &SourceGraph) -> Option<Type> {
 }
 
 impl Checker<'_> {
+    /// Keywords capture their values in source order before applying the filesystem ABI.
+    pub(super) fn shutil_which(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let path = self.types.optional(Type::Str);
+        let params = [
+            ("cmd", Type::Str, None),
+            (
+                "mode",
+                Type::Int,
+                Some(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Int("1".into()),
+                }),
+            ),
+            ("path", path, Some(absent(path))),
+        ]
+        .map(|(name, ty, default)| Parameter {
+            name: name.into(),
+            ty,
+            kind: ParameterKind::PositionalOrKeyword,
+            default,
+            sign_only: false,
+        });
+        let args = self.arguments_with(call, &params, None, |checker, i, arg| match i {
+            0 => checker.fspath_argument(arg),
+            1 => checker.expr_expected(arg, Type::Int),
+            _ => {
+                let raw = checker.expr(arg)?;
+                if raw.ty == Type::None {
+                    return checker.coerce(raw, path, arg);
+                }
+                if checker
+                    .types
+                    .payload(raw.ty)
+                    .is_some_and(|t| matches!(t, Type::Str | Type::Bytes))
+                {
+                    return Ok(raw);
+                }
+                let value = checker.fspath_value(raw, arg)?;
+                let ty = checker.types.optional(value.ty);
+                checker.coerce(value, ty, arg)
+            }
+        })?;
+        let returns = self.types.optional(args.values[args.order[0]].ty);
+        Ok(self.ordered_builtin(Builtin::Process(ProcessOperation::Which), returns, args))
+    }
+
     /// Literal mode arguments establish a text-only result. Dynamic values are
     /// rooted in source order before their permutation into the runtime ABI.
     pub(super) fn process_run(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {

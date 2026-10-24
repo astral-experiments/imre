@@ -3248,6 +3248,12 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::GlobalGet(slot), Vec::new()),
             });
         }
+        if let Some(Binding::Intrinsic(Intrinsic::AccessMode(mode))) = self.resolve(expression) {
+            return Ok(Expr {
+                ty: Type::Int,
+                kind: ExprKind::Int(mode.to_string()),
+            });
+        }
         if matches!(
             self.resolve(expression),
             Some(Binding::Intrinsic(Intrinsic::Argv))
@@ -3986,6 +3992,7 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(Builtin::Process(ir::ProcessOperation::GetCwd), vec![]),
                 });
             }
+            Some(Binding::Intrinsic(Intrinsic::Which)) => return self.shutil_which(call),
             Some(Binding::Intrinsic(Intrinsic::FsPath)) => {
                 self.reject_builtin_keywords(call)?;
                 let [path] = call.arguments.args.as_ref() else {

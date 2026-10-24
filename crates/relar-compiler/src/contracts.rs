@@ -113,6 +113,7 @@ impl Builtin {
                 | ProcessOperation::EnvironCopy
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
+                | ProcessOperation::Which
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
@@ -427,6 +428,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_subprocess_run_timeout_int"
                 | "relar_environ_get"
                 | "relar_getcwd"
+                | "relar_shutil_which"
                 | "relar_environ_copy"
                 | "relar_subprocess_check"
                 | "relar_subprocess_error_field"
