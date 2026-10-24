@@ -814,7 +814,7 @@ impl Checker<'_> {
         self.restore_state(before);
         for name in writes {
             if let Some(slot) = self.names.get(&name) {
-                self.narrowed.remove(slot);
+                self.narrowed.remove_mut(slot);
             }
         }
         let exported = self
@@ -852,7 +852,7 @@ impl Checker<'_> {
         };
         for name in display.repeated_writes(index) {
             if let Some(slot) = self.names.get(&name) {
-                self.narrowed.remove(slot);
+                self.narrowed.remove_mut(slot);
             }
         }
         self.lower_iteration(&clause.target, input, &[], |checker| {
@@ -1074,7 +1074,7 @@ mod tests {
             "mapping: dict[str, int] = {'x': 1}\ndef gather(data: bytes) -> list[int]:\n    return [mapping[c] for c in data.decode()]\n",
         )
         .unwrap();
-        let graph = crate::modules::SourceGraph::load(&entry, Some(directory.path()), &[]).unwrap();
+        let graph = crate::modules::SourceGraph::load(&entry, Some(directory.path())).unwrap();
         let module = crate::frontend::lower(&graph).unwrap();
         let mut helper = None;
         walk_expressions(&module.functions[0].body, &mut |value| {

@@ -126,7 +126,7 @@ impl WordKind {
                 2 => drop(Int(word)),
                 3 => Rc::decrement_strong_count(word as *const Str),
                 4 => crate::relar_list_release(word as *const List),
-                5 => Rc::decrement_strong_count(word as *const Object),
+                5 => records::release_object_word(Rc::from_raw(word as *const Object)),
                 6 => records::relar_record_release(word as *const usize),
                 7 if self.raw() & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
                 7 => {}
@@ -153,6 +153,13 @@ impl OwnedWord {
     /// Transfers an already-owned, correctly typed word into this temporary.
     pub(super) unsafe fn from_owned(word: usize, kind: WordKind) -> Self {
         Self { word, kind }
+    }
+}
+
+impl Clone for OwnedWord {
+    fn clone(&self) -> Self {
+        // SAFETY: this owner keeps the initialized word live throughout acquisition.
+        unsafe { self.kind.acquire(self.word) }
     }
 }
 
@@ -361,10 +368,13 @@ pub struct SequenceLayout {
     inline_words: usize,
 }
 
-/// Offsets within a rooted sequence handle. Querying this once keeps Rust's
-/// enum and inline-buffer layout on the runtime side of the ABI.
+/// Generated main calls this once before running user code. Returning the
+/// sequence offsets keeps Rust's enum and inline-buffer layout private.
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_seq_layout() -> SequenceLayout {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    crate::run_start::wait_for_cleanup();
+
     let mut sample = Words::new(0);
     sample.values.push(0);
     // One non-owning word fits inline and needs no destructor.
@@ -386,7 +396,7 @@ impl Drop for Words {
             drop(unsafe { Box::from_raw(self.values[0] as *mut Deferred) });
             return;
         }
-        for word in self.values.drain(..) {
+        for word in self.values.drain(..).rev() {
             // SAFETY: each buffer word owns its declared value independently.
             unsafe { self.kind.release(word) };
         }

@@ -60,6 +60,11 @@ with gzip.open("rows.gz", "rb") as stream:
     binary_lines(stream)
 with gzip.open("padded.gz", "rb") as stream:
     print(len(stream.read()))
+with gzip.open("truncated-after-open.gz", "rb") as stream:
+    print(stream.read(1))
+    with open("truncated-after-open.gz", "wb") as writer:
+        writer.write(b"")
+    print(len(stream.read(200_000)))
 with gzip.open("empty.gz", "rt", encoding="utf-8") as text:
     print(len([line for line in text]))
     print(len(text.readline()))
@@ -68,3 +73,13 @@ with gzip.open("rows.gz", "rt", encoding="utf-8") as text:
         text.close()
         break
     print(text.closed)
+
+for suffix in [b"\xed\xa0", b"\xed\xbf", b"\xed\xa0\x80", b"\xe0\x80"]:
+    with open("partial-utf8.txt", "wb") as writer:
+        writer.write(b"\n" + suffix)
+    with open("partial-utf8.txt", "r", encoding="utf-8") as text:
+        for _ in range(2):
+            try:
+                print(repr(text.readline()))
+            except UnicodeDecodeError:
+                print("invalid UTF-8")

@@ -11,6 +11,7 @@ use std::rc::Rc;
 
 use ruff_python_literal::escape::{Escape, UnicodeEscape};
 
+use super::words::{OwnedWord, WordKind};
 use super::{Object, Storage, StorageCell, Str, acquire_rc, fail, object};
 
 #[repr(C)]
@@ -194,23 +195,32 @@ impl Kind {
 #[derive(Clone)]
 pub(super) struct Exception {
     kind: Kind,
-    message: Rc<Str>,
-    cause: Option<Rc<Object>>,
+    payload: Payload,
     suppress_context: bool,
-    payload: Option<Box<Payload>>,
-    /// Exceptional frame roots with a native filesystem finalizer. This subset
-    /// needs only the owners whose lifetime can affect a later filesystem query.
-    directories: Option<Rc<Vec<Rc<Object>>>>,
+    details: Option<Rc<ExceptionDetails>>,
 }
 
-/// Builtin exceptions carry one specialized payload. Keep it off the common
-/// object so adding a richer exception never grows every list, dict and task.
+#[derive(Clone, Default)]
+struct ExceptionDetails {
+    cause: Option<Rc<Object>>,
+    named: Option<&'static NamedDescriptor>,
+    /// Exceptional frames retain filesystem contexts whose lifetime is observable.
+    directories: Vec<Rc<Object>>,
+}
+
 #[derive(Clone)]
 enum Payload {
-    Named(&'static NamedDescriptor),
-    Process(super::processes::ProcessError),
-    Timeout(super::processes::TimeoutError),
+    Message(Rc<Str>),
+    Key(OwnedWord),
+    Process(Box<super::processes::ProcessError>),
+    Timeout(Box<super::processes::TimeoutError>),
     Group(Box<[GroupMember]>),
+}
+
+impl From<Rc<Str>> for Payload {
+    fn from(message: Rc<Str>) -> Self {
+        Self::Message(message)
+    }
 }
 
 /// A member raised explicitly from its owning group needs both observable
@@ -237,7 +247,7 @@ impl GroupMember {
                     return child;
                 }
                 let mut value = entry.value.clone();
-                value.cause = Some(owner.clone());
+                value.details_mut().cause = Some(owner.clone());
                 let child = Rc::new(Object(StorageCell::new(Storage::Exception(value))));
                 *entry.live.borrow_mut() = Rc::downgrade(&child);
                 child
@@ -247,11 +257,21 @@ impl GroupMember {
 }
 
 impl Exception {
+    fn details_mut(&mut self) -> &mut ExceptionDetails {
+        Rc::make_mut(self.details.get_or_insert_with(Default::default))
+    }
+
+    fn cause(&self) -> Option<&Rc<Object>> {
+        self.details.as_deref()?.cause.as_ref()
+    }
+
+    fn take_cause(&mut self) -> Option<Rc<Object>> {
+        // A shared snapshot retains its own metadata and keeps the cause rooted.
+        Rc::into_inner(self.details.take()?)?.cause
+    }
+
     fn named(&self) -> Option<&'static NamedDescriptor> {
-        match self.payload.as_deref() {
-            Some(Payload::Named(descriptor)) => Some(descriptor),
-            _ => None,
-        }
+        self.details.as_deref()?.named
     }
 
     fn name(&self) -> &str {
@@ -273,7 +293,7 @@ impl Exception {
 impl Drop for Exception {
     /// Release uniquely owned cause tails iteratively, including very long chains.
     fn drop(&mut self) {
-        let mut next = self.cause.take();
+        let mut next = self.take_cause();
         while let Some(cause) = next {
             let Ok(object) = Rc::try_unwrap(cause) else {
                 break;
@@ -281,7 +301,7 @@ impl Drop for Exception {
             let Storage::Exception(mut exception) = object.0.into_inner() else {
                 unreachable!("exception causes have exact exception storage");
             };
-            next = exception.cause.take();
+            next = exception.take_cause();
         }
     }
 }
@@ -289,15 +309,28 @@ impl Drop for Exception {
 /// An owned error returned from a storage access before pending state is changed.
 pub(crate) struct Error {
     kind: Kind,
-    message: Str,
+    payload: Payload,
 }
 
 impl Error {
     pub(crate) fn new(kind: Kind, message: impl Into<Str>) -> Self {
         Self {
             kind,
-            message: message.into(),
+            payload: Payload::Message(Rc::new(message.into())),
         }
+    }
+
+    pub(super) fn key(key: OwnedWord) -> Self {
+        Self {
+            kind: Kind::KeyError,
+            payload: Payload::Key(key),
+        }
+    }
+
+    pub(super) fn string_key(key: Str) -> Self {
+        let word = Rc::into_raw(Rc::new(key)) as usize;
+        // SAFETY: the new string contributes one owned reference of exact kind 3.
+        Self::key(unsafe { OwnedWord::from_owned(word, WordKind::new(3)) })
     }
 
     pub(crate) fn index() -> Self {
@@ -309,7 +342,7 @@ impl Error {
     #[cold]
     #[inline(never)]
     pub(crate) fn raise(self) {
-        replace_pending(Some(new_exception(self.kind, Rc::new(self.message))));
+        replace_pending(Some(new_exception(self.kind, self.payload)));
     }
 
     /// Returns a failure sentinel after installing the owned exception.
@@ -329,6 +362,9 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
 }
 
 thread_local! {
+    static RECORD_ALLOCATION_ERROR: Rc<Object> = new_exception(
+        Kind::MemoryError, Rc::new(Str::new("record allocation failed")),
+    );
     static PENDING: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
     static ACTIVE: RefCell<Option<Rc<Object>>> = const { RefCell::new(None) };
     // The non-Drop mirror lets successful calls query one TLS byte without
@@ -337,6 +373,19 @@ thread_local! {
     // flag before dropping displaced owners. The single-thread, no-callback
     // contract makes the brief interval between owner and flag writes unobservable.
     static PENDING_PRESENT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Prepare the exception before generated code starts allocating records.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_record_error_init() {
+    RECORD_ALLOCATION_ERROR.with(|_| ());
+    PENDING.with(|_| ());
+    ACTIVE.with(|_| ());
+}
+
+#[cold]
+pub(super) fn record_allocation_failed() {
+    RECORD_ALLOCATION_ERROR.with(|error| replace_pending(Some(Rc::clone(error))));
 }
 
 /// # Safety
@@ -366,8 +415,7 @@ pub unsafe extern "C" fn relar_error_keep_directory(manager: *const Object) {
                     let Storage::Exception(exception) = storage else {
                         unreachable!()
                     };
-                    let roots =
-                        Rc::make_mut(exception.directories.get_or_insert_with(Default::default));
+                    let roots = &mut exception.details_mut().directories;
                     if !roots.iter().any(|root| Rc::as_ptr(root) == manager) {
                         roots.push(acquire_rc::<Object>(manager as usize));
                     }
@@ -377,14 +425,12 @@ pub unsafe extern "C" fn relar_error_keep_directory(manager: *const Object) {
     });
 }
 
-fn new_exception(kind: Kind, message: Rc<Str>) -> Rc<Object> {
+fn new_exception(kind: Kind, payload: impl Into<Payload>) -> Rc<Object> {
     Rc::new(Object(StorageCell::new(Storage::Exception(Exception {
         kind,
-        message,
-        cause: None,
+        payload: payload.into(),
         suppress_context: false,
-        payload: None,
-        directories: None,
+        details: None,
     }))))
 }
 
@@ -394,21 +440,10 @@ pub(super) fn kind_of(error: &Object) -> Kind {
 }
 
 pub(super) fn task_group_errors(errors: Vec<Rc<Object>>) -> Rc<Object> {
-    let n = errors.len();
-    let suffix = if n == 1 { "" } else { "s" };
-    let message = Rc::new(Str::from(format!(
-        "unhandled errors in a TaskGroup ({n} sub-exception{suffix})"
-    )));
-    Rc::new(Object(StorageCell::new(Storage::Exception(Exception {
-        kind: Kind::ExceptionGroup,
-        message,
-        cause: None,
-        suppress_context: false,
-        payload: Some(Box::new(Payload::Group(
-            errors.into_iter().map(GroupMember::Strong).collect(),
-        ))),
-        directories: None,
-    }))))
+    new_exception(
+        Kind::ExceptionGroup,
+        Payload::Group(errors.into_iter().map(GroupMember::Strong).collect()),
+    )
 }
 
 /// # Safety
@@ -424,7 +459,7 @@ pub unsafe extern "C" fn relar_async_exception_at(
     let result = unsafe {
         owner.0.with(|storage| {
             let exception = storage.exception();
-            let Some(Payload::Group(group)) = exception.payload.as_deref() else {
+            let Payload::Group(group) = &exception.payload else {
                 return Err(Error::new(
                     Kind::AttributeError,
                     format!(
@@ -456,7 +491,9 @@ pub unsafe extern "C" fn relar_async_member_cause(
         let child: Rc<Object> = acquire_rc(child as usize);
         let group: Rc<Object> = acquire_rc(group as usize);
         let mut snapshot = child.0.with(|storage| storage.exception().clone());
-        snapshot.cause = None;
+        if snapshot.cause().is_some() {
+            snapshot.details_mut().cause = None;
+        }
         snapshot.suppress_context = true;
         let entry = Rc::new(CausedMember {
             live: RefCell::new(Rc::downgrade(&child)),
@@ -466,7 +503,7 @@ pub unsafe extern "C" fn relar_async_member_cause(
             let Storage::Exception(parent) = storage else {
                 unreachable!()
             };
-            let Some(Payload::Group(members)) = parent.payload.as_deref_mut() else {
+            let Payload::Group(members) = &mut parent.payload else {
                 unreachable!("child belongs to group");
             };
             for member in members.iter_mut() {
@@ -479,7 +516,7 @@ pub unsafe extern "C" fn relar_async_member_cause(
             let Storage::Exception(value) = storage else {
                 unreachable!()
             };
-            value.cause = Some(group);
+            value.details_mut().cause = Some(group);
             value.suppress_context = true;
         });
         Rc::into_raw(child)
@@ -489,31 +526,19 @@ pub unsafe extern "C" fn relar_async_member_cause(
 /// Publishes a completed child's rich failure after all input storage borrows end.
 #[cold]
 pub(super) fn raise_process(error: super::processes::ProcessError) {
-    replace_pending(Some(Rc::new(Object(StorageCell::new(Storage::Exception(
-        Exception {
-            kind: Kind::CalledProcessError,
-            message: Rc::new(Str::new("")),
-            cause: None,
-            suppress_context: false,
-            payload: Some(Box::new(Payload::Process(error))),
-            directories: None,
-        },
-    ))))));
+    replace_pending(Some(new_exception(
+        Kind::CalledProcessError,
+        Payload::Process(Box::new(error)),
+    )));
 }
 
 /// Publishes the immutable deadline snapshot after the child has been reaped.
 #[cold]
 pub(super) fn raise_timeout(error: super::processes::TimeoutError) {
-    replace_pending(Some(Rc::new(Object(StorageCell::new(Storage::Exception(
-        Exception {
-            kind: Kind::TimeoutExpired,
-            message: Rc::new(Str::new("")),
-            cause: None,
-            suppress_context: false,
-            payload: Some(Box::new(Payload::Timeout(error))),
-            directories: None,
-        },
-    ))))));
+    replace_pending(Some(new_exception(
+        Kind::TimeoutExpired,
+        Payload::Timeout(Box::new(error)),
+    )));
 }
 
 /// Replaces the pending owner without dropping it during a TLS mutable borrow.
@@ -542,15 +567,33 @@ pub(super) fn active_exception() -> Option<Rc<Object>> {
 
 /// Uses Ruff's Python repr rules and its pinned Unicode printable categories.
 pub(crate) fn string_repr(value: &str) -> Str {
-    let escaped = UnicodeEscape::new_repr(value);
     let mut result = String::new();
-    let quote = escaped.layout().quote.as_char();
-    result.push(quote);
-    escaped
-        .write_body(&mut result)
-        .expect("writing to a String cannot fail");
-    result.push(quote);
+    push_string_repr(value, &mut result);
     Str::from(result)
+}
+
+pub(super) fn push_string_repr(value: &str, out: &mut String) {
+    let escaped = UnicodeEscape::new_repr(value);
+    if out.is_empty()
+        && let Some(size) = escaped.layout().len.and_then(|body| body.checked_add(2))
+    {
+        out.reserve_exact(size);
+    }
+    write_escaped_string(&escaped, out).expect("writing to a String cannot fail");
+}
+
+pub(crate) fn write_string_repr(value: &str, out: &mut impl std::fmt::Write) -> std::fmt::Result {
+    write_escaped_string(&UnicodeEscape::new_repr(value), out)
+}
+
+fn write_escaped_string(
+    escaped: &UnicodeEscape<'_>,
+    out: &mut impl std::fmt::Write,
+) -> std::fmt::Result {
+    let quote = escaped.layout().quote.as_char();
+    out.write_char(quote)?;
+    escaped.write_body(out)?;
+    out.write_char(quote)
 }
 
 /// Acquires nullable exception input without retaining a storage reference.
@@ -577,11 +620,27 @@ impl Storage {
     }
 
     fn exception_message(&self) -> Rc<Str> {
-        let exception = self.exception();
-        match exception.payload.as_deref() {
-            Some(Payload::Timeout(timeout)) => Rc::new(timeout.message()),
-            Some(Payload::Process(process)) => Rc::new(process.message()),
-            _ => exception.message.clone(),
+        match &self.exception().payload {
+            Payload::Message(message) => Rc::clone(message),
+            Payload::Process(process) => Rc::new(process.message()),
+            Payload::Timeout(timeout) => Rc::new(timeout.message()),
+            Payload::Key(key) if key.kind == WordKind::new(3) => {
+                // SAFETY: this owned kind-3 word is a live string.
+                Rc::new(string_repr(unsafe { &*(key.word as *const Str) }))
+            }
+            Payload::Key(key) => {
+                let mut message = String::new();
+                // SAFETY: the exception owns the immutable key and its exact kind.
+                unsafe { super::values::write_repr(&mut message, key.word, key.kind) };
+                Rc::new(Str::from(message))
+            }
+            Payload::Group(members) => {
+                let count = members.len();
+                let suffix = if count == 1 { "" } else { "s" };
+                Rc::new(Str::from(format!(
+                    "unhandled errors in a TaskGroup ({count} sub-exception{suffix})"
+                )))
+            }
         }
     }
 }
@@ -603,9 +662,9 @@ pub unsafe extern "C" fn relar_subprocess_error_field(value: *const Object, fiel
     let result = unsafe {
         object(value).0.with(|storage| {
             let exception = storage.exception();
-            match exception.payload.as_deref() {
-                Some(Payload::Timeout(timeout)) if field == 0 => Ok(timeout.field(0)),
-                Some(Payload::Process(process)) => Ok(process.field(field)),
+            match &exception.payload {
+                Payload::Process(process) => Ok(process.field(field)),
+                Payload::Timeout(timeout) if field == 0 => Ok(timeout.field(0)),
                 _ => {
                     let name = ["cmd", "returncode", "stdout", "stderr", "output"][field as usize];
                     Err(Error::new(
@@ -630,7 +689,7 @@ pub unsafe extern "C" fn relar_subprocess_timeout_field(value: *const Object, fi
     // SAFETY: the checker establishes an exact TimeoutExpired before projection.
     unsafe {
         object(value).0.with(|storage| {
-            let Some(Payload::Timeout(timeout)) = storage.exception().payload.as_deref() else {
+            let Payload::Timeout(timeout) = &storage.exception().payload else {
                 fail("SystemError", "expected TimeoutExpired storage");
             };
             timeout.field(field)
@@ -674,7 +733,7 @@ pub unsafe extern "C" fn relar_named_exception_new(
             let Storage::Exception(exception) = storage else {
                 unreachable!()
             };
-            exception.payload = Some(Box::new(Payload::Named(descriptor)));
+            exception.details_mut().named = Some(descriptor);
         });
         handle
     }
@@ -688,16 +747,16 @@ pub unsafe extern "C" fn relar_named_exception_new(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_exception_new(kind: u32, message: *const Str) -> *const Object {
     let kind = Kind::from_raw(kind);
-    let message = if message.is_null() {
-        Rc::new(Str::new(""))
+    let payload = if message.is_null() {
+        Payload::Message(Rc::new(Str::new("")))
     } else if kind == Kind::KeyError {
         // SAFETY: the caller roots the immutable string argument.
-        Rc::new(string_repr(unsafe { &*message }))
+        Payload::Key(unsafe { WordKind::new(3).acquire(message as usize) })
     } else {
         // SAFETY: the non-null argument is a rooted Rc<Str>.
-        unsafe { acquire_rc(message as usize) }
+        Payload::Message(unsafe { acquire_rc(message as usize) })
     };
-    Rc::into_raw(new_exception(kind, message))
+    Rc::into_raw(new_exception(kind, payload))
 }
 
 /// # Safety
@@ -768,8 +827,10 @@ pub unsafe extern "C" fn relar_exception_with_cause(
             let Storage::Exception(exception) = storage else {
                 fail("SystemError", "expected an exception object");
             };
-            debug_assert!(exception.cause.is_none() && !exception.suppress_context);
-            exception.cause = cause;
+            debug_assert!(exception.cause().is_none() && !exception.suppress_context);
+            if let Some(cause) = cause {
+                exception.details_mut().cause = Some(cause);
+            }
             exception.suppress_context = true;
         });
         relar_exception_retain(value);
@@ -787,7 +848,7 @@ pub unsafe extern "C" fn relar_exception_cause(value: *const Object) -> *const O
     unsafe {
         object(value)
             .0
-            .with(|storage| storage.exception().cause.clone())
+            .with(|storage| storage.exception().cause().cloned())
             .map_or(std::ptr::null(), Rc::into_raw)
     }
 }
@@ -871,7 +932,7 @@ pub extern "C" fn relar_error_unhandled() -> i32 {
                     exception.kind,
                     exception.name().to_owned(),
                     storage.exception_message(),
-                    exception.cause.clone(),
+                    exception.cause().cloned(),
                 )
             })
         };
@@ -963,6 +1024,21 @@ mod tests {
     fn message(value: &Rc<Object>) -> Rc<Str> {
         // SAFETY: the rooted exception accessor transfers one string reference.
         unsafe { Rc::from_raw(relar_exception_message(Rc::as_ptr(value))) }
+    }
+
+    #[test]
+    fn key_error_owns_its_key_until_the_exception_is_released() {
+        let key = Rc::new(Str::new("a quoted 'key'\n"));
+        let expected = string_repr(&key);
+        let weak = Rc::downgrade(&key);
+        // SAFETY: the key is rooted and the constructor returns one owned exception.
+        let error =
+            unsafe { Rc::from_raw(relar_exception_new(Kind::KeyError as u32, Rc::as_ptr(&key))) };
+        drop(key);
+        assert_eq!(weak.strong_count(), 1);
+        assert_eq!(*message(&error), expected);
+        drop(error);
+        assert!(weak.upgrade().is_none());
     }
 
     #[test]
@@ -1269,5 +1345,15 @@ mod tests {
             drop(take_error(Kind::RuntimeError));
             assert_eq!((key, value), (17, 19));
         }
+    }
+
+    #[test]
+    fn standalone_string_repr_uses_the_escaped_size() {
+        let value = "\0".repeat(16_384);
+        let rendered = string_repr(&value);
+        assert_eq!(rendered.len(), 65_538);
+        assert!(rendered.starts_with("'\\x00"));
+        assert!(rendered.ends_with("\\x00'"));
+        assert!(rendered.capacity() < 128 * 1024);
     }
 }

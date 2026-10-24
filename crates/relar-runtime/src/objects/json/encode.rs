@@ -35,45 +35,98 @@ fn plain_ascii(bytes: &[u8]) -> bool {
 }
 
 impl Encoder {
+    #[inline]
+    fn reserve(&mut self, additional: usize) -> Result<(), Error> {
+        if additional <= self.output.capacity() - self.output.len() {
+            return Ok(());
+        }
+        self.grow(additional)
+    }
+
+    #[cold]
+    fn grow(&mut self, additional: usize) -> Result<(), Error> {
+        // A geometrically larger buffer can exceed the process limit while the
+        // result still fits. Grow in smaller chunks under memory pressure.
+        self.output
+            .try_reserve(additional)
+            .or_else(|_| self.output.try_reserve_exact(additional.max(1 << 20)))
+            .or_else(|_| self.output.try_reserve_exact(additional))
+            .map_err(|_| Error::new(Kind::MemoryError, "JSON output allocation failed"))
+    }
+
+    #[inline]
+    fn append(&mut self, text: &str) -> Result<(), Error> {
+        self.reserve(text.len())?;
+        self.output.push_str(text);
+        Ok(())
+    }
+
     /// JSON's escapes differ from Python repr, including UTF-16 surrogate pairs
     /// for non-BMP characters when ensure_ascii is requested.
-    fn string(&mut self, value: &str) {
+    fn string(&mut self, value: &str) -> Result<(), Error> {
         const HEX: &[u8; 16] = b"0123456789abcdef";
-        self.output.push('"');
         if plain_ascii(value.as_bytes()) {
+            self.reserve(value.len().saturating_add(2))?;
+            self.output.push('"');
             self.output.push_str(value);
             self.output.push('"');
-            return;
+            return Ok(());
         }
-        for character in value.chars() {
-            match character {
-                '"' => self.output.push_str("\\\""),
-                '\\' => self.output.push_str("\\\\"),
-                '\u{8}' => self.output.push_str("\\b"),
-                '\u{c}' => self.output.push_str("\\f"),
-                '\n' => self.output.push_str("\\n"),
-                '\r' => self.output.push_str("\\r"),
-                '\t' => self.output.push_str("\\t"),
-                '\0'..='\u{1f}' => {
-                    let value = character as usize;
-                    self.output.push_str("\\u00");
-                    self.output.push(char::from(HEX[value >> 4]));
-                    self.output.push(char::from(HEX[value & 15]));
-                }
-                _ if self.ensure_ascii && !(' '..='~').contains(&character) => {
-                    let mut buffer = [0; 2];
-                    for &unit in character.encode_utf16(&mut buffer).iter() {
-                        self.output.push_str("\\u");
-                        for shift in [12, 8, 4, 0] {
-                            self.output
-                                .push(char::from(HEX[usize::from((unit >> shift) & 15)]));
+        self.reserve(1)?;
+        self.output.push('"');
+        let mut rest = value;
+        while !rest.is_empty() {
+            // At most six output bytes per input byte. Checking one UTF-8 chunk
+            // at a time bounds spare capacity outside the per-character loop.
+            let (chunk, tail) = rest.split_at(rest.floor_char_boundary(rest.len().min(4096)));
+            if 6 * chunk.len() > self.output.capacity() - self.output.len() {
+                // A worst-case reservation can fail even when the escaped chunk fits.
+                let needed = chunk
+                    .chars()
+                    .map(|character| match character {
+                        '"' | '\\' | '\u{8}' | '\u{c}' | '\n' | '\r' | '\t' => 2,
+                        '\0'..='\u{1f}' => 6,
+                        _ if self.ensure_ascii && !(' '..='~').contains(&character) => {
+                            6 * character.len_utf16()
+                        }
+                        _ => character.len_utf8(),
+                    })
+                    .sum();
+                self.reserve(needed)?;
+            }
+            for character in chunk.chars() {
+                match character {
+                    '"' => self.output.push_str("\\\""),
+                    '\\' => self.output.push_str("\\\\"),
+                    '\u{8}' => self.output.push_str("\\b"),
+                    '\u{c}' => self.output.push_str("\\f"),
+                    '\n' => self.output.push_str("\\n"),
+                    '\r' => self.output.push_str("\\r"),
+                    '\t' => self.output.push_str("\\t"),
+                    '\0'..='\u{1f}' => {
+                        let value = character as usize;
+                        self.output.push_str("\\u00");
+                        self.output.push(char::from(HEX[value >> 4]));
+                        self.output.push(char::from(HEX[value & 15]));
+                    }
+                    _ if self.ensure_ascii && !(' '..='~').contains(&character) => {
+                        let mut buffer = [0; 2];
+                        for &unit in character.encode_utf16(&mut buffer).iter() {
+                            self.output.push_str("\\u");
+                            for shift in [12, 8, 4, 0] {
+                                self.output
+                                    .push(char::from(HEX[usize::from((unit >> shift) & 15)]));
+                            }
                         }
                     }
+                    _ => self.output.push(character),
                 }
-                _ => self.output.push(character),
             }
+            rest = tail;
         }
+        self.reserve(1)?;
         self.output.push('"');
+        Ok(())
     }
 
     fn newline(&mut self, depth: usize) -> Result<(), Error> {
@@ -84,9 +137,7 @@ impl Encoder {
             .and_then(|count| count.checked_add(1))
             .filter(|&count| count <= isize::MAX as usize)
             .ok_or_else(|| Error::new(Kind::MemoryError, "JSON indentation is too large"))?;
-        self.output
-            .try_reserve(count)
-            .map_err(|_| Error::new(Kind::MemoryError, "JSON indentation allocation failed"))?;
+        self.reserve(count)?;
         self.output.push('\n');
         self.output.extend(std::iter::repeat_n(' ', count - 1));
         Ok(())
@@ -99,26 +150,29 @@ impl Encoder {
                 "JSON nesting exceeds 128 containers",
             ));
         }
+        self.reserve(1)?;
         self.output.push(delimiter);
         Ok(())
     }
 
     fn separator(&mut self, index: usize, depth: usize) -> Result<(), Error> {
-        if index != 0 {
-            self.output.push(',');
-        }
         if self.indent.is_some() {
-            self.newline(depth + 1)?;
+            if index != 0 {
+                self.append(",")?;
+            }
+            self.newline(depth + 1)
         } else if index != 0 {
-            self.output.push(' ');
+            self.append(", ")
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     fn end(&mut self, delimiter: char, nonempty: bool, depth: usize) -> Result<(), Error> {
         if nonempty && self.indent.is_some() {
             self.newline(depth)?;
         }
+        self.reserve(1)?;
         self.output.push(delimiter);
         Ok(())
     }
@@ -149,16 +203,14 @@ impl Encoder {
         // SAFETY: each branch reads only the schema's exact rooted representation.
         unsafe {
             match schema.kind {
-                NONE => self.output.push_str("null"),
-                BOOLEAN => self
-                    .output
-                    .push_str(if word == 0 { "false" } else { "true" }),
+                NONE => self.append("null")?,
+                BOOLEAN => self.append(if word == 0 { "false" } else { "true" })?,
                 INTEGER => {
                     let value = Int::borrow(word);
                     if let Some(value) = value.as_small() {
-                        self.output.push_str(itoa::Buffer::new().format(value));
+                        self.append(itoa::Buffer::new().format(value))?;
                     } else {
-                        self.output.push_str(&value.big().to_string());
+                        self.append(&value.big().to_string())?;
                     }
                 }
                 FLOAT => {
@@ -169,10 +221,10 @@ impl Encoder {
                             "non-finite floats are not JSON",
                         ));
                     }
-                    self.output.push_str(&crate::floats::render(value));
+                    self.append(&crate::floats::render(value))?;
                 }
-                STRING => self.string(&*(word as *const Str)),
-                OPTIONAL if word == 0 => self.output.push_str("null"),
+                STRING => self.string(&*(word as *const Str))?,
+                OPTIONAL if word == 0 => self.append("null")?,
                 OPTIONAL => {
                     let child = schema.child();
                     let word = match child.word_kind {
@@ -200,8 +252,8 @@ impl Encoder {
                     self.begin('{', depth)?;
                     for (index, field) in schema.fields().iter().enumerate() {
                         self.separator(index, depth)?;
-                        self.string(field.name());
-                        self.output.push_str(": ");
+                        self.string(field.name())?;
+                        self.append(": ")?;
                         let child = field.schema();
                         let word = child
                             .storage()
@@ -219,8 +271,8 @@ impl Encoder {
                         {
                             nonempty = true;
                             self.separator(index, depth)?;
-                            self.string(key);
-                            self.output.push_str(": ");
+                            self.string(key)?;
+                            self.append(": ")?;
                             self.value(value, schema.child(), depth + 1)?;
                         }
                         Ok::<_, Error>(nonempty)
@@ -282,6 +334,42 @@ pub unsafe extern "C" fn relar_json_encode(
 mod tests {
     use super::*;
     use crate::objects::exceptions::{relar_error_take, relar_exception_matches};
+
+    #[test]
+    fn failed_reservation_preserves_the_encoder_for_a_shorter_value() {
+        let mut encoder = Encoder {
+            output: String::from("["),
+            indent: None,
+            ensure_ascii: true,
+        };
+        assert!(encoder.reserve(usize::MAX).is_err());
+        assert!(encoder.string("\0𐐀").is_ok());
+        assert!(encoder.end(']', true, 0).is_ok());
+        assert_eq!(encoder.output, r#"["\u0000\ud801\udc00"]"#);
+    }
+
+    #[test]
+    fn escaped_string_uses_available_capacity() {
+        for ensure_ascii in [false, true] {
+            let prefix = "a".repeat(4094);
+            let input = format!("{prefix}é\\\"\u{b}\n𐐀");
+            let suffix = if ensure_ascii {
+                r#"\u00e9\\\"\u000b\n\ud801\udc00"#
+            } else {
+                r#"é\\\"\u000b\n𐐀"#
+            };
+            let expected = format!("\"{prefix}{suffix}\"");
+            let mut encoder = Encoder {
+                output: String::with_capacity(expected.len()),
+                indent: None,
+                ensure_ascii,
+            };
+            let capacity = encoder.output.capacity();
+            assert!(encoder.string(&input).is_ok());
+            assert_eq!(encoder.output, expected);
+            assert_eq!(encoder.output.capacity(), capacity);
+        }
+    }
 
     #[test]
     fn plain_ascii_checks_every_byte_and_chunk_boundary() {

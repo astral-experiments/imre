@@ -964,7 +964,7 @@ pub unsafe extern "C" fn relar_subprocess_check_output(args: *const Object) -> *
                         5 => object(word as *const Object)
                             .0
                             .with(|storage| match storage {
-                                Storage::Path { text, .. } => cstring(text.as_bytes()),
+                                Storage::Path { .. } => cstring(storage.path().as_bytes()),
                                 _ => fail("SystemError", "expected a subprocess Path argument"),
                             }),
                         _ => fail("SystemError", "invalid subprocess argument kind"),

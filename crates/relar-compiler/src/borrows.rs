@@ -20,11 +20,10 @@ pub(crate) struct FunctionBorrows {
 
 /// Computes closed-callgraph edge preservation before deriving local roots.
 /// The separate initializer summary applies only to a newly allocated receiver.
-pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
-    let targets = Targets::analyze(module);
+pub(crate) fn analyze(module: &Module, targets: &Targets) -> Vec<FunctionBorrows> {
     let private = private::analyze(module);
-    let (preserves, initializes) = summaries(module, true, &targets, &private);
-    let (readonly, readonly_initializes) = summaries(module, false, &targets, &private);
+    let (preserves, initializes) = summaries(module, true, targets, &private);
+    let (readonly, readonly_initializes) = summaries(module, false, targets, &private);
     module
         .functions
         .iter()
@@ -37,7 +36,7 @@ pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
                 &initializes,
                 false,
                 true,
-                &targets,
+                targets,
                 private,
             ) {
                 local_roots(function, &module.types, &module.functions)
@@ -54,7 +53,7 @@ pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
                 &readonly_initializes,
                 false,
                 false,
-                &targets,
+                targets,
                 private,
             ) {
                 facts.length_roots = length_roots(function, &facts);
@@ -64,8 +63,8 @@ pub(crate) fn analyze(module: &Module) -> Vec<FunctionBorrows> {
         .collect()
 }
 
-/// Edge preservation permits append; length/buffer invariance additionally
-/// excludes it and reserve, including through every ordinary or fresh call.
+/// Appending preserves element owners. Incoming lengths and buffers also stay
+/// intact when an append or reserve targets a freshly allocated private list.
 fn summaries(
     module: &Module,
     append: bool,
@@ -254,8 +253,10 @@ fn preserves_edges(
             ExprKind::Builtin(operation, args) => {
                 let contract = operation.contract(args);
                 contract.preserves_list_storage()
-                    || (matches!(operation, Builtin::SetAdd)
-                        && matches!(args[0].kind, ExprKind::Local(slot) if private[slot]))
+                    || (matches!(
+                        operation,
+                        Builtin::SetAdd | Builtin::Append | Builtin::ListReserveRange
+                    ) && matches!(args[0].kind, ExprKind::Local(slot) if private[slot]))
                     || (append && contract.preserves_owners())
             }
             // A binding can replace an earlier borrowed operand during evaluation.
@@ -465,6 +466,10 @@ fn length_roots(function: &Function, facts: &FunctionBorrows) -> Vec<Option<usiz
 mod tests {
     use super::*;
     use crate::ir::CallArgs;
+
+    fn analyze(module: &Module) -> Vec<FunctionBorrows> {
+        super::analyze(module, &Targets::analyze(module))
+    }
 
     fn local(slot: usize, ty: Type) -> Expr {
         Expr {
@@ -772,7 +777,7 @@ mod tests {
 
     fn emitted_body(module: &Module, id: usize) -> String {
         let ranges = crate::ranges::analyze(module);
-        let llvm = crate::llvm::emit(module, &ranges, false);
+        let llvm = crate::llvm::emit(module, &ranges, false).unwrap();
         llvm.split_once(&format!("@fn_{id}("))
             .unwrap()
             .1
@@ -780,6 +785,16 @@ mod tests {
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn only_appends_to_a_fresh_private_list_preserve_the_input_length() {
+        let module = lower(include_str!(
+            "../../../tests/fixtures/containers/fresh_list_length.py"
+        ));
+        let facts = analyze(&module);
+        assert_eq!(facts[0].length_roots[0], Some(0));
+        assert_eq!(facts[1].length_roots[0], None);
     }
 
     #[test]

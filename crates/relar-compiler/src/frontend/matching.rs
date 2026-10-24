@@ -6,8 +6,8 @@ use super::*;
 
 #[derive(Clone)]
 struct Flow {
-    assigned: HashSet<usize>,
-    narrowed: HashMap<usize, Type>,
+    assigned: assignments::Assigned,
+    narrowed: assignments::Narrowed,
 }
 
 impl Flow {
@@ -24,9 +24,12 @@ impl Flow {
     }
 
     fn intersect(&mut self, other: &Self) {
-        self.assigned.retain(|slot| other.assigned.contains(slot));
-        self.narrowed
-            .retain(|slot, ty| other.narrowed.get(slot) == Some(ty));
+        assignments::intersect(
+            &mut self.assigned,
+            &mut self.narrowed,
+            &other.assigned,
+            &other.narrowed,
+        );
     }
 }
 
@@ -311,7 +314,7 @@ impl Checker<'_> {
         } else {
             before.restore(self);
         }
-        self.narrowed.remove(&subject);
+        self.narrowed.remove_mut(&subject);
         Ok((
             vec![Statement::Scope {
                 body,
@@ -350,7 +353,7 @@ impl Checker<'_> {
             if let Some(payload) = self.types.payload(self.locals[slot])
                 && (ty == Type::None || ty == payload)
             {
-                self.narrowed.insert(slot, ty);
+                self.narrowed.insert_mut(slot, ty);
             }
         }
     }

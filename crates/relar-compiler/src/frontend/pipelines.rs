@@ -346,6 +346,7 @@ impl Checker<'_> {
                     _ => None,
                 });
                 let source = self.expansion_input(&call.arguments.args[0], element)?;
+                let source = self.fuse_splitlines(source);
                 let mut input = self.prepare_iteration(source, call, false)?;
                 self.hint_empty_iteration(&input, element);
                 let start = if let Some(start) = call.arguments.args.get(1) {
@@ -491,6 +492,50 @@ impl Checker<'_> {
         })
     }
 
+    /// Capture the immutable receiver once, before evaluating an enumerate start.
+    /// The fresh split list is unobservable at these direct iteration sites.
+    pub(super) fn fuse_splitlines(&mut self, input: Iteration) -> Iteration {
+        let Iteration::Container {
+            iterable:
+                Expr {
+                    kind: ExprKind::Builtin(Builtin::SplitLines, args),
+                    ..
+                },
+            items: false,
+            start: None,
+        } = input
+        else {
+            return input;
+        };
+        let iterator = self.hidden(Type::Iterator);
+        let value = self.hidden(Type::Str);
+        let ready = self.hidden(Type::Bool);
+        Iteration::Prepared(Prepared {
+            evaluate: vec![Statement::Assign(
+                iterator,
+                Expr {
+                    ty: Type::Iterator,
+                    kind: ExprKind::Builtin(Builtin::SplitLinesIter, args),
+                },
+            )],
+            acquire: Vec::new(),
+            next: vec![
+                Statement::Clear(value),
+                Statement::IterNext {
+                    iterator,
+                    key: value,
+                    value: None,
+                    ready,
+                },
+            ],
+            value,
+            ready,
+            elementless: false,
+            writes: HashSet::new(),
+            clear: vec![iterator, value, ready],
+        })
+    }
+
     /// Method evaluation creates the iterator at Python's observable point.
     /// Runtime iterdir snapshots eagerly; glob waits for the first pull. Private
     /// nullable results own every yielded path until the consumer acquires it.
@@ -551,26 +596,13 @@ impl Checker<'_> {
         }
     }
 
-    /// A file or any of its transitive owners has an observable final drop.
-    /// Opaque callables may also own a bound receiver that contains a file.
     fn may_own_file(&self, ty: Type, opaque_callables: bool) -> bool {
-        match ty {
-            Type::TextIO | Type::BinaryIO => true,
-            Type::Callable(_) if opaque_callables => true,
-            Type::Class(class) => self.classes.fields[class]
-                .iter()
-                .any(|ty| self.may_own_file(*ty, opaque_callables)),
-            _ => self
-                .types
-                .children(ty)
-                .into_iter()
-                .any(|ty| self.may_own_file(ty, opaque_callables)),
-        }
+        self.types
+            .may_own_file(ty, &self.classes.fields, opaque_callables)
     }
 
-    /// Only file resources have observable final drops in the sealed language.
-    /// Their transitive owners retain CPython's iterator tuple cache, including
-    /// shared-result behavior; other exact tuples can be scalar-replaced.
+    /// Preserve CPython's iterator tuple lifetime when dropping a component can
+    /// close a file, remove a directory, or release a suspended frame.
     fn iterator_tuple_cache(
         &mut self,
         ty: Type,
@@ -1286,7 +1318,7 @@ impl Checker<'_> {
         self.comprehension_depth += 1;
         // Suspended generators can observe later enclosing writes. Facts about
         // those mutable slots must be proved again inside the lazy body.
-        self.narrowed.clear();
+        self.narrowed = assignments::Narrowed::new();
         let mut inputs = Vec::new();
         let mut bindings = Vec::new();
         let mut filters = Vec::new();
@@ -1310,7 +1342,11 @@ impl Checker<'_> {
                     .iter()
                     .filter_map(|name| self.names.get(name).copied())
                     .collect::<HashSet<_>>();
-                self.narrowed.retain(|slot, _| stable.contains(slot));
+                for (slot, _) in &self.narrowed.clone() {
+                    if !stable.contains(slot) {
+                        self.narrowed.remove_mut(slot);
+                    }
+                }
             }
             let repeated_writes = generator.generators[index..]
                 .iter()
@@ -1320,7 +1356,7 @@ impl Checker<'_> {
                 .collect::<HashSet<_>>();
             for name in repeated_writes {
                 if let Some(slot) = self.names.get(&name) {
-                    self.narrowed.remove(slot);
+                    self.narrowed.remove_mut(slot);
                 }
             }
             bindings.push(self.bind_iterator_pattern(&clause.target, input.value)?);
@@ -1389,7 +1425,7 @@ impl Checker<'_> {
         {
             for name in narrowing::expression_assignments(expression) {
                 if let Some(slot) = self.names.get(&name) {
-                    self.narrowed.remove(slot);
+                    self.narrowed.remove_mut(slot);
                     writes.insert(*slot);
                 }
             }
@@ -1746,7 +1782,7 @@ impl Checker<'_> {
         // A later consumer argument or zip constructor argument may have
         // established new facts since this lazy body was checked.
         for slot in &input.writes {
-            self.narrowed.remove(slot);
+            self.narrowed.remove_mut(slot);
         }
         let before = self.assigned.clone();
         let mut facts = self.narrowed.clone();
@@ -1755,12 +1791,12 @@ impl Checker<'_> {
         target_names(target, &mut rebound);
         for name in rebound {
             if let Some(slot) = self.names.get(&name) {
-                facts.remove(slot);
+                facts.remove_mut(slot);
             }
         }
         let mut body = input.next;
         Prepared::bind_next(&mut body, self.local(input.ready), input.value, binding);
-        self.loop_breaks.push(Vec::new());
+        self.loop_breaks.push(None);
         body.extend(lower_body(self)?);
         let breaks = self.loop_breaks.pop().unwrap();
         self.assigned = before;

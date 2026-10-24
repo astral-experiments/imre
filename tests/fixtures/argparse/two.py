@@ -4,8 +4,10 @@ from pathlib import Path
 
 
 def first():
-    parser = ArgumentParser(prog="first")
-    parser.add_argument("--mode", choices=("small", "large"), required=True)
+    parser = ArgumentParser(prog="first", description="\x1cChoose\va mode\x1f")
+    parser.add_argument(
+        "--mode", choices=("small", "large"), required=True, help="Select\vthe mode"
+    )
     return parser.parse_args()
 
 

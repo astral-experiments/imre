@@ -2,6 +2,50 @@
 
 use super::*;
 
+/// Recognizes constructions whose only work after evaluating the arguments is
+/// writing each field once in order. The previous record may release
+/// its fields during those writes, so admit only fields with resource-free contents.
+pub(super) fn replacement_fields<'a>(module: &Module, expression: &'a Expr) -> Option<&'a [Expr]> {
+    if let ExprKind::Tuple(fields) = &expression.kind {
+        return (!module
+            .types
+            .may_own_file(expression.ty, &module.class_fields, true))
+        .then_some(fields);
+    }
+    let (Type::Class(class), ExprKind::Construct { initializer, args }) =
+        (expression.ty, &expression.kind)
+    else {
+        return None;
+    };
+    let function = &module.functions[*initializer];
+    let (receiver, params) = function.params.split_first()?;
+    let fields = &module.class_fields[class];
+    if fields.is_empty()
+        || function.body.len() != fields.len()
+        || args.order.iter().copied().ne(0..fields.len())
+    {
+        return None;
+    }
+    for (field, (statement, ty)) in function.body.iter().zip(fields).enumerate() {
+        let Statement::SetField(object, index, value) = statement else {
+            return None;
+        };
+        if *index != field
+            || value.ty != *ty
+            || args.values[field].ty != *ty
+            || !matches!(object.kind, ExprKind::Local(slot) if slot == *receiver)
+            || !matches!(value.kind, ExprKind::Local(slot) if params.get(field) == Some(&slot))
+            || !matches!(
+                ty,
+                Type::Int | Type::Bool | Type::Float | Type::Str | Type::Bytes | Type::ListInt
+            )
+        {
+            return None;
+        }
+    }
+    Some(&args.values)
+}
+
 fn bytes(output: &mut String, name: &str, value: &str) {
     write!(
         output,
@@ -113,5 +157,55 @@ impl Emitter<'_, '_> {
             operand,
             small_integer: false,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{CompileOptions, compile};
+
+    #[test]
+    fn loop_record_replacement_requires_only_resource_free_field_stores() {
+        let compile = |source| compile(source, &CompileOptions::default()).unwrap();
+        let eligible = compile(include_str!(
+            "../../../../tests/fixtures/classes/record_reuse.py"
+        ));
+        assert!(eligible.contains("call ptr @relar_record_try_cached_result("));
+
+        let list_fields = compile(include_str!(
+            "../../../../tests/fixtures/classes/record_reuse_list.py"
+        ));
+        let cached = "call ptr @relar_record_try_cached_result(";
+        assert!(list_fields.contains(cached));
+        let streams = list_fields
+            .split("\ndefine ")
+            .find(|body| body.contains("call ptr @relar_text_open("))
+            .unwrap();
+        assert!(!streams.contains(cached));
+
+        let ordinary = compile(
+            r#"
+from dataclasses import dataclass
+from typing import TextIO
+
+@dataclass(repr=False, eq=False)
+class Streams:
+    handles: list[TextIO]
+
+@dataclass
+class Logged:
+    number: int
+
+    def __post_init__(self) -> None:
+        print(self.number)
+
+def keep(streams: list[TextIO]) -> None:
+    for i in range(2):
+        holder = Streams(streams)
+        logged = Logged(i)
+        print(len(holder.handles) + logged.number)
+"#,
+        );
+        assert!(!ordinary.contains("call ptr @relar_record_try_cached_result("));
     }
 }

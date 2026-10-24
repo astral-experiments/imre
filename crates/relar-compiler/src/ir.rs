@@ -365,15 +365,6 @@ pub(crate) enum Compare {
 pub(crate) enum Builtin {
     DirectoryContextView,
     Document(DocumentOp),
-    /// Runs the static archive's module initializer in ordinary import order.
-    ExtensionImport(String),
-    /// Calls a checked declaration in a rebuilt extension's method table.
-    ExtensionCall {
-        module: String,
-        method: String,
-        kinds: Vec<u8>,
-        result_kind: u8,
-    },
     StrEnumMember {
         class: usize,
         member: usize,
@@ -463,6 +454,8 @@ pub(crate) enum Builtin {
     ListDistinct,
     StringGet,
     StringIter,
+    /// Iterates Python line boundaries on a rooted immutable string.
+    SplitLinesIter,
     /// Linear Unicode iteration from the final code point toward the first.
     StringReverseIter,
     /// Private, initially zeroed tuple storage for iterator result caching.
@@ -607,6 +600,19 @@ pub(crate) enum Builtin {
     ExceptionCause,
     ExceptionSuppressContext,
 }
+
+impl Builtin {
+    /// Position of a read-only key that can borrow a stack tuple for the call.
+    pub(crate) fn tuple_probe_index(&self) -> Option<usize> {
+        match self {
+            Self::DictGetDefault | Self::DictTryGet(_) => Some(1),
+            Self::DictContains | Self::SetContains => Some(0),
+            _ => None,
+        }
+    }
+}
+
+pub(crate) const TUPLE_PROBE_ARITY: std::ops::RangeInclusive<usize> = 1..=16;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum DocumentShape {

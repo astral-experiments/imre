@@ -2,8 +2,11 @@
 
 use std::cell::{Ref, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::fmt::{self, Write};
 
 use crate::ir::Type;
+
+const MAX_DESCRIPTION_BYTES: usize = 1024;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum Shape {
@@ -44,6 +47,109 @@ struct Storage {
 /// type universe without retaining references into its growable storage.
 #[derive(Default)]
 pub(crate) struct Types(RefCell<Storage>);
+
+#[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+impl Types {
+    /// Checks an identity without using the unchecked shape accessors below.
+    pub(crate) fn verify_type(&self, ty: Type, classes: usize) -> Result<(), String> {
+        let storage = self.0.borrow();
+        let valid = match ty {
+            Type::StrLiteral(id) => {
+                matches!(storage.shapes.get(id), Some(Shape::StringLiterals(_)))
+            }
+            Type::List(id) => matches!(storage.shapes.get(id), Some(Shape::List(_))),
+            Type::Dict(id) => matches!(
+                storage.shapes.get(id),
+                Some(Shape::Dict(..) | Shape::DefaultListDict(..) | Shape::Counter(_))
+            ),
+            Type::Set(id) => matches!(storage.shapes.get(id), Some(Shape::Set(_))),
+            Type::Tuple(id) => matches!(storage.shapes.get(id), Some(Shape::Tuple(_))),
+            Type::Callable(id) => matches!(storage.shapes.get(id), Some(Shape::Callable(..))),
+            Type::Optional(id) => matches!(storage.shapes.get(id), Some(Shape::Optional(_))),
+            Type::Union(id) => matches!(storage.shapes.get(id), Some(Shape::Union(_))),
+            Type::Class(id) | Type::StrEnum(id) | Type::Enum(id) => id < classes,
+            Type::Coroutine(id) | Type::Task(id) => {
+                matches!(storage.shapes.get(id), Some(Shape::Awaitable(_)))
+            }
+            Type::DirectoryContext(id) => {
+                matches!(storage.shapes.get(id), Some(Shape::DirectoryContext(_)))
+            }
+            Type::AsyncProcess(bits) => bits <= 3,
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::Str
+            | Type::Bytes
+            | Type::ListInt
+            | Type::StringKeys
+            | Type::Iterator
+            | Type::Exception
+            | Type::TimeoutExpired
+            | Type::TextIO
+            | Type::BinaryIO
+            | Type::Path
+            | Type::CompletedProcess
+            | Type::EventLoop
+            | Type::TaskGroup
+            | Type::GeneratorContext
+            | Type::Semaphore
+            | Type::Document(_)
+            | Type::Logger
+            | Type::RegexPattern
+            | Type::RegexMatch
+            | Type::JsonValue
+            | Type::JsonObject
+            | Type::None => true,
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(format!("invalid type identity {ty}"))
+        }
+    }
+
+    /// Interned structural types refer to earlier shapes; nominal class edges are separate.
+    pub(crate) fn verify_shapes(&self, classes: usize) -> Result<(), String> {
+        let storage = self.0.borrow();
+        for (id, shape) in storage.shapes.iter().enumerate() {
+            let children: Vec<Type> = match shape {
+                Shape::StringLiterals(_) => Vec::new(),
+                Shape::List(ty)
+                | Shape::Set(ty)
+                | Shape::Counter(ty)
+                | Shape::Awaitable(ty)
+                | Shape::DirectoryContext(ty)
+                | Shape::Optional(ty) => vec![*ty],
+                Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => vec![*key, *value],
+                Shape::Tuple(fields) | Shape::Union(fields) => fields.clone(),
+                Shape::Callable(params, returns) => {
+                    params.iter().copied().chain([*returns]).collect()
+                }
+            };
+            for child in children {
+                self.verify_type(child, classes)?;
+                if let Type::StrLiteral(child_id)
+                | Type::List(child_id)
+                | Type::Dict(child_id)
+                | Type::Set(child_id)
+                | Type::Tuple(child_id)
+                | Type::Callable(child_id)
+                | Type::Optional(child_id)
+                | Type::Coroutine(child_id)
+                | Type::Task(child_id)
+                | Type::DirectoryContext(child_id)
+                | Type::Union(child_id) = child
+                    && child_id >= id
+                {
+                    return Err(format!(
+                        "type shape #{id} contains a forward or cyclic reference to {child}"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
 
 impl Types {
     pub(crate) fn set_exception_declarations(&self, declarations: Vec<NamedException>) {
@@ -472,6 +578,38 @@ impl Types {
         }
     }
 
+    /// Closing a file or pipe, removing a temporary directory, or releasing a
+    /// suspended frame can make the timing of the final drop observable.
+    pub(crate) fn may_own_file(
+        &self,
+        ty: Type,
+        class_fields: &[Vec<Type>],
+        opaque_callables: bool,
+    ) -> bool {
+        let mut pending = vec![ty];
+        let mut seen = HashSet::new();
+        while let Some(ty) = pending.pop() {
+            if !seen.insert(ty) {
+                continue;
+            }
+            match ty {
+                Type::TextIO
+                | Type::BinaryIO
+                | Type::AsyncProcess(_)
+                | Type::DirectoryContext(_)
+                | Type::GeneratorContext
+                | Type::EventLoop
+                | Type::Coroutine(_)
+                | Type::Task(_)
+                | Type::TaskGroup => return true,
+                Type::Callable(_) if opaque_callables => return true,
+                Type::Class(class) => pending.extend_from_slice(&class_fields[class]),
+                _ => pending.extend(self.children(ty)),
+            }
+        }
+        false
+    }
+
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
         if let Some(element) = self
@@ -490,70 +628,156 @@ impl Types {
     }
 
     pub(crate) fn describe(&self, ty: Type, class_name: &impl Fn(usize) -> String) -> String {
-        match ty {
-            Type::StrLiteral(_) => {
-                let values = self.literal_strings(ty).unwrap();
-                let choices = values.iter().map(|s| format!("{s:?}")).collect::<Vec<_>>();
-                format!("Literal[{}]", choices.join(", "))
-            }
-            Type::Class(id) | Type::StrEnum(id) | Type::Enum(id) => class_name(id),
-            Type::Callable(_) => {
-                let (params, returns) = self.signature(ty).unwrap();
-                format!(
-                    "Callable[[{}], {}]",
-                    params
-                        .iter()
-                        .map(|&ty| self.describe(ty, class_name))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    self.describe(returns, class_name)
-                )
-            }
-            Type::List(_) => format!(
-                "list[{}]",
-                self.describe(self.element(ty).unwrap(), class_name)
-            ),
-            Type::Tuple(_) => format!(
-                "tuple[{}]",
-                self.fields(ty)
-                    .unwrap()
-                    .into_iter()
-                    .map(|ty| self.describe(ty, class_name))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Type::Dict(_) => {
-                let (key, value) = self.mapping(ty).unwrap();
-                if self.is_counter(ty) {
-                    return format!("Counter[{}]", self.describe(key, class_name));
-                }
-                let name = if self.is_default_list_dict(ty) {
-                    "defaultdict"
-                } else {
-                    "dict"
-                };
-                format!(
-                    "{name}[{}, {}]",
-                    self.describe(key, class_name),
-                    self.describe(value, class_name)
-                )
-            }
-            Type::Set(_) => format!(
-                "set[{}]",
-                self.describe(self.set_element(ty).unwrap(), class_name)
-            ),
-            Type::Optional(_) => format!(
-                "{} | None",
-                self.describe(self.payload(ty).unwrap(), class_name)
-            ),
-            Type::Union(_) => self
-                .members(ty)
-                .unwrap()
-                .into_iter()
-                .map(|ty| self.describe(ty, class_name))
-                .collect::<Vec<_>>()
-                .join(" | "),
-            _ => ty.to_string(),
+        let storage = self.0.borrow();
+        let mut description = TypeDescription {
+            shapes: &storage.shapes,
+            class_name,
+            text: String::new(),
+            remaining_nodes: 256,
+        };
+        if description.write_type(ty).is_err() {
+            description.text.push_str("...");
         }
+        description.text
+    }
+}
+
+/// A shared type can have an exponentially larger spelling than its source.
+struct TypeDescription<'a> {
+    shapes: &'a [Shape],
+    class_name: &'a dyn Fn(usize) -> String,
+    text: String,
+    remaining_nodes: usize,
+}
+
+impl fmt::Write for TypeDescription<'_> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        let remaining = MAX_DESCRIPTION_BYTES - self.text.len();
+        if s.len() > remaining {
+            self.text.push_str(&s[..s.floor_char_boundary(remaining)]);
+            return Err(fmt::Error);
+        }
+        self.text.push_str(s);
+        Ok(())
+    }
+}
+
+impl TypeDescription<'_> {
+    fn write_types(&mut self, types: &[Type], separator: &str) -> fmt::Result {
+        for (i, &ty) in types.iter().enumerate() {
+            if i != 0 {
+                self.write_str(separator)?;
+            }
+            self.write_type(ty)?;
+        }
+        Ok(())
+    }
+
+    fn write_type(&mut self, ty: Type) -> fmt::Result {
+        self.remaining_nodes = self.remaining_nodes.checked_sub(1).ok_or(fmt::Error)?;
+        let id = match ty {
+            Type::StrLiteral(id)
+            | Type::List(id)
+            | Type::Tuple(id)
+            | Type::Callable(id)
+            | Type::Dict(id)
+            | Type::Set(id)
+            | Type::Optional(id)
+            | Type::Union(id) => id,
+            Type::Class(id) | Type::StrEnum(id) | Type::Enum(id) => {
+                return self.write_str(&(self.class_name)(id));
+            }
+            _ => return write!(self, "{ty}"),
+        };
+        let shape = &self.shapes[id];
+        match shape {
+            Shape::StringLiterals(values) => {
+                self.write_str("Literal[")?;
+                for (i, value) in values.iter().enumerate() {
+                    if i != 0 {
+                        self.write_str(", ")?;
+                    }
+                    write!(self, "{value:?}")?;
+                }
+            }
+            Shape::Callable(params, returns) => {
+                self.write_str("Callable[[")?;
+                self.write_types(params, ", ")?;
+                self.write_str("], ")?;
+                self.write_type(*returns)?;
+            }
+            Shape::List(element) | Shape::Set(element) => {
+                self.write_str(if matches!(shape, Shape::List(_)) {
+                    "list["
+                } else {
+                    "set["
+                })?;
+                self.write_type(*element)?;
+            }
+            Shape::Tuple(fields) => {
+                self.write_str("tuple[")?;
+                self.write_types(fields, ", ")?;
+            }
+            Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => {
+                self.write_str(if matches!(shape, Shape::Dict(..)) {
+                    "dict["
+                } else {
+                    "defaultdict["
+                })?;
+                self.write_type(*key)?;
+                self.write_str(", ")?;
+                self.write_type(*value)?;
+            }
+            Shape::Counter(key) => {
+                self.write_str("Counter[")?;
+                self.write_type(*key)?;
+            }
+            Shape::DirectoryContext(_) | Shape::Awaitable(_) => {
+                unreachable!("handled by the nominal type spelling")
+            }
+            Shape::Optional(element) => {
+                self.write_type(*element)?;
+                return self.write_str(" | None");
+            }
+            Shape::Union(members) => return self.write_types(members, " | "),
+        }
+        self.write_str("]")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tuple_elements_can_own_resources_through_contexts_and_suspended_frames() {
+        let types = Types::default();
+        for resource in [
+            types.directory_context(Type::Str),
+            types.coroutine(Type::Int),
+            Type::AsyncProcess(1),
+        ] {
+            assert!(types.may_own_file(types.tuple(vec![resource]), &[], false));
+        }
+        assert!(!types.may_own_file(types.tuple(vec![Type::Path]), &[], false));
+    }
+
+    #[test]
+    fn shared_tuple_descriptions_stop_expanding() {
+        let types = Types::default();
+        let pair = types.tuple(vec![Type::Int, Type::Int]);
+        let name = |_| unreachable!();
+        assert_eq!(types.describe(pair, &name), "tuple[int, int]");
+        let mut ty = pair;
+        for _ in 0..30 {
+            ty = types.tuple(vec![ty, ty]);
+        }
+        let text = types.describe(ty, &name);
+        assert!(text.starts_with("tuple[tuple[") && text.ends_with("..."));
+        assert!(text.len() <= MAX_DESCRIPTION_BYTES + 3);
+        let literal = types.string_literal(vec!["雪".repeat(400)]);
+        let text = types.describe(literal, &name);
+        assert!(text.starts_with("Literal[\"雪") && text.ends_with("..."));
+        assert!(text.len() <= MAX_DESCRIPTION_BYTES + 3);
     }
 }

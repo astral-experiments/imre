@@ -66,8 +66,7 @@ impl Checker<'_> {
         }
     }
 
-    /// Transfers a compiler-owned root before evaluating the next user target.
-    /// Returning the value retains an independent reference before cleanup.
+    /// Yields the captured value and clears its slot before evaluating the next target.
     fn take_temporary(&self, slot: usize) -> Expr {
         Expr {
             ty: self.locals[slot],

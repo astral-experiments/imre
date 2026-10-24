@@ -4,11 +4,14 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
-use crate::contracts::runtime_call_may_raise;
+use crate::contracts::{
+    LIST_APPEND, LIST_BORROW_INDEX, LIST_COPY_INDEX, LIST_GET, LIST_GET_INDEX, LIST_POP, LIST_SET,
+    LIST_SET_INDEX, runtime_call_may_raise,
+};
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
     Binary, Builtin, CallArgs, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType,
-    Module, RegexCapture, Statement, Type,
+    Module, RegexCapture, Statement, TUPLE_PROBE_ARITY, Type,
 };
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
@@ -22,6 +25,7 @@ mod literals;
 mod paths;
 mod processes;
 mod records;
+mod runtime;
 mod stdlib;
 mod string_enums;
 mod text;
@@ -29,6 +33,7 @@ mod truthiness;
 mod unions;
 mod units;
 
+use units::Output;
 pub(crate) use units::emit_units;
 
 impl Type {
@@ -183,34 +188,37 @@ enum Completion {
     Error,
 }
 
-pub(crate) fn emit(module: &Module, ranges: &RangeFacts<'_>, sanitize: bool) -> String {
-    emit_program(module, ranges, sanitize, None)
+pub(crate) fn emit(
+    module: &Module,
+    ranges: &RangeFacts<'_>,
+    sanitize: bool,
+) -> Result<String, String> {
+    let mut output = Output::new(&vec![0; module.functions.len()], 1, 0, false);
+    emit_program(module, ranges, sanitize, &mut output)?;
+    Ok(std::mem::take(output.entry_buffer()))
 }
 
 fn emit_program(
     module: &Module,
     ranges: &RangeFacts<'_>,
     sanitize: bool,
-    mut partition: Option<&mut units::Owners<'_>>,
-) -> String {
-    let borrows = borrows::analyze(module);
-    let effects = effects::analyze(module);
+    output: &mut Output,
+) -> Result<(), String> {
+    let callable_targets = crate::callables::Targets::analyze(module);
+    let borrows = borrows::analyze(module, &callable_targets);
+    let effects = effects::analyze(module, &callable_targets);
     let inline_dispatch = string_enums::inline_dispatch(module, &effects);
-    let mut extension_modules = std::collections::BTreeSet::new();
-    for function in &module.functions {
-        crate::ir::walk_expressions(&function.body, &mut |expr| {
-            if let ExprKind::Builtin(Builtin::ExtensionImport(name), _) = &expr.kind {
-                extension_modules.insert(name.clone());
-            }
-        });
-    }
     let mut emitter = Emitter {
         module,
+        output,
         code: String::new(),
         entry_allocas: String::new(),
         strings: Vec::new(),
         string_literals: BTreeMap::new(),
+        tuple_literals: BTreeMap::new(),
         regex_literals: BTreeMap::new(),
+        bytes_literals: BTreeMap::new(),
+        integer_literals: BTreeMap::new(),
         enum_members: Vec::new(),
         literal_globals: literal_globals(module),
         next_value: 0,
@@ -228,51 +236,41 @@ fn emit_program(
         small_locals: Vec::new(),
         temporaries: Vec::new(),
         cleanups: Vec::new(),
+        try_nesting: 0,
+        cleanup_bytes: 0,
+        cleanup_limit_hit: false,
         return_exit: String::new(),
         error_exit: String::new(),
         sanitize,
         ranges,
         effects,
         inline_dispatch,
-        callable_targets: crate::callables::Targets::analyze(module),
+        callable_targets,
         integer_regions: integer_regions::analyze(module),
         uses_sys_argv: module.uses_sys_argv(),
-        has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
-    if let Some(plan) = &mut partition {
-        plan.strings.resize(emitter.strings.len(), plan.entry);
-    }
-    for (id, function) in module.functions.iter().enumerate() {
-        if partition.is_some() {
+    let mut bodies = Vec::with_capacity(module.functions.len() + 1);
+    for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
+        let entry = id == module.functions.len();
+        emitter.output.current = if entry {
+            emitter.output.entry
+        } else {
+            emitter.output.function_owner(id)
+        };
+        if emitter.output.split() {
             // SSA names and labels are scoped to one LLVM function.
             emitter.next_value = 0;
             emitter.next_label = 0;
         }
-        emitter.function(function, &format!("fn_{id}"), false, &borrows[id]);
-        if let Some(plan) = &mut partition {
-            plan.strings
-                .resize(emitter.strings.len(), plan.functions[id]);
-        }
+        let params = emitter.function(function, entry, &borrows[id])?;
+        bodies.push((params, std::mem::take(&mut emitter.code)));
     }
-    if partition.is_some() {
-        emitter.next_value = 0;
-        emitter.next_label = 0;
-    }
-    emitter.function(&module.entry, "main", true, borrows.last().unwrap());
-    if let Some(plan) = &mut partition {
-        plan.strings.resize(emitter.strings.len(), plan.entry);
-    }
-    let mut output = String::from(
-        "; Generated by Relar. Runtime arguments borrow; results transfer ownership.\n",
-    );
-    output.push_str(DECLARATIONS);
-    if !extension_modules.is_empty() {
-        output.push_str("declare void @relar_extension_import(ptr)\ndeclare void @relar_extension_clear()\ndeclare i64 @relar_extension_call(ptr, ptr, ptr, ptr, i64, i32)\n");
-        for name in extension_modules {
-            writeln!(output, "declare ptr @PyInit_{name}()").unwrap();
-        }
-    }
+    emitter
+        .output
+        .common()
+        .push_str("; Generated by Relar. Runtime arguments borrow; results transfer ownership.\n");
+    write_declarations(emitter.output);
     for declaration in module.types.exception_declarations().iter() {
         let id = declaration.id;
         let name = declaration.name.as_bytes();
@@ -287,6 +285,7 @@ fn emit_program(
             .map(|kind| format!("i32 {kind}"))
             .collect::<Vec<_>>()
             .join(", ");
+        let output = emitter.output.entry_buffer();
         writeln!(
             output,
             "@exception_name_{id} = private constant [{} x i8] [{names}]",
@@ -299,51 +298,100 @@ fn emit_program(
             declaration.ancestors.len()
         )
         .unwrap();
-        writeln!(output, "@exception_type_{id} = private constant {{ ptr, i64, ptr, i64, i32 }} {{ ptr @exception_name_{id}, i64 {}, ptr @exception_ancestors_{id}, i64 {}, i32 {} }}", name.len(), declaration.ancestors.len(), declaration.base).unwrap();
+        let name_storage = emitter.output.global(
+            emitter.output.entry,
+            &format!("exception_type_{id}"),
+            "constant",
+            "{ ptr, i64, ptr, i64, i32 }",
+        );
+        writeln!(
+            name_storage,
+            "{{ ptr @exception_name_{id}, i64 {}, ptr @exception_ancestors_{id}, i64 {}, i32 {} }}",
+            name.len(),
+            declaration.ancestors.len(),
+            declaration.base
+        )
+        .unwrap();
     }
-    output.push_str(&record_layouts(module));
-    output.push_str(&json::schemas(module));
-    output.push_str(&callables::adapters(module, sanitize));
-    output.push_str(&asyncio::adapters(module, sanitize));
-    output.push_str(&integer_helpers());
-    output.push_str(&nullable_pointer_helpers());
+    record_layouts(module, emitter.output);
+    json::schemas(module, emitter.output);
+    callables::adapters(module, sanitize, emitter.output);
+    asyncio::adapters(module, sanitize, emitter.output);
+    emitter.output.common().push_str(&integer_helpers());
+    emitter
+        .output
+        .common()
+        .push_str(&nullable_pointer_helpers());
     for (slot, ty) in module.globals.iter().enumerate() {
         writeln!(
-            output,
-            "@module_value_{slot} = internal global {} {}",
-            ty.llvm(),
+            emitter.output.global(
+                emitter.output.entry,
+                &format!("module_value_{slot}"),
+                "global",
+                ty.llvm()
+            ),
+            "{}",
             ty.initial()
         )
         .unwrap();
     }
     for (id, bytes) in emitter.strings.iter().enumerate() {
-        write!(
-            output,
-            "@str_{id} = private unnamed_addr constant [{} x i8] c\"",
-            bytes.len()
-        )
-        .unwrap();
+        let name = emitter.output.string_name(id, "str");
+        let owner = emitter.output.string_owner(id);
+        let output = emitter.output.global(
+            owner,
+            &name,
+            "unnamed_addr constant",
+            format_args!("[{} x i8]", bytes.len()),
+        );
+        output.push_str("c\"");
         for byte in bytes {
             write!(output, "\\{byte:02X}").unwrap();
         }
         output.push_str("\"\n");
     }
-    output.push_str(&emitter.enum_table());
-    output.push_str(&emitter.literal_pool());
-    output.push_str(&emitter.code);
+    emitter.enum_table();
+    emitter.literal_pool();
+    for (id, (params, body)) in bodies.into_iter().enumerate() {
+        let (owner, name, returns) = if let Some(f) = module.functions.get(id) {
+            (
+                emitter.output.function_owner(id),
+                emitter.output.function_name(id),
+                f.returns.llvm(),
+            )
+        } else {
+            (emitter.output.entry, "main".to_owned(), "i32")
+        };
+        let attrs = if sanitize { " sanitize_address" } else { "" };
+        emitter.output.common().push('\n');
+        emitter
+            .output
+            .function(owner, &name, returns, &params, attrs)
+            .push_str(&body);
+    }
     // Layout hints never replace the representation, overflow, or error guards.
-    output.push_str("\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n");
-    output.push_str("!1 = !{!\"branch_weights\", i32 2000, i32 1}\n");
-    output
+    emitter
+        .output
+        .common()
+        .push_str("\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n");
+    emitter
+        .output
+        .common()
+        .push_str("!1 = !{!\"branch_weights\", i32 2000, i32 1}\n");
+    Ok(())
 }
 
 struct Emitter<'a, 'module> {
     module: &'a Module,
+    output: &'a mut Output,
     code: String,
     entry_allocas: String,
     strings: Vec<Vec<u8>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
+    tuple_literals: BTreeMap<usize, Vec<String>>,
     regex_literals: BTreeMap<Vec<u8>, usize>,
+    bytes_literals: BTreeMap<Vec<u8>, usize>,
+    integer_literals: BTreeMap<Vec<u8>, usize>,
     enum_members: Vec<[usize; 3]>,
     literal_globals: Vec<Option<String>>,
     next_value: usize,
@@ -361,6 +409,9 @@ struct Emitter<'a, 'module> {
     small_locals: Vec<bool>,
     temporaries: Vec<Value>,
     cleanups: Vec<Cleanup>,
+    try_nesting: usize,
+    cleanup_bytes: usize,
+    cleanup_limit_hit: bool,
     return_exit: String,
     error_exit: String,
     sanitize: bool,
@@ -370,7 +421,6 @@ struct Emitter<'a, 'module> {
     callable_targets: crate::callables::Targets,
     integer_regions: Vec<Option<integer_regions::Summary>>,
     uses_sys_argv: bool,
-    has_extensions: bool,
 }
 
 impl Emitter<'_, '_> {
@@ -462,8 +512,9 @@ impl Emitter<'_, '_> {
         args: &[&Value],
         enum_match: bool,
     ) -> Value {
+        let name = self.output.function_ref(function);
         self.call_with_effect(
-            &format!("fn_{function}"),
+            &name,
             returns,
             args,
             self.effects.may_raise(function),
@@ -682,9 +733,10 @@ impl Emitter<'_, '_> {
     }
 
     fn borrow_global(&mut self, slot: usize, ty: Type) -> Value {
+        let name = self.output.global_ref(format!("module_value_{slot}"));
         Value {
             ty,
-            operand: self.instruction(format!("load {}, ptr @module_value_{slot}", ty.llvm())),
+            operand: self.instruction(format!("load {}, ptr @{name}", ty.llvm())),
             small_integer: false,
         }
     }
@@ -1070,11 +1122,14 @@ impl Emitter<'_, '_> {
         })
     }
 
+    fn owns_slot(&self, slot: usize) -> bool {
+        !self.borrowed_params[slot] && !self.borrowed_locals[slot]
+    }
+
     /// Transfers a local's ownership to the returned value and leaves a valid
     /// empty/immediate value behind for subsequent reassignment or cleanup.
     fn take_slot(&mut self, slot: usize) -> Value {
-        debug_assert!(!self.borrowed_params[slot]);
-        debug_assert!(!self.borrowed_locals[slot]);
+        debug_assert!(self.owns_slot(slot));
         let value = self.borrow_slot(slot);
         self.line(format!(
             "store {} {}, ptr %local{slot}",
@@ -1210,6 +1265,14 @@ impl Emitter<'_, '_> {
                 Cleanup::Active { previous, name } => self.restore_active(&previous, name),
                 Cleanup::Completion(value) => self.release(&value),
                 Cleanup::Finally { body, loops } => {
+                    // A finalbody can itself contain transfers and protected
+                    // regions. Bound copied cleanup IR across one outer try.
+                    const MAX_CLEANUP_BYTES: usize = 8 * 1024 * 1024;
+                    if self.cleanup_limit_hit || self.cleanup_bytes >= MAX_CLEANUP_BYTES {
+                        self.cleanup_limit_hit = true;
+                        self.terminated = true;
+                        return;
+                    }
                     let depth = self.cleanups.len();
                     let error = if matches!(completion, Completion::Error) {
                         let error = self.call("relar_error_take", Type::Exception, &[]);
@@ -1230,7 +1293,11 @@ impl Emitter<'_, '_> {
                         None
                     };
                     self.loops = loops;
+                    let before = self.code.len();
+                    let previous_bytes = self.cleanup_bytes;
                     self.block(&body);
+                    // Nested copies are already included in this byte range.
+                    self.cleanup_bytes = previous_bytes + (self.code.len() - before);
                     self.cleanups.truncate(depth);
                     if self.terminated {
                         return;
@@ -1266,6 +1333,10 @@ impl Emitter<'_, '_> {
         orelse: &[Statement],
         finalbody: &[Statement],
     ) {
+        if self.try_nesting == 0 {
+            self.cleanup_bytes = 0;
+        }
+        self.try_nesting += 1;
         let depth = self.cleanups.len();
         let end = self.label();
         if !finalbody.is_empty() {
@@ -1275,11 +1346,12 @@ impl Emitter<'_, '_> {
             });
         }
         let dispatch = self.label();
-        if !handlers.is_empty() {
+        let catches_error = !handlers.is_empty() || !finalbody.is_empty();
+        if catches_error {
             self.cleanups.push(Cleanup::Handler(dispatch.clone()));
         }
         self.block(body);
-        if !handlers.is_empty() {
+        if catches_error {
             self.cleanups.pop();
         }
         if !self.terminated {
@@ -1342,9 +1414,15 @@ impl Emitter<'_, '_> {
             self.void_call("relar_error_set", &[&exception]);
             self.release(&exception);
             self.route(Completion::Error);
+        } else if catches_error {
+            // Every failure in this protected body shares its pending-error
+            // cleanup. Outer protected bodies provide their own landing pads.
+            self.start(&dispatch);
+            self.route(Completion::Error);
         }
         self.cleanups.truncate(depth);
         self.start(&end);
+        self.try_nesting -= 1;
     }
 
     /// The caller roots arguments throughout a call. Parameters whose bindings
@@ -1352,10 +1430,9 @@ impl Emitter<'_, '_> {
     fn function(
         &mut self,
         function: &Function,
-        symbol: &str,
         entry: bool,
         borrows: &FunctionBorrows,
-    ) {
+    ) -> Result<String, String> {
         self.entry_allocas.clear();
         self.locals = function.locals.clone();
         self.borrowed_locals = borrows.locals.clone();
@@ -1391,17 +1468,6 @@ impl Emitter<'_, '_> {
         } else {
             function.returns.llvm()
         };
-        let linkage = if entry { "" } else { "internal " };
-        let attributes = if self.sanitize {
-            " sanitize_address"
-        } else {
-            ""
-        };
-        writeln!(
-            self.code,
-            "\ndefine {linkage}{returns} @{symbol}({params}){attributes} {{"
-        )
-        .unwrap();
         self.start("entry");
         let allocas_at = self.code.len();
         self.line(format!(
@@ -1452,6 +1518,7 @@ impl Emitter<'_, '_> {
             self.line(format!(
                 "store {{ i64, i64 }} {layout}, ptr @sequence_layout"
             ));
+            self.line("call void @relar_record_error_init()");
             self.line("call void @relar_init_literals()");
         }
         if entry && self.uses_sys_argv {
@@ -1464,9 +1531,6 @@ impl Emitter<'_, '_> {
         self.start(&self.return_exit.clone());
         self.cleanup();
         if entry {
-            if self.has_extensions {
-                self.line("call void @relar_extension_clear()");
-            }
             self.cleanup_globals();
             self.line("call void @relar_clear_literals()");
             if self.uses_sys_argv {
@@ -1503,9 +1567,6 @@ impl Emitter<'_, '_> {
         }
         self.cleanup();
         if entry {
-            if self.has_extensions {
-                self.line("call void @relar_extension_clear()");
-            }
             self.cleanup_globals();
             self.line("call void @relar_clear_literals()");
             if self.uses_sys_argv {
@@ -1518,6 +1579,10 @@ impl Emitter<'_, '_> {
         }
         self.code.push_str("}\n");
         self.code.insert_str(allocas_at, &self.entry_allocas);
+        if self.cleanup_limit_hit {
+            return Err("Relar: finally cleanup expansion exceeds the compiler limit".to_owned());
+        }
+        Ok(params)
     }
 
     fn block(&mut self, statements: &[Statement]) {
@@ -1528,7 +1593,7 @@ impl Emitter<'_, '_> {
                 break;
             }
             if let Some(next) = statements.peek()
-                && self.append_pair(statement, next)
+                && (self.move_cleared_local(statement, next) || self.append_pair(statement, next))
             {
                 statements.next();
             } else {
@@ -1542,6 +1607,21 @@ impl Emitter<'_, '_> {
                 "statement changed its enclosing expression owners"
             );
         }
+    }
+
+    /// A copy immediately followed by clearing its private source transfers one owner.
+    fn move_cleared_local(&mut self, first: &Statement, second: &Statement) -> bool {
+        if let Statement::Assign(target, value) = first
+            && let ExprKind::Local(source) = value.kind
+            && matches!(second, Statement::Clear(slot) if *slot == source)
+            && *target != source
+            && self.owns_slot(source)
+            && self.owns_slot(*target)
+        {
+            self.statement(&Statement::Move(*target, source));
+            return true;
+        }
+        false
     }
 
     /// Combines two appends whose already-evaluated operands cannot change.
@@ -1602,9 +1682,9 @@ impl Emitter<'_, '_> {
                     return;
                 }
                 if !self.loops.is_empty()
-                    && let ExprKind::Tuple(fields) = &expression.kind
+                    && let Some(fields) = records::replacement_fields(self.module, expression)
                 {
-                    self.assign_loop_tuple(*slot, fields);
+                    self.assign_loop_record(*slot, fields);
                     return;
                 }
                 let previous_small = self.assignment_replaces_small(*slot, expression);
@@ -1942,31 +2022,11 @@ impl Emitter<'_, '_> {
         }
     }
 
-    fn literal(&mut self, contents: &str, ty: Type) -> Value {
-        self.literal_bytes(contents.as_bytes(), ty)
-    }
-
-    /// Emits exact source bytes without routing arbitrary byte values through UTF-8.
-    fn literal_bytes(&mut self, contents: &[u8], ty: Type) -> Value {
-        if ty == Type::Str {
-            return self.pooled_literal(contents, Type::Str);
-        }
+    fn byte_array(&mut self, bytes: Vec<u8>) -> String {
         let id = self.strings.len();
-        self.strings.push(contents.to_vec());
-        let function = match ty {
-            Type::Int => "relar_int_literal",
-            Type::Bytes => "relar_bytes_literal",
-            _ => unreachable!("literal representation was checked"),
-        };
-        Value {
-            ty,
-            operand: self.instruction(format!(
-                "call {} @{function}(ptr @str_{id}, i64 {})",
-                ty.llvm(),
-                contents.len()
-            )),
-            small_integer: false,
-        }
+        self.strings.push(bytes);
+        self.output.add_string();
+        self.output.string_name(id, "str")
     }
 
     /// Produces an owned result; its consumer must transfer or release that ownership.
@@ -1990,7 +2050,7 @@ impl Emitter<'_, '_> {
                 {
                     small(value)
                 } else {
-                    self.literal(value, Type::Int)
+                    self.pooled_literal(value.as_bytes(), Type::Int)
                 }
             }
             ExprKind::Float(value) => Value {
@@ -2005,9 +2065,9 @@ impl Emitter<'_, '_> {
             },
             ExprKind::Str(value) => Value {
                 ty: expression.ty,
-                ..self.literal(value, Type::Str)
+                ..self.pooled_literal(value.as_bytes(), Type::Str)
             },
-            ExprKind::Bytes(value) => self.literal_bytes(value, Type::Bytes),
+            ExprKind::Bytes(value) => self.pooled_literal(value, Type::Bytes),
             ExprKind::None => none(),
             ExprKind::Local(slot) => {
                 let mut value = self.borrow_slot(*slot);
@@ -2044,6 +2104,15 @@ impl Emitter<'_, '_> {
             ExprKind::Scope { body, value, clear } => {
                 self.cleanups.push(Cleanup::Slots(clear.clone()));
                 self.block(body);
+                // Unpacking returns a captured item and clears its slot before
+                // evaluating the next target. Hand its owner to the result.
+                if let ExprKind::Local(slot) = value.kind
+                    && clear.as_slice() == [slot]
+                    && self.owns_slot(slot)
+                {
+                    self.cleanups.pop();
+                    return self.take_slot(slot);
+                }
                 let value = self.expr(value);
                 self.cleanups.pop();
                 self.clear_slots(clear);
@@ -2112,15 +2181,7 @@ impl Emitter<'_, '_> {
                 }
                 set
             }
-            ExprKind::Tuple(values) => {
-                let object = self.record(expression.ty);
-                for (field, value) in values.iter().enumerate() {
-                    let value = self.operand(value);
-                    self.set_field(&object, field, &value.value);
-                    self.release_operand(&value);
-                }
-                object
-            }
+            ExprKind::Tuple(values) => self.tuple(expression.ty, values),
             ExprKind::Present(expression_value) => {
                 let value = self.operand(expression_value);
                 let value = self.own_operand(value);
@@ -2258,11 +2319,15 @@ impl Emitter<'_, '_> {
                 let pointer = message
                     .as_ref()
                     .map_or("null", |message| message.value.operand.as_str());
+                let call = if *kind >= 256 {
+                    let descriptor = self.output.global_ref(format!("exception_type_{kind}"));
+                    format!("call ptr @relar_named_exception_new(ptr @{descriptor}, ptr {pointer})")
+                } else {
+                    format!("call ptr @relar_exception_new(i32 {kind}, ptr {pointer})")
+                };
                 let value = Value {
                     ty: Type::Exception,
-                    operand: self.instruction(if *kind >= 256 {
-                        format!("call ptr @relar_named_exception_new(ptr @exception_type_{kind}, ptr {pointer})")
-                    } else { format!("call ptr @relar_exception_new(i32 {kind}, ptr {pointer})") }),
+                    operand: self.instruction(call),
                     small_integer: false,
                 };
                 if let Some(message) = &message {
@@ -2305,7 +2370,20 @@ impl Emitter<'_, '_> {
         let (scratch, count, owners) = self.concat_parts(expressions[1..].to_vec());
         let left = self.take_slot(slot);
         self.forget(&left);
-        let instruction = if count == 1 && disjoint {
+        let instruction = if let [_, suffix] = expressions.as_slice()
+            && let ExprKind::Str(value) = &suffix.kind
+            && value.len() > INLINE_CONCAT_LITERAL
+        {
+            let id = self.intern_literal(value.as_bytes(), Type::Str);
+            let root = self.output.literal_ref(id);
+            let bytes = self.output.string_name(id, "str");
+            let bytes = self.output.used(self.output.string_owner(id), bytes);
+            format!(
+                "call ptr @relar_str_append_literal_owned(ptr {}, ptr @{root}, ptr @{bytes}, i64 {})",
+                left.operand,
+                value.len()
+            )
+        } else if count == 1 && disjoint {
             // Literals live in static storage; indexed characters were copied
             // into unique scratch (or point to an immutable ASCII literal).
             // Neither can overlap the runtime allocation being consumed.
@@ -2449,9 +2527,17 @@ impl Emitter<'_, '_> {
                 continue;
             }
             let (data, length) = if let ExprKind::Str(value) = &expression.kind {
-                let id = self.strings.len();
-                self.strings.push(value.as_bytes().to_vec());
-                (format!("@str_{id}"), value.len().to_string())
+                if value.len() <= INLINE_CONCAT_LITERAL {
+                    let name = self.byte_array(value.as_bytes().to_vec());
+                    (format!("@{name}"), value.len().to_string())
+                } else {
+                    let id = self.intern_literal(value.as_bytes(), Type::Str);
+                    let root = self.output.literal_ref(id);
+                    (
+                        self.instruction(format!("load ptr, ptr @{root}")),
+                        "-1".into(),
+                    )
+                }
             } else {
                 let operand = self.operand(expression);
                 let data = operand.value.operand.clone();
@@ -2491,10 +2577,9 @@ impl Emitter<'_, '_> {
         };
         let index = self.operand(&args[1]);
         let index_value = self.instruction(format!("ashr i64 {}, 1", index.value.operand));
-        let id = self.strings.len();
-        self.strings.push(bytes);
+        let name = self.byte_array(bytes);
         let data = self.instruction(format!(
-            "getelementptr inbounds i8, ptr @str_{id}, i64 {index_value}"
+            "getelementptr inbounds i8, ptr @{name}, i64 {index_value}"
         ));
         self.release_operand(&index);
         Some(data)
@@ -3034,11 +3119,24 @@ impl Emitter<'_, '_> {
             self.release_operand(&right);
             return result;
         }
+        // A chain keeps its middle operand across the next expression. Limit
+        // short field borrows to one native comparison with passive operands.
+        let operand = if ops.len() == 1
+            && matches!(
+                values[0].ty,
+                Type::Str | Type::StrLiteral(_) | Type::Tuple(_)
+            )
+            && values.iter().all(read_only_field_operand)
+        {
+            Self::immediate_receiver
+        } else {
+            Self::operand
+        };
         let end = self.label();
         let mut incoming = Vec::new();
-        let mut left = self.operand(&values[0]);
+        let mut left = operand(self, &values[0]);
         for (i, &op) in ops.iter().enumerate() {
-            let right = self.operand(&values[i + 1]);
+            let right = operand(self, &values[i + 1]);
             let test = self.compare(op, &left.value, &right.value);
             self.release_operand(&left);
             if i + 1 == ops.len() {
@@ -3081,19 +3179,11 @@ impl Emitter<'_, '_> {
         {
             let list = self.operand(receiver);
             let index = self.operand(index);
-            let at = self.index_word(&index.value, true);
-            let word = self.checked_int_list_word(format!(
-                "call i64 @relar_list_borrow_index(ptr {}, i64 {at})",
-                list.value.operand
-            ));
+            let at = self.native_index(&index.value);
+            let borrowed = self.runtime_call(&LIST_BORROW_INDEX, [&list.value, &at]);
             self.release_operand(&index);
             self.release_operand(&list);
-            let value = self.unpack_word(word, Type::Int);
-            self.forget(&value);
-            return Operand {
-                value,
-                ownership: Ownership::Borrowed,
-            };
+            return borrowed;
         }
         self.operand(expression)
     }
@@ -3192,11 +3282,23 @@ impl Emitter<'_, '_> {
             self.store(*slot, &value);
             return self.truth(&value);
         }
-        let probe_index = match builtin {
-            Builtin::DictGetDefault | Builtin::DictTryGet(_) => Some(1),
-            Builtin::DictContains | Builtin::SetContains => Some(0),
-            _ => None,
-        };
+        let probe_index = builtin.tuple_probe_index();
+        // A later key or eager default can replace the receiver or any field
+        // along its path. A stack key assembled from local snapshots cannot.
+        let borrow_probe = probe_index.is_some_and(|key| {
+            expressions
+                .iter()
+                .enumerate()
+                .all(|(i, arg)| match &arg.kind {
+                    ExprKind::Tuple(fields) if i == key => {
+                        TUPLE_PROBE_ARITY.contains(&fields.len())
+                            && fields
+                                .iter()
+                                .all(|field| matches!(field.kind, ExprKind::Local(_)))
+                    }
+                    _ => read_only_field_operand(arg),
+                })
+        });
         let mut probe_fields = Vec::new();
         let args = expressions
             .iter()
@@ -3204,14 +3306,20 @@ impl Emitter<'_, '_> {
             .map(|(index, arg)| {
                 if probe_index == Some(index)
                     && let ExprKind::Tuple(fields) = &arg.kind
-                    && (1..=16).contains(&fields.len())
+                    && TUPLE_PROBE_ARITY.contains(&fields.len())
                 {
-                    self.tuple_probe(arg.ty, fields, &mut probe_fields)
-                } else if index == 0
-                    && matches!(
-                        builtin,
-                        Builtin::Len | Builtin::Bool | Builtin::RegexCapture { .. }
+                    self.tuple_probe(
+                        arg.ty,
+                        fields,
+                        index + 1 == expressions.len(),
+                        &mut probe_fields,
                     )
+                } else if borrow_probe
+                    || (index == 0
+                        && matches!(
+                            builtin,
+                            Builtin::Len | Builtin::Bool | Builtin::RegexCapture { .. }
+                        ))
                 {
                     self.immediate_receiver(arg)
                 } else {
@@ -3220,34 +3328,6 @@ impl Emitter<'_, '_> {
             })
             .collect::<Vec<_>>();
         let result = match builtin {
-            Builtin::ExtensionImport(module) => {
-                self.checked_line(format!(
-                    "call void @relar_extension_import(ptr @PyInit_{module})"
-                ));
-                none()
-            }
-            Builtin::ExtensionCall {
-                module,
-                method,
-                kinds,
-                result_kind,
-            } => {
-                let method_id = self.strings.len();
-                self.strings.push(method.bytes().chain([0]).collect());
-                let kinds_id = self.strings.len();
-                self.strings.push(kinds.clone());
-                let words = self.entry_alloca(format!("[{} x i64]", args.len()));
-                for (i, arg) in args.iter().enumerate() {
-                    let word = self.word(&arg.value);
-                    let slot = self.instruction(format!("getelementptr i64, ptr {words}, i64 {i}"));
-                    self.line(format!("store i64 {word}, ptr {slot}"));
-                }
-                let word = self.checked_instruction(format!(
-                    "call i64 @relar_extension_call(ptr @PyInit_{module}, ptr @str_{method_id}, ptr @str_{kinds_id}, ptr {words}, i64 {}, i32 {result_kind})",
-                    args.len()
-                ));
-                self.unpack_word(word, returns)
-            }
             Builtin::StrEnumMember { class, member } => Value {
                 ty: returns,
                 operand: self.enum_tag(*class, *member).to_string(),
@@ -3451,24 +3531,24 @@ impl Emitter<'_, '_> {
                 } else {
                     "json"
                 };
+                let schema = self.output.global_ref(json::schema_name(*schema));
                 Value {
                     ty: returns,
                     operand: self.checked_instruction(format!(
-                        "call ptr @relar_{format}_decode(ptr {}, ptr @{})",
+                        "call ptr @relar_{format}_decode(ptr {}, ptr @{schema})",
                         args[0].value.operand,
-                        json::schema_name(*schema),
                     )),
                     small_integer: false,
                 }
             }
             Builtin::JsonEncode(schema) => {
+                let schema = self.output.global_ref(json::schema_name(*schema));
                 let word = self.word(&args[0].value);
                 let ascii = self.instruction(format!("zext i1 {} to i32", args[2].value.operand));
                 Value {
                     ty: returns,
                     operand: self.checked_instruction(format!(
-                        "call ptr @relar_json_encode(i64 {word}, ptr @{}, i64 {}, i32 {ascii})",
-                        json::schema_name(*schema),
+                        "call ptr @relar_json_encode(i64 {word}, ptr @{schema}, i64 {}, i32 {ascii})",
                         args[1].value.operand,
                     )),
                     small_integer: false,
@@ -3484,19 +3564,25 @@ impl Emitter<'_, '_> {
             | Builtin::FloatFormat { .. }
             | Builtin::Abs => self.stdlib_builtin(builtin, &args),
             Builtin::TupleCacheNew => return self.record(returns),
-            Builtin::TupleCacheResult => {
-                self.call("relar_record_cached_result", returns, &[&args[0].value])
-            }
+            Builtin::TupleCacheResult => Value {
+                ty: returns,
+                operand: self.checked_pointer(format!(
+                    "call ptr @relar_record_try_cached_result(ptr {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::GlobalGet(slot) => {
                 let value = self.borrow_global(*slot, returns);
                 self.retain(&value);
                 value
             }
             Builtin::GlobalSet(slot) => {
+                let name = self.output.global_ref(format!("module_value_{slot}"));
                 let value = &args[0].value;
                 self.retain(value);
                 self.line(format!(
-                    "store {} {}, ptr @module_value_{slot}",
+                    "store {} {}, ptr @{name}",
                     value.ty.llvm(),
                     value.operand
                 ));
@@ -3507,8 +3593,9 @@ impl Emitter<'_, '_> {
                 return self.union_inject(value, returns);
             }
             Builtin::ExactRecord(class) => {
+                let layout = self.output.global_ref(format!("layout_class_{class}"));
                 let matched = self.instruction(format!(
-                    "call i32 @relar_record_has_type(ptr {}, ptr @layout_class_{class})",
+                    "call i32 @relar_record_has_type(ptr {}, ptr @{layout})",
                     args[0].value.operand
                 ));
                 Value {
@@ -3536,6 +3623,7 @@ impl Emitter<'_, '_> {
                 let [schema, description, argv] = args.as_slice() else {
                     unreachable!()
                 };
+                let layout = self.output.global_ref(format!("layout_class_{class}"));
                 let child_layouts = if children.is_empty() {
                     "null".to_owned()
                 } else {
@@ -3543,7 +3631,12 @@ impl Emitter<'_, '_> {
                     let slot = self.instruction(format!("alloca [{size} x ptr]"));
                     let layouts = children
                         .iter()
-                        .map(|child| format!("ptr @layout_class_{child}"))
+                        .map(|child| {
+                            format!(
+                                "ptr @{}",
+                                self.output.global_ref(format!("layout_class_{child}"))
+                            )
+                        })
                         .collect::<Vec<_>>()
                         .join(", ");
                     self.line(format!("store [{size} x ptr] [{layouts}], ptr {slot}"));
@@ -3552,7 +3645,7 @@ impl Emitter<'_, '_> {
                 Value {
                     ty: returns,
                     operand: self.checked_instruction(format!(
-                        "call ptr @relar_argparse_parse(ptr @layout_class_{class}, ptr {child_layouts}, ptr {}, ptr {}, ptr {})",
+                        "call ptr @relar_argparse_parse(ptr @{layout}, ptr {child_layouts}, ptr {}, ptr {}, ptr {})",
                         schema.value.operand, description.value.operand, argv.value.operand,
                     )),
                     small_integer: false,
@@ -3815,25 +3908,22 @@ impl Emitter<'_, '_> {
                 };
                 debug_assert!(min <= max && min >= -(1_i64 << 62) && max < (1_i64 << 62));
                 let in_bounds = matches!(builtin, Builtin::ListGetBoundedInBounds { .. });
-                let nonnegative = in_bounds || self.nonnegative_index(&expressions[1]);
-                let mut index = args[1].value.clone();
-                index.small_integer |= in_bounds;
-                let index = self.index_word(&index, nonnegative);
                 let word = if in_bounds {
                     let ExprKind::Local(slot) = expressions[0].kind else {
                         unreachable!("the in-bounds proof identifies the stable list local")
                     };
+                    let mut index = args[1].value.clone();
+                    index.small_integer = true;
+                    let index = self.index_word(&index, true);
                     self.proven_list_word(slot, &args[0].value, &index)
+                } else if self.nonnegative_index(&expressions[1]) {
+                    let index = self.native_index(&args[1].value);
+                    self.runtime_call(&LIST_BORROW_INDEX, [&args[0].value, &index])
+                        .value
+                        .operand
                 } else {
-                    let helper = if nonnegative {
-                        "relar_list_borrow_index"
-                    } else {
-                        "relar_list_get"
-                    };
-                    self.checked_int_list_word(format!(
-                        "call i64 @{helper}(ptr {}, i64 {index})",
-                        args[0].value.operand
-                    ))
+                    self.runtime_call(&LIST_GET, [&args[0].value, &args[1].value])
+                        .into_proven_small_word()
                 };
                 let narrow = in_bounds
                     && (IntRange { min, max }).fits_u32()
@@ -3941,6 +4031,11 @@ impl Emitter<'_, '_> {
             }
             Builtin::BytesIter => self.call("relar_bytes_iter", Type::Iterator, &[&args[0].value]),
             Builtin::StringIter => self.call("relar_str_iter", Type::Iterator, &[&args[0].value]),
+            Builtin::SplitLinesIter => self.call(
+                "relar_str_splitlines_iter",
+                Type::Iterator,
+                &[&args[0].value],
+            ),
             Builtin::StringReverseIter => {
                 self.call("relar_str_reverse_iter", Type::Iterator, &[&args[0].value])
             }
@@ -4011,22 +4106,22 @@ impl Emitter<'_, '_> {
                         self.instruction(format!("getelementptr ptr, ptr {handles}, i64 {i}"));
                     self.line(format!("store ptr {}, ptr {slot}", source.value.operand));
                 }
-                let instruction = if let Builtin::SortedRecordRows { class, columns } = builtin {
-                    let id = self.strings.len();
-                    self.strings.push(columns.clone());
-                    format!(
-                        "call ptr @relar_sorted_record_rows(ptr {handles}, i64 {}, ptr @layout_class_{class}, ptr @str_{id})",
+                let operand = if let Builtin::SortedRecordRows { class, columns } = builtin {
+                    let name = self.byte_array(columns.clone());
+                    let layout = self.output.global_ref(format!("layout_class_{class}"));
+                    self.checked_pointer(format!(
+                        "call ptr @relar_sorted_record_rows(ptr {handles}, i64 {}, ptr @{layout}, ptr @{name})",
                         args.len()
-                    )
+                    ))
                 } else {
-                    format!(
+                    self.instruction(format!(
                         "call ptr @relar_sorted_string_keys(ptr {handles}, i64 {})",
                         args.len()
-                    )
+                    ))
                 };
                 Value {
                     ty: returns,
-                    operand: self.instruction(instruction),
+                    operand,
                     small_integer: false,
                 }
             }
@@ -4095,15 +4190,16 @@ impl Emitter<'_, '_> {
             Builtin::SetIter => self.call("relar_set_iter", Type::Iterator, &[&args[0].value]),
             Builtin::Append => {
                 self.append(&args[0].value, &args[1].value);
-                none()
+                // The list now owns the item. Drop the argument first so a
+                // temporary receiver destroys its items in reverse insertion order.
+                self.release_operand(&args[1]);
+                self.release_operand(&args[0]);
+                return none();
             }
             Builtin::Pop => {
                 if args[0].value.ty == Type::ListInt {
-                    let word = self.checked_int_list_word(format!(
-                        "call i64 @relar_list_pop(ptr {})",
-                        args[0].value.operand
-                    ));
-                    self.unpack_word(word, Type::Int)
+                    self.runtime_call(&LIST_POP, [&args[0].value])
+                        .into_value(self)
                 } else {
                     let word = self.checked_instruction(format!(
                         "call i64 @relar_seq_pop(ptr {})",
@@ -4267,23 +4363,46 @@ impl Emitter<'_, '_> {
 
     /// Read-only lookups never take ownership of the key, even on a miss in a
     /// defaultdict. Keep the field owners across subsequent arguments and errors.
-    fn tuple_probe(&mut self, ty: Type, fields: &[Expr], roots: &mut Vec<Value>) -> Operand {
+    fn tuple_probe(
+        &mut self,
+        ty: Type,
+        fields: &[Expr],
+        last_arg: bool,
+        roots: &mut Vec<Value>,
+    ) -> Operand {
         let scratch = self.entry_alloca(format!("[{} x i64]", fields.len() + 2));
+        let layout = self
+            .output
+            .global_ref(format!("layout_{}", record_name(ty)));
         let payload = self.instruction(format!(
-            "call ptr @relar_tuple_probe(ptr {scratch}, ptr @layout_{})",
-            record_name(ty)
+            "call ptr @relar_tuple_probe(ptr {scratch}, ptr @{layout})"
         ));
         let value = Value {
             ty,
             operand: payload,
             small_integer: false,
         };
+        // An immediate probe of local snapshots executes only loads between the
+        // first field and the lookup. Their slots keep every word alive.
+        let borrow_locals = last_arg
+            && fields
+                .iter()
+                .all(|field| matches!(field.kind, ExprKind::Local(_)));
         for (index, field) in fields.iter().enumerate() {
-            let field = self.expr(field);
+            let field = if borrow_locals {
+                self.operand(field)
+            } else {
+                Operand {
+                    value: self.expr(field),
+                    ownership: Ownership::Owned,
+                }
+            };
             let pointer = self.field_pointer(&value, index);
-            let word = self.word(&field);
+            let word = self.word(&field.value);
             self.line(format!("store i64 {word}, ptr {pointer}"));
-            roots.push(field);
+            if matches!(field.ownership, Ownership::Owned) {
+                roots.push(field.value);
+            }
         }
         Operand {
             value,
@@ -4533,18 +4652,26 @@ impl Emitter<'_, '_> {
     }
 
     fn record_with_layout(&mut self, ty: Type, name: &str) -> Value {
+        let layout = self.output.global_ref(format!("layout_{name}"));
         let value = Value {
             ty,
-            operand: self.instruction(format!("call ptr @relar_record_new(ptr @layout_{name})")),
+            operand: self.checked_pointer(format!("call ptr @relar_record_try_new(ptr @{layout})")),
             small_integer: false,
         };
         self.owned(value)
     }
 
-    /// An unaliased tuple local can reuse its allocation on the next iteration.
+    fn checked_pointer(&mut self, instruction: impl AsRef<str>) -> String {
+        let pointer = self.instruction(instruction);
+        let failed = self.instruction(format!("icmp eq ptr {pointer}, null"));
+        self.check_failed(&failed);
+        pointer
+    }
+
+    /// An unaliased record local can reuse its allocation on the next iteration.
     /// Finish every RHS effect first, including rebinding the destination, and
     /// root each field across the remaining evaluations and all replacements.
-    fn assign_loop_tuple(&mut self, slot: usize, fields: &[Expr]) {
+    fn assign_loop_record(&mut self, slot: usize, fields: &[Expr]) {
         let fields: Vec<_> = fields.iter().map(|field| self.expr(field)).collect();
         let previous = self.borrow_slot(slot);
         let empty = self.instruction(format!("icmp eq ptr {}, null", previous.operand));
@@ -4553,22 +4680,24 @@ impl Emitter<'_, '_> {
         let write = self.label();
         self.branch(&empty, &allocate, &cached);
         self.start(&allocate);
-        let fresh = self.instruction(format!(
-            "call ptr @relar_record_new(ptr @layout_{})",
-            record_name(previous.ty)
-        ));
+        let layout = self
+            .output
+            .global_ref(format!("layout_{}", record_name(previous.ty)));
+        let fresh = self.checked_pointer(format!("call ptr @relar_record_try_new(ptr @{layout})"));
+        let allocated = self.current.clone();
         self.jump(&write);
         self.start(&cached);
-        let replacement = self.instruction(format!(
-            "call ptr @relar_record_cached_result(ptr {})",
+        let replacement = self.checked_pointer(format!(
+            "call ptr @relar_record_try_cached_result(ptr {})",
             previous.operand
         ));
+        let reused = self.current.clone();
         self.jump(&write);
         self.start(&write);
         let record = Value {
             ty: previous.ty,
             operand: self.instruction(format!(
-                "phi ptr [{fresh}, %{allocate}], [{replacement}, %{cached}]"
+                "phi ptr [{fresh}, %{allocated}], [{replacement}, %{reused}]"
             )),
             small_integer: false,
         };
@@ -4642,7 +4771,7 @@ impl Emitter<'_, '_> {
 
     fn append(&mut self, list: &Value, value: &Value) {
         if list.ty == Type::ListInt {
-            self.void_call("relar_list_append", &[list, value]);
+            self.runtime_call(&LIST_APPEND, [list, value]);
         } else {
             let word = self.word(value);
             self.line(format!(
@@ -4704,12 +4833,9 @@ impl Emitter<'_, '_> {
         let list = self.operand(source_receiver);
         let source = self.operand(source);
         let destination = self.operand(index);
-        let from = self.index_word(&source.value, true);
-        let to = self.index_word(&destination.value, true);
-        self.checked_int_list_status(format!(
-            "call i32 @relar_list_copy_index(ptr {}, i64 {to}, i64 {from})",
-            list.value.operand
-        ));
+        let from = self.native_index(&source.value);
+        let to = self.native_index(&destination.value);
+        self.runtime_call(&LIST_COPY_INDEX, [&list.value, &to, &from]);
         self.release_operand(&destination);
         self.release_operand(&source);
         self.release_operand(&list);
@@ -4746,22 +4872,21 @@ impl Emitter<'_, '_> {
             };
             return self.unpack_word(word, returns);
         }
-        let family = if list.ty == Type::ListInt {
-            "list"
-        } else {
-            "seq"
-        };
+        if list.ty == Type::ListInt {
+            let word = if nonnegative {
+                let index = self.native_index(index);
+                self.runtime_call(&LIST_GET_INDEX, [list, &index])
+            } else {
+                self.runtime_call(&LIST_GET, [list, index])
+            };
+            return word.into_value(self);
+        }
         let suffix = if nonnegative { "_index" } else { "" };
         let index = self.index_word(index, nonnegative);
-        let instruction = format!(
-            "call i64 @relar_{family}_get{suffix}(ptr {}, i64 {index})",
+        let word = self.checked_instruction(format!(
+            "call i64 @relar_seq_get{suffix}(ptr {}, i64 {index})",
             list.operand
-        );
-        let word = if list.ty == Type::ListInt {
-            self.checked_int_list_word(instruction)
-        } else {
-            self.checked_instruction(instruction)
-        };
+        ));
         self.unpack_word(word, returns)
     }
 
@@ -4775,26 +4900,41 @@ impl Emitter<'_, '_> {
             ));
             return;
         }
-        let family = if list.ty == Type::ListInt {
-            "list"
-        } else {
-            "seq"
-        };
-        let suffix = if nonnegative { "_index" } else { "" };
-        let index = self.index_word(index, nonnegative);
-        let word = self.word(value);
         if list.ty == Type::ListInt {
-            self.checked_int_list_status(format!(
-                "call i32 @relar_list_set{suffix}(ptr {}, i64 {index}, i64 {word})",
-                list.operand
-            ));
+            if nonnegative {
+                let index = self.native_index(index);
+                self.runtime_call(&LIST_SET_INDEX, [list, &index, value]);
+            } else {
+                self.runtime_call(&LIST_SET, [list, index, value]);
+            }
         } else {
+            let suffix = if nonnegative { "_index" } else { "" };
+            let index = self.index_word(index, nonnegative);
+            let word = self.word(value);
             self.checked_line(format!(
-                "call void @relar_{family}_set{suffix}(ptr {}, i64 {index}, i64 {word}, i32 {})",
+                "call void @relar_seq_set{suffix}(ptr {}, i64 {index}, i64 {word}, i32 {})",
                 list.operand,
                 representation_kind(value.ty, &self.module.types)
             ));
         }
+    }
+}
+
+/// Evaluating these expressions cannot rebind a local or mutate a record.
+/// Only local-rooted projections borrow; literals keep their usual ownership.
+fn read_only_field_operand(expression: &Expr) -> bool {
+    match &expression.kind {
+        ExprKind::Local(_)
+        | ExprKind::Str(_)
+        | ExprKind::Bool(_)
+        | ExprKind::None
+        | ExprKind::Int(_) => true,
+        ExprKind::Field(receiver, _) => read_only_field_operand(receiver),
+        ExprKind::Unwrap(inner) => {
+            matches!(inner.kind, ExprKind::Local(_))
+                && !matches!(expression.ty, Type::Bool | Type::Float)
+        }
+        _ => false,
     }
 }
 
@@ -4915,6 +5055,9 @@ fn expression_preserves_local(expression: &Expr, slot: usize, locals: usize) -> 
     !written[slot]
 }
 
+// Keep literals that fit in CompactString's three inline words on the raw append path.
+const INLINE_CONCAT_LITERAL: usize = 3 * size_of::<usize>();
+
 /// Flattens only exact string additions, preserving both source nesting shapes'
 /// leaf order without evaluating through calls or other expression boundaries.
 fn concat_leaves(expression: &Expr) -> Vec<&Expr> {
@@ -5029,8 +5172,7 @@ fn storage_type(ty: Type) -> &'static str {
 /// Emits concrete field layouts and static destruction descriptors. No per-field
 /// runtime tag or presence bitmap is needed: owning fields reserve zero until
 /// initialization, and their exact kinds are shared by every instance.
-fn record_layouts(module: &Module) -> String {
-    let mut output = String::new();
+fn record_layouts(module: &Module, output: &mut Output) {
     let classes = module
         .class_fields
         .iter()
@@ -5061,20 +5203,24 @@ fn record_layouts(module: &Module) -> String {
             .collect::<Vec<_>>()
             .join(", ");
         let count = fields.len();
-        writeln!(output, "%{name} = type {{ {storage} }}").unwrap();
+        writeln!(output.common(), "%{name} = type {{ {storage} }}").unwrap();
         writeln!(
-            output,
+            output.entry_buffer(),
             "@kinds_{name} = private unnamed_addr constant [{count} x i32] [{kinds}]"
         )
         .unwrap();
-        let semantics = records::semantics(module, ty, &name, &mut output);
+        let semantics = records::semantics(module, ty, &name, output.entry_buffer());
         writeln!(
-            output,
-            "@layout_{name} = private constant {{ i64, ptr, ptr }} {{ i64 {count}, ptr @kinds_{name}, ptr {semantics} }}"
+            output.global(
+                output.entry,
+                &format!("layout_{name}"),
+                "constant",
+                "{ i64, ptr, ptr }"
+            ),
+            "{{ i64 {count}, ptr @kinds_{name}, ptr {semantics} }}"
         )
         .unwrap();
     }
-    output
 }
 
 fn small(value: i64) -> Value {
@@ -5095,7 +5241,9 @@ fn none() -> Value {
 
 // Use i32 for runtime flags and status codes. Narrow C integers require different
 // extension attributes on Apple ARM64 and Linux ARM64, even for the same Rust type.
-const DECLARATIONS: &str = r#"
+fn write_declarations(units: &mut Output) {
+    units.common().push_str(
+        r#"
 declare ptr @relar_subprocess_check_output(ptr)
 declare ptr @relar_subprocess_run(ptr, ptr, ptr, i32, ptr)
 declare ptr @relar_async_coroutine(ptr, ptr, i32)
@@ -5235,7 +5383,8 @@ declare ptr @relar_exception_swap_active(ptr)
 declare void @relar_exception_raise(ptr)
 declare void @relar_exception_reraise()
 declare void @relar_flush_stdout()
-declare ptr @relar_record_new(ptr)
+declare void @relar_record_error_init()
+declare ptr @relar_record_try_new(ptr)
 declare ptr @relar_tuple_probe(ptr, ptr)
 declare ptr @relar_json_decode(ptr, ptr)
 declare ptr @relar_json_loads(ptr)
@@ -5251,7 +5400,7 @@ declare i32 @relar_json_null(ptr)
 declare ptr @relar_toml_decode(ptr, ptr)
 declare ptr @relar_toml_keys(ptr)
 declare ptr @relar_json_encode(i64, ptr, i64, i32)
-declare ptr @relar_record_cached_result(ptr)
+declare ptr @relar_record_try_cached_result(ptr)
 declare void @relar_record_retain(ptr)
 declare void @relar_record_release(ptr)
 declare i32 @relar_record_equal(ptr, ptr) nounwind
@@ -5270,10 +5419,15 @@ declare void @relar_seq_set_index(ptr, i64, i64, i32)
 declare void @relar_seq_append(ptr, i64, i32)
 declare i64 @relar_seq_pop(ptr)
 declare i64 @relar_seq_len(ptr) nounwind
-declare { i64, i64 } @relar_seq_layout() nounwind willreturn memory(none)
 declare i32 @relar_seq_resolve_header(ptr) nounwind
-@sequence_layout = internal global { i64, i64 } zeroinitializer
-define internal i32 @sequence_header(ptr %sequence) alwaysinline nounwind {
+; The entry bootstrap can wait for relar run before it returns the layout.
+declare { i64, i64 } @relar_seq_layout() nounwind
+"#,
+    );
+    // Every unit's inline sequence helpers load the same initialized layout.
+    units.shared_global("sequence_layout", "{ i64, i64 }", "zeroinitializer");
+    let output = units.common();
+    output.push_str(r#"define internal i32 @sequence_header(ptr %sequence) alwaysinline nounwind {
   %offset = load i64, ptr @sequence_layout
   %field = getelementptr inbounds i8, ptr %sequence, i64 %offset
   %length = load i32, ptr %field, align 4
@@ -5347,6 +5501,7 @@ declare ptr @relar_str_repeat(ptr, i64)
 declare ptr @relar_str_concat_parts(ptr, i64)
 declare ptr @relar_str_concat_parts_owned(ptr, ptr, i64)
 declare ptr @relar_str_append_utf8_owned(ptr, ptr, i64)
+declare ptr @relar_str_append_literal_owned(ptr, ptr, ptr, i64)
 declare i32 @relar_str_get_part(ptr, i64, ptr, ptr)
 declare ptr @relar_int_str_part(i64, ptr, ptr)
 declare ptr @relar_str_split_whitespace(ptr)
@@ -5359,6 +5514,7 @@ declare i64 @relar_str_find(ptr, ptr, i64)
 declare void @relar_str_partition(ptr, ptr, ptr)
 declare ptr @relar_str_unquote(ptr)
 declare ptr @relar_str_splitlines(ptr)
+declare ptr @relar_str_splitlines_iter(ptr)
 declare ptr @relar_ndiff_deferred(ptr, ptr)
 declare ptr @relar_str_list_copy(ptr)
 declare ptr @relar_str_list_filter(ptr, ptr, ptr, ptr, i32)
@@ -5404,7 +5560,7 @@ declare i32 @relar_int_compare(i64, i64)
 declare void @relar_print_int(i64)
 declare void @relar_print_bool(i32)
 declare void @relar_print_none()
-declare ptr @relar_str_literal(ptr, i64)
+declare ptr @relar_str_static_literal(ptr, i64)
 declare ptr @relar_regex_compile(ptr, i64)
 declare ptr @relar_regex_search(ptr, ptr)
 declare ptr @relar_regex_match(ptr, ptr)
@@ -5445,18 +5601,24 @@ declare i32 @relar_list_all_i32(ptr, i64, i64, i64)
 declare void @relar_list_reserve_range(ptr, i64, i64, i64, i64)
 declare void @relar_list_retain(ptr)
 declare void @relar_list_release(ptr)
-declare i64 @relar_list_get(ptr, i64)
-declare i32 @relar_list_set(ptr, i64, i64)
-declare i64 @relar_list_get_index(ptr, i64)
-declare i32 @relar_list_set_index(ptr, i64, i64)
-declare i64 @relar_list_borrow_index(ptr, i64)
+"#);
+    writeln!(
+        output,
+        "{LIST_GET}
+{LIST_SET}
+{LIST_GET_INDEX}
+{LIST_SET_INDEX}
+{LIST_BORROW_INDEX}
 declare i64 @relar_list_borrow_index_proven(ptr, i64) nounwind memory(argmem: read)
 declare ptr @relar_list_data_readonly(ptr) nounwind memory(argmem: read)
-declare i32 @relar_list_copy_index(ptr, i64, i64)
-declare void @relar_list_append(ptr, i64)
+{LIST_COPY_INDEX}
+{LIST_APPEND}
 declare void @relar_list_append_pair(ptr, i64, i64)
-declare i64 @relar_list_pop(ptr)
-declare i64 @relar_list_len(ptr)
+{LIST_POP}"
+    )
+    .unwrap();
+    output.push_str(
+        r#"declare i64 @relar_list_len(ptr)
 declare ptr @relar_list_repeat(ptr, i64)
 declare ptr @relar_list_slice(ptr, i64, i64, i64)
 declare ptr @relar_seq_slice(ptr, i64, i64, i64)
@@ -5466,7 +5628,9 @@ declare void @llvm.assume(i1)
 declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
-"#;
+"#,
+    );
+}
 
 /// Expose zero-owner cleanup to LLVM even when the runtime is linked without LTO.
 /// After mem2reg, a cleared or never-filled slot needs no runtime call at all.
@@ -5760,6 +5924,106 @@ mod tests {
     }
 
     #[test]
+    fn record_allocation_errors_escape_nested_calls() {
+        let llvm = compile(
+            "def make(n: int) -> tuple[int, int]:\n    return (n, 1)\ndef outer(n: int) -> tuple[int, int]:\n    return make(n)\ntry:\n    print(outer(3)[0])\nexcept MemoryError:\n    print(0)\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        let body = |name: &str| {
+            llvm.split_once(&format!("define internal ptr @{name}("))
+                .unwrap()
+                .1
+                .split_once("\n}")
+                .unwrap()
+                .0
+        };
+        assert!(body("fn_0").contains("call ptr @relar_record_try_new("));
+        assert!(body("fn_0").contains("icmp eq ptr "));
+        assert!(body("fn_1").contains("call i32 @relar_error_pending()"));
+        assert!(llvm.contains("call void @relar_record_error_init()"));
+    }
+
+    #[test]
+    fn immutable_tuple_literals_use_lazy_roots() {
+        let llvm = compile(
+            "def frozen() -> tuple[tuple[int, int], str]:\n    return ((-1, 2 + 3), 'x')\ndef dynamic(n: int) -> tuple[int, str]:\n    return (n, 'x')\ndef mutable() -> tuple[list[int], int]:\n    return ([0], 1)\nprint(frozen()[0][0])\nprint(dynamic(2)[0])\nprint(mutable()[0][0])\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            llvm.lines()
+                .filter(|line| line.starts_with("@tuple_literal_"))
+                .count(),
+            2
+        );
+        let cleanup = llvm
+            .split_once("define internal void @relar_clear_literals()")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        assert_eq!(
+            cleanup.matches("call void @relar_record_release(").count(),
+            2
+        );
+        let init = llvm
+            .split_once("define internal void @relar_init_literals()")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        assert!(!init.contains("@relar_record_try_new("));
+    }
+
+    #[test]
+    fn repeated_bytes_and_heap_integer_constants_share_typed_roots() {
+        let llvm = compile(
+            "def data() -> bytes:\n    return b'18446744073709551616'\ndef number() -> int:\n    return 18446744073709551616\nprint(data())\nprint(b'18446744073709551616')\nprint(number())\nprint(18446744073709551616)\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            llvm.lines()
+                .filter(|line| line.starts_with("@literal_"))
+                .count(),
+            2
+        );
+        let eager = llvm
+            .split_once("define internal void @relar_init_literals()")
+            .unwrap()
+            .1;
+        let eager = eager.split_once("\n}").unwrap().0;
+        assert!(!eager.contains("@relar_bytes_literal("));
+        assert!(!eager.contains("@relar_int_literal("));
+        assert_eq!(llvm.matches("call ptr @relar_bytes_literal(").count(), 1);
+        assert_eq!(llvm.matches("call i64 @relar_int_literal(").count(), 1);
+        assert!(llvm.contains("call void @relar_bytes_release(ptr %literal_"));
+        assert!(llvm.contains("call void @relar_int_release(i64 %literal_"));
+    }
+
+    #[test]
+    fn long_concat_literals_use_rooted_fragments_and_the_direct_append() {
+        let literal = "a literal that exceeds the inline string capacity";
+        let llvm = compile(
+            &format!("def build(empty: str) -> str:\n    value = empty\n    value = value + '{literal}'\n    return empty + '{literal}' + value\nprint(build(''))\n"),
+            &CompileOptions::default(),
+        ).unwrap();
+        let body = llvm
+            .split_once("define internal ptr @fn_0(")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        assert!(body.contains("call ptr @relar_str_append_literal_owned("));
+        assert!(body.contains("call ptr @relar_str_concat_parts("));
+        assert!(body.contains("load ptr, ptr @literal_"));
+    }
+
+    #[test]
     fn string_constants_are_rooted_once_and_cleared_on_both_main_exits() {
         let llvm = compile(
             "def text() -> str:\n    return 'shared'\nprint('shared')\nprint(text())\n",
@@ -5769,7 +6033,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(llvm.matches("call ptr @relar_str_literal(").count(), 1);
+        assert_eq!(
+            llvm.matches("call ptr @relar_str_static_literal(").count(),
+            1
+        );
         for operation in ["init", "clear"] {
             assert!(llvm.contains(&format!(
                 "define internal void @relar_{operation}_literals() sanitize_address {{"
@@ -5782,7 +6049,7 @@ mod tests {
             .split_once("\n}")
             .unwrap()
             .0;
-        assert!(!body.contains("@relar_str_literal("));
+        assert!(!body.contains("@relar_str_static_literal("));
         assert!(body.contains("@relar_str_retain("));
         let main = llvm.split_once("define i32 @main(").unwrap().1;
         assert_eq!(main.matches("call void @relar_init_literals()").count(), 1);
@@ -5817,12 +6084,134 @@ mod tests {
     }
 
     #[test]
+    fn adjacent_local_handoffs_emit_a_move() {
+        use crate::ir::{Expr, ExprKind, Statement, Type};
+
+        let local = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Local(0),
+        };
+        let graph = crate::modules::SourceGraph::single(
+            "def transfer(source: str, target: str) -> str:\n    return target\n",
+        )
+        .unwrap();
+        let emit = |handoff: Vec<Statement>| {
+            let mut module = crate::frontend::lower(&graph).unwrap();
+            module.functions[0].body.splice(..0, handoff);
+            let ranges = crate::ranges::analyze(&module);
+            super::emit(&module, &ranges, false).unwrap()
+        };
+        let moved = emit(vec![Statement::Move(1, 0)]);
+        let copy = Statement::Assign(1, local.clone());
+        assert_eq!(emit(vec![copy.clone(), Statement::Clear(0)]), moved);
+        let take = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Scope {
+                body: vec![],
+                value: Box::new(local.clone()),
+                clear: vec![0],
+            },
+        };
+        assert_eq!(emit(vec![Statement::Assign(1, take)]), moved);
+
+        // A read between the copy and clear still observes the source owner.
+        let read = Statement::Expr(Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(crate::ir::Builtin::Len, vec![local.clone()]),
+        });
+        let separated = emit(vec![copy, read, Statement::Clear(0)]);
+        assert_eq!(
+            separated.matches("call void @relar_str_retain(").count(),
+            moved.matches("call void @relar_str_retain(").count() + 1
+        );
+
+        // A self-assignment followed by clear must leave the source empty.
+        let own_copy = emit(vec![Statement::Assign(0, local), Statement::Clear(0)]);
+        let just_clear = emit(vec![Statement::Clear(0)]);
+        assert_eq!(
+            own_copy.matches("call void @relar_str_retain(").count(),
+            just_clear.matches("call void @relar_str_retain(").count() + 1
+        );
+    }
+
+    #[test]
     fn read_only_tuple_lookups_use_scratch_and_subscriptions_own_their_keys() {
         let body = function_body(
             "def probe(d: dict[tuple[str, int], int], x: str) -> int:\n    d.get((x, 1))\n    d.get((x, 2), 3)\n    if (x, 4) in d:\n        return d[(x, 5)]\n    return 0\n",
         );
         assert_eq!(body.matches("call ptr @relar_tuple_probe(").count(), 3);
-        assert_eq!(body.matches("call ptr @relar_record_new(").count(), 1);
+        assert_eq!(body.matches("call ptr @relar_record_try_new(").count(), 1);
+    }
+
+    #[test]
+    fn short_field_borrows_end_before_mutating_defaults() {
+        let llvm = compile(
+            include_str!("../../../tests/fixtures/tuple_keys/field_borrows.py"),
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        let exercise = llvm.split_once("define internal i8 @fn_2(").unwrap().1;
+        let (reads, later) = exercise
+            .split_once("call i32 @relar_tuple_compare(")
+            .unwrap();
+        assert!(reads.contains("call i32 @relar_dict_try_get("));
+        let (before_default, _) = later.split_once("call ptr @fn_0(").unwrap();
+        for retain in [
+            "call void @relar_object_retain(",
+            "call void @relar_record_retain(",
+        ] {
+            assert!(!reads.contains(retain));
+            assert!(before_default.contains(retain));
+        }
+    }
+
+    #[test]
+    fn named_tuple_keys_materialize_at_the_single_insertion() {
+        let body = function_body(
+            "def probe(d: dict[tuple[str, str], int], x: str, y: str, write: bool) -> int:\n    key = (x, y)\n    found = d.get(key, 0)\n    if write:\n        d[key] = found + 1\n    return found\n",
+        );
+        let (_, after_probe) = body.split_once("call ptr @relar_tuple_probe(").unwrap();
+        assert_eq!(body.matches("call ptr @relar_record_try_new(").count(), 1);
+        assert!(after_probe.contains("call ptr @relar_record_try_new("));
+    }
+
+    #[test]
+    fn immediate_tuple_probes_borrow_local_components() {
+        for (args, retains) in [("key", 0), ("key, 0", 2)] {
+            let body = function_body(&format!(
+                "def probe(d: dict[tuple[str, str], int], x: str, y: str) -> None:\n    key = (x, y)\n    d.get({args})\n"
+            ));
+            let (_, probe) = body.split_once("call ptr @relar_tuple_probe(").unwrap();
+            let (fields, _) = probe.split_once("@relar_dict_").unwrap();
+            assert_eq!(
+                fields.matches("call void @relar_str_retain(").count(),
+                retains
+            );
+        }
+    }
+
+    #[test]
+    fn named_probe_preserves_tuple_producer_calls() {
+        let llvm = compile(
+            "def make(x: str, y: str) -> tuple[str, str]:\n    return (x, y)\n\ndef probe(d: dict[tuple[str, str], int], x: str, y: str) -> None:\n    key = make(x, y)\n    d.get(key)\n",
+            &CompileOptions::default(),
+        ).unwrap();
+        assert!(llvm.contains("call ptr @fn_0("));
+        assert!(!llvm.contains("call ptr @relar_tuple_probe("));
+    }
+
+    #[test]
+    fn repeated_insertions_keep_one_owned_tuple() {
+        for stores in [
+            "    for i in range(3):\n        d[key] = i",
+            "    d[key] = 1\n    other[key] = 2",
+        ] {
+            let body = function_body(&format!(
+                "def probe(d: dict[tuple[str, int], int], other: dict[tuple[str, int], int], x: str) -> int:\n    key = (x, 0)\n    found = d.get(key, 0)\n{stores}\n    return found\n"
+            ));
+            assert!(!body.contains("call ptr @relar_tuple_probe("));
+            assert_eq!(body.matches("call ptr @relar_record_try_new(").count(), 1);
+        }
     }
 
     #[test]
@@ -5843,10 +6232,18 @@ mod tests {
     fn sorted_rows_require_only_generated_field_assignments() {
         let source = include_str!("../../../tests/fixtures/containers/sorted_rows.py");
         let llvm = compile(source, &CompileOptions::default()).unwrap();
-        assert_eq!(
-            llvm.matches("call ptr @relar_sorted_record_rows(").count(),
-            1
+        let mut lines = llvm.lines();
+        let call = lines
+            .find(|line| line.contains(" = call ptr @relar_sorted_record_rows("))
+            .unwrap();
+        let result = call.trim().split_once(" = ").unwrap().0;
+        assert!(
+            lines
+                .next()
+                .unwrap()
+                .contains(&format!("icmp eq ptr {result}, null"))
         );
+        assert!(!lines.any(|line| line.contains(" = call ptr @relar_sorted_record_rows(")));
         assert_eq!(
             llvm.matches("call ptr @relar_sorted_string_keys(").count(),
             1
@@ -6347,7 +6744,7 @@ def total(text: str) -> int:
         };
         assert!(!module.functions[0].expression_rebound()[0]);
         let ranges = crate::ranges::analyze(&module);
-        let llvm = super::emit(&module, &ranges, false);
+        let llvm = super::emit(&module, &ranges, false).unwrap();
         let body = llvm
             .split_once("@fn_0(")
             .unwrap()

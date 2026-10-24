@@ -4,7 +4,7 @@
 use super::*;
 use crate::ir::ProcessOperation;
 
-pub(super) fn adapters(module: &Module, sanitize: bool) -> String {
+pub(super) fn adapters(module: &Module, sanitize: bool, units: &mut Output) {
     let mut direct = BTreeMap::new();
     let mut indirect = BTreeMap::new();
     for f in module.functions.iter().chain([&module.entry]) {
@@ -27,30 +27,29 @@ pub(super) fn adapters(module: &Module, sanitize: bool) -> String {
             }
         });
     }
-    let mut output = String::new();
     let attrs = if sanitize { " sanitize_address" } else { "" };
     for (id, frame) in direct {
         let function = &module.functions[id];
-        writeln!(
-            output,
-            "define internal i64 @callable_{id}_async(ptr %frame){attrs} {{"
-        )
-        .unwrap();
+        let target = units.function_name(id);
+        let thunk = units.async_name(id);
+        let output = units.function(units.function_owner(id), &thunk, "i64", "ptr %frame", attrs);
         let args = function
             .params
             .iter()
             .enumerate()
-            .map(|(index, &slot)| load_arg(&mut output, frame, index, function.locals[slot]))
+            .map(|(index, &slot)| load_arg(output, frame, index, function.locals[slot]))
             .collect();
-        invoke(&mut output, format!("@fn_{id}"), args, function.returns);
+        invoke(output, format!("@{target}"), args, function.returns);
     }
     for (id, (frame, result)) in indirect {
-        writeln!(
-            output,
-            "define internal i64 @async_invoke_{id}(ptr %frame){attrs} {{"
-        )
-        .unwrap();
-        let callable = load_arg(&mut output, frame, 0, Type::Callable(id));
+        let output = units.function(
+            units.entry,
+            &format!("async_invoke_{id}"),
+            "i64",
+            "ptr %frame",
+            attrs,
+        );
+        let callable = load_arg(output, frame, 0, Type::Callable(id));
         writeln!(output, "  %target = load ptr, {callable}\n  %slot = getelementptr %callable, {callable}, i32 0, i32 1\n  %context = load ptr, ptr %slot").unwrap();
         let mut args = vec!["ptr %context".to_owned()];
         let (params, _) = module.types.signature(Type::Callable(id)).unwrap();
@@ -58,11 +57,10 @@ pub(super) fn adapters(module: &Module, sanitize: bool) -> String {
             params
                 .iter()
                 .enumerate()
-                .map(|(index, &ty)| load_arg(&mut output, frame, index + 1, ty)),
+                .map(|(index, &ty)| load_arg(output, frame, index + 1, ty)),
         );
-        invoke(&mut output, "%target".to_owned(), args, result);
+        invoke(output, "%target".to_owned(), args, result);
     }
-    output
 }
 
 fn load_arg(output: &mut String, frame: Type, index: usize, ty: Type) -> String {

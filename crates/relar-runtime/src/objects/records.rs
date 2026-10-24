@@ -1,12 +1,23 @@
 //! Fixed native records with a compact header and compiler-described payload.
 
 use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
-use std::cell::{Cell, UnsafeCell};
+use std::cell::{Cell, RefCell, UnsafeCell};
 use std::rc::Rc;
 
-use super::{fail, words::WordKind};
+use super::{Object, fail, words::WordKind};
 
 pub(super) mod strings;
+
+enum Release {
+    Record(*const usize),
+    Object(Rc<Object>),
+}
+
+thread_local! {
+    // The outer release owns the queue on its stack. This slot has no TLS
+    // destructor, so records can also be released during thread teardown.
+    static PENDING_RELEASES: Cell<*const RefCell<Vec<Release>>> = const { Cell::new(std::ptr::null()) };
+}
 
 /// Compiler-emitted immutable metadata; every field occupies one eight-byte word.
 /// The descriptor and its kind array must outlive every allocation using them.
@@ -220,6 +231,34 @@ impl<'a> RecordBatch<'a> {
 /// reading them, preserve each declared representation, and prevent heap cycles.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_record_new(descriptor: *const RecordDescriptor) -> *mut usize {
+    // SAFETY: the caller supplies a live descriptor and its immutable field kinds.
+    let record = unsafe { allocate_record(descriptor) };
+    if record.is_null() {
+        // SAFETY: the descriptor remains live after a failed allocation.
+        handle_alloc_error(layout(unsafe { (*descriptor).allocated_words() }));
+    }
+    record
+}
+
+/// Returns null with MemoryError pending when the record allocation fails.
+///
+/// # Safety
+/// The descriptor satisfies the same lifetime and field requirements as `relar_record_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_record_try_new(descriptor: *const RecordDescriptor) -> *mut usize {
+    // SAFETY: the caller supplies a live descriptor and its immutable field kinds.
+    let record = unsafe { allocate_record(descriptor) };
+    if record.is_null() {
+        super::exceptions::record_allocation_failed();
+    }
+    record
+}
+
+/// Returns a record with zeroed fields, or null on allocation failure.
+///
+/// # Safety
+/// The immutable descriptor and all field kinds must outlive the returned record.
+pub(super) unsafe fn allocate_record(descriptor: *const RecordDescriptor) -> *mut usize {
     // SAFETY: the caller provides immutable live metadata for this allocation.
     let descriptor_value = unsafe { &*descriptor };
     let allocation_layout = layout(descriptor_value.allocated_words());
@@ -231,7 +270,7 @@ pub unsafe extern "C" fn relar_record_new(descriptor: *const RecordDescriptor) -
     // SAFETY: layout is nonzero and correctly aligned for the header and words.
     let allocation = unsafe { alloc(allocation_layout) };
     if allocation.is_null() {
-        handle_alloc_error(allocation_layout);
+        return std::ptr::null_mut();
     }
     // SAFETY: the allocation has room for this header and its declared payload.
     unsafe {
@@ -276,6 +315,25 @@ pub unsafe extern "C" fn relar_record_retain(payload: *const usize) {
 /// representation. A reused record may be mutated only through this result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_record_cached_result(payload: *const usize) -> *mut usize {
+    // SAFETY: the caller borrows its rooted cache without a temporary owner.
+    unsafe { cached_result(payload, relar_record_new) }
+}
+
+/// Returns a retained cache or a fresh record, raising MemoryError on allocation failure.
+///
+/// # Safety
+/// The cache and returned record have the same ownership and initialization
+/// requirements as `relar_record_cached_result`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_record_try_cached_result(payload: *const usize) -> *mut usize {
+    // SAFETY: the caller borrows its rooted cache without a temporary owner.
+    unsafe { cached_result(payload, relar_record_try_new) }
+}
+
+unsafe fn cached_result(
+    payload: *const usize,
+    allocate: unsafe extern "C" fn(*const RecordDescriptor) -> *mut usize,
+) -> *mut usize {
     // SAFETY: the caller roots this cache and its immutable descriptor.
     let header = unsafe { &*payload.cast::<Header>().sub(1) };
     if header.references.get() == 1 {
@@ -284,7 +342,7 @@ pub unsafe extern "C" fn relar_record_cached_result(payload: *const usize) -> *m
     } else {
         // SAFETY: a fresh record uses the cache's static descriptor; it does not
         // expose or mutate any existing tuple's observable field values.
-        unsafe { relar_record_new(header.descriptor()) }
+        unsafe { allocate(header.descriptor()) }
     }
 }
 
@@ -299,6 +357,51 @@ pub unsafe extern "C" fn relar_record_release(payload: *const usize) {
     if payload.is_null() {
         return;
     }
+    PENDING_RELEASES.with(|slot| {
+        // SAFETY: a non-null pointer belongs to the enclosing release on this
+        // thread. The C ABI cannot unwind, and the outer call clears the slot
+        // before returning. No queue borrow spans a field release.
+        if let Some(pending) = unsafe { slot.get().as_ref() } {
+            pending.borrow_mut().push(Release::Record(payload));
+            return;
+        }
+        let pending = RefCell::new(Vec::new());
+        slot.set(&pending);
+        let mut current = Release::Record(payload);
+        loop {
+            let siblings = pending.borrow().len();
+            match current {
+                // SAFETY: each entry transfers one live owner of this record.
+                Release::Record(record) => unsafe { release_record_owner(record) },
+                Release::Object(object) => drop(object),
+            }
+            let mut pending = pending.borrow_mut();
+            // Children were enqueued in field or container order. Finish this
+            // subtree in that order before resuming the outstanding siblings.
+            pending[siblings..].reverse();
+            let Some(next) = pending.pop() else { break };
+            current = next;
+        }
+        slot.set(std::ptr::null());
+    });
+}
+
+/// Defer object drops during a record traversal. The last owner can flush a file
+/// or release further records through a container.
+pub(super) fn release_object_word(object: Rc<Object>) {
+    PENDING_RELEASES.with(|slot| {
+        // SAFETY: the outer record release owns the queue while this slot is set.
+        if let Some(pending) = unsafe { slot.get().as_ref() } {
+            pending.borrow_mut().push(Release::Object(object));
+        } else {
+            drop(object);
+        }
+    });
+}
+
+/// # Safety
+/// The caller transfers one live record owner on its execution thread.
+unsafe fn release_record_owner(payload: *const usize) {
     // SAFETY: the payload follows its live header, and this thread owns access.
     let header = unsafe { &*payload.cast::<Header>().sub(1) };
     let count = header.references.get();
@@ -333,7 +436,16 @@ pub unsafe extern "C" fn relar_record_release(payload: *const usize) {
 /// # Safety
 /// The caller transfers the final record's fields with their original descriptor.
 unsafe fn release_fields<const PACKED: bool>(payload: *const usize, descriptor: &RecordDescriptor) {
-    for index in 0..descriptor.length {
+    // Dataclass fields release in definition order. Tuples release their last
+    // element first. Both kinds use the same native record layout.
+    // SAFETY: semantic metadata, when present, lives as long as the descriptor.
+    let is_tuple = unsafe { descriptor.semantics.as_ref() }.is_some_and(|value| value.kind == 1);
+    for field in 0..descriptor.length {
+        let index = if is_tuple {
+            descriptor.length - 1 - field
+        } else {
+            field
+        };
         // SAFETY: each nonzero owning word transfers the field's final reference.
         unsafe {
             let kind = WordKind::new(descriptor.kinds.add(index).read());
@@ -376,6 +488,64 @@ mod tests {
             }
             kind.release(old);
         }
+    }
+
+    #[test]
+    fn deep_record_chains_release_iteratively_and_preserve_shared_children() {
+        let record_kind = [6];
+        let descriptor = RecordDescriptor {
+            length: 1,
+            kinds: record_kind.as_ptr(),
+            semantics: std::ptr::null(),
+        };
+        let string_kind = [3];
+        let leaf_descriptor = RecordDescriptor {
+            length: 1,
+            kinds: string_kind.as_ptr(),
+            semantics: std::ptr::null(),
+        };
+        let text = Rc::new(Str::from("shared leaf"));
+        // SAFETY: each new field receives one live owner of its declared kind.
+        // Both descriptors outlive every release, including the saved leaf.
+        unsafe {
+            let leaf = relar_record_new(&leaf_descriptor);
+            leaf.write(Rc::into_raw(text.clone()) as usize);
+            relar_record_retain(leaf);
+            let mut root = leaf;
+            for _ in 0..50_000 {
+                let parent = relar_record_new(&descriptor);
+                parent.write(root as usize);
+                root = parent;
+            }
+            relar_record_release(root);
+            assert_eq!(Rc::strong_count(&text), 2);
+            relar_record_release(leaf);
+            assert_eq!(Rc::strong_count(&text), 1);
+        }
+    }
+
+    #[test]
+    fn records_can_be_released_from_thread_local_destructors() {
+        struct ReleaseOnExit;
+        impl Drop for ReleaseOnExit {
+            fn drop(&mut self) {
+                let kinds = [0];
+                let descriptor = RecordDescriptor {
+                    length: kinds.len(),
+                    kinds: kinds.as_ptr(),
+                    semantics: std::ptr::null(),
+                };
+                // SAFETY: the descriptor outlives the sole owner.
+                unsafe { relar_record_release(relar_record_new(&descriptor)) };
+            }
+        }
+        thread_local! { static ON_EXIT: ReleaseOnExit = const { ReleaseOnExit }; }
+        std::thread::spawn(|| {
+            ON_EXIT.with(|_| {});
+            drop(ReleaseOnExit);
+        })
+        .join()
+        .unwrap();
     }
 
     #[test]

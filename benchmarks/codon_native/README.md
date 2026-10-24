@@ -72,16 +72,6 @@ python3 benchmarks/codon_native/build.py \
   --output /path/to/fresh-build-directory
 ```
 
-## Memory report comparisons
-
-`--applications memory_report` builds the file and directory `compare` command.
-The Codon entry point reads each file with its native JSON module, constructs
-fixed-field records, and calls the existing typed port's comparison and Markdown
-renderer. It supports the stdout path used in the timed runs. The native
-integer range covers all four retained ty captures. The benchmark checks each
-complete report against Ruff on CPython, including any rows tied at the top-15
-cutoff. [Memory benchmark](../memory_program_benchmark.py)
-
 ## Live conformance workflow
 
 The checkout-based reporter additionally uses explicit native TOML, subprocess,

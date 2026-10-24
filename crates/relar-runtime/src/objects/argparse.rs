@@ -112,15 +112,18 @@ impl Parser {
         {
             return Token::Option(index, explicit);
         }
-        if arg.starts_with("--") {
-            let help = "--help".starts_with(flag);
+        if flag.starts_with("--") || flag == "-" {
+            let mut names: Vec<_> = ["-h", "--help"]
+                .into_iter()
+                .filter(|name| name.starts_with(flag))
+                .collect();
+            let help = !names.is_empty();
             let matches = self
                 .options
                 .iter()
                 .enumerate()
                 .flat_map(|(index, option)| option.flags().map(move |flag| (index, flag)))
                 .filter(|(_, spelling)| spelling.starts_with(flag));
-            let mut names = if help { vec!["--help"] } else { Vec::new() };
             let mut option = None;
             for (index, matched) in matches {
                 names.push(matched);

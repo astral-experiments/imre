@@ -41,7 +41,8 @@ pub unsafe extern "C" fn relar_str_dedent(text: *const Str) -> *const Str {
             .count();
         margin = &margin[..common];
     }
-    let mut result = Str::with_capacity(text.len());
+    // Indentation and blank lines can account for nearly the entire input.
+    let mut result = Str::default();
     for (index, line) in text.split('\n').enumerate() {
         if index != 0 {
             result.push('\n');
@@ -53,8 +54,27 @@ pub unsafe extern "C" fn relar_str_dedent(text: *const Str) -> *const Str {
     Rc::into_raw(Rc::new(result))
 }
 
+thread_local! {
+    static SHORT_STRINGS: std::cell::RefCell<[Option<Rc<Str>>; 257]> =
+        const { std::cell::RefCell::new([const { None }; 257]) };
+}
+
+/// Reuses immutable owners for empty and single Latin-1 strings.
+pub(super) fn owned_string(value: &str) -> Rc<Str> {
+    let index = match value.as_bytes() {
+        [] => 256,
+        [byte] => usize::from(*byte),
+        // These UTF-8 lead bytes encode U+0080 through U+00FF.
+        [0xc2 | 0xc3, _] => value.chars().next().unwrap() as usize,
+        _ => return Rc::new(Str::new(value)),
+    };
+    SHORT_STRINGS.with_borrow_mut(|strings| {
+        Rc::clone(strings[index].get_or_insert_with(|| Rc::new(Str::new(value))))
+    })
+}
+
 /// Appends an owned slice of source, retaining its allocation for a full slice.
-fn push_part(parts: &mut Words, source: &Rc<Str>, value: &str) {
+pub(super) fn push_part(parts: &mut Words, source: &Rc<Str>, value: &str) {
     parts
         .values
         .try_reserve(1)
@@ -62,7 +82,7 @@ fn push_part(parts: &mut Words, source: &Rc<Str>, value: &str) {
     let value = if value.len() == source.len() {
         Rc::clone(source)
     } else {
-        Rc::new(Str::new(value))
+        owned_string(value)
     };
     parts.values.push(Rc::into_raw(value) as usize);
 }
@@ -585,6 +605,20 @@ mod tests {
             // SAFETY: the input lives through the call and the result transfers one owner.
             let result = unsafe { Rc::from_raw(relar_str_dedent(&source)) };
             assert_eq!(result.as_str(), expected);
+        }
+    }
+
+    #[test]
+    fn dedent_keeps_small_results_inline_after_removing_large_prefixes() {
+        for (text, expected) in [
+            (format!("{}x", " ".repeat(65_536)), "x"),
+            (format!("{}\n", "\u{2003}".repeat(21_000)), "\n"),
+        ] {
+            let source = Str::from(text);
+            // SAFETY: the source lives through the call and the result transfers one owner.
+            let result = unsafe { Rc::from_raw(relar_str_dedent(&source)) };
+            assert_eq!(result.as_str(), expected);
+            assert!(!result.is_heap_allocated());
         }
     }
 

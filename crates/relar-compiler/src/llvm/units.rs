@@ -1,146 +1,221 @@
-//! Partition Relar's emitted LLVM definitions. Only symbols referenced from another
-//! unit lose local linkage; record descriptors and mutable roots keep one address.
+//! Write each definition to its owner and declare its symbol in the units that use it.
 use std::collections::{HashMap, HashSet};
+use std::fmt::{Display, Write};
 
 use super::*;
 use crate::CodegenUnit;
 
-pub(super) struct Owners<'a> {
-    pub functions: &'a [usize],
+pub(super) struct Output {
+    units: Vec<String>,
+    common: Option<String>,
     pub entry: usize,
-    /// Each byte array and its optional pooled string/regex root share an ID.
-    pub strings: Vec<usize>,
+    pub current: usize,
+    functions: Vec<(usize, usize)>,
+    strings: Vec<(usize, usize)>,
+    next_string: Vec<usize>,
+    users: HashMap<String, HashSet<usize>>,
 }
 
-struct Definition<'a> {
-    name: &'a str,
-    unit: usize,
-    body: &'a str,
-}
+impl Output {
+    pub fn new(functions: &[usize], count: usize, entry: usize, split: bool) -> Self {
+        let mut next = vec![0; count];
+        let functions = functions
+            .iter()
+            .map(|&owner| {
+                let local = next[owner];
+                next[owner] += 1;
+                (owner, local)
+            })
+            .collect();
+        Self {
+            units: vec![String::new(); count],
+            common: split.then(|| "source_filename = \"relar-unit\"\n".to_owned()),
+            entry,
+            current: entry,
+            functions,
+            strings: Vec::new(),
+            next_string: vec![0; count],
+            users: HashMap::new(),
+        }
+    }
 
-fn symbols(text: &str) -> impl Iterator<Item = (usize, &str)> {
-    text.match_indices('@').map(move |(start, _)| {
-        let tail = &text[start + 1..];
-        let end = tail
-            .bytes()
-            .take_while(|c| c.is_ascii_alphanumeric() || b"_.$-".contains(c))
-            .count();
-        (start, &tail[..end])
-    })
-}
+    pub fn split(&self) -> bool {
+        self.common.is_some()
+    }
 
-fn numbered(name: &str, prefix: &str) -> Option<usize> {
-    name.strip_prefix(prefix)?.parse().ok()
-}
+    pub fn common(&mut self) -> &mut String {
+        self.common.as_mut().unwrap_or(&mut self.units[self.entry])
+    }
 
-fn adapter(name: &str) -> Option<(usize, &str)> {
-    let (id, flavor) = name.strip_prefix("callable_")?.split_once('_')?;
-    Some((id.parse().ok()?, flavor))
-}
+    pub fn entry_buffer(&mut self) -> &mut String {
+        &mut self.units[self.entry]
+    }
 
-impl Owners<'_> {
-    fn function(&self, name: &str) -> Option<usize> {
-        if let Some(id) = numbered(name, "fn_").or_else(|| adapter(name).map(|(id, _)| id)) {
-            Some(self.functions[id])
-        } else if matches!(
-            name,
-            "main" | "relar_init_literals" | "relar_clear_literals"
-        ) {
-            Some(self.entry)
+    pub fn function_owner(&self, id: usize) -> usize {
+        self.functions[id].0
+    }
+
+    pub fn add_string(&mut self) {
+        let next = &mut self.next_string[self.current];
+        self.strings.push((self.current, *next));
+        *next += 1;
+    }
+
+    pub fn string_owner(&self, id: usize) -> usize {
+        self.strings[id].0
+    }
+
+    fn numbered(&self, prefix: &str, id: usize, (owner, local): (usize, usize)) -> String {
+        if self.split() {
+            format!("{prefix}_m{owner}_{local}")
         } else {
-            // Integer, sequence and nullable helpers are private, inlineable code
-            // in every unit. They address the same externally declared state.
-            None
+            format!("{prefix}_{id}")
         }
     }
 
-    fn global(&self, name: &str) -> usize {
-        numbered(name, "str_")
-            .or_else(|| numbered(name, "literal_"))
-            .map_or(self.entry, |i| self.strings[i])
+    pub fn function_name(&self, id: usize) -> String {
+        self.numbered("fn", id, self.functions[id])
     }
-}
 
-/// The LLVM emitter uses a global for each scalar, named type, array or struct.
-/// Declarations must retain that exact type, including nested aggregate types.
-fn global_type(value: &str) -> &str {
-    let mut depth = 0usize;
-    for (i, c) in value.bytes().enumerate() {
-        match c {
-            b'[' | b'{' => depth += 1,
-            b']' | b'}' => depth -= 1,
-            b' ' if depth == 0 => return &value[..i],
-            _ => {}
-        }
+    pub fn adapter_name(&self, id: usize, bound: bool) -> String {
+        let name = self.numbered("callable", id, self.functions[id]);
+        format!("{name}_{}", if bound { "bound" } else { "plain" })
     }
-    value
-}
 
-impl Definition<'_> {
-    fn declaration(&self) -> String {
-        if self.body.starts_with("define ") {
-            let header = self.body.lines().next().unwrap();
-            let signature = header
-                .strip_prefix("define internal ")
-                .expect("generated cross-unit function")
-                .split_once(')')
-                .unwrap()
-                .0;
-            return format!("declare hidden {signature})\n");
-        }
-        let (_, rhs) = self.body.split_once(" = ").unwrap();
-        let (kind, value) = rhs
-            .split_once("constant ")
-            .map(|(_, v)| ("constant", v))
-            .or_else(|| rhs.split_once("global ").map(|(_, v)| ("global", v)))
-            .expect("generated global or constant");
+    pub fn async_name(&self, id: usize) -> String {
         format!(
-            "@{} = external hidden {kind} {}\n",
-            self.name,
-            global_type(value)
+            "{}_async",
+            self.numbered("callable", id, self.functions[id])
         )
     }
 
-    fn exported(&self) -> String {
-        if self.body.starts_with("define ") {
-            self.body.replacen("define internal ", "define hidden ", 1)
-        } else {
-            let (name, rhs) = self.body.split_once(" = ").unwrap();
-            let exported = rhs
-                .strip_prefix("internal ")
-                .or_else(|| rhs.strip_prefix("private "))
+    pub fn string_name(&self, id: usize, prefix: &str) -> String {
+        self.numbered(prefix, id, self.strings[id])
+    }
+
+    // Uses are recorded during lowering. By the time definitions are written,
+    // every owner knows its required linkage and which callers need a declaration.
+    pub fn used(&mut self, owner: usize, name: String) -> String {
+        if self.current != owner {
+            self.users
+                .entry(name.clone())
+                .or_default()
+                .insert(self.current);
+        }
+        name
+    }
+
+    pub fn global_ref(&mut self, name: String) -> String {
+        self.used(self.entry, name)
+    }
+
+    pub fn use_literal_from_entry(&mut self, id: usize) {
+        if self.current != self.entry {
+            for prefix in ["str", "literal"] {
+                self.users
+                    .entry(self.string_name(id, prefix))
+                    .or_default()
+                    .insert(self.entry);
+            }
+        }
+    }
+
+    pub fn literal_ref(&mut self, id: usize) -> String {
+        self.used(self.string_owner(id), self.string_name(id, "literal"))
+    }
+
+    pub fn function_ref(&mut self, id: usize) -> String {
+        self.used(self.function_owner(id), self.function_name(id))
+    }
+
+    pub fn adapter_ref(&mut self, id: usize, bound: bool) -> String {
+        self.used(self.function_owner(id), self.adapter_name(id, bound))
+    }
+
+    pub fn shared_global(&mut self, name: &str, ty: &str, value: &str) {
+        if self.units.len() > 1 {
+            self.users.insert(
+                name.to_owned(),
+                (0..self.units.len()).filter(|&u| u != self.entry).collect(),
+            );
+        }
+        writeln!(self.global(self.entry, name, "global", ty), "{value}").unwrap();
+    }
+
+    pub fn global(
+        &mut self,
+        owner: usize,
+        name: &str,
+        kind: &str,
+        ty: impl Display,
+    ) -> &mut String {
+        let linkage = if let Some(users) = self.users.get(name) {
+            for &unit in users {
+                let declaration = if kind == "global" {
+                    "global"
+                } else {
+                    "constant"
+                };
+                writeln!(
+                    self.units[unit],
+                    "@{name} = external hidden {declaration} {ty}"
+                )
                 .unwrap();
-            format!("{name} = hidden {exported}")
-        }
+            }
+            "hidden"
+        } else if kind == "global" {
+            "internal"
+        } else {
+            "private"
+        };
+        write!(self.units[owner], "@{name} = {linkage} {kind} {ty} ").unwrap();
+        &mut self.units[owner]
     }
-}
 
-/// Number generated symbols within their source file so introducing a literal
-/// or helper in an earlier module doesn't renumber references throughout later units.
-fn local_ids(owners: &[usize], units: usize) -> Vec<String> {
-    let mut next = vec![0; units];
-    owners
-        .iter()
-        .map(|&m| {
-            let id = next[m];
-            next[m] += 1;
-            format!("m{m}_{id}")
-        })
-        .collect()
-}
-
-fn rename(code: &str, names: &HashMap<&str, String>) -> String {
-    let mut out = String::with_capacity(code.len());
-    let mut last = 0;
-    for (at, name) in symbols(code) {
-        if let Some(mapped) = names.get(name) {
-            out.push_str(&code[last..at + 1]);
-            out.push_str(mapped);
-            last = at + 1 + name.len();
-        }
+    pub fn function(
+        &mut self,
+        owner: usize,
+        name: &str,
+        returns: &str,
+        params: &str,
+        attrs: &str,
+    ) -> &mut String {
+        let linkage = if let Some(users) = self.users.get(name) {
+            for &unit in users {
+                writeln!(
+                    self.units[unit],
+                    "declare hidden {returns} @{name}({params})"
+                )
+                .unwrap();
+            }
+            "hidden "
+        } else if name == "main" {
+            ""
+        } else {
+            "internal "
+        };
+        writeln!(
+            self.units[owner],
+            "define {linkage}{returns} @{name}({params}){attrs} {{"
+        )
+        .unwrap();
+        &mut self.units[owner]
     }
-    out.push_str(&code[last..]);
-    out
+
+    fn finish(self) -> Vec<String> {
+        let Some(common) = self.common else {
+            return self.units;
+        };
+        self.units
+            .into_iter()
+            .map(|body| {
+                let mut unit = String::with_capacity(common.len() + body.len());
+                unit.push_str(&common);
+                unit.push_str(&body);
+                unit
+            })
+            .collect()
+    }
 }
 
 pub(crate) fn emit_units(
@@ -151,95 +226,14 @@ pub(crate) fn emit_units(
     names: &[String],
     entry: usize,
 ) -> Result<Vec<CodegenUnit>, String> {
-    let mut owners = Owners {
-        functions,
-        entry,
-        strings: Vec::new(),
-    };
-    let ir = emit_program(module, ranges, sanitize, Some(&mut owners));
-    let mut remaining = ir.as_str();
-    let mut common = String::from("source_filename = \"relar-unit\"\n");
-    let mut common_refs = HashSet::new();
-    let mut defs = Vec::new();
-    let mut refs = vec![HashSet::new(); names.len()];
-    // Relar emits its own restricted LLVM syntax: function headers and top-level
-    // globals are single lines, and function-closing braces begin a line.
-    while !remaining.is_empty() {
-        let function = remaining.starts_with("define ");
-        let end = if function {
-            remaining
-                .find("\n}\n")
-                .ok_or("unterminated emitted LLVM function")?
-                + 3
-        } else {
-            remaining.find('\n').map_or(remaining.len(), |end| end + 1)
-        };
-        let (body, rest) = remaining.split_at(end);
-        remaining = rest;
-        let origin = if function || body.starts_with('@') {
-            let (_, name) = symbols(body).next().ok_or("missing emitted LLVM symbol")?;
-            let unit = if function {
-                owners.function(name)
-            } else {
-                Some(owners.global(name))
-            };
-            unit.map(|unit| Definition { name, unit, body })
-        } else {
-            None
-        };
-        if let Some(def) = origin {
-            refs[def.unit].extend(symbols(body).skip(1).map(|(_, name)| name));
-            defs.push(def);
-        } else {
-            common.push_str(body);
-            common_refs.extend(symbols(body).map(|(_, name)| name));
-        }
-    }
-    let function_ids = local_ids(functions, names.len());
-    let string_ids = local_ids(&owners.strings, names.len());
-    let mut renames = HashMap::new();
-    for def in &defs {
-        let name = def.name;
-        let mapped = if let Some(id) = numbered(name, "fn_") {
-            Some(format!("fn_{}", function_ids[id]))
-        } else if let Some((id, flavor)) = adapter(name) {
-            Some(format!("callable_{}_{flavor}", function_ids[id]))
-        } else if let Some(id) = numbered(name, "str_") {
-            Some(format!("str_{}", string_ids[id]))
-        } else {
-            numbered(name, "literal_").map(|id| format!("literal_{}", string_ids[id]))
-        };
-        if let Some(mapped) = mapped {
-            renames.insert(name, mapped);
-        }
-    }
-    let mut units = vec![common; names.len()];
-    for def in &defs {
-        let shared = (names.len() > 1 && common_refs.contains(def.name))
-            || refs
-                .iter()
-                .enumerate()
-                .any(|(unit, used)| unit != def.unit && used.contains(def.name));
-        if shared {
-            units[def.unit].push_str(&def.exported());
-            let declaration = def.declaration();
-            for (unit, output) in units.iter_mut().enumerate() {
-                if unit != def.unit
-                    && (common_refs.contains(def.name) || refs[unit].contains(def.name))
-                {
-                    output.push_str(&declaration);
-                }
-            }
-        } else {
-            units[def.unit].push_str(def.body);
-        }
-    }
+    let mut output = Output::new(functions, names.len(), entry, true);
+    emit_program(module, ranges, sanitize, &mut output)?;
     Ok(names
         .iter()
-        .zip(units)
-        .map(|(name, ir)| CodegenUnit {
+        .zip(output.finish())
+        .map(|(name, llvm_ir)| CodegenUnit {
             name: name.clone(),
-            llvm_ir: rename(&ir, &renames),
+            llvm_ir,
         })
         .collect())
 }
@@ -247,6 +241,64 @@ pub(crate) fn emit_units(
 #[cfg(test)]
 mod tests {
     use std::fs;
+
+    #[test]
+    fn adapters_and_literal_roots_declare_only_their_foreign_uses() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.py");
+        fs::write(
+            &entry,
+            "from leaf import choose\nfrom spare import count\nprint(choose()())\nprint(count())\n",
+        )
+        .unwrap();
+        fs::write(temp.path().join("leaf.py"), "from typing import Callable\ndef label() -> str:\n    return 'hello'\ndef choose() -> Callable[[], str]:\n    return label\n").unwrap();
+        fs::write(
+            temp.path().join("spare.py"),
+            "def count() -> int:\n    return 3\n",
+        )
+        .unwrap();
+        let units = crate::compile_file_units(&entry, None, &crate::CompileOptions::default())
+            .unwrap()
+            .units
+            .into_iter()
+            .map(|u| (u.name, u.llvm_ir))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert!(units["leaf"].contains("define hidden ptr @callable_m"));
+        assert!(units["main"].contains("declare hidden ptr @callable_m"));
+        assert!(
+            units["leaf"].contains("@layout_callable = external hidden constant { i64, ptr, ptr }")
+        );
+        assert!(units["main"].contains("@layout_callable = hidden constant"));
+        assert!(units["main"].contains(" = external hidden constant [5 x i8]"));
+        assert!(units["main"].contains(" = external hidden global ptr"));
+        assert!(!units["spare"].contains("@callable_m"));
+        assert!(!units["spare"].contains("@literal_m"));
+    }
+
+    #[test]
+    fn async_calls_and_exception_types_are_visible_to_their_callers() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.py");
+        fs::write(
+            &entry,
+            "import asyncio\nfrom leaf import fail\nasyncio.run(fail())\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("leaf.py"),
+            "class Failure(Exception):\n    pass\nasync def fail() -> None:\n    raise Failure('failed')\n",
+        ).unwrap();
+        let units = crate::compile_file_units(&entry, None, &crate::CompileOptions::default())
+            .unwrap()
+            .units
+            .into_iter()
+            .map(|u| (u.name, u.llvm_ir))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert!(units["main"].contains("declare hidden i64 @callable_m"));
+        assert!(units["leaf"].contains("define hidden i64 @callable_m"));
+        assert!(units["leaf"].contains("@exception_type_256 = external hidden constant"));
+        assert!(units["main"].contains("@exception_type_256 = hidden constant"));
+    }
 
     #[test]
     fn literal_body_and_caller_abi_invalidate_their_own_units() {

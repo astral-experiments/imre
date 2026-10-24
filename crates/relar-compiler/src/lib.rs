@@ -17,8 +17,13 @@ mod range_specialization;
 mod ranges;
 mod record_copies;
 mod reductions;
+#[cfg(test)]
+mod slice_sum_validation;
 mod tuples;
 mod types;
+#[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+mod verify;
+mod watch;
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -31,13 +36,29 @@ pub struct CompileOptions {
     pub reachable_only: bool,
     /// Marks generated functions for LLVM's AddressSanitizer pass.
     pub address_sanitizer: bool,
-    /// Explicit installation roots containing rebuilt native modules and their type stubs.
-    pub extension_paths: Vec<PathBuf>,
+}
+
+impl CompileOptions {
+    fn load_graph(
+        &self,
+        path: &Path,
+        module_root: Option<&Path>,
+        filesystem: watch::FileSystem<'_>,
+    ) -> Result<modules::SourceGraph, String> {
+        modules::SourceGraph::load_profile_with(
+            path,
+            module_root,
+            self.reachable_only || self.entry_profile.is_some(),
+            self.entry_profile.as_deref(),
+            filesystem,
+        )
+    }
 }
 
 /// Checks source syntax, ty diagnostics, and Relar's exact type contract.
 pub fn check(source: &str) -> Result<(), String> {
-    frontend::lower(&modules::SourceGraph::single(source)?).map(|_| ())
+    let (module, _) = checked_lower(&mut modules::SourceGraph::single(source)?)?;
+    verify_after(&module, "lowering")
 }
 
 /// Compiles a checked module to LLVM IR; the resulting executable uses no CPython.
@@ -45,13 +66,13 @@ pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String>
     if options.entry_profile.is_some() {
         return Err("an entry profile requires a source file and its module name".to_owned());
     }
-    let mut module = frontend::lower(&modules::SourceGraph::single_with_mode(
+    let (mut module, _) = checked_lower(&mut modules::SourceGraph::single_with_mode(
         source,
         options.reachable_only,
     )?)?;
-    specialize(&mut module);
+    specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
-    Ok(llvm::emit(&module, &ranges, options.address_sanitizer))
+    llvm::emit(&module, &ranges, options.address_sanitizer)
 }
 
 /// The generated IR and every source file that must be protected from output writes.
@@ -59,12 +80,10 @@ pub struct Compilation {
     pub llvm_ir: String,
     pub input_paths: Vec<PathBuf>,
     pub source_inputs: SourceInputs,
-    /// Native archives reached by the static import graph, in link order.
-    pub extension_archives: Vec<PathBuf>,
 }
 
 /// Files and failed import lookups observed by the source loader.
-#[derive(Default, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct SourceInputs {
     pub files: Vec<(PathBuf, PathBuf, String)>,
     pub missing: Vec<PathBuf>,
@@ -85,21 +104,7 @@ impl SourceInputs {
 
 /// Checks a closed first-party module graph, inferring its package root when omitted.
 pub fn check_file(path: &Path, module_root: Option<&Path>) -> Result<(), String> {
-    check_file_with_extensions(path, module_root, &[])
-}
-
-/// Checks first-party code against the declarations in explicitly installed extension wheels.
-pub fn check_file_with_extensions(
-    path: &Path,
-    module_root: Option<&Path>,
-    extension_paths: &[PathBuf],
-) -> Result<(), String> {
-    frontend::lower(&modules::SourceGraph::load(
-        path,
-        module_root,
-        extension_paths,
-    )?)
-    .map(|_| ())
+    check_file_with_options(path, module_root, &CompileOptions::default())
 }
 
 /// Checks a first-party entry using the same reachability policy as its native build.
@@ -108,14 +113,19 @@ pub fn check_file_with_options(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<(), String> {
-    frontend::lower(&modules::SourceGraph::load_profile(
-        path,
-        module_root,
-        &options.extension_paths,
-        options.reachable_only || options.entry_profile.is_some(),
-        options.entry_profile.as_deref(),
-    )?)
-    .map(|_| ())
+    check_file_with(path, module_root, options, None, Default::default())
+}
+
+fn check_file_with(
+    path: &Path,
+    module_root: Option<&Path>,
+    options: &CompileOptions,
+    cache: Option<&mut analysis::AnalysisCache>,
+    filesystem: watch::FileSystem<'_>,
+) -> Result<(), String> {
+    let mut graph = options.load_graph(path, module_root, filesystem)?;
+    let (module, _) = checked_lower_with(&mut graph, cache)?;
+    verify_after(&module, "lowering")
 }
 
 /// Compiles one entry module and its statically resolved first-party dependencies.
@@ -124,23 +134,12 @@ pub fn compile_file(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
-    let graph = modules::SourceGraph::load_profile(
-        path,
-        module_root,
-        &options.extension_paths,
-        options.reachable_only || options.entry_profile.is_some(),
-        options.entry_profile.as_deref(),
-    )?;
-    let mut module = frontend::lower(&graph)?;
-    specialize(&mut module);
+    let mut graph = options.load_graph(path, module_root, Default::default())?;
+    let (mut module, _) = checked_lower(&mut graph)?;
+    specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
     Ok(Compilation {
-        llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer),
-        extension_archives: graph
-            .modules
-            .iter()
-            .filter_map(|m| m.archive.clone())
-            .collect(),
+        llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer)?,
         source_inputs: graph.inputs,
         input_paths: graph
             .modules
@@ -160,8 +159,59 @@ pub struct UnitCompilation {
     pub units: Vec<CodegenUnit>,
     pub input_paths: Vec<PathBuf>,
     pub source_inputs: SourceInputs,
-    /// Native archives reached by the static import graph, in link order.
-    pub extension_archives: Vec<PathBuf>,
+}
+
+/// Reuses ty's semantic queries across revisions of a first-party program in this process.
+/// Each call resolves imports and runs Relar's preflight, lowering and requested code generation
+/// against the current files. Changing the module root or resolved file set starts a new database.
+#[derive(Default)]
+pub struct IncrementalCompiler {
+    cache: analysis::AnalysisCache,
+}
+
+impl IncrementalCompiler {
+    /// Checks the current revision, including unused definitions in every reachable file.
+    pub fn check_file(&mut self, path: &Path, module_root: Option<&Path>) -> Result<(), String> {
+        check_file_with(
+            path,
+            module_root,
+            &CompileOptions::default(),
+            Some(&mut self.cache),
+            Default::default(),
+        )
+    }
+
+    /// Reports an initial check and subsequent source changes until interrupted. Source
+    /// diagnostics are delivered to `report`, so fixing a failed check can produce the next result.
+    pub fn watch_file(
+        &mut self,
+        path: &Path,
+        module_root: Option<&Path>,
+        report: impl FnMut(Result<(), String>),
+    ) -> Result<(), String> {
+        self.watch_file_with_options(path, module_root, &CompileOptions::default(), report)
+    }
+
+    /// Watches the file graph used by a check with the given entry profile and import roots.
+    pub fn watch_file_with_options(
+        &mut self,
+        path: &Path,
+        module_root: Option<&Path>,
+        options: &CompileOptions,
+        report: impl FnMut(Result<(), String>),
+    ) -> Result<(), String> {
+        watch::check(&mut self.cache, path, module_root, options, report)
+    }
+
+    /// Checks the current revision and emits the same codegen units as [`compile_file_units`].
+    pub fn compile_file_units(
+        &mut self,
+        path: &Path,
+        module_root: Option<&Path>,
+        options: &CompileOptions,
+    ) -> Result<UnitCompilation, String> {
+        compile_file_units_with(path, module_root, options, Some(&mut self.cache))
+    }
 }
 
 /// Keeps whole-program checking and specialization, then partitions native code by source owner.
@@ -170,15 +220,18 @@ pub fn compile_file_units(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<UnitCompilation, String> {
-    let graph = modules::SourceGraph::load_profile(
-        path,
-        module_root,
-        &options.extension_paths,
-        options.reachable_only || options.entry_profile.is_some(),
-        options.entry_profile.as_deref(),
-    )?;
-    let (mut module, mut owners) = frontend::lower_with_owners(&graph)?;
-    for original in specialize(&mut module) {
+    compile_file_units_with(path, module_root, options, None)
+}
+
+fn compile_file_units_with(
+    path: &Path,
+    module_root: Option<&Path>,
+    options: &CompileOptions,
+    cache: Option<&mut analysis::AnalysisCache>,
+) -> Result<UnitCompilation, String> {
+    let mut graph = options.load_graph(path, module_root, Default::default())?;
+    let (mut module, mut owners) = checked_lower_with(&mut graph, cache)?;
+    for original in specialize(&mut module)? {
         owners.push(owners[original]);
     }
     let ranges = ranges::analyze(&module);
@@ -196,11 +249,6 @@ pub fn compile_file_units(
             &names,
             graph.entry,
         )?,
-        extension_archives: graph
-            .modules
-            .iter()
-            .filter_map(|m| m.archive.clone())
-            .collect(),
         input_paths: graph
             .modules
             .into_iter()
@@ -211,15 +259,70 @@ pub fn compile_file_units(
     })
 }
 
-fn specialize(module: &mut ir::Module) -> Vec<usize> {
+/// Reject unsupported operations before ty renders potentially exponential types.
+fn checked_lower(
+    graph: &mut modules::SourceGraph,
+) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
+    let lowered = frontend::lower_with_owners(graph)?;
+    let (skipped, decorators) = graph.diagnostic_scopes();
+    graph
+        .session
+        .check_scopes(skipped.as_deref(), &decorators)?;
+    Ok(lowered)
+}
+
+fn checked_lower_with(
+    graph: &mut modules::SourceGraph,
+    cache: Option<&mut analysis::AnalysisCache>,
+) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
+    let Some(cache) = cache else {
+        return checked_lower(graph);
+    };
+    cache.restore_hints(graph)?;
+    let lowered = frontend::lower_with_owners(graph);
+    cache.retain_hints(graph, lowered.is_ok());
+    let lowered = lowered?;
+    let (skipped, decorators) = graph.diagnostic_scopes();
+    cache.check_scopes(
+        &mut graph.session,
+        &graph.inputs,
+        skipped.as_deref(),
+        &decorators,
+    )?;
+    Ok(lowered)
+}
+
+fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
+    verify_after(module, "lowering")?;
     let reader_origins = record_copies::scalarize(module);
+    verify_after(module, "record copy scalarization")?;
     tuples::scalarize(module);
+    verify_after(module, "tuple scalarization")?;
     list_bounds::specialize(module);
+    verify_after(module, "list bounds specialization")?;
     list_specialization::specialize(module);
+    verify_after(module, "list specialization")?;
     range_specialization::specialize(module);
+    verify_after(module, "range specialization")?;
     reductions::specialize(module);
+    verify_after(module, "reduction specialization")?;
     guarded_text::specialize(module);
-    reader_origins
+    verify_after(module, "guarded text specialization")?;
+    Ok(reader_origins)
+}
+
+/// Names the first stage that produces malformed IR, before later passes consume it.
+fn verify_after(module: &ir::Module, stage: &str) -> Result<(), String> {
+    #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+    {
+        verify::module(module)
+            .map_err(|error| format!("internal compiler error: invalid IR after {stage}: {error}"))
+    }
+    #[cfg(not(any(debug_assertions, test, feature = "verify-ir")))]
+    {
+        let _ = (module, stage);
+        Ok(())
+    }
 }
 
 /// Applies Python's source preprocessing before Ruff, ty, and source-range checks.
@@ -282,6 +385,43 @@ mod tests {
     use super::{CompileOptions, compile};
 
     #[test]
+    fn unsupported_operations_on_shared_tuple_types_have_bounded_diagnostics() {
+        let mut source = String::from("def f(x0: int) -> None:\n");
+        for i in 0..14 {
+            source.push_str(&format!("    x{} = (x{i}, x{i})\n", i + 1));
+        }
+        super::check(&source).unwrap();
+        for operation in [
+            "    x14()\n",
+            "    with x14:\n        pass\n",
+            "    raise x14\n",
+        ] {
+            let error = super::check(&format!("{source}{operation}")).unwrap_err();
+            assert!(error.len() < 2048, "diagnostic had {} bytes", error.len());
+        }
+    }
+
+    #[test]
+    fn reject_starred_tuple_displays_before_expanding_their_fields() {
+        let mut source = String::from("def f(x: int) -> int:\n    a0 = (x,)\n");
+        for i in 1..=16 {
+            source.push_str(&format!("    a{i} = (*a{}, *a{})\n", i - 1, i - 1));
+        }
+        source.push_str("    return x\n");
+        for rejected in [
+            source.as_str(),
+            "def f(x: tuple[int] = (*(1,),)) -> int:\n    return 0\n",
+        ] {
+            let error = super::check(rejected).unwrap_err();
+            assert!(
+                error.contains("starred elements in tuple displays"),
+                "{error}"
+            );
+        }
+        super::check("def f(x: int) -> int:\n    a, *rest = (x, x)\n    b = [*rest]\n    return a + len(b)\n").unwrap();
+    }
+
+    #[test]
     fn deep_source_returns_a_diagnostic_but_wide_displays_compile() {
         for expression in [
             format!("{}1", "-".repeat(4096)),
@@ -294,6 +434,114 @@ mod tests {
         }
         let flat = format!("print(len([{}]))\n", "(1 + 2),".repeat(256));
         compile(&flat, &CompileOptions::default()).unwrap();
+    }
+
+    #[test]
+    fn joins_conditional_writes_in_boolean_conditions() {
+        for operator in ["and", "or"] {
+            let source = format!(
+                "def check(flag: bool) -> bool:\n    if (first := flag) {operator} (last := flag):\n        pass\n    return first\n"
+            );
+            super::check(&source).unwrap();
+            assert!(super::check(&source.replace("return first", "return last")).is_err());
+        }
+    }
+
+    #[test]
+    fn nested_conditional_values_join_assignments_from_every_arm() {
+        let source = "def f(flag: bool, value: int | None) -> int:\n    kept = 7\n    selected = (saved := kept) if flag else ((saved := value) if value is not None else (saved := 0))\n    return saved + selected + kept\n";
+        super::check(source).unwrap();
+        assert!(super::check(&source.replace("(saved := 0)", "0")).is_err());
+    }
+
+    #[test]
+    fn nested_boolean_exits_preserve_only_guaranteed_writes() {
+        let source = "def f(flag: bool, other: bool) -> bool:\n    result = (saved := flag) and (other or (flag and (saved := other)))\n    return saved\n";
+        super::check(source).unwrap();
+        assert!(super::check(&source.replace("(saved := flag)", "flag")).is_err());
+    }
+
+    #[test]
+    fn elif_chains_count_toward_branch_depth() {
+        let flat = format!("if False: pass\n{}", "elif False: pass\n".repeat(10_000));
+        let nested = format!(
+            "if False: pass\n{}else:\n    if False: pass\n{}",
+            "elif False: pass\n".repeat(60),
+            "    elif False: pass\n".repeat(60)
+        );
+        for source in [flat, nested] {
+            let error = super::check(&source).unwrap_err();
+            assert!(error.contains("syntax complexity limit"), "{error}");
+        }
+        super::check(&"if False: pass\nelif False: pass\n".repeat(128)).unwrap();
+    }
+
+    #[test]
+    fn limits_exception_handlers_per_try_statement() {
+        let handler = "except ValueError:\n    pass\n";
+        let chain = |count| format!("try:\n    pass\n{}", handler.repeat(count));
+        super::check(&chain(96)).unwrap();
+        let error = super::check(&chain(97)).unwrap_err();
+        assert!(error.contains("exception handler limit"), "{error}");
+        super::check(&chain(2).repeat(100)).unwrap();
+        let inner: String = chain(96)
+            .lines()
+            .map(|line| format!("    {line}\n"))
+            .collect();
+        super::check(&format!("try:\n{inner}{}", handler.repeat(96))).unwrap();
+    }
+
+    #[test]
+    fn finally_updates_only_breaks_that_pass_through_it() {
+        let source = concat!(
+            "def choose(run: bool, early: bool) -> str:\n",
+            "    while run:\n",
+            "        if early:\n",
+            "            word = 'early'\n",
+            "            break\n",
+            "        try:\n",
+            "            break\n",
+            "        finally:\n",
+            "            word = 'late'\n",
+            "    else:\n",
+            "        word = 'else'\n",
+            "    return word\n",
+        );
+        super::check(source).unwrap();
+        let missing = source.replace("word = 'early'", "pass");
+        assert!(super::check(&missing).is_err());
+    }
+
+    #[test]
+    fn joins_elif_exits_through_an_exhaustive_type_guard() {
+        let source = concat!(
+            "def choose(value: str | bytes) -> str:\n",
+            "    if isinstance(value, str):\n",
+            "        answer = value\n",
+            "    elif isinstance(value, bytes):\n",
+            "        answer = value.decode()\n",
+            "    else:\n",
+            "        pass\n",
+            "    return answer\n",
+        );
+        super::check(source).unwrap();
+        let missing = source.replace("answer = value.decode()", "pass");
+        assert!(super::check(&missing).is_err());
+    }
+
+    #[test]
+    fn joins_chained_comparison_exits_after_the_first_two_operands() {
+        let source = "def check(value: int) -> int:\n    (first := value) == (second := value) < (last := value)\n    return first + second\n";
+        super::check(source).unwrap();
+        assert!(super::check(&source.replace("first + second", "first + last")).is_err());
+    }
+
+    #[test]
+    fn joins_only_falling_exception_handler_exits() {
+        let source = "def choose(value: int) -> str:\n    try:\n        if value == 0:\n            raise ValueError('zero')\n        raise IndexError('one')\n    except ValueError:\n        word = 'zero'\n    except IndexError:\n        return 'one'\n    return word\n";
+        super::check(source).unwrap();
+        let missing = source.replace("return 'one'", "pass");
+        assert!(super::check(&missing).is_err());
     }
 
     #[test]
@@ -355,6 +603,61 @@ def first(stream: Stream) -> str:
     }
 
     #[test]
+    fn limits_semantic_snapshots_for_loop_transfers() {
+        let mut source = String::from("def check(value: int) -> None:\n");
+        for slot in 0..6_000 {
+            source.push_str(&format!("    a{slot} = 0\n"));
+        }
+        for transfer in ["break", "continue"] {
+            let body = format!("        if value: {transfer}\n").repeat(3_000);
+            let error = super::check(&format!("{source}    while value:\n{body}")).unwrap_err();
+            assert!(
+                error.contains("loop transfers exceed the flow analysis limit"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn limits_match_flow_snapshots_within_the_enclosing_scope() {
+        let locals: String = (0..4000).map(|i| format!("    a{i}=0\n")).collect();
+        let case = "        case 0: pass\n";
+        let wide = case.repeat(600);
+        let header = "def big(value: int) -> None:\n";
+        let subject = "    match value:\n";
+        let error = super::check(&format!("{header}{locals}{subject}{wide}")).unwrap_err();
+        assert!(
+            error.contains("match statement exceeds the flow analysis limit"),
+            "{error}"
+        );
+        super::check(&format!(
+            "{header}{locals}{subject}{case}def small(value: int) -> None:\n{subject}{wide}"
+        ))
+        .unwrap();
+    }
+
+    #[test]
+    fn context_manager_depth_counts_flat_and_nested_items() {
+        let managers = |n| vec!["f"; n].join(", ");
+        let file = "f = open('/dev/null', 'rb')\n";
+        let flat = format!("{file}with {}:\n    pass\n", managers(10_000));
+        let nested = format!(
+            "{file}with {}:\n    with {}:\n        pass\n",
+            managers(60),
+            managers(60)
+        );
+        for source in [flat, nested] {
+            let error = super::check(&source).unwrap_err();
+            assert!(
+                error.contains("context manager nesting exceeds 96 levels"),
+                "{error}"
+            );
+        }
+        let sequential = format!("{file}{}", "with f, f:\n    pass\n".repeat(100));
+        super::check(&sequential).unwrap();
+    }
+
+    #[test]
     fn file_iterators_pull_typed_lines_and_keep_reads_in_the_loop() {
         let source = r#"
 from gzip import open
@@ -392,6 +695,31 @@ def first(path: str) -> bytes:
         assert!(llvm.contains("define i32 @main()"));
         assert!(!llvm.contains("call void @relar_args_init"));
         assert!(!llvm.contains("call void @relar_args_clear"));
+    }
+
+    #[test]
+    fn nested_finally_emission_stays_bounded() {
+        fn indent(body: &str) -> String {
+            body.lines().map(|line| format!("    {line}\n")).collect()
+        }
+        fn program(depth: usize, nested_cleanup: bool) -> String {
+            let mut body = "pass\n".to_owned();
+            for _ in 0..depth {
+                let nested = indent(&body);
+                body = if nested_cleanup {
+                    format!("try:\n    int(text)\nfinally:\n{nested}")
+                } else {
+                    format!("try:\n{nested}finally:\n    int(text)\n")
+                };
+            }
+            format!("def f(text: str) -> None:\n{}f('1')\n", indent(&body))
+        }
+        let options = CompileOptions::default();
+        let shallow = compile(&program(8, false), &options).unwrap();
+        let deep = compile(&program(12, false), &options).unwrap();
+        assert!(deep.len() < 2 * shallow.len());
+        let error = compile(&program(14, true), &options).unwrap_err();
+        assert!(error.contains("finally cleanup expansion"), "{error}");
     }
 
     #[test]

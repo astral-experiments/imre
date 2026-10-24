@@ -1,22 +1,86 @@
-//! A shared cursor for whole-file, bounded-byte, and incremental line reads.
+//! Buffered binary and UTF-8 streams with Python's read and write boundaries.
 
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, Read};
+use std::io::{self, BufRead, BufReader, BufWriter, IsTerminal, Read, Write};
+use std::mem::MaybeUninit;
 
 use smallvec::SmallVec;
 
 use super::gzip::{GzipError, GzipReader};
 use super::{Bytes, Error, Kind, Result, Str, decode_utf8_text, os_error};
 
+pub(super) struct Output {
+    raw: BufWriter<File>,
+    text: Option<Vec<u8>>,
+    line_buffering: bool,
+}
+
+impl Output {
+    pub(super) fn new(file: File, capacity: usize, binary: bool) -> Self {
+        Self {
+            line_buffering: !binary && file.is_terminal(),
+            raw: BufWriter::with_capacity(capacity, file),
+            text: (!binary).then(Vec::new),
+        }
+    }
+
+    pub(super) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+        let Some(pending) = &mut self.text else {
+            return self.raw.write_all(bytes);
+        };
+        let flush_line = self.line_buffering && memchr::memchr2(b'\r', b'\n', bytes).is_some();
+        // TextIOWrapper groups small encoded writes, but forwards a large write
+        // separately after draining any pending text.
+        const CHUNK_SIZE: usize = 8192;
+        if bytes.len() >= CHUNK_SIZE {
+            Self::drain_text(&mut self.raw, pending)?;
+            self.raw.write_all(bytes)?;
+        } else {
+            pending.extend_from_slice(bytes);
+            if pending.len() >= CHUNK_SIZE || flush_line {
+                Self::drain_text(&mut self.raw, pending)?;
+            }
+        }
+        if flush_line {
+            self.raw.flush()?;
+        }
+        Ok(())
+    }
+
+    fn drain_text(raw: &mut BufWriter<File>, pending: &mut Vec<u8>) -> io::Result<()> {
+        let result = raw.write_all(pending);
+        // TextIOWrapper removes the pending text even when the binary write fails.
+        pending.clear();
+        result
+    }
+
+    pub(super) fn flush(&mut self) -> io::Result<()> {
+        if let Some(pending) = &mut self.text {
+            Self::drain_text(&mut self.raw, pending)?;
+        }
+        self.raw.flush()
+    }
+
+    pub(super) fn finish(mut self) -> (File, io::Result<()>) {
+        let flushed = self.flush();
+        let (file, _) = self.raw.into_parts();
+        (file, flushed)
+    }
+}
+
 enum Source {
     Plain(File),
     Gzip(Box<GzipReader>),
 }
 
-impl Read for Source {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+impl Source {
+    /// Read one raw chunk into the already reserved result, initializing its prefix.
+    fn read_uninit(&mut self, buf: &mut [MaybeUninit<u8>]) -> io::Result<usize> {
         match self {
-            Self::Plain(file) => file.read(buf),
+            Self::Plain(file) => rustix::io::retry_on_intr(|| {
+                rustix::io::read(&*file, &mut *buf).map(|(initialized, _)| initialized.len())
+            })
+            .map_err(Into::into),
             Self::Gzip(gzip) => gzip.read(buf).map_err(|err| {
                 if err.kind() == io::ErrorKind::UnexpectedEof {
                     io::Error::other(GzipError(
@@ -31,28 +95,39 @@ impl Read for Source {
     }
 }
 
+impl Read for Source {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        // SAFETY: both raw readers only write initialized bytes into the prefix.
+        let buf = unsafe { &mut *(buf as *mut [u8] as *mut [MaybeUninit<u8>]) };
+        self.read_uninit(buf)
+    }
+}
+
 pub(super) struct Input {
-    raw: BufReader<Source>,
+    raw: BufReader<io::Take<Source>>,
     text: TextBuffer,
 }
 
 impl Input {
-    pub(super) fn new(file: File, gzip: bool, binary: bool) -> Self {
+    pub(super) fn new(file: File, gzip: bool, binary: bool, capacity: usize) -> Self {
         let source = if gzip {
-            Source::Gzip(Box::new(GzipReader::new(file)))
+            Source::Gzip(Box::new(GzipReader::new(file, capacity)))
         } else {
             Source::Plain(file)
         };
         // TextIOWrapper reads 8192 bytes per decode. CPython 3.14's binary
         // BufferedReader reads 128 KiB ahead, exposing errors in that chunk.
         Self {
-            raw: BufReader::with_capacity(if binary { 128 * 1024 } else { 8192 }, source),
+            raw: BufReader::with_capacity(
+                if binary { 128 * 1024 } else { 8192 },
+                source.take(u64::MAX),
+            ),
             text: TextBuffer::default(),
         }
     }
 
     pub(super) fn into_file(self) -> File {
-        match self.raw.into_inner() {
+        match self.raw.into_inner().into_inner() {
             Source::Plain(file) => file,
             Source::Gzip(reader) => reader.into_file(),
         }
@@ -69,11 +144,7 @@ impl Input {
             bytes
                 .try_reserve_exact(limit)
                 .map_err(|_| Error::new(Kind::MemoryError, "bytes allocation failed"))?;
-            self.raw
-                .by_ref()
-                .take(limit as u64)
-                .read_to_end(&mut bytes)
-                .map_err(os_error)?;
+            self.read_sized(&mut bytes, limit).map_err(os_error)?;
             // CPython releases the unused part of a short read. Keeping the
             // requested capacity alive with a tiny result exhausts address space.
             if bytes.len() < limit {
@@ -83,6 +154,49 @@ impl Input {
             self.raw.read_to_end(&mut bytes).map_err(os_error)?;
         }
         Ok(bytes)
+    }
+
+    /// Match BufferedReader's raw request sizes after short reads, including
+    /// gzip member boundaries where looking one byte further can raise an error.
+    fn read_sized(&mut self, bytes: &mut Bytes, limit: usize) -> io::Result<()> {
+        let buffered = limit.min(self.raw.buffer().len());
+        bytes.extend_from_slice(&self.raw.buffer()[..buffered]);
+        self.raw.consume(buffered);
+        let capacity = self.raw.capacity();
+        while limit - bytes.len() >= capacity {
+            let start = bytes.len();
+            let remaining = limit - start;
+            let bulk = remaining - remaining % capacity;
+            let count = self
+                .raw
+                .get_mut()
+                .get_mut()
+                .read_uninit(&mut bytes.spare_capacity_mut()[..bulk])?;
+            if count == 0 {
+                return Ok(());
+            }
+            // SAFETY: the source initialized exactly the reported prefix.
+            unsafe { bytes.set_len(start + count) };
+        }
+        // Fill one final block. Each short raw read reduces the space left in
+        // that block, even when all of its returned bytes go straight to the caller.
+        let mut room = capacity;
+        while bytes.len() < limit {
+            self.raw.get_mut().set_limit(room as u64);
+            let read = self.raw.fill_buf().map(|chunk| {
+                let count = (limit - bytes.len()).min(chunk.len());
+                bytes.extend_from_slice(&chunk[..count]);
+                (count, chunk.len())
+            });
+            self.raw.get_mut().set_limit(u64::MAX);
+            let (count, filled) = read?;
+            if filled == 0 {
+                break;
+            }
+            self.raw.consume(count);
+            room -= filled;
+        }
+        Ok(())
     }
 
     pub(super) fn binary_line(&mut self) -> Result<Bytes> {
@@ -166,7 +280,13 @@ impl TextBuffer {
         };
         let text = match str::from_utf8(bytes) {
             Ok(text) => text,
-            Err(err) if err.error_len().is_none() && !eof => {
+            // CPython's incremental decoder also waits for the third byte of
+            // a surrogate encoding before rejecting it, even in strict mode.
+            Err(err)
+                if !eof
+                    && (err.error_len().is_none()
+                        || matches!(&bytes[err.valid_up_to()..], [0xed, 0xa0..=0xbf])) =>
+            {
                 // SAFETY: valid_up_to is the byte length of the validated prefix.
                 unsafe { str::from_utf8_unchecked(&bytes[..err.valid_up_to()]) }
             }

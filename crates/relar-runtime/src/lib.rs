@@ -9,17 +9,16 @@
 //! their respective types. ABI arguments borrow these handles; results transfer
 //! one owned reference unless an entry point explicitly documents a borrowed
 //! result. Release functions consume one reference. Generated code
-//! must never forge, confuse, or reuse released handles. Container operations
-//! run without calling user code. Rebuilt C extensions can invoke callbacks
-//! after the individual container operation has released all storage borrows.
+//! must never forge, confuse, or reuse released handles. There are no callbacks
+//! or user-defined finalizers, so a container access cannot reenter user code.
 //! Final resource release may close a file, but never installs a language error.
 //! Handles belong to one execution thread. An operation must finish before
 //! another operation accesses the same mutable storage; no storage reference may
 //! escape. Buffer addresses stay private except for explicitly documented readonly
 //! loop views whose compiler proof keeps the owner rooted and prevents all storage
 //! mutation. Such views never enter language values or escape the loop. Aliased
-//! handles are allowed and observe sequential mutations. Python.h APIs and
-//! callbacks run on the same thread as the originating extension call.
+//! handles are allowed and observe sequential mutations. Future callback or threaded
+//! extension boundaries must uphold these invariants before entering this ABI.
 //!
 //! Recoverable calls enter with pending state clear. Language errors install an
 //! owned thread-local exception; generated code checks the entry point's error
@@ -32,18 +31,19 @@
 //! Cleanup/error-state entry points remain valid while pending. Invalid ABI
 //! inputs and allocator exhaustion remain fatal; neither uses Rust unwinding.
 
-mod extensions;
 mod floats;
 mod integer_text;
 mod objects;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod run_start;
 
 use objects::exceptions::{Error, Kind, Result, finish};
 
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
 use std::borrow::Cow;
-use std::cell::{RefCell, UnsafeCell};
-use std::io::{self, BufWriter, IsTerminal, Write};
+use std::cell::{Cell, RefCell, UnsafeCell};
+use std::io::{self, IsTerminal, Write};
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 use std::sync::{LazyLock, Mutex, Once};
@@ -171,7 +171,24 @@ impl<T> StorageCell<T> {
 }
 
 /// An opaque, nonmoving list allocation. Only a proven readonly loop borrows its buffer.
-pub struct List(StorageCell<Vec<Int>>);
+pub struct List(
+    StorageCell<Vec<Int>>,
+    // Capacity charged to this list in the thread's range-hint budget.
+    Cell<usize>,
+);
+
+impl List {
+    fn new(values: Vec<Int>) -> Self {
+        Self(StorageCell::new(values), Cell::new(0))
+    }
+
+    fn release_range_hint(&self) {
+        let slots = self.1.replace(0);
+        if slots != 0 {
+            let _ = RANGE_HINT_SLOTS.try_with(|used| used.set(used.get() - slots));
+        }
+    }
+}
 
 // An unallocated Vec never reads, writes, or frees this address. A real push
 // replaces it with an allocation, even if a later pop empties the list again.
@@ -188,8 +205,12 @@ fn is_sorting_empty_ints(values: &[Int]) -> bool {
 }
 
 const MAX_REUSED_LIST_CAPACITY: usize = 32_768;
+const MAX_LIVE_RANGE_HINT_SLOTS: usize = 2 * MAX_REUSED_LIST_CAPACITY;
 
 thread_local! {
+    // A loop can break or raise before filling its output. Bound speculative
+    // capacity across all live lists, including buffers obtained from the cache.
+    static RANGE_HINT_SLOTS: Cell<usize> = const { Cell::new(0) };
     // Only empty buffers enter these newest-first slots: no integer owners or
     // list identities survive here. Retention is bounded to 512 KiB per thread.
     static LIST_BUFFERS: RefCell<[Vec<Int>; 2]> = const {
@@ -222,7 +243,7 @@ fn new_list(values: Vec<Int>) -> *const List {
         *storage = values;
         owner
     } else {
-        Rc::new(List(StorageCell::new(values)))
+        Rc::new(List::new(values))
     };
     Rc::into_raw(owner)
 }
@@ -235,8 +256,9 @@ fn recycle_list_header(mut owner: Rc<List>) {
     let Some(list) = Rc::get_mut(&mut owner) else {
         return;
     };
+    list.release_range_hint();
     let values = std::mem::take(list.0.0.get_mut());
-    drop(List(StorageCell::new(values)));
+    drop(List::new(values));
     let evicted = LIST_HEADERS.try_with(|headers| {
         let Ok(mut headers) = headers.try_borrow_mut() else {
             return Some(owner);
@@ -301,6 +323,7 @@ impl Drop for List {
     /// immediate. Any BigInt leaves the ordinary Vec drop path responsible for
     /// releasing all owners, including repeated references to the same integer.
     fn drop(&mut self) {
+        self.release_range_hint();
         let values = self.0.0.get_mut();
         let common_tags = values.iter().fold(1_usize, |tags, value| tags & value.0);
         if common_tags & 1 != 0 {
@@ -344,37 +367,96 @@ fn initialize_io() {
 /// Standard output uses bounded block buffering for pipes and files, while
 /// terminals flush each printed line. LLVM supplies the process entry point, so
 /// input, fatal errors, and normal entry-point return explicitly flush it.
-struct Output {
-    writer: BufWriter<io::Stdout>,
+struct Output<W = io::Stdout> {
+    stdout: W,
+    buffer: Vec<u8>,
+    written: usize,
     line_buffered: bool,
+}
+
+impl<W: Write> Output<W> {
+    #[cold]
+    fn write_all_slow(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.flush_buffer()?;
+        if bytes.len() >= self.buffer.capacity() {
+            self.stdout.write_all(bytes)
+        } else {
+            self.buffer.extend_from_slice(bytes);
+            Ok(())
+        }
+    }
+
+    fn flush_buffer(&mut self) -> io::Result<()> {
+        while self.written < self.buffer.len() {
+            match self.stdout.write(&self.buffer[self.written..]) {
+                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                Ok(count) => self.written += count,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        self.buffer.clear();
+        self.written = 0;
+        Ok(())
+    }
+}
+
+impl<W: Write> Write for Output<W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.len() > self.buffer.capacity() - self.buffer.len() {
+            self.flush_buffer()?;
+        }
+        if bytes.len() >= self.buffer.capacity() {
+            return self.stdout.write(bytes);
+        }
+        self.buffer.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    #[inline]
+    fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        if bytes.len() <= self.buffer.capacity() - self.buffer.len() {
+            self.buffer.extend_from_slice(bytes);
+            return Ok(());
+        }
+        self.write_all_slow(bytes)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.flush_buffer()?;
+        self.stdout.flush()
+    }
 }
 
 static OUTPUT: LazyLock<Mutex<Output>> = LazyLock::new(|| {
     initialize_io();
     let stdout = io::stdout();
     let line_buffered = stdout.is_terminal();
+    let mut buffer = Vec::new();
+    // With zero capacity every write goes directly to stdout.
+    let _ = buffer.try_reserve_exact(8 * 1024);
     Mutex::new(Output {
-        writer: BufWriter::with_capacity(8 * 1024, stdout),
+        stdout,
+        buffer,
+        written: 0,
         line_buffered,
     })
 });
 
 /// Prints one value and a newline, returning with the writer lock released.
 /// Only primitive formatters run here; they cannot call user code.
-fn write_output(
-    write: impl FnOnce(&mut BufWriter<io::Stdout>) -> io::Result<()>,
-) -> io::Result<()> {
+fn write_output(write: impl FnOnce(&mut Output) -> io::Result<()>) -> io::Result<()> {
     let mut output = OUTPUT.lock().unwrap_or_else(|poison| poison.into_inner());
-    write(&mut output.writer)?;
-    output.writer.write_all(b"\n")?;
+    write(&mut output)?;
+    output.write_all(b"\n")?;
     if output.line_buffered {
-        output.writer.flush()?;
+        output.flush()?;
     }
     Ok(())
 }
 
 /// Handles write failures only after releasing the writer lock.
-fn output(write: impl FnOnce(&mut BufWriter<io::Stdout>) -> io::Result<()>) {
+fn output(write: impl FnOnce(&mut Output) -> io::Result<()>) {
     if write_output(write).is_err() {
         Error::new(Kind::OSError, "could not write standard output").raise();
     }
@@ -405,10 +487,12 @@ fn output_bytes(value: &[u8]) {
 
 /// The caller handles errors only after this function releases the writer lock.
 fn flush_stdout() -> io::Result<()> {
-    OUTPUT
+    let Some(output) = LazyLock::get(&OUTPUT) else {
+        return Ok(());
+    };
+    output
         .lock()
         .unwrap_or_else(|poison| poison.into_inner())
-        .writer
         .flush()
 }
 
@@ -684,6 +768,16 @@ pub unsafe extern "C" fn relar_str_literal(data: *const u8, length: usize) -> *c
 }
 
 /// # Safety
+/// The compiler supplies immutable UTF-8 bytes that remain readable for
+/// the program's lifetime. A zero-length span may be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_static_literal(data: *const u8, length: usize) -> *const Str {
+    // SAFETY: the compiler's string globals have static storage duration.
+    let literal: &'static str = unsafe { text(data, length) };
+    Rc::into_raw(Rc::new(Str::const_new(literal)))
+}
+
+/// # Safety
 /// The argument must be a live string handle or null during slot cleanup.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_str_retain(value: *const Str) {
@@ -732,9 +826,8 @@ pub unsafe extern "C" fn relar_stdout_write(value: *const Str) -> usize {
         let flush =
             output.line_buffered && text.as_bytes().iter().any(|&b| b == b'\n' || b == b'\r');
         output
-            .writer
             .write_all(text.as_bytes())
-            .and_then(|()| if flush { output.writer.flush() } else { Ok(()) })
+            .and_then(|()| if flush { output.flush() } else { Ok(()) })
     };
     if result.is_err() {
         Error::new(Kind::OSError, "could not write standard output").raise();
@@ -1273,23 +1366,38 @@ pub unsafe extern "C" fn relar_list_reserve_range(
     let capacity = trips
         .saturating_mul(per_iteration)
         .min(MAX_REUSED_LIST_CAPACITY);
-    // SAFETY: this nonreentrant reservation changes capacity only; no buffer
-    // address or storage borrow escapes, and existing elements are untouched.
-    let displaced = unsafe {
-        (&*list).0.with_mut(|values| {
-            if !values.is_empty() || values.capacity() >= capacity || is_sorting_empty_ints(values)
-            {
-                return Vec::new();
-            }
-            let buffer = take_list_buffer(capacity);
-            if buffer.capacity() >= capacity {
+    // SAFETY: the caller roots the list for this nonreentrant reservation.
+    let list = unsafe { &*list };
+    let displaced = RANGE_HINT_SLOTS.try_with(|used| {
+        let other_slots = used.get() - list.1.get();
+        let available = MAX_LIVE_RANGE_HINT_SLOTS - other_slots;
+        if capacity > available {
+            return Vec::new();
+        }
+        // SAFETY: no buffer address or storage borrow escapes, and the
+        // reservation leaves existing elements untouched.
+        unsafe {
+            list.0.with_mut(|values| {
+                if !values.is_empty()
+                    || values.capacity() >= capacity
+                    || is_sorting_empty_ints(values)
+                {
+                    return Vec::new();
+                }
+                let mut buffer = take_list_buffer(capacity);
+                if buffer.capacity() < capacity && buffer.try_reserve_exact(capacity).is_err() {
+                    return buffer;
+                }
+                let slots = buffer.capacity();
+                if slots > available {
+                    return buffer;
+                }
+                list.1.set(slots);
+                used.set(other_slots + slots);
                 std::mem::replace(values, buffer)
-            } else {
-                let _ = values.try_reserve_exact(capacity);
-                buffer
-            }
-        })
-    };
+            })
+        }
+    });
     drop(displaced);
 }
 
@@ -1395,13 +1503,69 @@ mod tests {
     };
 
     #[test]
+    fn output_works_with_and_without_a_reserved_buffer() {
+        for capacity in [0, 8] {
+            let mut output = Output {
+                stdout: Vec::new(),
+                buffer: Vec::with_capacity(capacity),
+                written: 0,
+                line_buffered: false,
+            };
+            output.write_all(b"abc").unwrap();
+            assert_eq!(output.stdout.is_empty(), capacity != 0);
+            output.write_all(b"0123456789").unwrap();
+            output.write_all(b"z").unwrap();
+            output.flush().unwrap();
+            assert_eq!(output.stdout, b"abc0123456789z");
+        }
+    }
+
+    #[test]
+    fn output_retries_only_the_unwritten_suffix() {
+        #[derive(Default)]
+        struct Sink {
+            bytes: Vec<u8>,
+            failed: bool,
+        }
+        impl Write for Sink {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if self.bytes.is_empty() {
+                    return self.bytes.write(&bytes[..bytes.len().min(2)]);
+                }
+                if !self.failed {
+                    self.failed = true;
+                    return Err(io::ErrorKind::BrokenPipe.into());
+                }
+                self.bytes.write(bytes)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut output = Output {
+            stdout: Sink::default(),
+            buffer: Vec::with_capacity(16),
+            written: 0,
+            line_buffered: false,
+        };
+        output.write_all(b"partial").unwrap();
+        assert_eq!(
+            output.flush().unwrap_err().kind(),
+            io::ErrorKind::BrokenPipe
+        );
+        output.flush().unwrap();
+        assert_eq!(output.stdout.bytes, b"partial");
+    }
+
+    #[test]
     fn paired_append_preserves_order_and_independent_bigint_owners() {
         let big = Rc::new(BigInt::from(1_u128 << 100));
         let weak = Rc::downgrade(&big);
         let big_word = Rc::as_ptr(&big) as usize;
         let negative = Int::small(-7).unwrap().0;
         let values = vec![Int::small(9).unwrap()];
-        let list = Rc::new(List(StorageCell::new(values)));
+        let list = Rc::new(List::new(values));
         // SAFETY: both inputs and the exact list remain rooted. The second call
         // borrows its repeated input from the list itself across buffer growth.
         unsafe {
@@ -1432,11 +1596,11 @@ mod tests {
             let expected = (0..length)
                 .map(|index| BigInt::from(pattern[index % pattern.len()]))
                 .sum::<BigInt>();
-            let list = List(StorageCell::new(
+            let list = List::new(
                 (0..length)
                     .map(|index| Int::small(i64::from(pattern[index % pattern.len()])).unwrap())
                     .collect(),
-            ));
+            );
             for start in [0, -19, MIN_SMALL, MAX_SMALL] {
                 let start = Int::small(start).unwrap();
                 // SAFETY: both exact arguments remain rooted for the sum.
@@ -1465,7 +1629,7 @@ mod tests {
             ),
         ] {
             let expected = values.iter().sum::<BigInt>() + &start;
-            let list = List(StorageCell::new(values.into_iter().map(Int::new).collect()));
+            let list = List::new(values.into_iter().map(Int::new).collect());
             let start = Int::new(start);
             // SAFETY: both exact arguments remain rooted for the sum.
             let result = Int(unsafe { relar_list_sum(&list, start.0) });
@@ -1486,11 +1650,11 @@ mod tests {
         let negative = Rc::new(-positive.as_ref());
         let positive_weak = Rc::downgrade(&positive);
         let negative_weak = Rc::downgrade(&negative);
-        let list = Rc::new(List(StorageCell::new(vec![
+        let list = Rc::new(List::new(vec![
             Int(Rc::into_raw(positive.clone()) as usize),
             Int(Rc::into_raw(negative.clone()) as usize),
             Int::small(7).unwrap(),
-        ])));
+        ]));
         let alias = list.clone();
         let start = Rc::as_ptr(&positive) as usize;
         // SAFETY: start is rooted both directly and by the list. The aliased
@@ -1667,7 +1831,7 @@ mod tests {
         let mut values = Vec::with_capacity(64);
         values.extend((0..64).map(|value| Int::small(value).unwrap()));
         let allocation = values.as_ptr();
-        let list = Rc::new(List(StorageCell::new(values)));
+        let list = Rc::new(List::new(values));
         let alias = list.clone();
         drop(list);
         assert_eq!(take_list_buffer(48).capacity(), 0);
@@ -1732,7 +1896,7 @@ mod tests {
         recycle_list_buffer(&mut values);
         assert_eq!(values.len(), 1);
         assert_eq!(weak.strong_count(), 1);
-        drop(List(StorageCell::new(values)));
+        drop(List::new(values));
         assert!(weak.upgrade().is_none());
         LIST_BUFFERS.with(|buffers| {
             assert!(buffers.borrow().iter().all(|buffer| buffer.capacity() == 0));
@@ -1744,7 +1908,7 @@ mod tests {
                 let mut values = take_list_buffer(8);
                 values.try_reserve_exact(8).unwrap();
                 values.push(Int::small(1).unwrap());
-                drop(List(StorageCell::new(values)));
+                drop(List::new(values));
                 self.0.store(true, Ordering::Relaxed);
             }
         }
@@ -1759,7 +1923,7 @@ mod tests {
             TEARDOWN.with(|probe| *probe.borrow_mut() = Some(Teardown(observed)));
             let mut values = Vec::with_capacity(8);
             values.push(Int::small(2).unwrap());
-            drop(List(StorageCell::new(values)));
+            drop(List::new(values));
         })
         .join()
         .unwrap();
@@ -1775,7 +1939,7 @@ mod tests {
                 .map(|value| Int::small(value - 16).unwrap())
                 .collect::<Vec<_>>();
             values[position] = Int(Rc::into_raw(bigint) as usize);
-            let list = Rc::new(List(StorageCell::new(values)));
+            let list = Rc::new(List::new(values));
             let alias = Rc::clone(&list);
             drop(list);
             assert_eq!(weak.strong_count(), 1);
@@ -1789,7 +1953,7 @@ mod tests {
                 .take(length)
                 .map(|value| Int::small(value).unwrap())
                 .collect();
-            drop(List(StorageCell::new(values)));
+            drop(List::new(values));
         }
     }
 
@@ -2060,6 +2224,33 @@ mod tests {
             assert_eq!(relar_error_pending(), 0);
             relar_list_release(list);
         }
+    }
+
+    #[test]
+    fn live_range_hints_share_a_budget_and_return_it_on_release() {
+        let zero = Int::small(0).unwrap();
+        let stop = Int::small(MAX_SMALL).unwrap();
+        let one = Int::small(1).unwrap();
+        let first = relar_list_new();
+        let second = relar_list_new();
+        let third = relar_list_new();
+        // SAFETY: each list has one live owner, and all range words are
+        // immediate integers. Release each list through exactly one path.
+        unsafe {
+            let reserve = |list| relar_list_reserve_range(list, zero.0, stop.0, one.0, 1);
+            for list in [first, second, third] {
+                reserve(list);
+            }
+            assert_eq!((&*first).0.with(Vec::capacity), MAX_REUSED_LIST_CAPACITY);
+            assert_eq!((&*second).0.with(Vec::capacity), MAX_REUSED_LIST_CAPACITY);
+            assert_eq!((&*third).0.with(Vec::capacity), 0);
+            relar_list_release(first);
+            reserve(third);
+            assert_eq!((&*third).0.with(Vec::capacity), MAX_REUSED_LIST_CAPACITY);
+            drop(Rc::from_raw(second));
+            relar_list_release(third);
+        }
+        assert_eq!(RANGE_HINT_SLOTS.with(Cell::get), 0);
     }
 
     #[test]

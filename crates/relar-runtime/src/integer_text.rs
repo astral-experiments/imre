@@ -1,6 +1,6 @@
 //! Unicode 16.0 text properties for integer conversion, matching CPython 3.14.
 
-use std::fmt::Write;
+use std::fmt::{self, Write};
 
 use crate::{Error, Kind, Str};
 
@@ -8,10 +8,7 @@ use crate::{Error, Kind, Str};
 /// CPython's `%.200R` limit truncates the rendered repr by code points.
 #[cold]
 pub(super) fn invalid_literal(value: &str) -> Error {
-    let mut literal = literal_repr(value);
-    if let Some((end, _)) = literal.char_indices().nth(200) {
-        literal.truncate(end);
-    }
+    let literal = literal_repr_prefix(value);
     Error::new(
         Kind::ValueError,
         compact_str::format_compact!("invalid literal for int() with base 10: {literal}"),
@@ -49,7 +46,7 @@ pub(super) fn decimal_digit(value: char) -> Option<u8> {
 /// ICU general-category printability predicate and CPython 3.14 `isprintable()`
 /// over all Unicode scalar values. There are no differences in the other
 /// direction. Recheck this table when updating ICU or the Python target version.
-fn newer_printable(value: char) -> bool {
+pub(super) fn newer_printable(value: char) -> bool {
     #[rustfmt::skip]
     const RANGES: &[(u32, u32)] = &[
         (0x88f, 0x890), (0xc5c, 0xc5d), (0xcdc, 0xcdd),
@@ -74,24 +71,58 @@ fn newer_printable(value: char) -> bool {
     end != 0 && codepoint < RANGES[end - 1].1
 }
 
-/// Uses Ruff's quote and escape rules with Unicode 16 printability.
-pub(super) fn literal_repr(value: &str) -> Str {
-    let escaped = crate::objects::exceptions::string_repr(value);
-    if !escaped.chars().any(newer_printable) {
-        return escaped;
+/// Stop the repr writer after the diagnostic's 200 Unicode code points.
+fn literal_repr_prefix(value: &str) -> Str {
+    struct Prefix {
+        text: Str,
+        remaining: usize,
     }
-    let mut result = String::with_capacity(escaped.len());
-    for character in escaped.chars() {
-        if newer_printable(character) {
-            if u32::from(character) <= 0xffff {
-                write!(result, "\\u{:04x}", u32::from(character))
-            } else {
-                write!(result, "\\U{:08x}", u32::from(character))
+
+    impl Write for Prefix {
+        fn write_str(&mut self, text: &str) -> fmt::Result {
+            for character in text.chars() {
+                if self.remaining == 0 {
+                    return Err(fmt::Error);
+                }
+                if newer_printable(character) {
+                    // Ruff's newer Unicode tables print these characters literally.
+                    // The ASCII escape goes through the same code-point limit.
+                    let code = u32::from(character);
+                    if code <= 0xffff {
+                        write!(self, "\\u{code:04x}")?;
+                    } else {
+                        write!(self, "\\U{code:08x}")?;
+                    }
+                } else {
+                    self.text.push(character);
+                    self.remaining -= 1;
+                }
             }
-            .expect("writing to a String cannot fail");
-        } else {
-            result.push(character);
+            Ok(())
         }
     }
-    Str::from(result)
+
+    let mut prefix = Prefix {
+        text: Str::default(),
+        remaining: 200,
+    };
+    // Quote selection still examines the whole source. Only rendering is bounded.
+    let _ = crate::objects::exceptions::write_string_repr(value, &mut prefix);
+    prefix.text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_literal_prefix_preserves_late_quotes_and_partial_escapes() {
+        let nul = "\0".repeat(16_384) + "'";
+        let expected = format!("\"{}", "\\x00".repeat(50));
+        assert_eq!(literal_repr_prefix(&nul), &expected[..200]);
+
+        let unicode = "\u{1ccfa}".repeat(1_024);
+        let expected = format!("'{}", "\\U0001ccfa".repeat(20));
+        assert_eq!(literal_repr_prefix(&unicode), &expected[..200]);
+    }
 }

@@ -10,7 +10,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use serde::de::{
-    Deserialize, DeserializeSeed, Error as _, IgnoredAny, MapAccess, SeqAccess, Visitor,
+    Deserialize, DeserializeSeed, Error as _, IgnoredAny, MapAccess, SeqAccess, Unexpected, Visitor,
 };
 use serde_json::value::RawValue;
 
@@ -195,7 +195,6 @@ impl<'de> DeserializeSeed<'de> for Seed<'_, '_, 'de> {
                 value.into_raw()
             }
             STRING => return deserializer.deserialize_str(self),
-            BOOLEAN => usize::from(bool::deserialize(deserializer)?),
             FLOAT => {
                 let raw = <&RawValue>::deserialize(deserializer)?.get();
                 // Match JSON integer decoding followed by float conversion: -0
@@ -211,12 +210,11 @@ impl<'de> DeserializeSeed<'de> for Seed<'_, '_, 'de> {
                 }
                 value.to_bits() as usize
             }
-            NONE => {
-                <()>::deserialize(deserializer)?;
-                0
+            // Validate these kinds in the visitor. The type-specific deserializers
+            // include the entire rejected string in their mismatch diagnostics.
+            BOOLEAN | NONE | LIST | RECORD | DICTIONARY => {
+                return deserializer.deserialize_any(self);
             }
-            LIST => return deserializer.deserialize_seq(self),
-            RECORD | DICTIONARY => return deserializer.deserialize_map(self),
             OPTIONAL => return deserializer.deserialize_option(self),
             _ => unreachable!("compiler emitted an invalid JSON schema"),
         };
@@ -230,6 +228,8 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self.0.kind {
+            BOOLEAN => "a boolean",
+            NONE => "null",
             STRING => "a string",
             LIST => "an array",
             RECORD | DICTIONARY => "an object",
@@ -237,7 +237,25 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
         })
     }
 
+    fn visit_bool<E: serde::de::Error>(self, value: bool) -> Result<OwnedWord, E> {
+        if self.0.kind != BOOLEAN {
+            return Err(E::invalid_type(Unexpected::Bool(value), &self));
+        }
+        // SAFETY: booleans are stored as immediate zero/one words.
+        Ok(unsafe { OwnedWord::from_owned(usize::from(value), self.0.storage()) })
+    }
+
+    fn visit_unit<E: serde::de::Error>(self) -> Result<OwnedWord, E> {
+        if self.0.kind != NONE {
+            return Err(E::invalid_type(Unexpected::Unit, &self));
+        }
+        self.visit_none()
+    }
+
     fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        if self.0.kind != STRING {
+            return Err(E::invalid_type(Unexpected::Other("a string"), &self));
+        }
         // A collision evicts one immutable owner from the document-local table.
         let owner = if !value.is_empty()
             && value.len() <= 32
@@ -261,7 +279,7 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
         } else {
             Rc::new(Str::new(value))
         };
-        // SAFETY: deserialize_str is used only for the checked string schema.
+        // SAFETY: the checked string schema owns this new string handle.
         Ok(unsafe { OwnedWord::from_owned(Rc::into_raw(owner) as usize, self.0.storage()) })
     }
 
@@ -287,6 +305,9 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<OwnedWord, A::Error> {
+        if self.0.kind != LIST {
+            return Err(A::Error::invalid_type(Unexpected::Seq, &self));
+        }
         let child = self.0.child();
         if self.0.word_kind == 4 {
             let mut values = Vec::new();
@@ -340,6 +361,9 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
             ))))) as usize;
             // SAFETY: the new dictionary owns every successfully decoded entry.
             return Ok(unsafe { OwnedWord::from_owned(pointer, self.0.storage()) });
+        }
+        if self.0.kind != RECORD {
+            return Err(A::Error::invalid_type(Unexpected::Map, &self));
         }
         let fields = self.0.fields();
         // SAFETY: emitted record metadata outlives every decoded record.

@@ -327,7 +327,8 @@ pub unsafe extern "C" fn relar_str_join(
 /// Substitutes plain named fields in encounter order. A missing field can raise
 /// before a malformed brace later in the same template.
 fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> crate::Result<Str> {
-    let mut result = Str::with_capacity(template.len());
+    // A long template can consist entirely of fields with empty replacements.
+    let mut result = Str::default();
     let mut rest = template;
     while let Some(at) = memchr::memchr2(b'{', b'}', rest.as_bytes()) {
         result.push_str(&rest[..at]);
@@ -405,8 +406,7 @@ fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> 
                 ),
             ));
         }
-        let text = field(name)
-            .ok_or_else(|| Error::new(Kind::KeyError, super::exceptions::string_repr(name)))?;
+        let text = field(name).ok_or_else(|| Error::string_key(Str::new(name)))?;
         if !supported {
             return Err(Error::new(
                 Kind::ValueError,
@@ -453,7 +453,17 @@ pub unsafe extern "C" fn relar_str_replace(
 ) -> *const Str {
     // SAFETY: inputs remain immutable and rooted through both sizing and copying.
     let (value, old, new) = unsafe { (&*value, &*old, &*new) };
-    let count = value.matches(old.as_str()).count();
+    let count = if old == new {
+        0
+    } else {
+        value.matches(old.as_str()).count()
+    };
+    if count == 0 {
+        // SAFETY: the caller roots the input; the unchanged result takes its own owner.
+        return Rc::into_raw(unsafe {
+            super::acquire_rc::<Str>(std::ptr::from_ref(value) as usize)
+        });
+    }
     let length = value
         .len()
         .checked_sub(old.len().checked_mul(count).unwrap())
@@ -519,6 +529,19 @@ pub extern "C" fn relar_wall_time() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_named_fields_do_not_reserve_the_template_length() {
+        let template = "{x}".repeat(20_000) + "{y}";
+        let result = format_named(&template, |name| match name {
+            "x" => Some(""),
+            "y" => Some("雪"),
+            _ => None,
+        })
+        .unwrap_or_else(|_| panic!("valid named fields"));
+        assert_eq!(result.as_str(), "雪");
+        assert!(!result.is_heap_allocated());
+    }
 
     #[test]
     fn stable_permutations_preserve_ties_in_both_directions() {
@@ -686,6 +709,24 @@ mod tests {
             super::super::relar_object_release(values);
         }
         assert!(texts.iter().all(|text| Rc::strong_count(text) == 1));
+    }
+
+    #[test]
+    fn unchanged_replacements_return_an_owner_of_the_source() {
+        let value = Rc::new(Str::from("word".repeat(1024)));
+        for (old, new) in [("absent", "!"), ("word", "word"), ("", "")] {
+            let old = Rc::new(Str::from(old));
+            let new = Rc::new(Str::from(new));
+            // SAFETY: the three inputs stay rooted, and the result transfers an owner.
+            let result = unsafe {
+                Rc::from_raw(relar_str_replace(
+                    Rc::as_ptr(&value),
+                    Rc::as_ptr(&old),
+                    Rc::as_ptr(&new),
+                ))
+            };
+            assert!(Rc::ptr_eq(&result, &value));
+        }
     }
 
     #[test]

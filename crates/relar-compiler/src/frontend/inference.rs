@@ -55,7 +55,10 @@ impl Checker<'_> {
         body: &[ast::Stmt],
         clauses: &[ast::ElifElseClause],
     ) -> Result<(), String> {
-        if !clauses.last().is_some_and(|c| c.test.is_none()) {
+        if !clauses.last().is_some_and(|c| c.test.is_none())
+            || !body.iter().any(|stmt| matches!(stmt, ast::Stmt::Assign(assign)
+                if matches!(assign.targets.as_slice(), [ast::Expr::Name(name)] if !self.names.contains_key(name.id.as_str()))))
+        {
             return Ok(());
         }
         let mut arms: HashMap<&str, Vec<&ast::Expr>> = HashMap::new();
@@ -264,9 +267,6 @@ impl Inference {
                 }
             }
             for (module, function, signature) in definitions.iter() {
-                if graph.modules[*module].archive.is_some() {
-                    continue; // Native declarations must be fully annotated.
-                }
                 let (ready, infer_return) = {
                     let pending = self.pending.borrow();
                     let pending = &pending[signature.id];

@@ -68,7 +68,14 @@ impl Emitter<'_, '_> {
             }
             ProcessOperation::Coroutine { function, result } => {
                 let kind = representation_kind(result, &self.module.types);
-                let operand = self.instruction(format!("call ptr @relar_async_coroutine(ptr @callable_{function}_async, ptr {}, i32 {kind})", args[0].value.operand));
+                let thunk = self.output.used(
+                    self.output.function_owner(function),
+                    self.output.async_name(function),
+                );
+                let operand = self.instruction(format!(
+                    "call ptr @relar_async_coroutine(ptr @{thunk}, ptr {}, i32 {kind})",
+                    args[0].value.operand
+                ));
                 self.owned(Value {
                     ty: returns,
                     operand,
@@ -76,8 +83,12 @@ impl Emitter<'_, '_> {
                 })
             }
             ProcessOperation::ContextNew { function } => {
+                let thunk = self.output.used(
+                    self.output.function_owner(function),
+                    self.output.async_name(function),
+                );
                 let operand = self.instruction(format!(
-                    "call ptr @relar_context_new(ptr @callable_{function}_async, ptr {})",
+                    "call ptr @relar_context_new(ptr @{thunk}, ptr {})",
                     args[0].value.operand
                 ));
                 self.owned(Value {
@@ -118,7 +129,13 @@ impl Emitter<'_, '_> {
                     unreachable!()
                 };
                 let kind = representation_kind(result, &self.module.types);
-                let operand = self.instruction(format!("call ptr @relar_async_coroutine(ptr @async_invoke_{signature}, ptr {}, i32 {kind})", args[0].value.operand));
+                let thunk = self
+                    .output
+                    .used(self.output.entry, format!("async_invoke_{signature}"));
+                let operand = self.instruction(format!(
+                    "call ptr @relar_async_coroutine(ptr @{thunk}, ptr {}, i32 {kind})",
+                    args[0].value.operand
+                ));
                 self.owned(Value {
                     ty: returns,
                     operand,
@@ -249,10 +266,12 @@ impl Emitter<'_, '_> {
                 self.unpack_word(word, returns)
             }
             ProcessOperation::AsyncCommunicate => {
+                let layout = self
+                    .output
+                    .global_ref(format!("layout_{}", record_name(returns)));
                 let operand = self.checked_instruction(format!(
-                    "call ptr @relar_async_process_communicate(ptr {}, ptr @layout_{})",
+                    "call ptr @relar_async_process_communicate(ptr {}, ptr @{layout})",
                     args[0].value.operand,
-                    record_name(returns)
                 ));
                 self.owned(Value {
                     ty: returns,
@@ -288,6 +307,9 @@ impl Emitter<'_, '_> {
                 none()
             }
             ProcessOperation::Run | ProcessOperation::RunTimeout => {
+                let layout = self
+                    .output
+                    .global_ref("layout_completed_process".to_owned());
                 let cwd =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
                 let environment =
@@ -296,20 +318,20 @@ impl Emitter<'_, '_> {
                 let operand = if matches!(operation, ProcessOperation::RunTimeout) {
                     if args[4].value.ty == Type::Int {
                         self.checked_instruction(format!(
-                            "call ptr @relar_subprocess_run_timeout_int(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, i64 {}, ptr @layout_completed_process)",
+                            "call ptr @relar_subprocess_run_timeout_int(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, i64 {}, ptr @{layout})",
                             args[0].value.operand, args[4].value.operand
                         ))
                     } else {
                         let timeout = self
                             .instruction(format!("inttoptr i64 {} to ptr", args[4].value.operand));
                         self.checked_instruction(format!(
-                        "call ptr @relar_subprocess_run_timeout(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, ptr {timeout}, ptr @layout_completed_process)",
+                        "call ptr @relar_subprocess_run_timeout(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, ptr {timeout}, ptr @{layout})",
                         args[0].value.operand
                     ))
                     }
                 } else {
                     self.checked_instruction(format!(
-                        "call ptr @relar_subprocess_run(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, ptr @layout_completed_process)",
+                        "call ptr @relar_subprocess_run(ptr {}, ptr {cwd}, ptr {environment}, i32 {check}, ptr @{layout})",
                         args[0].value.operand
                     ))
                 };

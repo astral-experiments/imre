@@ -1,9 +1,10 @@
 //! Sealed UTF-8 text and byte streams. Explicit operations report language errors;
 //! final ownership cleanup only closes resources and never changes error state.
 
-use std::fs::{File, OpenOptions};
-use std::io::{self, BufWriter, Write};
+use std::fs::OpenOptions;
+use std::io;
 use std::os::fd::IntoRawFd;
+use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
@@ -13,7 +14,7 @@ use super::{
 mod buffered;
 mod gzip;
 
-use buffered::Input;
+use buffered::{Input, Output};
 
 pub(super) struct FileState {
     stream: Option<Stream>,
@@ -31,7 +32,7 @@ enum FileKind {
 
 enum Stream {
     Read(Input),
-    Write(BufWriter<File>),
+    Write(Output),
 }
 
 impl Stream {
@@ -40,12 +41,7 @@ impl Stream {
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
             Self::Read(input) => (input.into_file(), Ok(())),
-            Self::Write(mut writer) => {
-                let flushed = writer.flush();
-                let (file, buffered) = writer.into_parts();
-                drop(buffered);
-                (file, flushed)
-            }
+            Self::Write(writer) => writer.finish(),
         };
         let descriptor = file.into_raw_fd();
         // SAFETY: into_raw_fd transfers our unique descriptor owner. Do not
@@ -146,7 +142,7 @@ impl FileState {
         let Stream::Write(writer) = stream else {
             return Err(Error::new(Kind::UnsupportedOperation, "not writable"));
         };
-        writer.write_all(bytes).map_err(os_error)
+        writer.write(bytes).map_err(os_error)
     }
 
     fn write(&mut self, text: &str) -> Result<()> {
@@ -294,12 +290,15 @@ fn open_state(path: &str, mode: u32, binary: bool, gzip: bool) -> Result<FileSta
         _ => fail("SystemError", "invalid file mode"),
     }
     .map_err(os_error)?;
-    if file.metadata().map_err(os_error)?.is_dir() {
+    let metadata = file.metadata().map_err(os_error)?;
+    if metadata.is_dir() {
         return Err(Error::new(Kind::IsADirectoryError, "is a directory"));
     }
+    // CPython 3.14 bounds the device's preferred block size for buffered I/O.
+    let capacity = metadata.blksize().clamp(128 * 1024, 8 * 1024 * 1024) as usize;
     let stream = match mode {
-        0 => Stream::Read(Input::new(file, gzip, binary)),
-        _ => Stream::Write(BufWriter::with_capacity(8192, file)),
+        0 => Stream::Read(Input::new(file, gzip, binary, capacity)),
+        _ => Stream::Write(Output::new(file, capacity, binary)),
     };
     Ok(FileState {
         stream: Some(stream),
@@ -567,6 +566,8 @@ pub unsafe extern "C" fn relar_text_closed(value: *const Object) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File;
+    use std::io::Write;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -629,7 +630,7 @@ mod tests {
         let file = File::from(OwnedFd::from(writer));
         Rc::new(Object(StorageCell::new(Storage::File(Box::new(
             FileState {
-                stream: Some(Stream::Write(BufWriter::with_capacity(8192, file))),
+                stream: Some(Stream::Write(Output::new(file, 8192, false))),
                 kind: FileKind::Text,
             },
         )))))

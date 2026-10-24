@@ -2,7 +2,8 @@
 
 use std::fmt::Write as _;
 
-use super::{Node, View, string_repr};
+use super::{Node, View};
+use crate::objects::exceptions::push_string_repr;
 
 impl View {
     pub(in crate::objects) fn equal(&self, right: &Self) -> bool {
@@ -64,7 +65,7 @@ impl View {
                 }
             }
             Node::Float(f) => output.push_str(&crate::floats::render(*f)),
-            Node::String(s) => output.push_str(&string_repr(s)),
+            Node::String(s) => push_string_repr(s, output),
             Node::Array(items) => {
                 output.push('[');
                 for (offset, &item) in items.iter().enumerate() {
@@ -84,7 +85,7 @@ impl View {
                     if offset != 0 {
                         output.push_str(", ");
                     }
-                    output.push_str(&string_repr(name));
+                    push_string_repr(name, output);
                     output.push_str(": ");
                     self.write_at(node.lookup(name).unwrap(), output);
                 }

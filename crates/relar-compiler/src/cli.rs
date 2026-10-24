@@ -11,6 +11,7 @@ use super::{Allocator, USAGE};
 pub(super) struct BuildOptions {
     pub source_path: Option<PathBuf>,
     pub help: bool,
+    pub watch: bool,
     pub no_cache: bool,
     pub whole_program: bool,
     pub verbosity: Verbosity,
@@ -77,9 +78,12 @@ impl BuildOptions {
                 self.help = true;
                 break;
             }
+            if command == "check" && (flag == "--watch" || flag == "-w") {
+                self.watch = true;
+                continue;
+            }
             if command == "check"
                 && flag != "--module-root"
-                && flag != "--extension-path"
                 && flag != "--reachable-only"
                 && flag != "--entry-profile"
             {
@@ -101,7 +105,6 @@ impl BuildOptions {
                 }
                 Some("--reachable-only") => self.compile.reachable_only = true,
                 Some("--module-root") => self.module_root = Some(value()?.into()),
-                Some("--extension-path") => self.compile.extension_paths.push(value()?.into()),
                 Some("-o") if command == "build" => self.output = Some(value()?.into()),
                 Some("--runtime") => self.runtime = Some(value()?.into()),
                 Some("--emit-llvm") => self.llvm_path = Some(value()?.into()),
@@ -177,6 +180,19 @@ fn environment_flags() -> Result<Vec<OsString>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn watch_is_a_check_option() {
+        for command in ["check", "build", "run"] {
+            for flag in ["--watch", "-w"] {
+                let mut options = BuildOptions::default();
+                let mut args = ["main.py", flag].map(OsString::from).into_iter();
+                let result = options.read(OsStr::new(command), &mut args, true);
+                assert_eq!(result.is_ok(), command == "check");
+                assert_eq!(options.watch, command == "check");
+            }
+        }
+    }
 
     #[test]
     fn source_is_positional_only_on_the_command_line() {

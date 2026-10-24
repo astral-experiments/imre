@@ -76,7 +76,8 @@ pub(super) fn invoked_signature(value: &Expr) -> Option<Type> {
 pub(super) fn targets(
     functions: &[ir::Function],
     entry: &ir::Function,
-) -> HashMap<Type, HashSet<usize>> {
+    types: &Types,
+) -> Result<HashMap<Type, HashSet<usize>>, String> {
     let mut targets = HashMap::<Type, HashSet<usize>>::new();
     for function in functions.iter().chain([entry]) {
         ir::walk_expressions(&function.body, &mut |value| {
@@ -85,7 +86,19 @@ pub(super) fn targets(
             }
         });
     }
-    targets
+    // A cold callback adapter executes an async body and returns the awaited
+    // result. An eager factory returns a coroutine object through a different ABI.
+    for (signature, candidates) in &targets {
+        let (_, returns) = types.signature(*signature).unwrap();
+        if matches!(returns, Type::Coroutine(_))
+            && candidates
+                .iter()
+                .any(|&id| functions[id].returns == returns)
+        {
+            return Err("an Awaitable callback must be defined with async def".into());
+        }
+    }
+    Ok(targets)
 }
 
 impl Checker<'_> {
@@ -289,5 +302,31 @@ impl Checker<'_> {
                 args: ir::CallArgs::positional(values),
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn eager_coroutine_factories_remain_direct_calls() {
+        let source = "from collections.abc import Awaitable, Callable\nasync def cold(x: int) -> int:\n    return x\ndef factory(x: int) -> Awaitable[int]:\n    return cold(x)\n";
+        for callback in ["cold", "factory", "lambda x: cold(x)"] {
+            let program = format!(
+                "{source}async def run() -> int:\n    cb: Callable[[int], Awaitable[int]] = {callback}\n    return await cb(7)\n"
+            );
+            if callback == "cold" {
+                crate::check(&program).unwrap();
+            } else {
+                assert!(
+                    crate::check(&program)
+                        .unwrap_err()
+                        .contains("Awaitable callback must be defined with async def")
+                );
+            }
+        }
+        crate::check(&format!(
+            "{source}async def run() -> int:\n    return await factory(7)\n"
+        ))
+        .unwrap();
     }
 }

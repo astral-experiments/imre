@@ -814,7 +814,7 @@ impl Checker<'_> {
             && field == attribute.attr.as_str()
             && let Some(&variant) = children.get(value)
         {
-            self.narrowed.insert(slot, Type::Class(variant));
+            self.narrowed.insert_mut(slot, Type::Class(variant));
         }
     }
 

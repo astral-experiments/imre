@@ -33,17 +33,13 @@ For a complete example, Relar can build Ruff’s conformance reporter directly
 from its original Python file. The executable runs two versions of ty against
 a typing checkout and renders their differences. [Run the reporter](examples/conformance_report/README.md#run-directly-from-a-checkout).
 
-Relar also runs Ruff’s original memory reporter. It compares saved JSON captures
-or runs two versions of ty on flake8, Sphinx, Prefect, and Trio.
-[Run the memory reporter](examples/memory_report/README.md#run-ruffs-original-script).
-
 Relar also builds Ruff’s ecosystem checker from its original Python package. It clones
 58 repositories and compares the diagnostics from two Ruff binaries.
 [Run the ecosystem checker](examples/ruff_ecosystem/README.md#run-the-original-check-command).
 
 Relar supports:
 
-- Statically resolved imports, including [rebuilt native extension wheels](docs/extensions.md)
+- Statically resolved imports
 - Functions with exact declared or inferred signatures
 - Classes and dataclasses with fixed fields
 - String enums with named members and aliases, and string-valued `Literal` annotations
@@ -74,8 +70,9 @@ signature. This lets Relar choose concrete representations. It aims to preserve
 Python's behavior for supported operations, including arbitrary-precision integers.
 
 Relar's runtime uses reference counting and restricts object graphs to avoid
-cycles. Compiled programs run without a Python installation. Their imports must
-use supported Python or native extensions rebuilt against Relar’s `Python.h`.
+cycles. Compiled programs run without a Python installation, but Relar must
+implement the features and libraries they use. It cannot use arbitrary Python
+packages or CPython extensions.
 
 Other projects make different trade-offs:
 
@@ -151,6 +148,8 @@ relar run totals.py -- 10 20 12
 ```
 
 Arguments after `--` go into the script’s `sys.argv`. Use `build` to keep the compiled executable.
+
+Use `relar check --watch totals.py` to see diagnostics as you edit the script or its imports. Press Ctrl-C to stop.
 
 `build` and `run` share cached executables and module objects by default with
 the bundled Linux toolchain. Source builds on x86-64 Debian and Ubuntu also

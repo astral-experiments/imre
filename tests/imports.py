@@ -133,6 +133,14 @@ def main() -> None:
                 assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)
                 checks += 1
 
+        chain = temporary / "deep_imports"
+        files = {f"m{i}.py": f"import m{i + 1}\n" for i in range(97)}
+        write_files(chain, {**files, "m97.py": "pass\n"})
+        require_success(run([compiler, "check", str(chain / "m1.py")], temporary))
+        result = run([compiler, "check", str(chain / "m0.py")], temporary)
+        assert result.returncode == 1 and "import nesting exceeds 96" in result.stderr, result
+        checks += 2
+
         for name, (files, expected) in REJECTED.items():
             case = temporary / name
             write_files(case, files)

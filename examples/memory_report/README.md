@@ -1,37 +1,7 @@
 # Compare ty memory reports
 
-## Run Ruff’s original script
-
-From a Ruff checkout, compare a pair of existing captures:
-
-```sh
-relar run scripts/memory_report.py -- compare --old old.json --new new.json
-```
-
-Use `--old-dir` and `--new-dir` for directories of captures. Add
-`--output report.md` to write the Markdown to a file.
-
-```sh
-RELAR_PYTHON="$(command -v python3)" relar run scripts/memory_report.py -- run \
-  --old-ty /path/to/old/ty --new-ty /path/to/new/ty \
-  --projects-dir ./memory-projects --old-reports-dir ./old --new-reports-dir ./new
-```
-
-The native reporter runs Ruff’s neighboring `setup_primer_project.py` through
-its locked uv environment. The first run clones four projects and installs their
-dependencies. Subsequent runs reuse those projects and collect eight fresh ty
-reports. Keep the Ruff checkout available to a built executable that uses
-`run`. The `compare` command can run independently.
-
-The [comparison benchmarks](../../benchmarks/results/2026-10-23-original-memory-report.md)
-cover 1× and 10× input against CPython, Codon, and Rust. The
-[live runs](../../benchmarks/results/2026-10-23-original-memory-live.md) time the
-original command on all four projects with both ty executables.
-
-## Run the typed port
-
 This is a typed port of Ruff's real
-[`scripts/memory_report.py`](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/memory_report.py)
+[`scripts/memory_report.py`](https://github.com/astral-sh/ruff/blob/3e4fffb05a2b143fafbf31d891c79c878fe3bcd3/scripts/memory_report.py)
 file and directory comparison modes, plus a prepared-project collection mode.
 It reads `TY_MEMORY_REPORT=json` captures and
 produces the same Markdown summary and largest-change tables. The retained

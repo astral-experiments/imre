@@ -32,31 +32,47 @@ pub(super) unsafe fn tuple_order(left: *const usize, right: *const usize) -> Ord
     if left == right {
         return Ordering::Equal;
     }
-    // SAFETY: the exact tuple type supplies this live immutable descriptor.
-    let layout = unsafe { descriptor(left) };
-    for index in 0..layout.length {
-        // SAFETY: both payloads have the same initialized concrete field layout.
-        let order = unsafe {
-            let kind = WordKind::new(*layout.kinds.add(index));
-            let left = kind.read_record_field(left.add(index));
-            let right = kind.read_record_field(right.add(index));
-            match kind.raw() {
-                0 => Ordering::Equal,
-                1 => left.cmp(&right),
-                10 => super::string_enums::compare(left, right),
-                2 if left & right & 1 != 0 => (left as isize).cmp(&(right as isize)),
-                2 => crate::relar_int_compare(left, right).cmp(&0),
-                3 => (&*(left as *const Str)).cmp(&*(right as *const Str)),
-                6 => tuple_order(left as *const usize, right as *const usize),
-                8 => (&*(left as *const Bytes)).cmp(&*(right as *const Bytes)),
-                _ => unreachable!("the checker proves ordered immutable tuple fields"),
+    let mut pending = Vec::new();
+    let mut current = (left, right, 0);
+    'tuples: loop {
+        let (left_tuple, right_tuple, position) = current;
+        // SAFETY: the exact tuple type supplies this live immutable descriptor.
+        let layout = unsafe { descriptor(left_tuple) };
+        for index in position..layout.length {
+            // SAFETY: both roots own corresponding tuples with the same layout.
+            let order = unsafe {
+                let kind = WordKind::new(*layout.kinds.add(index));
+                let left = kind.read_record_field(left_tuple.add(index));
+                let right = kind.read_record_field(right_tuple.add(index));
+                match kind.raw() {
+                    0 => Ordering::Equal,
+                    1 => left.cmp(&right),
+                    10 => super::string_enums::compare(left, right),
+                    2 if left & right & 1 != 0 => (left as isize).cmp(&(right as isize)),
+                    2 => crate::relar_int_compare(left, right).cmp(&0),
+                    3 => (&*(left as *const Str)).cmp(&*(right as *const Str)),
+                    6 if left == right => Ordering::Equal,
+                    6 => {
+                        // Resume the siblings only if this child compares equal.
+                        if index + 1 < layout.length {
+                            pending.push((left_tuple, right_tuple, index + 1));
+                        }
+                        current = (left as *const usize, right as *const usize, 0);
+                        continue 'tuples;
+                    }
+                    8 => (&*(left as *const Bytes)).cmp(&*(right as *const Bytes)),
+                    _ => unreachable!("the checker proves ordered immutable tuple fields"),
+                }
+            };
+            if order != Ordering::Equal {
+                return order;
             }
-        };
-        if order != Ordering::Equal {
-            return order;
         }
+        let Some(next) = pending.pop() else {
+            return Ordering::Equal;
+        };
+        current = next;
     }
-    Ordering::Equal
 }
 
 /// Uses Python 3.13+ dataclass equality: identical objects compare equal before
@@ -69,26 +85,36 @@ pub(super) unsafe fn tuple_order(left: *const usize, right: *const usize) -> Ord
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_record_equal(left: *const usize, right: *const usize) -> u32 {
     // SAFETY: the ABI promises both checked record roots for the entire traversal.
-    u32::from(unsafe { record_equal(left, right) })
+    u32::from(unsafe { equal(left as usize, right as usize, WordKind::new(6)) })
 }
 
-unsafe fn record_equal(left: *const usize, right: *const usize) -> bool {
+pub(super) enum Comparison {
+    Done(bool),
+    Child {
+        left: usize,
+        right: usize,
+        kind: WordKind,
+        resume: Option<usize>,
+    },
+}
+
+unsafe fn record_field(left: *const usize, right: *const usize, position: usize) -> Comparison {
     if left == right {
-        return true;
+        return Comparison::Done(true);
     }
     // SAFETY: both pointers are rooted record payloads.
     let (left_layout, right_layout) = unsafe { (descriptor(left), descriptor(right)) };
     if !std::ptr::eq(left_layout, right_layout) {
-        return false;
+        return Comparison::Done(false);
     }
     // SAFETY: nonnull semantic descriptors are immutable compiler-emitted data.
     let Some(semantics) = (unsafe { left_layout.semantics.as_ref() }) else {
-        return false;
+        return Comparison::Done(false);
     };
     if semantics.kind != TUPLE && semantics.flags & GENERATED_EQ == 0 {
-        return false;
+        return Comparison::Done(false);
     }
-    for index in 0..left_layout.length {
+    for index in position..left_layout.length {
         // SAFETY: the descriptor covers every initialized payload word. Tuples
         // compare all fields; classes have one immutable flag per declared field.
         unsafe {
@@ -96,16 +122,23 @@ unsafe fn record_equal(left: *const usize, right: *const usize) -> bool {
                 continue;
             }
             let kind = WordKind::new(*left_layout.kinds.add(index));
-            if !equal(
-                kind.read_record_field(left.add(index)),
-                kind.read_record_field(right.add(index)),
-                kind,
-            ) {
-                return false;
+            let left_word = kind.read_record_field(left.add(index));
+            let right_word = kind.read_record_field(right.add(index));
+            if !matches!(kind.raw() & !NULLABLE, 5 | 6 | 9) {
+                if !scalar_equal(left_word, right_word, kind) {
+                    return Comparison::Done(false);
+                }
+                continue;
             }
+            return Comparison::Child {
+                left: left_word,
+                right: right_word,
+                kind,
+                resume: (index + 1 < left_layout.length).then_some(index + 1),
+            };
         }
     }
-    true
+    Comparison::Done(true)
 }
 
 /// Canonical integers never box a value in the small-integer range. Mixed
@@ -131,6 +164,62 @@ unsafe fn integer_equal(left: usize, right: usize) -> bool {
 /// Each word is rooted and uses `kind`. All descendant ownership graphs are
 /// acyclic and remain immutable throughout this nonreentrant traversal.
 pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
+    let mut pending = Vec::new();
+    let mut current = (left, right, kind, 0);
+    loop {
+        let (left, right, kind, position) = current;
+        let raw = kind.raw();
+        let step = if raw & NULLABLE != 0 && (left == 0 || right == 0) {
+            Comparison::Done(left == right)
+        } else {
+            // SAFETY: the roots keep every copied child word alive. No storage
+            // reference or buffer address is kept across a comparison step.
+            unsafe {
+                match raw & !NULLABLE {
+                    5 => object_element(left as *const Object, right as *const Object, position),
+                    6 => record_field(left as *const usize, right as *const usize, position),
+                    9 => {
+                        let (left, left_kind) = super::unions::member(left);
+                        let (right, right_kind) = super::unions::member(right);
+                        if left_kind != right_kind {
+                            Comparison::Done(false)
+                        } else {
+                            Comparison::Child {
+                                left,
+                                right,
+                                kind: left_kind,
+                                resume: None,
+                            }
+                        }
+                    }
+                    _ => Comparison::Done(scalar_equal(left, right, kind)),
+                }
+            }
+        };
+        match step {
+            Comparison::Done(false) => return false,
+            Comparison::Done(true) => match pending.pop() {
+                Some(next) => current = next,
+                None => return true,
+            },
+            Comparison::Child {
+                left: child_left,
+                right: child_right,
+                kind: child_kind,
+                resume,
+            } => {
+                if let Some(position) = resume {
+                    pending.push((left, right, kind, position));
+                }
+                current = (child_left, child_right, child_kind, 0);
+            }
+        }
+    }
+}
+
+/// # Safety
+/// The words are present, rooted values of this concrete scalar or integer-list kind.
+unsafe fn scalar_equal(left: usize, right: usize, kind: WordKind) -> bool {
     let raw = kind.raw();
     if raw & NULLABLE != 0 && (left == 0 || right == 0) {
         return left == right;
@@ -155,16 +244,9 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
                     })
                 })
             }
-            5 => object_equal(left as *const Object, right as *const Object),
-            6 => record_equal(left as *const usize, right as *const usize),
             7 if raw & NULLABLE != 0 => *(left as *const f64) == *(right as *const f64),
             7 => f64::from_bits(left as u64) == f64::from_bits(right as u64),
             8 => *(left as *const Bytes) == *(right as *const Bytes),
-            9 => {
-                let (left, left_kind) = super::unions::member(left);
-                let (right, right_kind) = super::unions::member(right);
-                left_kind == right_kind && equal(left, right, left_kind)
-            }
             _ => unreachable!("WordKind validates concrete representations"),
         }
     }
@@ -178,40 +260,52 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_sequence_equal(left: *const Object, right: *const Object) -> u32 {
     // SAFETY: the compiler verified both sequence layouts before calling.
-    u32::from(unsafe { object_equal(left, right) })
+    u32::from(unsafe { equal(left as usize, right as usize, WordKind::new(5)) })
 }
 
-unsafe fn object_equal(left: *const Object, right: *const Object) -> bool {
+unsafe fn object_element(left: *const Object, right: *const Object, position: usize) -> Comparison {
     if left == right {
-        return true;
+        return Comparison::Done(true);
     }
-    // SAFETY: immutable access cannot invoke callbacks; acyclic types and the
-    // identity check prevent reentering the same cell through a descendant.
+    // SAFETY: both objects remain rooted and immutable. Each step returns only
+    // copied words; the storage closures end before their children are visited.
     unsafe {
         object(left).0.with(|left| {
             object(right).0.with(|right| match (left, right) {
                 (Storage::Sequence(left), Storage::Sequence(right)) => {
                     let (left, right) = (left.resolved(), right.resolved());
-                    left.kind == right.kind
-                        && left.values.len() == right.values.len()
-                        && left
-                            .values
-                            .iter()
-                            .zip(&right.values)
-                            .all(|(&left_word, &right_word)| {
-                                equal(left_word, right_word, left.kind)
-                            })
+                    if left.kind != right.kind || left.values.len() != right.values.len() {
+                        return Comparison::Done(false);
+                    }
+                    if !matches!(left.kind.raw() & !NULLABLE, 5 | 6 | 9) {
+                        return Comparison::Done(left.values.iter().zip(&right.values).all(
+                            |(&left_word, &right_word)| {
+                                scalar_equal(left_word, right_word, left.kind)
+                            },
+                        ));
+                    }
+                    if position == left.values.len() {
+                        return Comparison::Done(true);
+                    }
+                    Comparison::Child {
+                        left: left.values[position],
+                        right: right.values[position],
+                        kind: left.kind,
+                        resume: (position + 1 < left.values.len()).then_some(position + 1),
+                    }
                 }
-                (Storage::Dictionary(left), Storage::Dictionary(right)) => left.equal(right),
-                (Storage::Set(left), Storage::Set(right)) => left.equal(right),
-                (Storage::Json(left), Storage::Json(right)) => left.equal(right),
+                (Storage::Dictionary(left), Storage::Dictionary(right)) => {
+                    left.compare_entry(right, position)
+                }
+                (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
+                (Storage::Json(left), Storage::Json(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Document(left), Storage::Document(right)) => {
-                    left.view().equal(&right.view())
+                    Comparison::Done(left.view().equal(&right.view()))
                 }
-                (Storage::Path { text: left, .. }, Storage::Path { text: right, .. }) => {
-                    left == right
+                (left @ Storage::Path { .. }, right @ Storage::Path { .. }) => {
+                    Comparison::Done(left.path() == right.path())
                 }
-                _ => false,
+                _ => Comparison::Done(false),
             })
         })
     }
@@ -234,6 +328,112 @@ pub unsafe extern "C" fn relar_value_repr(word: usize, kind: u32) -> *const Str 
 /// The word and all descendants are rooted with the supplied representation;
 /// no runtime mutation or user callback can overlap formatting.
 pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind) {
+    let mut pending = Vec::new();
+    let mut current = Some(ReprTask::Word(word, kind));
+    while let Some(task) = current.take().or_else(|| pending.pop()) {
+        // SAFETY: the root owns the whole immutable graph until formatting
+        // returns. Tasks retain only copied words and positions, never storage
+        // references or buffer addresses.
+        current = unsafe {
+            match task {
+                ReprTask::Word(word, kind) => match kind.raw() & !NULLABLE {
+                    5 if word != 0 => Some(ReprTask::Object(word as *const Object, 0)),
+                    6 if word != 0 => Some(ReprTask::Record(word as *const usize, 0, 0)),
+                    9 if word != 0 => {
+                        let (member, kind) = super::unions::member(word);
+                        Some(ReprTask::Word(member, kind))
+                    }
+                    _ => {
+                        write_scalar(output, word, kind);
+                        None
+                    }
+                },
+                ReprTask::Object(owner, position) => {
+                    object(owner).0.with(|storage| match storage {
+                        Storage::Sequence(values) => {
+                            let values = values.resolved();
+                            if position == 0 {
+                                output.push('[');
+                            }
+                            for (index, &value) in values.values.iter().enumerate().skip(position) {
+                                if index != 0 {
+                                    output.push_str(", ");
+                                }
+                                if value != 0 && matches!(values.kind.raw() & !NULLABLE, 5 | 6 | 9)
+                                {
+                                    pending.push(ReprTask::Object(owner, index + 1));
+                                    return Some(ReprTask::Word(value, values.kind));
+                                }
+                                write_scalar(output, value, values.kind);
+                            }
+                            output.push(']');
+                            None
+                        }
+                        Storage::Dictionary(mapping) => {
+                            format_entry(owner, mapping.repr_entry(output, position), &mut pending)
+                        }
+                        Storage::Set(set) => {
+                            format_entry(owner, set.repr_entry(output, position), &mut pending)
+                        }
+                        Storage::Json(value) => {
+                            value.write_repr(output);
+                            None
+                        }
+                        Storage::Document(value) => {
+                            value.view().write_repr(output);
+                            None
+                        }
+                        path @ Storage::Path { .. } => {
+                            output.push_str("PosixPath(");
+                            super::exceptions::push_string_repr(path.path(), output);
+                            output.push(')');
+                            None
+                        }
+                        _ => fail("SystemError", "unsupported resource representation"),
+                    })
+                }
+                ReprTask::Record(payload, position, written) => {
+                    record_field_repr(output, payload, position, written, &mut pending)
+                }
+                ReprTask::KeySeparator => {
+                    output.push_str(": ");
+                    None
+                }
+            }
+        };
+    }
+}
+
+enum ReprTask {
+    Word(usize, WordKind),
+    Object(*const Object, usize),
+    Record(*const usize, usize, usize),
+    KeySeparator,
+}
+
+pub(super) struct ReprEntry {
+    pub next: usize,
+    pub key: (usize, WordKind),
+    pub value: Option<(usize, WordKind)>,
+}
+
+fn format_entry(
+    owner: *const Object,
+    entry: Option<ReprEntry>,
+    pending: &mut Vec<ReprTask>,
+) -> Option<ReprTask> {
+    let entry = entry?;
+    pending.push(ReprTask::Object(owner, entry.next));
+    if let Some((word, kind)) = entry.value {
+        pending.push(ReprTask::Word(word, kind));
+        pending.push(ReprTask::KeySeparator);
+    }
+    Some(ReprTask::Word(entry.key.0, entry.key.1))
+}
+
+/// # Safety
+/// The rooted word has its declared scalar, integer-list, or nullable representation.
+unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
     let raw = kind.raw();
     if raw & NULLABLE != 0 && word == 0 {
         output.push_str("None");
@@ -256,43 +456,17 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                     write!(output, "{}", value.big()).unwrap();
                 }
             }
-            3 => output.push_str(&super::exceptions::string_repr(&*(word as *const Str))),
+            3 => super::exceptions::push_string_repr(&*(word as *const Str), output),
             4 => (&*(word as *const List)).0.with(|values| {
                 output.push('[');
                 for (index, value) in values.iter().enumerate() {
                     if index != 0 {
                         output.push_str(", ");
                     }
-                    write_repr(output, value.0, WordKind::new(2));
+                    write_scalar(output, value.0, WordKind::new(2));
                 }
                 output.push(']');
             }),
-            5 => object(word as *const Object)
-                .0
-                .with(|storage| match storage {
-                    Storage::Sequence(values) => {
-                        let values = values.resolved();
-                        output.push('[');
-                        for (index, &value) in values.values.iter().enumerate() {
-                            if index != 0 {
-                                output.push_str(", ");
-                            }
-                            write_repr(output, value, values.kind);
-                        }
-                        output.push(']');
-                    }
-                    Storage::Dictionary(value) => value.write_repr(output),
-                    Storage::Set(value) => value.write_repr(output),
-                    Storage::Json(value) => value.write_repr(output),
-                    Storage::Document(value) => value.view().write_repr(output),
-                    Storage::Path { text: value, .. } => {
-                        output.push_str("PosixPath(");
-                        output.push_str(&super::exceptions::string_repr(value));
-                        output.push(')');
-                    }
-                    _ => fail("SystemError", "unsupported resource representation"),
-                }),
-            6 => record_repr(output, word as *const usize),
             7 => {
                 let value = if raw & NULLABLE != 0 {
                     *(word as *const f64)
@@ -301,11 +475,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 };
                 output.push_str(&crate::floats::render(value));
             }
-            8 => output.push_str(&super::bytes::repr(&*(word as *const Bytes))),
-            9 => {
-                let (member, kind) = super::unions::member(word);
-                write_repr(output, member, kind);
-            }
+            8 => super::bytes::write_repr(output, &*(word as *const Bytes)),
             _ => unreachable!("WordKind validates concrete representations"),
         }
     }
@@ -317,7 +487,13 @@ unsafe fn text<'a>(pointer: *const u8, length: usize) -> &'a str {
     unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(pointer, length)) }
 }
 
-unsafe fn record_repr(output: &mut String, payload: *const usize) {
+unsafe fn record_field_repr(
+    output: &mut String,
+    payload: *const usize,
+    position: usize,
+    mut written: usize,
+    pending: &mut Vec<ReprTask>,
+) -> Option<ReprTask> {
     // SAFETY: the caller roots a fully initialized record and its descriptor.
     let layout = unsafe { descriptor(payload) };
     // SAFETY: public record representations always have static semantic metadata.
@@ -332,14 +508,15 @@ unsafe fn record_repr(output: &mut String, payload: *const usize) {
                 text(semantics.qualified_name, semantics.qualified_name_len)
             )
             .unwrap();
-            return;
+            return None;
         }
-        if semantics.kind != TUPLE {
-            output.push_str(text(semantics.name, semantics.name_len));
+        if position == 0 {
+            if semantics.kind != TUPLE {
+                output.push_str(text(semantics.name, semantics.name_len));
+            }
+            output.push('(');
         }
-        output.push('(');
-        let mut written = 0;
-        for index in 0..layout.length {
+        for index in position..layout.length {
             let field = if semantics.kind == TUPLE {
                 None
             } else {
@@ -356,13 +533,19 @@ unsafe fn record_repr(output: &mut String, payload: *const usize) {
                 output.push('=');
             }
             let kind = WordKind::new(*layout.kinds.add(index));
-            write_repr(output, kind.read_record_field(payload.add(index)), kind);
+            let word = kind.read_record_field(payload.add(index));
             written += 1;
+            if word != 0 && matches!(kind.raw() & !NULLABLE, 5 | 6 | 9) {
+                pending.push(ReprTask::Record(payload, index + 1, written));
+                return Some(ReprTask::Word(word, kind));
+            }
+            write_scalar(output, word, kind);
         }
         if semantics.kind == TUPLE && written == 1 {
             output.push(',');
         }
         output.push(')');
+        None
     }
 }
 
@@ -372,6 +555,86 @@ mod tests {
     use crate::objects::records::{
         RecordDescriptor, RecordField, RecordSemantics, relar_record_new, relar_record_release,
     };
+
+    #[test]
+    fn deeply_nested_tuple_order_resumes_only_after_equal_children() {
+        let semantics = RecordSemantics {
+            kind: TUPLE,
+            flags: GENERATED_EQ | GENERATED_REPR,
+            name: std::ptr::null(),
+            name_len: 0,
+            qualified_name: std::ptr::null(),
+            qualified_name_len: 0,
+            fields: std::ptr::null(),
+        };
+        let leaf_kinds = [2];
+        let pair_kinds = [6, 2];
+        let leaf_layout = RecordDescriptor {
+            length: 1,
+            kinds: leaf_kinds.as_ptr(),
+            semantics: &semantics,
+        };
+        let pair_layout = RecordDescriptor {
+            length: 2,
+            kinds: pair_kinds.as_ptr(),
+            semantics: &semantics,
+        };
+        let one = Int::small(1).unwrap().0;
+        // SAFETY: each parent takes ownership of its child. The leaves remain
+        // rooted until both complete tuples have been compared and released.
+        unsafe {
+            let mut roots = [
+                relar_record_new(&leaf_layout),
+                relar_record_new(&leaf_layout),
+            ];
+            let right_leaf = roots[1];
+            for root in &mut roots {
+                root.write(one);
+                for _ in 0..20_000 {
+                    let parent = relar_record_new(&pair_layout);
+                    parent.cast::<*mut usize>().write(*root);
+                    parent.add(1).write(one);
+                    *root = parent;
+                }
+            }
+            let [left, right] = roots;
+            assert_eq!(tuple_order(left, right), Ordering::Equal);
+            right.add(1).write(Int::small(0).unwrap().0);
+            assert_eq!(tuple_order(left, right), Ordering::Greater);
+            right_leaf.write(Int::small(2).unwrap().0);
+            assert_eq!(tuple_order(left, right), Ordering::Less);
+            assert_eq!(tuple_order(right, left), Ordering::Greater);
+            relar_record_release(left);
+            relar_record_release(right);
+        }
+    }
+
+    #[test]
+    fn deeply_nested_sequences_compare_with_bounded_stack() {
+        use crate::objects::{relar_object_release, relar_seq_append, relar_seq_new};
+        let mut left = vec![relar_seq_new(2)];
+        let mut right = vec![relar_seq_new(2)];
+        // SAFETY: every sequence remains rooted. Each append borrows a word
+        // of the declared type, and ancestors release before their children.
+        unsafe {
+            for chain in [&mut left, &mut right] {
+                for _ in 0..20_000 {
+                    let parent = relar_seq_new(5);
+                    relar_seq_append(parent, *chain.last().unwrap() as usize, 5);
+                    chain.push(parent);
+                }
+            }
+            let (a, b) = (*left.last().unwrap(), *right.last().unwrap());
+            assert_eq!(relar_sequence_equal(a, b), 1);
+            relar_seq_append(left[0], 1, 2);
+            assert_eq!(relar_sequence_equal(a, b), 0);
+            for chain in [left, right] {
+                for value in chain.into_iter().rev() {
+                    relar_object_release(value);
+                }
+            }
+        }
+    }
 
     #[test]
     fn generated_equality_preserves_identity_and_fieldwise_nan_comparison() {
@@ -412,6 +675,31 @@ mod tests {
             assert_eq!(relar_record_equal(left, right), 1);
             relar_record_release(left);
             relar_record_release(right);
+        }
+    }
+
+    #[test]
+    fn deeply_nested_sequence_repr_preserves_all_delimiters() {
+        use crate::objects::{relar_object_release, relar_seq_append, relar_seq_new};
+        let mut chain = vec![relar_seq_new(2)];
+        // SAFETY: each sequence retains its declared child, and the separate
+        // roots are released from the outermost sequence to the leaf.
+        unsafe {
+            for _ in 0..20_000 {
+                let parent = relar_seq_new(5);
+                relar_seq_append(parent, *chain.last().unwrap() as usize, 5);
+                chain.push(parent);
+            }
+            let mut output = String::new();
+            write_repr(
+                &mut output,
+                *chain.last().unwrap() as usize,
+                WordKind::new(5),
+            );
+            assert_eq!(output, "[".repeat(chain.len()) + &"]".repeat(chain.len()));
+            for value in chain.into_iter().rev() {
+                relar_object_release(value);
+            }
         }
     }
 }

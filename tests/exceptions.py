@@ -657,7 +657,7 @@ for turn in range(3):
         print(values.pop())
     except IndexError:
         print("empty pop")
-    values.append(1000000000000000000000000000002)
+    values.append(1000000000000000000000000000002 + turn)
     try:
         print(values[0] < values[9])
     except IndexError:
@@ -686,7 +686,9 @@ for turn in range(3):
         write(values, -2, 1000000000000000000000000000005)
     except IndexError:
         print("signed store")
-    print(values[0])
+    saved = values[0]
+    values[0] = 0
+    print(saved)
     print(values.pop())
 
 flags: list[bool] = [False]

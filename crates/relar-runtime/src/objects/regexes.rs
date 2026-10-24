@@ -79,12 +79,19 @@ impl Pattern {
         // At least one branch's mandatory substring must exist. An unguarded
         // branch disables the shortcut, as does an unusually wide alternation.
         let branches = match hir.kind() {
-            HirKind::Alternation(branches) if branches.len() <= 4 => branches.as_slice(),
+            HirKind::Alternation(branches) => branches.as_slice(),
             _ => std::slice::from_ref(&hir),
         };
         let required = branches
             .iter()
-            .map(|branch| {
+            // Translation uses impossible alternatives to preserve Python's branch
+            // priority. They cannot produce a match, even on the empty string.
+            .filter(|branch| branch.properties().minimum_len().is_some())
+            .enumerate()
+            .map(|(index, branch)| {
+                if index == 4 {
+                    return None;
+                }
                 required_literal(branch)
                     .filter(|s| !s.is_empty() && !(s.len() == 1 && Some(s[0]) == first))
                     .map(|s| {
@@ -543,6 +550,18 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn impossible_alternatives_do_not_disable_required_literals() {
+        let mut pattern = Pattern::new(r"^(one.+)|\P{any}|(.* two .*)|\P{any}|(three.*)");
+        assert!(!pattern.could_match(b"ordinary line", true));
+        for text in ["one!", "a two b", "three"] {
+            assert!(pattern.match_start(text));
+        }
+
+        let mut empty = Pattern::new(r"^(one.+)|\P{any}|()");
+        assert!(empty.match_start("ordinary line"));
     }
 
     #[test]

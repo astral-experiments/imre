@@ -49,30 +49,36 @@ impl Emitter<'_, '_> {
                 .sum::<usize>()
     }
 
-    pub(super) fn enum_table(&self) -> String {
+    pub(super) fn enum_table(&mut self) {
         if self.enum_members.is_empty() {
-            return String::new();
+            return;
         }
         let rows = self
             .enum_members
             .iter()
-            .map(|[class, name, value]| {
-                format!(
-                    "[3 x ptr] [ptr @literal_{class}, ptr @literal_{name}, ptr @literal_{value}]"
-                )
+            .map(|row| {
+                let [class, name, value] = row.map(|id| self.output.string_name(id, "literal"));
+                format!("[3 x ptr] [ptr @{class}, ptr @{name}, ptr @{value}]")
             })
             .collect::<Vec<_>>();
-        format!(
-            "@str_enum_members = private constant [{} x [3 x ptr]] [{}]\n",
-            rows.len(),
+        writeln!(
+            self.output.global(
+                self.output.entry,
+                "str_enum_members",
+                "constant",
+                format_args!("[{} x [3 x ptr]]", rows.len())
+            ),
+            "[{}]",
             rows.join(", ")
         )
+        .unwrap();
     }
 
     pub(super) fn enum_text(&mut self, tag: &Value, name: bool) -> Value {
         let index = self.instruction(format!("sub nuw i64 {}, 1", tag.operand));
         let field = if name { 1 } else { 2 };
-        let ptr = self.instruction(format!("getelementptr inbounds [{} x [3 x ptr]], ptr @str_enum_members, i64 0, i64 {index}, i64 {field}", self.enum_members.len()));
+        let table = self.output.global_ref("str_enum_members".to_owned());
+        let ptr = self.instruction(format!("getelementptr inbounds [{} x [3 x ptr]], ptr @{table}, i64 0, i64 {index}, i64 {field}", self.enum_members.len()));
         let root = self.instruction(format!("load ptr, ptr {ptr}"));
         let result = Value {
             ty: Type::Str,
@@ -110,7 +116,7 @@ print(label(S.ON))
         assert!(
             !llvm
                 .lines()
-                .any(|line| line.contains("call ptr @relar_record_new("))
+                .any(|line| line.contains("call ptr @relar_record_try_new("))
         );
     }
 

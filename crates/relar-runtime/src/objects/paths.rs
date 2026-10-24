@@ -6,19 +6,167 @@ use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::os::unix::fs::DirBuilderExt;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use num_traits::ToPrimitive;
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Storage, StorageCell, Str, fail, files, object};
 
+#[derive(Clone)]
+pub(super) enum PathText {
+    Flat(Rc<Str>),
+    WithParent {
+        text: Rc<Str>,
+        parent: Weak<Str>,
+    },
+    Joined {
+        parts: JoinedParts,
+        spelling: std::cell::OnceCell<Rc<Str>>,
+    },
+}
+
+#[derive(Clone)]
+pub(super) struct JoinedParts {
+    parent: Prefix,
+    child: Rc<Str>,
+    absolute: bool,
+}
+
+#[derive(Clone)]
+enum Prefix {
+    Empty,
+    Flat(Rc<Str>),
+    Joined(Rc<JoinedParts>),
+}
+
+impl PathText {
+    fn parent(&mut self) -> Rc<Str> {
+        if let Self::WithParent { parent, .. } = self
+            && let Some(shared) = parent.upgrade()
+        {
+            return shared;
+        }
+        let text = self.spelling();
+        let shared = Rc::new(Str::from(parent(text)));
+        if shared.len() > size_of::<Str>() {
+            // Derived paths own the spelling. Discarding the last derived
+            // owner frees the string even while the source path stays rooted.
+            *self = Self::WithParent {
+                text: Rc::clone(text),
+                parent: Rc::downgrade(&shared),
+            };
+        }
+        shared
+    }
+
+    fn cached(&self) -> Option<&Rc<Str>> {
+        match self {
+            Self::Flat(text) | Self::WithParent { text, .. } => Some(text),
+            Self::Joined { spelling, .. } => spelling.get(),
+        }
+    }
+
+    fn prefix(&self) -> Prefix {
+        match self {
+            Self::Flat(text) | Self::WithParent { text, .. } => Prefix::Flat(Rc::clone(text)),
+            Self::Joined { parts, spelling } => match spelling.get() {
+                Some(text) => Prefix::Flat(Rc::clone(text)),
+                None => Prefix::Joined(Rc::new(parts.clone())),
+            },
+        }
+    }
+
+    fn is_absolute(&self) -> bool {
+        match self {
+            Self::Flat(text) | Self::WithParent { text, .. } => text.starts_with('/'),
+            Self::Joined { parts, .. } => parts.absolute,
+        }
+    }
+
+    fn spelling(&self) -> &Rc<Str> {
+        match self {
+            Self::Flat(text) | Self::WithParent { text, .. } => text,
+            Self::Joined { parts, spelling } => spelling.get_or_init(|| parts.render()),
+        }
+    }
+}
+
+impl JoinedParts {
+    fn render(&self) -> Rc<Str> {
+        match &self.parent {
+            Prefix::Empty => {
+                return if is_normalized(&self.child) {
+                    Rc::clone(&self.child)
+                } else {
+                    Rc::new(normalize(&self.child))
+                };
+            }
+            Prefix::Flat(base) => return Rc::new(join(base, &self.child)),
+            Prefix::Joined(_) => {}
+        }
+
+        // Collect unrendered components without materializing ancestor spellings.
+        let mut children = vec![self.child.as_str()];
+        let mut prefix = &self.parent;
+        while let Prefix::Joined(parts) = prefix {
+            children.push(parts.child.as_str());
+            prefix = &parts.parent;
+        }
+        let mut result = Str::default();
+        if let Prefix::Flat(base) = prefix
+            && base.as_str() != "."
+        {
+            result.push_str(base);
+        }
+        for child in children.into_iter().rev() {
+            append_components(&mut result, child);
+        }
+        if result.is_empty() {
+            result.push('.');
+        }
+        Rc::new(result)
+    }
+}
+
+impl Drop for JoinedParts {
+    fn drop(&mut self) {
+        // Release uniquely owned ancestry iteratively, including unrendered paths.
+        let mut parent = std::mem::replace(&mut self.parent, Prefix::Empty);
+        while let Prefix::Joined(node) = parent {
+            let Some(mut parts) = Rc::into_inner(node) else {
+                break;
+            };
+            parent = std::mem::replace(&mut parts.parent, Prefix::Empty);
+        }
+    }
+}
+
 impl Storage {
     pub(super) fn path(&self) -> &str {
         self.path_text()
     }
 
+    fn path_name(&self) -> &Rc<Str> {
+        let Self::Path { name: cached, .. } = self else {
+            fail("SystemError", "expected a path object");
+        };
+        cached.get_or_init(|| {
+            let text = self.path_text();
+            let component = name(text);
+            if component.len() == text.len() {
+                Rc::clone(text)
+            } else {
+                Rc::new(Str::from(component))
+            }
+        })
+    }
+
     fn path_text(&self) -> &Rc<Str> {
+        self.path_value().spelling()
+    }
+
+    fn path_value(&self) -> &PathText {
         match self {
             Self::Path { text, .. } => text,
             _ => fail("SystemError", "expected a path object"),
@@ -42,14 +190,22 @@ fn is_normalized(path: &str) -> bool {
 /// POSIX normalization removes empty and dot components while retaining `..`
 /// and exactly two leading slashes, which may have implementation-defined meaning.
 pub(super) fn normalize(path: &str) -> Str {
-    let root = if path.starts_with("//") && !path.starts_with("///") {
-        "//"
-    } else if path.starts_with('/') {
-        "/"
-    } else {
-        ""
-    };
-    let mut result = Str::from(root);
+    let mut result = Str::default();
+    append_components(&mut result, path);
+    if result.is_empty() {
+        result.push('.');
+    }
+    result
+}
+
+fn append_components(result: &mut Str, path: &str) {
+    if path.starts_with('/') {
+        result.clear();
+        result.push('/');
+        if path.starts_with("//") && !path.starts_with("///") {
+            result.push('/');
+        }
+    }
     for part in path
         .split('/')
         .filter(|part| !part.is_empty() && *part != ".")
@@ -59,10 +215,6 @@ pub(super) fn normalize(path: &str) -> Str {
         }
         result.push_str(part);
     }
-    if result.is_empty() {
-        result.push('.');
-    }
-    result
 }
 
 fn join(path: &str, child: &str) -> Str {
@@ -88,8 +240,12 @@ fn join(path: &str, child: &str) -> Str {
 }
 
 fn new_path(path: impl Into<Rc<Str>>) -> *const Object {
+    path_with_text(PathText::Flat(path.into()))
+}
+
+fn path_with_text(text: PathText) -> *const Object {
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Path {
-        text: path.into(),
+        text,
         name: std::cell::OnceCell::new(),
     }))))
 }
@@ -127,14 +283,16 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
         let directory = std::env::current_dir().map_err(files::os_error)?;
         path_utf8(directory.into_os_string())?
     };
-    let mut remaining = path.split('/').count();
-    let mut parts: Vec<_> = path
-        .split('/')
-        .rev()
-        .map(|part| ResolvePart::Component(Str::from(part)))
-        .collect();
+    let mut source = path.split('/');
+    let mut remaining = source.clone().count();
+    // Only expanded symlink targets and their completion markers need a stack.
+    let mut parts = Vec::new();
     let mut links: HashMap<Str, Option<Str>> = HashMap::new();
-    while let Some(part) = parts.pop() {
+    while let Some(part) = parts.pop().or_else(|| {
+        source
+            .next()
+            .map(|part| ResolvePart::Component(Str::from(part)))
+    }) {
         let part = match part {
             ResolvePart::Component(part) => part,
             ResolvePart::ResolvedLink(link) => {
@@ -341,9 +499,36 @@ pub unsafe extern "C" fn relar_shutil_which(command: *const Str) -> usize {
 /// the left path; otherwise both operands are joined without resolving symlinks.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_path_join(path: *const Object, child: *const Str) -> *const Object {
-    // SAFETY: lexical work has no callbacks and only an owned string escapes.
-    let joined = unsafe { object(path).0.with(|storage| join(storage.path(), &*child)) };
-    new_path(joined)
+    // SAFETY: the caller roots both operands until the result owns its child
+    // and, for a relative component, its immutable parent spelling.
+    unsafe {
+        object(path).0.with(|storage| {
+            let parent = storage.path_value();
+            let child_text = &*child;
+            if matches!(child_text.as_str(), "" | ".") {
+                return path_with_text(parent.clone());
+            }
+            if let Some(base) = parent.cached()
+                && base.len().saturating_add(child_text.len()) < size_of::<Str>()
+            {
+                return new_path(join(base, child_text));
+            }
+            let child_absolute = child_text.starts_with('/');
+            Rc::increment_strong_count(child);
+            path_with_text(PathText::Joined {
+                parts: JoinedParts {
+                    parent: if child_absolute {
+                        Prefix::Empty
+                    } else {
+                        parent.prefix()
+                    },
+                    child: Rc::from_raw(child),
+                    absolute: child_absolute || parent.is_absolute(),
+                },
+                spelling: std::cell::OnceCell::new(),
+            })
+        })
+    }
 }
 
 /// # Safety
@@ -414,19 +599,9 @@ pub unsafe extern "C" fn relar_path_name(path: *const Object) -> *const Str {
     // SAFETY: spelling is fixed. The one per-path cached component and the
     // returned handle each own their reference across subsequent operations.
     let text = unsafe {
-        object(path).0.with(|storage| {
-            let Storage::Path { text, name: cached } = storage else {
-                fail("SystemError", "expected a path object");
-            };
-            Rc::clone(cached.get_or_init(|| {
-                let component = name(text);
-                if component.len() == text.len() {
-                    Rc::clone(text)
-                } else {
-                    Rc::new(Str::from(component))
-                }
-            }))
-        })
+        object(path)
+            .0
+            .with(|storage| Rc::clone(storage.path_name()))
     };
     Rc::into_raw(text)
 }
@@ -436,14 +611,17 @@ pub unsafe extern "C" fn relar_path_name(path: *const Object) -> *const Str {
 /// names consisting entirely of dots and leading-dot names have no such suffix.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_path_stem(path: *const Object) -> *const Str {
-    // SAFETY: only an owned substring escapes this immutable storage access.
-    let text = unsafe {
+    // SAFETY: the rooted path owns its spelling and cached basename.
+    let stem = unsafe {
         object(path).0.with(|storage| {
-            let name = name(storage.path());
-            Str::from(&name[..suffix_start(name).unwrap_or(name.len())])
+            let component = name(storage.path());
+            match suffix_start(component) {
+                Some(end) => Rc::new(Str::from(&component[..end])),
+                None => Rc::clone(storage.path_name()),
+            }
         })
     };
-    Rc::into_raw(Rc::new(text))
+    Rc::into_raw(stem)
 }
 
 /// # Safety
@@ -461,15 +639,20 @@ pub unsafe extern "C" fn relar_path_suffix(path: *const Object) -> *const Str {
 }
 
 /// # Safety
-/// Root an exact Path. This lexical parent never follows symlinks or collapses
+/// Root an exact Path with no overlapping storage borrow. This lexical parent
+/// never follows symlinks or collapses
 /// `..`; roots and the current-directory path are their own parents.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_path_parent(path: *const Object) -> *const Object {
-    // SAFETY: the new spelling is owned before the original storage borrow ends.
+    // SAFETY: the rooted exact Path is accessed exclusively. Computing and
+    // caching its lexical parent never invokes user code or borrows another Path.
     let parent = unsafe {
-        object(path)
-            .0
-            .with(|storage| Str::from(parent(storage.path())))
+        object(path).0.with_mut(|storage| {
+            let Storage::Path { text, .. } = storage else {
+                fail("SystemError", "expected a path object");
+            };
+            text.parent()
+        })
     };
     new_path(parent)
 }
@@ -482,7 +665,7 @@ pub unsafe extern "C" fn relar_path_is_absolute(path: *const Object) -> u32 {
     unsafe {
         object(path)
             .0
-            .with(|storage| u32::from(storage.path().starts_with('/')))
+            .with(|storage| u32::from(storage.path_value().is_absolute()))
     }
 }
 
@@ -783,8 +966,8 @@ impl PathIterator {
             else {
                 unreachable!()
             };
-            if pattern.literal {
-                let path = join(&self.root, &pattern.text);
+            if let Pattern::Literal(text) = &pattern {
+                let path = join(&self.root, text);
                 // Literal globbing uses lexists, so dangling symlinks are included
                 // without scanning or inspecting unrelated directory names.
                 return Ok(if fs::symlink_metadata(path.as_str()).is_ok() {
@@ -864,10 +1047,9 @@ pub unsafe extern "C" fn relar_path_next(iterator: *const Object) -> *const Obje
     finish(result, std::ptr::null())
 }
 
-struct Pattern {
-    text: Str,
-    tokens: Vec<Token>,
-    literal: bool,
+enum Pattern {
+    Literal(Str),
+    Wildcard(Vec<Token>),
 }
 
 enum Token {
@@ -894,6 +1076,9 @@ impl Pattern {
                 "glob requires a nonrecursive single-component pattern",
             ));
         }
+        if !pattern.contains(['*', '?', '[']) {
+            return Ok(Self::Literal(Str::from(pattern)));
+        }
         let chars: Vec<_> = pattern.chars().collect();
         let mut tokens = Vec::new();
         let mut index = 0;
@@ -919,27 +1104,26 @@ impl Pattern {
                 character => tokens.push(Token::Literal(character)),
             }
         }
-        Ok(Self {
-            text: Str::from(pattern),
-            tokens,
-            literal: !pattern.contains(['*', '?', '[']),
-        })
+        Ok(Self::Wildcard(tokens))
     }
 
     /// Greedy star matching remembers the most recent star and advances its
     /// Unicode-scalar boundary on mismatch, avoiding recursive backtracking.
     fn matches(&self, name: &str) -> bool {
+        let tokens = match self {
+            Self::Literal(text) => return text == name,
+            Self::Wildcard(tokens) => tokens,
+        };
         let (mut token, mut at) = (0, 0);
         let mut star = None;
         while at < name.len() {
-            if matches!(self.tokens.get(token), Some(Token::Star)) {
+            if matches!(tokens.get(token), Some(Token::Star)) {
                 star = Some((token, at));
                 token += 1;
                 continue;
             }
             let character = name[at..].chars().next().unwrap();
-            if self
-                .tokens
+            if tokens
                 .get(token)
                 .is_some_and(|token| token.matches(character))
             {
@@ -956,10 +1140,10 @@ impl Pattern {
                 return false;
             }
         }
-        while matches!(self.tokens.get(token), Some(Token::Star)) {
+        while matches!(tokens.get(token), Some(Token::Star)) {
             token += 1;
         }
-        token == self.tokens.len()
+        token == tokens.len()
     }
 }
 
@@ -1068,6 +1252,27 @@ mod tests {
     }
 
     #[test]
+    fn live_parents_share_their_large_spelling() {
+        let prefix = "a-long-directory-component-that-cannot-fit-inline";
+        // SAFETY: each returned raw pointer transfers one owner. All calls borrow
+        // a live exact Path, and each returned owner is recovered just once.
+        unsafe {
+            let path = Rc::from_raw(new_path(Str::from(format!("{prefix}/leaf"))));
+            let first = Rc::from_raw(relar_path_parent(Rc::as_ptr(&path)));
+            let second = Rc::from_raw(relar_path_parent(Rc::as_ptr(&path)));
+            assert!(!Rc::ptr_eq(&first, &second));
+            let first_text = Rc::from_raw(relar_path_text(Rc::as_ptr(&first)));
+            let second_text = Rc::from_raw(relar_path_text(Rc::as_ptr(&second)));
+            assert!(Rc::ptr_eq(&first_text, &second_text));
+            let old = Rc::downgrade(&first_text);
+            drop((first_text, second_text, first, second));
+            assert!(old.upgrade().is_none());
+            let fresh = Rc::from_raw(relar_path_parent(Rc::as_ptr(&path)));
+            assert!(fresh.0.with(|storage| storage.path() == prefix));
+        }
+    }
+
+    #[test]
     fn shared_spelling_and_basename_survive_other_owners() {
         let mut source = Rc::new(Str::from(
             "//r/../é\0/this-long-basename-is-stored-in-a-heap-buffer",
@@ -1079,12 +1284,15 @@ mod tests {
             let path = Rc::from_raw(relar_path_new(Rc::as_ptr(&source)));
             let first = Rc::from_raw(relar_path_text(Rc::as_ptr(&path)));
             let component = Rc::from_raw(relar_path_name(Rc::as_ptr(&path)));
+            let stem = Rc::from_raw(relar_path_stem(Rc::as_ptr(&path)));
+            assert!(Rc::ptr_eq(&stem, &component));
             let mut other = Rc::from_raw(relar_path_name(Rc::as_ptr(&path)));
             assert!(Rc::ptr_eq(&first, &source));
             assert!(Rc::ptr_eq(&other, &component));
             Rc::make_mut(&mut source).push('!');
             Rc::make_mut(&mut other).push('?');
             drop(path);
+            assert_eq!(*stem, *component);
             assert_eq!(*first, original);
             assert_eq!(
                 component.as_str(),
@@ -1125,6 +1333,43 @@ mod tests {
         }
         result.sort();
         result
+    }
+
+    #[test]
+    fn joined_spelling_is_deferred_and_owns_its_operands() {
+        let parent = path("/parent");
+        let mut child = Rc::new(Str::from(
+            "child/./a-long-component-that-needs-character-storage",
+        ));
+        // SAFETY: both inputs are rooted through the join, whose result owns
+        // its operands. Each later text call transfers one independent owner.
+        unsafe {
+            let joined = Rc::from_raw(relar_path_join(Rc::as_ptr(&parent), Rc::as_ptr(&child)));
+            drop(parent);
+            Rc::make_mut(&mut child).push('!');
+            let tail = Rc::new(Str::from(".."));
+            let descendant = Rc::from_raw(relar_path_join(Rc::as_ptr(&joined), Rc::as_ptr(&tail)));
+            let rendered = Rc::from_raw(relar_path_text(Rc::as_ptr(&descendant)));
+            assert_eq!(
+                rendered.as_str(),
+                "/parent/child/a-long-component-that-needs-character-storage/.."
+            );
+            assert_eq!(relar_path_is_absolute(Rc::as_ptr(&joined)), 1);
+            joined.0.with(|storage| {
+                let PathText::Joined { spelling, .. } = storage.path_value() else {
+                    panic!("expected a deferred path");
+                };
+                assert!(spelling.get().is_none());
+            });
+            let first = Rc::from_raw(relar_path_text(Rc::as_ptr(&joined)));
+            let second = Rc::from_raw(relar_path_text(Rc::as_ptr(&joined)));
+            drop(joined);
+            assert!(Rc::ptr_eq(&first, &second));
+            assert_eq!(
+                first.as_str(),
+                "/parent/child/a-long-component-that-needs-character-storage"
+            );
+        }
     }
 
     #[test]
@@ -1353,7 +1598,8 @@ mod tests {
 
     #[test]
     fn wildcard_patterns_match_unicode_hidden_names_and_character_classes() {
-        for (pattern, yes, no) in [
+        for (spelling, yes, no) in [
+            ("literal.β", "literal.β", "other.β"),
             ("*.json", ".hidden.json", "plain.txt"),
             ("?.json", "🦀.json", "aa.json"),
             ("[a-c]?", "bβ", "dβ"),
@@ -1368,9 +1614,9 @@ mod tests {
             ("[-a]", "-", "b"),
             ("[a-]", "-", "b"),
         ] {
-            let pattern = Pattern::new(pattern).unwrap_or_else(|_| panic!());
-            assert!(pattern.matches(yes), "{} {yes}", pattern.text);
-            assert!(!pattern.matches(no), "{} {no}", pattern.text);
+            let pattern = Pattern::new(spelling).unwrap_or_else(|_| panic!());
+            assert!(pattern.matches(yes), "{spelling} {yes}");
+            assert!(!pattern.matches(no), "{spelling} {no}");
         }
     }
 }

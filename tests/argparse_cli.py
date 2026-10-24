@@ -21,6 +21,8 @@ CASES = {
         ["--item-kind=blue", "--items", "red"],
         ["--items", "red", "--", "tail"],
         ["--help=none"],
+        ["-=", "--help"],
+        ["-=value"],
         ["-hhh=x"],
         ["-hh-x"],
         ["-hx"],
@@ -130,6 +132,8 @@ def main():
             for width in (16, 34, 55, 111):
                 for arguments in (["--help"], ["--not-an-option"]):
                     samples.extend((arguments, width, color) for color in (False, True))
+            for width in (" 34\t", "+3_4", "٣٤", "3__4", "9" * 20, "0" * 4300 + "34"):
+                samples.append((["--help"], width, False))
             for level in args.opt_levels:
                 subprocess.run(
                     [

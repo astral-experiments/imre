@@ -25,6 +25,8 @@ pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, St
     let mut output = String::new();
     let mut groups = vec![None]; // Group zero is the whole match.
     let mut can_repeat = false;
+    let mut may_backtrack = false;
+    let mut outer_prefixes = Vec::new();
     while let Some(c) = input.next() {
         match c {
             c if verbose && verbose_space(c) => continue,
@@ -43,6 +45,8 @@ pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, St
                 continue;
             }
             '(' => {
+                outer_prefixes.push(may_backtrack);
+                may_backtrack = false;
                 output.push('(');
                 if input.next_if_eq(&'?').is_some() {
                     if input.next_if_eq(&':').is_some() {
@@ -72,9 +76,26 @@ pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, St
                 }
                 can_repeat = false;
             }
-            ')' | '|' | '.' | '^' => {
+            '|' => {
+                // regex-syntax factors identical prefixes. Moving a repetition
+                // or nested choice before the branch can change the first match.
+                // An empty character class is an unreachable branch that keeps
+                // these alternatives separate without adding a capture.
+                output.push_str(if may_backtrack { r"|\P{any}|" } else { "|" });
+                if let Some(outer) = outer_prefixes.last_mut() {
+                    *outer = true; // The enclosing prefix now contains a choice.
+                }
+                may_backtrack = false;
+                can_repeat = false;
+            }
+            ')' => {
+                may_backtrack |= outer_prefixes.pop().unwrap_or(false);
                 output.push(c);
-                can_repeat = c == ')' || c == '.';
+                can_repeat = true;
+            }
+            '.' | '^' => {
+                output.push(c);
+                can_repeat = c == '.';
             }
             '$' if input.peek().is_none() => {
                 // Remember a consumed final newline so the runtime can exclude it
@@ -92,6 +113,7 @@ pub(crate) fn translate(pattern: &str, verbose: bool) -> Result<FixedPattern, St
                 can_repeat = kind != Escape::Anchor;
             }
             '*' | '+' | '?' | '{' => {
+                may_backtrack = true;
                 if !can_repeat {
                     return Err("regex quantifier requires a preceding atom".into());
                 }
@@ -358,6 +380,18 @@ mod tests {
             let regex = Regex::new(&translate(pattern, false).unwrap().source).unwrap();
             let matched: String = regex.find_iter("abc-dx").map(|m| m.as_str()).collect();
             assert_eq!(matched, expected);
+        }
+    }
+
+    #[test]
+    fn alternatives_keep_priority_over_a_shared_repetition_or_choice() {
+        for (pattern, text, expected) in [
+            (".*?b|.*?a", "ab", "ab"),
+            (".*a|.*b", "ab", "a"),
+            ("(?:a|ab)c|(?:a|ab)b", "abc", "abc"),
+        ] {
+            let compiled = Regex::new(&translate(pattern, false).unwrap().source).unwrap();
+            assert_eq!(compiled.find(text).unwrap().as_str(), expected);
         }
     }
 

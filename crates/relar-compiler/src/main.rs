@@ -4,11 +4,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus};
 
 #[cfg(unix)]
-use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::os::unix::process::ExitStatusExt;
 
 mod build_cache;
 mod build_output;
 mod cli;
+#[cfg(unix)]
+mod run_program;
 
 use build_output::BuildOutput;
 use cli::{BuildOptions, Relro};
@@ -23,14 +25,12 @@ enum Allocator {
 
 const JEMALLOC_RUNTIME: &str = "librelar_runtime_jemalloc.a";
 
-const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--entry-profile FILE]
-       relar extension-header
+const USAGE: &str = "Usage: relar check SOURCE.py [--module-root DIRECTORY] [--reachable-only] [--entry-profile FILE] [--watch | -w]
        relar build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]
        relar run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]
 
 Build options:
   --module-root DIRECTORY  --runtime LIBRARY.a  --emit-llvm FILE.ll
-  --extension-path DIRECTORY  Search an installed Relar wheel directory (repeatable)
   --reachable-only         Compile definitions reachable from program entry and module initialization
   --clang CLANG  --opt-level 0|1|2|3  --sanitize  --no-cache  --whole-program
   -q, --quiet              Suppress build status
@@ -41,6 +41,7 @@ Build options:
   -C link-arg=ARG (repeatable, passes one argument to Clang)
 
 Build writes the executable to the current directory using the source filename without its extension.
+Check --watch reports each revision to stderr until interrupted.
 Build and run share cached module objects and executables on supported native Linux toolchains.
 Use --whole-program to optimize all modules together.
 Use --entry-profile FILE to compile selected branches and reject excluded modes at runtime.
@@ -74,13 +75,6 @@ fn run() -> Result<ExitCode, String> {
         );
         return Ok(ExitCode::SUCCESS);
     }
-    if command == "extension-header" {
-        if args.next().is_some() {
-            return Err("relar extension-header takes no arguments".into());
-        }
-        print!("{}", include_str!("../../relar-runtime/include/Python.h"));
-        return Ok(ExitCode::SUCCESS);
-    }
     let execute = command == "run";
     if command != "build" && command != "check" && !execute {
         return Err(USAGE.to_owned());
@@ -95,6 +89,7 @@ fn run() -> Result<ExitCode, String> {
     let BuildOptions {
         source_path,
         help,
+        watch,
         no_cache,
         whole_program,
         verbosity,
@@ -116,7 +111,23 @@ fn run() -> Result<ExitCode, String> {
     }
     let source_path = source_path.ok_or(USAGE)?;
     if command == "check" {
-        relar_compiler::check_file_with_options(&source_path, module_root.as_deref(), &options)?;
+        if watch {
+            relar_compiler::IncrementalCompiler::default().watch_file_with_options(
+                &source_path,
+                module_root.as_deref(),
+                &options,
+                |result| match result {
+                    Ok(()) => eprintln!("Check passed"),
+                    Err(error) => eprintln!("{error}\nCheck failed"),
+                },
+            )?;
+        } else {
+            relar_compiler::check_file_with_options(
+                &source_path,
+                module_root.as_deref(),
+                &options,
+            )?;
+        }
         return Ok(ExitCode::SUCCESS);
     }
     if !cfg!(any(
@@ -199,7 +210,7 @@ fn run() -> Result<ExitCode, String> {
     };
     let cache = native
         .as_ref()
-        .filter(|_| !no_cache && options.extension_paths.is_empty() && !options.reachable_only)
+        .filter(|_| !no_cache && !options.reachable_only)
         .and_then(|native| {
             build_cache::Cache::open(
                 &source_path,
@@ -230,9 +241,9 @@ fn run() -> Result<ExitCode, String> {
             build_cache::materialize(&file, &output).map_err(|e| e.to_string())?;
             build_cache::trace("hit");
             progress.cached(label);
-            if execute {
+            if let Some(directory) = run_directory {
                 progress.running(&source_path);
-                return run_program(&output, &source_path, args);
+                return run_program(&output, directory, &source_path, args);
             }
             return Ok(ExitCode::SUCCESS);
         }
@@ -245,30 +256,15 @@ fn run() -> Result<ExitCode, String> {
         Whole(String),
         Units(Vec<CodegenUnit>),
     }
-    let (code, input_paths, sources, extension_archives) = if split {
+    let (code, input_paths, sources) = if split {
         let c = relar_compiler::compile_file_units(&source_path, module_root.as_deref(), &options)?;
-        (
-            Code::Units(c.units),
-            c.input_paths,
-            c.source_inputs,
-            c.extension_archives,
-        )
+        (Code::Units(c.units), c.input_paths, c.source_inputs)
     } else {
         let c = relar_compiler::compile_file(&source_path, module_root.as_deref(), &options)?;
-        (
-            Code::Whole(c.llvm_ir),
-            c.input_paths,
-            c.source_inputs,
-            c.extension_archives,
-        )
+        (Code::Whole(c.llvm_ir), c.input_paths, c.source_inputs)
     };
-    let (library_manifests, native_libraries) = extension_libraries(&extension_archives)?;
     validate_paths(
-        input_paths
-            .iter()
-            .chain(&extension_archives)
-            .chain(&library_manifests)
-            .map(PathBuf::as_path),
+        input_paths.iter().map(PathBuf::as_path),
         &runtime,
         &output,
         llvm_path.as_deref(),
@@ -332,9 +328,7 @@ fn run() -> Result<ExitCode, String> {
         .arg(format!("-O{}", optimization.to_string_lossy()))
         .arg("-Wno-override-module")
         .args(&native_inputs)
-        .args(&extension_archives)
-        .arg(&runtime)
-        .args(native_libraries);
+        .arg(&runtime);
     if let Some(stage) = &stage {
         let mut depfile = OsString::from("--dependency-file=");
         depfile.push(stage.path().join("link.d"));
@@ -429,55 +423,14 @@ fn run() -> Result<ExitCode, String> {
         }
     }
     progress.finished(label);
-    if execute {
+    if let Some(directory) = run_directory {
         progress.running(&source_path);
         drop(temporary);
         drop(scratch);
         drop(stage);
-        return run_program(&output, &source_path, args);
+        return run_program(&output, directory, &source_path, args);
     }
     Ok(ExitCode::SUCCESS)
-}
-
-/// Read only library names, never arbitrary driver or linker options, from a wheel.
-/// Keep input manifests protected by the same output alias check as the archives.
-fn extension_libraries(archives: &[PathBuf]) -> Result<(Vec<PathBuf>, Vec<String>), String> {
-    let mut manifests = Vec::new();
-    let mut libraries = Vec::new();
-    for archive in archives {
-        let path = archive.with_extension("libs");
-        let canonical = match path.canonicalize() {
-            Ok(canonical) => canonical,
-            Err(e) if e.kind() == ErrorKind::NotFound => continue,
-            Err(e) => return Err(format!("{}: {e}", path.display())),
-        };
-        if canonical.parent() != archive.parent() {
-            return Err(format!(
-                "link library manifest resolves outside the archive directory: {}",
-                path.display()
-            ));
-        }
-        let contents =
-            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        for name in contents.lines().filter(|line| !line.is_empty()) {
-            if !name.starts_with(|ch: char| ch.is_ascii_alphanumeric() || ch == '_')
-                || !name
-                    .bytes()
-                    .all(|ch| ch.is_ascii_alphanumeric() || b"._+-".contains(&ch))
-            {
-                return Err(format!(
-                    "{}: invalid native link library name {name:?}",
-                    path.display()
-                ));
-            }
-            let arg = format!("-l{name}");
-            if !libraries.contains(&arg) {
-                libraries.push(arg);
-            }
-        }
-        manifests.push(path);
-    }
-    Ok((manifests, libraries))
 }
 
 fn validate_paths<'a>(
@@ -517,16 +470,18 @@ fn validate_paths<'a>(
 
 fn run_program(
     output: &Path,
+    directory: tempfile::TempDir,
     source: &Path,
     args: impl Iterator<Item = OsString>,
 ) -> Result<ExitCode, String> {
-    let mut program = Command::new(output);
     #[cfg(unix)]
-    program.arg0(source);
-    // An ELF interpreter may reopen the executable after spawn returns.
-    program
-        .args(args)
-        .status()
+    let status = run_program::launch(output, directory, source, args);
+    #[cfg(not(unix))]
+    let status = {
+        let _directory = directory;
+        Command::new(output).args(args).status()
+    };
+    status
         .map(program_exit_code)
         .map_err(|e| format!("Could not run compiled {}: {e}", source.display()))
 }

@@ -19,7 +19,6 @@ LIBRARIES = {
 FILES = {
     "conformance_report": ["__init__.py", "__main__.py", "compute.py", "app.py", "model.py", "parse.py", "render.py", "live.py"],
     "python_catalog": ["__init__.py", "__main__.py", "compute.py", "catalog.py"],
-    "memory_report": ["__init__.py", "compare.py", "render.py"],
 }
 
 
@@ -360,9 +359,6 @@ def main() -> None:
     (source_root / "codon_json_helpers.codon").write_bytes((HERE / "json_helpers.py").read_bytes())
     (source_root / "codon_decimal.codon").write_bytes((HERE / "decimal.py").read_bytes())
     (source_root / "codon_sort.codon").write_bytes((HERE / "sort.py").read_bytes())
-    if "memory_report" in args.applications:
-        for filename, target in (("memory_model.py", "model.codon"), ("memory_compare.py", "__main__.codon")):
-            (source_root / "memory_report" / target).write_bytes((HERE / filename).read_bytes())
     if "conformance_report" in args.applications:
         reporter = ROOT / "examples/conformance_report"
         if "from enum import StrEnum, auto" in (reporter / "model.py").read_text():

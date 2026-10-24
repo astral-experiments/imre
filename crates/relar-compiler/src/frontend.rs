@@ -159,36 +159,10 @@ impl ClassInfo {
         }
         // Reference counting is sufficient only while no accepted field graph can
         // close a cycle. This concerns storage types, not method signatures.
-        fn visit_type(ty: Type, fields: &[Vec<Type>], types: &Types, states: &mut [u8]) -> bool {
-            if let Type::Class(id) = ty {
-                visit(id, fields, types, states)
-            } else {
-                types
-                    .children(ty)
-                    .into_iter()
-                    .all(|child| visit_type(child, fields, types, states))
-            }
-        }
-        fn visit(id: usize, fields: &[Vec<Type>], types: &Types, states: &mut [u8]) -> bool {
-            if states[id] != 0 {
-                return states[id] == 2;
-            }
-            states[id] = 1;
-            if !fields[id]
-                .iter()
-                .all(|&ty| visit_type(ty, fields, types, states))
-            {
-                return false;
-            }
-            states[id] = 2;
-            true
-        }
-        let mut states = vec![0; fields.len()];
-        for (id, class) in declarations.definitions.iter().enumerate() {
-            if !visit(id, &fields, types, &mut states) {
-                return Err(graph.modules[class.definition.module].error(&class.node,
-                    "cyclic heap types are unsupported; class fields must form an acyclic ownership graph"));
-            }
+        if let Some(id) = Self::cyclic_field_root(&fields, types) {
+            let class = &declarations.definitions[id];
+            return Err(graph.modules[class.definition.module].error(&class.node,
+                "cyclic heap types are unsupported; class fields must form an acyclic ownership graph"));
         }
         loop {
             let before = hashable.len();
@@ -267,6 +241,39 @@ impl ClassInfo {
             declarations,
             fields,
         })
+    }
+
+    fn cyclic_field_root(fields: &[Vec<Type>], types: &Types) -> Option<usize> {
+        enum Step {
+            Visit(Type),
+            Finish(usize),
+        }
+        let mut states = vec![0; fields.len()];
+        let mut pending = Vec::new();
+        for root in 0..fields.len() {
+            if states[root] != 0 {
+                continue;
+            }
+            pending.push(Step::Visit(Type::Class(root)));
+            while let Some(step) = pending.pop() {
+                match step {
+                    Step::Finish(id) => states[id] = 2,
+                    Step::Visit(Type::Class(id)) => match states[id] {
+                        1 => return Some(root),
+                        2 => {}
+                        _ => {
+                            states[id] = 1;
+                            pending.push(Step::Finish(id));
+                            pending.extend(fields[id].iter().copied().map(Step::Visit));
+                        }
+                    },
+                    Step::Visit(ty) => {
+                        pending.extend(types.children(ty).into_iter().map(Step::Visit));
+                    }
+                }
+            }
+        }
+        None
     }
 }
 
@@ -365,6 +372,7 @@ fn pattern_elements(target: &ast::Expr) -> Option<&[ast::Expr]> {
 }
 
 /// Resolves the project-wide call graph without changing source-level namespaces.
+#[cfg(test)]
 pub(crate) fn lower(graph: &SourceGraph) -> Result<ir::Module, String> {
     lower_with_owners(graph).map(|(module, _)| module)
 }
@@ -633,42 +641,7 @@ pub(crate) fn lower_with_owners(
                 checker.assigned.insert(slot);
                 params.push(slot);
             }
-            let (mut body, falls_through) = if module.archive.is_some() {
-                let args = params.iter().map(|&slot| checker.local(slot)).collect();
-                let kind = |ty| match ty {
-                    Type::None => Ok(0),
-                    Type::Int => Ok(1),
-                    Type::Bytes => Ok(2),
-                    Type::ListInt => Ok(3),
-                    Type::Callable(_)
-                        if types.signature(ty) == Some((vec![Type::Int], Type::Int)) =>
-                    {
-                        Ok(4)
-                    }
-                    _ => Err(error(
-                        &module.source,
-                        definition,
-                        "native declarations currently support None, int, bytes, list[int], and Callable[[int], int]",
-                    )),
-                };
-                let call = Builtin::ExtensionCall {
-                    module: module.name.rsplit('.').next().unwrap().to_owned(),
-                    method: definition.name.to_string(),
-                    kinds: signature
-                        .params
-                        .iter()
-                        .map(|p| kind(p.ty))
-                        .collect::<Result<_, _>>()?,
-                    result_kind: kind(signature.returns)?,
-                };
-                (
-                    vec![Statement::Return(Expr {
-                        ty: signature.returns,
-                        kind: ExprKind::Builtin(call, args),
-                    })],
-                    false,
-                )
-            } else if classes.keyword_copies.contains(&signature.id) {
+            let (mut body, falls_through) = if classes.keyword_copies.contains(&signature.id) {
                 let class = signature.method.unwrap().class;
                 let value = checker.dispatch_record(
                     class,
@@ -807,19 +780,6 @@ pub(crate) fn lower_with_owners(
             "recursive calls are unsupported in this prototype",
         ));
     }
-    fn visit(id: usize, graph: &[HashSet<usize>], states: &mut [u8]) -> bool {
-        if states[id] != 0 {
-            return states[id] == 2;
-        }
-        states[id] = 1;
-        for &callee in &graph[id] {
-            if !visit(callee, graph, states) {
-                return false;
-            }
-        }
-        states[id] = 2;
-        true
-    }
     let mut entry = None;
     for (module_id, module) in graph.modules.iter().enumerate() {
         if module_id != graph.entry {
@@ -865,28 +825,12 @@ pub(crate) fn lower_with_owners(
         }
     }
     for initialization in &initializations {
-        let module = &graph.modules[initialization.module];
-        let mut body = initialization.function.body.clone();
-        if module.archive.is_some() {
-            body.insert(
-                0,
-                Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        Builtin::ExtensionImport(
-                            module.name.rsplit('.').next().unwrap().to_owned(),
-                        ),
-                        vec![],
-                    ),
-                }),
-            );
-        }
         owners.push(initialization.module);
         functions.push(ir::Function {
             params: Vec::new(),
             returns: Type::None,
             locals: initialization.function.locals.clone(),
-            body,
+            body: initialization.function.body.clone(),
         });
         call_graph.push(initialization.calls.clone());
         class_reads.push(HashSet::new());
@@ -904,7 +848,7 @@ pub(crate) fn lower_with_owners(
         recursion_errors.push(helper.recursion_error);
     }
     let entry = entry.expect("source graph has an entry module");
-    let callable_targets = callables::targets(&functions, &entry);
+    let callable_targets = callables::targets(&functions, &entry, &types)?;
     for (function, calls) in functions.iter().zip(&mut call_graph) {
         ir::walk_expressions(&function.body, &mut |value| {
             if let Some(signature) = callables::invoked_signature(value)
@@ -917,11 +861,8 @@ pub(crate) fn lower_with_owners(
     for function in functions.iter().chain([&entry]) {
         callables::validate_storage(function, &types)?;
     }
-    let mut states = vec![0; functions.len()];
-    for (id, diagnostic) in recursion_errors.into_iter().enumerate() {
-        if !visit(id, &call_graph, &mut states) {
-            return Err(diagnostic);
-        }
+    if let Some(id) = recursive_call_root(&call_graph) {
+        return Err(recursion_errors.swap_remove(id));
     }
     for initialization in &initializations {
         initialization.validate(
@@ -1122,6 +1063,34 @@ fn signature(
         returns: returns.unwrap_or(Type::None),
         method,
     })
+}
+
+fn recursive_call_root(graph: &[HashSet<usize>]) -> Option<usize> {
+    let mut states = vec![0; graph.len()];
+    let mut path = Vec::new();
+    for root in 0..graph.len() {
+        if states[root] != 0 {
+            continue;
+        }
+        states[root] = 1;
+        path.push((root, graph[root].iter()));
+        while let Some((id, callees)) = path.last_mut() {
+            let Some(&callee) = callees.next() else {
+                states[*id] = 2;
+                path.pop();
+                continue;
+            };
+            match states[callee] {
+                1 => return Some(root),
+                2 => {}
+                _ => {
+                    states[callee] = 1;
+                    path.push((callee, graph[callee].iter()));
+                }
+            }
+        }
+    }
+    None
 }
 
 fn error(source: &str, node: &impl Ranged, message: &str) -> String {
@@ -1556,7 +1525,7 @@ struct Checker<'a> {
     comprehension_targets: HashSet<String>,
     comprehension_depth: usize,
     comprehension_exports: HashMap<String, usize>,
-    narrowed: HashMap<usize, Type>,
+    narrowed: assignments::Narrowed,
     regex_guards: Vec<(usize, regex::CaptureLayout)>,
     regex_locals: HashMap<usize, regex::CaptureLayout>,
     /// Group dictionary locals whose complete set of reads resolves to capture slots.
@@ -1568,10 +1537,10 @@ struct Checker<'a> {
     names: HashMap<String, usize>,
     local_functions: HashMap<String, local_functions::Binding>,
     locals: Vec<Type>,
-    assigned: HashSet<usize>,
+    assigned: assignments::Assigned,
     calls: HashSet<usize>,
     class_reads: std::cell::RefCell<HashSet<DefinitionId>>,
-    loop_breaks: Vec<Vec<LocalState>>,
+    loop_breaks: Vec<Option<LocalState>>,
     block_depth: usize,
     in_finally: bool,
     reachable: bool,
@@ -1611,7 +1580,7 @@ impl<'a> Checker<'a> {
             comprehension_targets: HashSet::new(),
             comprehension_depth: 0,
             comprehension_exports: HashMap::new(),
-            narrowed: HashMap::new(),
+            narrowed: assignments::Narrowed::new(),
             regex_guards: Vec::new(),
             regex_locals: HashMap::new(),
             regex_fields: HashMap::new(),
@@ -1622,7 +1591,7 @@ impl<'a> Checker<'a> {
             names: HashMap::new(),
             local_functions: HashMap::new(),
             locals: Vec::new(),
-            assigned: HashSet::new(),
+            assigned: assignments::Assigned::default(),
             calls: HashSet::new(),
             class_reads: Default::default(),
             loop_breaks: Vec::new(),
@@ -2146,7 +2115,7 @@ impl<'a> Checker<'a> {
         mut check: impl FnMut(&mut Self, &ast::Expr) -> Result<Expr, String>,
     ) -> Result<Expr, String> {
         let test = self.condition(&value.test)?;
-        let before = self.local_state();
+        let mut facts = assignments::ConditionalFacts::capture(self, value);
         let mut arm = |checker: &mut Self, truth: bool| {
             checker.apply_facts(&value.test, truth);
             let expression = if truth { &*value.body } else { &*value.orelse };
@@ -2170,10 +2139,9 @@ impl<'a> Checker<'a> {
             result
         };
         let first = arm(self, !reversed)?;
-        let first_state = self.local_state();
-        self.restore_state(before);
+        facts.switch_arm(self);
         let second = arm(self, reversed)?;
-        self.join_states([first_state, self.local_state()]);
+        facts.join(self);
         let (yes, no) = if reversed {
             (second, first)
         } else {
@@ -2227,7 +2195,7 @@ impl<'a> Checker<'a> {
                 } else {
                     self.types.payload(current).unwrap_or(current)
                 };
-                self.narrowed.insert(slot, narrowed);
+                self.narrowed.insert_mut(slot, narrowed);
             }
         }
         self.apply_instance_facts(test, truth);
@@ -2272,7 +2240,7 @@ impl<'a> Checker<'a> {
     fn invalidate_loop_facts(&mut self, body: &[ast::Stmt]) {
         for name in narrowing::assigned_names(body) {
             if let Some(slot) = self.names.get(&name) {
-                self.narrowed.remove(slot);
+                self.narrowed.remove_mut(slot);
             }
         }
         for name in narrowing::deleted_names(body) {
@@ -2286,14 +2254,14 @@ impl<'a> Checker<'a> {
         self.regex_locals.remove(&slot);
         self.regex_fields.remove(&slot);
         self.assigned.insert(slot);
-        self.narrowed.remove(&slot);
+        self.narrowed.remove_mut(&slot);
         if let Some(payload) = self.types.payload(self.locals[slot]) {
             match value.kind {
                 ExprKind::Present(_) => {
-                    self.narrowed.insert(slot, payload);
+                    self.narrowed.insert_mut(slot, payload);
                 }
                 ExprKind::Absent(_) => {
-                    self.narrowed.insert(slot, Type::None);
+                    self.narrowed.insert_mut(slot, Type::None);
                 }
                 _ => {}
             }
@@ -2306,12 +2274,12 @@ impl<'a> Checker<'a> {
             && let ExprKind::Builtin(Builtin::RecordView, args) = &value.kind
             && matches!(args[0].ty, documents::LIST | documents::MAP)
         {
-            self.narrowed.insert(slot, args[0].ty);
+            self.narrowed.insert_mut(slot, args[0].ty);
         }
         if let ExprKind::Builtin(Builtin::UnionInject, args) = &value.kind
             && matches!(args[0].ty, Type::Str | Type::Bytes)
         {
-            self.narrowed.insert(slot, args[0].ty);
+            self.narrowed.insert_mut(slot, args[0].ty);
         }
     }
 
@@ -2490,6 +2458,7 @@ impl<'a> Checker<'a> {
             Some(input) => input,
             None => self.iteration_input(&loop_.iter)?,
         };
+        input = self.fuse_splitlines(input);
         if let Iteration::Container {
             iterable,
             items: false,
@@ -2532,7 +2501,7 @@ impl<'a> Checker<'a> {
         self.invalidate_loop_facts(&loop_.body);
         for name in narrowing::expression_assignments(&loop_.target) {
             if let Some(slot) = self.names.get(&name) {
-                self.narrowed.remove(slot);
+                self.narrowed.remove_mut(slot);
             }
         }
         self.lower_iteration(&loop_.target, input, &loop_.orelse, |checker| {
@@ -2568,7 +2537,7 @@ impl<'a> Checker<'a> {
                 clear.push(slot);
                 self.names.remove(target.id.as_str());
                 self.assigned.remove(&slot);
-                self.narrowed.remove(&slot);
+                self.narrowed.remove_mut(&slot);
             }
         }
         let mut result = vec![Statement::Scope { body, clear }];
@@ -2655,11 +2624,11 @@ impl<'a> Checker<'a> {
                 return Err(error(self.source, target, "range target must be a name"));
             };
             let target = self.declare(name.id.as_str(), Type::Int, target)?;
-            self.narrowed.remove(&target);
+            self.narrowed.remove_mut(&target);
             let facts = self.narrowed.clone();
             let before = self.assigned.clone();
             self.assigned.insert(target);
-            self.loop_breaks.push(Vec::new());
+            self.loop_breaks.push(None);
             let body = lower_body(self)?;
             let breaks = self.loop_breaks.pop().unwrap();
             self.assigned = before;
@@ -2877,11 +2846,11 @@ impl<'a> Checker<'a> {
         fn remove_target_facts(
             target: &ast::Expr,
             names: &HashMap<String, usize>,
-            facts: &mut HashMap<usize, Type>,
+            facts: &mut assignments::Narrowed,
         ) {
             if let ast::Expr::Name(name) = target {
                 if let Some(slot) = names.get(name.id.as_str()) {
-                    facts.remove(slot);
+                    facts.remove_mut(slot);
                 }
             } else if let ast::Expr::Starred(starred) = target {
                 remove_target_facts(&starred.value, names, facts);
@@ -2892,7 +2861,7 @@ impl<'a> Checker<'a> {
             }
             for name in narrowing::expression_assignments(target) {
                 if let Some(slot) = names.get(&name) {
-                    facts.remove(slot);
+                    facts.remove_mut(slot);
                 }
             }
         }
@@ -2918,7 +2887,7 @@ impl<'a> Checker<'a> {
                 },
             ));
         }
-        self.loop_breaks.push(Vec::new());
+        self.loop_breaks.push(None);
         body.extend(lower_body(self)?);
         let breaks = self.loop_breaks.pop().unwrap();
         self.assigned = before;
@@ -2948,20 +2917,39 @@ impl<'a> Checker<'a> {
         ))
     }
 
+    // A transfer inside this suite can target only the innermost enclosing
+    // loop. Temporarily isolate its exits when a handler or finally changes them.
+    fn take_breaks(&mut self) -> Option<LocalState> {
+        self.loop_breaks.last_mut().and_then(Option::take)
+    }
+
+    fn include_breaks(&mut self, previous: Option<LocalState>) {
+        if let Some(mut previous) = previous {
+            let current = self
+                .loop_breaks
+                .last_mut()
+                .expect("break targets an active loop");
+            if let Some(current) = current.as_ref() {
+                previous.retain_common(&current.assigned, &current.narrowed);
+            }
+            *current = Some(previous);
+        }
+    }
+
     /// The else suite is outside this loop, so its transfers target an outer loop.
     /// Only normal completion enters else; break states join after it.
     fn loop_else(
         &mut self,
         orelse: &[ast::Stmt],
-        mut breaks: Vec<LocalState>,
+        mut breaks: Option<LocalState>,
     ) -> Result<(Vec<Statement>, bool), String> {
         let (orelse, falls) = self.block(orelse)?;
         if falls {
-            breaks.push(self.local_state());
+            self.merge_exit(&mut breaks);
         }
-        let falls = !breaks.is_empty();
-        if falls {
-            self.join_states(breaks);
+        let falls = breaks.is_some();
+        if let Some(exit) = breaks {
+            self.restore_state(exit);
         }
         Ok((orelse, falls))
     }
@@ -3098,7 +3086,7 @@ impl<'a> Checker<'a> {
                     self.names.insert(name.id.to_string(), slot);
                     self.assigned_value(slot, &value);
                     self.assigned.remove(&old);
-                    self.narrowed.remove(&old);
+                    self.narrowed.remove_mut(&old);
                     return Ok((
                         vec![Statement::Assign(slot, value), Statement::Clear(old)],
                         true,
@@ -3248,24 +3236,20 @@ impl<'a> Checker<'a> {
                 }
                 return Ok((statements, true));
             }
-            ast::Stmt::If(branch) => {
-                let (statement, flow) =
-                    self.if_chain(&branch.test, &branch.body, &branch.elif_else_clauses)?;
-                return Ok((vec![statement], flow));
-            }
+            ast::Stmt::If(branch) => return self.if_chain(branch),
             ast::Stmt::Match(branch) => return self.match_statement(branch),
             ast::Stmt::While(loop_) => {
                 self.invalidate_loop_facts(&loop_.body);
                 for name in narrowing::expression_assignments(&loop_.test) {
                     if let Some(slot) = self.names.get(&name) {
-                        self.narrowed.remove(slot);
+                        self.narrowed.remove_mut(slot);
                     }
                 }
                 let test = self.condition(&loop_.test)?;
                 let facts = self.narrowed.clone();
                 let before = self.assigned.clone();
                 self.apply_facts(&loop_.test, true);
-                self.loop_breaks.push(Vec::new());
+                self.loop_breaks.push(None);
                 let (body, _) = self.block(&loop_.body)?;
                 let breaks = self.loop_breaks.pop().unwrap();
                 self.assigned = before;
@@ -3300,8 +3284,9 @@ impl<'a> Checker<'a> {
             }
             ast::Stmt::Break(_) | ast::Stmt::Continue(_) if !self.loop_breaks.is_empty() => {
                 if self.reachable && matches!(statement, ast::Stmt::Break(_)) {
-                    let state = self.local_state();
-                    self.loop_breaks.last_mut().unwrap().push(state);
+                    let mut exits = self.take_breaks();
+                    self.merge_exit(&mut exits);
+                    *self.loop_breaks.last_mut().unwrap() = exits;
                 }
                 return Ok((
                     vec![if matches!(statement, ast::Stmt::Break(_)) {
@@ -3556,16 +3541,17 @@ impl<'a> Checker<'a> {
     fn try_statement(&mut self, try_: &ast::StmtTry) -> Result<(Vec<Statement>, bool), String> {
         let before = self.assigned.clone();
         let before_facts = self.narrowed.clone();
-        let break_counts = self.loop_breaks.iter().map(Vec::len).collect::<Vec<_>>();
+        let earlier_breaks = if try_.finalbody.is_empty() {
+            None
+        } else {
+            self.take_breaks()
+        };
         let (body, body_falls) = self.block(&try_.body)?;
         let reachable = self.reachable;
         self.reachable &= body_falls;
         let (orelse, else_falls) = self.block(&try_.orelse)?;
         self.reachable = reachable;
-        let mut exits = Vec::new();
-        if body_falls && else_falls {
-            exits.push((self.assigned.clone(), self.narrowed.clone()));
-        }
+        let mut normal_exit = (body_falls && else_falls).then(|| self.local_state());
 
         let mut handler_assigned = before.clone();
         for name in narrowing::deleted_names(&try_.body) {
@@ -3576,7 +3562,7 @@ impl<'a> Checker<'a> {
         let mut handler_facts = before_facts.clone();
         for name in narrowing::assigned_names(&try_.body) {
             if let Some(slot) = self.names.get(&name) {
-                handler_facts.remove(slot);
+                handler_facts.remove_mut(slot);
             }
         }
         let mut handlers = Vec::new();
@@ -3622,14 +3608,14 @@ impl<'a> Checker<'a> {
                 .map(|name| {
                     let slot = self.declare(name.as_str(), Type::Exception, handler)?;
                     self.assigned.insert(slot);
-                    self.narrowed.remove(&slot);
+                    self.narrowed.remove_mut(&slot);
                     if !kinds.is_empty() && kinds.iter().all(|kind| *kind == 27) {
-                        self.narrowed.insert(slot, Type::TimeoutExpired);
+                        self.narrowed.insert_mut(slot, Type::TimeoutExpired);
                     }
                     Ok::<_, String>(slot)
                 })
                 .transpose()?;
-            let handler_breaks = self.loop_breaks.iter().map(Vec::len).collect::<Vec<_>>();
+            let before_handler = name.and_then(|_| self.take_breaks());
             let capture_depth = self.captured_process_errors.len();
             if let (Some(slot), Some(target)) = (name, &handler.name)
                 && processes::captures_errors(&try_.body, &body)
@@ -3642,17 +3628,16 @@ impl<'a> Checker<'a> {
             self.captured_process_errors.truncate(capture_depth);
             if let Some(name) = name {
                 self.assigned.remove(&name);
-                self.narrowed.remove(&name);
+                self.narrowed.remove_mut(&name);
                 // The exception target is deleted even when a handler breaks.
-                for (states, start) in self.loop_breaks.iter_mut().zip(handler_breaks) {
-                    for state in &mut states[start..] {
-                        state.assigned.remove(&name);
-                        state.narrowed.remove(&name);
-                    }
+                if let Some(Some(exits)) = self.loop_breaks.last_mut() {
+                    exits.assigned.remove(&name);
+                    exits.narrowed.remove_mut(&name);
                 }
+                self.include_breaks(before_handler);
             }
             if falls {
-                exits.push((self.assigned.clone(), self.narrowed.clone()));
+                self.merge_exit(&mut normal_exit);
             }
             handlers.push(ir::ExceptHandler {
                 kinds,
@@ -3661,12 +3646,10 @@ impl<'a> Checker<'a> {
             });
         }
 
-        let mut normal_assigned = exits.first().map(|exit| exit.0.clone()).unwrap_or_default();
-        let mut normal_facts = exits.first().map(|exit| exit.1.clone()).unwrap_or_default();
-        for (assigned, facts) in &exits[1.min(exits.len())..] {
-            normal_assigned.retain(|slot| assigned.contains(slot));
-            normal_facts.retain(|slot, ty| facts.get(slot) == Some(ty));
-        }
+        let has_normal_exit = normal_exit.is_some();
+        let (mut normal_assigned, normal_facts) = normal_exit
+            .map(|exit| (exit.assigned, exit.narrowed))
+            .unwrap_or_default();
 
         self.assigned = before;
         self.narrowed = before_facts;
@@ -3679,7 +3662,7 @@ impl<'a> Checker<'a> {
                 && let Some(slot) = self.names.get(name.as_str())
             {
                 self.assigned.remove(slot);
-                self.narrowed.remove(slot);
+                self.narrowed.remove_mut(slot);
             }
         }
         for name in narrowing::deleted_names(&protected) {
@@ -3689,7 +3672,7 @@ impl<'a> Checker<'a> {
         }
         for name in narrowing::assigned_names(&protected) {
             if let Some(slot) = self.names.get(&name) {
-                self.narrowed.remove(slot);
+                self.narrowed.remove_mut(slot);
             }
         }
         // Pending breaks must pass through finally. Its own transfers replace
@@ -3697,19 +3680,15 @@ impl<'a> Checker<'a> {
         // optional facts it may have changed, rather than recording an early
         // "broken" flag before the final completion is known.
         let pending_breaks = if try_.finalbody.is_empty() {
-            Vec::new()
+            None
         } else {
-            self.loop_breaks
-                .iter_mut()
-                .zip(break_counts)
-                .map(|(states, start)| states.split_off(start))
-                .collect::<Vec<_>>()
+            self.take_breaks()
         };
         let outer_finally = self.in_finally;
         self.in_finally = true;
         let (finalbody, final_falls) = self.block(&try_.finalbody)?;
         self.in_finally = outer_finally;
-        if final_falls && !pending_breaks.is_empty() {
+        if final_falls && let Some(mut pending) = pending_breaks {
             let final_state = self.local_state();
             let written = narrowing::assigned_names(&try_.finalbody)
                 .into_iter()
@@ -3719,18 +3698,19 @@ impl<'a> Checker<'a> {
                 .into_iter()
                 .filter_map(|name| self.names.get(&name).copied())
                 .collect::<HashSet<_>>();
-            for (states, pending) in self.loop_breaks.iter_mut().zip(pending_breaks) {
-                for mut state in pending {
-                    state.assigned.retain(|slot| !deleted.contains(slot));
-                    state
-                        .narrowed
-                        .retain(|slot, _| !written.contains(slot) && !deleted.contains(slot));
-                    state.assigned.extend(&final_state.assigned);
-                    state.narrowed.extend(&final_state.narrowed);
-                    states.push(state);
-                }
+            for slot in &deleted {
+                pending.assigned.remove(slot);
             }
+            for slot in written.iter().chain(&deleted) {
+                pending.narrowed.remove_mut(slot);
+            }
+            pending.assigned.extend(&final_state.assigned);
+            for (&slot, &ty) in &final_state.narrowed {
+                pending.narrowed.insert_mut(slot, ty);
+            }
+            self.include_breaks(Some(pending));
         }
+        self.include_breaks(earlier_breaks);
         if try_.finalbody.is_empty() {
             self.assigned = normal_assigned;
             self.narrowed = normal_facts;
@@ -3740,7 +3720,7 @@ impl<'a> Checker<'a> {
                     normal_assigned.remove(slot);
                 }
             }
-            self.assigned.extend(normal_assigned);
+            self.assigned.extend(&normal_assigned);
             // Facts from the successful body cannot describe an interrupted one.
             // Preserve only facts established while checking the shared finally.
         }
@@ -3751,64 +3731,74 @@ impl<'a> Checker<'a> {
                 orelse,
                 finalbody,
             }],
-            !exits.is_empty() && final_falls,
+            has_normal_exit && final_falls,
         ))
     }
 
-    fn if_chain(
-        &mut self,
-        test: &ast::Expr,
-        body: &[ast::Stmt],
-        clauses: &[ast::ElifElseClause],
-    ) -> Result<(Statement, bool), String> {
-        self.branch_layouts(body, clauses)?;
-        let condition = self.condition(test)?;
-        let known = self.instance_condition(&condition);
-        let before = self.assigned.clone();
-        let facts = self.narrowed.clone();
-        self.apply_facts(test, true);
-        let guard_depth = self.regex_guards.len();
-        if let Some(guard) = self.regex_guard(&condition, body) {
-            self.regex_guards.push(guard);
-        }
-        let namespace_depth = self.namespace_guards.len();
-        self.enter_namespace_guards(test, body);
-        // An exact isinstance test can exclude a compatibility guard under the
-        // reachable-only policy. With expression-only statements there are no
-        // local declarations to preserve from its suite.
-        let (yes, yes_falls) = if self.graph.reachable_only() && known == Some(false)
-            && body.iter().all(|stmt| matches!(stmt, ast::Stmt::Expr(s) if narrowing::expression_assignments(&s.value).is_empty()))
-        {
-            (Vec::new(), false)
-        } else { self.block(body)? };
-        self.namespace_guards.truncate(namespace_depth);
-        self.regex_guards.truncate(guard_depth);
-        let yes_falls = yes_falls && known != Some(false);
-        let yes_assigned = self.assigned.clone();
-        let yes_facts = self.narrowed.clone();
-        self.assigned = before;
-        self.narrowed = facts;
-        self.apply_facts(test, false);
-        let (no, no_falls) = if let Some((clause, rest)) = clauses.split_first() {
-            if let Some(test) = &clause.test {
-                let (nested, flow) = self.if_chain(test, &clause.body, rest)?;
-                (vec![nested], flow)
-            } else {
-                self.block(&clause.body)?
+    fn if_chain(&mut self, branch: &ast::StmtIf) -> Result<(Vec<Statement>, bool), String> {
+        let clauses = &branch.elif_else_clauses;
+        let conditions = std::iter::once((branch.test.as_ref(), branch.body.as_slice())).chain(
+            clauses
+                .iter()
+                .filter_map(|clause| Some((clause.test.as_ref()?, clause.body.as_slice()))),
+        );
+        let mut arms = Vec::with_capacity(clauses.len() + 1);
+        let mut joined = None;
+        let mut falls_at_cutoff = None;
+        let mut exit_fixed = false;
+        for (index, (test, body)) in conditions.enumerate() {
+            self.branch_layouts(body, &clauses[index..])?;
+            let condition = self.condition(test)?;
+            let known = self.instance_condition(&condition);
+            let before = self.local_state();
+            self.apply_facts(test, true);
+            let guard_depth = self.regex_guards.len();
+            if let Some(guard) = self.regex_guard(&condition, body) {
+                self.regex_guards.push(guard);
             }
+            let namespace_depth = self.namespace_guards.len();
+            self.enter_namespace_guards(test, body);
+            // In a reachable-only profile, an impossible compatibility guard's
+            // expression-only body contains no local declarations to preserve.
+            let (yes, yes_falls) = if self.graph.reachable_only()
+                && known == Some(false)
+                && body.iter().all(|stmt| matches!(stmt, ast::Stmt::Expr(s) if narrowing::expression_assignments(&s.value).is_empty()))
+            {
+                (Vec::new(), false)
+            } else {
+                self.block(body)?
+            };
+            self.namespace_guards.truncate(namespace_depth);
+            self.regex_guards.truncate(guard_depth);
+            if yes_falls && known != Some(false) && !exit_fixed {
+                self.merge_exit(&mut joined);
+            }
+            self.restore_state(before);
+            self.apply_facts(test, false);
+            if known == Some(true) {
+                // Later clauses are still checked. Their facts matter for checking
+                // dead code only when this prefix has no normal exit of its own.
+                falls_at_cutoff.get_or_insert(joined.is_some());
+                exit_fixed = joined.is_some();
+            }
+            arms.push((condition, yes));
+        }
+        let (mut no, no_falls) = if let Some(tail) = clauses.last().filter(|c| c.test.is_none()) {
+            self.block(&tail.body)?
         } else {
             (Vec::new(), true)
         };
-        let no_falls = no_falls && known != Some(true);
-        if yes_falls && no_falls {
-            self.assigned.retain(|slot| yes_assigned.contains(slot));
-            self.narrowed
-                .retain(|slot, ty| yes_facts.get(slot) == Some(ty));
-        } else if yes_falls {
-            self.assigned = yes_assigned;
-            self.narrowed = yes_facts;
+        if no_falls && !exit_fixed {
+            self.merge_exit(&mut joined);
         }
-        Ok((Statement::If(condition, yes, no), yes_falls || no_falls))
+        let falls = falls_at_cutoff.unwrap_or(joined.is_some());
+        if let Some(joined) = joined {
+            self.restore_state(joined);
+        }
+        for (condition, yes) in arms.into_iter().rev() {
+            no = vec![Statement::If(condition, yes, no)];
+        }
+        Ok((no, falls))
     }
 
     fn assign(&mut self, target: &ast::Expr, value: Expr) -> Result<Statement, String> {
@@ -4307,14 +4297,14 @@ impl<'a> Checker<'a> {
                     return Ok(result);
                 }
                 let mut values = Vec::new();
-                let mut exits = Vec::new();
+                let mut exit = None;
                 for (index, value) in compare.operands.iter().enumerate() {
                     values.push(self.expr(value)?);
                     if index != 0 {
-                        exits.push(self.local_state());
+                        self.merge_exit(&mut exit);
                     }
                 }
-                self.join_states(exits);
+                self.restore_state(exit.expect("comparisons have at least two operands"));
                 if values
                     .iter()
                     .any(|value| matches!(value.ty, Type::JsonValue | Type::JsonObject))
@@ -5891,12 +5881,56 @@ impl<'a> Checker<'a> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn long_call_chains_can_be_checked_with_or_without_a_cycle() {
+        use std::collections::HashSet;
+
+        let mut graph: Vec<_> = (1..=40_000).map(|id| HashSet::from([id])).collect();
+        graph.push(HashSet::new());
+        assert_eq!(super::recursive_call_root(&graph), None);
+        graph.last_mut().unwrap().insert(0);
+        assert_eq!(super::recursive_call_root(&graph), Some(0));
+    }
+
+    #[test]
     fn literal_string_comprehensions_keep_inline_iteration() {
         crate::compile(
             "values = [outer + inner for outer in [\"a\", \"b\"] for inner in [\"1\", \"2\"]]\nprint(len(values))\n",
             &crate::CompileOptions::default(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn splitlines_fuses_only_the_immediately_consumed_list() {
+        let llvm = crate::compile(
+            r#"
+from pathlib import Path
+
+def scan(text: str, path: Path, start: str) -> None:
+    for line in text.splitlines():
+        print(line)
+    for i, line in enumerate(path.read_text().splitlines(), int(start)):
+        print(i)
+        print(line)
+    lines = text.splitlines()
+    for line in lines:
+        print(line)
+    print(len(lines))
+scan("a\nb", Path("lines.txt"), "4")
+"#,
+            &crate::CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            llvm.matches("call ptr @relar_str_splitlines_iter(").count(),
+            2
+        );
+        assert_eq!(llvm.matches("call ptr @relar_str_splitlines(").count(), 1);
+        let (_, after_read) = llvm.split_once("call ptr @relar_path_read_text(").unwrap();
+        let (_, after_cursor) = after_read
+            .split_once("call ptr @relar_str_splitlines_iter(")
+            .unwrap();
+        assert!(after_cursor.contains("call i64 @relar_int_parse("));
     }
 
     #[test]
@@ -5909,7 +5943,7 @@ mod tests {
             let llvm = crate::compile(&source, &crate::CompileOptions::default()).unwrap();
             assert!(!llvm.contains("call ptr @relar_seq_new("));
             assert!(!llvm.contains("call void @relar_seq_append("));
-            assert!(!llvm.contains("call ptr @relar_record_new("));
+            assert!(!llvm.contains("call ptr @relar_record_try_new("));
         }
     }
 
@@ -5924,5 +5958,19 @@ mod tests {
             let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
             assert!(llvm.contains("call ptr @relar_seq_new("), "{source}");
         }
+    }
+
+    #[test]
+    fn deeply_nested_field_graphs_preserve_cycle_detection() {
+        use super::{ClassInfo, Type, Types};
+
+        let types = Types::default();
+        let mut fields: Vec<_> = (1..=20_000)
+            .map(|id| vec![types.list(Type::Class(id))])
+            .collect();
+        fields.push(vec![Type::Int]);
+        assert_eq!(ClassInfo::cyclic_field_root(&fields, &types), None);
+        fields.last_mut().unwrap().push(types.list(Type::Class(0)));
+        assert_eq!(ClassInfo::cyclic_field_root(&fields, &types), Some(0));
     }
 }

@@ -22,8 +22,14 @@ fn name(expr: &ast::Expr) -> Option<String> {
 }
 
 impl Profile {
-    pub(super) fn load(path: &Path, modules: &[SourceModule]) -> Result<Self, String> {
-        let definition = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    pub(super) fn load(
+        path: &Path,
+        modules: &[SourceModule],
+        fs: &mut crate::watch::FileSystem<'_>,
+    ) -> Result<Self, String> {
+        let definition = fs
+            .read(path)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
         let mut rules: BTreeMap<String, BTreeMap<String, String>> =
             serde_json::from_slice(&definition).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut profile = Self::default();
@@ -155,9 +161,14 @@ def choose(debug: bool) -> str:
         fs::write(&profile, r#"{"service.choose":{"debug":"False"}}"#).unwrap();
         let result = compile_file(&entry, None, &options).unwrap();
         assert!(result.input_paths.contains(&profile));
-        let graph =
-            super::super::SourceGraph::load_profile(&entry, None, &[], true, Some(&profile))
-                .unwrap();
+        let graph = super::super::SourceGraph::load_profile_with(
+            &entry,
+            None,
+            true,
+            Some(&profile),
+            Default::default(),
+        )
+        .unwrap();
         let (module, service) = graph
             .modules
             .iter()

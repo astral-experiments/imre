@@ -1,5 +1,66 @@
 # Changelog
 
+## 0.1.2
+
+Released on 2026-10-23.
+
+### Enhancements
+
+- Build and run programs on Linux x86-64 and ARM64 without installing a system
+  compiler, linker, or development files. The release archives include Clang 18,
+  LLD 18, and their native link inputs. This adds about 76 MB to each download.
+  Use `--clang` to choose your own toolchain.
+  ([#138](https://github.com/astral-sh/relar/pull/138))
+- Compile Ruff’s complete `scripts/conformance.py` unchanged. Its command line
+  runs both ty analyzers, decodes their JSON diagnostics into dataclasses, and
+  renders both report formats byte-for-byte identically to Ruff on CPython.
+  ([#130](https://github.com/astral-sh/relar/pull/130),
+  [#132](https://github.com/astral-sh/relar/pull/132),
+  [#135](https://github.com/astral-sh/relar/pull/135),
+  [#137](https://github.com/astral-sh/relar/pull/137))
+
+### Performance
+
+- Relink native Linux x86-64 executables with LLD. Rebuilding Ruff’s seven-module
+  reporter after a renderer edit took 0.88 s with LLD and 1.22 s with GNU BFD
+  on the same pinned core. Switching linkers still reuses compiled module objects.
+  ([#131](https://github.com/astral-sh/relar/pull/131))
+- Vectorize more integer-list reductions when the element arithmetic and subtotal
+  fit in machine integers. Summing `x * (x + 1)` over 4,096 digits, including
+  parsing them from text, ran about twice as fast on x86-64.
+  ([#134](https://github.com/astral-sh/relar/pull/134))
+- Combine adjacent integer sums over the same `zip(strict=True)` into one
+  traversal when the terms are total integer expressions. The telemetry reporter
+  can compute signed, absolute, and squared error in one pass over its inputs.
+  ([#139](https://github.com/astral-sh/relar/pull/139))
+- Reuse uniquely owned record storage in loops that replace a record with a
+  simple scalar-field constructor. A surviving alias keeps the original record.
+  ([#145](https://github.com/astral-sh/relar/pull/145))
+
+### Bug fixes
+
+- Remove the `relar run` executable after its loader opens it and before user
+  code starts. Killing the compiler and program together at that point leaves
+  the temporary directory empty. Older explicitly supplied runtimes still clean
+  up on normal exit.
+  ([#147](https://github.com/astral-sh/relar/pull/147))
+- Match CPython’s counted regex repetitions with an omitted minimum, including
+  greedy, lazy, and unbounded forms.
+  ([#127](https://github.com/astral-sh/relar/pull/127))
+- Report diagnostics for excessively deep first-party imports, long `elif`
+  chains, nested context managers, and `finally` blocks whose repeated cleanup
+  would generate excessive LLVM IR.
+  ([#149](https://github.com/astral-sh/relar/pull/149),
+  [#152](https://github.com/astral-sh/relar/pull/152),
+  [#156](https://github.com/astral-sh/relar/pull/156),
+  [#160](https://github.com/astral-sh/relar/pull/160))
+- Check long call chains and deeply nested class-field ownership graphs without
+  exhausting the compiler’s native stack. Cycles still produce diagnostics.
+  ([#162](https://github.com/astral-sh/relar/pull/162),
+  [#164](https://github.com/astral-sh/relar/pull/164))
+
+[Full history for 0.1.2](https://github.com/astral-sh/relar/compare/0.1.1...0.1.2)
+
 ## 0.1.1
 
 Released on 2026-10-23.

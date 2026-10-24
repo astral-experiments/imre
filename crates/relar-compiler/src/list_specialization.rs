@@ -18,12 +18,12 @@ pub(crate) fn specialize(module: &mut Module) {
         if function.expression_rebound().into_iter().any(|value| value) {
             continue;
         }
-        rewrite_block(&mut function.body, &function.locals);
+        rewrite_block(&mut function.body, &mut function.locals);
     }
 }
 
 /// Rewrites children before considering a loop, without revisiting new versions.
-fn rewrite_block(body: &mut [Statement], locals: &[Type]) {
+fn rewrite_block(body: &mut [Statement], locals: &mut Vec<Type>) {
     for statement in body {
         crate::ir::statement_children_mut(statement, |child| match child {
             crate::ir::ChildMut::Expression(value) => rewrite_expression(value, locals),
@@ -43,7 +43,7 @@ fn rewrite_block(body: &mut [Statement], locals: &[Type]) {
         };
         // The guard also rejects scans whose cost cannot be amortized by the
         // captured range. Only cheap, nonfallible operands may be read twice.
-        let Some([start, stop, step]) = arguments else {
+        let Some([start, mut stop, step]) = arguments else {
             continue;
         };
         if contains_loop(orelse) {
@@ -103,16 +103,34 @@ fn rewrite_block(body: &mut [Statement], locals: &[Type]) {
                 vec![list_local(input), start.clone(), stop.clone(), step.clone()],
             ));
         }
+        let Plan {
+            outputs, appends, ..
+        } = plan;
         let mut fast_body = Vec::new();
-        if plan.outputs.len() == 1 {
+        // Every append target passed ListDistinct against the condition's source.
+        // Only this arm can reuse its length across the loop backedge.
+        if !outputs.is_empty()
+            && let Statement::While(test, _, _) = &mut fast
+            && let ExprKind::Compare(operands, _) = &mut test.kind
+        {
+            let slot = locals.len();
+            locals.push(Type::Int);
+            fast_body.push(Statement::Assign(slot, stop));
+            stop = Expr {
+                ty: Type::Int,
+                kind: ExprKind::Local(slot),
+            };
+            operands[1] = stop.clone();
+        }
+        if outputs.len() == 1 {
             // Hints beyond the runtime's slot budget cannot reserve more space.
-            let appends = plan.appends.min(32_768) as i64;
+            let appends = appends.min(32_768) as i64;
             fast_body.push(Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(
                     Builtin::ListReserveRange,
                     vec![
-                        list_local(*plan.outputs.first().unwrap()),
+                        list_local(*outputs.first().unwrap()),
                         start,
                         stop,
                         step,
@@ -136,7 +154,7 @@ fn rewrite_block(body: &mut [Statement], locals: &[Type]) {
 
 /// Visits each eager expression once, descending into its own statement scopes.
 /// Newly generated loop versions are not revisited by this child-first walk.
-fn rewrite_expression(expression: &mut Expr, locals: &[Type]) {
+fn rewrite_expression(expression: &mut Expr, locals: &mut Vec<Type>) {
     if let ExprKind::Scope { body, value, .. } = &mut expression.kind {
         rewrite_block(body, locals);
         rewrite_expression(value, locals);
@@ -725,7 +743,31 @@ def transform(data: list[int], cursor: int, output: list[int]) -> None:
             }
         });
         assert_eq!(guards, 1);
-        let llvm = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false);
+        let Some(Statement::If(_, fast, fallback)) = module.functions[0]
+            .body
+            .iter()
+            .find(|s| matches!(s, Statement::If(..)))
+        else {
+            panic!("missing guarded loop");
+        };
+        let [
+            Statement::Assign(slot, length),
+            Statement::Expr(reserve),
+            Statement::While(test, _, _),
+        ] = fast.as_slice()
+        else {
+            panic!("missing fast loop preheader");
+        };
+        assert!(matches!(length.kind, ExprKind::Builtin(Builtin::Len, _)));
+        assert!(
+            matches!(&reserve.kind, ExprKind::Builtin(Builtin::ListReserveRange, args)
+            if matches!(args[2].kind, ExprKind::Local(i) if i == *slot))
+        );
+        assert!(matches!(&test.kind, ExprKind::Compare(args, _)
+            if matches!(args[1].kind, ExprKind::Local(i) if i == *slot)));
+        assert!(matches!(fallback.as_slice(), [Statement::While(test, _, _)]
+            if while_arguments(test).is_some()));
+        let llvm = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
         assert!(llvm.contains("call i64 @relar_list_get("));
     }
 

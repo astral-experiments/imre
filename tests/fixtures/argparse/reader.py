@@ -25,7 +25,7 @@ def read_options():
     parser.add_argument(
         "--verbose", action="store_true", help="Print long human-readable messages"
     )
-    parser.add_argument("--debug", action="store_true", default=None)
+    parser.add_argument("--debug", action="store_true", default=None, help="abcdef ²²-abcd")
     parser.add_argument("--locations", type=P, nargs="+")
     opts = parser.parse_args()
     return opts

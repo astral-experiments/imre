@@ -109,6 +109,14 @@ print(output.closed)
 with open("empty.txt", "r", encoding="utf-8") as empty:
     print(empty.read())
     print(empty.read())
+with open("buffered.txt", "w", encoding="utf-8") as writer:
+    for size in [122880, 8191, 2]:
+        writer.write(bytes(size).decode())
+        with open("buffered.txt", "rb") as reader:
+            print(len(reader.read()))
+    writer.flush()
+    with open("buffered.txt", "rb") as reader:
+        print(len(reader.read()))
 """,
     "splitlines_and_formatting": r"""
 def nothing() -> None:
@@ -351,6 +359,114 @@ write_file()
 with open("output.txt", "r", encoding="utf-8") as stream:
     print(stream.read())
 """,
+    "nested_record_release_order": r"""
+from dataclasses import dataclass
+from typing import BinaryIO
+
+@dataclass(repr=False, eq=False)
+class Leaf:
+    stream: BinaryIO
+
+@dataclass(repr=False, eq=False)
+class Group:
+    first: Leaf
+    direct: BinaryIO
+    nested: list[Leaf]
+    pair: tuple[Leaf, Leaf]
+    last: Leaf
+
+def writer(mark: bytes) -> BinaryIO:
+    stream = open("order.bin", "ab")
+    stream.write(mark)
+    return stream
+
+def group(shared: bool) -> Group:
+    first = Leaf(writer(b"A"))
+    last = first if shared else Leaf(writer(b"D"))
+    return Group(first, writer(b"B"), [Leaf(writer(b"C")), Leaf(writer(b"E"))],
+                 (Leaf(writer(b"F")), Leaf(writer(b"G"))), last)
+
+def discard(shared: bool) -> None:
+    owner = group(shared)
+    print(owner.first.stream.closed)
+
+with open("order.bin", "wb") as empty:
+    pass
+discard(False)
+discard(True)
+with open("order.bin", "rb") as result:
+    print(result.read())
+""",
+    "list_release_order": r"""
+from typing import BinaryIO
+
+def writer(mark: bytes) -> BinaryIO:
+    stream = open("order.bin", "ab")
+    stream.write(mark)
+    return stream
+
+def discard(shared: bool) -> None:
+    streams: list[BinaryIO] = [writer(b"A"), writer(b"B")]
+    if shared:
+        streams.append(streams[0])
+    else:
+        streams.append(writer(b"C"))
+    streams.append(writer(b"D"))
+    print(len(streams))
+
+with open("order.bin", "wb") as empty:
+    pass
+discard(False)
+discard(True)
+with open("order.bin", "rb") as result:
+    print(result.read())
+""",
+    "projected_tuple_release_order": r"""
+from dataclasses import dataclass
+from typing import BinaryIO
+
+@dataclass(repr=False, eq=False)
+class Leaf:
+    stream: BinaryIO
+
+def writer(mark: bytes) -> BinaryIO:
+    stream = open("order.bin", "ab")
+    stream.write(mark)
+    return stream
+
+def projected() -> None:
+    streams = (writer(b"A"), writer(b"B"), writer(b"C"))
+    print(streams[1].closed)
+
+def nested() -> None:
+    leaves = (Leaf(writer(b"D")), Leaf(writer(b"E")), Leaf(writer(b"F")))
+    print(leaves[1].stream.closed)
+
+def replaced(count: int) -> None:
+    streams = (writer(b"G"), writer(b"H"))
+    for i in range(count):
+        streams = (writer(b"I"), writer(b"J"))
+        print(streams[0].closed)
+
+def fail() -> BinaryIO:
+    raise ValueError("stop")
+
+def interrupted() -> None:
+    streams = (writer(b"K"), writer(b"L"))
+    try:
+        streams = (writer(b"M"), fail())
+    except ValueError:
+        print(streams[0].closed)
+
+with open("order.bin", "wb") as empty:
+    pass
+projected()
+nested()
+replaced(2)
+interrupted()
+with open("order.bin", "rb") as result:
+    print(result.read())
+""",
     "flush_and_close_failure": r"""
 stream = open("failing-output", "w", encoding="utf-8")
 stream.write("buffered")
@@ -560,9 +676,18 @@ def seed(directory: Path, case: str) -> None:
     (directory / "output.txt").write_bytes(b"old data that must be truncated")
     (directory / "directory").mkdir()
     if case == "stream_reads":
+        (directory / "truncated-after-open.gz").write_bytes(
+            gzip.compress(b"x" * 300_000, compresslevel=0, mtime=0)
+        )
         (directory / "long-rows.txt").write_bytes(
             b"a" * 32768 + b"\n" + b"b" * 32769 + b"\r\n" + b"c" * 160000 + b"\rdone"
         )
+    if case == "stream_errors":
+        first = gzip.compress(b"\n" * 65536, compresslevel=1, mtime=0)
+        for name, length in [("partial", 131071), ("bulk", 262144)]:
+            second = bytearray(gzip.compress(b"x" * length, compresslevel=6, mtime=0))
+            second[10] &= ~1  # Clear BFINAL so the decoder encounters an invalid next block.
+            (directory / f"{name}.gz").write_bytes(first + second)
     if case.startswith("stream_"):
         # Split both a CRLF and a four-byte UTF-8 scalar at 8 KiB boundaries.
         contents = b"a" * 8191 + b"\r\n" + b"b" * 8189 + "🙂\rC\n\nD\0".encode()
@@ -575,6 +700,11 @@ def seed(directory: Path, case: str) -> None:
         (directory / "crc.gz").write_bytes(members[:-8] + bytes([members[-8] ^ 1]) + members[-7:])
         (directory / "invalid-block.gz").write_bytes(bytes.fromhex("1f8b0800000000000003ff") + bytes(16))
         (directory / "invalid-text.gz").write_bytes(gzip.compress(b"bad\xff", mtime=0))
+    if case == "stream_errors":
+        header = bytes.fromhex("1f8b08040000000000ff") + b"\xff\xff" + bytes(65535)
+        # A nonfinal stored block followed by a reserved block type.
+        body = bytes.fromhex("00ffff0000") + b"x" * 65535 + b"\x07"
+        (directory / "long-header.gz").write_bytes(header + body)
 
 
 def snapshot(directory: Path) -> dict[str, bytes | None]:
