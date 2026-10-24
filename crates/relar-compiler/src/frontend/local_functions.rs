@@ -16,9 +16,24 @@ pub(super) struct Function {
 pub(super) struct Binding {
     site: TextRange,
     function: Option<Function>,
+    pub(super) generic: Option<Rc<ast::StmtFunctionDef>>,
+    instances: HashMap<Type, Function>,
+    later_writes: HashSet<String>,
 }
 
 impl Binding {
+    /// A direct call reads its captured slots at call time. A generic local
+    /// function can acquire its capture list when a later call specializes it.
+    pub(super) fn may_capture(&self, slot: usize, name: &str) -> bool {
+        self.function
+            .as_ref()
+            .is_some_and(|f| f.captures.contains(&slot))
+            || self
+                .generic
+                .as_ref()
+                .is_some_and(|f| comprehensions::function_reads(f).contains(name))
+    }
+
     pub(super) fn target(&self, source: &str, node: &impl Ranged) -> Result<&Function, String> {
         self.function.as_ref().ok_or_else(|| {
             error(
@@ -53,7 +68,11 @@ impl Function {
         Ok(Expr {
             ty: types.callable(
                 self.signature.params.iter().map(|p| p.ty).collect(),
-                self.signature.returns,
+                if self.signature.asynchronous {
+                    types.coroutine(self.signature.returns)
+                } else {
+                    self.signature.returns
+                },
             ),
             kind: ExprKind::Callable {
                 function: self.signature.id,
@@ -71,7 +90,10 @@ impl Checker<'_> {
     /// Only an unconditional definition in the enclosing function's suite can
     /// introduce a fixed call target. Reserve its spelling throughout the suite.
     pub(super) fn collect_local_functions(&mut self, stmts: &[ast::Stmt]) -> Result<(), String> {
-        for function in stmts.iter().filter_map(ast::Stmt::as_function_def_stmt) {
+        for (index, statement) in stmts.iter().enumerate() {
+            let Some(function) = statement.as_function_def_stmt() else {
+                continue;
+            };
             let name = function.name.as_str();
             if reserved(name)
                 || self.names.contains_key(name)
@@ -90,6 +112,13 @@ impl Checker<'_> {
                 Binding {
                     site: function.range,
                     function: None,
+                    generic: None,
+                    instances: HashMap::new(),
+                    later_writes: if function.is_async {
+                        narrowing::assigned_names(&stmts[index + 1..])
+                    } else {
+                        HashSet::new()
+                    },
                 },
             );
         }
@@ -124,7 +153,11 @@ impl Checker<'_> {
                 "local functions require annotated parameters and return types",
             ));
         }
-        let mut signature = signature(
+        if self.generic_awaitable_wrapper(definition) {
+            self.local_functions.get_mut(name).unwrap().generic = Some(Rc::new(definition.clone()));
+            return Ok(());
+        }
+        let signature = signature(
             definition,
             self.graph,
             self.module,
@@ -133,6 +166,93 @@ impl Checker<'_> {
             None,
             &inference::Inference::default(),
         )?;
+        let function = self.lift_local(definition, signature)?;
+        self.local_functions.get_mut(name).unwrap().function = Some(function);
+        Ok(())
+    }
+
+    fn generic_awaitable_wrapper(&self, definition: &ast::StmtFunctionDef) -> bool {
+        let [parameter] = definition.parameters.args.as_ref() else {
+            return false;
+        };
+        let Some(result) = &definition.returns else {
+            return false;
+        };
+        let Some(ast::Expr::Subscript(expected)) = parameter.annotation() else {
+            return false;
+        };
+        let Some(crate::modules::Binding::Value(id)) = self.graph.resolve_type(self.module, result)
+        else {
+            return false;
+        };
+        definition.is_async
+            && definition.parameters.posonlyargs.is_empty()
+            && definition.parameters.kwonlyargs.is_empty()
+            && definition.parameters.vararg.is_none()
+            && definition.parameters.kwarg.is_none()
+            && parameter.default.is_none()
+            && self.graph.resolve_type(self.module, &expected.value)
+                == Some(crate::modules::Binding::Intrinsic(Intrinsic::Awaitable))
+            && self.graph.resolve_type(self.module, &expected.slice)
+                == Some(crate::modules::Binding::Value(id))
+            && type_variable(
+                self.graph,
+                id.module,
+                &self.graph.modules[id.module].parsed.syntax().body[id.statement],
+            )
+    }
+
+    pub(super) fn call_generic_awaitable(
+        &mut self,
+        call: &ast::ExprCall,
+        definition: &ast::StmtFunctionDef,
+    ) -> Result<Expr, String> {
+        let [argument] = call.arguments.args.as_ref() else {
+            return Err(error(
+                self.source,
+                call,
+                "awaitable wrapper requires one argument",
+            ));
+        };
+        self.reject_builtin_keywords(call)?;
+        let value = self.expr(argument)?;
+        let result = self
+            .types
+            .awaited(value.ty)
+            .ok_or_else(|| error(self.source, argument, "expected a typed awaitable"))?;
+        let name = definition.name.as_str();
+        let function = if let Some(existing) = self.local_functions[name].instances.get(&value.ty) {
+            existing.clone()
+        } else {
+            let signature = Signature {
+                id: 0,
+                asynchronous: true,
+                method: None,
+                returns: result,
+                params: vec![Parameter {
+                    name: definition.parameters.args[0].name().to_string(),
+                    ty: value.ty,
+                    kind: ParameterKind::PositionalOrKeyword,
+                    default: None,
+                    sign_only: false,
+                }],
+            };
+            let function = self.lift_local(definition, signature)?;
+            self.local_functions
+                .get_mut(name)
+                .unwrap()
+                .instances
+                .insert(value.ty, function.clone());
+            function
+        };
+        self.call_local_args(call, &function, ir::CallArgs::positional(vec![value]))
+    }
+
+    fn lift_local(
+        &mut self,
+        definition: &ast::StmtFunctionDef,
+        mut signature: Signature,
+    ) -> Result<Function, String> {
         signature.id = self.helpers.reserve();
         let mut helper = Checker::new(
             self.graph,
@@ -145,6 +265,7 @@ impl Checker<'_> {
         );
         helper.inference = self.inference;
         helper.returns = signature.returns;
+        helper.asynchronous = signature.asynchronous;
         let mut params = Vec::new();
         for (parameter, ty) in definition
             .parameters
@@ -187,6 +308,25 @@ impl Checker<'_> {
                 helper.local_functions.insert(read, binding);
             }
         }
+        // A cold coroutine can start after its caller has returned. Capturing a
+        // stable binding preserves cell reads without allocating a heap cell.
+        // References to mutable objects still observe changes to their contents.
+        if signature.asynchronous
+            && let Some(name) = self.local_functions[definition.name.as_str()]
+                .later_writes
+                .iter()
+                .find(|name| {
+                    self.names
+                        .get(*name)
+                        .is_some_and(|slot| captures.contains(slot))
+                })
+        {
+            return Err(error(
+                self.source,
+                definition,
+                &format!("asynchronous capture '{name}' may be rebound before the coroutine runs"),
+            ));
+        }
         let (mut body, falls) = helper.function_body(&definition.body)?;
         if falls && self.types.payload(signature.returns).is_some() {
             body.push(Statement::Return(helper.coerce(
@@ -220,12 +360,11 @@ impl Checker<'_> {
                     .error(definition, "recursive local function calls are unsupported"),
             },
         );
-        self.local_functions.get_mut(name).unwrap().function = Some(Function {
+        Ok(Function {
             signature,
             captures,
             definition: Rc::new(definition.clone()),
-        });
-        Ok(())
+        })
     }
 
     pub(super) fn call_local_function(
@@ -233,7 +372,16 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         function: &Function,
     ) -> Result<Expr, String> {
-        let mut args = self.arguments(call, &function.signature.params, None)?;
+        let args = self.arguments(call, &function.signature.params, None)?;
+        self.call_local_args(call, function, args)
+    }
+
+    fn call_local_args(
+        &mut self,
+        call: &ast::ExprCall,
+        function: &Function,
+        mut args: ir::CallArgs,
+    ) -> Result<Expr, String> {
         for &slot in &function.captures {
             if !self.assigned.contains(&slot) {
                 return Err(error(
@@ -246,9 +394,24 @@ impl Checker<'_> {
             args.values.push(self.local(slot));
         }
         self.calls.insert(function.signature.id);
-        Ok(Expr {
-            ty: function.signature.returns,
-            kind: ExprKind::Call(function.signature.id, args),
-        })
+        Ok(self.call_value(&function.signature, function.signature.returns, args))
     }
+}
+
+/// A TypeVar declaration is a compile-time binding; uses as runtime values
+/// are rejected by the ordinary uninitialized-global check.
+pub(super) fn type_variable(graph: &SourceGraph, module: ModuleId, statement: &ast::Stmt) -> bool {
+    let ast::Stmt::Assign(assign) = statement else {
+        return false;
+    };
+    let [ast::Expr::Name(target)] = assign.targets.as_slice() else {
+        return false;
+    };
+    let ast::Expr::Call(call) = &*assign.value else {
+        return false;
+    };
+    graph.resolve(module, &call.func)
+        == Some(crate::modules::Binding::Intrinsic(Intrinsic::TypeVar))
+        && matches!(call.arguments.args.as_ref(), [ast::Expr::StringLiteral(name)] if name.value.to_str() == target.id.as_str())
+        && call.arguments.keywords.is_empty()
 }

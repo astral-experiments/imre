@@ -30,26 +30,10 @@ impl ExceptionEffects {
 pub(crate) fn analyze(module: &Module) -> ExceptionEffects {
     let targets = Targets::analyze(module);
     let mut functions = vec![true; module.functions.len()];
-    let hash_errors: Vec<_> = module
-        .functions
-        .iter()
-        .map(|function| {
-            let mut fallible = false;
-            crate::ir::walk_expressions(&function.body, &mut |v| {
-                let key = module
-                    .types
-                    .mapping(v.ty)
-                    .map(|(key, _)| key)
-                    .or_else(|| module.types.set_element(v.ty));
-                fallible |= key.is_some_and(|key| module.types.fallible_key(key));
-            });
-            fallible
-        })
-        .collect();
     loop {
         let mut changed = false;
         for (id, function) in module.functions.iter().enumerate() {
-            if functions[id] && !hash_errors[id] && !block(&function.body, &functions, &targets) {
+            if functions[id] && !block(&function.body, &functions, &targets) {
                 functions[id] = false;
                 changed = true;
             }

@@ -211,6 +211,13 @@ impl Checker<'_> {
             ast::Expr::Attribute(attribute) => probe.field(attribute).ok().map(|(_, _, ty)| ty),
             ast::Expr::Subscript(subscript) => {
                 let receiver = probe.expr(&subscript.value).ok()?;
+                if matches!(receiver.ty, Type::Document(_)) {
+                    return Some(if matches!(&*subscript.slice, ast::Expr::Slice(_)) {
+                        self.types.list(documents::ANY)
+                    } else {
+                        documents::ANY
+                    });
+                }
                 self.types
                     .mapping(receiver.ty)
                     .map(|(_, value)| value)
@@ -219,4 +226,42 @@ impl Checker<'_> {
             _ => None,
         }
     }
+}
+
+/// Reserve an optional slot when a later assignment calls a function with that
+/// declared return type. The ordinary checker still enforces every assignment.
+pub(super) fn nullable_assignments(
+    checker: &Checker<'_>,
+    body: &[ast::Stmt],
+) -> HashMap<String, Type> {
+    use ruff_python_ast::visitor::{Visitor, walk_stmt};
+    struct Scan<'a, 'b> {
+        checker: &'a Checker<'b>,
+        found: HashMap<String, Type>,
+    }
+    impl<'a> Visitor<'a> for Scan<'_, '_> {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if matches!(stmt, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_)) {
+                return;
+            }
+            if let ast::Stmt::Assign(a) = stmt
+                && let [ast::Expr::Name(target)] = a.targets.as_slice()
+                && let ast::Expr::Call(call) = &*a.value
+                && let Some(Binding::Definition(def)) = self.checker.resolve(&call.func)
+                && let Some(sig) = self.checker.functions.get(&def)
+                && self.checker.types.payload(sig.returns).is_some()
+            {
+                self.found.insert(target.id.to_string(), sig.returns);
+            }
+            walk_stmt(self, stmt);
+        }
+    }
+    let mut scan = Scan {
+        checker,
+        found: HashMap::new(),
+    };
+    for stmt in body {
+        scan.visit_stmt(stmt);
+    }
+    scan.found
 }

@@ -13,6 +13,15 @@ use ruff_python_literal::escape::{Escape, UnicodeEscape};
 
 use super::{Object, Storage, StorageCell, Str, acquire_rc, fail, object};
 
+#[repr(C)]
+pub struct NamedDescriptor {
+    name: *const u8,
+    length: usize,
+    kinds: *const u32,
+    count: usize,
+    base: u32,
+}
+
 /// Stable ABI identifiers for the supported builtin exception hierarchy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -50,6 +59,8 @@ pub(crate) enum Kind {
     TomlDecodeError = 30,
     JsonDecodeError = 31,
     SystemExit = 32,
+    CancelledError = 33,
+    ExceptionGroup = 34,
 }
 
 impl Kind {
@@ -88,6 +99,8 @@ impl Kind {
             30 => Self::TomlDecodeError,
             31 => Self::JsonDecodeError,
             32 => Self::SystemExit,
+            33 => Self::CancelledError,
+            34 => Self::ExceptionGroup,
             _ => fail("SystemError", "invalid exception kind"),
         }
     }
@@ -127,13 +140,18 @@ impl Kind {
             Self::TomlDecodeError => "TOMLDecodeError",
             Self::JsonDecodeError => "JSONDecodeError",
             Self::SystemExit => "SystemExit",
+            Self::CancelledError => "CancelledError",
+            Self::ExceptionGroup => "ExceptionGroup",
         }
     }
 
     fn matches(self, expected: Self) -> bool {
         match expected {
             Self::BaseException => true,
-            Self::Exception => !matches!(self, Self::BaseException | Self::SystemExit),
+            Self::Exception => !matches!(
+                self,
+                Self::BaseException | Self::SystemExit | Self::CancelledError
+            ),
             Self::ArithmeticError => matches!(
                 self,
                 Self::ArithmeticError | Self::ZeroDivisionError | Self::OverflowError
@@ -173,13 +191,83 @@ impl Kind {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct Exception {
     kind: Kind,
     message: Rc<Str>,
     cause: Option<Rc<Object>>,
     suppress_context: bool,
-    process: Option<Box<super::processes::ProcessError>>,
-    timeout: Option<Box<super::processes::TimeoutError>>,
+    payload: Option<Box<Payload>>,
+    /// Exceptional frame roots with a native filesystem finalizer. This subset
+    /// needs only the owners whose lifetime can affect a later filesystem query.
+    directories: Option<Rc<Vec<Rc<Object>>>>,
+}
+
+/// Builtin exceptions carry one specialized payload. Keep it off the common
+/// object so adding a richer exception never grows every list, dict and task.
+#[derive(Clone)]
+enum Payload {
+    Named(&'static NamedDescriptor),
+    Process(super::processes::ProcessError),
+    Timeout(super::processes::TimeoutError),
+    Group(Box<[GroupMember]>),
+}
+
+/// A member raised explicitly from its owning group needs both observable
+/// directions without an Rc cycle. A weak identity is enough while anyone
+/// holds the child. If only the group survives, its immutable value can be
+/// materialized again; simultaneous projections preserve object identity.
+#[derive(Clone)]
+enum GroupMember {
+    Strong(Rc<Object>),
+    Caused(Rc<CausedMember>),
+}
+
+struct CausedMember {
+    live: RefCell<std::rc::Weak<Object>>,
+    value: Exception,
+}
+
+impl GroupMember {
+    fn get(&self, owner: &Rc<Object>) -> Rc<Object> {
+        match self {
+            Self::Strong(child) => child.clone(),
+            Self::Caused(entry) => {
+                if let Some(child) = entry.live.borrow().upgrade() {
+                    return child;
+                }
+                let mut value = entry.value.clone();
+                value.cause = Some(owner.clone());
+                let child = Rc::new(Object(StorageCell::new(Storage::Exception(value))));
+                *entry.live.borrow_mut() = Rc::downgrade(&child);
+                child
+            }
+        }
+    }
+}
+
+impl Exception {
+    fn named(&self) -> Option<&'static NamedDescriptor> {
+        match self.payload.as_deref() {
+            Some(Payload::Named(descriptor)) => Some(descriptor),
+            _ => None,
+        }
+    }
+
+    fn name(&self) -> &str {
+        self.named().map_or_else(
+            || self.kind.name(),
+            |descriptor| {
+                // SAFETY: the compiler emits a static UTF-8 identifier with this length.
+                unsafe {
+                    std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                        descriptor.name,
+                        descriptor.length,
+                    ))
+                }
+            },
+        )
+    }
 }
 
 impl Drop for Exception {
@@ -251,15 +339,151 @@ thread_local! {
     static PENDING_PRESENT: Cell<bool> = const { Cell::new(false) };
 }
 
+/// # Safety
+/// The exceptional frame still roots this exact directory context. An empty
+/// local slot is zero. Its payload can only be a string or path, so attaching
+/// the owner to the exception cannot form a reference cycle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_error_keep_directory(manager: *const Object) {
+    if manager.is_null() {
+        return;
+    }
+    // SAFETY: the generated frame has not yet released this non-null local.
+    let armed = unsafe {
+        object(manager).0.with(|storage| {
+        matches!(storage, Storage::DirectoryContext(context) if context.needs_cleanup())
+    })
+    };
+    if !armed {
+        return;
+    }
+    PENDING.with_borrow(|pending| {
+        if let Some(pending) = pending {
+            // SAFETY: no callback runs while adding an immutable owner to the
+            // pending exception, and a manager cannot refer back to this error.
+            unsafe {
+                pending.0.with_mut(|storage| {
+                    let Storage::Exception(exception) = storage else {
+                        unreachable!()
+                    };
+                    let roots =
+                        Rc::make_mut(exception.directories.get_or_insert_with(Default::default));
+                    if !roots.iter().any(|root| Rc::as_ptr(root) == manager) {
+                        roots.push(acquire_rc::<Object>(manager as usize));
+                    }
+                })
+            };
+        }
+    });
+}
+
 fn new_exception(kind: Kind, message: Rc<Str>) -> Rc<Object> {
     Rc::new(Object(StorageCell::new(Storage::Exception(Exception {
         kind,
         message,
         cause: None,
         suppress_context: false,
-        process: None,
-        timeout: None,
+        payload: None,
+        directories: None,
     }))))
+}
+
+pub(super) fn kind_of(error: &Object) -> Kind {
+    // SAFETY: the task holds an immutable exact exception throughout the read.
+    unsafe { error.0.with(Storage::exception_kind) }
+}
+
+pub(super) fn task_group_errors(errors: Vec<Rc<Object>>) -> Rc<Object> {
+    let n = errors.len();
+    let suffix = if n == 1 { "" } else { "s" };
+    let message = Rc::new(Str::from(format!(
+        "unhandled errors in a TaskGroup ({n} sub-exception{suffix})"
+    )));
+    Rc::new(Object(StorageCell::new(Storage::Exception(Exception {
+        kind: Kind::ExceptionGroup,
+        message,
+        cause: None,
+        suppress_context: false,
+        payload: Some(Box::new(Payload::Group(
+            errors.into_iter().map(GroupMember::Strong).collect(),
+        ))),
+        directories: None,
+    }))))
+}
+
+/// # Safety
+/// The exact exception and canonical index stay rooted for the projection.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_async_exception_at(
+    error: *const Object,
+    index: usize,
+) -> *const Object {
+    // SAFETY: only an immutable child owner leaves the group's storage.
+    let owner: Rc<Object> = unsafe { acquire_rc(error as usize) };
+    // SAFETY: the owner roots the exact group while its child is acquired.
+    let result = unsafe {
+        owner.0.with(|storage| {
+            let exception = storage.exception();
+            let Some(Payload::Group(group)) = exception.payload.as_deref() else {
+                return Err(Error::new(
+                    Kind::AttributeError,
+                    format!(
+                        "'{}' object has no attribute 'exceptions'",
+                        exception.name()
+                    ),
+                ));
+            };
+            let index = super::decode_index(&crate::Int::borrow(index))
+                .and_then(|index| super::index(index, group.len()))
+                .map_err(|_| Error::new(Kind::IndexError, "tuple index out of range"))?;
+            Ok(Rc::into_raw(group[index].get(&owner)))
+        })
+    };
+    finish(result, std::ptr::null())
+}
+
+/// # Safety
+/// The compiler supplies a child projected from this exact group; both stay
+/// rooted during this transfer of relationship ownership.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_async_member_cause(
+    child: *const Object,
+    group: *const Object,
+) -> *const Object {
+    // SAFETY: two ordinary, rooted exception objects are accessed in separate
+    // scopes. No user code can reenter their storage during ownership transfer.
+    unsafe {
+        let child: Rc<Object> = acquire_rc(child as usize);
+        let group: Rc<Object> = acquire_rc(group as usize);
+        let mut snapshot = child.0.with(|storage| storage.exception().clone());
+        snapshot.cause = None;
+        snapshot.suppress_context = true;
+        let entry = Rc::new(CausedMember {
+            live: RefCell::new(Rc::downgrade(&child)),
+            value: snapshot,
+        });
+        group.0.with_mut(|storage| {
+            let Storage::Exception(parent) = storage else {
+                unreachable!()
+            };
+            let Some(Payload::Group(members)) = parent.payload.as_deref_mut() else {
+                unreachable!("child belongs to group");
+            };
+            for member in members.iter_mut() {
+                if matches!(member, GroupMember::Strong(target) if Rc::ptr_eq(target, &child)) {
+                    *member = GroupMember::Caused(entry.clone());
+                }
+            }
+        });
+        child.0.with_mut(|storage| {
+            let Storage::Exception(value) = storage else {
+                unreachable!()
+            };
+            value.cause = Some(group);
+            value.suppress_context = true;
+        });
+        Rc::into_raw(child)
+    }
 }
 
 /// Publishes a completed child's rich failure after all input storage borrows end.
@@ -271,8 +495,8 @@ pub(super) fn raise_process(error: super::processes::ProcessError) {
             message: Rc::new(Str::new("")),
             cause: None,
             suppress_context: false,
-            process: Some(Box::new(error)),
-            timeout: None,
+            payload: Some(Box::new(Payload::Process(error))),
+            directories: None,
         },
     ))))));
 }
@@ -286,14 +510,14 @@ pub(super) fn raise_timeout(error: super::processes::TimeoutError) {
             message: Rc::new(Str::new("")),
             cause: None,
             suppress_context: false,
-            process: None,
-            timeout: Some(Box::new(error)),
+            payload: Some(Box::new(Payload::Timeout(error))),
+            directories: None,
         },
     ))))));
 }
 
 /// Replaces the pending owner without dropping it during a TLS mutable borrow.
-fn replace_pending(value: Option<Rc<Object>>) {
+pub(super) fn replace_pending(value: Option<Rc<Object>>) {
     let present = value.is_some();
     let previous = PENDING.with(|pending| pending.replace(value));
     PENDING_PRESENT.set(present);
@@ -301,10 +525,19 @@ fn replace_pending(value: Option<Rc<Object>>) {
 }
 
 /// Clears presence before transferring the owner, without dropping under a TLS borrow.
-fn take_pending() -> Option<Rc<Object>> {
+pub(super) fn take_pending() -> Option<Rc<Object>> {
     let pending = PENDING.with(RefCell::take);
     PENDING_PRESENT.set(false);
     pending
+}
+
+/// A suspended task retains the exception dynamically active in its own handlers.
+pub(super) fn swap_active(saved: &mut Option<Rc<Object>>) {
+    ACTIVE.with(|active| std::mem::swap(&mut *active.borrow_mut(), saved));
+}
+
+pub(super) fn active_exception() -> Option<Rc<Object>> {
+    ACTIVE.with(|active| active.borrow().clone())
 }
 
 /// Uses Ruff's Python repr rules and its pinned Unicode printable categories.
@@ -345,13 +578,11 @@ impl Storage {
 
     fn exception_message(&self) -> Rc<Str> {
         let exception = self.exception();
-        if let Some(timeout) = &exception.timeout {
-            return Rc::new(timeout.message());
+        match exception.payload.as_deref() {
+            Some(Payload::Timeout(timeout)) => Rc::new(timeout.message()),
+            Some(Payload::Process(process)) => Rc::new(process.message()),
+            _ => exception.message.clone(),
         }
-        exception.process.as_ref().map_or_else(
-            || exception.message.clone(),
-            |process| Rc::new(process.message()),
-        )
     }
 }
 
@@ -372,24 +603,17 @@ pub unsafe extern "C" fn relar_subprocess_error_field(value: *const Object, fiel
     let result = unsafe {
         object(value).0.with(|storage| {
             let exception = storage.exception();
-            if field == 0
-                && let Some(timeout) = &exception.timeout
-            {
-                return Ok(timeout.field(0));
-            }
-            exception.process.as_ref().map_or_else(
-                || {
+            match exception.payload.as_deref() {
+                Some(Payload::Timeout(timeout)) if field == 0 => Ok(timeout.field(0)),
+                Some(Payload::Process(process)) => Ok(process.field(field)),
+                _ => {
                     let name = ["cmd", "returncode", "stdout", "stderr", "output"][field as usize];
                     Err(Error::new(
                         Kind::AttributeError,
-                        format!(
-                            "'{}' object has no attribute '{name}'",
-                            exception.kind.name()
-                        ),
+                        format!("'{}' object has no attribute '{name}'", exception.name()),
                     ))
-                },
-                |process| Ok(process.field(field)),
-            )
+                }
+            }
         })
     };
     finish(result, 0)
@@ -406,12 +630,10 @@ pub unsafe extern "C" fn relar_subprocess_timeout_field(value: *const Object, fi
     // SAFETY: the checker establishes an exact TimeoutExpired before projection.
     unsafe {
         object(value).0.with(|storage| {
-            storage
-                .exception()
-                .timeout
-                .as_ref()
-                .unwrap_or_else(|| fail("SystemError", "expected TimeoutExpired storage"))
-                .field(field)
+            let Some(Payload::Timeout(timeout)) = storage.exception().payload.as_deref() else {
+                fail("SystemError", "expected TimeoutExpired storage");
+            };
+            timeout.field(field)
         })
     }
 }
@@ -434,6 +656,28 @@ pub extern "C" fn relar_error_take() -> *const Object {
 pub unsafe extern "C" fn relar_error_set(value: *const Object) {
     // SAFETY: the caller supplies a rooted exception or null.
     replace_pending(unsafe { acquire_exception(value) });
+}
+
+/// # Safety
+/// The descriptor and its name/ancestor arrays live for the process lifetime.
+/// The nullable message is rooted exactly as for a builtin exception.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_named_exception_new(
+    descriptor: *const NamedDescriptor,
+    message: *const Str,
+) -> *const Object {
+    // SAFETY: the fresh builtin has not escaped and the descriptor is static.
+    unsafe {
+        let descriptor = &*descriptor;
+        let handle = relar_exception_new(descriptor.base, message);
+        object(handle).0.with_mut(|storage| {
+            let Storage::Exception(exception) = storage else {
+                unreachable!()
+            };
+            exception.payload = Some(Box::new(Payload::Named(descriptor)));
+        });
+        handle
+    }
 }
 
 /// Constructs an owned builtin exception from zero or one string argument.
@@ -476,6 +720,16 @@ pub unsafe extern "C" fn relar_exception_release(value: *const Object) {
 /// `value` is a rooted exception and `expected_kind` is a supported builtin kind.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_exception_matches(value: *const Object, expected_kind: u32) -> u32 {
+    if expected_kind >= 256 {
+        // SAFETY: every named class descriptor and its ancestor slice have static compiler-owned storage.
+        return u32::from(unsafe {
+            object(value).0.with(|s| {
+                s.exception().named().is_some_and(|d| {
+                    std::slice::from_raw_parts(d.kinds, d.count).contains(&expected_kind)
+                })
+            })
+        });
+    }
     let expected = Kind::from_raw(expected_kind);
     // SAFETY: the rooted exception is read without reentry or escaped references.
     u32::from(unsafe {
@@ -610,11 +864,12 @@ pub extern "C" fn relar_error_unhandled() -> i32 {
     let mut current = Some(pending.clone());
     while let Some(exception) = current {
         // SAFETY: the current owner roots the exception; only owned data escapes.
-        let (kind, message, cause) = unsafe {
+        let (kind, name, message, cause) = unsafe {
             exception.0.with(|storage| {
                 let exception = storage.exception();
                 (
                     exception.kind,
+                    exception.name().to_owned(),
                     storage.exception_message(),
                     exception.cause.clone(),
                 )
@@ -627,13 +882,13 @@ pub extern "C" fn relar_error_unhandled() -> i32 {
             }
             return message.parse::<i64>().unwrap_or(-1) as i32;
         }
-        chain.push((kind, message));
+        chain.push((name, message));
         current = cause;
     }
     drop(pending);
     let _ = crate::flush_stdout();
     let mut stderr = io::stderr().lock();
-    for (index, (kind, message)) in chain.into_iter().rev().enumerate() {
+    for (index, (name, message)) in chain.into_iter().rev().enumerate() {
         if index != 0 {
             let _ = writeln!(
                 stderr,
@@ -641,9 +896,9 @@ pub extern "C" fn relar_error_unhandled() -> i32 {
             );
         }
         if message.is_empty() {
-            let _ = writeln!(stderr, "{}", kind.name());
+            let _ = writeln!(stderr, "{name}");
         } else {
-            let _ = writeln!(stderr, "{}: {message}", kind.name());
+            let _ = writeln!(stderr, "{name}: {message}");
         }
     }
     1
@@ -664,6 +919,33 @@ mod tests {
         relar_list_get_index, relar_list_new, relar_list_pop, relar_list_repeat,
     };
     use num_bigint::BigInt;
+
+    #[test]
+    fn reraised_group_members_keep_identity_without_retaining_a_cycle() {
+        let child = new_exception(Kind::ValueError, Rc::new(Str::from("child")));
+        let group = task_group_errors(vec![child.clone(), child.clone()]);
+        let weak_group = Rc::downgrade(&group);
+        let weak_child = Rc::downgrade(&child);
+        // SAFETY: local owners root this exact group and one of its members.
+        unsafe {
+            let raised = Rc::from_raw(relar_async_member_cause(
+                Rc::as_ptr(&child),
+                Rc::as_ptr(&group),
+            ));
+            assert!(Rc::ptr_eq(&child, &raised));
+            let first = Rc::from_raw(relar_async_exception_at(Rc::as_ptr(&group), 1));
+            assert!(Rc::ptr_eq(&first, &raised));
+            drop((first, raised, child));
+            assert!(weak_child.upgrade().is_none());
+            let first = Rc::from_raw(relar_async_exception_at(Rc::as_ptr(&group), 1));
+            let second = Rc::from_raw(relar_async_exception_at(Rc::as_ptr(&group), 3));
+            assert!(Rc::ptr_eq(&first, &second));
+            let cause = Rc::from_raw(relar_exception_cause(Rc::as_ptr(&second)));
+            assert!(Rc::ptr_eq(&cause, &group));
+            drop((first, second, cause, group));
+            assert!(weak_group.upgrade().is_none());
+        }
+    }
 
     fn take_error(kind: Kind) -> Rc<Object> {
         assert_eq!(relar_error_pending(), 1);

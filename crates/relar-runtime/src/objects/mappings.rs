@@ -631,6 +631,33 @@ impl Mapping {
         pairs
     }
 
+    pub(super) fn is_empty(&self) -> bool {
+        self.tables.len() == 0
+    }
+
+    /// A typed dict of None can initialize a mutable document's removal values.
+    pub(super) fn document_null_keys(&self) -> Vec<Rc<Str>> {
+        assert_eq!((self.tables.key_kind(), self.value_kind.raw()), (3, 0));
+        let mut keys = Vec::with_capacity(self.tables.len());
+        self.tables.all(|key, _| {
+            // SAFETY: the mapping holds a strong reference to each exact string key.
+            keys.push(unsafe { acquire_rc(key) });
+            true
+        });
+        keys
+    }
+
+    pub(super) fn document_pairs(&self) -> Vec<(Rc<Str>, Rc<Object>)> {
+        assert_eq!((self.tables.key_kind(), self.value_kind.raw()), (3, 5));
+        let mut pairs = Vec::with_capacity(self.tables.len());
+        self.tables.all(|key, value| {
+            // SAFETY: the exact native mapping roots each typed key and value.
+            pairs.push(unsafe { (acquire_rc(key), acquire_rc(value)) });
+            true
+        });
+        pairs
+    }
+
     /// # Safety
     /// Both tables and all values are rooted and immutable for this traversal.
     pub(super) unsafe fn equal(&self, other: &Self) -> bool {
@@ -670,7 +697,7 @@ impl Mapping {
                     true
                 });
                 // Stable ties follow insertion order, as in Counter.most_common().
-                // SAFETY: the mapping roots each integer count until sorting is complete.
+                // SAFETY: this mapping roots the integer counts until sorting is complete.
                 entries.sort_by(|a, b| unsafe { crate::relar_int_compare(b.1, a.1) }.cmp(&0));
                 output.push('{');
                 let key_kind = WordKind::new(self.tables.key_kind());
@@ -678,7 +705,7 @@ impl Mapping {
                     if i != 0 {
                         output.push_str(", ");
                     }
-                    // SAFETY: the table roots this initialized key and integer count.
+                    // SAFETY: the rooted table supplies an initialized key and integer count.
                     unsafe {
                         super::values::write_repr(output, key, key_kind);
                         output.push_str(": ");
@@ -931,6 +958,24 @@ impl Storage {
 }
 
 /// Creates a dictionary with concrete scalar keys and one shared value descriptor.
+/// Each statically decorated module function owns one typed cache for the
+/// lifetime of the program. A failed call never reaches the wrapper's insert.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_function_cache(id: usize, key: u32, value: u32) -> *const Object {
+    thread_local! { static CACHES: std::cell::RefCell<std::collections::HashMap<usize, Rc<Object>>> = std::cell::RefCell::default(); }
+    CACHES.with_borrow_mut(|caches| {
+        Rc::into_raw(
+            caches
+                .entry(id)
+                .or_insert_with(|| {
+                    // SAFETY: relar_dict_new returns an independent strong owner.
+                    unsafe { Rc::from_raw(relar_dict_new(key, value)) }
+                })
+                .clone(),
+        )
+    })
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_dict_new(key_kind: u32, value_kind: u32) -> *const Object {
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(

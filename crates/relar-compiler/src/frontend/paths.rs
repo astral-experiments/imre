@@ -38,6 +38,13 @@ impl Checker<'_> {
         match value.ty {
             Type::Str => Ok(value),
             Type::JsonValue => self.coerce(value, Type::Str, node),
+            ty if self
+                .types
+                .members(ty)
+                .is_some_and(|members| members == [Type::Str, Type::Path]) =>
+            {
+                Ok(operation(PathOperation::UnionText, Type::Str, vec![value]))
+            }
             Type::Path => Ok(operation(PathOperation::Text, Type::Str, vec![value])),
             _ => Err(error(
                 self.source,
@@ -45,6 +52,41 @@ impl Checker<'_> {
                 "a filesystem path requires str or pathlib.Path",
             )),
         }
+    }
+
+    pub(super) fn directory_manager(
+        &mut self,
+        intrinsic: Intrinsic,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let temporary = intrinsic == Intrinsic::TemporaryDirectory;
+        let value = if temporary {
+            self.temporary_directory(call)?
+        } else {
+            self.reject_builtin_keywords(call)?;
+            match call.arguments.args.as_ref() {
+                [] => Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+                [arg] => self.expr(arg)?,
+                _ => {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "nullcontext accepts one path or string value",
+                    ));
+                }
+            }
+        };
+        let source = value.ty;
+        let domain = self.types.union(&[Type::Str, Type::Path]).unwrap();
+        let value = self.coerce(value, self.types.optional(domain), call)?;
+        Ok(operation(
+            PathOperation::ContextNew { temporary },
+            self.types.directory_context(source),
+            vec![value],
+        ))
     }
 
     pub(super) fn path_constructor(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -64,6 +106,50 @@ impl Checker<'_> {
             result = operation(PathOperation::Join, Type::Path, vec![result, next]);
         }
         Ok(result)
+    }
+
+    /// Keep os.path joins lexical, including trailing separators and empty components.
+    pub(super) fn system_path_call(
+        &mut self,
+        intrinsic: Intrinsic,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        self.reject_builtin_keywords(call)?;
+        let args = call.arguments.args.as_ref();
+        match (intrinsic, args) {
+            (Intrinsic::GetSysconfigPath, [ast::Expr::StringLiteral(name)])
+                if name.value.to_str() == "scripts" =>
+            {
+                Ok(operation(PathOperation::Scripts, Type::Str, Vec::new()))
+            }
+            (Intrinsic::OsPathJoin, [first, rest @ ..]) => {
+                let mut path = self.path_argument(first)?;
+                for child in rest {
+                    path = operation(
+                        PathOperation::OsJoin,
+                        Type::Str,
+                        vec![path, self.path_argument(child)?],
+                    );
+                }
+                Ok(path)
+            }
+            (Intrinsic::OsPathExists, [arg]) => Ok(operation(
+                PathOperation::OsExists,
+                Type::Bool,
+                vec![self.path_argument(arg)?],
+            )),
+            (Intrinsic::Which, [arg]) => Ok(operation(
+                PathOperation::Which,
+                self.types.optional(Type::Str),
+                vec![self.path_argument(arg)?],
+            )),
+            _ => Err(error(
+                self.source,
+                call,
+                "supported path calls are sysconfig.get_path('scripts'), os.path.join(path, *parts), os.path.exists(path), and shutil.which(command)",
+            )),
+        }
     }
 
     /// Both operands are evaluated in source order, including reflected str / Path.
@@ -118,6 +204,23 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if name == "joinpath" {
+            self.reject_builtin_keywords(call)?;
+            calls::reject_unpacking(call, self.source)?;
+            if call.arguments.args.is_empty() {
+                let path = operation(PathOperation::Text, Type::Str, vec![receiver]);
+                return Ok(operation(PathOperation::New, Type::Path, vec![path]));
+            }
+            let mut path = receiver;
+            for arg in &call.arguments.args {
+                path = operation(
+                    PathOperation::Join,
+                    Type::Path,
+                    vec![path, self.path_argument(arg)?],
+                );
+            }
+            return Ok(path);
+        }
         if matches!(name, "mkdir" | "unlink" | "replace" | "resolve") {
             return self.path_call(receiver, name, call);
         }
@@ -150,7 +253,8 @@ impl Checker<'_> {
             ));
         }
         match kind {
-            PathOperation::ReadText if call.arguments.keywords.is_empty() => {}
+            PathOperation::ReadText | PathOperation::WriteText
+                if call.arguments.keywords.is_empty() => {}
             PathOperation::ReadText | PathOperation::WriteText => self.utf8_encoding(call)?,
             _ => self.reject_builtin_keywords(call)?,
         }

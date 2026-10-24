@@ -31,6 +31,7 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                     enum_members: Vec::new(),
                     name: "CompletedProcess".to_owned(),
                     qualified_name: "subprocess.CompletedProcess".to_owned(),
+                    frozen_initializer: None,
                     dataclass_eq: false,
                     dataclass_repr: true,
                     toml_hash: false,

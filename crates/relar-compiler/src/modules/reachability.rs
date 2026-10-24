@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use ruff_python_ast as ast;
-use ruff_python_ast::visitor::{Visitor, walk_expr};
+use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use super::{Binding, DefinitionId, Intrinsic, ModuleId, SourceGraph};
@@ -26,6 +26,17 @@ struct References<'a> {
 }
 
 impl<'a> Visitor<'a> for References<'_> {
+    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+        if !self
+            .graph
+            .entry_profile
+            .ranges(self.module)
+            .any(|range| range.contains_range(stmt.range()))
+        {
+            walk_stmt(self, stmt);
+        }
+    }
+
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
         if let Some(Binding::Definition(id)) = self.graph.resolve_type(self.module, expr) {
             self.found.definitions.insert(id);
@@ -147,7 +158,7 @@ impl Reachable {
             }
         }
         for (module, source) in graph.modules.iter().enumerate() {
-            let mut skipped = Vec::new();
+            let mut skipped = graph.entry_profile.ranges(module).collect::<Vec<_>>();
             for (statement, node) in source.parsed.syntax().body.iter().enumerate() {
                 let id = DefinitionId { module, statement };
                 match node {

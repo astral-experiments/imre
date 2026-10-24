@@ -45,12 +45,74 @@ def locally_compiled(text: str) -> None:
         print(repr(simple.groupdict()))
 
 
+def saved_groups(text: str) -> None:
+    found = DIAGNOSTIC.match(text)
+    if found is None:
+        return
+    values = found.groupdict()
+    found = DIAGNOSTIC.match("- other: F42 next")
+    print(repr((values["where"], values.get("diff"), values.get("diff"), values["fix"])))
+
+
+def fallback() -> str:
+    print("evaluated default")
+    return "missing"
+
+
+def captured_binding(text: str) -> None:
+    values: dict[str, str | None] = {"where": "before"}
+
+    def read() -> str | None:
+        return values.get("where")
+
+    print(repr(read()))
+    found = DIAGNOSTIC.match(text)
+    if found is None:
+        return
+    values = found.groupdict()
+    print(repr(values.get("where")))
+    print(repr(read()))
+
+
+def unrelated_binding(text: str) -> str:
+    def suffix() -> str:
+        return "!"
+
+    found = DIAGNOSTIC.match(text)
+    if found is None:
+        return ""
+    values = found.groupdict()
+    return values["where"] + suffix()
+
+
+def dictionary_reads(text: str, key: str) -> None:
+    found = DIAGNOSTIC.match(text)
+    if found is None:
+        return
+    values = found.groupdict()
+    print(repr(values.get(key, fallback())))
+    print(repr(values.get("absent")))
+    try:
+        print(repr(values["absent"]))
+    except KeyError:
+        print("missing key")
+    alias = values
+    alias["where"] = None
+    print(repr(values["where"]))
+
+
 diagnostic("+ α: F١٠ [*] message\n")
 diagnostic("β: F42 ")
 diagnostic("prefix\nβ: F42 message")
 location("- path.py:10:2: utf8 β\n")
 location("\n+ path:1:1: x")
 mutation("+ α: F10 message")
+saved_groups("+ α: F10 message")
+saved_groups("β: F42 [*] message")
+captured_binding("+ α: F10 message")
+print(unrelated_binding("+ α: F10 message"))
+dictionary_reads("β: F42 message", "fix")
+dictionary_reads("β: F42 message", "absent")
 
 if found := re.search(r"(?:(?P<a>a)|(?P<b>b))(?P<empty>x*)", "b"):
     print(repr((found.groups(), found.groupdict())))

@@ -24,7 +24,7 @@ This is a deliberately restricted Python dialect for closed, statically typed so
 | Regular expressions | Fixed text patterns in `re.compile` and `re.search`, named and numbered groups, character offsets, and `re.VERBOSE` |
 | Bytes | Immutable bytes; literals, construction from an integer count or `list[int]`, concatenation/repetition, all value comparisons, indexing/slicing/iteration, `len`, Python byte repr, strict UTF-8 encode/decode |
 | Paths | Native POSIX `pathlib.Path`; lexical joining and components, equality, text I/O, filesystem predicates, directory creation/removal, unlink/replace, immediately consumed directory iteration and single-component globbing |
-| Workspaces | Direct `with tempfile.TemporaryDirectory(...)` scopes with UTF-8 names, typed location/name options, and deterministic recursive cleanup |
+| Workspaces | Stored or direct `TemporaryDirectory` and `nullcontext` scopes with typed enter values and recursive cleanup |
 | Files and arguments | Explicit UTF-8 text and binary file modes, buffered line iteration, binary `read(n)`, read-only `gzip.open`, shared cursors, `with` cleanup, and one shared mutable `sys.argv` list |
 | Processes | Synchronous `subprocess.run` with string arguments, captured UTF-8 text, working directories, replacement environments, checked status, and `os.environ.copy()` snapshots |
 | Builtins | `print(value)` for one scalar, path, exception, or record; `repr(value)` for supported data values; `input()` without a prompt; `bool()` or `bool(value)`; `int(int_or_float_or_bool_or_string)`; `float()` or `float(int_or_float_or_bool_or_string_or_bytes)`; `str()` or `str(int_or_float_or_bool_or_string_or_bytes_or_None_or_path_or_exception_or_record)`; `abs(int_or_float_or_bool)`; `len(string_or_bytes_or_container)`; `list([iterable])`; `sorted(iterable, key=callback_or_None, reverse=bool)`; integer `sum(iterable[, start])`; `min(integer_generator)` and `max(integer_generator)`; `any(iterable)` and `all(iterable)`; immediate `map(callback, iterable)`, `filter(predicate_or_None, iterable)`, `zip(iterable, ..., strict=condition)`, `reversed(sequence)`, and `enumerate(iterable[, start])`; contextual empty `dict()` and `set()`; `range` with one to three integer arguments at an iteration boundary |
@@ -35,7 +35,7 @@ Indentation must use spaces; tabs and form feeds remain valid inside string data
 
 The compiler bounds syntax complexity before parsing each module. Deeply nested blocks, delimiters, or long chains of operators can exceed the limit. Splitting a long expression into intermediate assignments reduces its depth.
 
-Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, generator functions, escaping iterator values, async, slice assignment/deletion, tuple display expansion, call argument expansion, variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and arbitrary object identity comparisons are currently rejected. Unsupported operations are rejected even in dead branches and unused functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, general generator functions, escaping iterator values, async generators, slice assignment/deletion, tuple display expansion, call argument expansion, variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and arbitrary object identity comparisons are currently rejected. By default the compiler checks every function and branch. A closed entry profile can select particular branches of reachable functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
 
 ## Inferred function signatures and iterable consumers
 
@@ -75,6 +75,10 @@ consuming the first glob.
 read-only `Sequence[str]` parameters. Line alignment, intraline Unicode hints,
 and popular-line handling follow CPython 3.12 with its default junk filters.
 The compiler can also pass the result to a parameter consumed immediately by `list`.
+The list snapshots both inputs. Changing an input or a shallow copy afterward
+preserves ordinary list semantics. A program that selects added or removed rows
+and sorts by the text after the two-character tag can skip intraline comparisons.
+Reading the raw rows yields the original ordering and `? ` guides.
 
 `itertools.groupby(source, key=...)` groups consecutive items with equal keys. In a
 `for key, group` loop, the first statement must assign `list(group)` to a separate
@@ -147,9 +151,7 @@ A generator expression evaluates its leftmost iterable and acquires that iterato
 
 `reversed` accepts concrete lists, Unicode strings, bytes, ranges, and homogeneous fixed tuples. A reversed list captures its starting index at construction, then reads live elements at descending indexes. Appended tail elements are not visited; an index outside the current list bounds exhausts the iterator when the next item is requested. String traversal yields Unicode scalar strings, and reversed ranges preserve arbitrary-precision bounds. Dictionaries, sets, generator expressions, and other iterator pipelines cannot be passed to `reversed`.
 
-`min(expr for item in source)` and `max(expr for item in source)` consume a single generator of exact integers. They evaluate each yielded value once and keep the first minimum or maximum. An empty generator raises `ValueError`. With two or more positional integer
-arguments, both builtins evaluate the operands from left to right and keep
-the first minimum or maximum.
+`min(expr for item in source)` and `max(expr for item in source)` consume a single generator of exact integers. They evaluate each yielded value once and keep the first minimum or maximum. An empty generator raises `ValueError`.
 
 `any` and `all` truth-test yielded values and return a boolean. `any` stops at the first true value and returns false for an empty input; `all` stops at the first false value and returns true for an empty input. Skipped elements, conversions, filters, and strict-zip probes do not execute. All source expressions still must type-check.
 
@@ -302,11 +304,9 @@ whose capture or empty-match behavior falls outside this dialect.
 
 ## Bounded unions and codec primitives
 
-`str | bytes` and `str | list[str]` are sealed two-member types. Both support
-`typing.Union` syntax and optional `None`. A string list retains its identity and
-observes mutations through aliases. Function, return, local, field, tuple, and container storage enforce those exact members. Concrete members promote into union storage without copying or allocating a wrapper. This does not allow arbitrary unions or heterogeneous untyped containers.
+`str | bytes` and `typing.Union[str, bytes]` denote the same sealed two-member type; either can additionally include `None`. Function, return, local, field, tuple, and container storage enforce those exact members. Concrete strings and bytes promote into union storage without copying or allocating a wrapper. This does not allow arbitrary unions or heterogeneous untyped containers.
 
-`isinstance(value, type)` accepts supported concrete type categories and the sealed builtin exception hierarchy. Tests against `str`, `bytes`, or `list` narrow a local union in the matching branch and exclude that member in the other branch. Reassignments invalidate those facts; mutable field or container reads do not become stable local facts. Custom metaclass tests and runtime type objects remain unsupported.
+`isinstance(value, type)` accepts supported concrete type categories and the sealed builtin exception hierarchy. Tests against `str` or `bytes` narrow a local union in the matching branch and exclude that member in the other branch. Reassignments invalidate those facts; mutable field or container reads do not become stable local facts. Custom metaclass tests and runtime type objects remain unsupported.
 
 Integer bit operations preserve Python's arbitrary-precision signed semantics. Negative shifts raise `ValueError`; large right shifts saturate to zero or minus one. A nonzero left shift too large to represent raises `OverflowError`, while zero shifted by an arbitrarily large nonnegative count stays zero. Resource exhaustion may still terminate the process. `divmod(a, b)` evaluates each integer argument once and returns the fixed tuple `(a // b, a % b)`, including Python's signed quotient/remainder rules and zero-division category. Runtime diagnostic wording can differ across CPython releases.
 
@@ -504,7 +504,7 @@ Indexing uses exact integer indexes, including negative indexes, and returns an 
 
 ## Native paths and directory traversal
 
-`from pathlib import Path` exposes a sealed native POSIX path type on both supported hosts. `Path()` represents the current directory; fixed positional string or `Path` arguments join left to right. The `/` operator accepts a path and a string or path, including a string on the left. An absolute segment replaces the preceding path. Empty segments, repeated separators, and `.` components normalize lexically; `..` components and exactly two leading slashes remain intact. Construction and joining do not access the filesystem or resolve symlinks.
+`from pathlib import Path` exposes a sealed native POSIX path type on both supported hosts. `Path()` represents the current directory; fixed positional string or `Path` arguments join left to right. `Path.joinpath(*parts)` joins fixed positional strings and paths in order. The `/` operator also accepts a string on the left. An absolute segment replaces the preceding path. Empty segments, repeated separators, and `.` components normalize lexically; `..` components and exactly two leading slashes remain intact. Construction and joining do not access the filesystem or resolve symlinks.
 
 `name`, `stem`, `suffix`, and `parent` are read-only properties. Parent traversal stops at the anchor or current directory. Components follow [Python 3.14 semantics](https://docs.python.org/3.14/library/pathlib.html), including `Path("report.").suffix == "."`. On these POSIX hosts, `path.as_posix()` returns the same text as `str(path)`. Paths compare by normalized value with `==` and `!=`; `str`, `print`, and ordinary f-strings produce the path text, while `repr` and `!r` produce `PosixPath(...)`. Paths are always true, including `Path("")`. They can appear in exact fields, lists, dictionary keys and values, sets, tuples, callables, and nullable storage. Dictionary and set lookups hash the normalized path spelling without accessing the filesystem. Dataclass equality and repr traverse their native values. Path ordering, subclasses, and arbitrary `os.PathLike` implementations are outside this contract.
 
@@ -517,7 +517,7 @@ for path in sorted(root.glob("*.json"), key=lambda path: path.name):
     print(path.read_text())
 ```
 
-`exists()`, `is_file()`, and `is_dir()` follow symlinks and return false for failed filesystem queries, matching Python 3.14, including invalid NUL-containing paths. `read_text()` reads and closes a file with strict UTF-8 decoding and universal-newline translation, regardless of the process locale. An explicit `encoding="utf-8"` has the same effect. `write_text(text, encoding="utf-8")` requires the literal encoding keyword and creates or truncates the file, writes UTF-8, closes, and returns the Unicode scalar count. Both methods use the same catchable exception categories as `open` for access and close failures. Argument evaluation completes before opening a file, so an argument failure cannot truncate the output.
+`exists()`, `is_file()`, and `is_dir()` follow symlinks and return false for failed filesystem queries, matching Python 3.14, including invalid NUL-containing paths. `read_text()` reads and closes a file with strict UTF-8 decoding and universal-newline translation, regardless of the process locale. An explicit `encoding="utf-8"` has the same effect. `write_text(text)` creates or truncates the file, writes UTF-8, closes it, and returns the Unicode scalar count. It also accepts an explicit `encoding="utf-8"`. Both methods use the same catchable exception categories as `open` for access and close failures. Argument evaluation completes before opening a file, so an argument failure cannot truncate the output.
 
 `mkdir(mode=0o777, parents=False, exist_ok=False)` creates a directory. The mode is an exact integer within the signed C-int range; larger values raise `OverflowError`. Boolean options require exact booleans. The process umask applies, and missing parents use mode `0o777` independently of the leaf mode. `exist_ok=True` accepts an existing directory, including a symlink to one, without changing its permissions. `unlink(missing_ok=False)` removes a file or symlink; its flag suppresses only `FileNotFoundError`. `rmdir()` removes an empty directory. These methods return `None` and preserve their normal filesystem error categories.
 
@@ -552,7 +552,7 @@ Cleanup removes the directory tree on fallthrough, return, loop transfers, and e
 
 Missing entries and an already-removed root are tolerated. Descendant symlinks are unlinked without following them; a root replaced by a symlink or regular file raises an error. Cleanup repairs owner permissions where CPython does and traverses raw Unix entry names without decoding them into language strings. This permits removal of an opaque filename created by an external process while preserving the Unicode boundary for public path operations. Moving the entire root elsewhere leaves that moved tree outside the original scope's cleanup path.
 
-Temporary-directory objects cannot be stored, passed, returned, manually entered, or inspected. `delete`, `ignore_cleanup_errors`, positional constructor arguments, arbitrary context-manager protocols, and finalizer-driven cleanup are unsupported. Use the scope to own resources and ordinary `str`/`Path` values to name them.
+Construction creates the directory immediately. A local can hold the manager before entering it. A normal or exceptional exit recursively removes the directory. If the last owner goes away before entering, cleanup is best effort. A conditional can choose between `TemporaryDirectory()` and `contextlib.nullcontext(path)`. The temporary branch yields its string name and the other branch yields the supplied `Path`. Passing that value to `Path(...)` accepts either representation. Constructor options remain limited to `dir`, `prefix`, and `suffix`.
 
 ## UTF-8 files and process arguments
 
@@ -576,7 +576,7 @@ Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueErr
 
 ## Command-line options
 
-A function can declare an `argparse.ArgumentParser`, add literal long options in order, and return the result of `parse_args()`. Relar derives a read-only namespace with a concrete field for each option. Hyphens become underscores in field names. A choice of strings gives the field a string `Literal` type. A value option without a default or `required=True` produces an optional field.
+A function can declare an `argparse.ArgumentParser`, add required positional arguments and named options, and return the result of `parse_args()`. Relar derives a read-only namespace with a concrete field for each option. Hyphens become underscores in field names. A choice of strings gives the field a string `Literal` type. A value option without a default or `required=True` produces an optional field.
 
 ```python
 from argparse import ArgumentParser
@@ -595,7 +595,7 @@ if args.output:
     args.output.write_text(args.input.read_text())
 ```
 
-The accepted declarations use one ASCII long option per `add_argument`, `str` or `Path` conversion, a matching literal default, `None`, `required`, `nargs="+"`, or `action="store_true"`. A list or tuple supplies constant string choices. Constructor options include a literal `prog`, a literal description or `__doc__`, and `RawDescriptionHelpFormatter`. In the default configuration the displayed program name is the entry script's basename. The parser reads the current `sys.argv[1:]` and handles repeated options, unique long-option abbreviations, and `--`. Help layout and coloring follow CPython 3.14. Help and usage errors follow the native exception cleanup path and raise catch-only `SystemExit` with status 0 or 2.
+Each positional declaration consumes one `str` or `Path`. Named options accept one or more ASCII spellings, such as `-v` and `--verbose`, with `required`, `nargs="+"` or `action="store_true"`. A list, tuple or `[member.value for member in Mode]` over a sealed enum supplies constant string choices. Omitted options with a nominal enum member as the default keep that member. Explicit values are strings. Constructor options include a literal `prog`, a literal description or `__doc__`, and `RawDescriptionHelpFormatter`. In the default configuration the displayed program name is the entry script's basename. The parser reads the current `sys.argv[1:]` and handles repeated options, unique long-option abbreviations, and `--`. Help layout and coloring follow CPython 3.14. Help and usage errors follow the native exception cleanup path and raise catch-only `SystemExit` with status 0 or 2.
 
 A parser can require a subcommand with `add_subparsers(dest="command", required=True)`. Each literal `add_parser("name", help="...")` introduces a child parser with its own options. The namespace carries the selected command and that child's fields. A `match args.command` case or `if args.command == "name"` branch selects its concrete layout. A directly called handler may annotate that argument as `argparse.Namespace`.
 
@@ -644,7 +644,7 @@ is `str | None`.
 For programs that explicitly launch Python helpers, `sys.executable` is the
 absolute interpreter path selected by `RELAR_PYTHON`, or the first executable
 `python3` on `PATH`. It is an empty string if neither is available. The
-native program itself has no Python runtime dependency. `__file__` refers to
+native program itself has no Python runtime dependency. `sysconfig.get_path("scripts")` locates the console scripts directory for that interpreter on standard POSIX installations and in virtual environments. `shutil.which(command)` checks executable permissions on PATH. `os.path.join(path, *parts)` preserves the lexical spelling and `os.path.exists(path)` queries it directly. `sys.platform` reports `linux` or `darwin` for the native build. `__file__` refers to
 the module’s source location at build time, so neighboring resources must
 remain available when the program accesses them. `sys.exit(status)` raises
 `SystemExit` and runs the usual exception cleanup.
@@ -655,7 +655,7 @@ The optional `timeout` keyword accepts signed integer literals or expressions of
 
 An `except subprocess.TimeoutExpired as error` binding has these exact field types. Stored generic exception values can be narrowed with `isinstance(error, subprocess.TimeoutExpired)` before accessing timeout fields. `cmd` retains the original list and `stdout` aliases `output`. Launch precedes timeout validation, so a missing executable takes precedence over an invalid timeout. Zero and negative timeouts, including negative infinity, launch the child and expire immediately; NaN raises `ValueError`, while positive infinity or an unrepresentable polling duration raises `OverflowError`. Exceptions can be retained and re-raised through the existing sealed exception storage; constructing or annotating a `TimeoutExpired` value directly is unsupported.
 
-Other subprocess modes are rejected, including `shell`, `Popen`, input data, arbitrary stream redirection, descriptor options, arbitrary encodings, and custom path or mapping protocols. Result construction, field replacement, exception construction, inheritance, and general access or mutation through `os.environ` are unsupported. This API adds process execution without embedding a Python interpreter or exposing an asynchronous process handle.
+Other subprocess modes are rejected, including `shell`, `Popen`, input data, arbitrary stream redirection, descriptor options, arbitrary encodings, and custom path or mapping protocols. Result construction, field replacement, exception construction, inheritance, and general access or mutation through `os.environ` are unsupported. For asynchronous child processes, see [native asyncio subprocesses](#native-asyncio-subprocesses).
 
 ## Structural pattern matching
 
@@ -770,7 +770,7 @@ Fixed classes and dataclasses can define `__str__(self) -> str`. `str(record)`, 
 
 Generated dataclass repr includes field names and values in declaration order, omitting `field(repr=False)`. `repr(record)`, `f"{record!r}"`, and representations of records inside containers use this repr even when the record defines `__str__`. With `repr=False`, the class uses the ordinary object repr, which includes its address. Resource fields require `repr=False` on the field or class.
 
-Fixed classes reserve field names beginning with `__`. Their supported special methods are `__init__` and `__str__`. Inheritance, metaclasses, class variables, and dynamically added fields remain unsupported. Class-field ownership types must form an acyclic graph, following list elements, dictionary values, tuple positions, and optional payloads. For example, fields `children: list["Node"]`, `named: dict[str, "Node"]`, and `parent: "Node | None"` inside class `Node` are rejected even when unused or initialized empty. Methods may accept or return their own class because those signatures do not create stored references.
+Fixed classes reserve field names beginning with `__`. A fixed class can extend one concrete base and inherit its fields and methods. Its instances keep a statically known field layout. The compiler rejects multiple concrete bases, metaclasses, class variables and dynamically added fields. Class-field ownership types must form an acyclic graph, following list elements, dictionary values, tuple positions, and optional payloads. For example, fields `children: list["Node"]`, `named: dict[str, "Node"]`, and `parent: "Node | None"` inside class `Node` are rejected even when unused or initialized empty. Methods may accept or return their own class because those signatures do not create stored references.
 
 ## Concrete containers and optional values
 
@@ -805,7 +805,7 @@ A plain `for` loop can iterate a fixed tuple with one element type, including a 
 
 The checker joins assignments from surviving break paths with the normally completed else suite. A search can assign its result before every break and assign a fallback in else, then use the result afterward. An else suite does not make the iteration target initialized when the iterable was empty. False-condition optional facts are available inside a while-else suite; finally writes and exception-handler target deletion cannot preserve stale facts on break paths.
 
-`for key in mapping` and `for key, value in mapping.items()` visit insertion order. `enumerate` accepts either form and creates the iterator after evaluating its start argument. Each yielded key/value has its own owner before the body runs. Replacing an existing value is allowed and later iterations see the replacement. A changed size at the next step reports `RuntimeError`, including after the last yielded item. Same-size structural mutation does not provide a portable traversal guarantee; it may report changed keys or skip entries. `items()` is supported only at a loop boundary, including inside loop-head `enumerate`; views and iterators cannot be stored as user values.
+`for key in mapping` and `for key, value in mapping.items()` visit insertion order. `enumerate` accepts either form and creates the iterator after evaluating its start argument. `for value in mapping.values()` visits values in the same order. Each yielded key or value has its own owner before the body runs. If the loop replaces an existing value, later iterations see the replacement. A changed size at the next step reports `RuntimeError`, including after the last yielded item. Same-size structural mutation may report changed keys or skip entries. Mapping views are supported where the loop or reduction immediately consumes them.
 
 Literal elements receive types from an annotated variable, an existing storage location, a function or method argument, or a return annotation. This also applies inside nested literals and list repetition: `rows: list[list[str]] = [[], []]` creates two independent string lists. It does not convert an existing container to a different element type.
 
@@ -863,7 +863,7 @@ Dictionaries use a randomized hash index and insertion-ordered entries. Integer,
 
 Language errors propagate through explicit checked call results and can be caught. Each fallible runtime call records an owned pending exception and reports failure through either its result or a pending-state query; generated code checks before decoding or acquiring a result. Integer-list reads reserve raw zero for failure, while writes return a 32-bit success flag. Other calls retain the pending-state check. Proven fixed-field operations and functions whose complete bodies cannot raise omit redundant queries; their argument and receiver evaluations retain their own checks. Partial expression values, constructor fields, unpacking temporaries, and loop iterator roots are released when their scopes exit. Function propagation also releases owned locals. No Rust panic or native stack unwinding implements language exceptions. Uncaught errors print an exception category and message and return process status 1 after cleanup. Actual allocation failures and invalid internal ABI operations may still terminate the process. The compiler and runtime archive must be rebuilt together when this private ABI changes.
 
-Exceptions contain an immutable category, message, optional explicit cause, and context-suppression flag. Process status errors additionally retain the original argument list, return code, and captured strings, and format their message from the current argument list. A cause can be attached only while raising a freshly constructed builtin exception, and cause attributes cannot be written, so cause chains remain acyclic. Deep uniquely owned cause chains are released iteratively. There are no traceback, frame, or implicit context references. Exited function frames release their owners during propagation; implicit file closure can therefore happen before CPython releases locals retained by a traceback. Full traceback objects, implicit exception context, attaching causes to existing instances, custom exception subclasses, exception groups, `except*`, and user-defined context managers remain unsupported.
+Exceptions contain an immutable category, message, optional explicit cause, and context-suppression flag. Process status errors additionally retain the original argument list, return code, and captured strings, and format their message from the current argument list. A cause can be attached only while raising a freshly constructed exception, and cause attributes cannot be written, so cause chains remain acyclic. Deep uniquely owned cause chains are released iteratively. There are no traceback, frame, or implicit context references. Exited function frames release their owners during propagation; implicit file closure can therefore happen before CPython releases locals retained by a traceback. A source-defined exception can inherit from one known exception class. A subclass with a docstring or `pass` uses the inherited constructor and matches its ancestor handlers. A failing `asyncio.TaskGroup` can raise an exception group. Full traceback objects, implicit exception context, attaching causes to existing instances and `except*` remain unsupported.
 
 ## Exceptions and cleanup
 
@@ -1070,3 +1070,18 @@ The bytes suite compares full byte-range repr/indexing, strict UTF-8 decoding er
 ```sh
 python3 tests/bytes.py --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
 ```
+
+
+### Closed entry profiles
+
+`--reachable-only` checks and compiles definitions used by the entrypoint. `--entry-profile FILE` also selects particular branch bodies in named functions. The JSON file maps each qualified function name to the condition and value it requires.
+
+```json
+{"tools.report.run": {"mode": "Mode.markdown", "args.debug": "False"}}
+```
+
+A profile can select a named arm of a simple `match`, or exclude the true arm of a named Boolean condition. The executable evaluates the original test. Entering an excluded arm raises a `ValueError` with the required value. A missing function or unmatched selector is a build error.
+
+### Native asyncio subprocesses
+
+Typed coroutines support `await`, `asyncio.TaskGroup`, `asyncio.gather` and `asyncio.Semaphore` for subprocess-backed work. A coroutine starts when it is awaited or scheduled. A task retains its result across awaits. Exceptions returned by `gather(..., return_exceptions=True)` retain their positions among the results. Standard output and standard error are drained concurrently. Ruff’s live ecosystem checker also exercises loop signal handlers, `functools.cache`, suspended generator context managers, and `TemporaryDirectory` cleanup on exception paths.

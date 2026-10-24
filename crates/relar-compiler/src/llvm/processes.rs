@@ -11,6 +11,255 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         match operation {
+            ProcessOperation::NewLoop | ProcessOperation::EnsureTask => {
+                let call = if matches!(operation, ProcessOperation::NewLoop) {
+                    "call ptr @relar_async_loop_new()".to_owned()
+                } else {
+                    format!(
+                        "call ptr @relar_async_ensure(ptr {})",
+                        args[0].value.operand
+                    )
+                };
+                let operand = self.checked_instruction(call);
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::RunUntilComplete => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @relar_async_loop_run(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::SetLoop
+            | ProcessOperation::CloseLoop
+            | ProcessOperation::LoopSignal => {
+                let call = match operation {
+                    ProcessOperation::SetLoop => format!(
+                        "call void @relar_async_loop_set(ptr {})",
+                        args[0].value.operand
+                    ),
+                    ProcessOperation::CloseLoop => format!(
+                        "call void @relar_async_loop_close(ptr {})",
+                        args[0].value.operand
+                    ),
+                    _ => format!(
+                        "call void @relar_async_loop_signal(ptr {}, i64 {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand, args[2].value.operand
+                    ),
+                };
+                self.checked_line(call);
+                none()
+            }
+            ProcessOperation::CancelTask => {
+                let flag = self.instruction(format!(
+                    "call i32 @relar_async_cancel(ptr {})",
+                    args[0].value.operand
+                ));
+                let operand = self.instruction(format!("trunc i32 {flag} to i1"));
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
+            ProcessOperation::Coroutine { function, result } => {
+                let kind = representation_kind(result, &self.module.types);
+                let operand = self.instruction(format!("call ptr @relar_async_coroutine(ptr @callable_{function}_async, ptr {}, i32 {kind})", args[0].value.operand));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::ContextNew { function } => {
+                let operand = self.instruction(format!(
+                    "call ptr @relar_context_new(ptr @callable_{function}_async, ptr {})",
+                    args[0].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::ContextEnter | ProcessOperation::ContextExit => {
+                let op = if matches!(operation, ProcessOperation::ContextEnter) {
+                    "enter"
+                } else {
+                    "exit"
+                };
+                self.checked_line(format!(
+                    "call void @relar_context_{op}(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
+            ProcessOperation::ContextYield => {
+                self.checked_line("call void @relar_context_yield()");
+                none()
+            }
+            ProcessOperation::ContextThrow => {
+                let byte = self.checked_instruction(format!(
+                    "call i32 @relar_context_throw(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {byte}, 0")),
+                    small_integer: false,
+                }
+            }
+            ProcessOperation::IndirectCoroutine { signature, result } => {
+                let Type::Callable(signature) = signature else {
+                    unreachable!()
+                };
+                let kind = representation_kind(result, &self.module.types);
+                let operand = self.instruction(format!("call ptr @relar_async_coroutine(ptr @async_invoke_{signature}, ptr {}, i32 {kind})", args[0].value.operand));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::Await | ProcessOperation::RunLoop => {
+                let run = u8::from(matches!(operation, ProcessOperation::RunLoop));
+                let task = u8::from(matches!(args[0].value.ty, Type::Task(_)));
+                let word = self.checked_instruction(format!(
+                    "call i64 @relar_async_await(ptr {}, i1 {run}, i1 {task})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::TaskGroup
+            | ProcessOperation::CreateTask
+            | ProcessOperation::Semaphore => {
+                let instruction = match operation {
+                    ProcessOperation::TaskGroup => "call ptr @relar_async_group()".to_owned(),
+                    ProcessOperation::CreateTask => format!(
+                        "call ptr @relar_async_create_task(ptr {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand
+                    ),
+                    _ => format!(
+                        "call ptr @relar_async_semaphore(i64 {})",
+                        args[0].value.operand
+                    ),
+                };
+                let operand = self.checked_instruction(instruction);
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::Gather { element, tagged } => {
+                let kind = representation_kind(element, &self.module.types);
+                let operand = self.checked_instruction(format!(
+                    "call ptr @relar_async_gather(ptr {}, i1 {}, i32 {kind}, i1 {})",
+                    args[0].value.operand,
+                    args[1].value.operand,
+                    u8::from(tagged)
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::TaskResult => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @relar_async_result(ptr {})",
+                    args[0].value.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::MemberCause => {
+                let operand = self.instruction(format!(
+                    "call ptr @relar_async_member_cause(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::ExceptionAt => {
+                let operand = self.checked_instruction(format!(
+                    "call ptr @relar_async_exception_at(ptr {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::EnterGroup => {
+                self.checked_line(format!(
+                    "call void @relar_async_group_enter(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
+            ProcessOperation::AbortGroup => {
+                self.line(format!(
+                    "call void @relar_async_abort_group(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
+            ProcessOperation::JoinGroup | ProcessOperation::Acquire | ProcessOperation::Release => {
+                let instruction = if matches!(operation, ProcessOperation::JoinGroup) {
+                    format!("call void @relar_async_join(ptr {})", args[0].value.operand)
+                } else {
+                    format!(
+                        "call void @relar_async_permit(ptr {}, i1 {})",
+                        args[0].value.operand,
+                        u8::from(matches!(operation, ProcessOperation::Acquire))
+                    )
+                };
+                self.checked_line(instruction);
+                none()
+            }
+            ProcessOperation::AsyncSpawn { stdout, stderr } => {
+                let cwd =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
+                let env =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
+                let operand = self.checked_instruction(format!(
+                    "call ptr @relar_async_process_spawn(ptr {}, ptr {cwd}, ptr {env}, i32 {stdout}, i32 {stderr})",
+                    args[0].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            ProcessOperation::AsyncStatus { wait } => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @relar_async_process_status(ptr {}, i1 {})",
+                    args[0].value.operand,
+                    u8::from(wait)
+                ));
+                self.unpack_word(word, returns)
+            }
+            ProcessOperation::AsyncCommunicate => {
+                let operand = self.checked_instruction(format!(
+                    "call ptr @relar_async_process_communicate(ptr {}, ptr @layout_{})",
+                    args[0].value.operand,
+                    record_name(returns)
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             ProcessOperation::Executable => self.call("relar_sys_executable", Type::Str, &[]),
             ProcessOperation::Exit => {
                 self.checked_line(format!(
@@ -18,6 +267,17 @@ impl Emitter<'_, '_> {
                     args[0].value.operand
                 ));
                 none()
+            }
+            ProcessOperation::CheckOutput => {
+                let operand = self.checked_instruction(format!(
+                    "call ptr @relar_subprocess_check_output(ptr {})",
+                    args[0].value.operand
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
             }
             ProcessOperation::RunToStderr => {
                 let check = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));

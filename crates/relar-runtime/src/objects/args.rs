@@ -63,21 +63,73 @@ fn decode(arguments: Arguments) -> Result<Rc<Object>> {
     Ok(values.into_object())
 }
 
-/// The Python interpreter for explicitly launched Python helpers. Preserve
-/// symlinks so a selected virtual environment keeps its own interpreter path.
-#[unsafe(no_mangle)]
-pub extern "C" fn relar_sys_executable() -> *const Str {
+fn python_executable() -> Option<std::path::PathBuf> {
     use rustix::fs::{Access, access};
-    let interpreter = std::env::var_os("RELAR_PYTHON")
+    std::env::var_os("RELAR_PYTHON")
         .map(std::path::PathBuf::from)
         .or_else(|| {
             let path = std::env::var_os("PATH")?;
             std::env::split_paths(&path)
                 .map(|directory| directory.join("python3"))
                 .find(|candidate| candidate.is_file() && access(candidate, Access::EXEC_OK).is_ok())
-        });
-    let text = interpreter
+        })
         .and_then(|path| std::path::absolute(path).ok())
+}
+
+/// The scripts directory belongs to the selected interpreter. Venv symlinks
+/// stay inside the venv; aliases for a standalone installation follow the target.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_sysconfig_scripts() -> *const Str {
+    let directory = python_executable()
+        .or_else(|| std::env::current_exe().ok())
+        .and_then(|path| {
+            let bin = path.parent()?;
+            if bin.join("pyvenv.cfg").is_file()
+                || bin
+                    .parent()
+                    .is_some_and(|prefix| prefix.join("pyvenv.cfg").is_file())
+            {
+                Some(bin.to_owned())
+            } else {
+                let executable = path.canonicalize().unwrap_or(path);
+                let bin = executable.parent()?;
+                // Debian's system interpreter installs console scripts into
+                // /usr/local by default; venvs and package builds keep /usr/bin.
+                let debian_local = bin == std::path::Path::new("/usr/bin")
+                    && std::path::Path::new("/usr/share/python3/debian_defaults").is_file()
+                    && !matches!(
+                        std::env::var("DEB_PYTHON_INSTALL_LAYOUT").as_deref(),
+                        Ok("deb" | "deb_system")
+                    );
+                Some(if debian_local {
+                    bin.with_file_name("local").join("bin")
+                } else {
+                    bin.to_owned()
+                })
+            }
+        });
+    let text = directory
+        .and_then(|path| path.into_os_string().into_string().ok())
+        .unwrap_or_default();
+    Rc::into_raw(Rc::new(Str::from(text)))
+}
+
+/// Python's platform spelling follows the native binary's target.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_sys_platform() -> *const Str {
+    let name = match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "win32",
+        other => other,
+    };
+    Rc::into_raw(Rc::new(Str::from(name)))
+}
+
+/// The Python interpreter for explicitly launched Python helpers. Preserve
+/// symlinks so a selected virtual environment keeps its own interpreter path.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_sys_executable() -> *const Str {
+    let text = python_executable()
         .and_then(|path| path.into_os_string().into_string().ok())
         .unwrap_or_default();
     Rc::into_raw(Rc::new(Str::from(text)))

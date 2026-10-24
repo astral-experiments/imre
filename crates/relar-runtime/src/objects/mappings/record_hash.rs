@@ -38,12 +38,20 @@ unsafe fn prepare(record: *const usize) -> Result<(), Error> {
     if layout.has_toml_hash() {
         // SAFETY: exactly these layouts own one extra zero-initialized cache word.
         let cache = unsafe { record.add(layout.length).cast_mut() };
-        // SAFETY: allocation initializes the private cache word to zero.
-        if unsafe { cache.read() } != 0 {
+        // SAFETY: this layout has an allocated cache slot and only initialized object fields.
+        let immutable_cached = unsafe {
+            cache.read() != 0
+                && !(0..layout.length).any(|i| {
+                    object(*record.add(i) as *const Object)
+                        .0
+                        .with(|storage| matches!(storage, Storage::Document(_)))
+                })
+        };
+        if immutable_cached {
             return Ok(());
         }
         let mut text = String::new();
-        // SAFETY: projected records always carry a static dataclass descriptor.
+        // SAFETY: projected records always have a static dataclass descriptor.
         let semantics = unsafe { &*layout.semantics };
         for index in 0..layout.length {
             // SAFETY: the checked projection lists every exact JSON field and its UTF-8 name.
@@ -55,18 +63,17 @@ unsafe fn prepare(record: *const usize) -> Result<(), Error> {
                     field.name_len,
                 ))
             };
-            // SAFETY: every projected field is an initialized immutable JSON object.
+            // SAFETY: every projected field is an initialized JSON/document object.
             let field = unsafe { object(*record.add(index) as *const Object) };
             if index != 0 {
                 text.push('\n');
             }
             // SAFETY: the rooted immutable JSON view cannot mutate while rendering.
             unsafe {
-                field.0.with(|storage| {
-                    let Storage::Json(view) = storage else {
-                        unreachable!("checked JSON projection")
-                    };
-                    view.toml_table(name, &mut text)
+                field.0.with(|storage| match storage {
+                    Storage::Json(view) => view.toml_table(name, &mut text),
+                    Storage::Document(value) => value.view().toml_table(name, &mut text),
+                    _ => unreachable!("checked TOML projection"),
                 })
             }?;
         }

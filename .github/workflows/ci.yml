@@ -103,9 +103,13 @@ jobs:
           python3 benchmarks/conformance_grouping_inputs.py \
             --archive benchmarks/results/2026-10-22-collector-ownership-study.tar.xz \
             --output "$RUNNER_TEMP/conformance-inputs" --check-reporter "$RUNNER_TEMP/conformance-report"
+      - name: Compare Ruff’s ecosystem check with CPython on local Git repositories
+        run: |
+          python3 -m pip install --no-deps tomli==2.5.0 tomli-w==1.2.0 unidiff==1.0.0
+          target/release/relar check --entry-profile examples/ruff_ecosystem/check-entry.json examples/ruff_ecosystem/ruff_ecosystem/__main__.py
+          python3 tests/ruff_ecosystem_live.py --compiler target/release/relar --runtime target/release/librelar_runtime.a
       - name: Compare native suites with CPython
         run: |
-          python3 -m pip install --no-deps tomli==2.5.0
           python3 tests/run_suites.py --workers 4 --log-dir /tmp/relar-suites-ordinary --suites differential imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
             -- --compiler target/release/relar --runtime target/release/librelar_runtime.a --clang clang-18
       - name: Validate the independent Rust Base45 reference
@@ -122,7 +126,7 @@ jobs:
           RUSTFLAGS: -Zsanitizer=address -Cforce-frame-pointers=yes
         run: |
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"
-          cargo build -p relar-runtime --release --locked --target "$relar_target" --target-dir target/asan
+          cargo build -p relar-runtime --features corosensei/sanitizer --release --locked --target "$relar_target" --target-dir target/asan
       - name: Check generated code and runtime with AddressSanitizer
         run: |
           relar_target="$(rustc -vV | sed -n 's/^host: //p')"

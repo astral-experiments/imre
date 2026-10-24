@@ -77,13 +77,13 @@ impl Checker<'_> {
     pub(super) fn remember_regex_assignment(
         &mut self,
         stmt: &ast::Stmt,
-        lowered: &[Statement],
+        lowered: &mut Vec<Statement>,
         later: &[ast::Stmt],
     ) {
         if self.block_depth != 1 || self.module_scope {
             return;
         }
-        let [Statement::Assign(slot, value)] = lowered else {
+        let [Statement::Assign(slot, value)] = lowered.as_slice() else {
             return;
         };
         let dictionary = matches!(value.kind, ExprKind::Builtin(Builtin::RegexGroupDict, _));
@@ -109,12 +109,84 @@ impl Checker<'_> {
             }
             _ => return,
         };
-        if let Some(groups) = self.capture_layout(value)
-            && !narrowing::assigned_names(later).contains(name)
-            && (!dictionary || readonly_groupdict(later, name))
+        // A previously defined local function may load this binding at its
+        // next call even when the remaining source never mentions the name.
+        if dictionary
+            && self
+                .local_functions
+                .values()
+                .any(|f| f.may_capture(*slot, name))
         {
-            self.regex_locals.insert(*slot, groups);
+            return;
         }
+        let Some(groups) = self.capture_layout(value) else {
+            return;
+        };
+        if narrowing::assigned_names(later).contains(name) {
+            return;
+        }
+        let slot = *slot;
+        let reads = dictionary.then(|| groupdict_reads(later, name));
+        if reads.as_ref().is_some_and(|reads| reads.escapes) {
+            return;
+        }
+        self.regex_locals.insert(slot, groups.clone());
+        let Some(keys) = reads.and_then(|reads| reads.keys) else {
+            return;
+        };
+        if keys.is_empty()
+            || !keys
+                .iter()
+                .all(|key| groups.iter().any(|g| g.name.as_ref() == Some(key)))
+        {
+            return;
+        }
+        let ExprKind::Builtin(Builtin::RegexGroupDict, args) = &value.kind else {
+            unreachable!()
+        };
+        let matched = self.hidden(Type::RegexMatch);
+        let mut captures = vec![Statement::Assign(matched, args[0].clone())];
+        let optional = self.types.optional(Type::Str);
+        let mut fields = HashMap::new();
+        for (index, group) in groups.iter().enumerate() {
+            let Some(name) = group.name.as_ref().filter(|name| keys.contains(*name)) else {
+                continue;
+            };
+            let field = self.hidden(optional);
+            captures.push(Statement::Assign(
+                field,
+                Expr {
+                    ty: optional,
+                    kind: ExprKind::Builtin(
+                        Builtin::RegexCapture {
+                            operation: RegexCapture::Group,
+                            known: true,
+                        },
+                        vec![
+                            self.local(matched),
+                            Expr {
+                                ty: Type::Int,
+                                kind: ExprKind::Int(index.to_string()),
+                            },
+                        ],
+                    ),
+                },
+            ));
+            fields.insert(name.clone(), field);
+        }
+        // Repeated reads observe the same captured string. The original match
+        // local may be rebound, and this assignment may displace a previous dict.
+        captures.extend([Statement::Clear(matched), Statement::Clear(slot)]);
+        *lowered = captures;
+        self.regex_fields.insert(slot, fields);
+    }
+
+    /// Resolves a static read only when the dictionary binding cannot escape.
+    pub(super) fn projected_group(&self, dictionary: &Expr, key: &Expr) -> Option<Expr> {
+        let (ExprKind::Local(slot), ExprKind::Str(name)) = (&dictionary.kind, &key.kind) else {
+            return None;
+        };
+        Some(self.local(*self.regex_fields.get(slot)?.get(name)?))
     }
 
     pub(super) fn required_group_key(&self, receiver: &Expr, key: &Expr) -> bool {
@@ -362,35 +434,78 @@ impl Checker<'_> {
     }
 }
 
-/// A fresh group dictionary keeps its required keys while its only uses are
-/// reads. An alias or mutation makes later lookups ordinary optional values.
-fn readonly_groupdict(body: &[ast::Stmt], name: &str) -> bool {
-    use ruff_python_ast::visitor::{Visitor, walk_expr};
+/// An alias or mutation invalidates even required-key narrowing. Other reads
+/// keep that narrowing but only literal, local lookups can replace the dictionary.
+struct GroupdictReads {
+    escapes: bool,
+    keys: Option<HashSet<String>>,
+}
+
+fn groupdict_reads(body: &[ast::Stmt], name: &str) -> GroupdictReads {
+    use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
     struct Reads<'a> {
         name: &'a str,
-        escape: bool,
+        uses: GroupdictReads,
+    }
+    impl Reads<'_> {
+        fn key(&mut self, expr: &ast::Expr) {
+            if let ast::Expr::StringLiteral(text) = expr {
+                if let Some(keys) = &mut self.uses.keys {
+                    keys.insert(text.value.to_str().to_owned());
+                }
+            } else {
+                self.uses.keys = None;
+            }
+        }
     }
     impl<'ast> Visitor<'ast> for Reads<'_> {
+        fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
+            if matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
+                self.uses.keys = None;
+            }
+            walk_stmt(self, stmt);
+        }
         fn visit_expr(&mut self, value: &'ast ast::Expr) {
             let local = |expr: &ast::Expr| matches!(expr, ast::Expr::Name(n) if n.id == self.name);
             match value {
                 ast::Expr::Subscript(sub)
                     if sub.ctx == ast::ExprContext::Load && local(&sub.value) =>
                 {
+                    self.key(&sub.slice);
                     self.visit_expr(&sub.slice)
                 }
-                ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Attribute(attr) if attr.attr.as_str() == "get" && local(&attr.value)) => {
+                ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Attribute(attr) if attr.attr.as_str() == "get" && local(&attr.value)) =>
+                {
+                    if let [key] = call.arguments.args.as_ref()
+                        && call.arguments.keywords.is_empty()
+                    {
+                        self.key(key);
+                    } else {
+                        self.uses.keys = None;
+                    }
                     self.visit_arguments(&call.arguments)
                 }
-                _ if local(value) => self.escape = true,
+                ast::Expr::ListComp(_)
+                | ast::Expr::DictComp(_)
+                | ast::Expr::SetComp(_)
+                | ast::Expr::Generator(_)
+                | ast::Expr::Lambda(_) => {
+                    // Comprehensions and closures can move reads into another function.
+                    self.uses.keys = None;
+                    walk_expr(self, value);
+                }
+                _ if local(value) => self.uses.escapes = true,
                 _ => walk_expr(self, value),
             }
         }
     }
     let mut reads = Reads {
         name,
-        escape: false,
+        uses: GroupdictReads {
+            escapes: false,
+            keys: Some(HashSet::new()),
+        },
     };
     reads.visit_body(body);
-    !reads.escape
+    reads.uses
 }

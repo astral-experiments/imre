@@ -62,7 +62,7 @@ def main() -> None:
     if sys.flags.optimize:
         parser.error("validation requires assertions")
     compiler = str(args.compiler.resolve())
-    flags = ["--runtime", str(args.runtime.resolve()), "--clang", args.clang]
+    flags = ["--quiet", "--runtime", str(args.runtime.resolve()), "--clang", args.clang]
     if args.target:
         flags += ["--target", args.target]
     if args.lto_linker:

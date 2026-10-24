@@ -1,9 +1,9 @@
 //! Python 3.12's default line differ. Both the line alignment and the optional
 //! intraline guides use the same longest-contiguous-match rule.
 
-use super::{Object, Str, Words, object, python_whitespace};
+use super::{Str, Words, python_whitespace};
 use smallvec::SmallVec;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::ops::Range;
 use std::rc::Rc;
@@ -314,11 +314,6 @@ fn changed(left: &[Line], right: &[Line], emit: &mut impl FnMut(&str, &str)) {
 /// an offset inside such a run can only shorten the block. Unequal counts
 /// or autojunk can change Python's choice, so those inputs use the matcher.
 fn sorted_line_blocks(left: &[Line], right: &[Line]) -> Option<Vec<Block>> {
-    if !left.iter().map(|line| line.text()).is_sorted()
-        || !right.iter().map(|line| line.text()).is_sorted()
-    {
-        return None;
-    }
     let mut blocks: Vec<Block> = Vec::new();
     let (mut i, mut j) = (0, 0);
     while i < left.len() && j < right.len() {
@@ -363,44 +358,199 @@ fn sorted_line_blocks(left: &[Line], right: &[Line]) -> Option<Vec<Block>> {
     Some(blocks)
 }
 
-fn ndiff(left: &[Line], right: &[Line], mut emit: impl FnMut(&str, &str)) {
+/// With no identical line in a replacement, every input survives with its own
+/// sign and in its original side's order. Interleaving the two sides cannot
+/// affect a stable sort by the entire untagged line: ties have the same sign.
+fn disjoint(left: &[Line], right: &[Line]) -> bool {
+    let (small, large) = if left.len() < right.len() {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    let keys: HashSet<&str> = small.iter().map(|line| line.text()).collect();
+    large.iter().all(|line| !keys.contains(line.text()))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Output {
+    Full,
+    ProjectedChanges,
+}
+
+fn ndiff(
+    left: &[Line],
+    right: &[Line],
+    sorted: Option<Vec<Block>>,
+    output: Output,
+    mut emit: impl FnMut(&str, &str),
+) {
     let (mut i, mut j) = (0, 0);
-    let blocks = sorted_line_blocks(left, right).unwrap_or_else(|| {
+    let exact_common_runs = sorted.is_some();
+    let blocks = sorted.unwrap_or_else(|| {
         let a: Vec<_> = left.iter().map(|line| line.text()).collect();
         let b: Vec<_> = right.iter().map(|line| line.text()).collect();
         Matcher::new(&b, |_| false).blocks(&a)
     });
     for block in blocks {
-        changed(&left[i..block.left], &right[j..block.right], &mut emit);
+        let removed = &left[i..block.left];
+        let added = &right[j..block.right];
+        if output == Output::ProjectedChanges
+            && (exact_common_runs
+                || removed.is_empty()
+                || added.is_empty()
+                || disjoint(removed, added))
+        {
+            dump(removed, "- ", &mut emit);
+            dump(added, "+ ", &mut emit);
+        } else {
+            changed(removed, added, &mut emit);
+        }
         i = block.left + block.len;
         j = block.right + block.len;
-        dump(&left[block.left..i], "  ", &mut emit);
+        if output == Output::Full {
+            dump(&left[block.left..i], "  ", &mut emit);
+        }
     }
 }
 
-/// Materializes the two-argument form of difflib.ndiff for an immediate consumer.
+/// Builds a full diff or the signed projection from two immutable snapshots.
 ///
 /// # Safety
-/// Both arguments are rooted sequences of nonnullable string owners. No Python
-/// code runs while their backing storage is borrowed, including for aliased inputs.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_ndiff(left: *const Object, right: *const Object) -> *const Object {
-    // SAFETY: both shared borrows last until the independently owned result is built.
-    unsafe {
-        object(left).0.with(|left| {
-            object(right).0.with(|right| {
-                let left = Line::from_words(left.sequence());
-                let right = Line::from_words(right.sequence());
-                let mut words = Words::new(3);
-                words.values.reserve(left.len().max(right.len()));
-                ndiff(left, right, |prefix, line| {
-                    let mut tagged = Str::with_capacity(prefix.len() + line.len());
-                    tagged.push_str(prefix);
-                    tagged.push_str(line);
-                    words.values.push(Rc::into_raw(Rc::new(tagged)) as usize);
-                });
-                Rc::into_raw(words.into_object())
-            })
-        })
+/// Each buffer owns nonnullable strings for the duration of the call.
+pub(super) unsafe fn materialize_words(left: &Words, right: &Words, output: Output) -> Words {
+    let ordered = left.strings_ascending() && right.strings_ascending();
+    // SAFETY: both input buffers remain rooted and immutable while their views are live.
+    let (left, right) = unsafe { (Line::from_words(left), Line::from_words(right)) };
+    let sorted = if ordered {
+        sorted_line_blocks(left, right)
+    } else {
+        None
+    };
+    let mut words = Words::new(3);
+    if output == Output::Full {
+        words.values.reserve(left.len().max(right.len()));
+    }
+    ndiff(left, right, sorted, output, |prefix, line| {
+        if output == Output::ProjectedChanges && !matches!(prefix, "- " | "+ ") {
+            return;
+        }
+        let mut tagged = Str::with_capacity(prefix.len() + line.len());
+        tagged.push_str(prefix);
+        tagged.push_str(line);
+        words.values.push(Rc::into_raw(Rc::new(tagged)) as usize);
+    });
+    words.update_header();
+    words
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strings(lines: &[&str]) -> Words {
+        let mut words = Words::new(3);
+        for &line in lines {
+            words
+                .values
+                .push(Rc::into_raw(Rc::new(Str::from(line))) as usize);
+        }
+        words
+    }
+
+    fn result(left: &[&str], right: &[&str], output: Output) -> Vec<String> {
+        let left = strings(left);
+        let right = strings(right);
+        // SAFETY: the input and output buffers independently root all their strings.
+        unsafe {
+            let rows = materialize_words(&left, &right, output);
+            Line::from_words(&rows)
+                .iter()
+                .map(|line| line.text().to_owned())
+                .collect()
+        }
+    }
+
+    fn check_observations(left: &[&str], right: &[&str]) {
+        let full = result(left, right, Output::Full);
+        let projected = result(left, right, Output::ProjectedChanges);
+        for sign in ["+ ", "- "] {
+            assert!(
+                full.iter()
+                    .filter(|s| s.starts_with(sign))
+                    .eq(projected.iter().filter(|s| s.starts_with(sign))),
+                "{left:?}, {right:?}"
+            );
+        }
+        let sorted = |rows: Vec<String>| {
+            let mut rows: Vec<_> = rows
+                .into_iter()
+                .filter(|s| s.starts_with(['+', '-']))
+                .collect();
+            rows.sort_by(|a, b| a[2..].cmp(&b[2..]));
+            rows
+        };
+        assert_eq!(sorted(full), sorted(projected), "{left:?}, {right:?}");
+    }
+
+    #[test]
+    fn raw_keeps_guides_and_interleaving() {
+        let left = ["anchor", "same text abc", "same text def", "zeta"];
+        let right = ["anchor", "same text abX", "same text deX", "zeta"];
+        assert_eq!(
+            result(&left, &right, Output::Full),
+            [
+                "  anchor",
+                "- same text abc",
+                "?             ^\n",
+                "+ same text abX",
+                "?             ^\n",
+                "- same text def",
+                "?             ^\n",
+                "+ same text deX",
+                "?             ^\n",
+                "  zeta"
+            ]
+        );
+        assert_eq!(
+            result(&left, &right, Output::ProjectedChanges),
+            [
+                "- same text abc",
+                "- same text def",
+                "+ same text abX",
+                "+ same text deX"
+            ]
+        );
+    }
+
+    #[test]
+    fn projected_changes_preserve_each_side_and_sorted_ties() {
+        // All orderings, multiplicities and near matches through length three.
+        let mut sequences = vec![Vec::new()];
+        for length in 1..=3 {
+            for sequence in 0..3_usize.pow(length) {
+                sequences.push(
+                    (0..length)
+                        .map(|i| ["café a", "café b", ""][sequence / 3_usize.pow(i) % 3])
+                        .collect(),
+                );
+            }
+        }
+        for left in &sequences {
+            for right in &sequences {
+                check_observations(left, right);
+            }
+        }
+        // The shared popular line cannot anchor a SequenceMatcher block, but
+        // fancy replacement may emit it as unchanged. Keep that decision exact.
+        let tail: Vec<_> = (0..200).map(|i| format!("tail {i:03}")).collect();
+        let mut left = vec!["a", "same", "same", "same", "same", "u"];
+        let mut right = vec!["b", "same", "same", "same", "same", "v"];
+        left.extend(tail.iter().map(String::as_str));
+        right.extend(tail.iter().map(String::as_str));
+        check_observations(&left, &right);
+        assert_eq!(
+            result(&left, &right, Output::ProjectedChanges),
+            ["- a", "+ b", "- u", "+ v"]
+        );
     }
 }

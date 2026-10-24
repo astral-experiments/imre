@@ -8,7 +8,10 @@
 
 mod argparse;
 mod args;
+mod asyncio;
 mod bytes;
+mod contexts;
+mod deferred_diff;
 mod difflib;
 pub(crate) mod exceptions;
 mod files;
@@ -49,6 +52,14 @@ enum Storage {
     BytesIterator(bytes::BytesIterator),
     Exception(exceptions::Exception),
     File(Box<files::FileState>),
+    AsyncProcess(Box<processes::AsyncProcess>),
+    AsyncTask(Rc<asyncio::Task>),
+    GeneratorContext(Rc<contexts::Manager>),
+    DirectoryContext(tempdirs::DirectoryContext),
+    Document(json::readonly::document::Value),
+    EventLoop(Rc<asyncio::EventLoop>),
+    TaskGroup(Rc<asyncio::Group>),
+    Semaphore(Rc<asyncio::Semaphore>),
     Path {
         text: Rc<Str>,
         name: std::cell::OnceCell<Rc<Str>>,
@@ -83,15 +94,22 @@ unsafe fn object<'a>(pointer: *const Object) -> &'a Object {
 }
 
 impl Storage {
-    fn sequence(&self) -> &Words {
+    fn sequence_storage(&self) -> &Words {
         match self {
             Self::Sequence(values) => values,
             _ => fail("SystemError", "expected a sequence object"),
         }
     }
+    fn sequence(&self) -> &Words {
+        self.sequence_storage().resolved()
+    }
     fn sequence_mut(&mut self) -> &mut Words {
         match self {
-            Self::Sequence(values) => values,
+            Self::Sequence(values) => {
+                values.resolve_mut();
+                values.forget_order();
+                values
+            }
             _ => fail("SystemError", "expected a sequence object"),
         }
     }
@@ -131,14 +149,9 @@ pub unsafe extern "C" fn relar_str_list_contains(needle: *const Str, list: *cons
     // SAFETY: the storage borrow prevents mutation and none of the compared
     // strings can invoke user code or release its live owner during equality.
     unsafe {
-        object(list).0.with(|storage| {
-            let words = storage.sequence();
-            debug_assert_eq!(words.kind.raw(), 3);
-            u32::from(words.values.iter().any(|&word| {
-                let item = word as *const Str;
-                item == needle || *item == *needle
-            }))
-        })
+        object(list)
+            .0
+            .with(|storage| u32::from(storage.sequence().contains_string(&*needle)))
     }
 }
 
@@ -202,7 +215,7 @@ pub unsafe extern "C" fn relar_seq_borrow_index_proven(value: *const Object, at:
                 // Exact kind is part of the same caller proof as the index.
                 std::hint::unreachable_unchecked()
             };
-            *values.values.get_unchecked(at)
+            *values.resolved().values.get_unchecked(at)
         })
     }
 }
@@ -226,7 +239,7 @@ pub unsafe extern "C" fn relar_seq_data_readonly(value: *const Object) -> *const
         let Storage::Sequence(values) = &*(*value).0.0.get() else {
             std::hint::unreachable_unchecked()
         };
-        values.values.as_ptr()
+        values.resolved().values.as_ptr()
     }
 }
 

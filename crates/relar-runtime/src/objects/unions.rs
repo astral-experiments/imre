@@ -4,18 +4,26 @@
 use super::words::WordKind;
 use super::{Bytes, Object, Str, object};
 
-const _: () =
-    assert!(align_of::<Str>() >= 4 && align_of::<Bytes>() >= 4 && align_of::<Object>() >= 4);
+const _: () = assert!(
+    align_of::<Str>() >= 8
+        && align_of::<Bytes>() >= 8
+        && align_of::<Object>() >= 8
+        && align_of::<usize>() >= 8
+);
 
 /// Recovers the original address and the runtime descriptor for its owner.
 pub(super) fn member(value: usize) -> (usize, WordKind) {
-    let kind = match value & 3 {
-        0 => 3, // str
-        1 => 8, // bytes
-        2 => 5, // list[str]
+    let kind = match value & 7 {
+        0 => 3,                                      // str
+        1 => 8,                                      // bytes
+        2 => 5,                                      // list[str]
+        3 => 5,                                      // exception
+        4 => 6,                                      // fixed record
+        6 => 5,                                      // pathlib.Path
+        5 => return (value >> 3, WordKind::new(10)), // ordinary Enum tag
         _ => unreachable!("invalid text union tag"),
     };
-    (value & !3, WordKind::new(kind))
+    (value & !7, WordKind::new(kind))
 }
 
 /// # Safety
@@ -43,15 +51,16 @@ pub unsafe extern "C" fn relar_union_truthy(value: usize) -> u32 {
     if value == 0 {
         return 0;
     }
-    let (word, kind) = member(value);
+    let (word, _) = member(value);
     // SAFETY: the caller roots the selected member and no user code runs here.
     unsafe {
-        u32::from(match kind.raw() {
-            3 => !(*(word as *const Str)).is_empty(),
-            8 => !(*(word as *const Bytes)).is_empty(),
-            _ => object(word as *const Object)
+        u32::from(match value & 7 {
+            0 => !(*(word as *const Str)).is_empty(),
+            1 => !(*(word as *const Bytes)).is_empty(),
+            2 => object(word as *const Object)
                 .0
                 .with(|s| !s.sequence().values.is_empty()),
+            _ => true,
         })
     }
 }

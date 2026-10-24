@@ -57,7 +57,13 @@ impl View {
         self.table(self.index, &key(name), false, output)
     }
 
-    fn table(&self, index: usize, name: &str, array: bool, out: &mut String) -> Result<(), Error> {
+    pub(super) fn table(
+        &self,
+        index: usize,
+        name: &str,
+        array: bool,
+        out: &mut String,
+    ) -> Result<(), Error> {
         let mut values = Vec::new();
         let mut tables = Vec::new();
         for (name, child) in entries(&self.nodes[index]) {
@@ -94,9 +100,9 @@ impl View {
             writeln!(out, "[{name}]").unwrap();
         }
         for (key_name, child) in values {
-            write!(out, "{} = ", key(key_name)).unwrap();
-            self.literal(child, 0, out)?;
-            out.push('\n');
+            let mut literal = String::new();
+            self.literal(child, 0, &mut literal)?;
+            writeln!(out, "{} = {literal}", key(key_name)).unwrap();
             written = true;
         }
         for (part, child, array) in tables {
@@ -133,6 +139,7 @@ impl View {
             }
             Node::Float(f) => out.push_str(&crate::floats::render(*f)),
             Node::String(s) => out.push_str(&quoted(s)),
+            Node::Datetime(date) => out.push_str(date),
             Node::Array(items) => {
                 out.push('[');
                 if !items.is_empty() {

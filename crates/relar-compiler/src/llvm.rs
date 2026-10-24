@@ -13,6 +13,7 @@ use crate::ir::{
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
 
+mod asyncio;
 mod callables;
 mod conditionals;
 mod integer_regions;
@@ -33,7 +34,9 @@ pub(crate) use units::emit_units;
 impl Type {
     fn llvm(self) -> &'static str {
         match self {
-            Self::Int | Self::StrEnum(_) | Self::Optional(_) | Self::Union(_) => "i64",
+            Self::Int | Self::StrEnum(_) | Self::Enum(_) | Self::Optional(_) | Self::Union(_) => {
+                "i64"
+            }
             Self::Float => "double",
             Self::Bool => "i1",
             Self::Str
@@ -51,6 +54,15 @@ impl Type {
             | Self::TimeoutExpired
             | Self::Path
             | Self::CompletedProcess
+            | Self::EventLoop
+            | Self::Coroutine(_)
+            | Self::Task(_)
+            | Self::TaskGroup
+            | Self::Document(_)
+            | Self::GeneratorContext
+            | Self::DirectoryContext(_)
+            | Self::Semaphore
+            | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::Logger
             | Self::RegexPattern
@@ -82,6 +94,15 @@ impl Type {
             | Self::TimeoutExpired
             | Self::Path
             | Self::CompletedProcess
+            | Self::EventLoop
+            | Self::Coroutine(_)
+            | Self::Task(_)
+            | Self::TaskGroup
+            | Self::Document(_)
+            | Self::GeneratorContext
+            | Self::DirectoryContext(_)
+            | Self::Semaphore
+            | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::Logger
             | Self::RegexPattern
@@ -90,7 +111,12 @@ impl Type {
             | Self::RegexMatch
             | Self::BinaryIO
             | Self::Tuple(_) => "null",
-            Self::Bool | Self::None | Self::StrEnum(_) | Self::Optional(_) | Self::Union(_) => "0",
+            Self::Bool
+            | Self::None
+            | Self::StrEnum(_)
+            | Self::Enum(_)
+            | Self::Optional(_)
+            | Self::Union(_) => "0",
         }
     }
 }
@@ -247,9 +273,38 @@ fn emit_program(
             writeln!(output, "declare ptr @PyInit_{name}()").unwrap();
         }
     }
+    for declaration in module.types.exception_declarations().iter() {
+        let id = declaration.id;
+        let name = declaration.name.as_bytes();
+        let names = name
+            .iter()
+            .map(|byte| format!("i8 {byte}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let ancestry = declaration
+            .ancestors
+            .iter()
+            .map(|kind| format!("i32 {kind}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(
+            output,
+            "@exception_name_{id} = private constant [{} x i8] [{names}]",
+            name.len()
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "@exception_ancestors_{id} = private constant [{} x i32] [{ancestry}]",
+            declaration.ancestors.len()
+        )
+        .unwrap();
+        writeln!(output, "@exception_type_{id} = private constant {{ ptr, i64, ptr, i64, i32 }} {{ ptr @exception_name_{id}, i64 {}, ptr @exception_ancestors_{id}, i64 {}, i32 {} }}", name.len(), declaration.ancestors.len(), declaration.base).unwrap();
+    }
     output.push_str(&record_layouts(module));
     output.push_str(&json::schemas(module));
     output.push_str(&callables::adapters(module, sanitize));
+    output.push_str(&asyncio::adapters(module, sanitize));
     output.push_str(&integer_helpers());
     output.push_str(&nullable_pointer_helpers());
     for (slot, ty) in module.globals.iter().enumerate() {
@@ -505,13 +560,22 @@ impl Emitter<'_, '_> {
             | Type::TimeoutExpired
             | Type::Path
             | Type::TextIO
+            | Type::EventLoop
+            | Type::Coroutine(_)
+            | Type::Task(_)
+            | Type::TaskGroup
+            | Type::Document(_)
+            | Type::GeneratorContext
+            | Type::DirectoryContext(_)
+            | Type::Semaphore
+            | Type::AsyncProcess(_)
             | Type::Logger
             | Type::RegexPattern
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
             | Type::BinaryIO => "object",
-            Type::Float | Type::Bool | Type::StrEnum(_) | Type::None => return,
+            Type::Float | Type::Bool | Type::StrEnum(_) | Type::Enum(_) | Type::None => return,
             Type::Optional(_) => unreachable!("optional types are flattened"),
         };
         let name = if value.ty == Type::Int {
@@ -539,7 +603,7 @@ impl Emitter<'_, '_> {
         if value.ty != Type::Float
             && !matches!(
                 self.module.types.payload(value.ty).unwrap_or(value.ty),
-                Type::Bool | Type::None | Type::StrEnum(_)
+                Type::Bool | Type::None | Type::StrEnum(_) | Type::Enum(_)
             )
             && !value.small_integer
             && !self
@@ -1418,6 +1482,25 @@ impl Emitter<'_, '_> {
             self.line(format!("ret {returns} {value}"));
         }
         self.start(&self.error_exit.clone());
+        // CPython's traceback keeps the throwing frame's live directory managers
+        // until the exception is released, even for a return before entering with.
+        for slot in 0..self.locals.len() {
+            let ty = self.locals[slot];
+            if matches!(
+                self.module.types.payload(ty).unwrap_or(ty),
+                Type::DirectoryContext(_)
+            ) {
+                let value = self.borrow_slot(slot);
+                let pointer = if self.module.types.payload(ty).is_some() {
+                    self.instruction(format!("inttoptr i64 {} to ptr", value.operand))
+                } else {
+                    value.operand
+                };
+                self.line(format!(
+                    "call void @relar_error_keep_directory(ptr {pointer})"
+                ));
+            }
+        }
         self.cleanup();
         if entry {
             if self.has_extensions {
@@ -1949,7 +2032,7 @@ impl Emitter<'_, '_> {
                     Type::Union(_)
                 ) && matches!(
                     self.module.types.payload(value.ty).unwrap_or(value.ty),
-                    Type::Str | Type::Bytes
+                    Type::Str | Type::Bytes | Type::List(_) | Type::Class(_) | Type::Exception
                 ) {
                     self.union_inject(value.clone(), storage)
                 } else {
@@ -2177,9 +2260,9 @@ impl Emitter<'_, '_> {
                     .map_or("null", |message| message.value.operand.as_str());
                 let value = Value {
                     ty: Type::Exception,
-                    operand: self.instruction(format!(
-                        "call ptr @relar_exception_new(i32 {kind}, ptr {pointer})"
-                    )),
+                    operand: self.instruction(if *kind >= 256 {
+                        format!("call ptr @relar_named_exception_new(ptr @exception_type_{kind}, ptr {pointer})")
+                    } else { format!("call ptr @relar_exception_new(i32 {kind}, ptr {pointer})") }),
                     small_integer: false,
                 };
                 if let Some(message) = &message {
@@ -2761,102 +2844,103 @@ impl Emitter<'_, '_> {
                 small_integer: false,
             };
         }
-        let operand = match left.ty {
-            Type::Int if left.small_integer && right.small_integer => self.instruction(format!(
-                "icmp {predicate} i64 {}, {}",
+        let operand = if [left.ty, right.ty]
+            .into_iter()
+            .any(|ty| self.module.types.payload(ty) == Some(Type::Int))
+        {
+            let equal = self.instruction(format!(
+                "call i32 @relar_optional_int_equal(i64 {}, i64 {})",
                 left.operand, right.operand
-            )),
-            Type::Int => {
-                let order = self.instruction(format!(
-                    "call i32 @compare_int(i64 {}, i64 {})",
-                    left.operand, right.operand
-                ));
-                self.instruction(format!("icmp {predicate} i32 {order}, 0"))
-            }
-            Type::Float => {
-                let predicate = match op {
-                    Compare::Equal => "oeq",
-                    Compare::NotEqual => "une",
-                    Compare::Less => "olt",
-                    Compare::LessEqual => "ole",
-                    Compare::Greater => "ogt",
-                    Compare::GreaterEqual => "oge",
-                };
-                self.instruction(format!(
-                    "fcmp {predicate} double {}, {}",
-                    left.operand, right.operand
-                ))
-            }
-            Type::StrEnum(_) => self.instruction(format!(
-                "icmp {predicate} i64 {}, {}",
-                left.operand, right.operand
-            )),
-            Type::Str | Type::StrLiteral(_) | Type::Optional(_) => {
-                let equal = if matches!(left.ty, Type::Optional(_))
-                    || matches!(right.ty, Type::Optional(_))
-                {
-                    let a = self.word(left);
-                    let b = self.word(right);
+            ));
+            let predicate = if matches!(op, Compare::Equal) {
+                "ne"
+            } else {
+                "eq"
+            };
+            self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
+        } else {
+            match left.ty {
+                Type::Int if left.small_integer && right.small_integer => self.instruction(
+                    format!("icmp {predicate} i64 {}, {}", left.operand, right.operand),
+                ),
+                Type::Int => {
+                    let order = self.instruction(format!(
+                        "call i32 @compare_int(i64 {}, i64 {})",
+                        left.operand, right.operand
+                    ));
+                    self.instruction(format!("icmp {predicate} i32 {order}, 0"))
+                }
+                Type::Float => {
+                    let predicate = match op {
+                        Compare::Equal => "oeq",
+                        Compare::NotEqual => "une",
+                        Compare::Less => "olt",
+                        Compare::LessEqual => "ole",
+                        Compare::Greater => "ogt",
+                        Compare::GreaterEqual => "oge",
+                    };
                     self.instruction(format!(
-                        "call i32 @relar_optional_str_equal(i64 {a}, i64 {b})"
-                    ))
-                } else {
-                    self.instruction(format!(
-                        "call i32 @relar_str_equal(ptr {}, ptr {})",
+                        "fcmp {predicate} double {}, {}",
                         left.operand, right.operand
                     ))
-                };
-                let predicate = if matches!(op, Compare::Equal) {
-                    "ne"
-                } else {
-                    "eq"
-                };
-                self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
-            }
-            Type::Path | Type::List(_) | Type::Dict(_) => {
-                let operation = if left.ty == Type::Path {
-                    "path"
-                } else {
-                    "sequence"
-                };
-                let equal = self.instruction(format!(
-                    "call i32 @relar_{operation}_equal(ptr {}, ptr {})",
+                }
+                Type::StrEnum(_) | Type::Enum(_) => self.instruction(format!(
+                    "icmp {predicate} i64 {}, {}",
                     left.operand, right.operand
-                ));
-                let predicate = if matches!(op, Compare::Equal) {
-                    "ne"
-                } else {
-                    "eq"
-                };
-                self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
-            }
-            Type::Bytes => {
-                let order = self.instruction(format!(
-                    "call i32 @relar_bytes_compare(ptr {}, ptr {})",
-                    left.operand, right.operand
-                ));
-                self.instruction(format!("icmp {predicate} i32 {order}, 0"))
-            }
-            Type::Class(class)
-                if self
-                    .module
-                    .class_metadata
-                    .get(class)
-                    .is_some_and(|metadata| metadata.dataclass_eq) =>
-            {
-                let equal = self.instruction(format!(
-                    "call i32 @relar_record_equal(ptr {}, ptr {})",
-                    left.operand, right.operand
-                ));
-                let predicate = if matches!(op, Compare::Equal) {
-                    "ne"
-                } else {
-                    "eq"
-                };
-                self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
-            }
-            Type::Tuple(_) => {
-                if matches!(op, Compare::Equal | Compare::NotEqual) {
+                )),
+                Type::Str | Type::StrLiteral(_) | Type::Optional(_) => {
+                    let equal = if matches!(left.ty, Type::Optional(_))
+                        || matches!(right.ty, Type::Optional(_))
+                    {
+                        let a = self.word(left);
+                        let b = self.word(right);
+                        self.instruction(format!(
+                            "call i32 @relar_optional_str_equal(i64 {a}, i64 {b})"
+                        ))
+                    } else {
+                        self.instruction(format!(
+                            "call i32 @relar_str_equal(ptr {}, ptr {})",
+                            left.operand, right.operand
+                        ))
+                    };
+                    let predicate = if matches!(op, Compare::Equal) {
+                        "ne"
+                    } else {
+                        "eq"
+                    };
+                    self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
+                }
+                Type::Path | Type::List(_) | Type::Dict(_) => {
+                    let operation = if left.ty == Type::Path {
+                        "path"
+                    } else {
+                        "sequence"
+                    };
+                    let equal = self.instruction(format!(
+                        "call i32 @relar_{operation}_equal(ptr {}, ptr {})",
+                        left.operand, right.operand
+                    ));
+                    let predicate = if matches!(op, Compare::Equal) {
+                        "ne"
+                    } else {
+                        "eq"
+                    };
+                    self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
+                }
+                Type::Bytes => {
+                    let order = self.instruction(format!(
+                        "call i32 @relar_bytes_compare(ptr {}, ptr {})",
+                        left.operand, right.operand
+                    ));
+                    self.instruction(format!("icmp {predicate} i32 {order}, 0"))
+                }
+                Type::Class(class)
+                    if self
+                        .module
+                        .class_metadata
+                        .get(class)
+                        .is_some_and(|metadata| metadata.dataclass_eq) =>
+                {
                     let equal = self.instruction(format!(
                         "call i32 @relar_record_equal(ptr {}, ptr {})",
                         left.operand, right.operand
@@ -2867,39 +2951,62 @@ impl Emitter<'_, '_> {
                         "eq"
                     };
                     self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
-                } else {
-                    let order = self.instruction(format!(
-                        "call i32 @relar_tuple_compare(ptr {}, ptr {})",
-                        left.operand, right.operand
-                    ));
-                    self.instruction(format!("icmp {predicate} i32 {order}, 0"))
                 }
-            }
-            Type::Bool
-            | Type::None
-            | Type::Class(_)
-            | Type::Exception
-            | Type::TimeoutExpired
-            | Type::TextIO
-            | Type::CompletedProcess
-            | Type::BinaryIO => self.instruction(format!(
-                "icmp {predicate} {} {}, {}",
-                left.ty.llvm(),
-                left.operand,
-                right.operand
-            )),
-            Type::ListInt
-            | Type::Set(_)
-            | Type::StringKeys
-            | Type::Iterator
-            | Type::Callable(_)
-            | Type::Logger
-            | Type::RegexPattern
-            | Type::JsonValue
-            | Type::JsonObject
-            | Type::RegexMatch
-            | Type::Union(_) => {
-                unreachable!("container comparison is rejected by the frontend")
+                Type::Tuple(_) => {
+                    if matches!(op, Compare::Equal | Compare::NotEqual) {
+                        let equal = self.instruction(format!(
+                            "call i32 @relar_record_equal(ptr {}, ptr {})",
+                            left.operand, right.operand
+                        ));
+                        let predicate = if matches!(op, Compare::Equal) {
+                            "ne"
+                        } else {
+                            "eq"
+                        };
+                        self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
+                    } else {
+                        let order = self.instruction(format!(
+                            "call i32 @relar_tuple_compare(ptr {}, ptr {})",
+                            left.operand, right.operand
+                        ));
+                        self.instruction(format!("icmp {predicate} i32 {order}, 0"))
+                    }
+                }
+                Type::Bool
+                | Type::None
+                | Type::Class(_)
+                | Type::Exception
+                | Type::TimeoutExpired
+                | Type::TextIO
+                | Type::CompletedProcess
+                | Type::BinaryIO => self.instruction(format!(
+                    "icmp {predicate} {} {}, {}",
+                    left.ty.llvm(),
+                    left.operand,
+                    right.operand
+                )),
+                Type::ListInt
+                | Type::Set(_)
+                | Type::StringKeys
+                | Type::Iterator
+                | Type::Callable(_)
+                | Type::EventLoop
+                | Type::Coroutine(_)
+                | Type::Task(_)
+                | Type::TaskGroup
+                | Type::Document(_)
+                | Type::GeneratorContext
+                | Type::DirectoryContext(_)
+                | Type::Semaphore
+                | Type::AsyncProcess(_)
+                | Type::Logger
+                | Type::RegexPattern
+                | Type::JsonValue
+                | Type::JsonObject
+                | Type::RegexMatch
+                | Type::Union(_) => {
+                    unreachable!("container comparison is rejected by the frontend")
+                }
             }
         };
         Value {
@@ -3056,7 +3163,10 @@ impl Emitter<'_, '_> {
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
         if matches!(
             builtin,
-            Builtin::LiteralStringView | Builtin::DictAsBase | Builtin::RecordView
+            Builtin::LiteralStringView
+                | Builtin::DictAsBase
+                | Builtin::RecordView
+                | Builtin::DirectoryContextView
         ) {
             let value = self.expr(&expressions[0]);
             return Value {
@@ -3143,6 +3253,19 @@ impl Emitter<'_, '_> {
                 operand: self.enum_tag(*class, *member).to_string(),
                 small_integer: false,
             },
+            Builtin::EnumString => self.call("relar_enum_string", returns, &[&args[0].value]),
+            Builtin::EnumLookup(class) => {
+                let first = self.enum_tag(*class, 0);
+                let count = self.module.class_metadata[*class].enum_members.len();
+                Value {
+                    ty: returns,
+                    operand: self.checked_instruction(format!(
+                        "call i64 @relar_enum_lookup(ptr {}, i64 {first}, i64 {count})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::StrEnumName | Builtin::StrEnumValue => {
                 self.enum_text(&args[0].value, matches!(builtin, Builtin::StrEnumName))
             }
@@ -3154,8 +3277,22 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::LiteralStringView | Builtin::DictAsBase | Builtin::RecordView => {
+            Builtin::LiteralStringView
+            | Builtin::DictAsBase
+            | Builtin::RecordView
+            | Builtin::DirectoryContextView => {
                 unreachable!("representation-preserving views transfer the operand owner directly")
+            }
+            Builtin::StringContains => {
+                let found = self.instruction(format!(
+                    "call i32 @relar_str_contains(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {found}, 0")),
+                    small_integer: false,
+                }
             }
             Builtin::StringListContains => {
                 let byte = self.instruction(format!(
@@ -3238,7 +3375,33 @@ impl Emitter<'_, '_> {
             }
             Builtin::Path(operation) => self.path_builtin(*operation, &args, returns),
             Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
+            Builtin::WallTime => self.call("relar_wall_time", Type::Float, &[]),
             Builtin::JsonEmptyObject => self.call("relar_json_empty_object", returns, &[]),
+            Builtin::Document(operation) => {
+                let mut words = ["0".to_owned(), "0".to_owned(), "0".to_owned()];
+                for (word, arg) in words.iter_mut().zip(&args) {
+                    *word = self.word(&arg.value);
+                }
+                let [a, b, c] = words;
+                let word = self.checked_instruction(format!(
+                    "call i64 @relar_document(i32 {}, i64 {a}, i64 {b}, i64 {c})",
+                    *operation as u32
+                ));
+                self.unpack_word(word, returns)
+            }
+            Builtin::FunctionCache(id) => {
+                let (key, value) = self.module.types.mapping(returns).unwrap();
+                let key = representation_kind(key, &self.module.types);
+                let value = representation_kind(value, &self.module.types);
+                let operand = self.instruction(format!(
+                    "call ptr @relar_function_cache(i64 {id}, i32 {key}, i32 {value})"
+                ));
+                self.owned(Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                })
+            }
             Builtin::HashStr => self.call("relar_string_hash", returns, &[&args[0].value]),
             Builtin::HashRecord => Value {
                 ty: Type::Int,
@@ -3343,10 +3506,6 @@ impl Emitter<'_, '_> {
                 let value = self.own_operand(args.into_iter().next().unwrap());
                 return self.union_inject(value, returns);
             }
-            Builtin::UnionProject => {
-                let value = self.own_operand(args.into_iter().next().unwrap());
-                return self.union_project(value, returns);
-            }
             Builtin::ExactRecord(class) => {
                 let matched = self.instruction(format!(
                     "call i32 @relar_record_has_type(ptr {}, ptr @layout_class_{class})",
@@ -3357,6 +3516,10 @@ impl Emitter<'_, '_> {
                     operand: self.instruction(format!("icmp ne i32 {matched}, 0")),
                     small_integer: false,
                 }
+            }
+            Builtin::UnionProject => {
+                let value = self.own_operand(args.into_iter().next().unwrap());
+                return self.union_project(value, returns);
             }
             Builtin::IsInstance(classes) => Value {
                 ty: Type::Bool,
@@ -3954,7 +4117,45 @@ impl Emitter<'_, '_> {
                 self.call("relar_bytes_decode_splitlines", returns, &[&args[0].value])
             }
             Builtin::SplitLines => self.call("relar_str_splitlines", returns, &[&args[0].value]),
-            Builtin::Ndiff => self.call("relar_ndiff", returns, &[&args[0].value, &args[1].value]),
+            Builtin::Ndiff => self.call(
+                "relar_ndiff_deferred",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::StringListCopy => self.call("relar_str_list_copy", returns, &[&args[0].value]),
+            Builtin::StringListNonempty => {
+                let found = self.instruction(format!(
+                    "call i32 @relar_str_list_nonempty(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!("icmp ne i32 {found}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::StringListFilter(strip) => {
+                let second =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
+                let exclude =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[3].value.operand));
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_str_list_filter(ptr {}, ptr {}, ptr {second}, ptr {exclude}, i32 {strip})",
+                        args[0].value.operand, args[1].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::StringListSortSuffix(skip) => Value {
+                ty: returns,
+                operand: self.instruction(format!(
+                    "call ptr @relar_str_list_sorted_suffix(ptr {}, i32 {skip})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::RStrip => {
                 let chars = if let Some(arg) = args.get(1) {
                     let word = self.word(&arg.value);
@@ -4001,8 +4202,12 @@ impl Emitter<'_, '_> {
                     Type::Str | Type::StrLiteral(_) => {
                         self.void_call("relar_print_str", &[&args[0].value])
                     }
-                    Type::StrEnum(_) => {
-                        let text = self.enum_text(&args[0].value, false);
+                    Type::StrEnum(_) | Type::Enum(_) => {
+                        let text = if matches!(args[0].value.ty, Type::Enum(_)) {
+                            self.call("relar_enum_string", Type::Str, &[&args[0].value])
+                        } else {
+                            self.enum_text(&args[0].value, false)
+                        };
                         let text = self.owned(text);
                         self.void_call("relar_print_str", &[&text]);
                         self.release(&text);
@@ -4025,6 +4230,15 @@ impl Emitter<'_, '_> {
                     | Type::TimeoutExpired
                     | Type::Path
                     | Type::TextIO
+                    | Type::EventLoop
+                    | Type::Coroutine(_)
+                    | Type::Task(_)
+                    | Type::TaskGroup
+                    | Type::Document(_)
+                    | Type::GeneratorContext
+                    | Type::DirectoryContext(_)
+                    | Type::Semaphore
+                    | Type::AsyncProcess(_)
                     | Type::Logger
                     | Type::RegexPattern
                     | Type::JsonValue
@@ -4174,9 +4388,19 @@ impl Emitter<'_, '_> {
 
     /// Converts a typed value to the runtime's word representation without
     /// changing ownership. The slot's representation tag controls reclamation.
+    fn key_word(&mut self, value: &Value) -> String {
+        if self.module.types.fallible_key(value.ty) {
+            self.checked_line(format!(
+                "call void @relar_prepare_record_key(ptr {})",
+                value.operand
+            ));
+        }
+        self.word(value)
+    }
+
     fn word(&mut self, value: &Value) -> String {
         match value.ty {
-            Type::Int | Type::StrEnum(_) | Type::Optional(_) | Type::Union(_) => {
+            Type::Int | Type::StrEnum(_) | Type::Enum(_) | Type::Optional(_) | Type::Union(_) => {
                 value.operand.clone()
             }
             Type::Float => self.instruction(format!("bitcast double {} to i64", value.operand)),
@@ -4198,6 +4422,15 @@ impl Emitter<'_, '_> {
             | Type::Path
             | Type::TextIO
             | Type::BinaryIO
+            | Type::EventLoop
+            | Type::Coroutine(_)
+            | Type::Task(_)
+            | Type::TaskGroup
+            | Type::Document(_)
+            | Type::GeneratorContext
+            | Type::DirectoryContext(_)
+            | Type::Semaphore
+            | Type::AsyncProcess(_)
             | Type::Logger
             | Type::RegexPattern
             | Type::JsonValue
@@ -4218,7 +4451,9 @@ impl Emitter<'_, '_> {
     /// Changes only the compiler view of a word, leaving its ownership unchanged.
     fn decode_word(&mut self, word: String, ty: Type) -> Value {
         let operand = match ty {
-            Type::Int | Type::StrEnum(_) | Type::Optional(_) | Type::Union(_) => word,
+            Type::Int | Type::StrEnum(_) | Type::Enum(_) | Type::Optional(_) | Type::Union(_) => {
+                word
+            }
             Type::Float => self.instruction(format!("bitcast i64 {word} to double")),
             Type::Bool => self.instruction(format!("trunc i64 {word} to i1")),
             Type::None => "0".to_owned(),
@@ -4238,6 +4473,15 @@ impl Emitter<'_, '_> {
             | Type::Path
             | Type::TextIO
             | Type::BinaryIO
+            | Type::EventLoop
+            | Type::Coroutine(_)
+            | Type::Task(_)
+            | Type::TaskGroup
+            | Type::Document(_)
+            | Type::GeneratorContext
+            | Type::DirectoryContext(_)
+            | Type::Semaphore
+            | Type::AsyncProcess(_)
             | Type::Logger
             | Type::RegexPattern
             | Type::JsonValue
@@ -4421,18 +4665,6 @@ impl Emitter<'_, '_> {
             "call void @relar_set_{operation}(ptr {}, i64 {word})",
             set.operand
         ));
-    }
-
-    /// Evaluate a pure fallible hash only once all operands are rooted and
-    /// before the container is borrowed or modified.
-    fn key_word(&mut self, value: &Value) -> String {
-        if self.module.types.fallible_key(value.ty) {
-            self.checked_line(format!(
-                "call void @relar_prepare_record_key(ptr {})",
-                value.operand
-            ));
-        }
-        self.word(value)
     }
 
     fn nonnegative_index(&self, expression: &Expr) -> bool {
@@ -4740,7 +4972,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Int => 2,
         Type::Float => 7,
         Type::Str | Type::StrLiteral(_) => 3,
-        Type::StrEnum(_) => 10,
+        Type::StrEnum(_) | Type::Enum(_) => 10,
         Type::Bytes => 8,
         Type::Union(_) => 9,
         Type::ListInt => 4,
@@ -4754,6 +4986,15 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::TimeoutExpired
         | Type::Path
         | Type::TextIO
+        | Type::EventLoop
+        | Type::Coroutine(_)
+        | Type::Task(_)
+        | Type::TaskGroup
+        | Type::Document(_)
+        | Type::GeneratorContext
+        | Type::DirectoryContext(_)
+        | Type::Semaphore
+        | Type::AsyncProcess(_)
         | Type::Logger
         | Type::RegexPattern
         | Type::JsonValue
@@ -4855,7 +5096,43 @@ fn none() -> Value {
 // Use i32 for runtime flags and status codes. Narrow C integers require different
 // extension attributes on Apple ARM64 and Linux ARM64, even for the same Rust type.
 const DECLARATIONS: &str = r#"
+declare ptr @relar_subprocess_check_output(ptr)
 declare ptr @relar_subprocess_run(ptr, ptr, ptr, i32, ptr)
+declare ptr @relar_async_coroutine(ptr, ptr, i32)
+declare ptr @relar_context_new(ptr, ptr)
+declare void @relar_context_enter(ptr)
+declare void @relar_context_exit(ptr)
+declare void @relar_context_yield()
+declare i32 @relar_context_throw(ptr, ptr)
+declare i64 @relar_async_await(ptr, i1 zeroext, i1 zeroext)
+declare ptr @relar_async_gather(ptr, i1 zeroext, i32, i1 zeroext)
+declare ptr @relar_async_loop_new()
+declare void @relar_async_loop_set(ptr)
+declare ptr @relar_async_ensure(ptr)
+declare i64 @relar_async_loop_run(ptr, ptr)
+declare void @relar_async_loop_signal(ptr, i64, ptr)
+declare void @relar_async_loop_close(ptr)
+declare i32 @relar_async_cancel(ptr)
+declare double @relar_wall_time()
+declare ptr @relar_async_group()
+declare void @relar_async_group_enter(ptr)
+declare ptr @relar_async_create_task(ptr, ptr)
+declare i64 @relar_async_result(ptr)
+declare ptr @relar_async_member_cause(ptr, ptr)
+declare ptr @relar_async_exception_at(ptr, i64)
+declare void @relar_async_abort_group(ptr, ptr)
+declare void @relar_async_join(ptr)
+declare ptr @relar_async_semaphore(i64)
+declare void @relar_async_permit(ptr, i1 zeroext)
+declare ptr @relar_json_empty_object()
+declare ptr @relar_function_cache(i64, i32, i32)
+declare i64 @relar_document(i32, i64, i64, i64)
+declare i64 @relar_string_hash(ptr)
+declare void @relar_prepare_record_key(ptr)
+declare i64 @relar_projected_hash(ptr)
+declare ptr @relar_async_process_spawn(ptr, ptr, ptr, i32, i32)
+declare i64 @relar_async_process_status(ptr, i1 zeroext)
+declare ptr @relar_async_process_communicate(ptr, ptr)
 declare ptr @relar_subprocess_run_timeout(ptr, ptr, ptr, i32, ptr, ptr)
 declare ptr @relar_subprocess_run_timeout_int(ptr, ptr, ptr, i32, i64, ptr)
 declare ptr @relar_environ_copy()
@@ -4874,12 +5151,22 @@ declare ptr @relar_path_parent(ptr)
 declare i32 @relar_path_is_absolute(ptr)
 declare ptr @relar_path_absolute(ptr)
 declare ptr @relar_path_resolve(ptr, i32)
+declare void @relar_error_keep_directory(ptr)
+declare ptr @relar_directory_context_new(i64, i32)
+declare i64 @relar_directory_context_enter(ptr)
+declare void @relar_directory_context_exit(ptr)
+declare ptr @relar_union_path_text(i64)
+declare ptr @relar_sys_platform()
+declare ptr @relar_sysconfig_scripts()
+declare ptr @relar_os_path_join(ptr, ptr)
+declare i32 @relar_path_text_exists(ptr)
+declare i64 @relar_shutil_which(ptr)
 declare i32 @relar_path_exists(ptr)
 declare i32 @relar_path_is_file(ptr)
 declare i32 @relar_path_is_dir(ptr)
 declare i32 @relar_path_equal(ptr, ptr)
-declare ptr @relar_path_read_text(ptr)
 declare ptr @relar_path_read_bytes(ptr)
+declare ptr @relar_path_read_text(ptr)
 declare i64 @relar_path_write_text(ptr, ptr)
 declare void @relar_path_mkdir(ptr, i64, i32, i32)
 declare void @relar_path_unlink(ptr, i32)
@@ -4918,8 +5205,8 @@ declare ptr @relar_bytes_concat(ptr, ptr)
 declare ptr @relar_bytes_repeat(ptr, i64)
 declare ptr @relar_bytes_iter(ptr)
 declare ptr @relar_str_encode(ptr)
-declare ptr @relar_bytes_decode(ptr)
 declare ptr @relar_bytes_decode_splitlines(ptr)
+declare ptr @relar_bytes_decode(ptr)
 declare ptr @relar_bytes_validate_utf8(ptr)
 declare ptr @relar_binary_open(ptr, i32)
 declare ptr @relar_binary_read(ptr)
@@ -4932,6 +5219,8 @@ declare i32 @relar_error_pending()
 declare ptr @relar_error_take()
 declare void @relar_error_set(ptr)
 declare i32 @relar_error_unhandled()
+declare i32 @relar_record_has_type(ptr, ptr) nounwind memory(read)
+declare ptr @relar_named_exception_new(ptr, ptr)
 declare ptr @relar_exception_new(i32, ptr)
 declare i32 @relar_exception_matches(ptr, i32)
 declare void @relar_union_retain(i64)
@@ -4950,10 +5239,6 @@ declare ptr @relar_record_new(ptr)
 declare ptr @relar_tuple_probe(ptr, ptr)
 declare ptr @relar_json_decode(ptr, ptr)
 declare ptr @relar_json_loads(ptr)
-declare ptr @relar_json_empty_object()
-declare i64 @relar_string_hash(ptr)
-declare i64 @relar_projected_hash(ptr)
-declare void @relar_prepare_record_key(ptr)
 declare ptr @relar_json_load(ptr)
 declare i64 @relar_json_get(ptr, ptr, i64, i32, i64)
 declare ptr @relar_json_add(ptr, ptr)
@@ -4969,10 +5254,9 @@ declare ptr @relar_json_encode(i64, ptr, i64, i32)
 declare ptr @relar_record_cached_result(ptr)
 declare void @relar_record_retain(ptr)
 declare void @relar_record_release(ptr)
-declare i32 @relar_record_equal(ptr, ptr) nounwind memory(read)
-declare i32 @relar_record_has_type(ptr, ptr) nounwind memory(read)
-declare i32 @relar_sequence_equal(ptr, ptr) nounwind memory(read)
-declare i32 @relar_tuple_compare(ptr, ptr) nounwind memory(read)
+declare i32 @relar_record_equal(ptr, ptr) nounwind
+declare i32 @relar_sequence_equal(ptr, ptr) nounwind
+declare i32 @relar_tuple_compare(ptr, ptr) nounwind
 declare ptr @relar_value_repr(i64, i32)
 declare void @relar_object_retain(ptr)
 declare void @relar_object_release(ptr)
@@ -4980,19 +5264,26 @@ declare ptr @relar_seq_new(i32)
 declare i64 @relar_seq_get(ptr, i64)
 declare void @relar_seq_set(ptr, i64, i64, i32)
 declare i64 @relar_seq_get_index(ptr, i64)
-declare i64 @relar_seq_borrow_index_proven(ptr, i64) nounwind memory(argmem: read)
-declare ptr @relar_seq_data_readonly(ptr) nounwind memory(argmem: read)
+declare i64 @relar_seq_borrow_index_proven(ptr, i64) nounwind
+declare ptr @relar_seq_data_readonly(ptr) nounwind
 declare void @relar_seq_set_index(ptr, i64, i64, i32)
 declare void @relar_seq_append(ptr, i64, i32)
 declare i64 @relar_seq_pop(ptr)
-declare i64 @relar_seq_len(ptr) nounwind memory(argmem: read)
+declare i64 @relar_seq_len(ptr) nounwind
 declare { i64, i64 } @relar_seq_layout() nounwind willreturn memory(none)
+declare i32 @relar_seq_resolve_header(ptr) nounwind
 @sequence_layout = internal global { i64, i64 } zeroinitializer
 define internal i32 @sequence_header(ptr %sequence) alwaysinline nounwind {
   %offset = load i64, ptr @sequence_layout
   %field = getelementptr inbounds i8, ptr %sequence, i64 %offset
   %length = load i32, ptr %field, align 4
+  %ordinary = icmp ne i32 %length, -1
+  br i1 %ordinary, label %cached, label %deferred, !prof !1
+cached:
   ret i32 %length
+deferred:
+  %resolved = call i32 @relar_seq_resolve_header(ptr %sequence)
+  ret i32 %resolved
 }
 define internal i64 @relar_seq_len_fast(ptr %sequence) alwaysinline nounwind {
   %length = call i32 @sequence_header(ptr %sequence)
@@ -5068,7 +5359,11 @@ declare i64 @relar_str_find(ptr, ptr, i64)
 declare void @relar_str_partition(ptr, ptr, ptr)
 declare ptr @relar_str_unquote(ptr)
 declare ptr @relar_str_splitlines(ptr)
-declare ptr @relar_ndiff(ptr, ptr)
+declare ptr @relar_ndiff_deferred(ptr, ptr)
+declare ptr @relar_str_list_copy(ptr)
+declare ptr @relar_str_list_filter(ptr, ptr, ptr, ptr, i32)
+declare ptr @relar_str_list_sorted_suffix(ptr, i32)
+declare i32 @relar_str_list_nonempty(ptr)
 declare ptr @relar_str_rstrip(ptr, ptr)
 declare void @relar_list_extend_unhinted(ptr, i32)
 declare ptr @relar_sort_detach(ptr, i32)
@@ -5133,9 +5428,13 @@ declare i64 @relar_stdout_write(ptr)
 declare i64 @relar_str_len(ptr)
 declare i32 @relar_str_truthy(ptr)
 declare i32 @relar_bytes_truthy(ptr)
+declare i32 @relar_str_contains(ptr, ptr)
 declare i32 @relar_str_list_contains(ptr, ptr)
 declare void @relar_str_enum_table(ptr, i64)
+declare i64 @relar_enum_lookup(ptr, i64, i64)
+declare ptr @relar_enum_string(i64)
 declare i32 @relar_str_equal(ptr, ptr)
+declare i32 @relar_optional_int_equal(i64, i64)
 declare i32 @relar_optional_str_equal(i64, i64)
 declare i64 @relar_int_parse(ptr)
 declare ptr @relar_input()

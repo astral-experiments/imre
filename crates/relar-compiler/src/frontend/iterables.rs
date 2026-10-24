@@ -28,7 +28,27 @@ impl Checker<'_> {
             }
             return Ok(diff);
         }
+        if let ast::Expr::Generator(generator) = source
+            && let Some(filtered) =
+                self.string_list_filter(&generator.generators, &generator.elt, element)?
+        {
+            return Ok(filtered);
+        }
         let (input, convert) = self.consumer_input(source, element)?;
+        if !convert
+            && let Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } = &input
+            && self.types.element(iterable.ty) == Some(Type::Str)
+            && element.is_none_or(|expected| expected == Type::Str)
+        {
+            return Ok(Expr {
+                ty: iterable.ty,
+                kind: ExprKind::Builtin(Builtin::StringListCopy, vec![iterable.clone()]),
+            });
+        }
         if convert
             && element.is_none_or(|ty| ty == Type::Int)
             && let Iteration::Container {

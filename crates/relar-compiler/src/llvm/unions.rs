@@ -2,20 +2,33 @@
 
 use super::*;
 
+fn tag(ty: Type) -> u8 {
+    match ty {
+        Type::Str => 0,
+        Type::Bytes => 1,
+        Type::List(_) => 2,
+        Type::Exception => 3,
+        Type::Class(_) => 4,
+        Type::Enum(_) => 5,
+        Type::Path => 6,
+        _ => unreachable!("closed native union member"),
+    }
+}
+
 impl Emitter<'_, '_> {
     /// The two alignment bits select str, bytes, or a string list. A nullable
     /// source preserves its absent zero word when transitioning into a union.
     pub(super) fn union_inject(&mut self, value: Value, returns: Type) -> Value {
         let source = self.module.types.payload(value.ty).unwrap_or(value.ty);
-        let tag = match source {
-            Type::Str => 0,
-            Type::Bytes => 1,
-            Type::List(_) => 2,
-            _ => unreachable!("a checked text union member"),
-        };
+        let tag = tag(source);
         let word = self.word(&value);
         let operand = if tag != 0 {
-            let tagged = self.instruction(format!("or i64 {word}, {tag}"));
+            let bits = if matches!(source, Type::Enum(_)) {
+                self.instruction(format!("shl i64 {word}, 3"))
+            } else {
+                word.clone()
+            };
+            let tagged = self.instruction(format!("or i64 {bits}, {tag}"));
             if value.ty != source {
                 let present = self.instruction(format!("icmp ne i64 {word}, 0"));
                 self.instruction(format!("select i1 {present}, i64 {tagged}, i64 0"))
@@ -36,7 +49,11 @@ impl Emitter<'_, '_> {
     /// Local flow proves the member before projection; clearing the tag restores
     /// its address and transfers ownership without retaining or allocating.
     pub(super) fn union_project(&mut self, value: Value, returns: Type) -> Value {
-        let word = self.instruction(format!("and i64 {}, -4", value.operand));
+        let word = if matches!(returns, Type::Enum(_)) {
+            self.instruction(format!("lshr i64 {}, 3", value.operand))
+        } else {
+            self.instruction(format!("and i64 {}, -8", value.operand))
+        };
         self.forget(&value);
         self.decode_word(word, returns)
     }
@@ -65,10 +82,31 @@ impl Emitter<'_, '_> {
                 match (class.accepts(members[0]), class.accepts(members[1])) {
                     (true, true) => "true".to_owned(),
                     (false, false) => "false".to_owned(),
-                    (text, _) => {
-                        let tag = self.instruction(format!("and i64 {}, 3", value.operand));
-                        let compare = if text { "eq" } else { "ne" };
-                        self.instruction(format!("icmp {compare} i64 {tag}, 0"))
+                    (first, _) => {
+                        let selected = members[usize::from(!first)];
+                        let bits = self.instruction(format!("and i64 {}, 7", value.operand));
+                        let found =
+                            self.instruction(format!("icmp eq i64 {bits}, {}", tag(selected)));
+                        if let InstanceType::Exception(kind) = class
+                            && kind != 0
+                            && selected == Type::Exception
+                        {
+                            let (inspect, end) = (self.label(), self.label());
+                            let other = self.current.clone();
+                            self.branch(&found, &inspect, &end);
+                            self.start(&inspect);
+                            let word = self.instruction(format!("and i64 {}, -8", value.operand));
+                            let payload = self.decode_word(word, Type::Exception);
+                            let matches = self.instance_test(&payload, &[class]);
+                            let inspected = self.current.clone();
+                            self.jump(&end);
+                            self.start(&end);
+                            self.instruction(format!(
+                                "phi i1 [ false, %{other} ], [ {matches}, %{inspected} ]"
+                            ))
+                        } else {
+                            found
+                        }
                     }
                 }
             } else if let InstanceType::Exception(kind) = class

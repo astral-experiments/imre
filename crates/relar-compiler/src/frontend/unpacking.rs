@@ -85,6 +85,35 @@ impl Checker<'_> {
         &mut self,
         assignment: &ast::StmtAssign,
     ) -> Result<Vec<Statement>, String> {
+        // A literal tuple assigned to plain locals can stage its elements in native
+        // slots. This also permits unpacking a typed callable without storing it
+        // in a heap object. All RHS expressions still precede all target writes.
+        if let [ast::Expr::Tuple(targets)] = assignment.targets.as_slice()
+            && let ast::Expr::Tuple(values) = &*assignment.value
+            && targets.elts.len() == values.elts.len()
+            && targets
+                .elts
+                .iter()
+                .all(|target| matches!(target, ast::Expr::Name(_)))
+            && !values
+                .elts
+                .iter()
+                .any(|value| matches!(value, ast::Expr::Starred(_)))
+        {
+            let mut body = Vec::new();
+            let mut slots = Vec::new();
+            for (target, source) in targets.elts.iter().zip(&values.elts) {
+                let value = self.unpacking_value(target, source)?;
+                let slot = self.hidden(value.ty);
+                body.push(Statement::Assign(slot, value));
+                slots.push(slot);
+            }
+            for (target, &slot) in targets.elts.iter().zip(&slots) {
+                let value = self.take_temporary(slot);
+                body.push(self.assign_value(target, value)?);
+            }
+            return Ok(vec![Statement::Scope { body, clear: slots }]);
+        }
         if let [target] = assignment.targets.as_slice() {
             if pattern_elements(target).is_some() {
                 let value = self.unpacking_value(target, &assignment.value)?;
@@ -138,6 +167,35 @@ impl Checker<'_> {
             ast::Expr::Name(_) => self.assign(target, value),
             ast::Expr::Subscript(subscript) => {
                 let receiver = self.expr(&subscript.value)?;
+                if matches!(receiver.ty, Type::Document(_)) {
+                    if let ast::Expr::Slice(slice) = &*subscript.slice {
+                        if slice.lower.is_some() || slice.upper.is_some() || slice.step.is_some() {
+                            return Err(error(
+                                self.source,
+                                target,
+                                "document list assignment requires a full slice",
+                            ));
+                        }
+                        let value = if value.ty == documents::LIST {
+                            self.document_list(value)
+                        } else {
+                            value
+                        };
+                        let value = self.coerce(value, self.types.list(documents::ANY), target)?;
+                        return Ok(Statement::Expr(documents::op(
+                            ir::DocumentOp::ReplaceItems,
+                            Type::None,
+                            vec![value, receiver],
+                        )));
+                    }
+                    let value = self.coerce(value, documents::ANY, target)?;
+                    let key = self.expr_expected(&subscript.slice, Type::Str)?;
+                    return Ok(Statement::Expr(documents::op(
+                        ir::DocumentOp::SetItem,
+                        Type::None,
+                        vec![value, receiver, key],
+                    )));
+                }
                 self.check_mutable_json_rows(receiver.ty, subscript)?;
                 let (key, element) = self
                     .types

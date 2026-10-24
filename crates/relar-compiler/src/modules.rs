@@ -8,6 +8,8 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use crate::analysis::Session;
+mod empty_keywords;
+mod entry_profile;
 mod reachability;
 
 pub(crate) type ModuleId = usize;
@@ -60,11 +62,16 @@ pub(crate) enum IntrinsicModule {
     Time,
     Tomli,
     TomliW,
+    Shutil,
+    Sysconfig,
+    Signal,
+    Unidiff,
     Pathlib,
     Shlex,
     Tempfile,
     Subprocess,
     Os,
+    OsPath,
     Urllib,
     UrllibParse,
     Collections,
@@ -96,17 +103,39 @@ pub(crate) enum Intrinsic {
     Abc,
     AbstractMethod,
     CreateSubprocessExec,
+    RunLoop,
+    NewLoop,
+    SetLoop,
+    EnsureTask,
+    CancelledError,
+    Gather,
+    TaskGroup,
+    Semaphore,
     ContextManager,
     FunctionCache,
     TomlDumps,
+    TomliLoads,
+    TomliLoad,
+    TomliDump,
     StandardEnum,
     IsDataclass,
     Pipe,
     Devnull,
     CheckOutput,
+    NullContext,
+    SignalNumber(i64),
+    WallTime,
+    PatchSet,
+    Awaitable,
+    TypeVar,
     Stderr,
     Stdout,
     SysExecutable,
+    Platform,
+    GetSysconfigPath,
+    OsPathJoin,
+    OsPathExists,
+    Which,
     SysExit,
     ShlexSplit,
     Ndiff,
@@ -174,6 +203,10 @@ impl IntrinsicModule {
             "time" => Some(Self::Time),
             "tomli" => Some(Self::Tomli),
             "tomli_w" => Some(Self::TomliW),
+            "shutil" => Some(Self::Shutil),
+            "sysconfig" => Some(Self::Sysconfig),
+            "signal" => Some(Self::Signal),
+            "unidiff" => Some(Self::Unidiff),
             "argparse" => Some(Self::Argparse),
             "sys" => Some(Self::Sys),
             "typing" => Some(Self::Typing),
@@ -184,6 +217,7 @@ impl IntrinsicModule {
             "tempfile" => Some(Self::Tempfile),
             "subprocess" => Some(Self::Subprocess),
             "os" => Some(Self::Os),
+            "os.path" => Some(Self::OsPath),
             "urllib" => Some(Self::Urllib),
             "urllib.parse" => Some(Self::UrllibParse),
             "collections" => Some(Self::Collections),
@@ -205,6 +239,9 @@ impl IntrinsicModule {
     }
 
     fn symbol(self, name: &str) -> Option<Binding> {
+        if self == Self::Os && name == "path" {
+            return Some(Binding::IntrinsicModule(Self::OsPath));
+        }
         if self == Self::Urllib && name == "parse" {
             return Some(Binding::IntrinsicModule(Self::UrllibParse));
         }
@@ -226,9 +263,27 @@ impl IntrinsicModule {
             (Self::Abc, "ABC") => Intrinsic::Abc,
             (Self::Abc, "abstractmethod") => Intrinsic::AbstractMethod,
             (Self::Asyncio, "create_subprocess_exec") => Intrinsic::CreateSubprocessExec,
+            (Self::Asyncio, "run") => Intrinsic::RunLoop,
+            (Self::Asyncio, "new_event_loop") => Intrinsic::NewLoop,
+            (Self::Asyncio, "set_event_loop") => Intrinsic::SetLoop,
+            (Self::Asyncio, "ensure_future") => Intrinsic::EnsureTask,
+            (Self::Asyncio, "CancelledError") => Intrinsic::CancelledError,
+            (Self::Asyncio, "gather") => Intrinsic::Gather,
+            (Self::Asyncio, "TaskGroup") => Intrinsic::TaskGroup,
+            (Self::Asyncio, "Semaphore") => Intrinsic::Semaphore,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
+            (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
+            (Self::Time, "time") => Intrinsic::WallTime,
+            (Self::Signal, "SIGINT") => Intrinsic::SignalNumber(2),
+            (Self::Signal, "SIGTERM") => Intrinsic::SignalNumber(15),
+            (Self::Unidiff, "PatchSet") => Intrinsic::PatchSet,
+            (Self::CollectionsAbc, "Awaitable") => Intrinsic::Awaitable,
+            (Self::Typing, "TypeVar") => Intrinsic::TypeVar,
             (Self::Functools, "cache") => Intrinsic::FunctionCache,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
+            (Self::Tomli, "loads") => Intrinsic::TomliLoads,
+            (Self::Tomli, "load") => Intrinsic::TomliLoad,
+            (Self::TomliW, "dump") => Intrinsic::TomliDump,
             (Self::Enum, "Enum") => Intrinsic::StandardEnum,
             (Self::Dataclasses, "is_dataclass") => Intrinsic::IsDataclass,
             (Self::Subprocess, "PIPE") => Intrinsic::Pipe,
@@ -244,6 +299,11 @@ impl IntrinsicModule {
             }
             (Self::Sys, "argv") => Intrinsic::Argv,
             (Self::Sys, "executable") => Intrinsic::SysExecutable,
+            (Self::Sys, "platform") => Intrinsic::Platform,
+            (Self::Sysconfig, "get_path") => Intrinsic::GetSysconfigPath,
+            (Self::OsPath, "join") => Intrinsic::OsPathJoin,
+            (Self::OsPath, "exists") => Intrinsic::OsPathExists,
+            (Self::Shutil, "which") => Intrinsic::Which,
             (Self::Sys, "exit") => Intrinsic::SysExit,
             (Self::Shlex, "split") => Intrinsic::ShlexSplit,
             (Self::Difflib, "ndiff") => Intrinsic::Ndiff,
@@ -336,6 +396,9 @@ impl SourceModule {
 }
 
 pub(crate) struct SourceGraph {
+    pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
+    pub(crate) entry_profile: entry_profile::Profile,
+    pub(crate) mutable_documents: bool,
     reachable: Option<reachability::Reachable>,
     pub(crate) inputs: crate::SourceInputs,
     pub(crate) session: Session,
@@ -349,9 +412,61 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// Keep read-only JSON views in programs that never parse or modify a TOML document.
+    fn uses_mutable_documents(&self) -> bool {
+        use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
+        struct Scan<'a> {
+            graph: &'a SourceGraph,
+            id: usize,
+            found: bool,
+        }
+        impl<'ast> Visitor<'ast> for Scan<'_> {
+            fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
+                if let ast::Stmt::FunctionDef(method) = stmt
+                    && !self.graph.includes_method(self.id, method)
+                    && !self.graph.modules[self.id]
+                        .bindings
+                        .contains_key(method.name.as_str())
+                {
+                    return;
+                }
+                walk_stmt(self, stmt);
+            }
+            fn visit_expr(&mut self, e: &'ast ast::Expr) {
+                if matches!(
+                    self.graph.resolve(self.id, e),
+                    Some(Binding::Intrinsic(
+                        Intrinsic::TomliLoads | Intrinsic::TomliLoad | Intrinsic::TomliDump
+                    ))
+                ) {
+                    self.found = true;
+                } else {
+                    walk_expr(self, e);
+                }
+            }
+        }
+        self.modules.iter().enumerate().any(|(id, m)| {
+            let mut scan = Scan {
+                graph: self,
+                id,
+                found: false,
+            };
+            for (statement, node) in m.parsed.syntax().body.iter().enumerate() {
+                if self.includes(DefinitionId {
+                    module: id,
+                    statement,
+                }) || !matches!(node, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
+                {
+                    scan.visit_stmt(node);
+                }
+            }
+            scan.found
+        })
+    }
     pub(crate) fn reachable_only(&self) -> bool {
         self.reachable.is_some()
     }
+
     pub(crate) fn includes(&self, definition: DefinitionId) -> bool {
         self.reachable
             .as_ref()
@@ -404,7 +519,7 @@ impl SourceGraph {
             source,
         )?;
         loader.scan(entry)?;
-        loader.finish(entry, filename, reachable_only)
+        loader.finish(entry, filename, reachable_only, None)
     }
 
     pub(crate) fn load(
@@ -420,6 +535,16 @@ impl SourceGraph {
         module_root: Option<&Path>,
         extension_paths: &[PathBuf],
         reachable_only: bool,
+    ) -> Result<Self, String> {
+        Self::load_profile(entry, module_root, extension_paths, reachable_only, None)
+    }
+
+    pub(crate) fn load_profile(
+        entry: &Path,
+        module_root: Option<&Path>,
+        extension_paths: &[PathBuf],
+        reachable_only: bool,
+        profile: Option<&Path>,
     ) -> Result<Self, String> {
         // __file__ preserves the invoked spelling, including symlinks and '..'.
         // Use the canonical path below for import resolution and containment.
@@ -486,7 +611,7 @@ impl SourceGraph {
             }
         }
         loader.scan(id)?;
-        loader.finish(id, filename, reachable_only)
+        loader.finish(id, filename, reachable_only, profile)
     }
 
     /// Resolves namespace paths while leaving local-value attributes to the expression checker.
@@ -617,6 +742,7 @@ impl Loader {
         entry: ModuleId,
         entry_filename: PathBuf,
         reachable_only: bool,
+        profile: Option<&Path>,
     ) -> Result<SourceGraph, String> {
         // Resolve against the completed graph. Type-only imports neither run a
         // module initializer nor introduce runtime bindings or import cycles.
@@ -650,6 +776,12 @@ impl Loader {
         self.inputs.missing.sort_unstable();
         self.inputs.missing.dedup();
         let mut graph = SourceGraph {
+            empty_keywords: empty_keywords::EmptyKeywords::default(),
+            entry_profile: profile
+                .map(|p| entry_profile::Profile::load(p, &self.modules))
+                .transpose()?
+                .unwrap_or_default(),
+            mutable_documents: false,
             reachable: None,
             entry_filename,
             inputs: self.inputs,
@@ -659,9 +791,44 @@ impl Loader {
             initialization: self.initialization,
         };
         graph.reachable = reachable_only.then(|| reachability::Reachable::collect(&graph));
-        graph
-            .session
-            .check(graph.reachable.as_ref().map(|r| r.skipped.as_slice()))?;
+        graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
+        graph.mutable_documents = graph.uses_mutable_documents();
+        let context_decorators: Vec<Vec<_>> = graph
+            .modules
+            .iter()
+            .enumerate()
+            .map(|(id, module)| {
+                module
+                    .parsed
+                    .syntax()
+                    .body
+                    .iter()
+                    .filter_map(|stmt| {
+                        if let ast::Stmt::ClassDef(c) = stmt {
+                            Some(&c.body)
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten()
+                    .filter_map(|stmt| {
+                        let ast::Stmt::FunctionDef(method) = stmt else {
+                            return None;
+                        };
+                        let [decorator] = method.decorator_list.as_slice() else {
+                            return None;
+                        };
+                        (graph.resolve(id, &decorator.expression)
+                            == Some(Binding::Intrinsic(Intrinsic::ContextManager)))
+                        .then_some(decorator.range())
+                    })
+                    .collect()
+            })
+            .collect();
+        graph.session.check(
+            graph.reachable.as_ref().map(|r| r.skipped.as_slice()),
+            &context_decorators,
+        )?;
         Ok(graph)
     }
 

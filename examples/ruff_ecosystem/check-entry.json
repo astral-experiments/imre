@@ -1,0 +1,12 @@
+{
+  "ruff_ecosystem.cli.entrypoint": {
+    "args.pdb": "False"
+  },
+  "ruff_ecosystem.main.main": {
+    "format": "OutputFormat.markdown",
+    "command": "RuffCommand.check"
+  },
+  "ruff_ecosystem.main.clone_and_compare": {
+    "command": "RuffCommand.check"
+  }
+}
