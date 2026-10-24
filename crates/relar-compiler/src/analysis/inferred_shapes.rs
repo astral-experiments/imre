@@ -55,7 +55,7 @@ struct Shape {
 enum Contents {
     #[default]
     Unknown,
-    List,
+    List(usize),
     Dict {
         key_depth: usize,
     },
@@ -71,10 +71,24 @@ impl Shape {
         }
     }
 
-    fn list(depth: usize) -> Self {
+    fn list(depth: usize, layers: usize) -> Self {
         Self {
             depth,
-            contents: Contents::List,
+            contents: Contents::List(layers),
+        }
+    }
+
+    fn list_layers(&self) -> usize {
+        match self.contents {
+            Contents::List(layers) => layers,
+            _ => 0,
+        }
+    }
+
+    fn item_list_layers(&self) -> usize {
+        match &self.contents {
+            Contents::Tuple(fields) => fields.iter().map(Self::list_layers).min().unwrap_or(0),
+            _ => self.list_layers().saturating_sub(1),
         }
     }
 
@@ -109,7 +123,14 @@ impl Shape {
                 return field.clone();
             }
         }
-        Self::plain(self.depth.saturating_sub(1))
+        let depth = self.depth.saturating_sub(1);
+        if let Contents::List(layers) = self.contents
+            && layers > 1
+        {
+            Self::list(depth, layers - 1)
+        } else {
+            Self::plain(depth)
+        }
     }
 }
 
@@ -137,7 +158,7 @@ fn bind_target<'a>(target: &'a Expr, shape: Shape, bind: &mut impl FnMut(&'a str
         Expr::Name(node) => return bind(node.id.as_str(), shape),
         // A starred target receives a list of the remaining elements.
         Expr::Starred(node) => {
-            return bind_target(&node.value, Shape::list(shape.depth + 1), bind);
+            return bind_target(&node.value, Shape::list(shape.depth + 1, 1), bind);
         }
         Expr::Tuple(node) => &node.elts,
         Expr::List(node) => &node.elts,
@@ -241,7 +262,72 @@ impl<'a> Shapes<'a> {
                     contents: Contents::Dict { key_depth },
                 }
             }
-            Expr::List(_) | Expr::ListComp(_) => Shape::list(self.depth_in(value, locals)),
+            Expr::List(node) => {
+                let mut depth = 0;
+                let mut common = None::<usize>;
+                for item in &node.elts {
+                    let item = self.shape(item, locals);
+                    depth = depth.max(item.depth);
+                    let layers = item.list_layers();
+                    common = Some(common.map_or(layers, |old| old.min(layers)));
+                }
+                Shape::list(depth + 1, common.unwrap_or(0) + 1)
+            }
+            Expr::ListComp(_) => Shape::list(self.depth_in(value, locals), 1),
+            Expr::Call(node) => {
+                let rank = |arg: &Expr| self.depth_in(arg, locals);
+                let max_depth = |args: &[Expr]| args.iter().map(rank).max().unwrap_or(0);
+                let name = node.func.as_name_expr().map(|name| name.id.as_str());
+                let args = &node.arguments.args;
+                let unknown_call_depth = |receiver| {
+                    max_depth(args).max(receiver).max(
+                        node.arguments
+                            .keywords
+                            .iter()
+                            .map(|kw| rank(&kw.value))
+                            .max()
+                            .unwrap_or(0),
+                    )
+                };
+                if let Some(attr) = node.func.as_attribute_expr()
+                    && attr.attr.as_str() == "pop"
+                {
+                    let receiver = self.shape(&attr.value, locals);
+                    return if receiver.list_layers() > 0 {
+                        receiver.element(None)
+                    } else {
+                        Shape::plain(unknown_call_depth(receiver.depth))
+                    };
+                }
+                if matches!(name, Some("list" | "sorted")) {
+                    let input = args
+                        .first()
+                        .map(|arg| self.shape(arg, locals))
+                        .unwrap_or_default();
+                    return Shape::list(1 + input.iteration_depth(), input.item_list_layers() + 1);
+                }
+                let item_depth = |arg: &Expr| self.shape(arg, locals).iteration_depth();
+                Shape::plain(match name {
+                    // Both the iterator and the tuple around its items add a level.
+                    Some("zip") => 2 + args.iter().map(item_depth).max().unwrap_or(0),
+                    Some("enumerate") => 2 + args.first().map_or(0, item_depth),
+                    Some("tuple" | "set" | "frozenset" | "iter" | "reversed") => {
+                        1 + args.first().map_or(0, item_depth)
+                    }
+                    Some("dict") => args.first().map_or(1, |e| rank(e).max(1)),
+                    Some("next") => args.first().map_or(0, |e| rank(e).saturating_sub(1)),
+                    Some(
+                        "len" | "int" | "float" | "str" | "repr" | "bool" | "bytes" | "sum"
+                        | "print",
+                    ) => 0,
+                    Some(name) if self.fixed.contains(name) => 0,
+                    _ => unknown_call_depth(
+                        node.func
+                            .as_attribute_expr()
+                            .map_or(0, |attr| rank(&attr.value)),
+                    ),
+                })
+            }
             Expr::Subscript(node) if !matches!(&*node.slice, Expr::Slice(_)) => self
                 .shape(&node.value, locals)
                 .element(literal_index(&node.slice)),
@@ -281,9 +367,9 @@ impl<'a> Shapes<'a> {
                         let depth = old.depth.max(field.depth);
                         *old = if matches!(
                             (&old.contents, &field.contents),
-                            (Contents::List, Contents::List)
+                            (Contents::List(_), Contents::List(_))
                         ) {
-                            Shape::list(depth)
+                            Shape::list(depth, old.list_layers().min(field.list_layers()))
                         } else {
                             Shape::plain(depth)
                         };
@@ -341,51 +427,7 @@ impl<'a> Shapes<'a> {
             Expr::ListComp(node) => self.comprehension(&node.generators, &[&node.elt], locals),
             Expr::SetComp(node) => self.comprehension(&node.generators, &[&node.elt], locals),
             Expr::Generator(node) => self.comprehension(&node.generators, &[&node.elt], locals),
-            Expr::Call(node) => {
-                let name = node.func.as_name_expr().map(|name| name.id.as_str());
-                let args = &node.arguments.args;
-                let unknown_call_depth = |receiver| {
-                    max_depth(args).max(receiver).max(
-                        node.arguments
-                            .keywords
-                            .iter()
-                            .map(|kw| rank(&kw.value))
-                            .max()
-                            .unwrap_or(0),
-                    )
-                };
-                if let Some(attr) = node.func.as_attribute_expr()
-                    && attr.attr.as_str() == "pop"
-                {
-                    let receiver = self.shape(&attr.value, locals);
-                    return if matches!(receiver.contents, Contents::List) {
-                        receiver.depth.saturating_sub(1)
-                    } else {
-                        unknown_call_depth(receiver.depth)
-                    };
-                }
-                let item_depth = |arg: &Expr| self.shape(arg, locals).iteration_depth();
-                match name {
-                    // Both the iterator and the tuple around its items add a level.
-                    Some("zip") => 2 + args.iter().map(item_depth).max().unwrap_or(0),
-                    Some("enumerate") => 2 + args.first().map_or(0, item_depth),
-                    Some(
-                        "tuple" | "list" | "set" | "frozenset" | "sorted" | "iter" | "reversed",
-                    ) => 1 + args.first().map_or(0, item_depth),
-                    Some("dict") => args.first().map_or(1, |e| rank(e).max(1)),
-                    Some("next") => args.first().map_or(0, |e| rank(e).saturating_sub(1)),
-                    Some(
-                        "len" | "int" | "float" | "str" | "repr" | "bool" | "bytes" | "sum"
-                        | "print",
-                    ) => 0,
-                    Some(name) if self.fixed.contains(name) => 0,
-                    _ => unknown_call_depth(
-                        node.func
-                            .as_attribute_expr()
-                            .map_or(0, |attr| rank(&attr.value)),
-                    ),
-                }
-            }
+            Expr::Call(_) => self.shape(value, locals).depth,
             Expr::BinOp(node) => rank(&node.left).max(rank(&node.right)),
             _ => 0,
         }
@@ -415,9 +457,9 @@ impl<'a> Shapes<'a> {
                     let depth = old.depth.max(shape.depth);
                     if matches!(
                         (&old.contents, &shape.contents),
-                        (Contents::List, Contents::List)
+                        (Contents::List(_), Contents::List(_))
                     ) {
-                        Shape::list(depth)
+                        Shape::list(depth, old.list_layers().min(shape.list_layers()))
                     } else {
                         Shape::plain(depth)
                     }
@@ -824,6 +866,23 @@ mod tests {
             } else {
                 result.unwrap();
             }
+        }
+    }
+
+    #[test]
+    fn list_copies_and_projections_preserve_nested_pop_shapes() {
+        for expr in [
+            "[[v]].pop().pop()",
+            "[[v]][0].pop()",
+            "list([v]).pop()",
+            "sorted([v]).pop()",
+        ] {
+            let mut source = String::from("def f() -> int:\n    v = 1\n");
+            for _ in 0..MAX_DEPTH + 1 {
+                source.push_str(&format!("    v = {expr}\n"));
+            }
+            source.push_str("    return v\n");
+            crate::check(&source).unwrap();
         }
     }
 }
