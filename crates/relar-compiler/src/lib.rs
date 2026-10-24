@@ -15,6 +15,7 @@ mod modules;
 mod narrowing;
 mod range_specialization;
 mod ranges;
+mod record_copies;
 mod reductions;
 mod tuples;
 mod types;
@@ -176,8 +177,10 @@ pub fn compile_file_units(
         options.reachable_only || options.entry_profile.is_some(),
         options.entry_profile.as_deref(),
     )?;
-    let (mut module, owners) = frontend::lower_with_owners(&graph)?;
-    specialize(&mut module);
+    let (mut module, mut owners) = frontend::lower_with_owners(&graph)?;
+    for original in specialize(&mut module) {
+        owners.push(owners[original]);
+    }
     let ranges = ranges::analyze(&module);
     let names = graph
         .modules
@@ -208,13 +211,15 @@ pub fn compile_file_units(
     })
 }
 
-fn specialize(module: &mut ir::Module) {
+fn specialize(module: &mut ir::Module) -> Vec<usize> {
+    let reader_origins = record_copies::scalarize(module);
     tuples::scalarize(module);
     list_bounds::specialize(module);
     list_specialization::specialize(module);
     range_specialization::specialize(module);
     reductions::specialize(module);
     guarded_text::specialize(module);
+    reader_origins
 }
 
 /// Applies Python's source preprocessing before Ruff, ty, and source-range checks.
