@@ -1,7 +1,7 @@
 //! Interns concrete container types while keeping IR type identities small and exact.
 
 use std::cell::{Ref, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ir::Type;
 
@@ -426,6 +426,30 @@ impl Types {
             Shape::Dict(key, value) | Shape::DefaultListDict(key, value) => Some((key, value)),
             _ => unreachable!("dictionary type identity has a dictionary shape"),
         }
+    }
+
+    /// A file or any of its transitive owners has an observable final drop.
+    /// Opaque callables may own a bound receiver that contains a file.
+    pub(crate) fn may_own_file(
+        &self,
+        ty: Type,
+        class_fields: &[Vec<Type>],
+        opaque_callables: bool,
+    ) -> bool {
+        let mut pending = vec![ty];
+        let mut seen = HashSet::new();
+        while let Some(ty) = pending.pop() {
+            if !seen.insert(ty) {
+                continue;
+            }
+            match ty {
+                Type::TextIO | Type::BinaryIO => return true,
+                Type::Callable(_) if opaque_callables => return true,
+                Type::Class(class) => pending.extend_from_slice(&class_fields[class]),
+                _ => pending.extend(self.children(ty)),
+            }
+        }
+        false
     }
 
     /// Enumerates stored types for the class-field acyclicity check.
