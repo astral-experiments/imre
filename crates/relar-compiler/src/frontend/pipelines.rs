@@ -1672,7 +1672,7 @@ impl Checker<'_> {
         }
         let mut body = input.next;
         Prepared::bind_next(&mut body, self.local(input.ready), input.value, binding);
-        self.loop_breaks.push(Vec::new());
+        self.loop_breaks.push(None);
         body.extend(lower_body(self)?);
         let breaks = self.loop_breaks.pop().unwrap();
         self.assigned = before;

@@ -273,6 +273,27 @@ mod tests {
     }
 
     #[test]
+    fn finally_updates_only_breaks_that_pass_through_it() {
+        let source = concat!(
+            "def choose(run: bool, early: bool) -> str:\n",
+            "    while run:\n",
+            "        if early:\n",
+            "            word = 'early'\n",
+            "            break\n",
+            "        try:\n",
+            "            break\n",
+            "        finally:\n",
+            "            word = 'late'\n",
+            "    else:\n",
+            "        word = 'else'\n",
+            "    return word\n",
+        );
+        super::check(source).unwrap();
+        let missing = source.replace("word = 'early'", "pass");
+        assert!(super::check(&missing).is_err());
+    }
+
+    #[test]
     fn joins_elif_exits_through_an_exhaustive_type_guard() {
         let source = concat!(
             "def choose(value: str | bytes) -> str:\n",
