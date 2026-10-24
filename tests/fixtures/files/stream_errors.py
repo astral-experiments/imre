@@ -37,6 +37,12 @@ try:
 except ValueError:
     print("closed")
 
+with gzip_open("long-header.gz", "rb") as stream:
+    try:
+        print(stream.read(1))
+    except DeflateError:
+        print("invalid deflate stream after extra field")
+
 with open("rows.txt", "r", encoding="utf-8") as text:
     try:
         for line in text:

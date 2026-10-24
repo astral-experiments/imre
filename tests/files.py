@@ -697,6 +697,11 @@ def seed(directory: Path, case: str) -> None:
         (directory / "crc.gz").write_bytes(members[:-8] + bytes([members[-8] ^ 1]) + members[-7:])
         (directory / "invalid-block.gz").write_bytes(bytes.fromhex("1f8b0800000000000003ff") + bytes(16))
         (directory / "invalid-text.gz").write_bytes(gzip.compress(b"bad\xff", mtime=0))
+    if case == "stream_errors":
+        header = bytes.fromhex("1f8b08040000000000ff") + b"\xff\xff" + bytes(65535)
+        # A nonfinal stored block followed by a reserved block type.
+        body = bytes.fromhex("00ffff0000") + b"x" * 65535 + b"\x07"
+        (directory / "long-header.gz").write_bytes(header + body)
 
 
 def snapshot(directory: Path) -> dict[str, bytes | None]:
