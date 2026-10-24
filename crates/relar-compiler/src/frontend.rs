@@ -4738,7 +4738,32 @@ impl<'a> Checker<'a> {
             }))
     }
 
-    fn call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+    fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
+        // A method result becomes the next receiver before its arguments are
+        // evaluated. Check such chains in that order without retaining a full
+        // expression and call-dispatch frame for every intermediate receiver.
+        let mut chain = Vec::new();
+        while let ast::Expr::Attribute(method) = &*call.func
+            && let ast::Expr::Call(inner) = &*method.value
+            && inner.func.is_attribute_expr()
+            && self.resolve(&inner.func).is_none()
+            && !call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+            && call.arguments.keywords.iter().all(|kw| kw.arg.is_some())
+        {
+            chain.push(call);
+            call = inner;
+        }
+        let mut value = self.call_on(call, None)?;
+        for call in chain.into_iter().rev() {
+            if matches!(value.ty, Type::StrLiteral(_)) {
+                value = literals::view(value, Type::Str);
+            }
+            value = self.call_on(call, Some(value))?;
+        }
+        Ok(value)
+    }
+
+    fn call_on(&mut self, call: &ast::ExprCall, receiver: Option<Expr>) -> Result<Expr, String> {
         if matches!(&*call.func,ast::Expr::Name(n) if n.id=="dict" && !self.names.contains_key("dict"))
             && self.resolve(&call.func).is_none()
             && let Some(mapping) = self.dict_from_zip(call)?
@@ -4766,7 +4791,7 @@ impl<'a> Checker<'a> {
                 }
             });
             if normalized.arguments.keywords.len() != call.arguments.keywords.len() {
-                return self.call(&normalized);
+                return self.call_on(&normalized, receiver);
             }
         }
         if let Some(Binding::Intrinsic(
@@ -4781,7 +4806,7 @@ impl<'a> Checker<'a> {
         if let Some(expression) = self.parse_args(call)? {
             return Ok(expression);
         }
-        self.call_with_key_view(call, None)
+        self.call_with_key_view(call, None, receiver)
     }
 
     /// A direct `dict.keys()` operand roots the mapping until the operation.
@@ -4790,7 +4815,7 @@ impl<'a> Checker<'a> {
         let mut view = false;
         let value = match source {
             ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Attribute(attr) if attr.attr.as_str() == "keys") => {
-                self.call_with_key_view(call, Some(&mut view))?
+                self.call_with_key_view(call, Some(&mut view), None)?
             }
             _ => self.expr(source)?,
         };
@@ -4806,6 +4831,7 @@ impl<'a> Checker<'a> {
         &mut self,
         call: &ast::ExprCall,
         key_view: Option<&mut bool>,
+        receiver: Option<Expr>,
     ) -> Result<Expr, String> {
         if crate::classes::super_init(call) {
             return self.call_super_initializer(call);
@@ -5122,7 +5148,10 @@ impl<'a> Checker<'a> {
             if let Some(class) = self.class_reference(&attribute.value) {
                 return self.class_method_call(call, attribute, class, None);
             }
-            let receiver = self.expr(&attribute.value)?;
+            let receiver = match receiver {
+                Some(value) => value,
+                None => self.expr(&attribute.value)?,
+            };
             if let Type::Class(class) = receiver.ty {
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }
