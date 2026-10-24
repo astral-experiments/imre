@@ -191,6 +191,7 @@ unsafe fn object_equal(left: *const Object, right: *const Object) -> bool {
         object(left).0.with(|left| {
             object(right).0.with(|right| match (left, right) {
                 (Storage::Sequence(left), Storage::Sequence(right)) => {
+                    let (left, right) = (left.resolved(), right.resolved());
                     left.kind == right.kind
                         && left.values.len() == right.values.len()
                         && left
@@ -270,6 +271,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 .0
                 .with(|storage| match storage {
                     Storage::Sequence(values) => {
+                        let values = values.resolved();
                         output.push('[');
                         for (index, &value) in values.values.iter().enumerate() {
                             if index != 0 {

@@ -492,6 +492,14 @@ pub(crate) enum Builtin {
     SplitLines,
     DecodeSplitLines,
     Ndiff,
+    /// Copy an exact list of immutable strings into a distinct mutable list.
+    StringListCopy,
+    /// Select by up to two prefixes, optionally exclude one, then slice each match.
+    StringListFilter(u32),
+    /// Stable sort by the suffix after a fixed number of Unicode code points.
+    StringListSortSuffix(u32),
+    /// Ask whether a source has an item before evaluating a comprehension predicate.
+    StringListNonempty,
     RStrip,
     SysArgv,
     /// The child layout descriptors follow the literal subcommand order.

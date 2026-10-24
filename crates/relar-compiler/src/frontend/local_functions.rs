@@ -22,6 +22,18 @@ pub(super) struct Binding {
 }
 
 impl Binding {
+    /// A direct call reads its captured slots at call time. A generic local
+    /// function can acquire its capture list when a later call specializes it.
+    pub(super) fn may_capture(&self, slot: usize, name: &str) -> bool {
+        self.function
+            .as_ref()
+            .is_some_and(|f| f.captures.contains(&slot))
+            || self
+                .generic
+                .as_ref()
+                .is_some_and(|f| comprehensions::function_reads(f).contains(name))
+    }
+
     pub(super) fn target(&self, source: &str, node: &impl Ranged) -> Result<&Function, String> {
         self.function.as_ref().ok_or_else(|| {
             error(

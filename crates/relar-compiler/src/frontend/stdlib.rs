@@ -32,6 +32,9 @@ impl Checker<'_> {
                 "sorted requires one positional iterable",
             ));
         }
+        if let Some(sorted) = self.string_list_sorted_suffix(call, element)? {
+            return Ok(sorted);
+        }
         let mut body = Vec::new();
         let mut clear = Vec::new();
         let input = self.expansion_input(&call.arguments.args[0], element)?;

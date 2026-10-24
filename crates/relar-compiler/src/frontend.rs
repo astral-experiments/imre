@@ -42,6 +42,7 @@ mod sequences;
 mod sign_parameters;
 mod sorted_rows;
 mod stdlib;
+mod string_lists;
 mod text;
 mod truthiness;
 mod unions;
@@ -1558,6 +1559,8 @@ struct Checker<'a> {
     narrowed: HashMap<usize, Type>,
     regex_guards: Vec<(usize, regex::CaptureLayout)>,
     regex_locals: HashMap<usize, regex::CaptureLayout>,
+    /// Group dictionary locals whose complete set of reads resolves to capture slots.
+    regex_fields: HashMap<usize, HashMap<String, usize>>,
     namespace_guards: Vec<(usize, usize)>,
     captured_process_errors: Vec<processes::CapturedFields>,
     returns: Type,
@@ -1611,6 +1614,7 @@ impl<'a> Checker<'a> {
             narrowed: HashMap::new(),
             regex_guards: Vec::new(),
             regex_locals: HashMap::new(),
+            regex_fields: HashMap::new(),
             namespace_guards: Vec::new(),
             captured_process_errors: Vec::new(),
             returns: Type::None,
@@ -2280,6 +2284,7 @@ impl<'a> Checker<'a> {
 
     fn assigned_value(&mut self, slot: usize, value: &Expr) {
         self.regex_locals.remove(&slot);
+        self.regex_fields.remove(&slot);
         self.assigned.insert(slot);
         self.narrowed.remove(&slot);
         if let Some(payload) = self.types.payload(self.locals[slot]) {
@@ -3040,8 +3045,8 @@ impl<'a> Checker<'a> {
                     && (previous_sum || statements.get(index + 1).and_then(zip_sums::rhs).is_some())
             });
             previous_sum = sum.is_some();
-            let (lowered, continues) = self.statement(statement)?;
-            self.remember_regex_assignment(statement, &lowered, &statements[index + 1..]);
+            let (mut lowered, continues) = self.statement(statement)?;
+            self.remember_regex_assignment(statement, &mut lowered, &statements[index + 1..]);
             body.extend(lowered);
             falls_through &= continues;
         }
@@ -4492,10 +4497,10 @@ impl<'a> Checker<'a> {
                 if let Some((key, value)) = self.types.mapping(list.ty) {
                     let key = self.expr_expected(&subscript.slice, key)?;
                     let required = self.required_group_key(&list, &key);
-                    let expression = Expr {
+                    let expression = self.projected_group(&list, &key).unwrap_or_else(|| Expr {
                         ty: value,
                         kind: ExprKind::Builtin(Builtin::DictGet, vec![list, key]),
-                    };
+                    });
                     return Ok(if required {
                         Expr {
                             ty: Type::Str,
@@ -5338,6 +5343,11 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 let key = self.expr_expected(&call.arguments.args[0], key_type)?;
+                if call.arguments.args.len() == 1
+                    && let Some(capture) = self.projected_group(&receiver, &key)
+                {
+                    return Ok(capture);
+                }
                 let mut args = vec![receiver, key];
                 let optional = self.types.optional(value_type);
                 let (builtin, ty) = if let Some(default) = call.arguments.args.get(1) {

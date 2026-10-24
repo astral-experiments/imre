@@ -56,3 +56,26 @@ python3 benchmarks/ruff_ecosystem_benchmark.py bench \
 ```
 
 The Rust reference implements the report independently. The Codon reference compiles Ruff’s Markdown function bodies with native typed adapters. Both references exploit the reporter’s stable sort of changed lines. Equal nonpopular runs in sorted inputs directly pair. Contested repeats use the CPython 3.12 alignment rules before sorting. The harness also checks unchanged projects, fix-only changes, non-ASCII paths, popular duplicate rows, and lines that the diagnostic parser skips.
+
+### Replay a preview comparison
+
+Ruff 0.15.0 prints rule codes in preview diagnostics and 0.16.1 prints rule names. The Bokeh comparison changes more than 76,000 lines on each side. The capture command clones the pinned revision from a local checkout, applies Ruff’s original temporary config changes, and verifies both stdout hashes. It also supports Superset and Zulip. [Pinned projects and capture hashes](../../benchmarks/fixtures/ruff_ecosystem/preview.json)
+
+```sh
+python3 benchmarks/ruff_ecosystem_preview.py --project bokeh \
+  --checkout /path/to/bokeh --old-ruff /path/to/ruff-0.15.0 \
+  --new-ruff /path/to/ruff-0.16.1 --output /tmp/bokeh-preview --first 1024
+/tmp/ruff-replay /tmp/bokeh-preview 1 > bokeh.md
+python3.14 examples/ruff_ecosystem/replay.py /tmp/bokeh-preview 1 > bokeh-cpython.md
+cmp bokeh.md bokeh-cpython.md
+```
+
+`/tmp/bokeh-preview/first-1024` contains the first 1,024 sorted diagnostics per side for a shorter CPython 3.12 comparison. CPython 3.14 bounds its search for intraline matches. The frozen reports use the replay driver’s standard project options. To compare the full 58-project CLI with its original command lines and project errors, use the live benchmark command above with `--force-preview --python /path/to/python3.14`.
+
+For the three-project timing comparison, write the captures under `preview/bokeh`, `preview/superset`, and `preview/zulip`. The harness verifies the input and Markdown hashes, runs each native executable once to warm up, and rotates the three executables through six measured rounds on one CPU. Passing `--python /path/to/python3.14` also times the original script once per complete project and compares the output bytes directly.
+
+```sh
+python3 benchmarks/ruff_ecosystem_benchmark.py preview --captures preview \
+  --relar /tmp/ruff-replay --codon /tmp/ruff-replay-codon \
+  --rust /path/to/ruff-ecosystem-reference --cpu 3 --output preview-results.json.gz
+```

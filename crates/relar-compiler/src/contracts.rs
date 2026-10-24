@@ -238,6 +238,10 @@ impl Builtin {
             | Self::Split
             | Self::SplitLines
             | Self::Ndiff
+            | Self::StringListCopy
+            | Self::StringListFilter(_)
+            | Self::StringListSortSuffix(_)
+            | Self::StringListNonempty
             | Self::Str
             | Self::StrEnumIdentity
             | Self::StrEnumMember { .. }
