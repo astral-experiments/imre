@@ -253,6 +253,21 @@ mod tests {
     }
 
     #[test]
+    fn bounds_tuples_yielded_by_zip_and_enumerate() {
+        for call in ["zip(input)", "zip([0], input)", "enumerate(input, 42)"] {
+            let mut body = String::from("v0 = [1]\n");
+            for i in 1..=MAX_DEPTH {
+                if i == MAX_DEPTH {
+                    assert!(!limited(&body), "{call}");
+                }
+                let wrapper = call.replace("input", &format!("v{}", i - 1));
+                body.push_str(&format!("v{i} = list({wrapper})\n"));
+            }
+            assert!(limited(&body), "{call}");
+        }
+    }
+
+    #[test]
     fn bounds_flat_wrapping_and_aliases() {
         let mut body = String::from("v0 = (1,)\n");
         for i in 1..MAX_DEPTH {
@@ -279,21 +294,6 @@ mod tests {
         ] {
             let last = wrap.replace("{p}", &format!("v{}", MAX_DEPTH - 1));
             assert!(limited(&format!("{body}result = {last}\n")), "{wrap}");
-        }
-    }
-
-    #[test]
-    fn bounds_tuples_yielded_by_zip_and_enumerate() {
-        for call in ["zip(input)", "zip([0], input)", "enumerate(input, 42)"] {
-            let mut body = String::from("v0 = [1]\n");
-            for i in 1..=MAX_DEPTH {
-                if i == MAX_DEPTH {
-                    assert!(!limited(&body), "{call}");
-                }
-                let wrapper = call.replace("input", &format!("v{}", i - 1));
-                body.push_str(&format!("v{i} = list({wrapper})\n"));
-            }
-            assert!(limited(&body), "{call}");
         }
     }
 
