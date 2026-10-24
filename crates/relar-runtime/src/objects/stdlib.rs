@@ -453,7 +453,17 @@ pub unsafe extern "C" fn relar_str_replace(
 ) -> *const Str {
     // SAFETY: inputs remain immutable and rooted through both sizing and copying.
     let (value, old, new) = unsafe { (&*value, &*old, &*new) };
-    let count = value.matches(old.as_str()).count();
+    let count = if old == new {
+        0
+    } else {
+        value.matches(old.as_str()).count()
+    };
+    if count == 0 {
+        // SAFETY: the caller roots the input; the unchanged result takes its own owner.
+        return Rc::into_raw(unsafe {
+            super::acquire_rc::<Str>(std::ptr::from_ref(value) as usize)
+        });
+    }
     let length = value
         .len()
         .checked_sub(old.len().checked_mul(count).unwrap())
@@ -689,6 +699,24 @@ mod tests {
             super::super::relar_object_release(values);
         }
         assert!(texts.iter().all(|text| Rc::strong_count(text) == 1));
+    }
+
+    #[test]
+    fn unchanged_replacements_return_an_owner_of_the_source() {
+        let value = Rc::new(Str::from("word".repeat(1024)));
+        for (old, new) in [("absent", "!"), ("word", "word"), ("", "")] {
+            let old = Rc::new(Str::from(old));
+            let new = Rc::new(Str::from(new));
+            // SAFETY: the three inputs stay rooted, and the result transfers an owner.
+            let result = unsafe {
+                Rc::from_raw(relar_str_replace(
+                    Rc::as_ptr(&value),
+                    Rc::as_ptr(&old),
+                    Rc::as_ptr(&new),
+                ))
+            };
+            assert!(Rc::ptr_eq(&result, &value));
+        }
     }
 
     #[test]
