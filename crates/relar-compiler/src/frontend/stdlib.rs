@@ -635,6 +635,7 @@ impl Checker<'_> {
                 | Type::Bytes
                 | Type::None
                 | Type::Exception
+                | Type::ExitCode
                 | Type::TimeoutExpired
         ) {
             return Err(error(

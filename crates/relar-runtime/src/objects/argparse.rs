@@ -307,10 +307,11 @@ pub unsafe extern "C" fn relar_argparse_parse(
                 return Error::new(exceptions::Kind::OSError, "could not write standard output")
                     .returning(std::ptr::null_mut());
             }
-            return Error::new(exceptions::Kind::SystemExit, "0").returning(std::ptr::null_mut());
+            return Error::exit_status(0).returning(std::ptr::null_mut());
         }
         Outcome::Error(error) => {
             let _ = crate::flush_stdout();
+            let _ = crate::sys::flush_stderr();
             if writeln!(
                 io::stderr().lock(),
                 "{}{}: error: {}",
@@ -323,7 +324,7 @@ pub unsafe extern "C" fn relar_argparse_parse(
                 return Error::new(exceptions::Kind::OSError, "could not write standard error")
                     .returning(std::ptr::null_mut());
             }
-            return Error::new(exceptions::Kind::SystemExit, "2").returning(std::ptr::null_mut());
+            return Error::exit_status(2).returning(std::ptr::null_mut());
         }
     };
     // SAFETY: every slot receives exactly one owner of its declared kind. All

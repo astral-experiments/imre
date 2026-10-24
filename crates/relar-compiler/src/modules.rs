@@ -82,6 +82,9 @@ pub(crate) enum Intrinsic {
     RawDescriptionHelpFormatter,
     FutureAnnotations,
     Stderr,
+    Stdout,
+    SysPlatform,
+    SysExit,
     Argv,
     TextIO,
     BinaryIO,
@@ -189,6 +192,9 @@ impl IntrinsicModule {
         let symbol = match (self, name) {
             (Self::Future, "annotations") => Intrinsic::FutureAnnotations,
             (Self::Sys, "stderr") => Intrinsic::Stderr,
+            (Self::Sys, "stdout") => Intrinsic::Stdout,
+            (Self::Sys, "platform") => Intrinsic::SysPlatform,
+            (Self::Sys, "exit") => Intrinsic::SysExit,
             (Self::Argparse, "ArgumentParser") => Intrinsic::ArgumentParser,
             (Self::Argparse, "RawDescriptionHelpFormatter") => {
                 Intrinsic::RawDescriptionHelpFormatter
