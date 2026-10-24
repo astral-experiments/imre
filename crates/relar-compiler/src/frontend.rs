@@ -1642,14 +1642,13 @@ impl<'a> Checker<'a> {
         mut check: impl FnMut(&mut Self, &ast::Expr) -> Result<Expr, String>,
     ) -> Result<Expr, String> {
         let test = self.condition(&value.test)?;
-        let before = self.local_state();
+        let mut facts = assignments::ConditionalFacts::capture(self, value);
         self.apply_facts(&value.test, true);
         let yes = check(self, &value.body)?;
-        let yes_state = self.local_state();
-        self.restore_state(before);
+        facts.switch_arm(self);
         self.apply_facts(&value.test, false);
         let no = check(self, &value.orelse)?;
-        self.join_states([yes_state, self.local_state()]);
+        facts.join(self);
         // Context can promote both concrete arms for optional storage. Keep the
         // expression's narrower result when those original values agree.
         let yes = assignments::unpromoted(yes);
