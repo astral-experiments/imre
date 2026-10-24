@@ -2,6 +2,128 @@
 //! keep conditional writes from becoming unconditional initialization facts.
 
 use super::*;
+use ruff_python_ast::visitor::{Visitor, walk_comprehension, walk_expr};
+
+/// Previously allocated slots keep their facts throughout an expression unless
+/// the expression can write the name or use it in a narrowing test. Names
+/// introduced by a walrus may acquire a slot while checking the first arm.
+pub(super) struct ConditionalFacts<'a> {
+    writes: Vec<(String, bool)>,
+    narrowed: Vec<(&'a str, Option<Type>)>,
+}
+
+impl<'a> ConditionalFacts<'a> {
+    pub(super) fn capture(checker: &Checker<'_>, value: &'a ast::ExprIf) -> Self {
+        struct Names<'a>(HashSet<&'a str>);
+        impl<'a> Visitor<'a> for Names<'a> {
+            fn visit_expr(&mut self, expr: &'a ast::Expr) {
+                if let ast::Expr::Name(name) = expr {
+                    self.0.insert(name.id.as_str());
+                } else {
+                    walk_expr(self, expr);
+                }
+            }
+        }
+        // Only truth tests, bindings, and comprehension targets can change
+        // narrowing inside an expression. Plain reads in wide displays do not.
+        struct FlowNames<'a> {
+            names: Names<'a>,
+        }
+        impl<'a> Visitor<'a> for FlowNames<'a> {
+            fn visit_expr(&mut self, expr: &'a ast::Expr) {
+                match expr {
+                    ast::Expr::If(node) => self.names.visit_expr(&node.test),
+                    ast::Expr::Named(node) => self.names.visit_expr(&node.target),
+                    ast::Expr::BoolOp(_) => {
+                        self.names.visit_expr(expr);
+                        return;
+                    }
+                    _ => {}
+                }
+                walk_expr(self, expr);
+            }
+            fn visit_comprehension(&mut self, node: &'a ast::Comprehension) {
+                self.names.visit_expr(&node.target);
+                for test in &node.ifs {
+                    self.names.visit_expr(test);
+                }
+                walk_comprehension(self, node);
+            }
+        }
+        let mut flow = FlowNames {
+            names: Names(HashSet::new()),
+        };
+        flow.names.visit_expr(&value.test);
+        let mut writes = HashSet::new();
+        for expr in [&*value.test, &*value.body, &*value.orelse] {
+            flow.visit_expr(expr);
+            writes.extend(narrowing::expression_assignments(expr));
+        }
+        Self {
+            writes: writes
+                .into_iter()
+                .map(|name| {
+                    let assigned = checker
+                        .names
+                        .get(&name)
+                        .is_some_and(|s| checker.assigned.contains(s));
+                    (name, assigned)
+                })
+                .collect(),
+            narrowed: flow
+                .names
+                .0
+                .into_iter()
+                .map(|name| {
+                    let ty = checker
+                        .names
+                        .get(name)
+                        .and_then(|s| checker.narrowed.get(s))
+                        .copied();
+                    (name, ty)
+                })
+                .collect(),
+        }
+    }
+
+    /// Restore the input facts and keep the completed arm's facts for the join.
+    pub(super) fn switch_arm(&mut self, checker: &mut Checker<'_>) {
+        for (name, assigned) in &mut self.writes {
+            if let Some(&slot) = checker.names.get(name) {
+                let current = checker.assigned.contains(&slot);
+                if *assigned {
+                    checker.assigned.insert(slot);
+                } else {
+                    checker.assigned.remove(&slot);
+                }
+                *assigned = current;
+            }
+        }
+        for (name, ty) in &mut self.narrowed {
+            if let Some(&slot) = checker.names.get(*name) {
+                *ty = match *ty {
+                    Some(previous) => checker.narrowed.insert(slot, previous),
+                    None => checker.narrowed.remove(&slot),
+                };
+            }
+        }
+    }
+
+    pub(super) fn join(self, checker: &mut Checker<'_>) {
+        for (name, assigned) in self.writes {
+            if !assigned && let Some(slot) = checker.names.get(&name) {
+                checker.assigned.remove(slot);
+            }
+        }
+        for (name, ty) in self.narrowed {
+            if let Some(slot) = checker.names.get(name)
+                && checker.narrowed.get(slot).copied() != ty
+            {
+                checker.narrowed.remove(slot);
+            }
+        }
+    }
+}
 
 #[derive(Clone)]
 pub(super) struct LocalState {
@@ -52,16 +174,6 @@ impl Checker<'_> {
     pub(super) fn restore_state(&mut self, state: LocalState) {
         self.assigned = state.assigned;
         self.narrowed = state.narrowed;
-    }
-
-    /// Keeps only facts established on every normally completed path.
-    pub(super) fn join_states(&mut self, states: impl IntoIterator<Item = LocalState>) {
-        let mut states = states.into_iter();
-        let mut joined = states.next().expect("a checked expression has an exit");
-        for state in states {
-            joined.retain_common(&state.assigned, &state.narrowed);
-        }
-        self.restore_state(joined);
     }
 
     /// A binding yields the original RHS value; optional promotion belongs to
