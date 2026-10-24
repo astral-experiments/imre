@@ -84,6 +84,14 @@ for size in [8192, 131071, 131072]:
         print(len(read("buffered.bin")))
         writer.flush()
         print(len(read("buffered.bin")))
+for size in [262144, 262145]:
+    with open("read-ahead.bin", "wb") as writer:
+        writer.write(b"A" * (size + 1))
+    with open("read-ahead.bin", "rb") as reader:
+        reader.read(size)
+        with open("read-ahead.bin", "wb"):
+            pass
+        print(reader.read(1))
 with open("payload.bin", "rb") as reader:
     try:
         print(reader.write(b"wrong"))

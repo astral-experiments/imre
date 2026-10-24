@@ -128,11 +128,28 @@ impl Input {
             bytes
                 .try_reserve_exact(limit)
                 .map_err(|_| Error::new(Kind::MemoryError, "bytes allocation failed"))?;
-            self.raw
+            let mut bulk = limit;
+            if matches!(self.raw.get_ref(), Source::Plain(_)) {
+                // Split a large file read at the last whole block so BufReader
+                // keeps the surplus bytes from the final partial block.
+                let remaining = limit.saturating_sub(self.raw.buffer().len());
+                if remaining > self.raw.capacity() {
+                    bulk -= remaining % self.raw.capacity();
+                }
+            }
+            let read = self
+                .raw
                 .by_ref()
-                .take(limit as u64)
+                .take(bulk as u64)
                 .read_to_end(&mut bytes)
                 .map_err(os_error)?;
+            if read == bulk && read < limit {
+                self.raw
+                    .by_ref()
+                    .take((limit - read) as u64)
+                    .read_to_end(&mut bytes)
+                    .map_err(os_error)?;
+            }
             // CPython releases the unused part of a short read. Keeping the
             // requested capacity alive with a tiny result exhausts address space.
             if bytes.len() < limit {
