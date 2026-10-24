@@ -155,7 +155,7 @@ def make_fixture(directory: Path, python: str | Path) -> tuple[Path, Path]:
     (suite / "tests" / "support.py").write_text("support = True\n", encoding="utf-8")
     analyzer = directory / "fixture-ty"
     analyzer.write_text(f"#!{Path(python).absolute()} -B\n" + '''import json, os, pathlib, sys, time
-mode = os.environ.get("RELAR_LIVE_FIXTURE", "ok")
+mode = os.environ.get("IMRE_LIVE_FIXTURE", "ok")
 expected = ["check", "--python-version=3.12", "--output-format=gitlab",
     "--ignore=assert-type-unspellable-subtype", "--error=ambiguous-protocol-member",
     "--error=invalid-enum-member-annotation", "--error=invalid-legacy-positional-parameter",
@@ -171,8 +171,8 @@ if mode == "exit":
     print("intentional failure", file=sys.stderr)
     sys.exit(7)
 if mode == "timeout":
-    if "RELAR_LIVE_PID" in os.environ:
-        pathlib.Path(os.environ["RELAR_LIVE_PID"]).write_text(str(os.getpid()))
+    if "IMRE_LIVE_PID" in os.environ:
+        pathlib.Path(os.environ["IMRE_LIVE_PID"]).write_text(str(os.getpid()))
     print("captured before timeout", flush=True)
     time.sleep(60)
 if mode == "json":
@@ -248,7 +248,7 @@ def validate(commands: dict[str, list[str]], suite: Path, old_ty: Path, new_ty: 
             pid_path = pid_directory / engine
             records.append({"case": "fixture-" + mode, "engine": engine,
                             **run_checked(command, arguments, directory, expected,
-                                          extra_environment={"RELAR_LIVE_FIXTURE": mode, "RELAR_LIVE_PID": str(pid_path)})})
+                                          extra_environment={"IMRE_LIVE_FIXTURE": mode, "IMRE_LIVE_PID": str(pid_path)})})
             if mode == "timeout":
                 pid = int(pid_path.read_text())
                 try:
@@ -278,7 +278,7 @@ def validate(commands: dict[str, list[str]], suite: Path, old_ty: Path, new_ty: 
         try:
             records.append({"case": "fixture-mutate-source", "engine": engine,
                             **run_checked(command, arguments, directory, expected,
-                                          extra_environment={"RELAR_LIVE_FIXTURE": "mutate-source"})})
+                                          extra_environment={"IMRE_LIVE_FIXTURE": "mutate-source"})})
             assert source.read_bytes() == b"\xff", (engine, "fixture analyzer never ran")
         finally:
             source.write_bytes(original_bytes)
@@ -290,7 +290,7 @@ def validate(commands: dict[str, list[str]], suite: Path, old_ty: Path, new_ty: 
         for engine, command in commands.items():
             records.append({"case": "fixture-" + name, "engine": engine,
                             **run_checked(command, arguments, directory, error,
-                                          extra_environment={"RELAR_LIVE_FIXTURE": "exit"})})
+                                          extra_environment={"IMRE_LIVE_FIXTURE": "exit"})})
     directory = artifact / "fixture-publication-error"
     directory.mkdir()
     (directory / "home").mkdir()
@@ -315,14 +315,14 @@ def main() -> None:
     parser.add_argument("--old-ty", required=True, type=Path)
     parser.add_argument("--new-ty", required=True, type=Path)
     parser.add_argument("--python", default=sys.executable)
-    parser.add_argument("--relar", type=Path)
+    parser.add_argument("--imre", type=Path)
     parser.add_argument("--codon", type=Path)
     parser.add_argument("--rust", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     commands = {"original": original_command(args.python), "port": python_command(args.python)}
     commands.update({name: [str(getattr(args, name).resolve(strict=True))]
-                     for name in ("relar", "codon", "rust") if getattr(args, name) is not None})
+                     for name in ("imre", "codon", "rust") if getattr(args, name) is not None})
     report = validate(commands, args.suite.resolve(strict=True), args.old_ty.resolve(strict=True),
                       args.new_ty.resolve(strict=True), args.output.resolve(), args.python)
     (args.output / "validation.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

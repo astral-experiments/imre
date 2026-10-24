@@ -1,4 +1,4 @@
-"""Build the same retained-list extension for CPython and a standalone Relar app."""
+"""Build the same retained-list extension for CPython and a standalone Imre app."""
 
 import argparse
 import os
@@ -26,7 +26,7 @@ def main() -> None:
     compiler = args.compiler.resolve()
     runtime = args.runtime.resolve()
 
-    with tempfile.TemporaryDirectory(prefix="relar-extension-") as temp:
+    with tempfile.TemporaryDirectory(prefix="imre-extension-") as temp:
         root = Path(temp)
         stage, include, cpython, app = [
             root / name for name in ("stage", "include", "cpython", "app")
@@ -36,7 +36,7 @@ def main() -> None:
         dist, site = root / "dist", root / "installed"
         env = {
             **os.environ,
-            "RELAR_CACHE_DIR": str(root / "cache"),
+            "IMRE_CACHE_DIR": str(root / "cache"),
             "PIP_DISABLE_PIP_VERSION_CHECK": "1",
         }
         if args.sanitize:
@@ -85,7 +85,7 @@ def main() -> None:
             "-o",
             root / "retainer.o",
         )
-        run("ar", "rcs", stage / "retainer.relar.a", root / "retainer.o")
+        run("ar", "rcs", stage / "retainer.imre.a", root / "retainer.o")
         shutil.copyfile(FIXTURES / "retainer.pyi", stage / "retainer.pyi")
         run(
             sys.executable,
@@ -101,7 +101,7 @@ def main() -> None:
         (wheel,) = dist.glob("*.whl")
         _, _, _, tags = parse_wheel_filename(wheel.name)
         (tag,) = tags
-        assert (tag.interpreter, tag.abi) == ("rl1", "relar1")
+        assert (tag.interpreter, tag.abi) == ("im1", "imre1")
         pip = (
             sys.executable,
             "-m",
@@ -118,15 +118,15 @@ def main() -> None:
         run(
             *pip,
             "--implementation",
-            "rl",
+            "im",
             "--python-version",
             "1",
             "--abi",
             tag.abi,
             wheel,
         )
-        assert (site / "retainer.relar.a").read_bytes() == (
-            stage / "retainer.relar.a"
+        assert (site / "retainer.imre.a").read_bytes() == (
+            stage / "retainer.imre.a"
         ).read_bytes()
 
         cp_runner = "import runpy, sys; sys.path.insert(0, sys.argv[1]); runpy.run_path(sys.argv[2], run_name='__main__')"
@@ -175,11 +175,11 @@ def main() -> None:
             assert run(cached) == programs[root / "retained-O3"]
 
             # Changing a wheel at the same path must affect the next link.
-            manifest = site / "retainer.relar.libs"
+            manifest = site / "retainer.imre.libs"
             manifest.write_text("--invalid-library\n")
             assert b"invalid native link library name" in run(*build, success=False)
             manifest.unlink()
-            archive = site / "retainer.relar.a"
+            archive = site / "retainer.imre.a"
             archive.write_bytes(b"invalid replacement archive\n")
             assert b"LLVM compilation/linking failed" in run(*build, success=False)
 

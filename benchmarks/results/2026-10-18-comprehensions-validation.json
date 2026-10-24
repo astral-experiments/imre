@@ -1,9 +1,9 @@
 {
-  "schema": "relar-inventory-publication-validation-v1",
+  "schema": "imre-inventory-publication-validation-v1",
   "recorded_at_utc": "2026-10-18T13:26:38.228931+00:00",
   "audit": {
     "script": {
-      "path": "<scratch>/relar-audit-inventory-publication.py",
+      "path": "<scratch>/imre-audit-inventory-publication.py",
       "sha256": "9c53bb6ecf5f641c697d6a5591ce9e967bd88dd17f6baee7f9f5b1d978d81ba7",
       "bytes": 27902
     },
@@ -25,30 +25,30 @@
     "compiled_source_sha256": {
       "Cargo.toml": "ce49064770ad21744c8ac6cea604da7408be1e5ec474e3f90206fa95f2af614f",
       "Cargo.lock": "94ea6e3c2351ad1dff6764dac5c52ff51993b1f7a3a79164e209a4e7c1b80471",
-      "crates/relar-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
-      "crates/relar-runtime/Cargo.toml": "504747307550bbb6a62804730b159c158cba5b35e22a533269db00f51f423ba8",
-      "crates/relar-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
-      "crates/relar-compiler/src/classes.rs": "8a57bbf41463e5384d86fc7d70be62fb8c26ef95b89bbcf7b575ea13be373785",
-      "crates/relar-compiler/src/effects.rs": "58d6d4604c2ec19402a696c6b168c63c924493424feab30f013874f10108f62f",
-      "crates/relar-compiler/src/frontend/comprehensions.rs": "d90161413c8957a941deeafa82210aca3ff73d51058760a9362124d4ab20bc02",
-      "crates/relar-compiler/src/frontend.rs": "555b5f6c8d62a210d38b13aa783ae8bfc9470a8b1bf0db10667a41f7dab2d38b",
-      "crates/relar-compiler/src/ir.rs": "a716274199e8cace1a95867148e752e62568cfd59f64aa1bd2c5c344eae3114c",
-      "crates/relar-compiler/src/lib.rs": "aff038d03eadb6f07481b29100e984e3f6de97c089404a574daf3c0f5653861d",
-      "crates/relar-compiler/src/llvm.rs": "8981af8933a57ee3d878e9d5746d38baa3be90b5fc90b577b39c798f7ed6d3da",
-      "crates/relar-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
-      "crates/relar-compiler/src/modules.rs": "3c597d7ddfe35c2cd12a2189ce7c69cf81c7983e89193c47f00395019210de0a",
-      "crates/relar-compiler/src/narrowing.rs": "f37bbacad8279aa18aff36edbee90477187d8927ca12b0563b0bfedde791832d",
-      "crates/relar-compiler/src/ranges.rs": "29c217f8ef942187f5e945385279ac2548ab645a13145345c2023befa6303060",
-      "crates/relar-compiler/src/tuples.rs": "022bc95c1702a09f6f124754031d13c07ff94b4f721f72f6363bad2ff29211fa",
-      "crates/relar-compiler/src/types.rs": "6ec28df90874d39206cfd36f025964e6e4fd1026bbfff9eba868e7a944d2cbbe",
-      "crates/relar-runtime/src/lib.rs": "4ca207eb054a7a9023b08957058ebe4dae933410ea5cd1ede62550c18dab2988",
-      "crates/relar-runtime/src/objects/args.rs": "0f7c2543368bc69da08613471c17dc7ac0981967e7840e3c30ef85dc6a044099",
-      "crates/relar-runtime/src/objects/exceptions.rs": "003d465b3a28ac4cb991d2fa2a9b589add6a35ef714587ad6c705e0667b836af",
-      "crates/relar-runtime/src/objects/files.rs": "8de2a1d4d72cef8236adc61cfb547e69a581eb3af3a28d190dd7e73f2f385e34",
-      "crates/relar-runtime/src/objects/mappings.rs": "eca128f038aff16c93af24203b7d66fe652d27430b5cac02a25630758a590ec9",
-      "crates/relar-runtime/src/objects/records.rs": "9e8061a02eca605d6587da87dedb0ca7b2b868d98bef9abb5159bd4b7ceff75d",
-      "crates/relar-runtime/src/objects/words.rs": "251b21899a15b0d40c6de1f8452034d139bf7093aa112c5603c8896427f53ca8",
-      "crates/relar-runtime/src/objects.rs": "666ea6e7015b105b71c5b1756cf8d8aa260dde245ae1c4ec8a5b4ccd2cfd90d3"
+      "crates/imre-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
+      "crates/imre-runtime/Cargo.toml": "504747307550bbb6a62804730b159c158cba5b35e22a533269db00f51f423ba8",
+      "crates/imre-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
+      "crates/imre-compiler/src/classes.rs": "8a57bbf41463e5384d86fc7d70be62fb8c26ef95b89bbcf7b575ea13be373785",
+      "crates/imre-compiler/src/effects.rs": "58d6d4604c2ec19402a696c6b168c63c924493424feab30f013874f10108f62f",
+      "crates/imre-compiler/src/frontend/comprehensions.rs": "d90161413c8957a941deeafa82210aca3ff73d51058760a9362124d4ab20bc02",
+      "crates/imre-compiler/src/frontend.rs": "555b5f6c8d62a210d38b13aa783ae8bfc9470a8b1bf0db10667a41f7dab2d38b",
+      "crates/imre-compiler/src/ir.rs": "a716274199e8cace1a95867148e752e62568cfd59f64aa1bd2c5c344eae3114c",
+      "crates/imre-compiler/src/lib.rs": "aff038d03eadb6f07481b29100e984e3f6de97c089404a574daf3c0f5653861d",
+      "crates/imre-compiler/src/llvm.rs": "8981af8933a57ee3d878e9d5746d38baa3be90b5fc90b577b39c798f7ed6d3da",
+      "crates/imre-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+      "crates/imre-compiler/src/modules.rs": "3c597d7ddfe35c2cd12a2189ce7c69cf81c7983e89193c47f00395019210de0a",
+      "crates/imre-compiler/src/narrowing.rs": "f37bbacad8279aa18aff36edbee90477187d8927ca12b0563b0bfedde791832d",
+      "crates/imre-compiler/src/ranges.rs": "29c217f8ef942187f5e945385279ac2548ab645a13145345c2023befa6303060",
+      "crates/imre-compiler/src/tuples.rs": "022bc95c1702a09f6f124754031d13c07ff94b4f721f72f6363bad2ff29211fa",
+      "crates/imre-compiler/src/types.rs": "6ec28df90874d39206cfd36f025964e6e4fd1026bbfff9eba868e7a944d2cbbe",
+      "crates/imre-runtime/src/lib.rs": "4ca207eb054a7a9023b08957058ebe4dae933410ea5cd1ede62550c18dab2988",
+      "crates/imre-runtime/src/objects/args.rs": "0f7c2543368bc69da08613471c17dc7ac0981967e7840e3c30ef85dc6a044099",
+      "crates/imre-runtime/src/objects/exceptions.rs": "003d465b3a28ac4cb991d2fa2a9b589add6a35ef714587ad6c705e0667b836af",
+      "crates/imre-runtime/src/objects/files.rs": "8de2a1d4d72cef8236adc61cfb547e69a581eb3af3a28d190dd7e73f2f385e34",
+      "crates/imre-runtime/src/objects/mappings.rs": "eca128f038aff16c93af24203b7d66fe652d27430b5cac02a25630758a590ec9",
+      "crates/imre-runtime/src/objects/records.rs": "9e8061a02eca605d6587da87dedb0ca7b2b868d98bef9abb5159bd4b7ceff75d",
+      "crates/imre-runtime/src/objects/words.rs": "251b21899a15b0d40c6de1f8452034d139bf7093aa112c5603c8896427f53ca8",
+      "crates/imre-runtime/src/objects.rs": "666ea6e7015b105b71c5b1756cf8d8aa260dde245ae1c4ec8a5b4ccd2cfd90d3"
     }
   },
   "references": {
@@ -72,7 +72,7 @@
       },
       "build_command": [
         "sh",
-        "<scratch>/relar-cargo.sh",
+        "<scratch>/imre-cargo.sh",
         "build",
         "--release",
         "--locked",
@@ -102,7 +102,7 @@
       },
       "build_command": [
         "sh",
-        "<scratch>/relar-cargo.sh",
+        "<scratch>/imre-cargo.sh",
         "build",
         "--release",
         "--locked",
@@ -150,10 +150,10 @@
         "python3",
         "benchmarks/inventory_benchmark.py",
         "--compiler",
-        "benchmarks/local/comprehension-tools-final/relar",
+        "benchmarks/local/comprehension-tools-final/imre",
         "--runtime",
-        "benchmarks/local/comprehension-tools-final/librelar_runtime.a",
-        "--relar-build-record",
+        "benchmarks/local/comprehension-tools-final/libimre_runtime.a",
+        "--imre-build-record",
         "benchmarks/local/comprehension-tools-final/build-record.json",
         "--rust-bigint",
         "benchmarks/local/inventory-reference-final-normal/inventory-bigint",
@@ -204,7 +204,7 @@
         "terminal_error_cases": 49,
         "engines": [
           "cpython",
-          "relar",
+          "imre",
           "rust_bigint"
         ],
         "filesystem_executions": 528,
@@ -217,7 +217,7 @@
         "engines": [
           "cpython",
           "baseline",
-          "relar"
+          "imre"
         ],
         "executions": 516,
         "note": "No checked-i64 engine participates; shared-validator i64 exclusion metadata does not exclude any of these engines."
@@ -232,7 +232,7 @@
             "medians_seconds": {
               "cpython": 0.113566179,
               "baseline": 0.050324312499999996,
-              "relar": 0.050243802500000004
+              "imre": 0.050243802500000004
             }
           },
           {
@@ -240,7 +240,7 @@
             "medians_seconds": {
               "cpython": 0.1947865765,
               "baseline": 0.074861153,
-              "relar": 0.075065582
+              "imre": 0.075065582
             }
           },
           {
@@ -248,7 +248,7 @@
             "medians_seconds": {
               "cpython": 0.1025658185,
               "baseline": 0.026280764999999998,
-              "relar": 0.026481664000000002
+              "imre": 0.026481664000000002
             }
           },
           {
@@ -256,7 +256,7 @@
             "medians_seconds": {
               "cpython": 0.186227288,
               "baseline": 0.0445176035,
-              "relar": 0.0446885365
+              "imre": 0.0446885365
             }
           },
           {
@@ -264,7 +264,7 @@
             "medians_seconds": {
               "cpython": 0.0210891805,
               "baseline": 0.003659509,
-              "relar": 0.0036543640000000002
+              "imre": 0.0036543640000000002
             }
           }
         ],
@@ -273,7 +273,7 @@
             "label": "empty",
             "medians_seconds": {
               "cpython": 0.026993612,
-              "relar": 0.0021898945,
+              "imre": 0.0021898945,
               "rust_bigint": 0.00225719
             }
           },
@@ -281,7 +281,7 @@
             "label": "boundary-128",
             "medians_seconds": {
               "cpython": 0.0279769665,
-              "relar": 0.0030300545,
+              "imre": 0.0030300545,
               "rust_bigint": 0.00270383
             }
           },
@@ -289,7 +289,7 @@
             "label": "dense-2048",
             "medians_seconds": {
               "cpython": 0.033073580000000005,
-              "relar": 0.008152798999999999,
+              "imre": 0.008152798999999999,
               "rust_bigint": 0.0059779125
             }
           },
@@ -297,7 +297,7 @@
             "label": "sparse-2048",
             "medians_seconds": {
               "cpython": 0.036561214499999994,
-              "relar": 0.0126482095,
+              "imre": 0.0126482095,
               "rust_bigint": 0.0083522155
             }
           },
@@ -305,7 +305,7 @@
             "label": "dense-16384",
             "medians_seconds": {
               "cpython": 0.07249169,
-              "relar": 0.045991135,
+              "imre": 0.045991135,
               "rust_bigint": 0.023031931
             }
           },
@@ -313,14 +313,14 @@
             "label": "sparse-16384",
             "medians_seconds": {
               "cpython": 0.1043863375,
-              "relar": 0.08063603050000001,
+              "imre": 0.08063603050000001,
               "rust_bigint": 0.042371951500000005
             }
           }
         ]
       },
       "tools": {
-        "relar": "relar 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
+        "imre": "imre 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
         "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin",
         "lto_linker": null,
         "cpython": {
@@ -405,10 +405,10 @@
         "python3",
         "benchmarks/inventory_benchmark.py",
         "--compiler",
-        "benchmarks/local/comprehension-tools-final/relar",
+        "benchmarks/local/comprehension-tools-final/imre",
         "--runtime",
-        "benchmarks/local/comprehension-tools-final/librelar_runtime_lto.a",
-        "--relar-build-record",
+        "benchmarks/local/comprehension-tools-final/libimre_runtime_lto.a",
+        "--imre-build-record",
         "benchmarks/local/comprehension-tools-final/build-record.json",
         "--rust-bigint",
         "benchmarks/local/inventory-reference-final-lto/inventory-bigint",
@@ -461,7 +461,7 @@
         "terminal_error_cases": 49,
         "engines": [
           "cpython",
-          "relar",
+          "imre",
           "rust_bigint"
         ],
         "filesystem_executions": 528,
@@ -474,7 +474,7 @@
         "engines": [
           "cpython",
           "baseline",
-          "relar"
+          "imre"
         ],
         "executions": 516,
         "note": "No checked-i64 engine participates; shared-validator i64 exclusion metadata does not exclude any of these engines."
@@ -489,7 +489,7 @@
             "medians_seconds": {
               "cpython": 0.112476393,
               "baseline": 0.042294012500000006,
-              "relar": 0.0423052135
+              "imre": 0.0423052135
             }
           },
           {
@@ -497,7 +497,7 @@
             "medians_seconds": {
               "cpython": 0.1919743235,
               "baseline": 0.06385126999999999,
-              "relar": 0.0635697665
+              "imre": 0.0635697665
             }
           },
           {
@@ -505,7 +505,7 @@
             "medians_seconds": {
               "cpython": 0.1021660585,
               "baseline": 0.0215087625,
-              "relar": 0.0214717335
+              "imre": 0.0214717335
             }
           },
           {
@@ -513,7 +513,7 @@
             "medians_seconds": {
               "cpython": 0.1868281395,
               "baseline": 0.035956025,
-              "relar": 0.035637808
+              "imre": 0.035637808
             }
           },
           {
@@ -521,7 +521,7 @@
             "medians_seconds": {
               "cpython": 0.020772873,
               "baseline": 0.0035056575000000003,
-              "relar": 0.003483477
+              "imre": 0.003483477
             }
           }
         ],
@@ -530,7 +530,7 @@
             "label": "empty",
             "medians_seconds": {
               "cpython": 0.0267143445,
-              "relar": 0.0021203695,
+              "imre": 0.0021203695,
               "rust_bigint": 0.002138184
             }
           },
@@ -538,7 +538,7 @@
             "label": "boundary-128",
             "medians_seconds": {
               "cpython": 0.029368242,
-              "relar": 0.0030920675,
+              "imre": 0.0030920675,
               "rust_bigint": 0.0027443465
             }
           },
@@ -546,7 +546,7 @@
             "label": "dense-2048",
             "medians_seconds": {
               "cpython": 0.0338475775,
-              "relar": 0.007227944,
+              "imre": 0.007227944,
               "rust_bigint": 0.0056621605
             }
           },
@@ -554,7 +554,7 @@
             "label": "sparse-2048",
             "medians_seconds": {
               "cpython": 0.0360623925,
-              "relar": 0.0100090045,
+              "imre": 0.0100090045,
               "rust_bigint": 0.007631721
             }
           },
@@ -562,7 +562,7 @@
             "label": "dense-16384",
             "medians_seconds": {
               "cpython": 0.0743402395,
-              "relar": 0.0331708325,
+              "imre": 0.0331708325,
               "rust_bigint": 0.0212740055
             }
           },
@@ -570,14 +570,14 @@
             "label": "sparse-16384",
             "medians_seconds": {
               "cpython": 0.10625566,
-              "relar": 0.0592831365,
+              "imre": 0.0592831365,
               "rust_bigint": 0.0378343705
             }
           }
         ]
       },
       "tools": {
-        "relar": "relar 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
+        "imre": "imre 0.1.0 (Ruff/ty 0.0.14; LLVM AOT)",
         "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin",
         "lto_linker": "LLD 22.1.8 (/checkout/src/llvm-project/llvm 52ed14fcd56afc30f9cccd8ca8ce237c2eef7e04) (compatible with GNU linkers)",
         "cpython": {
@@ -663,9 +663,9 @@
           "python3",
           "tests/comprehensions.py",
           "--compiler",
-          "benchmarks/local/comprehension-tools-final/relar",
+          "benchmarks/local/comprehension-tools-final/imre",
           "--runtime",
-          "benchmarks/local/comprehension-tools-final/librelar_runtime.a",
+          "benchmarks/local/comprehension-tools-final/libimre_runtime.a",
           "--python",
           "<local-bin>/python3.14",
           "--clang",
@@ -693,9 +693,9 @@
           "python3",
           "tests/comprehensions.py",
           "--compiler",
-          "benchmarks/local/comprehension-tools-final/relar",
+          "benchmarks/local/comprehension-tools-final/imre",
           "--runtime",
-          "benchmarks/local/comprehension-tools-final/librelar_runtime_lto.a",
+          "benchmarks/local/comprehension-tools-final/libimre_runtime_lto.a",
           "--python",
           "<local-bin>/python3.14",
           "--clang",
@@ -726,9 +726,9 @@
           "python3",
           "tests/comprehensions.py",
           "--compiler",
-          "benchmarks/local/comprehension-tools-final/relar",
+          "benchmarks/local/comprehension-tools-final/imre",
           "--runtime",
-          "benchmarks/local/comprehension-tools-final/librelar_runtime_asan.a",
+          "benchmarks/local/comprehension-tools-final/libimre_runtime_asan.a",
           "--python",
           "<local-bin>/python3.14",
           "--clang",
@@ -1125,7 +1125,7 @@
         "format": {
           "command": [
             "sh",
-            "<scratch>/relar-cargo.sh",
+            "<scratch>/imre-cargo.sh",
             "fmt",
             "--all",
             "--check"
@@ -1136,7 +1136,7 @@
         "clippy": {
           "command": [
             "sh",
-            "<scratch>/relar-cargo.sh",
+            "<scratch>/imre-cargo.sh",
             "clippy",
             "--workspace",
             "--all-targets",
@@ -1151,7 +1151,7 @@
         "unit": {
           "command": [
             "sh",
-            "<scratch>/relar-cargo.sh",
+            "<scratch>/imre-cargo.sh",
             "test",
             "--workspace",
             "--locked"
@@ -1164,9 +1164,9 @@
             "<local-bin>/python3.14",
             "tests/lto.py",
             "--compiler",
-            "benchmarks/local/comprehension-tools-final/relar",
+            "benchmarks/local/comprehension-tools-final/imre",
             "--runtime",
-            "benchmarks/local/comprehension-tools-final/librelar_runtime_lto.a",
+            "benchmarks/local/comprehension-tools-final/libimre_runtime_lto.a",
             "--clang",
             "/usr/bin/clang-18",
             "--target",
@@ -1200,7 +1200,7 @@
       "terminal_error_cases": 49,
       "engines": [
         "cpython",
-        "relar",
+        "imre",
         "rust_bigint"
       ],
       "filesystem_executions": 528,
@@ -1221,7 +1221,7 @@
         "LSAN_OPTIONS": "exitcode=23"
       },
       "build_command": [
-        "benchmarks/local/comprehension-tools-final/relar",
+        "benchmarks/local/comprehension-tools-final/imre",
         "build",
         "examples/inventory_reconciliation/__main__.py",
         "--module-root",
@@ -1229,7 +1229,7 @@
         "-o",
         "benchmarks/local/inventory-asan-final/inventory_reconciliation",
         "--runtime",
-        "benchmarks/local/comprehension-tools-final/librelar_runtime_asan.a",
+        "benchmarks/local/comprehension-tools-final/libimre_runtime_asan.a",
         "--clang",
         "clang-18",
         "--sanitize",
@@ -1276,40 +1276,40 @@
     "Malformed input and device output failures are validated but are not timed workloads. The boundary workload exercises successful arbitrary-precision quantities.",
     "All three inventory engines implement the same eager algorithm and arbitrary-precision quantities. Rust uses borrowed SKU/request references, native collections, and direct formatting, so allocation and ownership representation differ.",
     "Supported common input domain uses ASCII decimal digits with permitted signs/underscores, valid UTF-8 argv, and the documented normalized errors. CPython tracebacks/context/chaining are not matched.",
-    "Ordinary and matched ThinLTO comparisons are separate; Rust LLVM 22.1.8 differs from Clang 18.1.3 generating Relar IR. ThinLTO uses Rust LLD 22.1.8 and explicit 1000 import/inline budgets on both native implementations.",
+    "Ordinary and matched ThinLTO comparisons are separate; Rust LLVM 22.1.8 differs from Clang 18.1.3 generating Imre IR. ThinLTO uses Rust LLD 22.1.8 and explicit 1000 import/inline budgets on both native implementations.",
     "The old-source control has byte-identical emitted IR and runtime archive bytes, but executable hashes differ. Small timing differences do not establish a comprehension overhead regression or gain."
   ],
   "verified_file_sha256": {
     "Cargo.toml": "ce49064770ad21744c8ac6cea604da7408be1e5ec474e3f90206fa95f2af614f",
     "Cargo.lock": "94ea6e3c2351ad1dff6764dac5c52ff51993b1f7a3a79164e209a4e7c1b80471",
-    "crates/relar-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
-    "crates/relar-runtime/Cargo.toml": "504747307550bbb6a62804730b159c158cba5b35e22a533269db00f51f423ba8",
-    "crates/relar-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
-    "crates/relar-compiler/src/classes.rs": "8a57bbf41463e5384d86fc7d70be62fb8c26ef95b89bbcf7b575ea13be373785",
-    "crates/relar-compiler/src/effects.rs": "58d6d4604c2ec19402a696c6b168c63c924493424feab30f013874f10108f62f",
-    "crates/relar-compiler/src/frontend/comprehensions.rs": "d90161413c8957a941deeafa82210aca3ff73d51058760a9362124d4ab20bc02",
-    "crates/relar-compiler/src/frontend.rs": "555b5f6c8d62a210d38b13aa783ae8bfc9470a8b1bf0db10667a41f7dab2d38b",
-    "crates/relar-compiler/src/ir.rs": "a716274199e8cace1a95867148e752e62568cfd59f64aa1bd2c5c344eae3114c",
-    "crates/relar-compiler/src/lib.rs": "aff038d03eadb6f07481b29100e984e3f6de97c089404a574daf3c0f5653861d",
-    "crates/relar-compiler/src/llvm.rs": "8981af8933a57ee3d878e9d5746d38baa3be90b5fc90b577b39c798f7ed6d3da",
-    "crates/relar-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
-    "crates/relar-compiler/src/modules.rs": "3c597d7ddfe35c2cd12a2189ce7c69cf81c7983e89193c47f00395019210de0a",
-    "crates/relar-compiler/src/narrowing.rs": "f37bbacad8279aa18aff36edbee90477187d8927ca12b0563b0bfedde791832d",
-    "crates/relar-compiler/src/ranges.rs": "29c217f8ef942187f5e945385279ac2548ab645a13145345c2023befa6303060",
-    "crates/relar-compiler/src/tuples.rs": "022bc95c1702a09f6f124754031d13c07ff94b4f721f72f6363bad2ff29211fa",
-    "crates/relar-compiler/src/types.rs": "6ec28df90874d39206cfd36f025964e6e4fd1026bbfff9eba868e7a944d2cbbe",
-    "crates/relar-runtime/src/lib.rs": "4ca207eb054a7a9023b08957058ebe4dae933410ea5cd1ede62550c18dab2988",
-    "crates/relar-runtime/src/objects/args.rs": "0f7c2543368bc69da08613471c17dc7ac0981967e7840e3c30ef85dc6a044099",
-    "crates/relar-runtime/src/objects/exceptions.rs": "003d465b3a28ac4cb991d2fa2a9b589add6a35ef714587ad6c705e0667b836af",
-    "crates/relar-runtime/src/objects/files.rs": "8de2a1d4d72cef8236adc61cfb547e69a581eb3af3a28d190dd7e73f2f385e34",
-    "crates/relar-runtime/src/objects/mappings.rs": "eca128f038aff16c93af24203b7d66fe652d27430b5cac02a25630758a590ec9",
-    "crates/relar-runtime/src/objects/records.rs": "9e8061a02eca605d6587da87dedb0ca7b2b868d98bef9abb5159bd4b7ceff75d",
-    "crates/relar-runtime/src/objects/words.rs": "251b21899a15b0d40c6de1f8452034d139bf7093aa112c5603c8896427f53ca8",
-    "crates/relar-runtime/src/objects.rs": "666ea6e7015b105b71c5b1756cf8d8aa260dde245ae1c4ec8a5b4ccd2cfd90d3",
-    "benchmarks/local/comprehension-tools-final/relar": "b45610eb0e6b10f8009204c0cffa3c93053dc50bf6520200003b88800820d196",
-    "benchmarks/local/comprehension-tools-final/librelar_runtime.a": "ca204d2df89a52927cdd792f96ab2a45f833658858b3d926f0e27a6bd4839daf",
-    "benchmarks/local/comprehension-tools-final/librelar_runtime_lto.a": "cf4f3b157fd4e836e8a1b641bf845fb963aa104ec115f3a6396ca927887a5ebc",
-    "benchmarks/local/comprehension-tools-final/librelar_runtime_asan.a": "1ae81c87bf9e9cccb16813da21dfe534158ab72a7fbc6960ee88d22e9f6d3e32",
+    "crates/imre-compiler/Cargo.toml": "cbe32b10b1a34d8940a715ce87a251a1f5b8ed2759b7b55495145bd24333a247",
+    "crates/imre-runtime/Cargo.toml": "504747307550bbb6a62804730b159c158cba5b35e22a533269db00f51f423ba8",
+    "crates/imre-compiler/src/analysis.rs": "cbaad67d47f65e748358f891836dd07835461ab42ab41e60cdf29c1093c5b170",
+    "crates/imre-compiler/src/classes.rs": "8a57bbf41463e5384d86fc7d70be62fb8c26ef95b89bbcf7b575ea13be373785",
+    "crates/imre-compiler/src/effects.rs": "58d6d4604c2ec19402a696c6b168c63c924493424feab30f013874f10108f62f",
+    "crates/imre-compiler/src/frontend/comprehensions.rs": "d90161413c8957a941deeafa82210aca3ff73d51058760a9362124d4ab20bc02",
+    "crates/imre-compiler/src/frontend.rs": "555b5f6c8d62a210d38b13aa783ae8bfc9470a8b1bf0db10667a41f7dab2d38b",
+    "crates/imre-compiler/src/ir.rs": "a716274199e8cace1a95867148e752e62568cfd59f64aa1bd2c5c344eae3114c",
+    "crates/imre-compiler/src/lib.rs": "aff038d03eadb6f07481b29100e984e3f6de97c089404a574daf3c0f5653861d",
+    "crates/imre-compiler/src/llvm.rs": "8981af8933a57ee3d878e9d5746d38baa3be90b5fc90b577b39c798f7ed6d3da",
+    "crates/imre-compiler/src/main.rs": "fb9bda474d1a718d051b60650379c49f19809fa8dd8a0aca6e714b271d017a8c",
+    "crates/imre-compiler/src/modules.rs": "3c597d7ddfe35c2cd12a2189ce7c69cf81c7983e89193c47f00395019210de0a",
+    "crates/imre-compiler/src/narrowing.rs": "f37bbacad8279aa18aff36edbee90477187d8927ca12b0563b0bfedde791832d",
+    "crates/imre-compiler/src/ranges.rs": "29c217f8ef942187f5e945385279ac2548ab645a13145345c2023befa6303060",
+    "crates/imre-compiler/src/tuples.rs": "022bc95c1702a09f6f124754031d13c07ff94b4f721f72f6363bad2ff29211fa",
+    "crates/imre-compiler/src/types.rs": "6ec28df90874d39206cfd36f025964e6e4fd1026bbfff9eba868e7a944d2cbbe",
+    "crates/imre-runtime/src/lib.rs": "4ca207eb054a7a9023b08957058ebe4dae933410ea5cd1ede62550c18dab2988",
+    "crates/imre-runtime/src/objects/args.rs": "0f7c2543368bc69da08613471c17dc7ac0981967e7840e3c30ef85dc6a044099",
+    "crates/imre-runtime/src/objects/exceptions.rs": "003d465b3a28ac4cb991d2fa2a9b589add6a35ef714587ad6c705e0667b836af",
+    "crates/imre-runtime/src/objects/files.rs": "8de2a1d4d72cef8236adc61cfb547e69a581eb3af3a28d190dd7e73f2f385e34",
+    "crates/imre-runtime/src/objects/mappings.rs": "eca128f038aff16c93af24203b7d66fe652d27430b5cac02a25630758a590ec9",
+    "crates/imre-runtime/src/objects/records.rs": "9e8061a02eca605d6587da87dedb0ca7b2b868d98bef9abb5159bd4b7ceff75d",
+    "crates/imre-runtime/src/objects/words.rs": "251b21899a15b0d40c6de1f8452034d139bf7093aa112c5603c8896427f53ca8",
+    "crates/imre-runtime/src/objects.rs": "666ea6e7015b105b71c5b1756cf8d8aa260dde245ae1c4ec8a5b4ccd2cfd90d3",
+    "benchmarks/local/comprehension-tools-final/imre": "b45610eb0e6b10f8009204c0cffa3c93053dc50bf6520200003b88800820d196",
+    "benchmarks/local/comprehension-tools-final/libimre_runtime.a": "ca204d2df89a52927cdd792f96ab2a45f833658858b3d926f0e27a6bd4839daf",
+    "benchmarks/local/comprehension-tools-final/libimre_runtime_lto.a": "cf4f3b157fd4e836e8a1b641bf845fb963aa104ec115f3a6396ca927887a5ebc",
+    "benchmarks/local/comprehension-tools-final/libimre_runtime_asan.a": "1ae81c87bf9e9cccb16813da21dfe534158ab72a7fbc6960ee88d22e9f6d3e32",
     "benchmarks/local/comprehension-tools-final/ordinary.log": "ab05e0f0b1b9b1d60e62d7d641c49416c61c1ff1f4fefe5a52e6d35e45e3134b",
     "benchmarks/local/comprehension-tools-final/thinlto.log": "a06e8b911633715aba1c0bf759eee6a3316d4e97f8b76c30fe2b601bd7543b75",
     "benchmarks/local/comprehension-tools-final/asan.log": "91ba54654fae93d7580d1fbacc81966292ee4ff2103bd214470520c755f09b0f",
@@ -1345,7 +1345,7 @@
     "benchmarks/reference/inventory_reconciliation/build.py": "6ad52ac86852824666a0386323b33fa1ff5b86797de69fbbacf72d5c329850e2",
     "<ohm-toolchain>/bin/cargo": "576c30863ca9f6d6d0b889ef8abc4d3612a723bf79238a68a8e7a71db6e0b62e",
     "<ohm-toolchain>/bin/rustc": "e173035a5dd384e17ca6a178e1987a0a746260c3669459cfab3af580880927ba",
-    "<scratch>/relar-cargo.sh": "74f3f3596cf89fdecf9458d74fc47cfcf09533b8c10f3b569470f74ddbc80fd8",
+    "<scratch>/imre-cargo.sh": "74f3f3596cf89fdecf9458d74fc47cfcf09533b8c10f3b569470f74ddbc80fd8",
     "benchmarks/local/inventory-normal-final.json": "6cc110d2813388208bed649a01bfe7bd9ddba2fffeda9d459dad15312a629dae",
     "benchmarks/local/inventory-normal-final.log": "548beb18347fc139071349cc62e7d495e3f87412bdf246b5d95319237052c16b",
     "benchmarks/local/comprehension-tools-final/build-record.json": "cab3b5a462e9f3447ca3bbca75203113b7c4654e5d6e5f287bd54c708f99342f",
@@ -1442,7 +1442,7 @@
     "tests/programs/integer_matrix.py": "36d33ac4564ce1a810cfcda04caf67d4775e9e01fdf56cca4eafc08efa8caf3c",
     "tests/programs/ownership.py": "b581438ef1fdb00edc399f550112c5c153c152f15d4d5cbfd7c33357b9d84d29",
     "tests/programs/short_strings.py": "c35fc3f77c55f5d5cc70fa3b46312c290180207c5224d0aaee2bf7476688eed0",
-    "<scratch>/relar-comprehension-validation-final.py": "98cad76a02675bf4959b4637b24a7d3017db3e387acfa41787edd99c2a8bbc9d",
+    "<scratch>/imre-comprehension-validation-final.py": "98cad76a02675bf4959b4637b24a7d3017db3e387acfa41787edd99c2a8bbc9d",
     "benchmarks/local/comprehension-validation-final/regression-normal/classes.stdout": "17b5e0bb55bf9b355d570c75aeb14d06b943d145fd3c750ef0318eb2452fd116",
     "benchmarks/local/comprehension-validation-final/regression-normal/classes.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "benchmarks/local/comprehension-validation-final/regression-normal/exceptions.stdout": "2acc8d882974554d58247a8f2b8a536de2882591a83438ca391f35802fa7cf15",

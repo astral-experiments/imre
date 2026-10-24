@@ -1,10 +1,10 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Keyword arguments and scalar defaults: inventory reconciliation
 
-Keyword calls, keyword-only parameters, and scalar defaults now work in the inventory reconciler with **byte-identical LLVM and native `.text` in ordinary and ThinLTO builds**. Across twelve comparisons, current Relar median times differ from the preserved executable by −1.51% to +0.56%; every previous/current interquartile range overlaps. This is a capability and readability milestone, with no native speedup claim.
+Keyword calls, keyword-only parameters, and scalar defaults now work in the inventory reconciler with **byte-identical LLVM and native `.text` in ordinary and ThinLTO builds**. Across twelve comparisons, current Imre median times differ from the preserved executable by −1.51% to +0.56%; every previous/current interquartile range overlaps. This is a capability and readability milestone, with no native speedup claim.
 
-[PR 33](https://github.com/viarius-experiments/relar/pull/33) continues GitHub Stack 4 after the [scalar f-string milestone](2026-10-18-scalar-fstrings.md). Measurements use clean commit `3b7377367a6c93b19aa8981ccd97131bc7442e83`. Five application modules adopt named arguments, meaningful keyword-only parameters, and the existing `"stock"` label as an omitted default. Supplied expressions retain their previous order; the algorithm, inputs, outputs, and Rust implementation are unchanged.
+[PR 33](https://github.com/viarius-experiments/imre/pull/33) continues GitHub Stack 4 after the [scalar f-string milestone](2026-10-18-scalar-fstrings.md). Measurements use clean commit `3b7377367a6c93b19aa8981ccd97131bc7442e83`. Five application modules adopt named arguments, meaningful keyword-only parameters, and the existing `"stock"` label as an omitted default. Supplied expressions retain their previous order; the algorithm, inputs, outputs, and Rust implementation are unchanged.
 
 ## Supported calls
 
@@ -24,11 +24,11 @@ Missing, duplicate, unexpected, or wrongly typed arguments are compile-time erro
 
 ## Results
 
-Times are median milliseconds. Positive Relar change means more time than the previous executable. The [complete summary](2026-10-19-keyword-arguments-summary.json) retains exact medians, Q1/Q3, ratios, and overlap checks. Interquartile ranges describe sample spread, not confidence intervals.
+Times are median milliseconds. Positive Imre change means more time than the previous executable. The [complete summary](2026-10-19-keyword-arguments-summary.json) retains exact medians, Q1/Q3, ratios, and overlap checks. Interquartile ranges describe sample spread, not confidence intervals.
 
 **Ordinary**
 
-| Input | CPython ms | Previous Relar ms | Current Relar ms | Rust BigInt ms | Relar time change |
+| Input | CPython ms | Previous Imre ms | Current Imre ms | Rust BigInt ms | Imre time change |
 |---|---:|---:|---:|---:|---:|
 | empty | 27.118 | 2.171 | 2.183 | 2.228 | +0.56% |
 | boundary-128 | 27.800 | 2.752 | 2.756 | 2.568 | +0.14% |
@@ -39,7 +39,7 @@ Times are median milliseconds. Positive Relar change means more time than the pr
 
 **ThinLTO**
 
-| Input | CPython ms | Previous Relar ms | Current Relar ms | Rust BigInt ms | Relar time change |
+| Input | CPython ms | Previous Imre ms | Current Imre ms | Rust BigInt ms | Imre time change |
 |---|---:|---:|---:|---:|---:|
 | empty | 27.118 | 2.111 | 2.104 | 2.157 | -0.33% |
 | boundary-128 | 28.678 | 2.791 | 2.769 | 2.632 | -0.79% |
@@ -48,13 +48,13 @@ Times are median milliseconds. Positive Relar change means more time than the pr
 | dense-16384 | 76.647 | 21.404 | 21.320 | 20.389 | -0.39% |
 | sparse-16384 | 111.090 | 41.063 | 40.983 | 37.339 | -0.19% |
 
-For the two 16,384-positive-request cases, ThinLTO Relar runs **2.71–3.60× faster than CPython** and takes **4.6–9.8% more time than Rust BigInt**. Ordinary Relar runs 2.20–2.87× faster than CPython and takes 16.3–19.3% more time than Rust. Small inputs include a substantial startup and small-file floor.
+For the two 16,384-positive-request cases, ThinLTO Imre runs **2.71–3.60× faster than CPython** and takes **4.6–9.8% more time than Rust BigInt**. Ordinary Imre runs 2.20–2.87× faster than CPython and takes 16.3–19.3% more time than Rust. Small inputs include a substantial startup and small-file floor.
 
 The [read-only native audit](2026-10-19-keyword-arguments-native-text.json) verifies all 1,032,601 ordinary `.text` bytes and 1,040,928 ThinLTO `.text` bytes match the baseline. Whole ELF files differ only in symbol strings and, for ThinLTO, the build-ID note. No new CPU or allocation profiles were collected.
 
 ## Method and provenance
 
-Each mode compares current Relar, the preserved f-string Relar executable, CPython 3.14.5, and Rust BigInt on six captured inputs. CPython and current Relar use the migrated keyword-call source; preserved Relar uses the previous positional-call source. The explicit baseline snapshot verifies the complete old six-file package against its original record and captures exactly five changed files. Historical CPython ratios cannot isolate compiler effects from this source change or host variation.
+Each mode compares current Imre, the preserved f-string Imre executable, CPython 3.14.5, and Rust BigInt on six captured inputs. CPython and current Imre use the migrated keyword-call source; preserved Imre uses the previous positional-call source. The explicit baseline snapshot verifies the complete old six-file package against its original record and captures exactly five changed files. Historical CPython ratios cannot isolate compiler effects from this source change or host variation.
 
 Rust references were rebuilt from the measured commit because their Cargo manifest gained a license field. Algorithm/dependency sources, tools, flags, and linking budgets match the previous reference, and both rebuilt executables are byte-identical to it. Final compiler/runtime artifacts match those used for validation; the runtime archives are unchanged from the preceding milestone.
 
@@ -62,11 +62,11 @@ Each workload has 48 measured rounds covering all 24 engine permutations twice, 
 
 Fresh processes are pinned to CPU 0 outside ptrace. Timing includes startup/imports, file reading/decoding/parsing, eager containers and records, reconciliation, complete rendering, buffered writes, flush/close, and exit. Fixture preparation, builds, oracles, hashing, comparisons, and deletion are outside timing. OS caches are not deliberately flushed and writes are not fsynced. CPython's normal bytecode cache is prepared outside timing and verified unchanged.
 
-Modes ran sequentially after task-owned builds, tests, and profiling stopped. CPU frequency and unrelated shared-host activity remain uncontrolled. This is one x86-64 AMD EPYC-Milan devbox. CPython is a GIL build configured with PGO/LTO and its experimental JIT disabled. Relar uses Clang 18.1.3 at `-O3`; ThinLTO uses LLD 22.1.8. Rust 1.98.1-dev builds disable Ohm's experimental defaults; ThinLTO LLVM budgets match at 1,000. Rust preserves the eager algorithm and arbitrary-precision quantities, using native containers, borrowed strings, and direct formatting.
+Modes ran sequentially after task-owned builds, tests, and profiling stopped. CPU frequency and unrelated shared-host activity remain uncontrolled. This is one x86-64 AMD EPYC-Milan devbox. CPython is a GIL build configured with PGO/LTO and its experimental JIT disabled. Imre uses Clang 18.1.3 at `-O3`; ThinLTO uses LLD 22.1.8. Rust 1.98.1-dev builds disable Ohm's experimental defaults; ThinLTO LLVM budgets match at 1,000. Rust preserves the eager algorithm and arbitrary-precision quantities, using native containers, borrowed strings, and direct formatting.
 
 ## Validation and retained evidence
 
-All **2,376 reported semantic-suite checks**, **66 Rust unit tests**, format/Clippy checks, and 19 pure-Python benchmark-guard checks pass. Semantic totals include compile-time rejections. Coverage includes ordinary `-O0`/`-O3`, ThinLTO `-O3`, sanitizer `-O1`, and selected sanitizer `-O0` suites. Separate integration checks compare 176 inventory cases across nine old/new-source and engine combinations. Instrumented Relar also matches CPython and Rust on those 176 cases plus `/dev/full`. Sanitizers cover generated code and runtime dependencies; the prebuilt Rust standard library is not instrumented.
+All **2,376 reported semantic-suite checks**, **66 Rust unit tests**, format/Clippy checks, and 19 pure-Python benchmark-guard checks pass. Semantic totals include compile-time rejections. Coverage includes ordinary `-O0`/`-O3`, ThinLTO `-O3`, sanitizer `-O1`, and selected sanitizer `-O0` suites. Separate integration checks compare 176 inventory cases across nine old/new-source and engine combinations. Instrumented Imre also matches CPython and Rust on those 176 cases plus `/dev/full`. Sanitizers cover generated code and runtime dependencies; the prebuilt Rust standard library is not instrumented.
 
 Initial sandbox sanitizer runs failed because LeakSanitizer could not use ptrace. The twelve affected general suites and the inventory application passed outside the sandbox with unchanged compiler/runtime/source inputs and leak detection enabled. Original failure logs and receipts, the inventory's partial initial receipt, and successful retries are retained. The [validation index](2026-10-19-keyword-arguments-validation.json) distinguishes captured before/after hashes from later source reconciliation and records provenance limits.
 

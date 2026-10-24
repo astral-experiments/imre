@@ -1,34 +1,34 @@
 {
   "revision": "88169978bfc9436024a6bfc34fc8a6c7de285023",
-  "context": "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-context-final-3.json",
+  "context": "/home/dev-user/.cache/imre-native-tools-20261021/native-tools-timing-context-final-3.json",
   "context_sha256": "ed8dfb44796f6685f0f5352883d1f124be39bf414fe1bf5482fe99a4954473c1",
-  "driver": "/home/dev-user/.cache/relar-native-tools-20261021/relar-native-tools-final-3-summary.py",
+  "driver": "/home/dev-user/.cache/imre-native-tools-20261021/imre-native-tools-final-3-summary.py",
   "driver_sha256": "3c78691523f95e47d94b0bd5817c3c460a8d211602b1e2d3a37fa19d1874dd7b",
   "modes": {
     "normal": {
-      "raw": "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-normal-final-3.json",
+      "raw": "/home/dev-user/.cache/imre-native-tools-20261021/native-tools-timing-normal-final-3.json",
       "raw_sha256": "eb0cb68b634526c635abd07070c20d1487943517fdc223a26987ef4d44c1361c",
       "rows": [
         {
           "label": "catalog-real",
           "rounds": null,
           "median_seconds": {
-            "relar": 0.28626068849999997,
+            "imre": 0.28626068849999997,
             "port": 2.972906885,
             "original": 0.999933134,
             "codon": 0.567205551,
             "rust": 0.1554545375
           },
           "ratios": {
-            "relar_over_rust": 1.8414431196644871,
+            "imre_over_rust": 1.8414431196644871,
             "codon_over_rust": 3.648690865649387,
-            "original_over_relar": 3.4930857577393133,
-            "port_over_relar": 10.385313123425957,
-            "codon_over_relar": 1.981430122215332,
+            "original_over_imre": 3.4930857577393133,
+            "port_over_imre": 10.385313123425957,
+            "codon_over_imre": 1.981430122215332,
             "original_over_rust": 6.43231873498707
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.28626068849999997,
               "min_seconds": 0.278430919,
               "max_seconds": 0.292765343,
@@ -69,22 +69,22 @@
           "label": "catalog-real-compute-0",
           "rounds": 0,
           "median_seconds": {
-            "relar": 0.030103135500000003,
+            "imre": 0.030103135500000003,
             "port": 0.1056091995,
             "original": 0.139807907,
             "codon": 0.030098923,
             "rust": 0.028638860500000002
           },
           "ratios": {
-            "relar_over_rust": 1.0511289546593519,
+            "imre_over_rust": 1.0511289546593519,
             "codon_over_rust": 1.0509818643098596,
-            "original_over_relar": 4.644297169642012,
-            "port_over_relar": 3.508245827083361,
-            "codon_over_relar": 0.9998600644108983,
+            "original_over_imre": 4.644297169642012,
+            "port_over_imre": 3.508245827083361,
+            "codon_over_imre": 0.9998600644108983,
             "original_over_rust": 4.881755229053195
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.030103135500000003,
               "min_seconds": 0.028632678,
               "max_seconds": 0.031740917,
@@ -125,22 +125,22 @@
           "label": "catalog-real-compute-4",
           "rounds": 4,
           "median_seconds": {
-            "relar": 0.9680682275,
+            "imre": 0.9680682275,
             "port": 11.5770466805,
             "original": 3.4634512705000002,
             "codon": 2.2829585975,
             "rust": 0.4944841565
           },
           "ratios": {
-            "relar_over_rust": 1.9577335588506364,
+            "imre_over_rust": 1.9577335588506364,
             "codon_over_rust": 4.616848826176699,
-            "original_over_relar": 3.577693360977494,
-            "port_over_relar": 11.958916067721065,
-            "codon_over_relar": 2.3582620859230707,
+            "original_over_imre": 3.577693360977494,
+            "port_over_imre": 11.958916067721065,
+            "codon_over_imre": 2.3582620859230707,
             "original_over_rust": 7.0041703560627635
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.9680682275,
               "min_seconds": 0.951810767,
               "max_seconds": 1.022997314,
@@ -181,22 +181,22 @@
           "label": "conformance-unchanged-github",
           "rounds": null,
           "median_seconds": {
-            "relar": 0.035286925,
+            "imre": 0.035286925,
             "port": 0.2515807545,
             "original": 0.15321489900000002,
             "codon": 0.0586594495,
             "rust": 0.023767523
           },
           "ratios": {
-            "relar_over_rust": 1.4846698581084785,
+            "imre_over_rust": 1.4846698581084785,
             "codon_over_rust": 2.4680506041794934,
-            "original_over_relar": 4.341973663049417,
-            "port_over_relar": 7.129574325334384,
-            "codon_over_relar": 1.662356510237149,
+            "original_over_imre": 4.341973663049417,
+            "port_over_imre": 7.129574325334384,
+            "codon_over_imre": 1.662356510237149,
             "original_over_rust": 6.446397422230327
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.035286925,
               "min_seconds": 0.034783418,
               "max_seconds": 0.03659712,
@@ -237,22 +237,22 @@
           "label": "conformance-unchanged-github-compute-0",
           "rounds": 0,
           "median_seconds": {
-            "relar": 0.0106303495,
+            "imre": 0.0106303495,
             "port": 0.085655618,
             "original": 0.09534443100000001,
             "codon": 0.019784383500000002,
             "rust": 0.0097785415
           },
           "ratios": {
-            "relar_over_rust": 1.0871099232947983,
+            "imre_over_rust": 1.0871099232947983,
             "codon_over_rust": 2.023244826439608,
-            "original_over_relar": 8.969077733521367,
-            "port_over_relar": 8.057648339784125,
-            "codon_over_relar": 1.8611225811531409,
+            "original_over_imre": 8.969077733521367,
+            "port_over_imre": 8.057648339784125,
+            "codon_over_imre": 1.8611225811531409,
             "original_over_rust": 9.750373406913496
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.0106303495,
               "min_seconds": 0.01017002,
               "max_seconds": 0.011824504,
@@ -293,22 +293,22 @@
           "label": "conformance-unchanged-github-compute-4",
           "rounds": 4,
           "median_seconds": {
-            "relar": 0.10030456700000001,
+            "imre": 0.10030456700000001,
             "port": 0.725692265,
             "original": 0.3006823305,
             "codon": 0.140317207,
             "rust": 0.051680567
           },
           "ratios": {
-            "relar_over_rust": 1.9408565505869937,
+            "imre_over_rust": 1.9408565505869937,
             "codon_over_rust": 2.7150864463232383,
-            "original_over_relar": 2.997693320384903,
-            "port_over_relar": 7.234887569974753,
-            "codon_over_relar": 1.398911447372082,
+            "original_over_imre": 2.997693320384903,
+            "port_over_imre": 7.234887569974753,
+            "codon_over_imre": 1.398911447372082,
             "original_over_rust": 5.818092717519915
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.10030456700000001,
               "min_seconds": 0.096770768,
               "max_seconds": 0.106651336,
@@ -349,22 +349,22 @@
           "label": "conformance-changed-github",
           "rounds": null,
           "median_seconds": {
-            "relar": 0.036824473999999996,
+            "imre": 0.036824473999999996,
             "port": 0.252678087,
             "original": 0.155717723,
             "codon": 0.059839953,
             "rust": 0.0243064775
           },
           "ratios": {
-            "relar_over_rust": 1.5150066067779668,
+            "imre_over_rust": 1.5150066067779668,
             "codon_over_rust": 2.461893254586149,
-            "original_over_relar": 4.228647583669492,
-            "port_over_relar": 6.861688968048805,
-            "codon_over_relar": 1.6250049627321224,
+            "original_over_imre": 4.228647583669492,
+            "port_over_imre": 6.861688968048805,
+            "codon_over_imre": 1.6250049627321224,
             "original_over_rust": 6.406429026994965
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.036824473999999996,
               "min_seconds": 0.036231421,
               "max_seconds": 0.039245957,
@@ -405,22 +405,22 @@
           "label": "conformance-changed-github-compute-0",
           "rounds": 0,
           "median_seconds": {
-            "relar": 0.0107091935,
+            "imre": 0.0107091935,
             "port": 0.086556019,
             "original": 0.096010451,
             "codon": 0.0201814035,
             "rust": 0.0099951185
           },
           "ratios": {
-            "relar_over_rust": 1.0714423745951587,
+            "imre_over_rust": 1.0714423745951587,
             "codon_over_rust": 2.019125986350237,
-            "original_over_relar": 8.965236364437713,
-            "port_over_relar": 8.082403124007424,
-            "codon_over_relar": 1.8844933094168108,
+            "original_over_imre": 8.965236364437713,
+            "port_over_imre": 8.082403124007424,
+            "codon_over_imre": 1.8844933094168108,
             "original_over_rust": 9.605734139120012
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.0107091935,
               "min_seconds": 0.010238047,
               "max_seconds": 0.011450575,
@@ -461,22 +461,22 @@
           "label": "conformance-changed-github-compute-4",
           "rounds": 4,
           "median_seconds": {
-            "relar": 0.104965809,
+            "imre": 0.104965809,
             "port": 0.726241213,
             "original": 0.306310339,
             "codon": 0.150433549,
             "rust": 0.0555581825
           },
           "ratios": {
-            "relar_over_rust": 1.8892952266752066,
+            "imre_over_rust": 1.8892952266752066,
             "codon_over_rust": 2.707675849547454,
-            "original_over_relar": 2.918191570361736,
-            "port_over_relar": 6.918835951619256,
-            "codon_over_relar": 1.4331671468373097,
+            "original_over_imre": 2.918191570361736,
+            "port_over_imre": 6.918835951619256,
+            "codon_over_imre": 1.4331671468373097,
             "original_over_rust": 5.513325404408253
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.104965809,
               "min_seconds": 0.10294786,
               "max_seconds": 0.11154348,
@@ -517,22 +517,22 @@
           "label": "conformance-changed-diff",
           "rounds": null,
           "median_seconds": {
-            "relar": 0.03611191,
+            "imre": 0.03611191,
             "port": 0.25139417,
             "original": 0.155295522,
             "codon": 0.0591782555,
             "rust": 0.024051924
           },
           "ratios": {
-            "relar_over_rust": 1.501414606166226,
+            "imre_over_rust": 1.501414606166226,
             "codon_over_rust": 2.4604374893251784,
-            "original_over_relar": 4.300396240464711,
-            "port_over_relar": 6.961530697213191,
-            "codon_over_relar": 1.6387462058916298,
+            "original_over_imre": 4.300396240464711,
+            "port_over_imre": 6.961530697213191,
+            "codon_over_imre": 1.6387462058916298,
             "original_over_rust": 6.456677727736043
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.03611191,
               "min_seconds": 0.035571399,
               "max_seconds": 0.037302868,
@@ -573,22 +573,22 @@
           "label": "conformance-changed-diff-compute-0",
           "rounds": 0,
           "median_seconds": {
-            "relar": 0.0105786345,
+            "imre": 0.0105786345,
             "port": 0.086193974,
             "original": 0.0958562805,
             "codon": 0.0195541065,
             "rust": 0.009716002000000001
           },
           "ratios": {
-            "relar_over_rust": 1.0887847182411035,
+            "imre_over_rust": 1.0887847182411035,
             "codon_over_rust": 2.012567154679466,
-            "original_over_relar": 9.061309425143671,
-            "port_over_relar": 8.147930056568265,
-            "codon_over_relar": 1.848452794167338,
+            "original_over_imre": 9.061309425143671,
+            "port_over_imre": 8.147930056568265,
+            "codon_over_imre": 1.848452794167338,
             "original_over_rust": 9.865815229350508
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.0105786345,
               "min_seconds": 0.010002668,
               "max_seconds": 0.010951012,
@@ -629,22 +629,22 @@
           "label": "conformance-changed-diff-compute-4",
           "rounds": 4,
           "median_seconds": {
-            "relar": 0.10134205299999999,
+            "imre": 0.10134205299999999,
             "port": 0.7239529330000001,
             "original": 0.304644005,
             "codon": 0.147122933,
             "rust": 0.053852322
           },
           "ratios": {
-            "relar_over_rust": 1.8818511298361469,
+            "imre_over_rust": 1.8818511298361469,
             "codon_over_rust": 2.7319700903519073,
-            "original_over_relar": 3.0060966398618354,
-            "port_over_relar": 7.143657658089877,
-            "codon_over_relar": 1.4517461275429266,
+            "original_over_imre": 3.0060966398618354,
+            "port_over_imre": 7.143657658089877,
+            "codon_over_imre": 1.4517461275429266,
             "original_over_rust": 5.657026358120639
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.10134205299999999,
               "min_seconds": 0.097612307,
               "max_seconds": 0.103354077,
@@ -682,33 +682,33 @@
           }
         }
       ],
-      "real_workload_max_relar_over_rust": 1.9577335588506364,
+      "real_workload_max_imre_over_rust": 1.9577335588506364,
       "all_real_workloads_within_2x_rust": true
     },
     "thinlto": {
-      "raw": "/home/dev-user/.cache/relar-native-tools-20261021/native-tools-timing-thinlto-final-3.json",
+      "raw": "/home/dev-user/.cache/imre-native-tools-20261021/native-tools-timing-thinlto-final-3.json",
       "raw_sha256": "da42234ca5d6c7499e3a5892ccfd567b1c4444864f0a094cefa1d172282cf95c",
       "rows": [
         {
           "label": "catalog-real",
           "rounds": null,
           "median_seconds": {
-            "relar": 0.2148446985,
+            "imre": 0.2148446985,
             "port": 2.9791188615,
             "original": 0.997993532,
             "codon": 0.568819126,
             "rust": 0.1215605285
           },
           "ratios": {
-            "relar_over_rust": 1.767388651160726,
+            "imre_over_rust": 1.767388651160726,
             "codon_over_rust": 4.679307773822322,
-            "original_over_relar": 4.645185750301398,
-            "port_over_relar": 13.86638293753383,
-            "codon_over_relar": 2.6475827887370467,
+            "original_over_imre": 4.645185750301398,
+            "port_over_imre": 13.86638293753383,
+            "codon_over_imre": 2.6475827887370467,
             "original_over_rust": 8.209848577616212
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.2148446985,
               "min_seconds": 0.21047264,
               "max_seconds": 0.220950264,
@@ -749,22 +749,22 @@
           "label": "catalog-real-compute-0",
           "rounds": 0,
           "median_seconds": {
-            "relar": 0.029683438,
+            "imre": 0.029683438,
             "port": 0.1056405265,
             "original": 0.1388174245,
             "codon": 0.029871905,
             "rust": 0.028231306999999997
           },
           "ratios": {
-            "relar_over_rust": 1.0514369030098394,
+            "imre_over_rust": 1.0514369030098394,
             "codon_over_rust": 1.0581127186212103,
-            "original_over_relar": 4.676595227951696,
-            "port_over_relar": 3.558904682806621,
-            "codon_over_relar": 1.0063492308404438,
+            "original_over_imre": 4.676595227951696,
+            "port_over_imre": 3.558904682806621,
+            "codon_over_imre": 1.0063492308404438,
             "original_over_rust": 4.917144803108124
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.029683438,
               "min_seconds": 0.027980208,
               "max_seconds": 0.030402789,
@@ -805,22 +805,22 @@
           "label": "catalog-real-compute-4",
           "rounds": 4,
           "median_seconds": {
-            "relar": 0.691478528,
+            "imre": 0.691478528,
             "port": 11.5765109585,
             "original": 3.4858856075,
             "codon": 2.2839818745000002,
             "rust": 0.362284138
           },
           "ratios": {
-            "relar_over_rust": 1.9086635473949456,
+            "imre_over_rust": 1.9086635473949456,
             "codon_over_rust": 6.304393802910577,
-            "original_over_relar": 5.041205860118914,
-            "port_over_relar": 16.741678142896724,
-            "codon_over_relar": 3.3030409217565757,
+            "original_over_imre": 5.041205860118914,
+            "port_over_imre": 16.741678142896724,
+            "codon_over_imre": 3.3030409217565757,
             "original_over_rust": 9.621965860122753
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.691478528,
               "min_seconds": 0.67755741,
               "max_seconds": 1.021866085,
@@ -861,22 +861,22 @@
           "label": "conformance-unchanged-github",
           "rounds": null,
           "median_seconds": {
-            "relar": 0.0298535835,
+            "imre": 0.0298535835,
             "port": 0.2506035535,
             "original": 0.15266515,
             "codon": 0.058107097499999996,
             "rust": 0.0220868305
           },
           "ratios": {
-            "relar_over_rust": 1.3516463351316974,
+            "imre_over_rust": 1.3516463351316974,
             "codon_over_rust": 2.6308481653807227,
-            "original_over_relar": 5.113796472708209,
-            "port_over_relar": 8.394421175601918,
-            "codon_over_relar": 1.9464027660196974,
+            "original_over_imre": 5.113796472708209,
+            "port_over_imre": 8.394421175601918,
+            "codon_over_imre": 1.9464027660196974,
             "original_over_rust": 6.912044260945453
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.0298535835,
               "min_seconds": 0.029013943,
               "max_seconds": 0.031603419,
@@ -917,22 +917,22 @@
           "label": "conformance-unchanged-github-compute-0",
           "rounds": 0,
           "median_seconds": {
-            "relar": 0.010424423,
+            "imre": 0.010424423,
             "port": 0.08562368149999999,
             "original": 0.095847766,
             "codon": 0.019943853499999997,
             "rust": 0.009896471
           },
           "ratios": {
-            "relar_over_rust": 1.0533475013466922,
+            "imre_over_rust": 1.0533475013466922,
             "codon_over_rust": 2.0152490215956775,
-            "original_over_relar": 9.194539208549001,
-            "port_over_relar": 8.21375739453397,
-            "codon_over_relar": 1.9131853628733213,
+            "original_over_imre": 9.194539208549001,
+            "port_over_imre": 8.21375739453397,
+            "codon_over_imre": 1.9131853628733213,
             "original_over_rust": 9.685044901359282
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.010424423,
               "min_seconds": 0.009955587,
               "max_seconds": 0.067190064,
@@ -973,22 +973,22 @@
           "label": "conformance-unchanged-github-compute-4",
           "rounds": 4,
           "median_seconds": {
-            "relar": 0.0775731285,
+            "imre": 0.0775731285,
             "port": 0.7247003615000001,
             "original": 0.30106779100000003,
             "codon": 0.1405345255,
             "rust": 0.0455364845
           },
           "ratios": {
-            "relar_over_rust": 1.70353792902041,
+            "imre_over_rust": 1.70353792902041,
             "codon_over_rust": 3.0861962016413456,
-            "original_over_relar": 3.8810835249476887,
-            "port_over_relar": 9.342157207182897,
-            "codon_over_relar": 1.8116392650065674,
+            "original_over_imre": 3.8810835249476887,
+            "port_over_imre": 9.342157207182897,
+            "codon_over_imre": 1.8116392650065674,
             "original_over_rust": 6.6115729904446185
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.0775731285,
               "min_seconds": 0.075339025,
               "max_seconds": 0.079842445,
@@ -1029,22 +1029,22 @@
           "label": "conformance-changed-github",
           "rounds": null,
           "median_seconds": {
-            "relar": 0.030988727,
+            "imre": 0.030988727,
             "port": 0.2530010065,
             "original": 0.15540332750000002,
             "codon": 0.060316319,
             "rust": 0.02271527
           },
           "ratios": {
-            "relar_over_rust": 1.3642244622229893,
+            "imre_over_rust": 1.3642244622229893,
             "codon_over_rust": 2.655320363790525,
-            "original_over_relar": 5.01483418470207,
-            "port_over_relar": 8.16429169549301,
-            "codon_over_relar": 1.946395506985492,
+            "original_over_imre": 5.01483418470207,
+            "port_over_imre": 8.16429169549301,
+            "codon_over_imre": 1.946395506985492,
             "original_over_rust": 6.8413594687626444
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.030988727,
               "min_seconds": 0.029673194,
               "max_seconds": 0.033316463,
@@ -1085,22 +1085,22 @@
           "label": "conformance-changed-github-compute-0",
           "rounds": 0,
           "median_seconds": {
-            "relar": 0.010389042,
+            "imre": 0.010389042,
             "port": 0.0858092715,
             "original": 0.095458213,
             "codon": 0.019842282000000003,
             "rust": 0.0097246735
           },
           "ratios": {
-            "relar_over_rust": 1.0683178206445698,
+            "imre_over_rust": 1.0683178206445698,
             "codon_over_rust": 2.040405983810151,
-            "original_over_relar": 9.188355673217993,
-            "port_over_relar": 8.259594243627085,
-            "codon_over_relar": 1.9099241296743246,
+            "original_over_imre": 9.188355673217993,
+            "port_over_imre": 8.259594243627085,
+            "codon_over_imre": 1.9099241296743246,
             "original_over_rust": 9.816084108119414
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.010389042,
               "min_seconds": 0.009926661,
               "max_seconds": 0.011146475,
@@ -1141,22 +1141,22 @@
           "label": "conformance-changed-github-compute-4",
           "rounds": 4,
           "median_seconds": {
-            "relar": 0.0813483535,
+            "imre": 0.0813483535,
             "port": 0.727600408,
             "original": 0.3072136215,
             "codon": 0.1514610795,
             "rust": 0.049159639000000005
           },
           "ratios": {
-            "relar_over_rust": 1.6547793099131585,
+            "imre_over_rust": 1.6547793099131585,
             "codon_over_rust": 3.0810047140500765,
-            "original_over_relar": 3.7765192321931873,
-            "port_over_relar": 8.944254882798582,
-            "codon_over_relar": 1.8618825456620953,
+            "original_over_imre": 3.7765192321931873,
+            "port_over_imre": 8.944254882798582,
+            "codon_over_imre": 1.8618825456620953,
             "original_over_rust": 6.249305888922414
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.0813483535,
               "min_seconds": 0.079855535,
               "max_seconds": 0.084374812,
@@ -1197,22 +1197,22 @@
           "label": "conformance-changed-diff",
           "rounds": null,
           "median_seconds": {
-            "relar": 0.030504378,
+            "imre": 0.030504378,
             "port": 0.254273749,
             "original": 0.15713840950000002,
             "codon": 0.0600015305,
             "rust": 0.0230029725
           },
           "ratios": {
-            "relar_over_rust": 1.3261059195719163,
+            "imre_over_rust": 1.3261059195719163,
             "codon_over_rust": 2.6084250850623762,
-            "original_over_relar": 5.151339571650995,
-            "port_over_relar": 8.335647722435121,
-            "codon_over_relar": 1.9669809527012811,
+            "original_over_imre": 5.151339571650995,
+            "port_over_imre": 8.335647722435121,
+            "codon_over_imre": 1.9669809527012811,
             "original_over_rust": 6.831221899691443
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.030504378,
               "min_seconds": 0.029914073,
               "max_seconds": 0.035452399,
@@ -1253,22 +1253,22 @@
           "label": "conformance-changed-diff-compute-0",
           "rounds": 0,
           "median_seconds": {
-            "relar": 0.010576897,
+            "imre": 0.010576897,
             "port": 0.086059359,
             "original": 0.09632813500000001,
             "codon": 0.0199725095,
             "rust": 0.0098238635
           },
           "ratios": {
-            "relar_over_rust": 1.0766534978829867,
+            "imre_over_rust": 1.0766534978829867,
             "codon_over_rust": 2.033060567260528,
-            "original_over_relar": 9.107409762995708,
-            "port_over_relar": 8.136541274818125,
-            "codon_over_relar": 1.888314644644833,
+            "original_over_imre": 9.107409762995708,
+            "port_over_imre": 8.136541274818125,
+            "codon_over_imre": 1.888314644644833,
             "original_over_rust": 9.805524577982991
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.010576897,
               "min_seconds": 0.010013343,
               "max_seconds": 0.011715749,
@@ -1309,22 +1309,22 @@
           "label": "conformance-changed-diff-compute-4",
           "rounds": 4,
           "median_seconds": {
-            "relar": 0.079354186,
+            "imre": 0.079354186,
             "port": 0.7240801035,
             "original": 0.3036545025,
             "codon": 0.1501149255,
             "rust": 0.047951804
           },
           "ratios": {
-            "relar_over_rust": 1.6548738395744191,
+            "imre_over_rust": 1.6548738395744191,
             "codon_over_rust": 3.1305376018804214,
-            "original_over_relar": 3.8265719529906086,
-            "port_over_relar": 9.124661722319223,
-            "codon_over_relar": 1.8917077102901667,
+            "original_over_imre": 3.8265719529906086,
+            "port_over_imre": 9.124661722319223,
+            "codon_over_imre": 1.8917077102901667,
             "original_over_rust": 6.332493820253352
           },
           "summary": {
-            "relar": {
+            "imre": {
               "median_seconds": 0.079354186,
               "min_seconds": 0.077716505,
               "max_seconds": 0.080920602,
@@ -1362,7 +1362,7 @@
           }
         }
       ],
-      "real_workload_max_relar_over_rust": 1.9086635473949456,
+      "real_workload_max_imre_over_rust": 1.9086635473949456,
       "all_real_workloads_within_2x_rust": true
     }
   },

@@ -1,8 +1,8 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Reducing successful-path exception overhead
 
-Relar retains catchable exceptions while reducing the measured overhead on unchanged planner programs. With ThinLTO, the large all-changed layered/wide controls take **77.67 / 42.98 ms**, down **7.6% / 12.4%** from the original exception-enabled build. They remain **4.6% / 6.8%** slower than the preserved pre-exception build. Large batch workloads improve **8.4–14.5%**; Rust BigInt still takes less time.
+Imre retains catchable exceptions while reducing the measured overhead on unchanged planner programs. With ThinLTO, the large all-changed layered/wide controls take **77.67 / 42.98 ms**, down **7.6% / 12.4%** from the original exception-enabled build. They remain **4.6% / 6.8%** slower than the preserved pre-exception build. Large batch workloads improve **8.4–14.5%**; Rust BigInt still takes less time.
 
 The measured implementation is clean commit `5d2e517599a951376eb9e2c60dcb0befcb94fade`. The incremental and batch Python packages and the Rust reference sources are unchanged. This follows the [original exception/batch milestone](2026-10-18-batch-planner.md).
 
@@ -12,15 +12,15 @@ Each result is the median of 32 fresh processes, pinned with the harness to CPU 
 
 Each four-engine group uses the Williams rows `A B D C`, `B C A D`, `C D B A`, `D A C B`, repeated eight times. Every engine occupies each position eight times, and each directed adjacent pair within a round occurs eight times. Transitions between rounds are not balanced. All 2,992 measured/warmup executions passed exact stdout, exit-status, and stderr checks. Full input/expected output appears once per workload; every raw execution retains time, status, stderr, stdout hash and byte length.
 
-Control engines are CPython, pre-exception Relar, original exception-enabled Relar, and optimized Relar. Batch engines are CPython, original exception-enabled Relar, optimized Relar, and Rust BigInt. The five control and six batch inputs are byte-identical to the prior recorded workloads. Large batches contain two valid 16,384-target requests; mixed variants additionally contain recoverable malformed frames. The 128-target boundary case stresses integer boundaries. These are whole-program comparisons, not direct timing of an exception operation.
+Control engines are CPython, pre-exception Imre, original exception-enabled Imre, and optimized Imre. Batch engines are CPython, original exception-enabled Imre, optimized Imre, and Rust BigInt. The five control and six batch inputs are byte-identical to the prior recorded workloads. Large batches contain two valid 16,384-target requests; mixed variants additionally contain recoverable malformed frames. The 128-target boundary case stresses integer boundaries. These are whole-program comparisons, not direct timing of an exception operation.
 
-All times below are milliseconds. `Relar [Q1–Q3]` shows the median and observed interquartile range; this spread is not a confidence interval. Reduction is `1 − optimized / original-exceptions`; residual is `optimized / pre-exceptions − 1`.
+All times below are milliseconds. `Imre [Q1–Q3]` shows the median and observed interquartile range; this spread is not a confidence interval. Reduction is `1 − optimized / original-exceptions`; residual is `optimized / pre-exceptions − 1`.
 
 ### Unchanged single-request control
 
 **Ordinary linking**
 
-| Input | CPython | Pre-exceptions | Original exceptions | Relar [Q1–Q3] | Reduction | Residual |
+| Input | CPython | Pre-exceptions | Original exceptions | Imre [Q1–Q3] | Reduction | Residual |
 |---|---:|---:|---:|---:|---:|---:|
 | layered-16384-sparse | 117.44 | 57.56 | 60.82 | 59.84 [58.90–60.56] | 1.6% | +4.0% |
 | layered-16384-all | 198.46 | 85.99 | 92.31 | 89.79 [88.44–90.10] | 2.7% | +4.4% |
@@ -30,7 +30,7 @@ All times below are milliseconds. `Relar [Q1–Q3]` shows the median and observe
 
 **ThinLTO**
 
-| Input | CPython | Pre-exceptions | Original exceptions | Relar [Q1–Q3] | Reduction | Residual |
+| Input | CPython | Pre-exceptions | Original exceptions | Imre [Q1–Q3] | Reduction | Residual |
 |---|---:|---:|---:|---:|---:|---:|
 | layered-16384-sparse | 117.03 | 50.30 | 54.90 | 52.23 [51.97–52.97] | 4.9% | +3.8% |
 | layered-16384-all | 196.73 | 74.25 | 84.08 | 77.67 [76.62–78.76] | 7.6% | +4.6% |
@@ -40,11 +40,11 @@ All times below are milliseconds. `Relar [Q1–Q3]` shows the median and observe
 
 ### Batch requests
 
-`Relar/Rust` is elapsed-time ratio; values above one mean Rust is faster. `CPython/Relar` is the corresponding speed ratio.
+`Imre/Rust` is elapsed-time ratio; values above one mean Rust is faster. `CPython/Imre` is the corresponding speed ratio.
 
 **Ordinary linking**
 
-| Input | CPython | Original exceptions | Relar [Q1–Q3] | Rust BigInt | Reduction | CPython/Relar | Relar/Rust |
+| Input | CPython | Original exceptions | Imre [Q1–Q3] | Rust BigInt | Reduction | CPython/Imre | Imre/Rust |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | layered-16384-all-valid | 369.88 | 171.55 | 166.21 [163.92–169.00] | 101.98 | 3.1% | 2.23× | 1.63× |
 | layered-16384-all-mixed | 370.38 | 171.99 | 165.72 [164.12–167.57] | 103.37 | 3.6% | 2.23× | 1.60× |
@@ -55,7 +55,7 @@ All times below are milliseconds. `Relar [Q1–Q3]` shows the median and observe
 
 **ThinLTO**
 
-| Input | CPython | Original exceptions | Relar [Q1–Q3] | Rust BigInt | Reduction | CPython/Relar | Relar/Rust |
+| Input | CPython | Original exceptions | Imre [Q1–Q3] | Rust BigInt | Reduction | CPython/Imre | Imre/Rust |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | layered-16384-all-valid | 369.51 | 156.78 | 143.17 [141.85–143.73] | 92.30 | 8.7% | 2.58× | 1.55× |
 | layered-16384-all-mixed | 366.87 | 156.04 | 142.91 [141.84–144.24] | 91.93 | 8.4% | 2.57× | 1.55× |
@@ -95,7 +95,7 @@ The final ordinary controls execute 487,352,765 / 313,845,996 instructions; Thin
 
 ## Toolchain, validation, and limits
 
-The host is Linux x86-64 on an AMD EPYC-Milan devbox. CPython is 3.14.5 with the GIL enabled and JIT disabled; recorded build configuration indicates PGO and LTO. Relar uses Ruff/ty crates 0.0.14, Clang 18.1.3, and Rust 1.98.1-dev (`f62703110`, Ohm `ohm-1.98.1-1`, LLVM 22.1.8). Ordinary Rust references use their recorded no-LTO release profile. Both native ThinLTO builds use LLVM import/inline budgets of 1000; Rust and Relar still differ in frontend and backend details. The Rust BigInt reference is a direct port with the same algorithm and arbitrary-precision numeric domain, not generated from the Python source.
+The host is Linux x86-64 on an AMD EPYC-Milan devbox. CPython is 3.14.5 with the GIL enabled and JIT disabled; recorded build configuration indicates PGO and LTO. Imre uses Ruff/ty crates 0.0.14, Clang 18.1.3, and Rust 1.98.1-dev (`f62703110`, Ohm `ohm-1.98.1-1`, LLVM 22.1.8). Ordinary Rust references use their recorded no-LTO release profile. Both native ThinLTO builds use LLVM import/inline budgets of 1000; Rust and Imre still differ in frontend and backend details. The Rust BigInt reference is a direct port with the same algorithm and arbitrary-precision numeric domain, not generated from the Python source.
 
 Every control engine passed 155 independent graph-oracle inputs and 17 parser cases; every batch engine passed 194 inputs, covering 393 framed requests, 342 valid parses, 51 recovered parse failures, and nine terminal framing cases. The graph oracle uses independent topology/closure/scheduling logic, and the batch oracle independently parses bounded frames. All expected output is checked in full.
 
@@ -105,7 +105,7 @@ The [recovery-memory record](2026-10-18-exception-performance-recovery-memory.js
 
 AOT compilation is excluded from timings. Control/batch compile times were 0.615 / 0.721 s ordinary and 5.006 / 5.479 s ThinLTO. Compiler/runtime builds are excluded from those figures. Ordinary control/batch executables are 3,152,616 / 3,156,768 bytes; ThinLTO executables are 2,752,968 / 2,847,960 bytes. LLVM IR is 168,190 / 255,476 bytes.
 
-This is a shared devbox: affinity and balanced order reduce some noise, but frequency changes and shared resources remain uncontrolled. Fresh-process startup matters, especially at 128 targets. The baseline delta is the combined compiler/runtime change, not the isolated cost of a Python exception statement. Relar supports a narrower exception contract without CPython tracebacks, context, or chaining; mixed-batch comparisons cover the supported observable behavior, not identical exception internals. Results apply to these programs, inputs, and toolchains.
+This is a shared devbox: affinity and balanced order reduce some noise, but frequency changes and shared resources remain uncontrolled. Fresh-process startup matters, especially at 128 targets. The baseline delta is the combined compiler/runtime change, not the isolated cost of a Python exception statement. Imre supports a narrower exception contract without CPython tracebacks, context, or chaining; mixed-batch comparisons cover the supported observable behavior, not identical exception internals. Results apply to these programs, inputs, and toolchains.
 
 ## Evidence and reproduction
 
@@ -127,8 +127,8 @@ With those artifacts, the ordinary comparison is:
 
 ```sh
 python3 benchmarks/exception_benchmark.py \
-  --compiler "$TOOLS/relar" --runtime "$TOOLS/librelar_runtime.a" \
-  --relar-build-record "$TOOLS/build-record.json" \
+  --compiler "$TOOLS/imre" --runtime "$TOOLS/libimre_runtime.a" \
+  --imre-build-record "$TOOLS/build-record.json" \
   --pre-exception-control "$PRE/incremental_planner" \
   --pre-exception-record "$PRE_RECORD" \
   --baseline-control "$POST/incremental_planner" \
@@ -141,7 +141,7 @@ python3 benchmarks/exception_benchmark.py \
   --output benchmarks/local/exception-reproduction.json
 ```
 
-`TOOLS`, `PRE`, `POST`, and `RUST` denote the corresponding local artifact directories; `PRE_RECORD` and `POST_RECORD` denote their original comparison records. For ThinLTO, choose all matching ThinLTO artifacts/records, use `librelar_runtime_lto.a`, and add `--lto-linker /path/to/ld.lld` with an actual compatible Rust LLD backend symlink. Preserve the lexical `ld.lld` name; do not canonicalize it to `rust-lld`. Build the Rust reference with recorded ThinLTO and `--llvm-budget 1000` controls as described in its [README](../reference/incremental_planner/README.md). Run outside ptrace after other work stops.
+`TOOLS`, `PRE`, `POST`, and `RUST` denote the corresponding local artifact directories; `PRE_RECORD` and `POST_RECORD` denote their original comparison records. For ThinLTO, choose all matching ThinLTO artifacts/records, use `libimre_runtime_lto.a`, and add `--lto-linker /path/to/ld.lld` with an actual compatible Rust LLD backend symlink. Preserve the lexical `ld.lld` name; do not canonicalize it to `rust-lld`. Build the Rust reference with recorded ThinLTO and `--llvm-budget 1000` controls as described in its [README](../reference/incremental_planner/README.md). Run outside ptrace after other work stops.
 
 For profiling, extract the two all-changed control inputs from a comparison record, add `shape` (`layered-all`/`wide-all`) and `tasks=16384`, and retain their input/output hashes. Then use `dependency_profile.py --record INPUT_RECORD --binary final=BINARY --build-record final=COMPARISON_RECORD --output NEW_DIRECTORY --tools callgrind --cpu 0`. The profile artifact retains exact commands, trace/log/stdout hashes, raw-summary hashes, and source edits that reconstruct every intermediate snapshot against the published original build record. Never run profiling concurrently with timing.
 

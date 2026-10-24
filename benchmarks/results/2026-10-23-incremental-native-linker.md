@@ -1,6 +1,8 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Incremental native linking on the Ruff conformance reporter
 
-A one-line edit to a Markdown heading makes Relar regenerate LLVM for seven modules, compile the changed `render` module, and link a fresh executable with the Rust runtime. On the compiler that produced the original 1.546 s result, fifteen instrumented edits spent 186 ms in whole-program processing, including 142 ms in ty, 486 ms in Clang compiling `render`, and 519 ms in the final native link. Validating and restoring the six cached objects took 1.8 ms. Only the edited object's `.rodata` varied across those edits. Every instrumented build produced a byte-identical executable to its paired uninstrumented build.
+A one-line edit to a Markdown heading makes Imre regenerate LLVM for seven modules, compile the changed `render` module, and link a fresh executable with the Rust runtime. On the compiler that produced the original 1.546 s result, fifteen instrumented edits spent 186 ms in whole-program processing, including 142 ms in ty, 486 ms in Clang compiling `render`, and 519 ms in the final native link. Validating and restoring the six cached objects took 1.8 ms. Only the edited object's `.rodata` varied across those edits. Every instrumented build produced a byte-identical executable to its paired uninstrumented build.
 
 ## Reporter timings
 
@@ -31,7 +33,7 @@ Each snapshot ran four cold pairs, twelve pairs per edit or unchanged CLI scenar
 
 ## Compiler and linker profile
 
-Four separate process-profile pairs on the original `a4fca479` workload measured the complete Clang link at 523 ms with BFD and 168 ms with LLD. Compiling the changed module took 473 ms and 469 ms. The frontend and IR took 183 ms and 181 ms, and 40 ms and 41 ms elapsed between the link driver's exit and Relar's exit.
+Four separate process-profile pairs on the original `a4fca479` workload measured the complete Clang link at 523 ms with BFD and 168 ms with LLD. Compiling the changed module took 473 ms and 469 ms. The frontend and IR took 183 ms and 181 ms, and 40 ms and 41 ms elapsed between the link driver's exit and Imre's exit.
 
 The actual edited LLVM module was 335,280 bytes and contained 48 function definitions. A time trace on CPU 18 spent 224 ms optimizing LLVM IR and 217 ms generating target code. All eighteen timed replays produced the exact original object. With the smaller distribution-profile runtime archive and the updated reporter, a separate fifteen-pair native link replay fell from 412 ms to 141 ms. The bundled linker and notices added 1.73 MiB to the compressed x86-64 Linux package.
 
@@ -39,14 +41,14 @@ Before upstream `9a7f9951` landed, the same `a4fca479` workload on `9b8ddc22` sh
 
 ## Reproduce
 
-Build the control compiler at `9a7f9951` and the candidate from this change. Place byte-identical copies of `librelar_runtime.a` and the distro's `ld.lld-18` named `relar-ld.lld` beside both preserved compilers. Check out the same reporter revision in both arms and use its prepared `1x/changed` fixture. Replace CPU 12 with an available core on the test host.
+Build the control compiler at `9a7f9951` and the candidate from this change. Place byte-identical copies of `libimre_runtime.a` and the distro's `ld.lld-18` named `imre-ld.lld` beside both preserved compilers. Check out the same reporter revision in both arms and use its prepared `1x/changed` fixture. Replace CPU 12 with an available core on the test host.
 
 ```sh
 python3 benchmarks/compiler_incremental.py --cached-parent \
-  --parent /tmp/before/relar --child /tmp/after/relar \
+  --parent /tmp/before/imre --child /tmp/after/imre \
   --parent-source /tmp/reporter --child-source /tmp/reporter \
   --parent-revision 9a7f9951 --child-revision candidate \
   --inputs /tmp/fixtures/1x/changed --cpu 12 \
   --cold-pairs 4 --edit-pairs 12 --runtime-pairs 72 \
-  --scratch-parent /tmp --output /tmp/relar-samples.json --summary /tmp/relar-summary.json
+  --scratch-parent /tmp --output /tmp/imre-samples.json --summary /tmp/imre-summary.json
 ```

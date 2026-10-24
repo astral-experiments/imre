@@ -1,10 +1,10 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Truthiness, boolean values, and loop else
 
-Relar now supports Python truth tests, operand-returning `and`/`or`, and `for`/`while` `else` suites. The inventory reconciler uses all three capabilities while preserving its input, error, and output behavior. On the two large workloads, ThinLTO Relar runs **3.61× faster than CPython for dense input and 2.75× for sparse input**, taking **4.1% and 8.7% more time than Rust BigInt**, respectively.
+Imre now supports Python truth tests, operand-returning `and`/`or`, and `for`/`while` `else` suites. The inventory reconciler uses all three capabilities while preserving its input, error, and output behavior. On the two large workloads, ThinLTO Imre runs **3.61× faster than CPython for dense input and 2.75× for sparse input**, taking **4.1% and 8.7% more time than Rust BigInt**, respectively.
 
-[Truthiness and boolean values](https://github.com/viarius-experiments/relar/pull/42) and [loop else](https://github.com/viarius-experiments/relar/pull/43) continue GitHub Stack 4 after the [floats, bytes, matching, and assignment-expression milestone](2026-10-19-floats-bytes-match-walrus.md). Measurements use clean source commit `5b3e8438376091340f6610d7e603b9808d7ed65c`; the results and README refresh are committed separately.
+[Truthiness and boolean values](https://github.com/viarius-experiments/imre/pull/42) and [loop else](https://github.com/viarius-experiments/imre/pull/43) continue GitHub Stack 4 after the [floats, bytes, matching, and assignment-expression milestone](2026-10-19-floats-bytes-match-walrus.md). Measurements use clean source commit `5b3e8438376091340f6610d7e603b9808d7ed65c`; the results and README refresh are committed separately.
 
 ## Capability and application
 
@@ -16,11 +16,11 @@ The inventory parser uses `not token` and a digit-scanning `for ... else`; the s
 
 ## Updated-application comparisons
 
-CPython and current Relar run the updated application. Preserved Relar runs the previous application because the previous compiler cannot accept the new syntax. Rust uses its unchanged source and executables. These comparisons therefore include both compiler/runtime changes and the application rewrite. Times are median milliseconds; positive change means more time than preserved Relar.
+CPython and current Imre run the updated application. Preserved Imre runs the previous application because the previous compiler cannot accept the new syntax. Rust uses its unchanged source and executables. These comparisons therefore include both compiler/runtime changes and the application rewrite. Times are median milliseconds; positive change means more time than preserved Imre.
 
 **Ordinary linking**
 
-| Input | CPython ms | Previous Relar ms | Current Relar ms | Rust BigInt ms | Relar time change |
+| Input | CPython ms | Previous Imre ms | Current Imre ms | Rust BigInt ms | Imre time change |
 |---|---:|---:|---:|---:|---:|
 | empty | 27.136 | 2.148 | 2.137 | 2.151 | -0.54% |
 | boundary-128 | 28.555 | 2.893 | 2.866 | 2.614 | -0.91% |
@@ -31,7 +31,7 @@ CPython and current Relar run the updated application. Preserved Relar runs the 
 
 **ThinLTO**
 
-| Input | CPython ms | Previous Relar ms | Current Relar ms | Rust BigInt ms | Relar time change |
+| Input | CPython ms | Previous Imre ms | Current Imre ms | Rust BigInt ms | Imre time change |
 |---|---:|---:|---:|---:|---:|
 | empty | 27.481 | 2.135 | 2.133 | 2.168 | -0.08% |
 | boundary-128 | 28.611 | 2.832 | 2.805 | 2.667 | -0.97% |
@@ -40,11 +40,11 @@ CPython and current Relar run the updated application. Preserved Relar runs the 
 | dense-16384 | 76.696 | 21.641 | 21.237 | 20.398 | -1.87% |
 | sparse-16384 | 112.375 | 41.463 | 40.878 | 37.599 | -1.41% |
 
-For 16,384 positive requests, ordinary Relar takes 2.5–4.7% less time than preserved Relar and runs 2.25–2.95× faster than CPython. ThinLTO takes 1.4–1.9% less time than preserved Relar and narrows the Rust gap to 4.1–8.7%. These are descriptive changes in this session, not a general compiler speedup claim. Small cases include substantial process-startup and small-file overhead. No new CPU or allocation profiles were collected.
+For 16,384 positive requests, ordinary Imre takes 2.5–4.7% less time than preserved Imre and runs 2.25–2.95× faster than CPython. ThinLTO takes 1.4–1.9% less time than preserved Imre and narrows the Rust gap to 4.1–8.7%. These are descriptive changes in this session, not a general compiler speedup claim. Small cases include substantial process-startup and small-file overhead. No new CPU or allocation profiles were collected.
 
 ## Unchanged-application controls
 
-Both current and preserved Relar also run the exact previous application, holding all six Python files fixed. CPython and Rust participate in the same balanced rounds. This isolates the compiler/runtime comparison from adopting the new syntax.
+Both current and preserved Imre also run the exact previous application, holding all six Python files fixed. CPython and Rust participate in the same balanced rounds. This isolates the compiler/runtime comparison from adopting the new syntax.
 
 | Input | Ordinary previous ms | Ordinary current ms | Change | ThinLTO previous ms | ThinLTO current ms | Change |
 |---|---:|---:|---:|---:|---:|---:|
@@ -55,7 +55,7 @@ Both current and preserved Relar also run the exact previous application, holdin
 | dense-16384 | 27.279 | 27.002 | -1.02% | 21.655 | 21.522 | -0.62% |
 | sparse-16384 | 50.844 | 50.647 | -0.39% | 41.436 | 41.265 | -0.41% |
 
-Across these twelve comparisons, median changes range from **-1.48% to +0.06%**, and every current/preserved Relar interquartile range overlaps. This provides no clear compiler-only regression signal. Interquartile ranges describe sample spread, not confidence intervals or proof of equivalent performance. The application and unchanged-source families ran sequentially; subtracting their changes would not establish a causal source-only effect. The [summary](2026-10-19-truthiness-loop-else-summary.json) retains all four engines' statistics in every family.
+Across these twelve comparisons, median changes range from **-1.48% to +0.06%**, and every current/preserved Imre interquartile range overlaps. This provides no clear compiler-only regression signal. Interquartile ranges describe sample spread, not confidence intervals or proof of equivalent performance. The application and unchanged-source families ran sequentially; subtracting their changes would not establish a causal source-only effect. The [summary](2026-10-19-truthiness-loop-else-summary.json) retains all four engines' statistics in every family.
 
 ## Method and provenance
 
@@ -65,7 +65,7 @@ Before timing, every family checks the independent 204-case oracle and `/dev/ful
 
 Fresh processes run on CPU 0 outside ptrace. Timing includes startup/imports, reading/decoding/parsing, reconciliation, rendering, buffered writes, flush/close, and exit. Builds, fixture preparation, oracles, hashing, verification, and deletion stay outside the clock. OS caches are warm; writes are not fsynced. Task-owned builds, tests, and profiling stop during measurements; CPU frequency and unrelated activity on the shared host remain uncontrolled.
 
-The host is x86-64 AMD EPYC-Milan. CPython 3.14.5 is a GIL build with its experimental JIT disabled and PGO/LTO enabled. Relar uses Clang 18.1.3 at `-O3`, with LLD 22.1.8 for cross-language ThinLTO and matched LLVM optimization budgets. Rust preserves the eager algorithm and arbitrary-precision quantities while using native containers, borrowed strings, and direct formatting. These results apply to this complete inventory program and recorded environment.
+The host is x86-64 AMD EPYC-Milan. CPython 3.14.5 is a GIL build with its experimental JIT disabled and PGO/LTO enabled. Imre uses Clang 18.1.3 at `-O3`, with LLD 22.1.8 for cross-language ThinLTO and matched LLVM optimization budgets. Rust preserves the eager algorithm and arbitrary-precision quantities while using native containers, borrowed strings, and direct formatting. These results apply to this complete inventory program and recorded environment.
 
 ## Validation and evidence
 

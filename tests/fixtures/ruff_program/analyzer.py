@@ -7,7 +7,7 @@ import sys
 
 mode, command, *flags = sys.argv[1:]
 assert command == "check"
-assert flags[0] == "--python-version=" + os.environ.get("RELAR_EXPECTED_PYTHON_VERSION", "3.12")
+assert flags[0] == "--python-version=" + os.environ.get("IMRE_EXPECTED_PYTHON_VERSION", "3.12")
 assert flags[1] == "--output-format=gitlab"
 paths = [Path(arg) for arg in flags[flags.index("--exit-zero") + 2 :]]
 assert [path.name for path in paths] == ["cases_one.py", "cases_types.pyi"]

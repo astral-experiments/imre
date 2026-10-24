@@ -16,41 +16,41 @@
     },
     "build_record_sha256": "ed3e4ad2cb880532f2451c42fcfa525f18a342f1b78682a19ac6ba2576465516",
     "artifact_sha256": {
-      "relar": "0cfce8614ed1a0a72bec4b3fc3b460548a34857da0e3a9225514c7df63b97db1",
-      "librelar_runtime.a": "0079d909653763d6062823a8eb249bbc39ad5aa330251424bc096f4043310f82",
-      "librelar_runtime_lto.a": "7259cdb2422ad9c311ca29bae468ff8380073c6886c966628e9d0fc088e17a61"
+      "imre": "0cfce8614ed1a0a72bec4b3fc3b460548a34857da0e3a9225514c7df63b97db1",
+      "libimre_runtime.a": "0079d909653763d6062823a8eb249bbc39ad5aa330251424bc096f4043310f82",
+      "libimre_runtime_lto.a": "7259cdb2422ad9c311ca29bae468ff8380073c6886c966628e9d0fc088e17a61"
     }
   },
   "preserved_guard_before": {
     "sha256": {
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/asan.log": "e963e4d0906123d94140a8ff7f3d3701528eb23c027bf1915e1d05f971d0d042",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/build-record.json": "71fa1c0c7ea27640a98bc9a6c71dda009803090d88b18b1ba01a6b2f2def6ef0",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/copies.json": "266f263c923ee6a9254b3ae2342f775345b7a4b7bed9589f264bde02c9ac1fdf",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/freeze.py": "4879e7d1c214e5af793f9ec67c24b55bbe4438d76207ff259fffb250e2759d6a",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/librelar_runtime.a": "4e55a2e65cd85379975a4d72bd6a878e6de556685e03d28c2007200f01a0e859",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/librelar_runtime_asan.a": "5ad0c13ab1932fea92984dfc9fce2ff1cc14f97eaa0bd735f66ab9bbafcfd8c9",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/librelar_runtime_lto.a": "8e7126ca8bf47941a46771d3a176e9afc02cf5a5907b59fb1cdccbaff3ea4297",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/relar": "44bde4d0cf6b2056aff1f29643d84d285c56654a91470f941b31f99fb6db2e77",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/ordinary.log": "3cf4722772fe0d95ed0521c555d7a531fa34847e1b052b2b001b26d3dfe15754",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/thinlto.log": "d52208d3f2b1cba6ac0ff70e8bdafb86cca96bed275e881d885dff348b2b6299",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal/inventory_reconciliation": "e58b30bc7ddb1640d4066a71350e71719fef8fe56b31b88fdd4893b96a32f04b",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal/inventory_reconciliation.ll": "c342f100fe81d7803316a2b7b66f646e8a38f577dca52baa4c356be9206f4699",
-      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint": "dae07835587c65d3b1d82558e5eebb9f2cc11fc549f7ab5876570132c932f2f5",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/asan.log": "e963e4d0906123d94140a8ff7f3d3701528eb23c027bf1915e1d05f971d0d042",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/build-record.json": "71fa1c0c7ea27640a98bc9a6c71dda009803090d88b18b1ba01a6b2f2def6ef0",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/copies.json": "266f263c923ee6a9254b3ae2342f775345b7a4b7bed9589f264bde02c9ac1fdf",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/freeze.py": "4879e7d1c214e5af793f9ec67c24b55bbe4438d76207ff259fffb250e2759d6a",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/libimre_runtime.a": "4e55a2e65cd85379975a4d72bd6a878e6de556685e03d28c2007200f01a0e859",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/libimre_runtime_asan.a": "5ad0c13ab1932fea92984dfc9fce2ff1cc14f97eaa0bd735f66ab9bbafcfd8c9",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/libimre_runtime_lto.a": "8e7126ca8bf47941a46771d3a176e9afc02cf5a5907b59fb1cdccbaff3ea4297",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/imre": "44bde4d0cf6b2056aff1f29643d84d285c56654a91470f941b31f99fb6db2e77",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/ordinary.log": "3cf4722772fe0d95ed0521c555d7a531fa34847e1b052b2b001b26d3dfe15754",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/thinlto.log": "d52208d3f2b1cba6ac0ff70e8bdafb86cca96bed275e881d885dff348b2b6299",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/normal/inventory_reconciliation": "e58b30bc7ddb1640d4066a71350e71719fef8fe56b31b88fdd4893b96a32f04b",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/normal/inventory_reconciliation.ll": "c342f100fe81d7803316a2b7b66f646e8a38f577dca52baa4c356be9206f4699",
+      "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint": "dae07835587c65d3b1d82558e5eebb9f2cc11fc549f7ab5876570132c932f2f5",
       "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
       "/usr/lib/llvm-18/bin/clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal.json": "cd1998f95f409fa704d609f289e725d07829c80da1ee26a6fc1ce63156aade5c",
-      "/home/dev-user/code/oss/relar/benchmarks/results/2026-10-19-floats-bytes-match-walrus-normal.json.gz": "738788690e7360ded35a818e90a009df1693cd6d9847bacd9e56e7a3fa5121cb",
-      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json": "b43013232af09bdc8c1ce5d0c3d095cc48941fe9301b2f7e5fef0019ce65e8fb",
-      "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/Cargo.toml": "1bca622581e0122a40193f41c63ffef865c2e02b3e34853aaa2ab04fc096c839",
-      "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/Cargo.lock": "5fc2164c7d5d646f2dffefb4ae6bfe004cb211c240cbd1f591971e2e75ead1e0",
-      "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/src/main.rs": "e21c4a4aa25aa1509398afa76feb64d644535ff4b1707317037630e811db6617",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto/inventory_reconciliation": "eaada21d508398ce68367dfd3962bf2371e7d8ca598230e04f0d50d18c2ca069",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto/inventory_reconciliation.ll": "c342f100fe81d7803316a2b7b66f646e8a38f577dca52baa4c356be9206f4699",
-      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint": "00d4086b398ffe41a3346a9e24d14659002d763b1d25a058a353a3e5fd108270",
-      "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto.json": "d182335e16c44138ad9d0f072fb2cac5a87c5bacc51e489c06651235cc42749a",
-      "/home/dev-user/code/oss/relar/benchmarks/results/2026-10-19-floats-bytes-match-walrus-lto.json.gz": "5caa9434f86aa794bcccc2a9fd9b5d2c730d27d39ef5643fb0f7a67a7e258921",
-      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json": "001a121e8c549548ded1b976e9b2c099cbc07226b0678714fe39cb1707f97fce"
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/normal.json": "cd1998f95f409fa704d609f289e725d07829c80da1ee26a6fc1ce63156aade5c",
+      "/home/dev-user/code/oss/imre/benchmarks/results/2026-10-19-floats-bytes-match-walrus-normal.json.gz": "738788690e7360ded35a818e90a009df1693cd6d9847bacd9e56e7a3fa5121cb",
+      "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json": "b43013232af09bdc8c1ce5d0c3d095cc48941fe9301b2f7e5fef0019ce65e8fb",
+      "/home/dev-user/code/oss/imre/benchmarks/reference/inventory_reconciliation/Cargo.toml": "1bca622581e0122a40193f41c63ffef865c2e02b3e34853aaa2ab04fc096c839",
+      "/home/dev-user/code/oss/imre/benchmarks/reference/inventory_reconciliation/Cargo.lock": "5fc2164c7d5d646f2dffefb4ae6bfe004cb211c240cbd1f591971e2e75ead1e0",
+      "/home/dev-user/code/oss/imre/benchmarks/reference/inventory_reconciliation/src/main.rs": "e21c4a4aa25aa1509398afa76feb64d644535ff4b1707317037630e811db6617",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/lto/inventory_reconciliation": "eaada21d508398ce68367dfd3962bf2371e7d8ca598230e04f0d50d18c2ca069",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/lto/inventory_reconciliation.ll": "c342f100fe81d7803316a2b7b66f646e8a38f577dca52baa4c356be9206f4699",
+      "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint": "00d4086b398ffe41a3346a9e24d14659002d763b1d25a058a353a3e5fd108270",
+      "/home/dev-user/code/oss/imre/benchmarks/local/batch-linker/ld.lld": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/lto.json": "d182335e16c44138ad9d0f072fb2cac5a87c5bacc51e489c06651235cc42749a",
+      "/home/dev-user/code/oss/imre/benchmarks/results/2026-10-19-floats-bytes-match-walrus-lto.json.gz": "5caa9434f86aa794bcccc2a9fd9b5d2c730d27d39ef5643fb0f7a67a7e258921",
+      "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json": "001a121e8c549548ded1b976e9b2c099cbc07226b0678714fe39cb1707f97fce"
     },
     "snapshots": {
       "baseline_source": {
@@ -72,14 +72,14 @@
     }
   },
   "scripts": {
-    "/tmp/relar-control-flow-inventory/launch.py": "ceaa9a0a1fb7cd72536c47099c9a0017d77bfffc4c29833c525d20e133d2250d",
-    "/tmp/relar-control-flow-inventory/run_comparison.py": "2eecc09b5afd39d928556f9040e6d076d2bb80377d2dcde0d251872630164262",
-    "/tmp/relar-control-flow-inventory/prepared-manifest.json": "271c05026098a228346066465ad4539640098c5f26c28c0864c86065cf96c4b6",
-    "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-final-launch.py": "8aaacc03b3c40fb5b505518827d5d8afdf577745bda9a09326e0190a327ca508"
+    "/tmp/imre-control-flow-inventory/launch.py": "ceaa9a0a1fb7cd72536c47099c9a0017d77bfffc4c29833c525d20e133d2250d",
+    "/tmp/imre-control-flow-inventory/run_comparison.py": "2eecc09b5afd39d928556f9040e6d076d2bb80377d2dcde0d251872630164262",
+    "/tmp/imre-control-flow-inventory/prepared-manifest.json": "271c05026098a228346066465ad4539640098c5f26c28c0864c86065cf96c4b6",
+    "/home/dev-user/code/oss/imre/benchmarks/local/sequence-access-final-launch.py": "8aaacc03b3c40fb5b505518827d5d8afdf577745bda9a09326e0190a327ca508"
   },
   "comparison_families": {
-    "application": "CPython/current Relar run the rewritten source; preserved Relar runs the verified old source; Rust source is unchanged. Application and compiler effects are combined.",
-    "common-source": "CPython/current Relar/preserved Relar run the verified old source; Rust source is unchanged. Current/preserved Relar compares compiler/runtime changes with application source fixed."
+    "application": "CPython/current Imre run the rewritten source; preserved Imre runs the verified old source; Rust source is unchanged. Application and compiler effects are combined.",
+    "common-source": "CPython/current Imre/preserved Imre run the verified old source; Rust source is unchanged. Current/preserved Imre compares compiler/runtime changes with application source fixed."
   },
   "cache_preparation": {
     "command": [
@@ -88,8 +88,8 @@
       "-m",
       "compileall",
       "-q",
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation",
-      "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation"
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation",
+      "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation"
     ],
     "timed": false
   },
@@ -101,54 +101,54 @@
       "pycache_prefix": null,
       "dont_write_bytecode": false,
       "files": {
-        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__init__.py": {
+        "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__init__.py": {
           "source_sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
-          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
+          "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
           "cache_sha256": "363df6ba1b6d8875d50e03f1f83983871c49843a872dfa796596b9b6a532d9b5",
           "cache_bytes": 256,
           "flags": 0,
           "source_mtime_ns": 1792327978557777105,
           "valid_header": true
         },
-        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py": {
+        "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__main__.py": {
           "source_sha256": "48c3015dcbac52a08f48b800197398076ac26f37ca480a4ee1ebab2b72c9349c",
-          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
+          "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
           "cache_sha256": "539832a30f44267b7e44eb2e6217a4e90feb03b9ee4e665d7371397737f3e379",
           "cache_bytes": 1628,
           "flags": 0,
           "source_mtime_ns": 1792374525645378594,
           "valid_header": true
         },
-        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/load.py": {
+        "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/load.py": {
           "source_sha256": "63b6a27309c84a8e201703f23f1e825ffdc76b5f367b1f336001aa84dcee8429",
-          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
+          "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
           "cache_sha256": "db9abc5368778ae027c7b2db0c070e5d87287fe55913b72fa54caa71ac6be9ba",
           "cache_bytes": 8367,
           "flags": 0,
           "source_mtime_ns": 1792408933491639337,
           "valid_header": true
         },
-        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/model.py": {
+        "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/model.py": {
           "source_sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
-          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
+          "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
           "cache_sha256": "736e3da875859f41e443ec769f7029112e284fb5cf275fbc87c9348fd4e3cb39",
           "cache_bytes": 4993,
           "flags": 0,
           "source_mtime_ns": 1792368213235952247,
           "valid_header": true
         },
-        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/reconcile.py": {
+        "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/reconcile.py": {
           "source_sha256": "eca175bf2a76c26b7429e0f7ad574be004a63e0f3424a9a3f3ac7aea4bd8d0ea",
-          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
+          "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
           "cache_sha256": "7c4c6e518bf4b4002f178c2a96b544f689e7356cfb95c92a2b38c83c53de4849",
           "cache_bytes": 2684,
           "flags": 0,
           "source_mtime_ns": 1792408933492639333,
           "valid_header": true
         },
-        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/render.py": {
+        "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/render.py": {
           "source_sha256": "df456686711363c55c13f652df5a32df6b47ce666a71b8a2c8806b542e31357f",
-          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
+          "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
           "cache_sha256": "d0a23ab0ea4696127fe61fafa59b20fdd827822f251ad4241a485c1fe1b2299a",
           "cache_bytes": 4261,
           "flags": 0,
@@ -164,54 +164,54 @@
       "pycache_prefix": null,
       "dont_write_bytecode": false,
       "files": {
-        "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__init__.py": {
+        "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__init__.py": {
           "source_sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
-          "cache_path": "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
+          "cache_path": "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
           "cache_sha256": "4bb4ff740c811627984f6f0b490be5ff1e884cfbf47ad05fb295650fab143161",
           "cache_bytes": 267,
           "flags": 0,
           "source_mtime_ns": 1792407467795521623,
           "valid_header": true
         },
-        "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__main__.py": {
+        "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__main__.py": {
           "source_sha256": "48c3015dcbac52a08f48b800197398076ac26f37ca480a4ee1ebab2b72c9349c",
-          "cache_path": "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
+          "cache_path": "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
           "cache_sha256": "b22704acc22679ac99e13d1a2afdd9784d321abb1cfc6ad0e9fe08ec7a4fdb6e",
           "cache_bytes": 1639,
           "flags": 0,
           "source_mtime_ns": 1792407467807521551,
           "valid_header": true
         },
-        "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/load.py": {
+        "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/load.py": {
           "source_sha256": "a4fcffcd2431dc96833cb5aa05a8a436c350b0469ceb635ef1a788da6eabc863",
-          "cache_path": "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
+          "cache_path": "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
           "cache_sha256": "dfb7d1dcc7e06c9509e7defa875054ae5379417bdfc81f5626852f134c2fb120",
           "cache_bytes": 8480,
           "flags": 0,
           "source_mtime_ns": 1792407467820521474,
           "valid_header": true
         },
-        "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/model.py": {
+        "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/model.py": {
           "source_sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
-          "cache_path": "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
+          "cache_path": "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
           "cache_sha256": "34f2948837a8d53250ae8e6c2a4c311ab64134c1894bf0f4e66f8bac93f39b87",
           "cache_bytes": 5004,
           "flags": 0,
           "source_mtime_ns": 1792407467832521402,
           "valid_header": true
         },
-        "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/reconcile.py": {
+        "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/reconcile.py": {
           "source_sha256": "a1c7122171f4a92b62e57811bce52e6d522cb2231536b770e5d92785b1bfe618",
-          "cache_path": "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
+          "cache_path": "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
           "cache_sha256": "6385785a59a3c6138e3cf5964a6e521a57e14608e9290e6b06999286ddf9b294",
           "cache_bytes": 2678,
           "flags": 0,
           "source_mtime_ns": 1792407467845521325,
           "valid_header": true
         },
-        "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/render.py": {
+        "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/render.py": {
           "source_sha256": "c6319e84f2acbb15ddf142e9135c54635d47e1dc67b6d590ba0f0c44697ed200",
-          "cache_path": "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
+          "cache_path": "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
           "cache_sha256": "4f709a2e0df61eea8afd0561c648cacd6d8b6b92f3cb1da87c080352c67635a5",
           "cache_bytes": 4275,
           "flags": 0,
@@ -226,27 +226,27 @@
       "command": [
         "/home/dev-user/.virtualenvs/openai/bin/python3",
         "-u",
-        "/tmp/relar-control-flow-inventory/run_comparison.py",
+        "/tmp/imre-control-flow-inventory/run_comparison.py",
         "--repository",
-        "/home/dev-user/code/oss/relar",
+        "/home/dev-user/code/oss/imre",
         "--application-source-root",
-        "/home/dev-user/code/oss/relar/examples",
+        "/home/dev-user/code/oss/imre/examples",
         "--compiler",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/relar",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/imre",
         "--runtime",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime.a",
-        "--relar-build-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/build-record.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/libimre_runtime.a",
+        "--imre-build-record",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/build-record.json",
         "--rust-bigint",
-        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint",
+        "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint",
         "--rust-build-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json",
         "--inventory-baseline",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal/inventory_reconciliation",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/normal/inventory_reconciliation",
         "--inventory-baseline-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/normal.json",
         "--inventory-baseline-source-root",
-        "/tmp/relar-control-flow-inventory/baseline-source",
+        "/tmp/imre-control-flow-inventory/baseline-source",
         "--python",
         "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
         "--clang",
@@ -260,9 +260,9 @@
         "--warmups",
         "2",
         "--artifact-dir",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-comparison-final/application-normal",
         "--output",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-normal.json"
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-comparison-final/application-normal.json"
       ],
       "started_at_utc": "2026-10-19T11:25:20.796155+00:00",
       "returncode": 0,
@@ -274,27 +274,27 @@
       "command": [
         "/home/dev-user/.virtualenvs/openai/bin/python3",
         "-u",
-        "/tmp/relar-control-flow-inventory/run_comparison.py",
+        "/tmp/imre-control-flow-inventory/run_comparison.py",
         "--repository",
-        "/home/dev-user/code/oss/relar",
+        "/home/dev-user/code/oss/imre",
         "--application-source-root",
-        "/tmp/relar-control-flow-inventory/baseline-source",
+        "/tmp/imre-control-flow-inventory/baseline-source",
         "--compiler",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/relar",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/imre",
         "--runtime",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime.a",
-        "--relar-build-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/build-record.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/libimre_runtime.a",
+        "--imre-build-record",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/build-record.json",
         "--rust-bigint",
-        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint",
+        "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint",
         "--rust-build-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json",
         "--inventory-baseline",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal/inventory_reconciliation",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/normal/inventory_reconciliation",
         "--inventory-baseline-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/normal.json",
         "--inventory-baseline-source-root",
-        "/tmp/relar-control-flow-inventory/baseline-source",
+        "/tmp/imre-control-flow-inventory/baseline-source",
         "--python",
         "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
         "--clang",
@@ -308,9 +308,9 @@
         "--warmups",
         "2",
         "--artifact-dir",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/common-source-normal",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-comparison-final/common-source-normal",
         "--output",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/common-source-normal.json"
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-comparison-final/common-source-normal.json"
       ],
       "started_at_utc": "2026-10-19T11:26:09.761292+00:00",
       "returncode": 0,
@@ -322,27 +322,27 @@
       "command": [
         "/home/dev-user/.virtualenvs/openai/bin/python3",
         "-u",
-        "/tmp/relar-control-flow-inventory/run_comparison.py",
+        "/tmp/imre-control-flow-inventory/run_comparison.py",
         "--repository",
-        "/home/dev-user/code/oss/relar",
+        "/home/dev-user/code/oss/imre",
         "--application-source-root",
-        "/home/dev-user/code/oss/relar/examples",
+        "/home/dev-user/code/oss/imre/examples",
         "--compiler",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/relar",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/imre",
         "--runtime",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime_lto.a",
-        "--relar-build-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/build-record.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/libimre_runtime_lto.a",
+        "--imre-build-record",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/build-record.json",
         "--rust-bigint",
-        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint",
+        "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint",
         "--rust-build-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json",
         "--inventory-baseline",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto/inventory_reconciliation",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/lto/inventory_reconciliation",
         "--inventory-baseline-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/lto.json",
         "--inventory-baseline-source-root",
-        "/tmp/relar-control-flow-inventory/baseline-source",
+        "/tmp/imre-control-flow-inventory/baseline-source",
         "--python",
         "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
         "--clang",
@@ -356,11 +356,11 @@
         "--warmups",
         "2",
         "--artifact-dir",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-comparison-final/application-lto",
         "--output",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/application-lto.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-comparison-final/application-lto.json",
         "--lto-linker",
-        "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld"
+        "/home/dev-user/code/oss/imre/benchmarks/local/batch-linker/ld.lld"
       ],
       "started_at_utc": "2026-10-19T11:26:56.942206+00:00",
       "returncode": 0,
@@ -372,27 +372,27 @@
       "command": [
         "/home/dev-user/.virtualenvs/openai/bin/python3",
         "-u",
-        "/tmp/relar-control-flow-inventory/run_comparison.py",
+        "/tmp/imre-control-flow-inventory/run_comparison.py",
         "--repository",
-        "/home/dev-user/code/oss/relar",
+        "/home/dev-user/code/oss/imre",
         "--application-source-root",
-        "/tmp/relar-control-flow-inventory/baseline-source",
+        "/tmp/imre-control-flow-inventory/baseline-source",
         "--compiler",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/relar",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/imre",
         "--runtime",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/librelar_runtime_lto.a",
-        "--relar-build-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-tools-final-v2/build-record.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/libimre_runtime_lto.a",
+        "--imre-build-record",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-tools-final-v2/build-record.json",
         "--rust-bigint",
-        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint",
+        "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint",
         "--rust-build-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json",
         "--inventory-baseline",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto/inventory_reconciliation",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/lto/inventory_reconciliation",
         "--inventory-baseline-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/lto.json",
         "--inventory-baseline-source-root",
-        "/tmp/relar-control-flow-inventory/baseline-source",
+        "/tmp/imre-control-flow-inventory/baseline-source",
         "--python",
         "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
         "--clang",
@@ -406,11 +406,11 @@
         "--warmups",
         "2",
         "--artifact-dir",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/common-source-lto",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-comparison-final/common-source-lto",
         "--output",
-        "/home/dev-user/code/oss/relar/benchmarks/local/control-flow-comparison-final/common-source-lto.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/control-flow-comparison-final/common-source-lto.json",
         "--lto-linker",
-        "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld"
+        "/home/dev-user/code/oss/imre/benchmarks/local/batch-linker/ld.lld"
       ],
       "started_at_utc": "2026-10-19T11:27:49.673805+00:00",
       "returncode": 0,
@@ -434,41 +434,41 @@
     },
     "build_record_sha256": "ed3e4ad2cb880532f2451c42fcfa525f18a342f1b78682a19ac6ba2576465516",
     "artifact_sha256": {
-      "relar": "0cfce8614ed1a0a72bec4b3fc3b460548a34857da0e3a9225514c7df63b97db1",
-      "librelar_runtime.a": "0079d909653763d6062823a8eb249bbc39ad5aa330251424bc096f4043310f82",
-      "librelar_runtime_lto.a": "7259cdb2422ad9c311ca29bae468ff8380073c6886c966628e9d0fc088e17a61"
+      "imre": "0cfce8614ed1a0a72bec4b3fc3b460548a34857da0e3a9225514c7df63b97db1",
+      "libimre_runtime.a": "0079d909653763d6062823a8eb249bbc39ad5aa330251424bc096f4043310f82",
+      "libimre_runtime_lto.a": "7259cdb2422ad9c311ca29bae468ff8380073c6886c966628e9d0fc088e17a61"
     }
   },
   "preserved_guard_after": {
     "sha256": {
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/asan.log": "e963e4d0906123d94140a8ff7f3d3701528eb23c027bf1915e1d05f971d0d042",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/build-record.json": "71fa1c0c7ea27640a98bc9a6c71dda009803090d88b18b1ba01a6b2f2def6ef0",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/copies.json": "266f263c923ee6a9254b3ae2342f775345b7a4b7bed9589f264bde02c9ac1fdf",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/freeze.py": "4879e7d1c214e5af793f9ec67c24b55bbe4438d76207ff259fffb250e2759d6a",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/librelar_runtime.a": "4e55a2e65cd85379975a4d72bd6a878e6de556685e03d28c2007200f01a0e859",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/librelar_runtime_asan.a": "5ad0c13ab1932fea92984dfc9fce2ff1cc14f97eaa0bd735f66ab9bbafcfd8c9",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/librelar_runtime_lto.a": "8e7126ca8bf47941a46771d3a176e9afc02cf5a5907b59fb1cdccbaff3ea4297",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/relar": "44bde4d0cf6b2056aff1f29643d84d285c56654a91470f941b31f99fb6db2e77",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/ordinary.log": "3cf4722772fe0d95ed0521c555d7a531fa34847e1b052b2b001b26d3dfe15754",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/thinlto.log": "d52208d3f2b1cba6ac0ff70e8bdafb86cca96bed275e881d885dff348b2b6299",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal/inventory_reconciliation": "e58b30bc7ddb1640d4066a71350e71719fef8fe56b31b88fdd4893b96a32f04b",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal/inventory_reconciliation.ll": "c342f100fe81d7803316a2b7b66f646e8a38f577dca52baa4c356be9206f4699",
-      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint": "dae07835587c65d3b1d82558e5eebb9f2cc11fc549f7ab5876570132c932f2f5",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/asan.log": "e963e4d0906123d94140a8ff7f3d3701528eb23c027bf1915e1d05f971d0d042",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/build-record.json": "71fa1c0c7ea27640a98bc9a6c71dda009803090d88b18b1ba01a6b2f2def6ef0",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/copies.json": "266f263c923ee6a9254b3ae2342f775345b7a4b7bed9589f264bde02c9ac1fdf",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/freeze.py": "4879e7d1c214e5af793f9ec67c24b55bbe4438d76207ff259fffb250e2759d6a",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/libimre_runtime.a": "4e55a2e65cd85379975a4d72bd6a878e6de556685e03d28c2007200f01a0e859",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/libimre_runtime_asan.a": "5ad0c13ab1932fea92984dfc9fce2ff1cc14f97eaa0bd735f66ab9bbafcfd8c9",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/libimre_runtime_lto.a": "8e7126ca8bf47941a46771d3a176e9afc02cf5a5907b59fb1cdccbaff3ea4297",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/imre": "44bde4d0cf6b2056aff1f29643d84d285c56654a91470f941b31f99fb6db2e77",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/ordinary.log": "3cf4722772fe0d95ed0521c555d7a531fa34847e1b052b2b001b26d3dfe15754",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/thinlto.log": "d52208d3f2b1cba6ac0ff70e8bdafb86cca96bed275e881d885dff348b2b6299",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/normal/inventory_reconciliation": "e58b30bc7ddb1640d4066a71350e71719fef8fe56b31b88fdd4893b96a32f04b",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/normal/inventory_reconciliation.ll": "c342f100fe81d7803316a2b7b66f646e8a38f577dca52baa4c356be9206f4699",
+      "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint": "dae07835587c65d3b1d82558e5eebb9f2cc11fc549f7ab5876570132c932f2f5",
       "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
       "/usr/lib/llvm-18/bin/clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal.json": "cd1998f95f409fa704d609f289e725d07829c80da1ee26a6fc1ce63156aade5c",
-      "/home/dev-user/code/oss/relar/benchmarks/results/2026-10-19-floats-bytes-match-walrus-normal.json.gz": "738788690e7360ded35a818e90a009df1693cd6d9847bacd9e56e7a3fa5121cb",
-      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json": "b43013232af09bdc8c1ce5d0c3d095cc48941fe9301b2f7e5fef0019ce65e8fb",
-      "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/Cargo.toml": "1bca622581e0122a40193f41c63ffef865c2e02b3e34853aaa2ab04fc096c839",
-      "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/Cargo.lock": "5fc2164c7d5d646f2dffefb4ae6bfe004cb211c240cbd1f591971e2e75ead1e0",
-      "/home/dev-user/code/oss/relar/benchmarks/reference/inventory_reconciliation/src/main.rs": "e21c4a4aa25aa1509398afa76feb64d644535ff4b1707317037630e811db6617",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto/inventory_reconciliation": "eaada21d508398ce68367dfd3962bf2371e7d8ca598230e04f0d50d18c2ca069",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto/inventory_reconciliation.ll": "c342f100fe81d7803316a2b7b66f646e8a38f577dca52baa4c356be9206f4699",
-      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint": "00d4086b398ffe41a3346a9e24d14659002d763b1d25a058a353a3e5fd108270",
-      "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
-      "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto.json": "d182335e16c44138ad9d0f072fb2cac5a87c5bacc51e489c06651235cc42749a",
-      "/home/dev-user/code/oss/relar/benchmarks/results/2026-10-19-floats-bytes-match-walrus-lto.json.gz": "5caa9434f86aa794bcccc2a9fd9b5d2c730d27d39ef5643fb0f7a67a7e258921",
-      "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json": "001a121e8c549548ded1b976e9b2c099cbc07226b0678714fe39cb1707f97fce"
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/normal.json": "cd1998f95f409fa704d609f289e725d07829c80da1ee26a6fc1ce63156aade5c",
+      "/home/dev-user/code/oss/imre/benchmarks/results/2026-10-19-floats-bytes-match-walrus-normal.json.gz": "738788690e7360ded35a818e90a009df1693cd6d9847bacd9e56e7a3fa5121cb",
+      "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json": "b43013232af09bdc8c1ce5d0c3d095cc48941fe9301b2f7e5fef0019ce65e8fb",
+      "/home/dev-user/code/oss/imre/benchmarks/reference/inventory_reconciliation/Cargo.toml": "1bca622581e0122a40193f41c63ffef865c2e02b3e34853aaa2ab04fc096c839",
+      "/home/dev-user/code/oss/imre/benchmarks/reference/inventory_reconciliation/Cargo.lock": "5fc2164c7d5d646f2dffefb4ae6bfe004cb211c240cbd1f591971e2e75ead1e0",
+      "/home/dev-user/code/oss/imre/benchmarks/reference/inventory_reconciliation/src/main.rs": "e21c4a4aa25aa1509398afa76feb64d644535ff4b1707317037630e811db6617",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/lto/inventory_reconciliation": "eaada21d508398ce68367dfd3962bf2371e7d8ca598230e04f0d50d18c2ca069",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/lto/inventory_reconciliation.ll": "c342f100fe81d7803316a2b7b66f646e8a38f577dca52baa4c356be9206f4699",
+      "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint": "00d4086b398ffe41a3346a9e24d14659002d763b1d25a058a353a3e5fd108270",
+      "/home/dev-user/code/oss/imre/benchmarks/local/batch-linker/ld.lld": "8fdb035a0d8732dd47659e6e9a77ee75aacc1b7ab89ca822e97841176d58932b",
+      "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/lto.json": "d182335e16c44138ad9d0f072fb2cac5a87c5bacc51e489c06651235cc42749a",
+      "/home/dev-user/code/oss/imre/benchmarks/results/2026-10-19-floats-bytes-match-walrus-lto.json.gz": "5caa9434f86aa794bcccc2a9fd9b5d2c730d27d39ef5643fb0f7a67a7e258921",
+      "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json": "001a121e8c549548ded1b976e9b2c099cbc07226b0678714fe39cb1707f97fce"
     },
     "snapshots": {
       "baseline_source": {
@@ -497,54 +497,54 @@
       "pycache_prefix": null,
       "dont_write_bytecode": false,
       "files": {
-        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__init__.py": {
+        "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__init__.py": {
           "source_sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
-          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
+          "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
           "cache_sha256": "363df6ba1b6d8875d50e03f1f83983871c49843a872dfa796596b9b6a532d9b5",
           "cache_bytes": 256,
           "flags": 0,
           "source_mtime_ns": 1792327978557777105,
           "valid_header": true
         },
-        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py": {
+        "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__main__.py": {
           "source_sha256": "48c3015dcbac52a08f48b800197398076ac26f37ca480a4ee1ebab2b72c9349c",
-          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
+          "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
           "cache_sha256": "539832a30f44267b7e44eb2e6217a4e90feb03b9ee4e665d7371397737f3e379",
           "cache_bytes": 1628,
           "flags": 0,
           "source_mtime_ns": 1792374525645378594,
           "valid_header": true
         },
-        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/load.py": {
+        "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/load.py": {
           "source_sha256": "63b6a27309c84a8e201703f23f1e825ffdc76b5f367b1f336001aa84dcee8429",
-          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
+          "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
           "cache_sha256": "db9abc5368778ae027c7b2db0c070e5d87287fe55913b72fa54caa71ac6be9ba",
           "cache_bytes": 8367,
           "flags": 0,
           "source_mtime_ns": 1792408933491639337,
           "valid_header": true
         },
-        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/model.py": {
+        "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/model.py": {
           "source_sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
-          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
+          "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
           "cache_sha256": "736e3da875859f41e443ec769f7029112e284fb5cf275fbc87c9348fd4e3cb39",
           "cache_bytes": 4993,
           "flags": 0,
           "source_mtime_ns": 1792368213235952247,
           "valid_header": true
         },
-        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/reconcile.py": {
+        "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/reconcile.py": {
           "source_sha256": "eca175bf2a76c26b7429e0f7ad574be004a63e0f3424a9a3f3ac7aea4bd8d0ea",
-          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
+          "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
           "cache_sha256": "7c4c6e518bf4b4002f178c2a96b544f689e7356cfb95c92a2b38c83c53de4849",
           "cache_bytes": 2684,
           "flags": 0,
           "source_mtime_ns": 1792408933492639333,
           "valid_header": true
         },
-        "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/render.py": {
+        "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/render.py": {
           "source_sha256": "df456686711363c55c13f652df5a32df6b47ce666a71b8a2c8806b542e31357f",
-          "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
+          "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
           "cache_sha256": "d0a23ab0ea4696127fe61fafa59b20fdd827822f251ad4241a485c1fe1b2299a",
           "cache_bytes": 4261,
           "flags": 0,
@@ -560,54 +560,54 @@
       "pycache_prefix": null,
       "dont_write_bytecode": false,
       "files": {
-        "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__init__.py": {
+        "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__init__.py": {
           "source_sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
-          "cache_path": "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
+          "cache_path": "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
           "cache_sha256": "4bb4ff740c811627984f6f0b490be5ff1e884cfbf47ad05fb295650fab143161",
           "cache_bytes": 267,
           "flags": 0,
           "source_mtime_ns": 1792407467795521623,
           "valid_header": true
         },
-        "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__main__.py": {
+        "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__main__.py": {
           "source_sha256": "48c3015dcbac52a08f48b800197398076ac26f37ca480a4ee1ebab2b72c9349c",
-          "cache_path": "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
+          "cache_path": "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
           "cache_sha256": "b22704acc22679ac99e13d1a2afdd9784d321abb1cfc6ad0e9fe08ec7a4fdb6e",
           "cache_bytes": 1639,
           "flags": 0,
           "source_mtime_ns": 1792407467807521551,
           "valid_header": true
         },
-        "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/load.py": {
+        "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/load.py": {
           "source_sha256": "a4fcffcd2431dc96833cb5aa05a8a436c350b0469ceb635ef1a788da6eabc863",
-          "cache_path": "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
+          "cache_path": "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
           "cache_sha256": "dfb7d1dcc7e06c9509e7defa875054ae5379417bdfc81f5626852f134c2fb120",
           "cache_bytes": 8480,
           "flags": 0,
           "source_mtime_ns": 1792407467820521474,
           "valid_header": true
         },
-        "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/model.py": {
+        "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/model.py": {
           "source_sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
-          "cache_path": "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
+          "cache_path": "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
           "cache_sha256": "34f2948837a8d53250ae8e6c2a4c311ab64134c1894bf0f4e66f8bac93f39b87",
           "cache_bytes": 5004,
           "flags": 0,
           "source_mtime_ns": 1792407467832521402,
           "valid_header": true
         },
-        "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/reconcile.py": {
+        "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/reconcile.py": {
           "source_sha256": "a1c7122171f4a92b62e57811bce52e6d522cb2231536b770e5d92785b1bfe618",
-          "cache_path": "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
+          "cache_path": "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
           "cache_sha256": "6385785a59a3c6138e3cf5964a6e521a57e14608e9290e6b06999286ddf9b294",
           "cache_bytes": 2678,
           "flags": 0,
           "source_mtime_ns": 1792407467845521325,
           "valid_header": true
         },
-        "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/render.py": {
+        "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/render.py": {
           "source_sha256": "c6319e84f2acbb15ddf142e9135c54635d47e1dc67b6d590ba0f0c44697ed200",
-          "cache_path": "/tmp/relar-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
+          "cache_path": "/tmp/imre-control-flow-inventory/baseline-source/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
           "cache_sha256": "4f709a2e0df61eea8afd0561c648cacd6d8b6b92f3cb1da87c080352c67635a5",
           "cache_bytes": 4275,
           "flags": 0,

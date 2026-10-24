@@ -26,7 +26,7 @@ def source_paths(application: str) -> list[Path]:
     paths = [Path(__file__), HERE / "live_conformance_benchmark.py",
              HERE / "live_conformance_validate.py", HERE / "native_tools_benchmark.py",
              HERE / "conformance_validate.py", HERE / "benchmark.py", HERE / "validate.py"]
-    for directory in (ROOT / "examples" / application, ROOT / "stdlib/relar"):
+    for directory in (ROOT / "examples" / application, ROOT / "stdlib/imre"):
         paths.extend(path for path in directory.rglob("*.py") if "__pycache__" not in path.parts)
     return sorted(set(paths))
 
@@ -50,7 +50,7 @@ def main() -> None:
     core = benchmark.verify_build_record(core_path, guarded)
     assert core["kind"] == "native-tools-build"
     assert core["source_matches_revision"] or args.allow_dirty, "core inputs were exploratory"
-    compiler = core_path.parent / "relar"
+    compiler = core_path.parent / "imre"
     runtime = core_path.parent / (args.mode + "_runtime.a")
     assert benchmark.digest(runtime) == core["sha256"][args.mode + "_runtime"]
     clang = shutil.which(args.clang)

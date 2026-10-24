@@ -6,11 +6,11 @@
   },
   "asan_application": {
     "build": {
-      "path": "/tmp/relar-dataclass-memory-asan-build.json",
+      "path": "/tmp/imre-dataclass-memory-asan-build.json",
       "sha256": "9c94019d06719816349c408cd768ad64b23eb042e919bb180973d55005320851"
     },
     "validation": {
-      "path": "/tmp/relar-dataclass-memory-asan-validation.json",
+      "path": "/tmp/imre-dataclass-memory-asan-validation.json",
       "sha256": "1a41c42703876c7276a591dae6a77d888ae14011a06bc759960823311221f534"
     }
   },
@@ -23,7 +23,7 @@
     "sha256": "174fa5c4d603c945ff6ca36d1f1fd712f83c3cdbb4284711348f00489db1a043"
   },
   "build": {
-    "path": "/tmp/relar-dataclass-build/build-record.json",
+    "path": "/tmp/imre-dataclass-build/build-record.json",
     "sha256": "e3702d348c6d41b7cf94bde8a0aa3852a1c11aef626efcfa58732ad4126490c9"
   },
   "deduplicated_blob_count": 624,
@@ -3183,16 +3183,16 @@
   "packager_sha256": "e5f7847d2341680685c69fd86bb508bc988960f723f6ba920b510b2f61ce5f24",
   "preparations": {
     "normal": {
-      "path": "/tmp/relar-dataclass-prepared-normal.json",
+      "path": "/tmp/imre-dataclass-prepared-normal.json",
       "sha256": "5d46cfa434b37201bf03a6b7d680421d31c0dd79d95e057f5fc35ea450fcdee0"
     },
     "thinlto": {
-      "path": "/tmp/relar-dataclass-prepared-thinlto.json",
+      "path": "/tmp/imre-dataclass-prepared-thinlto.json",
       "sha256": "c5260fdeb24d81eb8a5ddaf094a35d5e576505856e8c7911f030e89cdcfb16ff"
     }
   },
   "replay_sha256": "7b4a2ca0e642bf921720c4b8e44cd71c5bfb4fe1df34b4859471af2d99730ced",
-  "repository": "/home/dev-user/code/oss/relar",
+  "repository": "/home/dev-user/code/oss/imre",
   "schema": 1,
   "source_roles": {
     "measurement": "f4aee96d255b4b4772e8d3fd2ba7169844cc58eb"
@@ -3200,11 +3200,11 @@
   "status": "passed",
   "timings": {
     "normal": {
-      "path": "/tmp/relar-dataclass-timing-normal.json",
+      "path": "/tmp/imre-dataclass-timing-normal.json",
       "sha256": "244f754fc6a3162a527ad061c36d416a7eb6d2716fe36f8991f9559a8b8feb42"
     },
     "thinlto": {
-      "path": "/tmp/relar-dataclass-timing-thinlto.json",
+      "path": "/tmp/imre-dataclass-timing-thinlto.json",
       "sha256": "9c60433ba2c3fcc41f19406058affa2508dd1aaa7c4a495d722e22a621c612c7"
     }
   }

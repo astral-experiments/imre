@@ -253,7 +253,7 @@ def main():
             print(
                 name,
                 {e: round(v / 1e6, 3) for e, v in case["median_ns"].items()},
-                "Relar/Rust",
+                "Imre/Rust",
                 round(gates[name], 3),
                 flush=True,
             )

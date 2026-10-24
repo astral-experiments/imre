@@ -1,4 +1,4 @@
-"""Run CPython's four SHA-256 vectors with the public one-shot hexdigest on Relar."""
+"""Run CPython's four SHA-256 vectors with the public one-shot hexdigest on Imre."""
 import argparse
 from collections import Counter
 import json
@@ -78,7 +78,7 @@ def run_case(suite, name, program, payload):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("relar", "runtime", "clang", "result"):
+    for name in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--cpython-source", type=Path)
     args = parser.parse_args()
@@ -98,7 +98,7 @@ def main():
         work = Path(tmp)
         source, program = work / "hash.py", work / "hash"
         source.write_text(DRIVER)
-        subprocess.run([args.relar.resolve(), "build", source, "-o", program, "--no-cache",
+        subprocess.run([args.imre.resolve(), "build", source, "-o", program, "--no-cache",
                         "--opt-level", "3", "--clang", args.clang.resolve(), "--runtime", args.runtime.resolve()],
                        check=True, timeout=120)
         cases = dict(run_case(test_hashlib, f"test_case_sha256_{n}", program, work / "data") for n in range(4))

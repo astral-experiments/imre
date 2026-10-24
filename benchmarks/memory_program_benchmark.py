@@ -113,7 +113,7 @@ def measure(commands, directory, oracle, samples):
         "order": plan,
         "samples_ns": rows,
         "median_ms": medians,
-        "relar_over_rust": medians["relar"] / medians["rust"],
+        "imre_over_rust": medians["imre"] / medians["rust"],
         "cpython_stdout_sha256": oracle_sha,
         "cpython_stdout_bytes": len(original.stdout),
         "observed_stdout_sha256": observed,
@@ -123,7 +123,7 @@ def measure(commands, directory, oracle, samples):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("relar", "codon", "rust", "output"):
+    for name in ("imre", "codon", "rust", "output"):
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--source", type=Path, default=UPSTREAM)
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
@@ -144,7 +144,7 @@ def main():
     commands.update(
         {
             name: [str(getattr(args, name).resolve(strict=True))]
-            for name in ("codon", "relar", "rust")
+            for name in ("codon", "imre", "rust")
         }
     )
     tools = [source, Path(__file__).resolve(), *(Path(v[0]) for v in commands.values())]
@@ -171,7 +171,7 @@ def main():
         "artifacts": [file_id(path) for path in tools],
         "cases": {},
     }
-    with tempfile.TemporaryDirectory(prefix="relar-memory-compare-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="imre-memory-compare-") as tmp:
         for layout, projects, rows in (
             ("1x", 1, 1),
             ("10x-projects", 10, 1),

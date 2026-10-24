@@ -3,7 +3,7 @@
   "status": "passed",
   "completed_at_utc": "2026-10-18T12:46:03.008278+00:00",
   "audit_script_sha256": "17a2c7441e155ed4eca1625a8e68cd534139fc0227607018cb931cc995fbe855",
-  "audit_script_source": "\"\"\"Recompute concrete-layout results without executing any benchmark or compiler.\n\nRun from any directory; preserved bundles and Git objects must remain available.\nStatistics use independent integer-nanosecond interpolation, not harness helpers.\nOracles are reused only after their exact measured source hashes are verified.\n\"\"\"\nimport argparse\nimport base64\nfrom collections import Counter\nfrom datetime import datetime, timezone\nfrom fractions import Fraction\nimport hashlib\nimport itertools\nimport json\nimport math\nfrom pathlib import Path\nimport runpy\nimport shutil\nimport subprocess\nimport tarfile\n\nENGINES = ('cpython', 'baseline', 'relar', 'rust_bigint')\nGROUPS = {'incremental': 5, 'batch': 6, 'manifest': 6}\nEMPTY = hashlib.sha256(b'').hexdigest()\nCHECKS = 0\nFILES = {}\n\n\ndef require(condition, message):\n    global CHECKS\n    CHECKS += 1\n    if not condition:\n        raise AssertionError(message)\n\n\ndef digest(data):\n    return hashlib.sha256(data).hexdigest()\n\n\ndef file_info(path):\n    path = Path(path).resolve(strict=True)\n    stamp = path.stat()\n    signature = (stamp.st_size, stamp.st_mtime_ns)\n    if path not in FILES:\n        with path.open('rb') as stream:\n            value = hashlib.file_digest(stream, 'sha256').hexdigest()\n        FILES[path] = (signature, value)\n    require(FILES[path][0] == signature, f'file changed during audit: {path}')\n    return {'sha256': FILES[path][1], 'bytes': signature[0]}\n\n\ndef verify_file(path, expected, size=None):\n    actual = file_info(path)\n    require(actual['sha256'] == expected, f'file digest differs: {path}')\n    if size is not None:\n        require(actual['bytes'] == size, f'file length differs: {path}')\n    return actual\n\n\ndef git_blobs(root, revision, paths):\n    names = list(paths)\n    result = subprocess.run(\n        ['git', '-C', str(root), 'cat-file', '--batch'],\n        input=''.join(f'{revision}:{name}\\n' for name in names).encode(),\n        capture_output=True, check=True,\n    ).stdout\n    output, offset = {}, 0\n    for name in names:\n        end = result.index(b'\\n', offset)\n        header = result[offset:end].split()\n        require(len(header) == 3 and header[1] == b'blob', f'Git blob missing: {revision}:{name}')\n        size = int(header[2]); offset = end + 1\n        output[name] = result[offset:offset + size]\n        offset += size\n        require(result[offset:offset + 1] == b'\\n', 'malformed Git batch delimiter')\n        offset += 1\n    require(offset == len(result), 'unexpected Git batch remainder')\n    return output\n\n\ndef verify_committed(root, revision, hashes):\n    contents = git_blobs(root, revision, hashes)\n    for name, expected in hashes.items():\n        require(digest(contents[name]) == expected, f'committed source differs: {revision}:{name}')\n    return len(contents)\n\n\ndef file_inventory(encoded):\n    inventory = {}\n    for name, spec in encoded.items():\n        data = base64.b64decode(spec['base64'], validate=True)\n        require(digest(data) == spec['sha256'] and len(data) == spec['bytes'], f'encoded file differs: {name}')\n        inventory[name] = {'sha256': digest(data), 'bytes': len(data)}\n    return inventory\n\n\ndef result_matches(result, expected, label):\n    data = expected['stdout'].encode()\n    require(result['returncode'] == expected['returncode'], label + ': returncode')\n    require(result['stdout_sha256'] == digest(data), label + ': stdout digest')\n    require(result['stdout_bytes'] == len(data), label + ': stdout length')\n    category = expected.get('error_category')\n    if category is None:\n        require(result['stderr'] == '', label + ': unexpected stderr')\n    else:\n        lines = result['stderr'].strip().splitlines()\n        require(bool(lines) and (lines[-1] == category or lines[-1].startswith(category + ':')), label + ': error category')\n    if expected.get('usage_message'):\n        require(expected['usage_message'] in result['stderr'], label + ': usage message')\n    if 'files' in expected:\n        require(result['files'] == file_inventory(expected['files']), label + ': filesystem bytes')\n        require(result['directories'] == expected['directories'], label + ': directories')\n\n\ndef quantile(values, numerator, denominator):\n    ordered = sorted(values)\n    position = Fraction((len(ordered) - 1) * numerator, denominator)\n    lower = position.numerator // position.denominator\n    upper = min(lower + 1, len(ordered) - 1)\n    return Fraction(ordered[lower]) + (ordered[upper] - ordered[lower]) * (position - lower)\n\n\ndef summary(values):\n    return {\n        'median_ns': float(quantile(values, 1, 2)),\n        'min_ns': min(values), 'max_ns': max(values),\n        'p25_ns': float(quantile(values, 1, 4)),\n        'p75_ns': float(quantile(values, 3, 4)),\n    }\n\n\ndef close(actual, expected, label):\n    require(math.isclose(actual, expected, rel_tol=2e-13, abs_tol=1e-12), label)\n\n\ndef sealed_baseline(root, path, record, thin):\n    index = json.loads(path.read_text()); bundle = path.parent.resolve()\n    require(index == record['baseline_provenance']['index'], 'embedded baseline index differs')\n    verify_file(path, record['sha256']['baseline_index'])\n    require(index['git']['dirty'] is False, 'baseline snapshot is dirty')\n    paths = {'baseline_index': path}\n\n    def register(name, spec):\n        relative = Path(spec['path']); selected = (bundle / relative).resolve(strict=True)\n        require(not relative.is_absolute() and selected.is_relative_to(bundle), 'baseline path escapes bundle')\n        verify_file(selected, spec['sha256'], spec['bytes'])\n        paths['baseline:' + name] = selected\n        return selected\n\n    register('preservation', index['preservation'])\n    snapshot = register('source_snapshot', index['source_snapshot'])\n    with tarfile.open(snapshot) as archive:\n        for name, expected in index['source_sha256'].items():\n            member = archive.extractfile(name)\n            require(member is not None and digest(member.read()) == expected, 'baseline archived source differs: ' + name)\n    verify_committed(root, index['git']['revision'], index['source_sha256'])\n    for name, spec in index['tools'].items():\n        register(name, spec)\n    tools = json.loads(paths['baseline:build-record.json'].read_text())\n    for name, expected in tools['source_sha256'].items():\n        require(index['source_sha256'][name] == expected, 'baseline compiler source snapshot differs')\n    for name in ('relar', 'librelar_runtime.a', 'librelar_runtime_lto.a'):\n        require(any(Path(k).name == name and v == file_info(paths['baseline:' + name])['sha256'] for k, v in tools['sha256'].items()), 'baseline tool lacks build identity')\n    mode = index['modes']['lto' if thin else 'normal']\n    for key in ('target', 'optimization_level', 'lto', 'llvm_budget'):\n        require(mode['options'][key] == record['options'][key], 'baseline compilation mode differs: ' + key)\n    originals = {}\n    for name in ('manifest_record', 'batch_input_record', 'batch_build_record'):\n        originals[name] = json.loads(register(name, mode[name]).read_text())\n    require(originals['manifest_record']['sources'] == record['sources'] == index['sources'], 'Python source parity differs')\n    batch_sources = {n: d for n, d in record['sources'].items() if not n.startswith('manifest_planner/')}\n    require(originals['batch_input_record']['sources'] == originals['batch_build_record']['sources'] == batch_sources, 'batch source parity differs')\n    runtime_name = 'librelar_runtime_lto.a' if thin else 'librelar_runtime.a'\n    for original in (originals['manifest_record'], originals['batch_build_record']):\n        require(original['sha256']['compiler'] == file_info(paths['baseline:relar'])['sha256'], 'baseline compiler pairing differs')\n        require(original['sha256']['runtime'] == file_info(paths['baseline:' + runtime_name])['sha256'], 'baseline runtime pairing differs')\n        for key in ('target', 'optimization_level', 'lto', 'llvm_budget'):\n            require(original['options'][key] == mode['options'][key], 'baseline executable build mode differs')\n    for group in GROUPS:\n        original = originals['batch_build_record'] if group == 'batch' else originals['manifest_record']\n        for kind in ('binary', 'ir'):\n            p = register(group + '_' + kind, mode['programs'][group][kind])\n            key = kind if group == 'batch' else ('control' if group == 'incremental' else group) + '_' + kind\n            require(file_info(p)['sha256'] == original['sha256'][key], 'baseline native artifact build differs')\n        spec = mode['references'][group]\n        binary = register('rust_' + group, spec['binary'])\n        build = json.loads(register('rust_record_' + group, spec['build_record']).read_text())\n        require(build == record['rust_build_records'][group], 'embedded Rust build differs')\n        require(build['binaries']['bigint']['sha256'] == file_info(binary)['sha256'], 'Rust binary build differs')\n        require(build.get('entrypoint', 'incremental') == group, 'Rust entrypoint differs')\n        require(build['llvm_budget'] == (1000 if thin else None), 'Rust optimization budget differs')\n        env = build['environment']\n        require(env.get('CARGO_PROFILE_RELEASE_LTO') == ('thin' if thin else None), 'Rust LTO mode differs')\n        require(env.get('CARGO_ENCODED_RUSTFLAGS') in (None, ''), 'unexpected Rust encoded flags')\n        if thin:\n            require('-import-instr-limit=1000' in env['RUSTFLAGS'] and '-inline-threshold=1000' in env['RUSTFLAGS'], 'Rust LLVM budgets absent')\n        else:\n            require(env['RUSTFLAGS'] == '', 'ordinary Rust flags differ')\n        source_root = bundle / spec['source_root']\n        require(set(build['source_contents']) == set(build['sources']), 'Rust source coverage differs')\n        for name, expected in build['sources'].items():\n            require(digest(build['source_contents'][name].encode()) == expected, 'Rust embedded source differs')\n            p = source_root / name\n            register('rust_source_' + group + ':' + name, {'path': str(p.relative_to(bundle)), 'sha256': expected, 'bytes': p.stat().st_size})\n        require(digest(build['build_script'].encode()) == build['build_script_sha256'], 'Rust build helper text differs')\n        p = source_root / 'build.py'\n        register('rust_build_script_' + group, {'path': str(p.relative_to(bundle)), 'sha256': build['build_script_sha256'], 'bytes': p.stat().st_size})\n    return index, paths, originals\n\n\ndef validate_correctness(record):\n    totals = {}\n    for group, count in (('incremental', 155), ('batch', 194), ('manifest', 196)):\n        evidence = record['validation'][group]\n        require(evidence.get('oracle_cases', evidence.get('cases')) == count, group + ': oracle count')\n        require(len(evidence['checks']) == count, group + ': missing checks')\n        require(evidence['passed_by_engine'] == dict.fromkeys(ENGINES, count), group + ': passed totals')\n        for case in evidence['checks']:\n            require(set(case['results']) == set(ENGINES), group + ': result coverage')\n            expected = {'stdout': case['expected_stdout'], 'returncode': 0} if group == 'incremental' else case['expected']\n            for engine, result in case['results'].items():\n                result_matches(result, expected, group + '/' + engine)\n        totals[group] = count * len(ENGINES)\n    incremental = record['validation']['incremental']\n    require(incremental['parser_cases'] == len(incremental['parser_checks']) == 17, 'parser case count')\n    require(incremental['parser_passed_by_engine'] == dict.fromkeys(ENGINES, 17), 'parser passed count')\n    for case in incremental['parser_checks']:\n        expected = {'stdout': case['expected_stdout'], 'returncode': case['expected_returncode'], 'error_category': case['expected_error_category']}\n        require(set(case['results']) == set(ENGINES), 'parser engine coverage')\n        for engine, result in case['results'].items():\n            result_matches(result, expected, 'parser/' + engine)\n    devices = record['validation']['manifest']['linux_device_checks']\n    require(devices['cases'] == len(devices['checks']) == 1, 'device check missing')\n    require(devices['passed_by_engine'] == dict.fromkeys(ENGINES, 1), 'device check totals')\n    for case in devices['checks']:\n        for engine, result in case['results'].items():\n            result_matches(result, case['expected'], 'device/' + engine)\n    return {**totals, 'incremental_parser': 17 * len(ENGINES), 'manifest_device': len(ENGINES)}\n\n\ndef audit_mode(root, path, baseline_path, external):\n    record = json.loads(path.read_text()); thin = record['options']['lto'] == 'thin'\n    mode_name = 'thinlto' if thin else 'ordinary'\n    require(record['example'] == 'concrete_layouts', 'wrong comparison')\n    require(record['git']['dirty'] is False, 'timing checkout was dirty')\n    require(record['options']['samples'] == 32 and record['options']['warmups'] == 2 and record['options']['validation_only'] is False, 'timing options differ')\n    require(record['options']['optimization_level'] == 3 and record['options']['llvm_budget'] == (1000 if thin else None), 'optimization mode differs')\n    contexts = list(record['execution'].values())\n    require(len(contexts) == 3 and contexts[0] == contexts[1] == contexts[2], 'runtime context changed')\n    require(contexts[0]['tracer_pid'] == 0, 'timing was traced')\n    require(record['host']['cpu']['affinity'] == [0], 'unexpected timing affinity')\n    require(record['clock']['monotonic'] and not record['clock']['adjustable'], 'timer is not monotonic')\n    index, paths, originals = sealed_baseline(root, baseline_path, record, thin)\n    build = record['relar_build_provenance']; source_hashes = build['source_sha256']\n    require(build['compiled_sources_match_commit'] is True, 'compiled source identity absent')\n    require(all(line.startswith('?? benchmarks/') for line in build['git_status'].splitlines()), 'build had tracked/source modifications')\n    require(subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', build['git_head'], record['git']['revision']]).returncode == 0, 'implementation is not timing ancestor')\n    verify_committed(root, build['git_head'], source_hashes)\n    verify_committed(root, record['git']['revision'], source_hashes)\n    verify_committed(root, record['git']['revision'], {'examples/' + name: value for name, value in record['sources'].items()})\n    tool_paths = {Path(k).name: root / k for k in build['sha256']}\n    for name, expected in build['sha256'].items():\n        verify_file(root / name, expected)\n    tool_root = tool_paths['relar'].parent\n    paths.update(compiler=tool_paths['relar'], runtime=tool_paths['librelar_runtime_lto.a' if thin else 'librelar_runtime.a'], relar_build_record=tool_root / 'build-record.json', clang=external['clang'], python=external['python'], harness=root / 'benchmarks/layout_benchmark.py')\n    if thin:\n        paths['lto_linker'] = external['lto_linker']\n    full_build = json.loads(paths['relar_build_record'].read_text())\n    for name, value in build.items():\n        require(full_build[name] == value, 'embedded build field differs: ' + name)\n    require(set(full_build['source_contents']) == set(source_hashes), 'compiled source contents coverage differs')\n    for name, value in full_build['source_contents'].items():\n        require(digest(value.encode()) == source_hashes[name], 'compiled source contents differ')\n    for name, command in full_build['commands'].items():\n        require(command['returncode'] == 0, 'failed tool build: ' + name)\n        verify_file(tool_root / (name + '.log'), command['log_sha256'])\n    artifact_dir = path.with_suffix('')\n    for group in GROUPS:\n        for kind, suffix in (('binary', ''), ('ir', '.ll')):\n            paths[group + '_' + kind] = artifact_dir / (group + '_planner' + suffix)\n        require(record['compilation'][group]['returncode'] == 0 and record['compilation'][group]['stderr'] == '', 'application compilation failed')\n    committed_harnesses = {}\n    for name, expected in record['sha256'].items():\n        if name.startswith('relar_source:'):\n            require(source_hashes[name.split(':', 1)[1]] == expected, 'compiled source record differs')\n            continue\n        if name not in paths:\n            require(name.endswith('.py'), 'unmapped recorded input: ' + name)\n            paths[name] = root / 'benchmarks' / name\n        verify_file(paths[name], expected)\n        if name == 'harness' or (name.endswith('.py') and not name.startswith('baseline:')):\n            committed_harnesses[str(paths[name].relative_to(root))] = expected\n    verify_committed(root, record['git']['revision'], committed_harnesses)\n    for name, spec in record['artifacts'].items():\n        require(file_info(paths[name])['bytes'] == spec['bytes'], 'recorded artifact bytes differ')\n    # Helpers are imported only after all recorded helper files match their hashes.\n    harness = runpy.run_path(str(root / 'benchmarks/layout_benchmark.py'))\n    original_workloads = {\n        'incremental': originals['manifest_record']['workloads']['control'],\n        'batch': originals['batch_input_record']['workloads']['batch'],\n        'manifest': originals['manifest_record']['workloads']['manifest'],\n    }\n    rows = []; position_counts = {}; adjacency_counts = {}; sample_runs = warmup_runs = 0\n    for group, count in GROUPS.items():\n        workloads = record['workloads'][group]\n        require(len(workloads) == count, 'workload count differs: ' + group)\n        require([w['label'] for w in workloads] == [w['label'] for w in original_workloads[group]], 'captured workload selection/order differs')\n        cycle = record['method']['order_cycles'][group]\n        require(len(cycle) == 4 and len({tuple(o) for o in cycle}) == 4, 'order cycle missing')\n        positions = Counter((engine, slot) for order in cycle for slot, engine in enumerate(order))\n        adjacent = Counter((a, b) for order in cycle for a, b in zip(order, order[1:]))\n        require(set(positions) == set(itertools.product(ENGINES, range(4))) and set(positions.values()) == {1}, 'cycle positions not balanced')\n        require(set(adjacent) == set(itertools.permutations(ENGINES, 2)) and set(adjacent.values()) == {1}, 'cycle predecessors not balanced')\n        for workload, original in zip(workloads, original_workloads[group]):\n            label = group + '/' + workload['label']\n            if group == 'incremental':\n                harness['manifest'].captured_workload(workload)\n            elif group == 'batch':\n                harness['exception'].captured_batches({'workloads': {'batch': [workload]}}, None)\n            else:\n                harness['captured_manifests']({'workloads': {'manifest': [workload]}}, None)\n            for key in ('input', 'expected_stdout') if group != 'manifest' else ('case', 'expected_stdout', 'expected_changed_files', 'expected_file_inventory'):\n                require(workload[key] == original[key], label + ': frozen input/output differs')\n            expected = {'returncode': 0, 'stdout': workload['expected_stdout']}\n            if group == 'manifest':\n                case = harness['VALIDATORS']['manifest'].case_from_record(workload['case'])\n                oracle = harness['VALIDATORS']['manifest'].oracle(case)\n                inventory = {n: {'sha256': digest(b), 'bytes': len(b)} for n, b in oracle['files'].items()}\n                require(inventory == workload['expected_file_inventory'], label + ': expected file inventory differs')\n                expected.update(files=harness['VALIDATORS']['manifest'].encoded_files(oracle['files']), directories=oracle['directories'])\n            measured_positions = Counter(); measured_adjacent = Counter()\n            for phase, n in (('warmups', 2), ('samples', 32)):\n                entries = workload[phase]\n                require(len(entries) == n, label + ': missing or discarded entries')\n                for i, entry in enumerate(entries):\n                    require(entry['index'] == i and entry['order'] == cycle[i % 4], label + ': sample order/index differs')\n                    require(set(entry) == {*ENGINES, 'index', 'order'}, label + ': sample coverage differs')\n                    for engine in ENGINES:\n                        require(type(entry[engine]['elapsed_ns']) is int and entry[engine]['elapsed_ns'] > 0, label + ': duration invalid')\n                        result_matches(entry[engine], expected, label + '/' + phase + '/' + engine)\n                    if phase == 'samples':\n                        measured_positions.update((engine, slot) for slot, engine in enumerate(entry['order']))\n                        measured_adjacent.update(zip(entry['order'], entry['order'][1:]))\n                        sample_runs += len(ENGINES)\n                    else:\n                        warmup_runs += len(ENGINES)\n            require(set(measured_positions.values()) == {8} and set(measured_adjacent.values()) == {8}, label + ': measured ordering unbalanced')\n            position_counts[label] = {f'{engine}@{slot}': n for (engine, slot), n in sorted(measured_positions.items())}\n            adjacency_counts[label] = {f'{a}->{b}': n for (a, b), n in sorted(measured_adjacent.items())}\n            computed = {}\n            for engine in ENGINES:\n                computed[engine] = summary([s[engine]['elapsed_ns'] for s in workload['samples']])\n                for key, value in computed[engine].items():\n                    close(workload['summary'][engine][key.replace('_ns', '_seconds')], value / 1e9, label + ': statistic differs: ' + engine + '/' + key)\n            medians = {engine: computed[engine]['median_ns'] for engine in ENGINES}\n            for a, b in itertools.permutations(ENGINES, 2):\n                close(workload['summary']['ratios_of_medians'][a + '_over_' + b], medians[a] / medians[b], label + ': ratio differs')\n            rows.append({'group': group, 'workload': workload['label'], 'statistics': computed, 'median_ms': {k: v / 1e6 for k, v in medians.items()}, 'old_to_new_time_reduction_percent': 100 * (1 - medians['relar'] / medians['baseline']), 'baseline_over_relar': medians['baseline'] / medians['relar'], 'cpython_over_relar': medians['cpython'] / medians['relar'], 'relar_over_rust_bigint': medians['relar'] / medians['rust_bigint']})\n    require(sample_runs == 17 * 32 * 4 and warmup_runs == 17 * 2 * 4, 'total sample accounting differs')\n    validation = validate_correctness(record)\n    return {\n        'mode': mode_name, 'record_sha256': file_info(path)['sha256'], 'timing_commit': record['git']['revision'],\n        'timing_checkout_clean': True, 'implementation_commit': build['git_head'],\n        'compiled_source_files_verified_in_both_commits': len(source_hashes),\n        'tool_build_status': build['git_status'],\n        'tool_build_status_note': 'Only then-untracked benchmark harness assets; every compiler/runtime/Cargo source independently matches the implementation and clean timing commits.',\n        'baseline_commit': index['git']['revision'], 'baseline_source_files_verified': len(index['source_sha256']),\n        'recorded_input_identities_verified': len(record['sha256']), 'artifact_hashes': {name: record['sha256'][name] for name in ('compiler', 'runtime', 'incremental_binary', 'batch_binary', 'manifest_binary')},\n        'workloads': 17, 'measured_rounds_per_workload': 32, 'warmup_rounds_per_workload': 2,\n        'measured_process_runs': sample_runs, 'warmup_process_runs': warmup_runs,\n        'oracle_process_results_verified': validation, 'tracer_checks': [c['tracer_pid'] for c in contexts],\n        'execution_context': contexts[0], 'ordering': {'position_counts': position_counts, 'within_round_predecessor_counts': adjacency_counts},\n        'rows': rows,\n    }, record\n\n\ndef main():\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[2])\n    parser.add_argument('--normal', type=Path)\n    parser.add_argument('--lto', type=Path)\n    parser.add_argument('--output', type=Path)\n    parser.add_argument('--python', default=str(Path.home() / '.local/bin/python3.14'))\n    parser.add_argument('--clang', default='clang-18')\n    args = parser.parse_args(); root = args.root.resolve()\n    paths = [args.normal or root / 'benchmarks/local/layout-normal-final.json', args.lto or root / 'benchmarks/local/layout-lto-final.json']\n    output = args.output or root / 'benchmarks/local/layout-final-audit.json'\n    external = {'python': Path(shutil.which(args.python) or args.python).resolve(strict=True), 'clang': Path(shutil.which(args.clang) or args.clang).resolve(strict=True), 'lto_linker': root / 'benchmarks/local/batch-linker/ld.lld'}\n    source = Path(__file__).read_text(); before = {str(p): file_info(p) for p in paths}\n    audits, records = zip(*(audit_mode(root, p, root / 'benchmarks/local/layout-baseline/baseline.json', external) for p in paths))\n    require(records[0]['sources'] == records[1]['sources'], 'cross-mode Python source identity differs')\n    require(records[0]['relar_build_provenance'] == records[1]['relar_build_provenance'], 'cross-mode Relar build generation differs')\n    require(records[0]['git'] == records[1]['git'], 'cross-mode timing commit differs')\n    for group in GROUPS:\n        for a, b in zip(records[0]['workloads'][group], records[1]['workloads'][group]):\n            require({k: v for k, v in a.items() if k not in ('samples', 'warmups', 'summary')} == {k: v for k, v in b.items() if k not in ('samples', 'warmups', 'summary')}, 'cross-mode workload/input/output differs')\n        require(records[0]['rust_build_records'][group]['sources'] == records[1]['rust_build_records'][group]['sources'], 'cross-mode Rust source identity differs')\n    for p in paths:\n        require(file_info(p) == before[str(p)], 'comparison changed during audit')\n    result = {\n        'schema_version': 1, 'status': 'passed', 'completed_at_utc': datetime.now(timezone.utc).isoformat(),\n        'audit_script_sha256': digest(source.encode()), 'audit_script_source': source,\n        'reproduction': 'python3 benchmarks/local/layout-final-audit.py',\n        'method': 'Independent integer-nanosecond medians and inclusive linear-interpolation quartiles over every recorded measured sample; all ratios recomputed; exact recorded artifact and committed source hashes checked; existing independent workload oracles reused after hash verification. No benchmarks, native tests, or compilers executed.',\n        'limits': [\n            'Recorded sample count and consecutive indices plus reviewed no-filter harness establish completeness of the saved run; no independent OS process log exists to rule out unrecorded prior attempts.',\n            'Measured stdout/filesystem contents were checked byte-for-byte by the hashed harness before compact digests were recorded. This audit verifies retained expected bytes and every result digest/length/status; per-run full stdout copies are not retained.',\n            'TracerPid was sampled at three checkpoints, not continuously; shared-host noise and cross-round predecessor balance are outside this audit.',\n            'The two warmup rounds use the first two Williams orders and are intentionally not fully balanced; all32 measured rounds are balanced.',\n        ],\n        'assertions_passed': CHECKS, 'distinct_files_hashed': len(FILES), 'modes': list(audits),\n    }\n    output.write_text(json.dumps(result, indent=2) + '\\n')\n    table = ['| Mode | Group / workload | Old ms | New ms | Time saved | CPython / new | New / Rust BigInt |', '|---|---|---:|---:|---:|---:|---:|']\n    for audit in audits:\n        for row in audit['rows']:\n            med = row['median_ms']\n            table.append(f\"| {audit['mode']} | {row['group']} / {row['workload']} | {med['baseline']:.3f} | {med['relar']:.3f} | {row['old_to_new_time_reduction_percent']:.2f}% | {row['cpython_over_relar']:.3f}x | {row['relar_over_rust_bigint']:.3f}x |\")\n    output.with_suffix('.md').write_text('\\n'.join(table) + '\\n')\n    print(json.dumps({'status': 'passed', 'assertions': CHECKS, 'distinct_files_hashed': len(FILES), 'audit_sha256': file_info(output)['sha256'], 'script_sha256': digest(source.encode()), 'output': str(output)}, indent=2))\n    print('\\n'.join(table))\n\n\nif __name__ == '__main__':\n    main()\n",
+  "audit_script_source": "\"\"\"Recompute concrete-layout results without executing any benchmark or compiler.\n\nRun from any directory; preserved bundles and Git objects must remain available.\nStatistics use independent integer-nanosecond interpolation, not harness helpers.\nOracles are reused only after their exact measured source hashes are verified.\n\"\"\"\nimport argparse\nimport base64\nfrom collections import Counter\nfrom datetime import datetime, timezone\nfrom fractions import Fraction\nimport hashlib\nimport itertools\nimport json\nimport math\nfrom pathlib import Path\nimport runpy\nimport shutil\nimport subprocess\nimport tarfile\n\nENGINES = ('cpython', 'baseline', 'imre', 'rust_bigint')\nGROUPS = {'incremental': 5, 'batch': 6, 'manifest': 6}\nEMPTY = hashlib.sha256(b'').hexdigest()\nCHECKS = 0\nFILES = {}\n\n\ndef require(condition, message):\n    global CHECKS\n    CHECKS += 1\n    if not condition:\n        raise AssertionError(message)\n\n\ndef digest(data):\n    return hashlib.sha256(data).hexdigest()\n\n\ndef file_info(path):\n    path = Path(path).resolve(strict=True)\n    stamp = path.stat()\n    signature = (stamp.st_size, stamp.st_mtime_ns)\n    if path not in FILES:\n        with path.open('rb') as stream:\n            value = hashlib.file_digest(stream, 'sha256').hexdigest()\n        FILES[path] = (signature, value)\n    require(FILES[path][0] == signature, f'file changed during audit: {path}')\n    return {'sha256': FILES[path][1], 'bytes': signature[0]}\n\n\ndef verify_file(path, expected, size=None):\n    actual = file_info(path)\n    require(actual['sha256'] == expected, f'file digest differs: {path}')\n    if size is not None:\n        require(actual['bytes'] == size, f'file length differs: {path}')\n    return actual\n\n\ndef git_blobs(root, revision, paths):\n    names = list(paths)\n    result = subprocess.run(\n        ['git', '-C', str(root), 'cat-file', '--batch'],\n        input=''.join(f'{revision}:{name}\\n' for name in names).encode(),\n        capture_output=True, check=True,\n    ).stdout\n    output, offset = {}, 0\n    for name in names:\n        end = result.index(b'\\n', offset)\n        header = result[offset:end].split()\n        require(len(header) == 3 and header[1] == b'blob', f'Git blob missing: {revision}:{name}')\n        size = int(header[2]); offset = end + 1\n        output[name] = result[offset:offset + size]\n        offset += size\n        require(result[offset:offset + 1] == b'\\n', 'malformed Git batch delimiter')\n        offset += 1\n    require(offset == len(result), 'unexpected Git batch remainder')\n    return output\n\n\ndef verify_committed(root, revision, hashes):\n    contents = git_blobs(root, revision, hashes)\n    for name, expected in hashes.items():\n        require(digest(contents[name]) == expected, f'committed source differs: {revision}:{name}')\n    return len(contents)\n\n\ndef file_inventory(encoded):\n    inventory = {}\n    for name, spec in encoded.items():\n        data = base64.b64decode(spec['base64'], validate=True)\n        require(digest(data) == spec['sha256'] and len(data) == spec['bytes'], f'encoded file differs: {name}')\n        inventory[name] = {'sha256': digest(data), 'bytes': len(data)}\n    return inventory\n\n\ndef result_matches(result, expected, label):\n    data = expected['stdout'].encode()\n    require(result['returncode'] == expected['returncode'], label + ': returncode')\n    require(result['stdout_sha256'] == digest(data), label + ': stdout digest')\n    require(result['stdout_bytes'] == len(data), label + ': stdout length')\n    category = expected.get('error_category')\n    if category is None:\n        require(result['stderr'] == '', label + ': unexpected stderr')\n    else:\n        lines = result['stderr'].strip().splitlines()\n        require(bool(lines) and (lines[-1] == category or lines[-1].startswith(category + ':')), label + ': error category')\n    if expected.get('usage_message'):\n        require(expected['usage_message'] in result['stderr'], label + ': usage message')\n    if 'files' in expected:\n        require(result['files'] == file_inventory(expected['files']), label + ': filesystem bytes')\n        require(result['directories'] == expected['directories'], label + ': directories')\n\n\ndef quantile(values, numerator, denominator):\n    ordered = sorted(values)\n    position = Fraction((len(ordered) - 1) * numerator, denominator)\n    lower = position.numerator // position.denominator\n    upper = min(lower + 1, len(ordered) - 1)\n    return Fraction(ordered[lower]) + (ordered[upper] - ordered[lower]) * (position - lower)\n\n\ndef summary(values):\n    return {\n        'median_ns': float(quantile(values, 1, 2)),\n        'min_ns': min(values), 'max_ns': max(values),\n        'p25_ns': float(quantile(values, 1, 4)),\n        'p75_ns': float(quantile(values, 3, 4)),\n    }\n\n\ndef close(actual, expected, label):\n    require(math.isclose(actual, expected, rel_tol=2e-13, abs_tol=1e-12), label)\n\n\ndef sealed_baseline(root, path, record, thin):\n    index = json.loads(path.read_text()); bundle = path.parent.resolve()\n    require(index == record['baseline_provenance']['index'], 'embedded baseline index differs')\n    verify_file(path, record['sha256']['baseline_index'])\n    require(index['git']['dirty'] is False, 'baseline snapshot is dirty')\n    paths = {'baseline_index': path}\n\n    def register(name, spec):\n        relative = Path(spec['path']); selected = (bundle / relative).resolve(strict=True)\n        require(not relative.is_absolute() and selected.is_relative_to(bundle), 'baseline path escapes bundle')\n        verify_file(selected, spec['sha256'], spec['bytes'])\n        paths['baseline:' + name] = selected\n        return selected\n\n    register('preservation', index['preservation'])\n    snapshot = register('source_snapshot', index['source_snapshot'])\n    with tarfile.open(snapshot) as archive:\n        for name, expected in index['source_sha256'].items():\n            member = archive.extractfile(name)\n            require(member is not None and digest(member.read()) == expected, 'baseline archived source differs: ' + name)\n    verify_committed(root, index['git']['revision'], index['source_sha256'])\n    for name, spec in index['tools'].items():\n        register(name, spec)\n    tools = json.loads(paths['baseline:build-record.json'].read_text())\n    for name, expected in tools['source_sha256'].items():\n        require(index['source_sha256'][name] == expected, 'baseline compiler source snapshot differs')\n    for name in ('imre', 'libimre_runtime.a', 'libimre_runtime_lto.a'):\n        require(any(Path(k).name == name and v == file_info(paths['baseline:' + name])['sha256'] for k, v in tools['sha256'].items()), 'baseline tool lacks build identity')\n    mode = index['modes']['lto' if thin else 'normal']\n    for key in ('target', 'optimization_level', 'lto', 'llvm_budget'):\n        require(mode['options'][key] == record['options'][key], 'baseline compilation mode differs: ' + key)\n    originals = {}\n    for name in ('manifest_record', 'batch_input_record', 'batch_build_record'):\n        originals[name] = json.loads(register(name, mode[name]).read_text())\n    require(originals['manifest_record']['sources'] == record['sources'] == index['sources'], 'Python source parity differs')\n    batch_sources = {n: d for n, d in record['sources'].items() if not n.startswith('manifest_planner/')}\n    require(originals['batch_input_record']['sources'] == originals['batch_build_record']['sources'] == batch_sources, 'batch source parity differs')\n    runtime_name = 'libimre_runtime_lto.a' if thin else 'libimre_runtime.a'\n    for original in (originals['manifest_record'], originals['batch_build_record']):\n        require(original['sha256']['compiler'] == file_info(paths['baseline:imre'])['sha256'], 'baseline compiler pairing differs')\n        require(original['sha256']['runtime'] == file_info(paths['baseline:' + runtime_name])['sha256'], 'baseline runtime pairing differs')\n        for key in ('target', 'optimization_level', 'lto', 'llvm_budget'):\n            require(original['options'][key] == mode['options'][key], 'baseline executable build mode differs')\n    for group in GROUPS:\n        original = originals['batch_build_record'] if group == 'batch' else originals['manifest_record']\n        for kind in ('binary', 'ir'):\n            p = register(group + '_' + kind, mode['programs'][group][kind])\n            key = kind if group == 'batch' else ('control' if group == 'incremental' else group) + '_' + kind\n            require(file_info(p)['sha256'] == original['sha256'][key], 'baseline native artifact build differs')\n        spec = mode['references'][group]\n        binary = register('rust_' + group, spec['binary'])\n        build = json.loads(register('rust_record_' + group, spec['build_record']).read_text())\n        require(build == record['rust_build_records'][group], 'embedded Rust build differs')\n        require(build['binaries']['bigint']['sha256'] == file_info(binary)['sha256'], 'Rust binary build differs')\n        require(build.get('entrypoint', 'incremental') == group, 'Rust entrypoint differs')\n        require(build['llvm_budget'] == (1000 if thin else None), 'Rust optimization budget differs')\n        env = build['environment']\n        require(env.get('CARGO_PROFILE_RELEASE_LTO') == ('thin' if thin else None), 'Rust LTO mode differs')\n        require(env.get('CARGO_ENCODED_RUSTFLAGS') in (None, ''), 'unexpected Rust encoded flags')\n        if thin:\n            require('-import-instr-limit=1000' in env['RUSTFLAGS'] and '-inline-threshold=1000' in env['RUSTFLAGS'], 'Rust LLVM budgets absent')\n        else:\n            require(env['RUSTFLAGS'] == '', 'ordinary Rust flags differ')\n        source_root = bundle / spec['source_root']\n        require(set(build['source_contents']) == set(build['sources']), 'Rust source coverage differs')\n        for name, expected in build['sources'].items():\n            require(digest(build['source_contents'][name].encode()) == expected, 'Rust embedded source differs')\n            p = source_root / name\n            register('rust_source_' + group + ':' + name, {'path': str(p.relative_to(bundle)), 'sha256': expected, 'bytes': p.stat().st_size})\n        require(digest(build['build_script'].encode()) == build['build_script_sha256'], 'Rust build helper text differs')\n        p = source_root / 'build.py'\n        register('rust_build_script_' + group, {'path': str(p.relative_to(bundle)), 'sha256': build['build_script_sha256'], 'bytes': p.stat().st_size})\n    return index, paths, originals\n\n\ndef validate_correctness(record):\n    totals = {}\n    for group, count in (('incremental', 155), ('batch', 194), ('manifest', 196)):\n        evidence = record['validation'][group]\n        require(evidence.get('oracle_cases', evidence.get('cases')) == count, group + ': oracle count')\n        require(len(evidence['checks']) == count, group + ': missing checks')\n        require(evidence['passed_by_engine'] == dict.fromkeys(ENGINES, count), group + ': passed totals')\n        for case in evidence['checks']:\n            require(set(case['results']) == set(ENGINES), group + ': result coverage')\n            expected = {'stdout': case['expected_stdout'], 'returncode': 0} if group == 'incremental' else case['expected']\n            for engine, result in case['results'].items():\n                result_matches(result, expected, group + '/' + engine)\n        totals[group] = count * len(ENGINES)\n    incremental = record['validation']['incremental']\n    require(incremental['parser_cases'] == len(incremental['parser_checks']) == 17, 'parser case count')\n    require(incremental['parser_passed_by_engine'] == dict.fromkeys(ENGINES, 17), 'parser passed count')\n    for case in incremental['parser_checks']:\n        expected = {'stdout': case['expected_stdout'], 'returncode': case['expected_returncode'], 'error_category': case['expected_error_category']}\n        require(set(case['results']) == set(ENGINES), 'parser engine coverage')\n        for engine, result in case['results'].items():\n            result_matches(result, expected, 'parser/' + engine)\n    devices = record['validation']['manifest']['linux_device_checks']\n    require(devices['cases'] == len(devices['checks']) == 1, 'device check missing')\n    require(devices['passed_by_engine'] == dict.fromkeys(ENGINES, 1), 'device check totals')\n    for case in devices['checks']:\n        for engine, result in case['results'].items():\n            result_matches(result, case['expected'], 'device/' + engine)\n    return {**totals, 'incremental_parser': 17 * len(ENGINES), 'manifest_device': len(ENGINES)}\n\n\ndef audit_mode(root, path, baseline_path, external):\n    record = json.loads(path.read_text()); thin = record['options']['lto'] == 'thin'\n    mode_name = 'thinlto' if thin else 'ordinary'\n    require(record['example'] == 'concrete_layouts', 'wrong comparison')\n    require(record['git']['dirty'] is False, 'timing checkout was dirty')\n    require(record['options']['samples'] == 32 and record['options']['warmups'] == 2 and record['options']['validation_only'] is False, 'timing options differ')\n    require(record['options']['optimization_level'] == 3 and record['options']['llvm_budget'] == (1000 if thin else None), 'optimization mode differs')\n    contexts = list(record['execution'].values())\n    require(len(contexts) == 3 and contexts[0] == contexts[1] == contexts[2], 'runtime context changed')\n    require(contexts[0]['tracer_pid'] == 0, 'timing was traced')\n    require(record['host']['cpu']['affinity'] == [0], 'unexpected timing affinity')\n    require(record['clock']['monotonic'] and not record['clock']['adjustable'], 'timer is not monotonic')\n    index, paths, originals = sealed_baseline(root, baseline_path, record, thin)\n    build = record['imre_build_provenance']; source_hashes = build['source_sha256']\n    require(build['compiled_sources_match_commit'] is True, 'compiled source identity absent')\n    require(all(line.startswith('?? benchmarks/') for line in build['git_status'].splitlines()), 'build had tracked/source modifications')\n    require(subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', build['git_head'], record['git']['revision']]).returncode == 0, 'implementation is not timing ancestor')\n    verify_committed(root, build['git_head'], source_hashes)\n    verify_committed(root, record['git']['revision'], source_hashes)\n    verify_committed(root, record['git']['revision'], {'examples/' + name: value for name, value in record['sources'].items()})\n    tool_paths = {Path(k).name: root / k for k in build['sha256']}\n    for name, expected in build['sha256'].items():\n        verify_file(root / name, expected)\n    tool_root = tool_paths['imre'].parent\n    paths.update(compiler=tool_paths['imre'], runtime=tool_paths['libimre_runtime_lto.a' if thin else 'libimre_runtime.a'], imre_build_record=tool_root / 'build-record.json', clang=external['clang'], python=external['python'], harness=root / 'benchmarks/layout_benchmark.py')\n    if thin:\n        paths['lto_linker'] = external['lto_linker']\n    full_build = json.loads(paths['imre_build_record'].read_text())\n    for name, value in build.items():\n        require(full_build[name] == value, 'embedded build field differs: ' + name)\n    require(set(full_build['source_contents']) == set(source_hashes), 'compiled source contents coverage differs')\n    for name, value in full_build['source_contents'].items():\n        require(digest(value.encode()) == source_hashes[name], 'compiled source contents differ')\n    for name, command in full_build['commands'].items():\n        require(command['returncode'] == 0, 'failed tool build: ' + name)\n        verify_file(tool_root / (name + '.log'), command['log_sha256'])\n    artifact_dir = path.with_suffix('')\n    for group in GROUPS:\n        for kind, suffix in (('binary', ''), ('ir', '.ll')):\n            paths[group + '_' + kind] = artifact_dir / (group + '_planner' + suffix)\n        require(record['compilation'][group]['returncode'] == 0 and record['compilation'][group]['stderr'] == '', 'application compilation failed')\n    committed_harnesses = {}\n    for name, expected in record['sha256'].items():\n        if name.startswith('imre_source:'):\n            require(source_hashes[name.split(':', 1)[1]] == expected, 'compiled source record differs')\n            continue\n        if name not in paths:\n            require(name.endswith('.py'), 'unmapped recorded input: ' + name)\n            paths[name] = root / 'benchmarks' / name\n        verify_file(paths[name], expected)\n        if name == 'harness' or (name.endswith('.py') and not name.startswith('baseline:')):\n            committed_harnesses[str(paths[name].relative_to(root))] = expected\n    verify_committed(root, record['git']['revision'], committed_harnesses)\n    for name, spec in record['artifacts'].items():\n        require(file_info(paths[name])['bytes'] == spec['bytes'], 'recorded artifact bytes differ')\n    # Helpers are imported only after all recorded helper files match their hashes.\n    harness = runpy.run_path(str(root / 'benchmarks/layout_benchmark.py'))\n    original_workloads = {\n        'incremental': originals['manifest_record']['workloads']['control'],\n        'batch': originals['batch_input_record']['workloads']['batch'],\n        'manifest': originals['manifest_record']['workloads']['manifest'],\n    }\n    rows = []; position_counts = {}; adjacency_counts = {}; sample_runs = warmup_runs = 0\n    for group, count in GROUPS.items():\n        workloads = record['workloads'][group]\n        require(len(workloads) == count, 'workload count differs: ' + group)\n        require([w['label'] for w in workloads] == [w['label'] for w in original_workloads[group]], 'captured workload selection/order differs')\n        cycle = record['method']['order_cycles'][group]\n        require(len(cycle) == 4 and len({tuple(o) for o in cycle}) == 4, 'order cycle missing')\n        positions = Counter((engine, slot) for order in cycle for slot, engine in enumerate(order))\n        adjacent = Counter((a, b) for order in cycle for a, b in zip(order, order[1:]))\n        require(set(positions) == set(itertools.product(ENGINES, range(4))) and set(positions.values()) == {1}, 'cycle positions not balanced')\n        require(set(adjacent) == set(itertools.permutations(ENGINES, 2)) and set(adjacent.values()) == {1}, 'cycle predecessors not balanced')\n        for workload, original in zip(workloads, original_workloads[group]):\n            label = group + '/' + workload['label']\n            if group == 'incremental':\n                harness['manifest'].captured_workload(workload)\n            elif group == 'batch':\n                harness['exception'].captured_batches({'workloads': {'batch': [workload]}}, None)\n            else:\n                harness['captured_manifests']({'workloads': {'manifest': [workload]}}, None)\n            for key in ('input', 'expected_stdout') if group != 'manifest' else ('case', 'expected_stdout', 'expected_changed_files', 'expected_file_inventory'):\n                require(workload[key] == original[key], label + ': frozen input/output differs')\n            expected = {'returncode': 0, 'stdout': workload['expected_stdout']}\n            if group == 'manifest':\n                case = harness['VALIDATORS']['manifest'].case_from_record(workload['case'])\n                oracle = harness['VALIDATORS']['manifest'].oracle(case)\n                inventory = {n: {'sha256': digest(b), 'bytes': len(b)} for n, b in oracle['files'].items()}\n                require(inventory == workload['expected_file_inventory'], label + ': expected file inventory differs')\n                expected.update(files=harness['VALIDATORS']['manifest'].encoded_files(oracle['files']), directories=oracle['directories'])\n            measured_positions = Counter(); measured_adjacent = Counter()\n            for phase, n in (('warmups', 2), ('samples', 32)):\n                entries = workload[phase]\n                require(len(entries) == n, label + ': missing or discarded entries')\n                for i, entry in enumerate(entries):\n                    require(entry['index'] == i and entry['order'] == cycle[i % 4], label + ': sample order/index differs')\n                    require(set(entry) == {*ENGINES, 'index', 'order'}, label + ': sample coverage differs')\n                    for engine in ENGINES:\n                        require(type(entry[engine]['elapsed_ns']) is int and entry[engine]['elapsed_ns'] > 0, label + ': duration invalid')\n                        result_matches(entry[engine], expected, label + '/' + phase + '/' + engine)\n                    if phase == 'samples':\n                        measured_positions.update((engine, slot) for slot, engine in enumerate(entry['order']))\n                        measured_adjacent.update(zip(entry['order'], entry['order'][1:]))\n                        sample_runs += len(ENGINES)\n                    else:\n                        warmup_runs += len(ENGINES)\n            require(set(measured_positions.values()) == {8} and set(measured_adjacent.values()) == {8}, label + ': measured ordering unbalanced')\n            position_counts[label] = {f'{engine}@{slot}': n for (engine, slot), n in sorted(measured_positions.items())}\n            adjacency_counts[label] = {f'{a}->{b}': n for (a, b), n in sorted(measured_adjacent.items())}\n            computed = {}\n            for engine in ENGINES:\n                computed[engine] = summary([s[engine]['elapsed_ns'] for s in workload['samples']])\n                for key, value in computed[engine].items():\n                    close(workload['summary'][engine][key.replace('_ns', '_seconds')], value / 1e9, label + ': statistic differs: ' + engine + '/' + key)\n            medians = {engine: computed[engine]['median_ns'] for engine in ENGINES}\n            for a, b in itertools.permutations(ENGINES, 2):\n                close(workload['summary']['ratios_of_medians'][a + '_over_' + b], medians[a] / medians[b], label + ': ratio differs')\n            rows.append({'group': group, 'workload': workload['label'], 'statistics': computed, 'median_ms': {k: v / 1e6 for k, v in medians.items()}, 'old_to_new_time_reduction_percent': 100 * (1 - medians['imre'] / medians['baseline']), 'baseline_over_imre': medians['baseline'] / medians['imre'], 'cpython_over_imre': medians['cpython'] / medians['imre'], 'imre_over_rust_bigint': medians['imre'] / medians['rust_bigint']})\n    require(sample_runs == 17 * 32 * 4 and warmup_runs == 17 * 2 * 4, 'total sample accounting differs')\n    validation = validate_correctness(record)\n    return {\n        'mode': mode_name, 'record_sha256': file_info(path)['sha256'], 'timing_commit': record['git']['revision'],\n        'timing_checkout_clean': True, 'implementation_commit': build['git_head'],\n        'compiled_source_files_verified_in_both_commits': len(source_hashes),\n        'tool_build_status': build['git_status'],\n        'tool_build_status_note': 'Only then-untracked benchmark harness assets; every compiler/runtime/Cargo source independently matches the implementation and clean timing commits.',\n        'baseline_commit': index['git']['revision'], 'baseline_source_files_verified': len(index['source_sha256']),\n        'recorded_input_identities_verified': len(record['sha256']), 'artifact_hashes': {name: record['sha256'][name] for name in ('compiler', 'runtime', 'incremental_binary', 'batch_binary', 'manifest_binary')},\n        'workloads': 17, 'measured_rounds_per_workload': 32, 'warmup_rounds_per_workload': 2,\n        'measured_process_runs': sample_runs, 'warmup_process_runs': warmup_runs,\n        'oracle_process_results_verified': validation, 'tracer_checks': [c['tracer_pid'] for c in contexts],\n        'execution_context': contexts[0], 'ordering': {'position_counts': position_counts, 'within_round_predecessor_counts': adjacency_counts},\n        'rows': rows,\n    }, record\n\n\ndef main():\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[2])\n    parser.add_argument('--normal', type=Path)\n    parser.add_argument('--lto', type=Path)\n    parser.add_argument('--output', type=Path)\n    parser.add_argument('--python', default=str(Path.home() / '.local/bin/python3.14'))\n    parser.add_argument('--clang', default='clang-18')\n    args = parser.parse_args(); root = args.root.resolve()\n    paths = [args.normal or root / 'benchmarks/local/layout-normal-final.json', args.lto or root / 'benchmarks/local/layout-lto-final.json']\n    output = args.output or root / 'benchmarks/local/layout-final-audit.json'\n    external = {'python': Path(shutil.which(args.python) or args.python).resolve(strict=True), 'clang': Path(shutil.which(args.clang) or args.clang).resolve(strict=True), 'lto_linker': root / 'benchmarks/local/batch-linker/ld.lld'}\n    source = Path(__file__).read_text(); before = {str(p): file_info(p) for p in paths}\n    audits, records = zip(*(audit_mode(root, p, root / 'benchmarks/local/layout-baseline/baseline.json', external) for p in paths))\n    require(records[0]['sources'] == records[1]['sources'], 'cross-mode Python source identity differs')\n    require(records[0]['imre_build_provenance'] == records[1]['imre_build_provenance'], 'cross-mode Imre build generation differs')\n    require(records[0]['git'] == records[1]['git'], 'cross-mode timing commit differs')\n    for group in GROUPS:\n        for a, b in zip(records[0]['workloads'][group], records[1]['workloads'][group]):\n            require({k: v for k, v in a.items() if k not in ('samples', 'warmups', 'summary')} == {k: v for k, v in b.items() if k not in ('samples', 'warmups', 'summary')}, 'cross-mode workload/input/output differs')\n        require(records[0]['rust_build_records'][group]['sources'] == records[1]['rust_build_records'][group]['sources'], 'cross-mode Rust source identity differs')\n    for p in paths:\n        require(file_info(p) == before[str(p)], 'comparison changed during audit')\n    result = {\n        'schema_version': 1, 'status': 'passed', 'completed_at_utc': datetime.now(timezone.utc).isoformat(),\n        'audit_script_sha256': digest(source.encode()), 'audit_script_source': source,\n        'reproduction': 'python3 benchmarks/local/layout-final-audit.py',\n        'method': 'Independent integer-nanosecond medians and inclusive linear-interpolation quartiles over every recorded measured sample; all ratios recomputed; exact recorded artifact and committed source hashes checked; existing independent workload oracles reused after hash verification. No benchmarks, native tests, or compilers executed.',\n        'limits': [\n            'Recorded sample count and consecutive indices plus reviewed no-filter harness establish completeness of the saved run; no independent OS process log exists to rule out unrecorded prior attempts.',\n            'Measured stdout/filesystem contents were checked byte-for-byte by the hashed harness before compact digests were recorded. This audit verifies retained expected bytes and every result digest/length/status; per-run full stdout copies are not retained.',\n            'TracerPid was sampled at three checkpoints, not continuously; shared-host noise and cross-round predecessor balance are outside this audit.',\n            'The two warmup rounds use the first two Williams orders and are intentionally not fully balanced; all32 measured rounds are balanced.',\n        ],\n        'assertions_passed': CHECKS, 'distinct_files_hashed': len(FILES), 'modes': list(audits),\n    }\n    output.write_text(json.dumps(result, indent=2) + '\\n')\n    table = ['| Mode | Group / workload | Old ms | New ms | Time saved | CPython / new | New / Rust BigInt |', '|---|---|---:|---:|---:|---:|---:|']\n    for audit in audits:\n        for row in audit['rows']:\n            med = row['median_ms']\n            table.append(f\"| {audit['mode']} | {row['group']} / {row['workload']} | {med['baseline']:.3f} | {med['imre']:.3f} | {row['old_to_new_time_reduction_percent']:.2f}% | {row['cpython_over_imre']:.3f}x | {row['imre_over_rust_bigint']:.3f}x |\")\n    output.with_suffix('.md').write_text('\\n'.join(table) + '\\n')\n    print(json.dumps({'status': 'passed', 'assertions': CHECKS, 'distinct_files_hashed': len(FILES), 'audit_sha256': file_info(output)['sha256'], 'script_sha256': digest(source.encode()), 'output': str(output)}, indent=2))\n    print('\\n'.join(table))\n\n\nif __name__ == '__main__':\n    main()\n",
   "reproduction": "python3 benchmarks/local/layout-final-audit.py",
   "method": "Independent integer-nanosecond medians and inclusive linear-interpolation quartiles over every recorded measured sample; all ratios recomputed; exact recorded artifact and committed source hashes checked; existing independent workload oracles reused after hash verification. No benchmarks, native tests, or compilers executed.",
   "limits": [
@@ -86,10 +86,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -104,10 +104,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -122,10 +122,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -140,10 +140,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -158,10 +158,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -176,10 +176,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -194,10 +194,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -212,10 +212,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -230,10 +230,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -248,10 +248,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -266,10 +266,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -284,10 +284,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -302,10 +302,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -320,10 +320,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -338,10 +338,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -356,10 +356,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -374,10 +374,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -387,241 +387,241 @@
         "within_round_predecessor_counts": {
           "incremental/layered-16384-sparse": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "incremental/layered-16384-all": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "incremental/wide-16384-sparse": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "incremental/wide-16384-all": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "incremental/boundary-128-all": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "batch/layered-16384-all-valid": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "batch/layered-16384-all-mixed": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "batch/wide-16384-all-valid": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "batch/wide-16384-all-mixed": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "batch/boundary-128-all-valid": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "batch/boundary-128-all-mixed": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "manifest/layered-16384-all-valid": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "manifest/layered-16384-all-mixed": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "manifest/wide-16384-all-valid": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "manifest/wide-16384-all-mixed": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "manifest/boundary-128-all-valid": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "manifest/boundary-128-all-mixed": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           }
         }
       },
@@ -644,7 +644,7 @@
               "p25_ns": 58515654.0,
               "p75_ns": 61163123.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 50390861.0,
               "min_ns": 49079752,
               "max_ns": 53511196,
@@ -662,13 +662,13 @@
           "median_ms": {
             "cpython": 115.1086505,
             "baseline": 59.5290555,
-            "relar": 50.390861,
+            "imre": 50.390861,
             "rust_bigint": 35.009222
           },
           "old_to_new_time_reduction_percent": 15.350813855932921,
-          "baseline_over_relar": 1.1813462663398429,
-          "cpython_over_relar": 2.2843160092065107,
-          "relar_over_rust_bigint": 1.4393596350127404
+          "baseline_over_imre": 1.1813462663398429,
+          "cpython_over_imre": 2.2843160092065107,
+          "imre_over_rust_bigint": 1.4393596350127404
         },
         {
           "group": "incremental",
@@ -688,7 +688,7 @@
               "p25_ns": 86918670.5,
               "p75_ns": 89132583.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 75106812.5,
               "min_ns": 72370362,
               "max_ns": 84545470,
@@ -706,13 +706,13 @@
           "median_ms": {
             "cpython": 193.050457,
             "baseline": 88.6515335,
-            "relar": 75.1068125,
+            "imre": 75.1068125,
             "rust_bigint": 54.0422455
           },
           "old_to_new_time_reduction_percent": 15.278608801504824,
-          "baseline_over_relar": 1.1803394465715078,
-          "cpython_over_relar": 2.5703454929604423,
-          "relar_over_rust_bigint": 1.389779640078057
+          "baseline_over_imre": 1.1803394465715078,
+          "cpython_over_imre": 2.5703454929604423,
+          "imre_over_rust_bigint": 1.389779640078057
         },
         {
           "group": "incremental",
@@ -732,7 +732,7 @@
               "p25_ns": 28581729.5,
               "p75_ns": 29043022.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 26314964.5,
               "min_ns": 24580598,
               "max_ns": 29865018,
@@ -750,13 +750,13 @@
           "median_ms": {
             "cpython": 101.201358,
             "baseline": 28.7327165,
-            "relar": 26.3149645,
+            "imre": 26.3149645,
             "rust_bigint": 16.505295
           },
           "old_to_new_time_reduction_percent": 8.414630757241493,
-          "baseline_over_relar": 1.0918774562663764,
-          "cpython_over_relar": 3.845772165111604,
-          "relar_over_rust_bigint": 1.594334696835167
+          "baseline_over_imre": 1.0918774562663764,
+          "cpython_over_imre": 3.845772165111604,
+          "imre_over_rust_bigint": 1.594334696835167
         },
         {
           "group": "incremental",
@@ -776,7 +776,7 @@
               "p25_ns": 50433493.0,
               "p75_ns": 51627797.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 44489020.5,
               "min_ns": 41543825,
               "max_ns": 54316498,
@@ -794,13 +794,13 @@
           "median_ms": {
             "cpython": 185.2819125,
             "baseline": 51.000013,
-            "relar": 44.4890205,
+            "imre": 44.4890205,
             "rust_bigint": 28.9198205
           },
           "old_to_new_time_reduction_percent": 12.76664870654053,
-          "baseline_over_relar": 1.1463505473221196,
-          "cpython_over_relar": 4.164666032600111,
-          "relar_over_rust_bigint": 1.5383574216859333
+          "baseline_over_imre": 1.1463505473221196,
+          "cpython_over_imre": 4.164666032600111,
+          "imre_over_rust_bigint": 1.5383574216859333
         },
         {
           "group": "incremental",
@@ -820,7 +820,7 @@
               "p25_ns": 3674106.75,
               "p75_ns": 3811551.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 3746785.0,
               "min_ns": 3498358,
               "max_ns": 4398763,
@@ -838,13 +838,13 @@
           "median_ms": {
             "cpython": 21.3686375,
             "baseline": 3.729247,
-            "relar": 3.746785,
+            "imre": 3.746785,
             "rust_bigint": 3.5459015
           },
           "old_to_new_time_reduction_percent": -0.47028260664954136,
-          "baseline_over_relar": 0.9953191869829734,
-          "cpython_over_relar": 5.703192870687803,
-          "relar_over_rust_bigint": 1.0566523068957216
+          "baseline_over_imre": 0.9953191869829734,
+          "cpython_over_imre": 5.703192870687803,
+          "imre_over_rust_bigint": 1.0566523068957216
         },
         {
           "group": "batch",
@@ -864,7 +864,7 @@
               "p25_ns": 161241019.25,
               "p75_ns": 167711461.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 144230550.0,
               "min_ns": 138776205,
               "max_ns": 158191545,
@@ -882,13 +882,13 @@
           "median_ms": {
             "cpython": 364.253402,
             "baseline": 163.604368,
-            "relar": 144.23055,
+            "imre": 144.23055,
             "rust_bigint": 102.000389
           },
           "old_to_new_time_reduction_percent": 11.841870872298465,
-          "baseline_over_relar": 1.1343253423078536,
-          "cpython_over_relar": 2.5254940926176874,
-          "relar_over_rust_bigint": 1.4140196073173799
+          "baseline_over_imre": 1.1343253423078536,
+          "cpython_over_imre": 2.5254940926176874,
+          "imre_over_rust_bigint": 1.4140196073173799
         },
         {
           "group": "batch",
@@ -908,7 +908,7 @@
               "p25_ns": 160665699.5,
               "p75_ns": 165088672.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 143482379.0,
               "min_ns": 135228220,
               "max_ns": 153788500,
@@ -926,13 +926,13 @@
           "median_ms": {
             "cpython": 362.7628085,
             "baseline": 161.9440605,
-            "relar": 143.482379,
+            "imre": 143.482379,
             "rust_bigint": 101.663153
           },
           "old_to_new_time_reduction_percent": 11.400036187186991,
-          "baseline_over_relar": 1.1286686325433732,
-          "cpython_over_relar": 2.528274280286362,
-          "relar_over_rust_bigint": 1.411350865735986
+          "baseline_over_imre": 1.1286686325433732,
+          "cpython_over_imre": 2.528274280286362,
+          "imre_over_rust_bigint": 1.411350865735986
         },
         {
           "group": "batch",
@@ -952,7 +952,7 @@
               "p25_ns": 92811670.0,
               "p75_ns": 95695743.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 85243327.0,
               "min_ns": 80106064,
               "max_ns": 92575138,
@@ -970,13 +970,13 @@
           "median_ms": {
             "cpython": 350.8869595,
             "baseline": 94.04622,
-            "relar": 85.243327,
+            "imre": 85.243327,
             "rust_bigint": 55.433467
           },
           "old_to_new_time_reduction_percent": 9.36017736810687,
-          "baseline_over_relar": 1.1032678252926473,
-          "cpython_over_relar": 4.116298270479283,
-          "relar_over_rust_bigint": 1.5377592565155631
+          "baseline_over_imre": 1.1032678252926473,
+          "cpython_over_imre": 4.116298270479283,
+          "imre_over_rust_bigint": 1.5377592565155631
         },
         {
           "group": "batch",
@@ -996,7 +996,7 @@
               "p25_ns": 93798787.0,
               "p75_ns": 94903519.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 85474200.0,
               "min_ns": 83676410,
               "max_ns": 89330149,
@@ -1014,13 +1014,13 @@
           "median_ms": {
             "cpython": 354.6916475,
             "baseline": 94.2479535,
-            "relar": 85.4742,
+            "imre": 85.4742,
             "rust_bigint": 55.694084
           },
           "old_to_new_time_reduction_percent": 9.309224417270768,
-          "baseline_over_relar": 1.1026479744765088,
-          "cpython_over_relar": 4.14969250955259,
-          "relar_over_rust_bigint": 1.5347087852275296
+          "baseline_over_imre": 1.1026479744765088,
+          "cpython_over_imre": 4.14969250955259,
+          "imre_over_rust_bigint": 1.5347087852275296
         },
         {
           "group": "batch",
@@ -1040,7 +1040,7 @@
               "p25_ns": 4056718.25,
               "p75_ns": 4121320.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 4051528.0,
               "min_ns": 3030599,
               "max_ns": 4269955,
@@ -1058,13 +1058,13 @@
           "median_ms": {
             "cpython": 22.302714,
             "baseline": 4.0880955,
-            "relar": 4.051528,
+            "imre": 4.051528,
             "rust_bigint": 3.6665175
           },
           "old_to_new_time_reduction_percent": 0.8944874208540399,
-          "baseline_over_relar": 1.0090256071289647,
-          "cpython_over_relar": 5.504766103060376,
-          "relar_over_rust_bigint": 1.1050071355175586
+          "baseline_over_imre": 1.0090256071289647,
+          "cpython_over_imre": 5.504766103060376,
+          "imre_over_rust_bigint": 1.1050071355175586
         },
         {
           "group": "batch",
@@ -1084,7 +1084,7 @@
               "p25_ns": 4209822.5,
               "p75_ns": 4374788.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 4210594.5,
               "min_ns": 4091080,
               "max_ns": 5803317,
@@ -1102,13 +1102,13 @@
           "median_ms": {
             "cpython": 23.1452915,
             "baseline": 4.240024,
-            "relar": 4.2105945,
+            "imre": 4.2105945,
             "rust_bigint": 3.7136345
           },
           "old_to_new_time_reduction_percent": 0.6940880523317761,
-          "baseline_over_relar": 1.006989393065516,
-          "cpython_over_relar": 5.496917715538744,
-          "relar_over_rust_bigint": 1.133820385393339
+          "baseline_over_imre": 1.006989393065516,
+          "cpython_over_imre": 5.496917715538744,
+          "imre_over_rust_bigint": 1.133820385393339
         },
         {
           "group": "manifest",
@@ -1128,7 +1128,7 @@
               "p25_ns": 161639583.25,
               "p75_ns": 164954791.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 142806078.0,
               "min_ns": 138111293,
               "max_ns": 149558077,
@@ -1146,13 +1146,13 @@
           "median_ms": {
             "cpython": 262.4642795,
             "baseline": 162.8859725,
-            "relar": 142.806078,
+            "imre": 142.806078,
             "rust_bigint": 89.5775735
           },
           "old_to_new_time_reduction_percent": 12.327577502108111,
-          "baseline_over_relar": 1.1406095229364117,
-          "cpython_over_relar": 1.8379069236814976,
-          "relar_over_rust_bigint": 1.5942168605404343
+          "baseline_over_imre": 1.1406095229364117,
+          "cpython_over_imre": 1.8379069236814976,
+          "imre_over_rust_bigint": 1.5942168605404343
         },
         {
           "group": "manifest",
@@ -1172,7 +1172,7 @@
               "p25_ns": 160417313.25,
               "p75_ns": 166162644.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 142503969.0,
               "min_ns": 136261855,
               "max_ns": 152870873,
@@ -1190,13 +1190,13 @@
           "median_ms": {
             "cpython": 260.6289815,
             "baseline": 163.7042825,
-            "relar": 142.503969,
+            "imre": 142.503969,
             "rust_bigint": 89.8609335
           },
           "old_to_new_time_reduction_percent": 12.950371961100037,
-          "baseline_over_relar": 1.148769986188946,
-          "cpython_over_relar": 1.8289243684153107,
-          "relar_over_rust_bigint": 1.5858278280627922
+          "baseline_over_imre": 1.148769986188946,
+          "cpython_over_imre": 1.8289243684153107,
+          "imre_over_rust_bigint": 1.5858278280627922
         },
         {
           "group": "manifest",
@@ -1216,7 +1216,7 @@
               "p25_ns": 95534685.75,
               "p75_ns": 98584902.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 86360678.0,
               "min_ns": 80983720,
               "max_ns": 92194613,
@@ -1234,13 +1234,13 @@
           "median_ms": {
             "cpython": 251.23273,
             "baseline": 97.44977,
-            "relar": 86.360678,
+            "imre": 86.360678,
             "rust_bigint": 47.574708
           },
           "old_to_new_time_reduction_percent": 11.379290069129977,
-          "baseline_over_relar": 1.1284044110908902,
-          "cpython_over_relar": 2.9091102086993805,
-          "relar_over_rust_bigint": 1.8152644888540357
+          "baseline_over_imre": 1.1284044110908902,
+          "cpython_over_imre": 2.9091102086993805,
+          "imre_over_rust_bigint": 1.8152644888540357
         },
         {
           "group": "manifest",
@@ -1260,7 +1260,7 @@
               "p25_ns": 96669139.75,
               "p75_ns": 99245631.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 87601058.5,
               "min_ns": 84632249,
               "max_ns": 93987160,
@@ -1278,13 +1278,13 @@
           "median_ms": {
             "cpython": 256.345811,
             "baseline": 97.9973835,
-            "relar": 87.6010585,
+            "imre": 87.6010585,
             "rust_bigint": 48.27918
           },
           "old_to_new_time_reduction_percent": 10.608778141510278,
-          "baseline_over_relar": 1.1186780751056793,
-          "cpython_over_relar": 2.9262866840815627,
-          "relar_over_rust_bigint": 1.8144686488047228
+          "baseline_over_imre": 1.1186780751056793,
+          "cpython_over_imre": 2.9262866840815627,
+          "imre_over_rust_bigint": 1.8144686488047228
         },
         {
           "group": "manifest",
@@ -1304,7 +1304,7 @@
               "p25_ns": 3279588.0,
               "p75_ns": 4396498.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 3343090.0,
               "min_ns": 3132629,
               "max_ns": 4898034,
@@ -1322,13 +1322,13 @@
           "median_ms": {
             "cpython": 29.827644,
             "baseline": 3.424316,
-            "relar": 3.34309,
+            "imre": 3.34309,
             "rust_bigint": 2.801748
           },
           "old_to_new_time_reduction_percent": 2.3720357583821072,
-          "baseline_over_relar": 1.0242966836070821,
-          "cpython_over_relar": 8.922177985037795,
-          "relar_over_rust_bigint": 1.1932158067035294
+          "baseline_over_imre": 1.0242966836070821,
+          "cpython_over_imre": 8.922177985037795,
+          "imre_over_rust_bigint": 1.1932158067035294
         },
         {
           "group": "manifest",
@@ -1348,7 +1348,7 @@
               "p25_ns": 3717059.0,
               "p75_ns": 4797307.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 4648254.0,
               "min_ns": 3474414,
               "max_ns": 5618314,
@@ -1366,13 +1366,13 @@
           "median_ms": {
             "cpython": 30.3511875,
             "baseline": 4.682973,
-            "relar": 4.648254,
+            "imre": 4.648254,
             "rust_bigint": 2.9847785
           },
           "old_to_new_time_reduction_percent": 0.7413880028776632,
-          "baseline_over_relar": 1.0074692561981338,
-          "cpython_over_relar": 6.529588852072197,
-          "relar_over_rust_bigint": 1.5573195799956345
+          "baseline_over_imre": 1.0074692561981338,
+          "cpython_over_imre": 6.529588852072197,
+          "imre_over_rust_bigint": 1.5573195799956345
         }
       ]
     },
@@ -1447,10 +1447,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1465,10 +1465,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1483,10 +1483,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1501,10 +1501,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1519,10 +1519,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1537,10 +1537,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1555,10 +1555,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1573,10 +1573,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1591,10 +1591,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1609,10 +1609,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1627,10 +1627,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1645,10 +1645,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1663,10 +1663,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1681,10 +1681,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1699,10 +1699,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1717,10 +1717,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1735,10 +1735,10 @@
             "cpython@1": 8,
             "cpython@2": 8,
             "cpython@3": 8,
-            "relar@0": 8,
-            "relar@1": 8,
-            "relar@2": 8,
-            "relar@3": 8,
+            "imre@0": 8,
+            "imre@1": 8,
+            "imre@2": 8,
+            "imre@3": 8,
             "rust_bigint@0": 8,
             "rust_bigint@1": 8,
             "rust_bigint@2": 8,
@@ -1748,241 +1748,241 @@
         "within_round_predecessor_counts": {
           "incremental/layered-16384-sparse": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "incremental/layered-16384-all": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "incremental/wide-16384-sparse": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "incremental/wide-16384-all": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "incremental/boundary-128-all": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "batch/layered-16384-all-valid": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "batch/layered-16384-all-mixed": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "batch/wide-16384-all-valid": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "batch/wide-16384-all-mixed": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "batch/boundary-128-all-valid": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "batch/boundary-128-all-mixed": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "manifest/layered-16384-all-valid": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "manifest/layered-16384-all-mixed": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "manifest/wide-16384-all-valid": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "manifest/wide-16384-all-mixed": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "manifest/boundary-128-all-valid": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           },
           "manifest/boundary-128-all-mixed": {
             "baseline->cpython": 8,
-            "baseline->relar": 8,
+            "baseline->imre": 8,
             "baseline->rust_bigint": 8,
             "cpython->baseline": 8,
-            "cpython->relar": 8,
+            "cpython->imre": 8,
             "cpython->rust_bigint": 8,
-            "relar->baseline": 8,
-            "relar->cpython": 8,
-            "relar->rust_bigint": 8,
+            "imre->baseline": 8,
+            "imre->cpython": 8,
+            "imre->rust_bigint": 8,
             "rust_bigint->baseline": 8,
             "rust_bigint->cpython": 8,
-            "rust_bigint->relar": 8
+            "rust_bigint->imre": 8
           }
         }
       },
@@ -2005,7 +2005,7 @@
               "p25_ns": 50856568.25,
               "p75_ns": 52470909.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 43734177.0,
               "min_ns": 41885026,
               "max_ns": 54030366,
@@ -2023,13 +2023,13 @@
           "median_ms": {
             "cpython": 113.774432,
             "baseline": 51.919417,
-            "relar": 43.734177,
+            "imre": 43.734177,
             "rust_bigint": 31.647572
           },
           "old_to_new_time_reduction_percent": 15.765277179441362,
-          "baseline_over_relar": 1.1871588894881913,
-          "cpython_over_relar": 2.6014993262591863,
-          "relar_over_rust_bigint": 1.3819125524068638
+          "baseline_over_imre": 1.1871588894881913,
+          "cpython_over_imre": 2.6014993262591863,
+          "imre_over_rust_bigint": 1.3819125524068638
         },
         {
           "group": "incremental",
@@ -2049,7 +2049,7 @@
               "p25_ns": 77088002.75,
               "p75_ns": 79435607.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 65952469.5,
               "min_ns": 63768257,
               "max_ns": 94789508,
@@ -2067,13 +2067,13 @@
           "median_ms": {
             "cpython": 194.646892,
             "baseline": 78.321841,
-            "relar": 65.9524695,
+            "imre": 65.9524695,
             "rust_bigint": 49.8817165
           },
           "old_to_new_time_reduction_percent": 15.793004022977453,
-          "baseline_over_relar": 1.187549785379909,
-          "cpython_over_relar": 2.9513207538043744,
-          "relar_over_rust_bigint": 1.3221772249958559
+          "baseline_over_imre": 1.187549785379909,
+          "cpython_over_imre": 2.9513207538043744,
+          "imre_over_rust_bigint": 1.3221772249958559
         },
         {
           "group": "incremental",
@@ -2093,7 +2093,7 @@
               "p25_ns": 24198813.0,
               "p75_ns": 24683602.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 21573848.0,
               "min_ns": 21227539,
               "max_ns": 22782332,
@@ -2111,13 +2111,13 @@
           "median_ms": {
             "cpython": 103.6797615,
             "baseline": 24.38835,
-            "relar": 21.573848,
+            "imre": 21.573848,
             "rust_bigint": 15.6108345
           },
           "old_to_new_time_reduction_percent": 11.540354308512057,
-          "baseline_over_relar": 1.130458970509109,
-          "cpython_over_relar": 4.805807545320612,
-          "relar_over_rust_bigint": 1.3819791632535723
+          "baseline_over_imre": 1.130458970509109,
+          "cpython_over_imre": 4.805807545320612,
+          "imre_over_rust_bigint": 1.3819791632535723
         },
         {
           "group": "incremental",
@@ -2137,7 +2137,7 @@
               "p25_ns": 41851801.25,
               "p75_ns": 42971336.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 36139868.5,
               "min_ns": 34828918,
               "max_ns": 38426452,
@@ -2155,13 +2155,13 @@
           "median_ms": {
             "cpython": 187.585654,
             "baseline": 42.4133915,
-            "relar": 36.1398685,
+            "imre": 36.1398685,
             "rust_bigint": 26.741946
           },
           "old_to_new_time_reduction_percent": 14.791373144493758,
-          "baseline_over_relar": 1.1735900892943205,
-          "cpython_over_relar": 5.190546113912949,
-          "relar_over_rust_bigint": 1.3514300156017067
+          "baseline_over_imre": 1.1735900892943205,
+          "cpython_over_imre": 5.190546113912949,
+          "imre_over_rust_bigint": 1.3514300156017067
         },
         {
           "group": "incremental",
@@ -2181,7 +2181,7 @@
               "p25_ns": 3503306.75,
               "p75_ns": 3593881.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 3551673.5,
               "min_ns": 3446152,
               "max_ns": 3889939,
@@ -2199,13 +2199,13 @@
           "median_ms": {
             "cpython": 21.098223,
             "baseline": 3.5368465,
-            "relar": 3.5516735,
+            "imre": 3.5516735,
             "rust_bigint": 3.4572335
           },
           "old_to_new_time_reduction_percent": -0.4192152529096216,
-          "baseline_over_relar": 0.9958253482478049,
-          "cpython_over_relar": 5.940361072041109,
-          "relar_over_rust_bigint": 1.027316639156713
+          "baseline_over_imre": 0.9958253482478049,
+          "cpython_over_imre": 5.940361072041109,
+          "imre_over_rust_bigint": 1.027316639156713
         },
         {
           "group": "batch",
@@ -2225,7 +2225,7 @@
               "p25_ns": 143108979.25,
               "p75_ns": 146524060.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 123476331.5,
               "min_ns": 120310854,
               "max_ns": 133012038,
@@ -2243,13 +2243,13 @@
           "median_ms": {
             "cpython": 363.3963215,
             "baseline": 145.0248375,
-            "relar": 123.4763315,
+            "imre": 123.4763315,
             "rust_bigint": 92.548246
           },
           "old_to_new_time_reduction_percent": 14.85849346323177,
-          "baseline_over_relar": 1.1745152754234522,
-          "cpython_over_relar": 2.9430443639313983,
-          "relar_over_rust_bigint": 1.334183378256569
+          "baseline_over_imre": 1.1745152754234522,
+          "cpython_over_imre": 2.9430443639313983,
+          "imre_over_rust_bigint": 1.334183378256569
         },
         {
           "group": "batch",
@@ -2269,7 +2269,7 @@
               "p25_ns": 142238502.0,
               "p75_ns": 147565388.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 122826875.0,
               "min_ns": 119800013,
               "max_ns": 147437965,
@@ -2287,13 +2287,13 @@
           "median_ms": {
             "cpython": 364.361605,
             "baseline": 144.6601535,
-            "relar": 122.826875,
+            "imre": 122.826875,
             "rust_bigint": 91.9302585
           },
           "old_to_new_time_reduction_percent": 15.092807502101813,
-          "baseline_over_relar": 1.1777565251904358,
-          "cpython_over_relar": 2.966464831088473,
-          "relar_over_rust_bigint": 1.3360875625080506
+          "baseline_over_imre": 1.1777565251904358,
+          "cpython_over_imre": 2.966464831088473,
+          "imre_over_rust_bigint": 1.3360875625080506
         },
         {
           "group": "batch",
@@ -2313,7 +2313,7 @@
               "p25_ns": 76710222.0,
               "p75_ns": 78289509.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 67699702.5,
               "min_ns": 63615817,
               "max_ns": 72074213,
@@ -2331,13 +2331,13 @@
           "median_ms": {
             "cpython": 353.2999985,
             "baseline": 77.758916,
-            "relar": 67.6997025,
+            "imre": 67.6997025,
             "rust_bigint": 49.4774495
           },
           "old_to_new_time_reduction_percent": 12.93641169071853,
-          "baseline_over_relar": 1.1485857858828847,
-          "cpython_over_relar": 5.218634431960761,
-          "relar_over_rust_bigint": 1.3682941053782491
+          "baseline_over_imre": 1.1485857858828847,
+          "cpython_over_imre": 5.218634431960761,
+          "imre_over_rust_bigint": 1.3682941053782491
         },
         {
           "group": "batch",
@@ -2357,7 +2357,7 @@
               "p25_ns": 76817754.25,
               "p75_ns": 78094173.0
             },
-            "relar": {
+            "imre": {
               "median_ns": 67424080.5,
               "min_ns": 64820982,
               "max_ns": 71791042,
@@ -2375,13 +2375,13 @@
           "median_ms": {
             "cpython": 353.239344,
             "baseline": 77.2610205,
-            "relar": 67.4240805,
+            "imre": 67.4240805,
             "rust_bigint": 49.2465905
           },
           "old_to_new_time_reduction_percent": 12.732086550681787,
-          "baseline_over_relar": 1.1458965391452391,
-          "cpython_over_relar": 5.239068021105605,
-          "relar_over_rust_bigint": 1.3691116443888638
+          "baseline_over_imre": 1.1458965391452391,
+          "cpython_over_imre": 5.239068021105605,
+          "imre_over_rust_bigint": 1.3691116443888638
         },
         {
           "group": "batch",
@@ -2401,7 +2401,7 @@
               "p25_ns": 3921481.5,
               "p75_ns": 4027617.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 3873333.0,
               "min_ns": 3757722,
               "max_ns": 4511485,
@@ -2419,13 +2419,13 @@
           "median_ms": {
             "cpython": 22.303824,
             "baseline": 3.94446,
-            "relar": 3.873333,
+            "imre": 3.873333,
             "rust_bigint": 3.595165
           },
           "old_to_new_time_reduction_percent": 1.8032126070488763,
-          "baseline_over_relar": 1.0183632545923627,
-          "cpython_over_relar": 5.758302733072524,
-          "relar_over_rust_bigint": 1.0773728048643108
+          "baseline_over_imre": 1.0183632545923627,
+          "cpython_over_imre": 5.758302733072524,
+          "imre_over_rust_bigint": 1.0773728048643108
         },
         {
           "group": "batch",
@@ -2445,7 +2445,7 @@
               "p25_ns": 3997173.75,
               "p75_ns": 4144115.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 3998094.0,
               "min_ns": 3901500,
               "max_ns": 4221885,
@@ -2463,13 +2463,13 @@
           "median_ms": {
             "cpython": 22.460521,
             "baseline": 4.061183,
-            "relar": 3.998094,
+            "imre": 3.998094,
             "rust_bigint": 3.64619
           },
           "old_to_new_time_reduction_percent": 1.5534636090026033,
-          "baseline_over_relar": 1.015779769059957,
-          "cpython_over_relar": 5.617807135099875,
-          "relar_over_rust_bigint": 1.0965127982908187
+          "baseline_over_imre": 1.015779769059957,
+          "cpython_over_imre": 5.617807135099875,
+          "imre_over_rust_bigint": 1.0965127982908187
         },
         {
           "group": "manifest",
@@ -2489,7 +2489,7 @@
               "p25_ns": 140499809.75,
               "p75_ns": 144440346.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 119638195.5,
               "min_ns": 117281345,
               "max_ns": 126328004,
@@ -2507,13 +2507,13 @@
           "median_ms": {
             "cpython": 263.6241925,
             "baseline": 143.0486995,
-            "relar": 119.6381955,
+            "imre": 119.6381955,
             "rust_bigint": 82.5157805
           },
           "old_to_new_time_reduction_percent": 16.365408481046696,
-          "baseline_over_relar": 1.1956775083589422,
-          "cpython_over_relar": 2.203511941970071,
-          "relar_over_rust_bigint": 1.4498826136656369
+          "baseline_over_imre": 1.1956775083589422,
+          "cpython_over_imre": 2.203511941970071,
+          "imre_over_rust_bigint": 1.4498826136656369
         },
         {
           "group": "manifest",
@@ -2533,7 +2533,7 @@
               "p25_ns": 140587234.5,
               "p75_ns": 146652554.25
             },
-            "relar": {
+            "imre": {
               "median_ns": 119317922.5,
               "min_ns": 116979060,
               "max_ns": 129114037,
@@ -2551,13 +2551,13 @@
           "median_ms": {
             "cpython": 264.6414205,
             "baseline": 142.0063575,
-            "relar": 119.3179225,
+            "imre": 119.3179225,
             "rust_bigint": 82.0351575
           },
           "old_to_new_time_reduction_percent": 15.977055815969365,
-          "baseline_over_relar": 1.1901511065950716,
-          "cpython_over_relar": 2.2179519635870295,
-          "relar_over_rust_bigint": 1.4544730105503851
+          "baseline_over_imre": 1.1901511065950716,
+          "cpython_over_imre": 2.2179519635870295,
+          "imre_over_rust_bigint": 1.4544730105503851
         },
         {
           "group": "manifest",
@@ -2577,7 +2577,7 @@
               "p25_ns": 77008612.75,
               "p75_ns": 78994912.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 67601599.5,
               "min_ns": 66473911,
               "max_ns": 75862537,
@@ -2595,13 +2595,13 @@
           "median_ms": {
             "cpython": 253.405055,
             "baseline": 77.963758,
-            "relar": 67.6015995,
+            "imre": 67.6015995,
             "rust_bigint": 43.4808635
           },
           "old_to_new_time_reduction_percent": 13.290994130888356,
-          "baseline_over_relar": 1.1532827414830622,
-          "cpython_over_relar": 3.7485067938370302,
-          "relar_over_rust_bigint": 1.5547437207635033
+          "baseline_over_imre": 1.1532827414830622,
+          "cpython_over_imre": 3.7485067938370302,
+          "imre_over_rust_bigint": 1.5547437207635033
         },
         {
           "group": "manifest",
@@ -2621,7 +2621,7 @@
               "p25_ns": 77515695.25,
               "p75_ns": 80174192.5
             },
-            "relar": {
+            "imre": {
               "median_ns": 68548127.0,
               "min_ns": 67209662,
               "max_ns": 80876374,
@@ -2639,13 +2639,13 @@
           "median_ms": {
             "cpython": 255.0440445,
             "baseline": 78.416266,
-            "relar": 68.548127,
+            "imre": 68.548127,
             "rust_bigint": 44.1582645
           },
           "old_to_new_time_reduction_percent": 12.584301068352321,
-          "baseline_over_relar": 1.1439592798793758,
-          "cpython_over_relar": 3.720656649013911,
-          "relar_over_rust_bigint": 1.5523283755864092
+          "baseline_over_imre": 1.1439592798793758,
+          "cpython_over_imre": 3.720656649013911,
+          "imre_over_rust_bigint": 1.5523283755864092
         },
         {
           "group": "manifest",
@@ -2665,7 +2665,7 @@
               "p25_ns": 3117189.5,
               "p75_ns": 4404445.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 3131002.5,
               "min_ns": 2908612,
               "max_ns": 4901582,
@@ -2683,13 +2683,13 @@
           "median_ms": {
             "cpython": 29.61969,
             "baseline": 3.3102205,
-            "relar": 3.1310025,
+            "imre": 3.1310025,
             "rust_bigint": 2.836424
           },
           "old_to_new_time_reduction_percent": 5.414080421530832,
-          "baseline_over_relar": 1.0572398137657188,
-          "cpython_over_relar": 9.460129782713365,
-          "relar_over_rust_bigint": 1.1038555942270971
+          "baseline_over_imre": 1.0572398137657188,
+          "cpython_over_imre": 9.460129782713365,
+          "imre_over_rust_bigint": 1.1038555942270971
         },
         {
           "group": "manifest",
@@ -2709,7 +2709,7 @@
               "p25_ns": 3390511.5,
               "p75_ns": 4690207.75
             },
-            "relar": {
+            "imre": {
               "median_ns": 3434951.5,
               "min_ns": 3195447,
               "max_ns": 5371126,
@@ -2727,13 +2727,13 @@
           "median_ms": {
             "cpython": 29.657896,
             "baseline": 3.5954305,
-            "relar": 3.4349515,
+            "imre": 3.4349515,
             "rust_bigint": 3.0175255
           },
           "old_to_new_time_reduction_percent": 4.46341543801222,
-          "baseline_over_relar": 1.046719436941104,
-          "cpython_over_relar": 8.634152767513603,
-          "relar_over_rust_bigint": 1.1383338765488478
+          "baseline_over_imre": 1.046719436941104,
+          "cpython_over_imre": 8.634152767513603,
+          "imre_over_rust_bigint": 1.1383338765488478
         }
       ]
     }

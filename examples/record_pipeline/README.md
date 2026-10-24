@@ -13,7 +13,7 @@ No intermediate payout list is created.
 From the repository root:
 
 ```sh
-target/release/relar build examples/record_pipeline/__main__.py \
+target/release/imre build examples/record_pipeline/__main__.py \
   --module-root examples --clang clang-18 -o /tmp/record-pipeline
 /tmp/record-pipeline net examples/record_pipeline/sample/transactions.txt \
   /tmp/payouts.txt 10 25 2

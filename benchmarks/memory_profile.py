@@ -23,7 +23,7 @@ if sys.flags.optimize:
     raise SystemExit("profile validation requires Python assertions; do not use -O")
 
 HERE = Path(__file__).resolve().parent
-ENGINES = ("relar", "rust")
+ENGINES = ("imre", "rust")
 TOOLS = ("callgrind", "dhat")
 
 
@@ -79,7 +79,7 @@ def checked_case(case):
 def profiler(args):
     """Use the same Callgrind/DHAT flags as dependency_profile and hash tools."""
     executable = Path(args.valgrind or shutil.which("valgrind")
-                      or Path.home() / ".cache/relar/profiling-tools/root/usr/bin/valgrind")
+                      or Path.home() / ".cache/imre/profiling-tools/root/usr/bin/valgrind")
     executable = Path(shutil.which(str(executable)) or executable).resolve(strict=True)
     library = args.valgrind_lib or os.environ.get("VALGRIND_LIB")
     if library is None:
@@ -144,7 +144,7 @@ def profile(args):
         retain("prepared:" + name, path, recorded_hashes[name])
     for name in ("binary", "llvm", "validation"):
         retain(name, prepared[name], prepared[name + "_sha256"])
-    binaries = {"relar": inputs["binary"], "rust": inputs["prepared:rust"]}
+    binaries = {"imre": inputs["binary"], "rust": inputs["prepared:rust"]}
     rust_record = json.loads(inputs["prepared:rust_build_record"].read_bytes())
     if (rust_record != prepared["rust_build_record"]
             or rust_record.get("input_guards_passed") is not True
@@ -165,7 +165,7 @@ def profile(args):
     benchmark = SimpleNamespace(**runpy.run_path(str(HERE / "memory_benchmark.py")))
     validator = benchmark.validator
     unchanged()
-    if (benchmark.targets.elf_target(binaries["relar"]) != prepared["native_elf"]
+    if (benchmark.targets.elf_target(binaries["imre"]) != prepared["native_elf"]
             or benchmark.targets.elf_target(binaries["rust"]) != prepared["native_elf"]):
         raise ValueError("native executable targets differ from the preparation")
     available = benchmark.workloads(args.copies)

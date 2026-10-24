@@ -21,7 +21,7 @@ CASES = {
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--relar", required=True, type=Path)
+    parser.add_argument("--imre", required=True, type=Path)
     parser.add_argument("--runtime", required=True, type=Path)
     parser.add_argument("--clang", default="clang")
     parser.add_argument("--python", default=sys.executable)
@@ -33,7 +33,7 @@ def main():
     source = Path(upstream.__file__).parent / "upstream/Lib/test/test_subprocess.py"
     data = source.read_text()
     classes = {node.name: node for node in ast.parse(data).body if isinstance(node, ast.ClassDef)}
-    with tempfile.TemporaryDirectory(prefix="relar-sys-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="imre-sys-") as tmp:
         folder = Path(tmp)
         flags = ["--runtime", args.runtime.resolve(), "--clang", args.clang,
                  "--opt-level", args.opt_level, "--quiet"]
@@ -45,7 +45,7 @@ def main():
             index = native.cache_info().misses
             script, exe = folder / f"child{index}.py", folder / f"child{index}"
             script.write_text(code + "\n")
-            subprocess.run([args.relar.resolve(), "build", script, *flags, "-o", exe], check=True)
+            subprocess.run([args.imre.resolve(), "build", script, *flags, "-o", exe], check=True)
             return exe
 
         def command(argv):

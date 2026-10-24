@@ -1,16 +1,18 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Typed callbacks: payout pipeline
 
 The [callback payout program](../../examples/record_pipeline/README.md) takes **2.93–2.96× Rust's time** on the two 4,096-record full-selection ThinLTO cases. Selective cases take **1.56–1.66×**. The full-selection cases remain above 2× Rust. This is a separate workload from the telemetry and memory-report comparisons.
 
-The measured compiler/runtime source is [`848477f3d06fb1afe6d4bdd93dae4b107c90229a`](https://github.com/viarius-experiments/relar/commit/848477f3d06fb1afe6d4bdd93dae4b107c90229a). The same Python source runs under Relar and CPython. It passes and returns typed function values, retains receivers in bound methods, uses a noncapturing lambda, and composes lazy `map`/`filter` pipelines without an intermediate payout list.
+The measured compiler/runtime source is [`848477f3d06fb1afe6d4bdd93dae4b107c90229a`](https://github.com/viarius-experiments/imre/commit/848477f3d06fb1afe6d4bdd93dae4b107c90229a). The same Python source runs under Imre and CPython. It passes and returns typed function values, retains receivers in bound methods, uses a noncapturing lambda, and composes lazy `map`/`filter` pipelines without an intermediate payout list.
 
 ## Results
 
-All values are whole-process median milliseconds. CPython / Relar is a speedup; Relar / Rust is a time ratio. Raw samples, inclusive quartiles and empty controls are retained in the linked measurement records.
+All values are whole-process median milliseconds. CPython / Imre is a speedup; Imre / Rust is a time ratio. Raw samples, inclusive quartiles and empty controls are retained in the linked measurement records.
 
 ### Ordinary linking
 
-| Workload / records | Relar ms | Rust ms | CPython ms | CPython / Relar | Relar / Rust |
+| Workload / records | Imre ms | Rust ms | CPython ms | CPython / Imre | Imre / Rust |
 |---|---:|---:|---:|---:|---:|
 | `gross-full-32` | 52.372 | 13.717 | 1397.401 | 26.682× | 3.818× |
 | `gross-selective-32` | 28.425 | 9.778 | 631.039 | 22.200× | 2.907× |
@@ -23,7 +25,7 @@ All values are whole-process median milliseconds. CPython / Relar is a speedup; 
 
 ### ThinLTO
 
-| Workload / records | Relar ms | Rust ms | CPython ms | CPython / Relar | Relar / Rust |
+| Workload / records | Imre ms | Rust ms | CPython ms | CPython / Imre | Imre / Rust |
 |---|---:|---:|---:|---:|---:|
 | `gross-full-32` | 46.083 | 13.117 | 1421.626 | 30.850× | 3.513× |
 | `gross-selective-32` | 23.809 | 9.101 | 650.319 | 27.314× | 2.616× |
@@ -38,18 +40,18 @@ All values are whole-process median milliseconds. CPython / Relar is a speedup; 
 
 Each process parses one record file, repeatedly selects eligible records by a bound risk-policy callback, computes either gross amounts or net amounts after a fee, and filters out nonpositive payouts. It writes one complete count/total/largest report and a repetition checksum. Full selection uses a risk limit of 99; selective selection uses 9. Both inspect every input record; selective cases perform fewer transforms and reductions, rather than exiting the scan early.
 
-Inputs use a fixed random seed, with 32 or 4,096 records. Each process inspects 8,388,608 input records across 262,144 or 2,048 complete queries respectively. Each condition has a correctness gate, two warmup rounds and twelve measured rounds. All six permutations of Relar, CPython and Rust occur twice among measured rounds; warmups and cross-round transitions are not balanced. CPU affinity is fixed to CPU 31 on an AMD EPYC-Milan host. These are shared-host measurements, not isolated-hardware guarantees.
+Inputs use a fixed random seed, with 32 or 4,096 records. Each process inspects 8,388,608 input records across 262,144 or 2,048 complete queries respectively. Each condition has a correctness gate, two warmup rounds and twelve measured rounds. All six permutations of Imre, CPython and Rust occur twice among measured rounds; warmups and cross-round transitions are not balanced. CPU affinity is fixed to CPU 31 on an AMD EPYC-Milan host. These are shared-host measurements, not isolated-hardware guarantees.
 
 Timing includes startup, parsing, all queries, checksum formatting and the final report write/close. Complete result and filesystem checks run outside the timed interval. Warm filesystem caches apply and no `fsync` is requested. Empty controls are not subtracted and omit nonempty parsing costs.
 
-| Linking | Empty Relar ms | Empty Rust ms | Empty CPython ms | Maximum Relar control/workload |
+| Linking | Empty Imre ms | Empty Rust ms | Empty CPython ms | Maximum Imre control/workload |
 |---|---:|---:|---:|---:|
 | normal | 2.374 | 2.412 | 31.030 | 11.56% |
 | thinlto | 2.430 | 2.351 | 31.480 | 13.90% |
 
 CPython is 3.14.5 with PGO/LTO, the GIL enabled and JIT disabled. Native builds use Clang 18 and the pinned Ohm Rust 1.98.1-dev toolchain (LLVM 22.1.8), at optimization level 3. Both native engines use the named ordinary or ThinLTO mode; ThinLTO uses import/inline budgets of 1,000. Separate batches have separate interleaved baselines, so their differences do not isolate linking alone.
 
-Rust stores records contiguously and uses native `i64` arithmetic with checked overflow and a `BigInt` retry over retained arbitrary-precision input. Its iterator closures can inline; each query and result passes through `black_box`. Relar uses typed records and first-class callback values. Closed-target analysis preserves safe borrowing and removes some dispatch/error checks, but this example still has multiple possible transform callbacks. The measurements compare these concrete implementations and storage/dispatch costs, not a universal language ranking.
+Rust stores records contiguously and uses native `i64` arithmetic with checked overflow and a `BigInt` retry over retained arbitrary-precision input. Its iterator closures can inline; each query and result passes through `black_box`. Imre uses typed records and first-class callback values. Closed-target analysis preserves safe borrowing and removes some dispatch/error checks, but this example still has multiple possible transform callbacks. The measurements compare these concrete implementations and storage/dispatch costs, not a universal language ranking.
 
 ## Validation and retained evidence
 

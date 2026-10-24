@@ -24,14 +24,14 @@ runs:
         python3 -m pip install "pytest==8.4.2"
         work="$RUNNER_TEMP/google-crc32c"
         mkdir -p "$work/include" "$work/consumer"
-        target/release/relar extension-header > "$work/include/Python.h"
+        target/release/imre extension-header > "$work/include/Python.h"
         python3 benchmarks/google_crc32c_build.py --crc32c-source .upstream-crc32c --output "$work" \
-          --relar-include "$work/include" --cc "$CC" --cxx "$CXX"
+          --imre-include "$work/include" --cc "$CC" --cxx "$CXX"
         python3 scripts/pack_extension_wheel.py "$work/wheel" --name google-crc32c --version 1.8.0 --output "$work/dist"
         python3 -m pip install --no-index --no-deps --no-compile --only-binary=:all: \
-          --implementation rl --python-version 1 --abi relar1 --target "$work/site" "$work"/dist/*.whl
+          --implementation im --python-version 1 --abi imre1 --target "$work/site" "$work"/dist/*.whl
         cp examples/google_crc32c/driver.py "$work/consumer/"
-        target/release/relar build "$work/consumer/driver.py" --extension-path "$work/site" --clang "$CC" -o "$work/driver"
+        target/release/imre build "$work/consumer/driver.py" --extension-path "$work/site" --clang "$CC" -o "$work/driver"
         python3 tests/google_crc32c.py cpython --cpython-package "$work/cpython"
-        python3 tests/google_crc32c.py relar --relar-binary "$work/driver"
+        python3 tests/google_crc32c.py imre --imre-binary "$work/driver"
         python3 tests/google_crc32c.py fallback

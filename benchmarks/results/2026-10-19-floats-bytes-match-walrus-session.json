@@ -52,12 +52,12 @@
     "manifest_sha256": "9347db18ab3c8bdc37a00a4738345376c083bab74c30008b199ced3e5fadad98"
   },
   "launcher": {
-    "path": "/tmp/relar-four-feature-inventory/launch.py",
+    "path": "/tmp/imre-four-feature-inventory/launch.py",
     "sha256": "31f1636fdb1756458abff8ed136d4de288baf8d573e82c89e829f1827e88d183",
-    "source": "\"\"\"Print or execute unchanged-inventory comparisons after the final tool freeze.\"\"\"\n\nimport argparse\nimport hashlib\nimport importlib.util\nimport json\nimport shlex\nimport subprocess\nimport sys\nfrom datetime import datetime, timezone\nfrom pathlib import Path\n\nROOT = Path('/home/dev-user/code/oss/relar')\nHERE = Path(__file__).resolve().parent\nMANIFEST = HERE / 'prepared-manifest.json'\nSPEC = importlib.util.spec_from_file_location(\n    'sequence_launcher', ROOT / 'benchmarks/local/sequence-access-final-launch.py'\n)\nPRIOR = importlib.util.module_from_spec(SPEC)\nSPEC.loader.exec_module(PRIOR)\n\n\ndef sha(path):\n    return hashlib.sha256(Path(path).read_bytes()).hexdigest()\n\n\ndef baseline_guard():\n    prepared = json.loads(MANIFEST.read_text())\n    sources = {\n        str(path.relative_to(ROOT / 'examples')): sha(path)\n        for path in sorted((ROOT / 'examples/inventory_reconciliation').rglob('*.py'))\n    }\n    identities = {}\n    for mode in ('normal', 'lto'):\n        value = prepared[mode]\n        if sources != value['sources']:\n            raise RuntimeError('inventory source changed from the preserved sequence milestone')\n        paths = {\n            **value['paths'],\n            'comparison': value['comparison'],\n            'published_record': value['published_record'],\n            'rust_build_record': value['rust_build_record'],\n        }\n        expected = {\n            **value['sha256'],\n            'comparison': value['comparison_sha256'],\n            'published_record': value['published_record_sha256'],\n            'rust_build_record': value['rust_build_record_sha256'],\n        }\n        current = {key: sha(path) for key, path in paths.items()}\n        if current != expected:\n            raise RuntimeError('preserved comparison or tool changed: ' + mode)\n        identities[mode] = current\n    if sha(prepared['preserved_tools']['path']) != prepared['preserved_tools']['sha256']:\n        raise RuntimeError('preserved sequence build record changed')\n    return {'sources': sources, 'sha256': identities, 'manifest_sha256': sha(MANIFEST)}\n\n\ndef command_for(mode, tools, output_dir):\n    prepared = json.loads(MANIFEST.read_text())[mode]\n    paths = prepared['paths']\n    command = [\n        sys.executable, '-u', str(ROOT / 'benchmarks/inventory_benchmark.py'),\n        '--compiler', str(tools / 'relar'),\n        '--runtime', str(tools / ('librelar_runtime_lto.a' if mode == 'lto' else 'librelar_runtime.a')),\n        '--relar-build-record', str(tools / 'build-record.json'),\n        '--rust-bigint', paths['rust_bigint'],\n        '--rust-build-record', prepared['rust_build_record'],\n        '--inventory-baseline', paths['inventory_binary'],\n        '--inventory-baseline-record', prepared['comparison'],\n        '--python', paths['python'], '--clang', paths['clang'],\n        '--target', 'x86_64-unknown-linux-gnu',\n        '--samples', '48', '--warmups', '2', '--cpu', '0',\n        '--output', str(output_dir / (mode + '.json')),\n        '--artifact-dir', str(output_dir / mode),\n    ]\n    if mode == 'lto':\n        command += ['--lto-linker', paths['lto_linker']]\n    return command\n\n\ndef cache_state(python):\n    return json.loads(subprocess.check_output([\n        python, '-I', '-c', PRIOR.CACHE_PROBE,\n        str(ROOT / 'examples/inventory_reconciliation'),\n    ], cwd=ROOT, text=True))\n\n\ndef main():\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument('--tools', required=True, type=Path)\n    parser.add_argument('--expected-head')\n    parser.add_argument('--output-dir', type=Path,\n                        default=ROOT / 'benchmarks/local/four-feature-inventory-regression')\n    parser.add_argument('--execute', action='store_true',\n                        help='run only after the parent confirms the tool freeze and heavy-work stop')\n    args = parser.parse_args()\n    tools, output_dir = args.tools.resolve(), args.output_dir.resolve()\n    commands = {mode: command_for(mode, tools, output_dir) for mode in ('normal', 'lto')}\n    if not args.execute:\n        for mode, command in commands.items():\n            print(mode + ':\\n' + shlex.join(command) + '\\n')\n        return\n    if args.expected_head is None or len(args.expected_head) != 40:\n        parser.error('--execute requires the full --expected-head commit')\n    if output_dir.exists():\n        raise RuntimeError('output directory must be new; preserve all earlier evidence')\n    before = PRIOR.clean_sources(tools, args.expected_head)\n    baseline_before = baseline_guard()\n    python = json.loads(MANIFEST.read_text())['normal']['paths']['python']\n    preparation = [python, '-I', '-m', 'compileall', '-q',\n                   str(ROOT / 'examples/inventory_reconciliation')]\n    subprocess.run(preparation, cwd=ROOT, check=True)\n    cache_before = cache_state(python)\n    output_dir.mkdir(parents=True)\n    session_path = output_dir / 'session.json'\n    session = {\n        'source_commit': args.expected_head,\n        'started_at_utc': datetime.now(timezone.utc).isoformat(),\n        'source_guard_before': before,\n        'baseline_guard_before': baseline_before,\n        'launcher': {'path': str(Path(__file__)), 'sha256': sha(__file__),\n                     'source': Path(__file__).read_text()},\n        'prior_launcher': {'path': str(PRIOR.__file__), 'sha256': sha(PRIOR.__file__)},\n        'cache_preparation': {'command': preparation, 'timed': False},\n        'bytecode_before': cache_before,\n        'runs': {},\n    }\n\n    def save():\n        session_path.write_text(json.dumps(session, indent=2) + '\\n')\n\n    save()\n    for mode, command in commands.items():\n        if PRIOR.clean_sources(tools, args.expected_head) != before:\n            raise RuntimeError('frozen sources changed before ' + mode)\n        if baseline_guard() != baseline_before:\n            raise RuntimeError('preserved inputs changed before ' + mode)\n        log_path = output_dir / (mode + '.log')\n        item = {'command': command, 'started_at_utc': datetime.now(timezone.utc).isoformat()}\n        session['runs'][mode] = item\n        save()\n        print('Starting ' + mode, flush=True)\n        with log_path.open('w') as log:\n            result = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)\n        item.update(returncode=result.returncode,\n                    completed_at_utc=datetime.now(timezone.utc).isoformat(),\n                    log_sha256=sha(log_path))\n        record_path = output_dir / (mode + '.json')\n        if record_path.exists():\n            item['record_sha256'] = sha(record_path)\n        save()\n        print(log_path.read_text(), end='', flush=True)\n        if result.returncode:\n            raise SystemExit(result.returncode)\n        if PRIOR.clean_sources(tools, args.expected_head) != before:\n            raise RuntimeError('frozen sources changed during ' + mode)\n        if baseline_guard() != baseline_before or cache_state(python) != cache_before:\n            raise RuntimeError('preserved inputs or Python bytecode changed during ' + mode)\n        old = json.loads(Path(json.loads(MANIFEST.read_text())[mode]['comparison']).read_text())\n        old_command = old['method']['compile_commands']['inventory']\n        old_ir = Path(old_command[old_command.index('--emit-llvm') + 1])\n        current_ir = output_dir / mode / 'inventory_reconciliation.ll'\n        item['generated_ir'] = {'baseline_sha256': sha(old_ir), 'current_sha256': sha(current_ir),\n                                'byte_identical': old_ir.read_bytes() == current_ir.read_bytes()}\n        save()\n    session.update(completed_at_utc=datetime.now(timezone.utc).isoformat(),\n                   source_guard_after=PRIOR.clean_sources(tools, args.expected_head),\n                   baseline_guard_after=baseline_guard(), bytecode_after=cache_state(python))\n    save()\n    print('Saved ' + str(session_path), flush=True)\n\n\nif __name__ == '__main__':\n    main()\n"
+    "source": "\"\"\"Print or execute unchanged-inventory comparisons after the final tool freeze.\"\"\"\n\nimport argparse\nimport hashlib\nimport importlib.util\nimport json\nimport shlex\nimport subprocess\nimport sys\nfrom datetime import datetime, timezone\nfrom pathlib import Path\n\nROOT = Path('/home/dev-user/code/oss/imre')\nHERE = Path(__file__).resolve().parent\nMANIFEST = HERE / 'prepared-manifest.json'\nSPEC = importlib.util.spec_from_file_location(\n    'sequence_launcher', ROOT / 'benchmarks/local/sequence-access-final-launch.py'\n)\nPRIOR = importlib.util.module_from_spec(SPEC)\nSPEC.loader.exec_module(PRIOR)\n\n\ndef sha(path):\n    return hashlib.sha256(Path(path).read_bytes()).hexdigest()\n\n\ndef baseline_guard():\n    prepared = json.loads(MANIFEST.read_text())\n    sources = {\n        str(path.relative_to(ROOT / 'examples')): sha(path)\n        for path in sorted((ROOT / 'examples/inventory_reconciliation').rglob('*.py'))\n    }\n    identities = {}\n    for mode in ('normal', 'lto'):\n        value = prepared[mode]\n        if sources != value['sources']:\n            raise RuntimeError('inventory source changed from the preserved sequence milestone')\n        paths = {\n            **value['paths'],\n            'comparison': value['comparison'],\n            'published_record': value['published_record'],\n            'rust_build_record': value['rust_build_record'],\n        }\n        expected = {\n            **value['sha256'],\n            'comparison': value['comparison_sha256'],\n            'published_record': value['published_record_sha256'],\n            'rust_build_record': value['rust_build_record_sha256'],\n        }\n        current = {key: sha(path) for key, path in paths.items()}\n        if current != expected:\n            raise RuntimeError('preserved comparison or tool changed: ' + mode)\n        identities[mode] = current\n    if sha(prepared['preserved_tools']['path']) != prepared['preserved_tools']['sha256']:\n        raise RuntimeError('preserved sequence build record changed')\n    return {'sources': sources, 'sha256': identities, 'manifest_sha256': sha(MANIFEST)}\n\n\ndef command_for(mode, tools, output_dir):\n    prepared = json.loads(MANIFEST.read_text())[mode]\n    paths = prepared['paths']\n    command = [\n        sys.executable, '-u', str(ROOT / 'benchmarks/inventory_benchmark.py'),\n        '--compiler', str(tools / 'imre'),\n        '--runtime', str(tools / ('libimre_runtime_lto.a' if mode == 'lto' else 'libimre_runtime.a')),\n        '--imre-build-record', str(tools / 'build-record.json'),\n        '--rust-bigint', paths['rust_bigint'],\n        '--rust-build-record', prepared['rust_build_record'],\n        '--inventory-baseline', paths['inventory_binary'],\n        '--inventory-baseline-record', prepared['comparison'],\n        '--python', paths['python'], '--clang', paths['clang'],\n        '--target', 'x86_64-unknown-linux-gnu',\n        '--samples', '48', '--warmups', '2', '--cpu', '0',\n        '--output', str(output_dir / (mode + '.json')),\n        '--artifact-dir', str(output_dir / mode),\n    ]\n    if mode == 'lto':\n        command += ['--lto-linker', paths['lto_linker']]\n    return command\n\n\ndef cache_state(python):\n    return json.loads(subprocess.check_output([\n        python, '-I', '-c', PRIOR.CACHE_PROBE,\n        str(ROOT / 'examples/inventory_reconciliation'),\n    ], cwd=ROOT, text=True))\n\n\ndef main():\n    parser = argparse.ArgumentParser(description=__doc__)\n    parser.add_argument('--tools', required=True, type=Path)\n    parser.add_argument('--expected-head')\n    parser.add_argument('--output-dir', type=Path,\n                        default=ROOT / 'benchmarks/local/four-feature-inventory-regression')\n    parser.add_argument('--execute', action='store_true',\n                        help='run only after the parent confirms the tool freeze and heavy-work stop')\n    args = parser.parse_args()\n    tools, output_dir = args.tools.resolve(), args.output_dir.resolve()\n    commands = {mode: command_for(mode, tools, output_dir) for mode in ('normal', 'lto')}\n    if not args.execute:\n        for mode, command in commands.items():\n            print(mode + ':\\n' + shlex.join(command) + '\\n')\n        return\n    if args.expected_head is None or len(args.expected_head) != 40:\n        parser.error('--execute requires the full --expected-head commit')\n    if output_dir.exists():\n        raise RuntimeError('output directory must be new; preserve all earlier evidence')\n    before = PRIOR.clean_sources(tools, args.expected_head)\n    baseline_before = baseline_guard()\n    python = json.loads(MANIFEST.read_text())['normal']['paths']['python']\n    preparation = [python, '-I', '-m', 'compileall', '-q',\n                   str(ROOT / 'examples/inventory_reconciliation')]\n    subprocess.run(preparation, cwd=ROOT, check=True)\n    cache_before = cache_state(python)\n    output_dir.mkdir(parents=True)\n    session_path = output_dir / 'session.json'\n    session = {\n        'source_commit': args.expected_head,\n        'started_at_utc': datetime.now(timezone.utc).isoformat(),\n        'source_guard_before': before,\n        'baseline_guard_before': baseline_before,\n        'launcher': {'path': str(Path(__file__)), 'sha256': sha(__file__),\n                     'source': Path(__file__).read_text()},\n        'prior_launcher': {'path': str(PRIOR.__file__), 'sha256': sha(PRIOR.__file__)},\n        'cache_preparation': {'command': preparation, 'timed': False},\n        'bytecode_before': cache_before,\n        'runs': {},\n    }\n\n    def save():\n        session_path.write_text(json.dumps(session, indent=2) + '\\n')\n\n    save()\n    for mode, command in commands.items():\n        if PRIOR.clean_sources(tools, args.expected_head) != before:\n            raise RuntimeError('frozen sources changed before ' + mode)\n        if baseline_guard() != baseline_before:\n            raise RuntimeError('preserved inputs changed before ' + mode)\n        log_path = output_dir / (mode + '.log')\n        item = {'command': command, 'started_at_utc': datetime.now(timezone.utc).isoformat()}\n        session['runs'][mode] = item\n        save()\n        print('Starting ' + mode, flush=True)\n        with log_path.open('w') as log:\n            result = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)\n        item.update(returncode=result.returncode,\n                    completed_at_utc=datetime.now(timezone.utc).isoformat(),\n                    log_sha256=sha(log_path))\n        record_path = output_dir / (mode + '.json')\n        if record_path.exists():\n            item['record_sha256'] = sha(record_path)\n        save()\n        print(log_path.read_text(), end='', flush=True)\n        if result.returncode:\n            raise SystemExit(result.returncode)\n        if PRIOR.clean_sources(tools, args.expected_head) != before:\n            raise RuntimeError('frozen sources changed during ' + mode)\n        if baseline_guard() != baseline_before or cache_state(python) != cache_before:\n            raise RuntimeError('preserved inputs or Python bytecode changed during ' + mode)\n        old = json.loads(Path(json.loads(MANIFEST.read_text())[mode]['comparison']).read_text())\n        old_command = old['method']['compile_commands']['inventory']\n        old_ir = Path(old_command[old_command.index('--emit-llvm') + 1])\n        current_ir = output_dir / mode / 'inventory_reconciliation.ll'\n        item['generated_ir'] = {'baseline_sha256': sha(old_ir), 'current_sha256': sha(current_ir),\n                                'byte_identical': old_ir.read_bytes() == current_ir.read_bytes()}\n        save()\n    session.update(completed_at_utc=datetime.now(timezone.utc).isoformat(),\n                   source_guard_after=PRIOR.clean_sources(tools, args.expected_head),\n                   baseline_guard_after=baseline_guard(), bytecode_after=cache_state(python))\n    save()\n    print('Saved ' + str(session_path), flush=True)\n\n\nif __name__ == '__main__':\n    main()\n"
   },
   "prior_launcher": {
-    "path": "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-final-launch.py",
+    "path": "/home/dev-user/code/oss/imre/benchmarks/local/sequence-access-final-launch.py",
     "sha256": "8aaacc03b3c40fb5b505518827d5d8afdf577745bda9a09326e0190a327ca508"
   },
   "cache_preparation": {
@@ -67,7 +67,7 @@
       "-m",
       "compileall",
       "-q",
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation"
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation"
     ],
     "timed": false
   },
@@ -78,54 +78,54 @@
     "pycache_prefix": null,
     "dont_write_bytecode": false,
     "files": {
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__init__.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__init__.py": {
         "source_sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
         "cache_sha256": "363df6ba1b6d8875d50e03f1f83983871c49843a872dfa796596b9b6a532d9b5",
         "cache_bytes": 256,
         "flags": 0,
         "source_mtime_ns": 1792327978557777105,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__main__.py": {
         "source_sha256": "48c3015dcbac52a08f48b800197398076ac26f37ca480a4ee1ebab2b72c9349c",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
         "cache_sha256": "539832a30f44267b7e44eb2e6217a4e90feb03b9ee4e665d7371397737f3e379",
         "cache_bytes": 1628,
         "flags": 0,
         "source_mtime_ns": 1792374525645378594,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/load.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/load.py": {
         "source_sha256": "a4fcffcd2431dc96833cb5aa05a8a436c350b0469ceb635ef1a788da6eabc863",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
         "cache_sha256": "621e9f8b2b42bc99dd0d5151aeb3444c8a2593cd838d978ac79068edf25018a8",
         "cache_bytes": 8469,
         "flags": 0,
         "source_mtime_ns": 1792374578661085708,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/model.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/model.py": {
         "source_sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
         "cache_sha256": "736e3da875859f41e443ec769f7029112e284fb5cf275fbc87c9348fd4e3cb39",
         "cache_bytes": 4993,
         "flags": 0,
         "source_mtime_ns": 1792368213235952247,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/reconcile.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/reconcile.py": {
         "source_sha256": "a1c7122171f4a92b62e57811bce52e6d522cb2231536b770e5d92785b1bfe618",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
         "cache_sha256": "661eafc1f3213b1af2eb77a7dc207f8e66b72a6d28323f6394f69223774550f7",
         "cache_bytes": 2667,
         "flags": 0,
         "source_mtime_ns": 1792374635169769897,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/render.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/render.py": {
         "source_sha256": "c6319e84f2acbb15ddf142e9135c54635d47e1dc67b6d590ba0f0c44697ed200",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
         "cache_sha256": "3822e62c133024818ce91ad2d84777d326cce361cd22c676deef1da923c0d247",
         "cache_bytes": 4264,
         "flags": 0,
@@ -139,21 +139,21 @@
       "command": [
         "/home/dev-user/.virtualenvs/openai/bin/python3",
         "-u",
-        "/home/dev-user/code/oss/relar/benchmarks/inventory_benchmark.py",
+        "/home/dev-user/code/oss/imre/benchmarks/inventory_benchmark.py",
         "--compiler",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/relar",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/imre",
         "--runtime",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/librelar_runtime.a",
-        "--relar-build-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/build-record.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/libimre_runtime.a",
+        "--imre-build-record",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/build-record.json",
         "--rust-bigint",
-        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint",
+        "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-normal/inventory-bigint",
         "--rust-build-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-normal/build-record.json",
         "--inventory-baseline",
-        "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-normal-final/inventory_reconciliation",
+        "/home/dev-user/code/oss/imre/benchmarks/local/sequence-access-normal-final/inventory_reconciliation",
         "--inventory-baseline-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-normal-final.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/sequence-access-normal-final.json",
         "--python",
         "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
         "--clang",
@@ -167,9 +167,9 @@
         "--cpu",
         "0",
         "--output",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/normal.json",
         "--artifact-dir",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/normal"
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/normal"
       ],
       "started_at_utc": "2026-10-19T03:30:02.601397+00:00",
       "returncode": 0,
@@ -186,21 +186,21 @@
       "command": [
         "/home/dev-user/.virtualenvs/openai/bin/python3",
         "-u",
-        "/home/dev-user/code/oss/relar/benchmarks/inventory_benchmark.py",
+        "/home/dev-user/code/oss/imre/benchmarks/inventory_benchmark.py",
         "--compiler",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/relar",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/imre",
         "--runtime",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/librelar_runtime_lto.a",
-        "--relar-build-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-tools-final/build-record.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/libimre_runtime_lto.a",
+        "--imre-build-record",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-tools-final/build-record.json",
         "--rust-bigint",
-        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint",
+        "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-lto/inventory-bigint",
         "--rust-build-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/keyword-arguments-reference-final-lto/build-record.json",
         "--inventory-baseline",
-        "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-lto-final/inventory_reconciliation",
+        "/home/dev-user/code/oss/imre/benchmarks/local/sequence-access-lto-final/inventory_reconciliation",
         "--inventory-baseline-record",
-        "/home/dev-user/code/oss/relar/benchmarks/local/sequence-access-lto-final.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/sequence-access-lto-final.json",
         "--python",
         "/home/dev-user/code/oss/penguin-uv-benchmark/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
         "--clang",
@@ -214,11 +214,11 @@
         "--cpu",
         "0",
         "--output",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto.json",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/lto.json",
         "--artifact-dir",
-        "/home/dev-user/code/oss/relar/benchmarks/local/four-feature-inventory-regression/lto",
+        "/home/dev-user/code/oss/imre/benchmarks/local/four-feature-inventory-regression/lto",
         "--lto-linker",
-        "/home/dev-user/code/oss/relar/benchmarks/local/batch-linker/ld.lld"
+        "/home/dev-user/code/oss/imre/benchmarks/local/batch-linker/ld.lld"
       ],
       "started_at_utc": "2026-10-19T03:30:52.348156+00:00",
       "returncode": 0,
@@ -290,54 +290,54 @@
     "pycache_prefix": null,
     "dont_write_bytecode": false,
     "files": {
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__init__.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__init__.py": {
         "source_sha256": "f8cf8df77569ec934c59224e5425aef34520fa2e22e6bd5fd913f2f5b19cabc1",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/__init__.cpython-314.pyc",
         "cache_sha256": "363df6ba1b6d8875d50e03f1f83983871c49843a872dfa796596b9b6a532d9b5",
         "cache_bytes": 256,
         "flags": 0,
         "source_mtime_ns": 1792327978557777105,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__main__.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__main__.py": {
         "source_sha256": "48c3015dcbac52a08f48b800197398076ac26f37ca480a4ee1ebab2b72c9349c",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/__main__.cpython-314.pyc",
         "cache_sha256": "539832a30f44267b7e44eb2e6217a4e90feb03b9ee4e665d7371397737f3e379",
         "cache_bytes": 1628,
         "flags": 0,
         "source_mtime_ns": 1792374525645378594,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/load.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/load.py": {
         "source_sha256": "a4fcffcd2431dc96833cb5aa05a8a436c350b0469ceb635ef1a788da6eabc863",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/load.cpython-314.pyc",
         "cache_sha256": "621e9f8b2b42bc99dd0d5151aeb3444c8a2593cd838d978ac79068edf25018a8",
         "cache_bytes": 8469,
         "flags": 0,
         "source_mtime_ns": 1792374578661085708,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/model.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/model.py": {
         "source_sha256": "9e9cd30be21f3f001886dc463f203ef7998a7c233d63e33d22671f8ed83eecff",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/model.cpython-314.pyc",
         "cache_sha256": "736e3da875859f41e443ec769f7029112e284fb5cf275fbc87c9348fd4e3cb39",
         "cache_bytes": 4993,
         "flags": 0,
         "source_mtime_ns": 1792368213235952247,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/reconcile.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/reconcile.py": {
         "source_sha256": "a1c7122171f4a92b62e57811bce52e6d522cb2231536b770e5d92785b1bfe618",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/reconcile.cpython-314.pyc",
         "cache_sha256": "661eafc1f3213b1af2eb77a7dc207f8e66b72a6d28323f6394f69223774550f7",
         "cache_bytes": 2667,
         "flags": 0,
         "source_mtime_ns": 1792374635169769897,
         "valid_header": true
       },
-      "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/render.py": {
+      "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/render.py": {
         "source_sha256": "c6319e84f2acbb15ddf142e9135c54635d47e1dc67b6d590ba0f0c44697ed200",
-        "cache_path": "/home/dev-user/code/oss/relar/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
+        "cache_path": "/home/dev-user/code/oss/imre/examples/inventory_reconciliation/__pycache__/render.cpython-314.pyc",
         "cache_sha256": "3822e62c133024818ce91ad2d84777d326cce361cd22c676deef1da923c0d247",
         "cache_bytes": 4264,
         "flags": 0,

@@ -3,7 +3,7 @@
 from pathlib import Path
 from sys import argv
 
-from relar.json import decode
+from imre.json import decode
 
 from .model import MemoryReport, ProjectComparison
 from .render import render_summary

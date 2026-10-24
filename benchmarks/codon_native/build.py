@@ -214,7 +214,7 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
         edits.append({"kind": "native compiled verbose regex and Python whitespace boundary",
                       "adapter": "conformance_re.py"})
     if name in ("conformance_report/parse.py", "python_catalog/catalog.py"):
-        before = "from relar.json import decode\n"
+        before = "from imre.json import decode\n"
         if changed.count(before) != 1:
             raise ValueError("typed decoder import changed")
         changed = changed.replace(before, "import json\n")
@@ -223,7 +223,7 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
         changed += "\n\n" + addition
         edits.append({"kind": "native typed JSON boundary", "adapter": adapter, "adapter_sha256": digest(addition.encode())})
     if name in ("python_catalog/__main__.py", "python_catalog/compute.py"):
-        before = "from relar.json import encode\n"
+        before = "from imre.json import encode\n"
         if changed.count(before) != 1:
             raise ValueError("typed encoder import changed")
         changed = changed.replace(before, "from .catalog import encode\n")
@@ -238,11 +238,11 @@ def adapt(source: str, name: str) -> tuple[str, list[dict]]:
         edits.append({"kind": "specialize native plain and gzip text handles", "before": declaration,
                       "after": "def read_catalog(stream)"})
     if name == "conformance_report/live.py":
-        before = "from relar.json import decode\n"
+        before = "from imre.json import decode\n"
         if changed.count(before) != 1:
             raise ValueError("live typed JSON import changed")
         changed = changed.replace(before, "from conformance_report.parse import decode\n")
-        before = "from relar.toml import decode as decode_toml\n"
+        before = "from imre.toml import decode as decode_toml\n"
         if changed.count(before) != 1:
             raise ValueError("live typed TOML import changed")
         changed = changed.replace(before, "")
@@ -334,8 +334,8 @@ def main() -> None:
         "schema": 1, "status": "preparing", "release": "v0.20.4", "compiler": str(codon),
         "compiler_sha256": COMPILER_SHA256, "source_inputs": {}, "transformations": {}, "generated": {}, "application_function_bodies": {}, "generated_application_function_bodies": {},
         "libraries": libraries,
-        "commands": [], "binaries": {}, "environment_overrides": {"CODON_PYTHON": "/nonexistent/relar-native-codon-libpython.so", "CODON_PATH": str(source_root)},
-        "domain": {"integers": "signed 64-bit; no arbitrary-precision fallback", "duplicate_json_keys": "stock Codon JSON keeps the last value; typed Relar rejects known-field duplicates", "python_interop": False},
+        "commands": [], "binaries": {}, "environment_overrides": {"CODON_PYTHON": "/nonexistent/imre-native-codon-libpython.so", "CODON_PATH": str(source_root)},
+        "domain": {"integers": "signed 64-bit; no arbitrary-precision fallback", "duplicate_json_keys": "stock Codon JSON keeps the last value; typed Imre rejects known-field duplicates", "python_interop": False},
     }
     if args.platform_library is not None:
         platform = args.platform_library.resolve(strict=True)

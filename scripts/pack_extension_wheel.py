@@ -1,4 +1,4 @@
-"""Pack a staged Relar extension using the standard wheel format."""
+"""Pack a staged Imre extension using the standard wheel format."""
 
 import argparse
 import sys
@@ -30,17 +30,17 @@ def main() -> None:
         parser.error("expected a wheel platform tag such as linux_x86_64")
     if args.output.resolve().is_relative_to(args.stage.resolve()):
         parser.error("the output directory must be outside the staged package")
-    archives = list(args.stage.rglob("*.relar.a"))
+    archives = list(args.stage.rglob("*.imre.a"))
     if not archives:
-        parser.error("the package contains no .relar.a archive")
+        parser.error("the package contains no .imre.a archive")
     for archive in archives:
-        stub = archive.with_name(archive.name.removesuffix(".relar.a") + ".pyi")
+        stub = archive.with_name(archive.name.removesuffix(".imre.a") + ".pyi")
         if not stub.is_file():
             parser.error(f"missing native declarations at {stub}")
 
     dist = name.replace("-", "_")
     info = f"{dist}-{args.version}.dist-info"
-    tag = f"rl1-relar1-{args.platform}"
+    tag = f"im1-imre1-{args.platform}"
     args.output.mkdir(parents=True, exist_ok=True)
     output = args.output / f"{dist}-{args.version}-{tag}.whl"
     with WheelFile(str(output), "w") as wheel:
@@ -53,7 +53,7 @@ def main() -> None:
         )
         wheel.writestr(
             f"{info}/WHEEL",
-            f"Wheel-Version: 1.0\nGenerator: relar\nRoot-Is-Purelib: false\nTag: {tag}\n",
+            f"Wheel-Version: 1.0\nGenerator: imre\nRoot-Is-Purelib: false\nTag: {tag}\n",
         )
     print(output)
 

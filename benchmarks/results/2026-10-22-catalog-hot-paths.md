@@ -1,23 +1,25 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Reducing overhead in uv’s streaming download catalog
 
 One release index contains 58,721 artifacts in 567 NDJSON records. Ten copies contain 587,210 artifacts and 198,704,170 uncompressed bytes. Each run reads its input, selects the downloads, and writes the same 6,098-entry, 3,440,812-byte catalog. The ten-copy gzip input has ten concatenated members. A separate correctness fixture puts a distinct winner in every member.
 
 ## Complete process time
 
-Median wall time in seconds on one AMD EPYC CPU. Each input ran in 14 position-balanced rounds. The two CPython columns run the pinned upstream implementation and the typed streaming program that Relar compiles. Codon runs its existing port, and Rust runs its hand-written reference. The ordinary and ThinLTO columns pair matching native build modes. All application and reference sources are identical to the previous study.
+Median wall time in seconds on one AMD EPYC CPU. Each input ran in 14 position-balanced rounds. The two CPython columns run the pinned upstream implementation and the typed streaming program that Imre compiles. Codon runs its existing port, and Rust runs its hand-written reference. The ordinary and ThinLTO columns pair matching native build modes. All application and reference sources are identical to the previous study.
 
-| Input | Upstream CPython | Typed CPython | Codon | Relar | Rust | Relar ThinLTO | Rust ThinLTO |
+| Input | Upstream CPython | Typed CPython | Codon | Imre | Rust | Imre ThinLTO | Rust ThinLTO |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1× plain | 1.056 | 2.627 | 0.555 | 0.152 (1.39×) | 0.109 | 0.114 (1.38×) | 0.082 |
 | 1× gzip | 1.059 | 2.647 | 0.593 | 0.168 (1.32×) | 0.127 | 0.129 (1.31×) | 0.099 |
 | 10× plain | 10.160 | 23.620 | 4.478 | 1.030 (1.40×) | 0.736 | 0.745 (1.46×) | 0.512 |
 | 10× gzip | 10.779 | 24.128 | 4.871 | 1.221 (1.29×) | 0.945 | 0.919 (1.31×) | 0.701 |
 
-Relar took **1.29–1.46× Rust’s time**. Upstream CPython took 6.32–13.64× as long as Relar. All 112 individual same-round ratios were below 2×, with a maximum of 1.80×.
+Imre took **1.29–1.46× Rust’s time**. Upstream CPython took 6.32–13.64× as long as Imre. All 112 individual same-round ratios were below 2×, with a maximum of 1.80×.
 
 ## Before and after
 
-A separate run interleaved the previously published Relar binaries, the optimized binaries and the same Rust references on the same CPU. Each entry compares medians from six position- and neighbor-balanced rounds.
+A separate run interleaved the previously published Imre binaries, the optimized binaries and the same Rust references on the same CPU. Each entry compares medians from six position- and neighbor-balanced rounds.
 
 | Input | Ordinary before → after (ms) | Time reduction | ThinLTO before → after (ms) | Time reduction |
 | --- | ---: | ---: | ---: | ---: |
@@ -30,7 +32,7 @@ A separate run interleaved the previously published Relar binaries, the optimize
 
 Median peak RSS in MiB, measured for each fresh process. Repeating the index keeps the selected output fixed.
 
-| Input | Upstream CPython | Typed CPython | Codon | Relar | Rust | Relar ThinLTO | Rust ThinLTO |
+| Input | Upstream CPython | Typed CPython | Codon | Imre | Rust | Imre ThinLTO | Rust ThinLTO |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1× plain | 119.0 | 30.3 | 42.5 | 15.2 | 11.2 | 15.4 | 11.2 |
 | 1× gzip | 119.3 | 31.1 | 42.8 | 15.6 | 11.3 | 15.6 | 11.3 |
@@ -41,7 +43,7 @@ Median peak RSS in MiB, measured for each fresh process. Repeating the index kee
 
 We profiled whole ordinary 10× plain processes with Callgrind and DHAT, and checked their output against the same upstream catalog. The host restricted hardware performance counters. Callgrind counts executed instructions, and DHAT measures cumulative allocation traffic and live heap. The wall times above come from separate uninstrumented processes.
 
-| 10× plain | Relar before | Relar after | Rust |
+| 10× plain | Imre before | Imre after | Rust |
 | --- | ---: | ---: | ---: |
 | Executed instructions | 10.552 billion | 8.181 billion | 5.141 billion |
 | Heap allocations | 8,073,496 | 5,160,772 | 3,131,697 |
@@ -63,7 +65,7 @@ for artifact in sorted(record.artifacts, key=artifact_key):
 
 The complete process executed 22.5% fewer instructions and requested 36.1% fewer heap allocations. The largest remaining exclusive instruction count was in `<serde_json::read::SliceRead>::skip_to_escape`, at 761 million instructions (9.3% of the process).
 
-A separate 1× ordinary profile on a second host counted 579,044 Relar heap allocations and 341,071 Rust allocations. DHAT counted 118,982 uncached string owners. The input contains 117,442 long URL and digest strings and 1,540 long variant strings. Relar also allocated 58,721 artifact records and 58,721 owners for decoded filenames. Counting just the URL and digest owners, artifact records, and filename owners gives 234,884 blocks, compared with a net difference of 237,973 across all sites. Rust stores string fields inline in its artifact vector and moves the filename string into the result. Both engines separately allocated 58,721 filename backing buffers totaling 4,494,790 bytes, and their shared JSON string scanner executed exactly 70,696,742 instructions in each.
+A separate 1× ordinary profile on a second host counted 579,044 Imre heap allocations and 341,071 Rust allocations. DHAT counted 118,982 uncached string owners. The input contains 117,442 long URL and digest strings and 1,540 long variant strings. Imre also allocated 58,721 artifact records and 58,721 owners for decoded filenames. Counting just the URL and digest owners, artifact records, and filename owners gives 234,884 blocks, compared with a net difference of 237,973 across all sites. Rust stores string fields inline in its artifact vector and moves the filename string into the result. Both engines separately allocated 58,721 filename backing buffers totaling 4,494,790 bytes, and their shared JSON string scanner executed exactly 70,696,742 instructions in each.
 
 ## Cross-workload check
 

@@ -18,7 +18,7 @@ The small diagnostic adapter matches category, explicit cause, suppression, and
 messages over the declared validation corpus. It does not implement universal
 CPython Unicode `repr`: Rust quotes some combining marks differently and uses its
 own Unicode version. Those explicitly recorded cases still check error metadata
-and unchanged output. Relar is checked against CPython's exact messages for every
+and unchanged output. Imre is checked against CPython's exact messages for every
 case. Timed Base45 input contains only valid ASCII alphabet characters, so this
 diagnostic boundary does not affect performance comparisons. Positive repetition
 counts must fit `usize`; checksums use `u128`, sufficient for addressable inputs and
@@ -42,7 +42,7 @@ exact sources, compiler versions, flags, optional wrapper contents, and binary
 hash. Inherited Rust flags are cleared; `CARGO_PROFILE_RELEASE_*` overrides and
 optional `--llvm-budget` are recorded. Use a separate artifact/target directory for
 a ThinLTO build with `CARGO_PROFILE_RELEASE_LTO=thin`. When comparing against
-Relar's expanded ThinLTO import and inlining budgets, pass `--llvm-budget 1000` to
+Imre's expanded ThinLTO import and inlining budgets, pass `--llvm-budget 1000` to
 give the Rust reference the same budgets.
 
 ```sh
@@ -53,8 +53,8 @@ python3.14 benchmarks/base45_validate.py \
 
 Pass this executable as `--rust` to `benchmarks/base45_benchmark.py`. The build
 record defaults to the file beside it. The default comparison balances all six
-Relar/CPython/Rust execution orders over 24 samples and six warmups. `--native-only`
-compares Relar and Rust with alternating order while retaining CPython validation;
+Imre/CPython/Rust execution orders over 24 samples and six warmups. `--native-only`
+compares Imre and Rust with alternating order while retaining CPython validation;
 larger `--batch-bytes` values reduce the proportion spent on process startup.
 Use `--operations encode` for an encoder-only comparison, or select any combination
 of `encode`, `decode-bytes`, and `decode-text`. The default measures all three

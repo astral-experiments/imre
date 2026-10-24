@@ -1,3 +1,5 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Compressed diff snapshots in Ruff’s ecosystem checker
 
 On the 10× Sphinx and Prefect replay, peak RSS fell from **249.6 to 123.9 MiB** (50.4% lower). Median wall time was **2.77 → 2.71 s** in six paired runs against #332. All five frozen Markdown reports matched CPython byte-for-byte. [Previous measurements](2026-10-24-ruff-ecosystem-packed.md) · [Raw samples, build hashes and input revisions](2026-10-24-ruff-ecosystem-diff-blocks.json.gz)
@@ -6,7 +8,7 @@ On the 10× Sphinx and Prefect replay, peak RSS fell from **249.6 to 123.9 MiB**
 
 Each cell gives **wall time in milliseconds / peak RSS in MiB**. The last column compares wall time.
 
-| Input | CPython | Codon | Rust | Relar | Relar / Rust |
+| Input | CPython | Codon | Rust | Imre | Imre / Rust |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Bokeh preview | 171,401 / 182.9 | 1,114 / 142.8 | 527 / 63.4 | 508 / 112.4 | 0.97× |
 | Superset preview | 1,479,775 / 410.7 | 3,843 / 646.0 | 1,372 / 151.7 | 1,347 / 267.1 | 0.98× |
@@ -18,7 +20,7 @@ The 10× workload keeps 20 project comparisons alive until rendering. The standa
 
 ## Recovery and storage
 
-When the report selects a few changes from large sorted inputs, Relar compares eight prefix bytes at a time and groups the common-prefix lengths and remaining row bytes into 64 KiB blocks. It keeps a block compressed when LZ4 reduces its size. Incompressible blocks and oversized rows stay raw. A full diff can reconstruct the original inputs with one reusable block buffer.
+When the report selects a few changes from large sorted inputs, Imre compares eight prefix bytes at a time and groups the common-prefix lengths and remaining row bytes into 64 KiB blocks. It keeps a block compressed when LZ4 reduces its size. Incompressible blocks and oversized rows stay raw. A full diff can reconstruct the original inputs with one reusable block buffer.
 
 In a separate twelve-round experiment on the 10× corpus, the previous prefix encoder, word-sized prefix comparisons, and word-sized comparisons with LZ4 took **2.614 → 2.577 → 2.552 s**. Peak RSS was **249.6 → 249.6 → 123.8 MiB**.
 

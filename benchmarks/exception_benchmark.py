@@ -102,7 +102,7 @@ def saved_provenance(record: dict, digest: str) -> dict:
         "tools",
         "options",
         "compilation",
-        "relar_build_provenance",
+        "imre_build_provenance",
     )
     return {
         "record_sha256": digest,
@@ -156,8 +156,8 @@ def benchmark(args: argparse.Namespace) -> dict:
     if args.target is not None:
         flags += ["--target", args.target]
         recorded_flags += ["--target", args.target]
-    if args.relar_build_record is not None:
-        inputs["relar_build_record"] = args.relar_build_record.resolve(strict=True)
+    if args.imre_build_record is not None:
+        inputs["imre_build_record"] = args.imre_build_record.resolve(strict=True)
     python_info = json.loads(
         shared.run(
             [shared.executable(args.python), "-I", "-c", shared.PYTHON_INFO],
@@ -210,7 +210,7 @@ def benchmark(args: argparse.Namespace) -> dict:
             1000 if thin_lto else None
         ):
             raise ValueError(
-                "all saved Relar artifacts must match the selected LTO mode and budget"
+                "all saved Imre artifacts must match the selected LTO mode and budget"
             )
     prior_cases = {case["label"]: case for case in pre_exception["workloads"]}
     for case in baseline["workloads"]["control"]:
@@ -233,33 +233,33 @@ def benchmark(args: argparse.Namespace) -> dict:
         *(REFERENCE / name for name in rust_sources),
         REFERENCE / "build.py",
     ]
-    relar_record = None
-    if args.relar_build_record is not None:
-        original = json.loads(inputs["relar_build_record"].read_text())
+    imre_record = None
+    if args.imre_build_record is not None:
+        original = json.loads(inputs["imre_build_record"].read_text())
         if not {hashes["compiler"], hashes["runtime"]} <= set(
             original.get("sha256", {}).values()
         ):
             raise ValueError(
-                "Relar build record does not identify the selected compiler/runtime"
+                "Imre build record does not identify the selected compiler/runtime"
             )
         if thin_lto and original.get("runtime_lto_rustflags") != "-Clinker-plugin-lto":
             raise ValueError(
-                "Relar build record must identify the linker-plugin-LTO runtime build"
+                "Imre build record must identify the linker-plugin-LTO runtime build"
             )
-        runtime_name = "librelar_runtime_lto.a" if thin_lto else "librelar_runtime.a"
+        runtime_name = "libimre_runtime_lto.a" if thin_lto else "libimre_runtime.a"
         if not any(
             Path(name).name == runtime_name and digest == hashes["runtime"]
             for name, digest in original["sha256"].items()
         ):
-            raise ValueError("Relar build record identifies a different runtime mode")
+            raise ValueError("Imre build record identifies a different runtime mode")
         for name, digest in original.get("source_sha256", {}).items():
             path = ROOT / name
             if shared.sha256(path) != digest:
-                raise ValueError(f"Relar build source changed: {name}")
-            inputs[f"relar_source:{name}"] = path
-            hashes[f"relar_source:{name}"] = digest
+                raise ValueError(f"Imre build source changed: {name}")
+            inputs[f"imre_source:{name}"] = path
+            hashes[f"imre_source:{name}"] = digest
             protected.append(path)
-        relar_record = {
+        imre_record = {
             key: original[key]
             for key in (
                 "git_head",
@@ -309,7 +309,7 @@ def benchmark(args: argparse.Namespace) -> dict:
         name: shared.run([str(inputs[key]), "--version"], b"", args.timeout)[
             "stdout"
         ].strip()
-        for name, key in (("relar", "compiler"), ("clang", "clang"))
+        for name, key in (("imre", "compiler"), ("clang", "clang"))
     }
     tools["lto_linker"] = (
         shared.run([str(inputs["lto_linker"]), "--version"], b"", args.timeout)[
@@ -367,12 +367,12 @@ def benchmark(args: argparse.Namespace) -> dict:
             "cpython": incremental.python_command(str(inputs["python"])),
             "pre_exception": [str(inputs["pre_exception"])],
             "baseline": [str(inputs["baseline_control"])],
-            "relar": [str(outputs["control_binary"])],
+            "imre": [str(outputs["control_binary"])],
         },
         "batch": {
             "cpython": validator.python_command(str(inputs["python"])),
             "baseline": [str(inputs["baseline_batch"])],
-            "relar": [str(outputs["batch_binary"])],
+            "imre": [str(outputs["batch_binary"])],
             "rust_bigint": [str(inputs["rust_bigint"])],
         },
     }
@@ -428,7 +428,7 @@ def benchmark(args: argparse.Namespace) -> dict:
             }
         },
         "rust_build_record": reference_record,
-        "relar_build_provenance": relar_record,
+        "imre_build_provenance": imre_record,
         "baseline_provenance": saved_provenance(baseline, hashes["baseline_record"]),
         "pre_exception_provenance": saved_provenance(
             pre_exception, hashes["pre_exception_record"]
@@ -476,7 +476,7 @@ def benchmark(args: argparse.Namespace) -> dict:
                     ],
                     "pre_exception": ["<pre-exception-control-binary>"],
                     "baseline": ["<baseline-control-binary>"],
-                    "relar": ["<control-binary>"],
+                    "imre": ["<control-binary>"],
                 },
                 "batch": {
                     "cpython": [
@@ -487,11 +487,11 @@ def benchmark(args: argparse.Namespace) -> dict:
                         "<package-root>",
                     ],
                     "baseline": ["<baseline-batch-binary>"],
-                    "relar": ["<batch-binary>"],
+                    "imre": ["<batch-binary>"],
                     "rust_bigint": ["<rust-batch-bigint>"],
                 },
             },
-            "scope": "control compares identical source/input under pre-exception, post-exception, and optimized Relar; batch compares unchanged programs with prior/new Relar and Rust. Neither group isolates per-check or per-throw cost. Rust shares the original direct-port graph algorithm but uses native containers/indices and explicit Result recovery. No C or general language-speed inference.",
+            "scope": "control compares identical source/input under pre-exception, post-exception, and optimized Imre; batch compares unchanged programs with prior/new Imre and Rust. Neither group isolates per-check or per-throw cost. Rust shares the original direct-port graph algorithm but uses native containers/indices and explicit Result recovery. No C or general language-speed inference.",
         },
         "validation": validation,
         "workloads": workloads,
@@ -503,7 +503,7 @@ def main() -> None:
     for option in (
         "compiler",
         "runtime",
-        "relar-build-record",
+        "imre-build-record",
         "pre-exception-control",
         "pre-exception-record",
         "baseline-control",

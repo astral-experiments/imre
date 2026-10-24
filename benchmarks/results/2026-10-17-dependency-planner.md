@@ -1,4 +1,4 @@
-> Project naming is normalized to Relar; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
 
 # Dependency planner: complete package and buffered output
 
@@ -10,7 +10,7 @@ The program uses static imports, typed classes and methods, lists of objects, ne
 
 These are medians from twelve measured triplets after two warmup triplets per workload. Each of the six execution orders occurs twice, balancing every implementation's position and predecessor within triplets. Every invocation starts a fresh process. Layered graphs contain 295, 4,821, and 38,622 dependencies at the respective sizes; wide graphs contain none. All inputs use seed 42.
 
-| Shape | Tasks | CPython, ms | Baseline Relar, ms | Buffered Relar, ms | Baseline / buffered | CPython / buffered |
+| Shape | Tasks | CPython, ms | Baseline Imre, ms | Buffered Imre, ms | Baseline / buffered | CPython / buffered |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Layered | 128 | 20.35 | 5.80 | 3.42 | 1.70× | 5.96× |
 | Layered | 2,048 | 31.50 | 70.15 | 8.33 | 8.42× | 3.78× |
@@ -19,7 +19,7 @@ These are medians from twelve measured triplets after two warmup triplets per wo
 | Wide | 2,048 | 30.62 | 66.74 | 6.55 | 10.19× | 4.68× |
 | Wide | 16,384 | 118.52 | 521.21 | 33.87 | 15.39× | 3.50× |
 
-For the largest layered graph, observed minimum–maximum times were 121.01–135.00 ms for CPython, 552.70–571.50 ms for baseline Relar, and 50.32–53.41 ms for buffered Relar. For the largest wide graph, they were 116.08–136.07, 517.04–533.15, and 32.80–35.07 ms. These ranges describe the observations, not confidence intervals.
+For the largest layered graph, observed minimum–maximum times were 121.01–135.00 ms for CPython, 552.70–571.50 ms for baseline Imre, and 50.32–53.41 ms for buffered Imre. For the largest wide graph, they were 116.08–136.07, 517.04–533.15, and 32.80–35.07 ms. These ranges describe the observations, not confidence intervals.
 
 The [comparison JSON](2026-10-17-dependency-planner-comparison.json) retains **216 measured executions and 36 warmups**, every order and raw duration, full inputs and expected outputs, and per-run output SHA256 and byte length. Every execution exited zero, emitted no stderr, and matched the entire expected report before its compact record was retained. An independent audit verified the source/tool/artifact hashes, baseline provenance, all six execution orders, output identities, and every median, quartile, range, and ratio.
 
@@ -29,7 +29,7 @@ Profiling the baseline showed tens of thousands of native `write` system calls w
 
 Separate syscall profiles of the exact benchmark executables show the reduction:
 
-| 16,384-task workload | Baseline Relar writes | Buffered Relar writes | CPython writes |
+| 16,384-task workload | Baseline Imre writes | Buffered Imre writes | CPython writes |
 | --- | ---: | ---: | ---: |
 | Layered | 83,574 | 76 | 5 |
 | Wide | 81,934 | 61 | 4 |
@@ -46,6 +46,6 @@ The timer surrounds `subprocess.run` with `time.perf_counter_ns`, including proc
 
 The current AOT compilation took **0.511 seconds**, separately measured with the compiler and Rust runtime already built. The buffered executable is **2,496,472 bytes** and its LLVM IR is **94,314 bytes**. Baseline provenance is verified by its original record and executable hash, rather than inferred from the current compiler.
 
-The measured revision is [`bee1ac80c7f3f196711ddb603c3170329557411d`](https://github.com/viarius-experiments/relar/commit/bee1ac80c7f3f196711ddb603c3170329557411d), with a clean worktree. The preserved baseline comes from clean revision [`81cba9801bf79bd9ff6c2008c96f453c1bd98fbf`](https://github.com/viarius-experiments/relar/commit/81cba9801bf79bd9ff6c2008c96f453c1bd98fbf). Relar used Ruff/ty crates 0.0.14 and Clang/LLVM 18.1.3 at O3. The Rust compiler/runtime build used Rust `1.98.1-dev` (`f6270311094cd4b48fefce03debdffcf8396c64c`) from Ohm `1.98.1-1`, whose Rust backend is LLVM 22.1.8; that is separate from LLVM 18 compiling the generated Python-program IR. CPython 3.14.5 was non-debug and GIL-enabled, with JIT available but disabled and PGO/LTO configuration reported.
+The measured revision is [`bee1ac80c7f3f196711ddb603c3170329557411d`](https://github.com/viarius-experiments/imre/commit/bee1ac80c7f3f196711ddb603c3170329557411d), with a clean worktree. The preserved baseline comes from clean revision [`81cba9801bf79bd9ff6c2008c96f453c1bd98fbf`](https://github.com/viarius-experiments/imre/commit/81cba9801bf79bd9ff6c2008c96f453c1bd98fbf). Imre used Ruff/ty crates 0.0.14 and Clang/LLVM 18.1.3 at O3. The Rust compiler/runtime build used Rust `1.98.1-dev` (`f6270311094cd4b48fefce03debdffcf8396c64c`) from Ohm `1.98.1-1`, whose Rust backend is LLVM 22.1.8; that is separate from LLVM 18 compiling the generated Python-program IR. CPython 3.14.5 was non-debug and GIL-enabled, with JIT available but disabled and PGO/LTO configuration reported.
 
 The harness and all children ran pinned to CPU 0 on an AMD EPYC-Milan devbox, x86-64 Linux `6.8.0-146-generic`, outside ptrace tracing. This shared host has no exclusive CPU ownership or fixed frequency controls. Startup, imports, report size, scheduling interference, and cache/memory contention affect the measurements. These are whole-program results for these graphs and toolchain, not isolated scheduling throughput or a general Python speedup. Reproduce them with the [package's three-way comparison instructions](../../examples/dependency_planner/README.md), using sizes 128/2,048/16,384, layered and wide shapes, seed 42, twelve samples, two warmups, and CPU 0.

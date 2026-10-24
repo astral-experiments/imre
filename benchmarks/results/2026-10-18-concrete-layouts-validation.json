@@ -1,6 +1,6 @@
 {
   "summary": {
-    "schema": "relar-layout-validation-summary-v1",
+    "schema": "imre-layout-validation-summary-v1",
     "passed": true,
     "source_commit": "6d0db50ab7851f4321704e6f97b79a2d92d58606",
     "build_record": {
@@ -8,10 +8,10 @@
       "sha256": "300e64922b3026fc2b44036ebacbe7c25d200e4ed0eacfacb9f6855f3f19dcd4"
     },
     "tools": {
-      "benchmarks/local/layout-tools-v2/relar": "5fc88efd11118c5bb49430be7c87c79c14edb6651f3490797e82c3722ff2e6d1",
-      "benchmarks/local/layout-tools-v2/librelar_runtime.a": "ca204d2df89a52927cdd792f96ab2a45f833658858b3d926f0e27a6bd4839daf",
-      "benchmarks/local/layout-tools-v2/librelar_runtime_lto.a": "cf4f3b157fd4e836e8a1b641bf845fb963aa104ec115f3a6396ca927887a5ebc",
-      "benchmarks/local/layout-tools-v2/librelar_runtime_asan.a": "1ae81c87bf9e9cccb16813da21dfe534158ab72a7fbc6960ee88d22e9f6d3e32"
+      "benchmarks/local/layout-tools-v2/imre": "5fc88efd11118c5bb49430be7c87c79c14edb6651f3490797e82c3722ff2e6d1",
+      "benchmarks/local/layout-tools-v2/libimre_runtime.a": "ca204d2df89a52927cdd792f96ab2a45f833658858b3d926f0e27a6bd4839daf",
+      "benchmarks/local/layout-tools-v2/libimre_runtime_lto.a": "cf4f3b157fd4e836e8a1b641bf845fb963aa104ec115f3a6396ca927887a5ebc",
+      "benchmarks/local/layout-tools-v2/libimre_runtime_asan.a": "1ae81c87bf9e9cccb16813da21dfe534158ab72a7fbc6960ee88d22e9f6d3e32"
     },
     "modes": {
       "ordinary": {
@@ -74,23 +74,23 @@
   },
   "records": {
     "ordinary": {
-      "schema": "relar-layout-native-validation-v1",
+      "schema": "imre-layout-native-validation-v1",
       "mode": "ordinary",
       "started_at_unix": 1792326264.272202,
-      "repository": "/home/dev-user/code/oss/relar",
+      "repository": "/home/dev-user/code/oss/imre",
       "head": "6d0db50ab7851f4321704e6f97b79a2d92d58606",
       "compiler": {
-        "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+        "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
         "sha256": "5fc88efd11118c5bb49430be7c87c79c14edb6651f3490797e82c3722ff2e6d1"
       },
       "runtime": {
-        "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+        "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime.a",
         "sha256": "ca204d2df89a52927cdd792f96ab2a45f833658858b3d926f0e27a6bd4839daf"
       },
       "python": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
       "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin",
       "runner": {
-        "path": "/tmp/relar-layout-validation-v2.py",
+        "path": "/tmp/imre-layout-validation-v2.py",
         "sha256": "b6f32f808d31449c09e2d0199493b6c343007701c104b0d1db1832849bd3539b"
       },
       "test_sources": {
@@ -142,11 +142,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/classes.py",
+            "/home/dev-user/code/oss/imre/tests/classes.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -159,11 +159,11 @@
           "started_at_unix": 1792326264.5456767,
           "finished_at_unix": 1792326268.9260488,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/classes.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/ordinary/classes.stdout",
             "sha256": "17b5e0bb55bf9b355d570c75aeb14d06b943d145fd3c750ef0318eb2452fd116"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/classes.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/ordinary/classes.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -171,11 +171,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/exceptions.py",
+            "/home/dev-user/code/oss/imre/tests/exceptions.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -188,11 +188,11 @@
           "started_at_unix": 1792326268.9275136,
           "finished_at_unix": 1792326281.5789716,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/exceptions.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/ordinary/exceptions.stdout",
             "sha256": "2acc8d882974554d58247a8f2b8a536de2882591a83438ca391f35802fa7cf15"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/exceptions.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/ordinary/exceptions.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -200,11 +200,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/differential.py",
+            "/home/dev-user/code/oss/imre/tests/differential.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -217,11 +217,11 @@
           "started_at_unix": 1792326281.5801594,
           "finished_at_unix": 1792326313.6179597,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/differential.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/ordinary/differential.stdout",
             "sha256": "bd6213d537870f3ce12fc4012cb254b21ddf4ecd47aea1515c035139a7d6c75e"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/differential.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/ordinary/differential.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -229,11 +229,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/imports.py",
+            "/home/dev-user/code/oss/imre/tests/imports.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -246,11 +246,11 @@
           "started_at_unix": 1792326313.6194155,
           "finished_at_unix": 1792326318.3160524,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/imports.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/ordinary/imports.stdout",
             "sha256": "29d9fdaf4f4e6d33d6e79f22dbf01c96bae4db4e8b3d1e2fae090b4b6890d835"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/imports.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/ordinary/imports.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -258,11 +258,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/io.py",
+            "/home/dev-user/code/oss/imre/tests/io.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -275,11 +275,11 @@
           "started_at_unix": 1792326318.3176239,
           "finished_at_unix": 1792326322.8233826,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/io.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/ordinary/io.stdout",
             "sha256": "ff6b20527ed1fc9c431c42fafb7f1f6b7f32182e53ec07ab1cf5d5241f1c23e3"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/io.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/ordinary/io.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -287,11 +287,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/containers.py",
+            "/home/dev-user/code/oss/imre/tests/containers.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -304,11 +304,11 @@
           "started_at_unix": 1792326264.5451827,
           "finished_at_unix": 1792326326.486322,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/containers.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/ordinary/containers.stdout",
             "sha256": "e23c058452d927e1ef68e1b5845318ca9d9e62203ce62ba845571bf3b699a162"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/containers.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/ordinary/containers.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -316,11 +316,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/files.py",
+            "/home/dev-user/code/oss/imre/tests/files.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -333,11 +333,11 @@
           "started_at_unix": 1792326322.8244278,
           "finished_at_unix": 1792326340.8248518,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/files.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/ordinary/files.stdout",
             "sha256": "02385ad9110fb1bbfd100a632c0eacb94f5eb55b52d33e80a5cb18074772c290"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/ordinary/files.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/ordinary/files.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         }
@@ -346,23 +346,23 @@
       "passed": true
     },
     "thinlto": {
-      "schema": "relar-layout-native-validation-v1",
+      "schema": "imre-layout-native-validation-v1",
       "mode": "thinlto",
       "started_at_unix": 1792326264.271974,
-      "repository": "/home/dev-user/code/oss/relar",
+      "repository": "/home/dev-user/code/oss/imre",
       "head": "6d0db50ab7851f4321704e6f97b79a2d92d58606",
       "compiler": {
-        "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+        "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
         "sha256": "5fc88efd11118c5bb49430be7c87c79c14edb6651f3490797e82c3722ff2e6d1"
       },
       "runtime": {
-        "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+        "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_lto.a",
         "sha256": "cf4f3b157fd4e836e8a1b641bf845fb963aa104ec115f3a6396ca927887a5ebc"
       },
       "python": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
       "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin",
       "runner": {
-        "path": "/tmp/relar-layout-validation-v2.py",
+        "path": "/tmp/imre-layout-validation-v2.py",
         "sha256": "b6f32f808d31449c09e2d0199493b6c343007701c104b0d1db1832849bd3539b"
       },
       "test_sources": {
@@ -414,11 +414,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/classes.py",
+            "/home/dev-user/code/oss/imre/tests/classes.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_lto.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -434,11 +434,11 @@
           "started_at_unix": 1792326264.5458357,
           "finished_at_unix": 1792326269.578285,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/classes.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/thinlto/classes.stdout",
             "sha256": "724d8cc23455331074e5b350ef4a08ea8a4ace147e236f59b60bd8b511eae8f3"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/classes.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/thinlto/classes.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -446,11 +446,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/exceptions.py",
+            "/home/dev-user/code/oss/imre/tests/exceptions.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_lto.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -466,11 +466,11 @@
           "started_at_unix": 1792326269.5794635,
           "finished_at_unix": 1792326285.7165446,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/exceptions.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/thinlto/exceptions.stdout",
             "sha256": "4be6f9ad9a05c34549de276fa89593d1ea332cc66be7ccb7b0216027cb0ea3f3"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/exceptions.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/thinlto/exceptions.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -478,11 +478,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/differential.py",
+            "/home/dev-user/code/oss/imre/tests/differential.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_lto.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -498,11 +498,11 @@
           "started_at_unix": 1792326285.71757,
           "finished_at_unix": 1792326329.371292,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/differential.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/thinlto/differential.stdout",
             "sha256": "b190ebd6e7203c28c17ec7faa0c0f5d8c6decd1e773be99ae0c98e060f7b79ad"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/differential.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/thinlto/differential.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -510,11 +510,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/imports.py",
+            "/home/dev-user/code/oss/imre/tests/imports.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_lto.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -530,11 +530,11 @@
           "started_at_unix": 1792326329.3721733,
           "finished_at_unix": 1792326335.476132,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/imports.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/thinlto/imports.stdout",
             "sha256": "f83498e79d485a45cf5d880badfac061b59ec07ac7f8ea00dd9723e7ac0d2cd0"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/imports.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/thinlto/imports.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -542,11 +542,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/io.py",
+            "/home/dev-user/code/oss/imre/tests/io.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_lto.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -562,11 +562,11 @@
           "started_at_unix": 1792326335.4772096,
           "finished_at_unix": 1792326340.2113981,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/io.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/thinlto/io.stdout",
             "sha256": "8db850d1783de29fdc0dc48daec150b64f1b10efdcfa1ee0ed8e7bd2dc5e0fc7"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/io.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/thinlto/io.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -574,11 +574,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/containers.py",
+            "/home/dev-user/code/oss/imre/tests/containers.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_lto.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -594,11 +594,11 @@
           "started_at_unix": 1792326264.5451329,
           "finished_at_unix": 1792326350.599205,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/containers.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/thinlto/containers.stdout",
             "sha256": "4345d7928633ae1675b86ccbec3e4990653cd1d9570e0ea33dd9bd55e7a0952b"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/containers.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/thinlto/containers.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -606,11 +606,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/files.py",
+            "/home/dev-user/code/oss/imre/tests/files.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_lto.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -626,11 +626,11 @@
           "started_at_unix": 1792326340.2122257,
           "finished_at_unix": 1792326358.964636,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/files.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/thinlto/files.stdout",
             "sha256": "4c604bc1ddd600c76379a883e749cf1b84424046db06dcc8a184a02b53accca6"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/thinlto/files.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/thinlto/files.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         }
@@ -639,23 +639,23 @@
       "passed": true
     },
     "asan": {
-      "schema": "relar-layout-native-validation-v1",
+      "schema": "imre-layout-native-validation-v1",
       "mode": "asan",
       "started_at_unix": 1792326279.625469,
-      "repository": "/home/dev-user/code/oss/relar",
+      "repository": "/home/dev-user/code/oss/imre",
       "head": "6d0db50ab7851f4321704e6f97b79a2d92d58606",
       "compiler": {
-        "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+        "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
         "sha256": "5fc88efd11118c5bb49430be7c87c79c14edb6651f3490797e82c3722ff2e6d1"
       },
       "runtime": {
-        "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+        "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_asan.a",
         "sha256": "1ae81c87bf9e9cccb16813da21dfe534158ab72a7fbc6960ee88d22e9f6d3e32"
       },
       "python": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
       "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin",
       "runner": {
-        "path": "/tmp/relar-layout-validation-v2.py",
+        "path": "/tmp/imre-layout-validation-v2.py",
         "sha256": "b6f32f808d31449c09e2d0199493b6c343007701c104b0d1db1832849bd3539b"
       },
       "test_sources": {
@@ -707,11 +707,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/classes.py",
+            "/home/dev-user/code/oss/imre/tests/classes.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_asan.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -724,11 +724,11 @@
           "started_at_unix": 1792326279.903679,
           "finished_at_unix": 1792326283.9928656,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/classes.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/asan/classes.stdout",
             "sha256": "a26de98482d5a15d93e729d42fb28bbcc488e3229801530c07894ac08617f363"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/classes.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/asan/classes.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -736,11 +736,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/exceptions.py",
+            "/home/dev-user/code/oss/imre/tests/exceptions.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_asan.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -753,11 +753,11 @@
           "started_at_unix": 1792326283.9943755,
           "finished_at_unix": 1792326294.1138153,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/exceptions.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/asan/exceptions.stdout",
             "sha256": "91a9949084dff395322b8fe7245ac8d9a85d7cca29884fa43cea75b8e619732a"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/exceptions.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/asan/exceptions.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -765,11 +765,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/differential.py",
+            "/home/dev-user/code/oss/imre/tests/differential.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_asan.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -782,11 +782,11 @@
           "started_at_unix": 1792326294.1147847,
           "finished_at_unix": 1792326320.102439,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/differential.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/asan/differential.stdout",
             "sha256": "6f0eb6f0c26454a86531ba69d7249778e547066993ecc9dbf879c6f205206211"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/differential.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/asan/differential.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -794,11 +794,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/imports.py",
+            "/home/dev-user/code/oss/imre/tests/imports.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_asan.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -811,11 +811,11 @@
           "started_at_unix": 1792326320.1036065,
           "finished_at_unix": 1792326323.5980072,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/imports.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/asan/imports.stdout",
             "sha256": "f83498e79d485a45cf5d880badfac061b59ec07ac7f8ea00dd9723e7ac0d2cd0"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/imports.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/asan/imports.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -823,11 +823,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/io.py",
+            "/home/dev-user/code/oss/imre/tests/io.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_asan.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -840,11 +840,11 @@
           "started_at_unix": 1792326323.598863,
           "finished_at_unix": 1792326327.034248,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/io.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/asan/io.stdout",
             "sha256": "d9f2f6ec07767e258532afcea56a032598491ddbb3d44867d018ac241e36d6a7"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/io.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/asan/io.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -852,11 +852,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/containers.py",
+            "/home/dev-user/code/oss/imre/tests/containers.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_asan.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -869,11 +869,11 @@
           "started_at_unix": 1792326279.90318,
           "finished_at_unix": 1792326330.3046274,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/containers.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/asan/containers.stdout",
             "sha256": "8e4b76864aa5f172cf5df2cab68617684d5a2a55631b7d185adffce60a7cf7f7"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/containers.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/asan/containers.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         },
@@ -881,11 +881,11 @@
           "command": [
             "/home/dev-user/.local/bin/python3.14",
             "-I",
-            "/home/dev-user/code/oss/relar/tests/files.py",
+            "/home/dev-user/code/oss/imre/tests/files.py",
             "--compiler",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
             "--runtime",
-            "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_asan.a",
+            "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_asan.a",
             "--python",
             "/home/dev-user/.local/bin/python3.14",
             "--clang",
@@ -898,11 +898,11 @@
           "started_at_unix": 1792326327.0354316,
           "finished_at_unix": 1792326341.0276306,
           "stdout": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/files.stdout",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/asan/files.stdout",
             "sha256": "2d2eee205ed3d94ae0833325e22ae5a515f65b73c5c8f5fe275013efa59930f6"
           },
           "stderr": {
-            "path": "/home/dev-user/code/oss/relar/benchmarks/local/layout-validation-v2/asan/files.stderr",
+            "path": "/home/dev-user/code/oss/imre/benchmarks/local/layout-validation-v2/asan/files.stderr",
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
         }
@@ -914,11 +914,11 @@
       "command": [
         "/home/dev-user/.local/bin/python3.14",
         "-I",
-        "/home/dev-user/code/oss/relar/tests/lto.py",
+        "/home/dev-user/code/oss/imre/tests/lto.py",
         "--compiler",
-        "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/relar",
+        "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/imre",
         "--runtime",
-        "/home/dev-user/code/oss/relar/benchmarks/local/layout-tools-v2/librelar_runtime_lto.a",
+        "/home/dev-user/code/oss/imre/benchmarks/local/layout-tools-v2/libimre_runtime_lto.a",
         "--clang",
         "/usr/bin/clang-18",
         "--target",
@@ -984,12 +984,12 @@
     "benchmarks/local/layout-validation-v2/thinlto/exceptions.stdout": "Passed 32 exception checks (16 rejected programs; optimization levels ['3']; ASan=False)\n"
   },
   "runtime_unit_checks": {
-    "command": "sh /tmp/relar-cargo.sh test -p relar-runtime --locked",
+    "command": "sh /tmp/imre-cargo.sh test -p imre-runtime --locked",
     "passed": 36,
-    "log": "Captured from the unified exec tool for session 60503; no tests were rerun to create this log.\nWorking directory: /home/dev-user/code/oss/relar\nCommands, in order:\nsh /tmp/relar-cargo.sh fmt -p relar-runtime\nsh /tmp/relar-cargo.sh test -p relar-runtime --locked\nsh /tmp/relar-cargo.sh clippy -p relar-runtime --all-targets --locked -- -D warnings\n\n   Compiling relar-runtime v0.1.0 (/home/dev-user/code/oss/relar/crates/relar-runtime)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.29s\n     Running unittests src/lib.rs (/home/dev-user/.cache/ohm/shared-build/debug/deps/relar_runtime-c3e381ebf08fcd07)\n\nrunning 36 tests\nRuntimeError: reported test error\ntest objects::args::tests::invalid_argv_never_publishes_partial_data_and_retries_cleanly ... ok\ntest objects::args::tests::argv_aliases_share_mutation_and_outlive_the_runtime_root ... ok\ntest objects::exceptions::tests::builtin_hierarchy_and_keyerror_string_arguments_match_python ... ok\ntest objects::exceptions::tests::failed_sequence_updates_release_staged_values_after_access ... ok\ntest objects::exceptions::tests::caught_arithmetic_and_list_failures_preserve_owners_and_allow_recovery ... ok\ntest objects::exceptions::tests::mapping_errors_preserve_outputs_and_scalar_key_messages ... ok\ntest objects::exceptions::tests::pending_and_active_errors_transfer_independent_owned_references ... ok\ntest objects::exceptions::tests::replacing_clearing_and_reporting_pending_errors_allow_later_recovery ... ok\ntest objects::files::tests::failed_close_closes_aliases_and_final_drop_preserves_pending ... ok\ntest objects::files::tests::open_reports_paths_before_publishing_a_resource ... ok\ntest objects::mappings::tests::active_iterator_positions_survive_deletion_reinsertion_and_compaction ... ok\ntest objects::mappings::tests::keys_use_scalar_equality_across_allocations_and_unicode_forms ... ok\ntest objects::files::tests::text_writes_count_characters_and_last_container_owner_flushes ... ok\ntest objects::mappings::tests::items_return_owned_snapshots_and_observe_later_value_updates ... ok\ntest objects::mappings::tests::iterator_mutation_errors_and_permanent_exhaustion_are_distinct ... ok\ntest objects::mappings::tests::optional_and_scalar_out_words_distinguish_missing_from_none ... ok\ntest objects::mappings::tests::replacement_acquires_sole_owners_and_reclaims_deleted_keys ... ok\ntest objects::mappings::tests::set_iteration_checks_size_but_ignores_duplicate_adds_and_missing_discards ... ok\ntest objects::mappings::tests::sets_deduplicate_integer_values_and_own_yielded_snapshots ... ok\ntest objects::mappings::tests::sets_keep_exact_string_keys_and_reclaim_owner_after_iteration ... ok\ntest objects::records::tests::compact_records_reclaim_partial_fields_without_disturbing_pending ... ok\ntest objects::records::tests::record_aliases_and_sole_owner_replacement_preserve_snapshots ... ok\ntest objects::tests::optional_bigint_sequence_replacement_releases_only_displaced_owners ... ok\ntest objects::tests::repeated_record_sequences_share_mutations_and_transfer_pop_owners ... ok\ntest objects::tests::sequence_words_preserve_niches_and_owned_snapshots ... ok\ntest objects::tests::splitlines_distinguishes_every_python_boundary_and_retains_interior_empty_lines ... ok\ntest objects::tests::splitting_owns_strings_and_matches_python_whitespace_boundaries ... ok\ntest objects::files::tests::text_reads_decode_normalize_recover_and_share_closed_state ... ok\ntest tests::borrowed_indices_and_list_copy_preserve_bigint_owners ... ok\ntest tests::container_ownership_survives_replacement_and_release ... ok\ntest tests::decimal_input_preserves_signs_separators_and_tag_boundaries ... ok\ntest tests::decoded_indices_acquire_before_replacing_the_only_stored_owner ... ok\ntest tests::integers_promote_and_demote_without_losing_values ... ok\ntest tests::floor_division_and_remainder_match_python_signs ... ok\ntest tests::scalar_strings_preserve_integer_boundaries_and_python_spellings ... ok\ntest tests::list_error_words_distinguish_numeric_zero_and_allow_recovery ... ok\n\ntest result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n\n   Doc-tests relar_runtime\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n    Checking relar-runtime v0.1.0 (/home/dev-user/code/oss/relar/crates/relar-runtime)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.49s\n\n"
+    "log": "Captured from the unified exec tool for session 60503; no tests were rerun to create this log.\nWorking directory: /home/dev-user/code/oss/imre\nCommands, in order:\nsh /tmp/imre-cargo.sh fmt -p imre-runtime\nsh /tmp/imre-cargo.sh test -p imre-runtime --locked\nsh /tmp/imre-cargo.sh clippy -p imre-runtime --all-targets --locked -- -D warnings\n\n   Compiling imre-runtime v0.1.0 (/home/dev-user/code/oss/imre/crates/imre-runtime)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.29s\n     Running unittests src/lib.rs (/home/dev-user/.cache/ohm/shared-build/debug/deps/imre_runtime-c3e381ebf08fcd07)\n\nrunning 36 tests\nRuntimeError: reported test error\ntest objects::args::tests::invalid_argv_never_publishes_partial_data_and_retries_cleanly ... ok\ntest objects::args::tests::argv_aliases_share_mutation_and_outlive_the_runtime_root ... ok\ntest objects::exceptions::tests::builtin_hierarchy_and_keyerror_string_arguments_match_python ... ok\ntest objects::exceptions::tests::failed_sequence_updates_release_staged_values_after_access ... ok\ntest objects::exceptions::tests::caught_arithmetic_and_list_failures_preserve_owners_and_allow_recovery ... ok\ntest objects::exceptions::tests::mapping_errors_preserve_outputs_and_scalar_key_messages ... ok\ntest objects::exceptions::tests::pending_and_active_errors_transfer_independent_owned_references ... ok\ntest objects::exceptions::tests::replacing_clearing_and_reporting_pending_errors_allow_later_recovery ... ok\ntest objects::files::tests::failed_close_closes_aliases_and_final_drop_preserves_pending ... ok\ntest objects::files::tests::open_reports_paths_before_publishing_a_resource ... ok\ntest objects::mappings::tests::active_iterator_positions_survive_deletion_reinsertion_and_compaction ... ok\ntest objects::mappings::tests::keys_use_scalar_equality_across_allocations_and_unicode_forms ... ok\ntest objects::files::tests::text_writes_count_characters_and_last_container_owner_flushes ... ok\ntest objects::mappings::tests::items_return_owned_snapshots_and_observe_later_value_updates ... ok\ntest objects::mappings::tests::iterator_mutation_errors_and_permanent_exhaustion_are_distinct ... ok\ntest objects::mappings::tests::optional_and_scalar_out_words_distinguish_missing_from_none ... ok\ntest objects::mappings::tests::replacement_acquires_sole_owners_and_reclaims_deleted_keys ... ok\ntest objects::mappings::tests::set_iteration_checks_size_but_ignores_duplicate_adds_and_missing_discards ... ok\ntest objects::mappings::tests::sets_deduplicate_integer_values_and_own_yielded_snapshots ... ok\ntest objects::mappings::tests::sets_keep_exact_string_keys_and_reclaim_owner_after_iteration ... ok\ntest objects::records::tests::compact_records_reclaim_partial_fields_without_disturbing_pending ... ok\ntest objects::records::tests::record_aliases_and_sole_owner_replacement_preserve_snapshots ... ok\ntest objects::tests::optional_bigint_sequence_replacement_releases_only_displaced_owners ... ok\ntest objects::tests::repeated_record_sequences_share_mutations_and_transfer_pop_owners ... ok\ntest objects::tests::sequence_words_preserve_niches_and_owned_snapshots ... ok\ntest objects::tests::splitlines_distinguishes_every_python_boundary_and_retains_interior_empty_lines ... ok\ntest objects::tests::splitting_owns_strings_and_matches_python_whitespace_boundaries ... ok\ntest objects::files::tests::text_reads_decode_normalize_recover_and_share_closed_state ... ok\ntest tests::borrowed_indices_and_list_copy_preserve_bigint_owners ... ok\ntest tests::container_ownership_survives_replacement_and_release ... ok\ntest tests::decimal_input_preserves_signs_separators_and_tag_boundaries ... ok\ntest tests::decoded_indices_acquire_before_replacing_the_only_stored_owner ... ok\ntest tests::integers_promote_and_demote_without_losing_values ... ok\ntest tests::floor_division_and_remainder_match_python_signs ... ok\ntest tests::scalar_strings_preserve_integer_boundaries_and_python_spellings ... ok\ntest tests::list_error_words_distinguish_numeric_zero_and_allow_recovery ... ok\n\ntest result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n\n   Doc-tests imre_runtime\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n    Checking imre-runtime v0.1.0 (/home/dev-user/code/oss/imre/crates/imre-runtime)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.49s\n\n"
   },
   "compiler_unit_checks": {
-    "command": "sh /tmp/relar-cargo.sh test -p relar-compiler --locked",
+    "command": "sh /tmp/imre-cargo.sh test -p imre-compiler --locked",
     "passed": 19,
     "evidence": "The local tool output recorded success; no standalone stdout log was preserved. The implementation PR CI also runs cargo test --workspace --locked."
   },
@@ -1226,13 +1226,13 @@
               "status": "completed"
             }
           ],
-          "url": "https://github.com/viarius-experiments/relar/actions/runs/39127175500/job/117674644104"
+          "url": "https://github.com/viarius-experiments/imre/actions/runs/39127175500/job/117674644104"
         }
       ],
       "startedAt": "2026-10-18T12:24:55Z",
       "status": "completed",
       "updatedAt": "2026-10-18T12:42:56Z",
-      "url": "https://github.com/viarius-experiments/relar/actions/runs/39127175500"
+      "url": "https://github.com/viarius-experiments/imre/actions/runs/39127175500"
     }
   }
 }

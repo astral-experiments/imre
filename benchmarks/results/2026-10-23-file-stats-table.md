@@ -1,14 +1,16 @@
+> Project naming is normalized to Imre; these are historical measurements. See [capture provenance and exact restoration](NAMING_PROVENANCE.md).
+
 # Ruff’s per-file report table
 
-Relar compiles the 81-line `render_file_stats_table` from Ruff at `de907154`. The report adapter binds `CONFORMANCE_DIR_WITH_README` to the requested suite revision in an enclosing function. A source check removes that single level of indentation and compares the full function, including its local `fmt` definition, to the pinned file. The summary and diagnostic-detail renderers still use the typed port. [Ruff source](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/conformance.py#L776)
+Imre compiles the 81-line `render_file_stats_table` from Ruff at `de907154`. The report adapter binds `CONFORMANCE_DIR_WITH_README` to the requested suite revision in an enclosing function. A source check removes that single level of indentation and compares the full function, including its local `fmt` definition, to the pinned file. The summary and diagnostic-detail renderers still use the typed port. [Ruff source](https://github.com/astral-sh/ruff/blob/de9071547cfec12f689142a7b8ce98edc7aef909/scripts/conformance.py#L776)
 
 ## Captured reports
 
 Each fresh process reads the source files, parses the two ty JSON captures, groups diagnostics, computes statistics, renders the full report, and writes it to disk. The 146-file input compares ty 0.0.60 and 0.0.90 on the pinned Python typing suite. The 1,460-file input materializes ten copies with distinct paths and remaps the diagnostics. Unchanged cases use the same ty version on both sides. All timings below include the forced summary table.
 
-Milliseconds are medians of 12 runs per engine and case, after one warmup. All six engines ran on CPU 8 of the same AMD EPYC-Milan x86-64 Linux host in balanced order. Both Relar versions and the Rust reference use jemalloc. CPython 3.14.5 ran pinned Ruff and, separately, the typed port. Native Codon 0.20.4 used the project's existing adapters. For the nested formatter, its adapter removes the keyword-only separator. [Codon build](../codon_native/build.py) · [Matched Rust allocator](2026-10-23-diagnostic-allocator.md)
+Milliseconds are medians of 12 runs per engine and case, after one warmup. All six engines ran on CPU 8 of the same AMD EPYC-Milan x86-64 Linux host in balanced order. Both Imre versions and the Rust reference use jemalloc. CPython 3.14.5 ran pinned Ruff and, separately, the typed port. Native Codon 0.20.4 used the project's existing adapters. For the nested formatter, its adapter removes the keyword-only separator. [Codon build](../codon_native/build.py) · [Matched Rust allocator](2026-10-23-diagnostic-allocator.md)
 
-| Build | Files | Report | Ruff on CPython | Typed CPython | Prior Relar port | Codon | Relar | Rust | Relar / Rust |
+| Build | Files | Report | Ruff on CPython | Typed CPython | Prior Imre port | Codon | Imre | Rust | Imre / Rust |
 | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Ordinary | 146 | changed GitHub | 168.8 | 274.1 | 38.4 | 72.9 | 38.4 | 27.5 | 1.40× |
 | Ordinary | 146 | changed diff | 170.1 | 277.2 | 38.1 | 73.8 | 38.8 | 27.1 | 1.43× |
@@ -31,7 +33,7 @@ All eight captured reports matched upstream byte-for-byte on every run in both l
 
 ## Live checkout
 
-With both real ty processes included, the changed GitHub report on the 146-file checkout took **671 ms in Relar and 649 ms in Rust** (1.03×). Ruff on CPython took 736 ms and native Codon took 781 ms. All four published the same 109,258 bytes. Each engine ran eight times in balanced order using ordinary optimized builds and two CPU cores.
+With both real ty processes included, the changed GitHub report on the 146-file checkout took **671 ms in Imre and 649 ms in Rust** (1.03×). Ruff on CPython took 736 ms and native Codon took 781 ms. All four published the same 109,258 bytes. Each engine ran eight times in balanced order using ordinary optimized builds and two CPU cores.
 
 ## Reproduce
 
