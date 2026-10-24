@@ -1623,7 +1623,7 @@ struct Checker<'a> {
     regex_locals: HashMap<usize, regex::CaptureLayout>,
     /// Group dictionary locals whose complete set of reads resolves to capture slots.
     regex_fields: HashMap<usize, HashMap<String, usize>>,
-    joined_lines: HashMap<TextRange, String>,
+    joined_lines: joined_lines::Plan,
     consuming_lists: HashSet<TextRange>,
     namespace_guards: Vec<(usize, usize)>,
     captured_process_errors: Vec<processes::CapturedFields>,
@@ -1679,7 +1679,7 @@ impl<'a> Checker<'a> {
             regex_guards: Vec::new(),
             regex_locals: HashMap::new(),
             regex_fields: HashMap::new(),
-            joined_lines: HashMap::new(),
+            joined_lines: joined_lines::Plan::default(),
             consuming_lists: HashSet::new(),
             namespace_guards: Vec::new(),
             captured_process_errors: Vec::new(),
@@ -1965,6 +1965,20 @@ impl<'a> Checker<'a> {
             return Ok(value);
         }
         self.reject_class_receiver_value(expression)?;
+        if self.types.element(expected) == Some(Type::Str)
+            && let Some(separator) = self.joined_lines.start_buffer(expression.range())
+        {
+            return Ok(Expr {
+                ty: expected,
+                kind: ExprKind::Builtin(
+                    Builtin::JoinBufferNew,
+                    vec![Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str(separator),
+                    }],
+                ),
+            });
+        }
         let mut concrete = self.types.payload(expected).unwrap_or(expected);
         if matches!(expression, ast::Expr::List(_))
             && let Some(members) = self.types.members(concrete)
@@ -5521,7 +5535,7 @@ impl<'a> Checker<'a> {
                 return Ok(Expr {
                     ty: self.types.list(Type::Str),
                     kind: match receiver.kind {
-                        _ if let Some(separator) = self.joined_lines.get(&call.range()) => {
+                        _ if let Some(separator) = self.joined_lines.splits.get(&call.range()) => {
                             ExprKind::Builtin(
                                 Builtin::JoinedSplitLines,
                                 vec![
@@ -5609,14 +5623,19 @@ impl<'a> Checker<'a> {
                     "supported value methods are typed-list append/pop, dict.get, set.add/discard, and str.split()",
                 )
             })?;
+            let append = if self.joined_lines.writes_buffer(call.range()) {
+                Builtin::JoinBufferAppend
+            } else {
+                Builtin::Append
+            };
             if attribute.attr.as_str() == "extend" && call.arguments.args.len() == 1 {
-                return self.extend_list(receiver, &call.arguments.args[0], call);
+                return self.extend_list(receiver, &call.arguments.args[0], call, append);
             }
             let mut args = vec![receiver];
             let (builtin, ty) = match attribute.attr.as_str() {
                 "append" if call.arguments.args.len() == 1 => {
                     args.push(self.expr_expected(&call.arguments.args[0], element)?);
-                    (Builtin::Append, Type::None)
+                    (append, Type::None)
                 }
                 "pop" if call.arguments.args.is_empty() => (Builtin::Pop, element),
                 _ => {

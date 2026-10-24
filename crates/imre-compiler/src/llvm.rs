@@ -4489,8 +4489,19 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::SetIter => self.call("imre_set_iter", Type::Iterator, &[&args[0].value]),
-            Builtin::Append => {
-                self.append(&args[0].value, &args[1].value);
+            Builtin::JoinBufferNew => self.call("imre_join_buffer_new", returns, &[&args[0].value]),
+            Builtin::JoinBufferFinish => {
+                self.call("imre_join_buffer_finish", Type::Str, &[&args[0].value])
+            }
+            Builtin::Append | Builtin::JoinBufferAppend => {
+                if matches!(builtin, Builtin::JoinBufferAppend) {
+                    self.checked_status(format!(
+                        "call i32 @imre_join_buffer_append(ptr {}, ptr {})",
+                        args[0].value.operand, args[1].value.operand
+                    ));
+                } else {
+                    self.append(&args[0].value, &args[1].value);
+                }
                 // The list now owns the item. Drop the argument first so a
                 // temporary receiver destroys its items in reverse insertion order.
                 self.release_operand(&args[1]);
@@ -5891,6 +5902,9 @@ declare ptr @imre_sort_detach(ptr, i32)
 declare void @imre_sort_restore(ptr, i32, ptr, i32)
 declare void @imre_sort_by_keys(ptr, i32, ptr, i32, i32)
 declare ptr @imre_str_join(ptr, ptr)
+declare ptr @imre_join_buffer_new(ptr)
+declare i32 @imre_join_buffer_append(ptr, ptr)
+declare ptr @imre_join_buffer_finish(ptr)
 declare ptr @imre_str_format(ptr, ptr, i64)
 declare ptr @imre_str_replace(ptr, ptr, ptr)
 declare ptr @imre_str_dedent(ptr)

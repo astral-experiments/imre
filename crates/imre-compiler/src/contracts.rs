@@ -213,6 +213,7 @@ impl Builtin {
             | Self::Slice
             | Self::StringFormat
             | Self::StringJoin
+            | Self::JoinBufferFinish
             | Self::StringReplace
             | Self::StringGet
             | Self::StringIntList
@@ -256,6 +257,7 @@ impl Builtin {
             | Self::Split
             | Self::SplitLines
             | Self::JoinedSplitLines
+            | Self::JoinBufferNew
             | Self::Ndiff
             | Self::StringListCopy
             | Self::StringListFilter(_)
@@ -272,7 +274,9 @@ impl Builtin {
             | Self::StringContains
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
-            Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
+            Self::Append | Self::JoinBufferAppend | Self::SortByKeys => {
+                Contract::new(true, PreservesOwners)
+            }
             Self::ListReserveRange => Contract::new(false, PreservesOwners),
             Self::BinaryOpen(_)
             | Self::BinaryRead
@@ -360,6 +364,19 @@ impl Builtin {
             _ => false,
         };
         let valid = match self {
+            Self::JoinBufferNew => {
+                types.element(result) == Some(Type::Str)
+                    && matches!(args, [separator] if separator.ty == Type::Str)
+            }
+            Self::JoinBufferAppend => {
+                result == Type::None
+                    && matches!(args, [buffer, piece]
+                    if types.element(buffer.ty) == Some(Type::Str) && piece.ty == Type::Str)
+            }
+            Self::JoinBufferFinish => {
+                result == Type::Str
+                    && matches!(args, [buffer] if types.element(buffer.ty) == Some(Type::Str))
+            }
             Self::ListGetI32 => signature(&[Type::ListInt, Type::Int], Type::Int),
             Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
@@ -563,6 +580,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_str_join"
+                | "imre_join_buffer_finish"
                 | "imre_str_replace"
                 | "imre_print_str"
                 | "imre_print_bytes"

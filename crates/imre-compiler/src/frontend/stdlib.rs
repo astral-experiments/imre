@@ -335,6 +335,12 @@ impl Checker<'_> {
                 "str.join requires one string iterable",
             ));
         };
+        if self.joined_lines.finishes_buffer(call.range()) {
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::JoinBufferFinish, vec![self.expr(source)?]),
+            });
+        }
         let input = self.expansion_input(source, Some(Type::Str))?;
         if let Iteration::Container {
             iterable,

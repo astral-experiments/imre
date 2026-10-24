@@ -53,6 +53,7 @@ impl Checker<'_> {
         receiver: Expr,
         source: &ast::Expr,
         node: &impl Ranged,
+        append: Builtin,
     ) -> Result<Expr, String> {
         let element = self.types.element(receiver.ty).unwrap();
         let destination = self.hidden(receiver.ty);
@@ -90,7 +91,7 @@ impl Checker<'_> {
             }
             Iteration::Range(_) => false,
         };
-        let before = if unhinted {
+        let before = if unhinted && matches!(append, Builtin::Append) {
             vec![Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::ListExtendUnhinted, vec![self.local(destination)]),
@@ -103,7 +104,7 @@ impl Checker<'_> {
                 Ok(vec![Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(
-                        Builtin::Append,
+                        append.clone(),
                         vec![
                             checker.local(destination),
                             checker.coerce(value, element, node)?,
