@@ -753,10 +753,7 @@ mod tests {
                 assert_eq!(output.bytes.capacity(), 256);
                 assert!(output.bytes.is_empty());
             });
-            assert_eq!(
-                imre_byte_output_append_pair(Rc::as_ptr(&output), 1, 511),
-                1
-            );
+            assert_eq!(imre_byte_output_append_pair(Rc::as_ptr(&output), 1, 511), 1);
             let buffer = output.0.with(|storage| {
                 let Storage::ByteOutput(output) = storage else {
                     unreachable!()
