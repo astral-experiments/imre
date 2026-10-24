@@ -1,6 +1,8 @@
-"""Run CPython's four SHA-256 vectors with the public one-shot hexdigest on Imre."""
+"""Run pinned SHA-256 vectors and incremental hash tests against native Imre."""
 import argparse
+import ast
 from collections import Counter
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -17,7 +19,8 @@ DRIVER = """import hashlib
 import sys
 
 with open(sys.argv[1], "rb") as stream:
-    print(hashlib.sha256(stream.read()).hexdigest())
+    h = hashlib.sha256(stream.read())
+print(repr((h.hexdigest(), h.digest(), h.digest_size)))
 """
 
 
@@ -30,33 +33,34 @@ def run_case(suite, name, program, payload):
     constructors.clear()
     constructors.update(host_constructors.values())
     host_calls = Counter()
+    checked = Counter()
     lengths = []
 
-    class OneShot:
+    class NativeVector:
         def __init__(self, data):
-            self.data = data
-            self.reference = original(data)
-
-        def hexdigest(self):
-            payload.write_bytes(self.data)
+            payload.write_bytes(data)
             result = subprocess.run([program, payload], check=True, capture_output=True, timeout=30)
             if result.stderr:
                 raise AssertionError(result.stderr)
-            lengths.append(len(self.data))
-            return result.stdout.decode("ascii").rstrip("\n")
+            self.hex, self.raw, self.size = ast.literal_eval(result.stdout.decode("ascii"))
+            lengths.append(len(data))
+
+        def hexdigest(self):
+            checked["hexdigest"] += 1
+            return self.hex
 
         def digest(self):
-            host_calls["direct digest"] += 1
-            return self.reference.digest()
+            checked["digest"] += 1
+            return self.raw
 
         @property
         def digest_size(self):
-            host_calls["direct digest_size"] += 1
-            return self.reference.digest_size
+            checked["digest_size"] += 1
+            return self.size
 
     def direct(*args):
         if args:  # The vector calls the public constructor with its input bytes.
-            return OneShot(*args)
+            return NativeVector(*args)
         # The file_digest helper requests an empty, mutable host constructor.
         host_calls["empty constructor for file_digest"] += 1
         return original()
@@ -66,14 +70,67 @@ def run_case(suite, name, program, payload):
         result = unittest.TestResult()
         case.run(result)
     host_calls["file_digest"] = files.call_count
-    passed = result.wasSuccessful() and result.testsRun == 1 and not result.skipped and len(lengths) == 1
+    passed = (result.wasSuccessful() and result.testsRun == 1 and not result.skipped and len(lengths) == 1
+              and checked == {"hexdigest": 1, "digest": 1, "digest_size": 1})
     return case.id(), {
         "status": "mixed" if passed else "fail",
         "native_one_shot_input_bytes": lengths,
+        "native_results_checked": dict(checked),
         "host_operations": dict(host_calls),
         "host_reference_constructors": {name: fn.call_count for name, fn in sorted(host_constructors.items())},
         "diagnostics": [reason for _, reason in result.failures + result.errors + result.skipped],
     }
+
+
+def run_native_methods(suite, work, build):
+    methods = {"test_sha256_gil": 2, "test_sha256_update_over_4gb": 1}
+    source = Path(suite.__file__).read_bytes()
+    cls = next(n for n in ast.parse(source).body if isinstance(n, ast.ClassDef) and n.name == "HashLibTestCase")
+    lines = source.splitlines(keepends=True)
+    bodies = {n.name: b"".join(lines[n.lineno - 1:n.end_lineno]) for n in cls.body
+              if isinstance(n, ast.FunctionDef) and n.name in methods}
+    # unittest opts the large test out without the CPU resource. This benchmark
+    # opts it in and copies the original method without its scheduling decorator.
+    # The private CPython module constants in the other fixture are host input.
+    threshold = suite.hashlib_helper.find_gil_minsize(["_sha2", "_hashlib"])
+    (work / "hashlib_helper.py").write_text(f"""def find_gil_minsize(modules: list[str]) -> int:
+    if len(modules) != 2 or modules[0] != "_sha2" or modules[1] != "_hashlib":
+        raise ValueError("unexpected SHA-256 threshold fixture")
+    return {threshold}
+""")
+    adapter = b"""import hashlib
+import hashlib_helper
+import sys
+
+class Case:
+    checks: int
+
+    def __init__(self) -> None:
+        self.checks = 0
+
+    def assertEqual(self, actual: str, expected: str) -> None:
+        if actual != expected:
+            raise ValueError(f"expected {expected}, got {actual}")
+        self.checks += 1
+
+"""
+    dispatch = "case = Case()\n" + "".join(f'if sys.argv[1] == "{name}":\n    case.{name}()\n' for name in methods)
+    driver = work / "methods.py"
+    driver.write_bytes(adapter + b"\n".join(bodies[name] for name in methods) + b"\n" +
+                       (dispatch + "print(case.checks)\n").encode())
+    binary = build(driver)
+    tests = {}
+    for name, checks in methods.items():
+        run = subprocess.run([binary, name], cwd=work, text=True, capture_output=True, timeout=120)
+        passed = not run.returncode and not run.stderr and run.stdout == f"{checks}\n"
+        row = {"status": "pass" if passed else "fail", "native_assertions": checks if passed else None,
+               "method_sha256": hashlib.sha256(bodies[name]).hexdigest()}
+        if name == "test_sha256_gil":
+            row["host_fixture_gil_minsize"] = threshold
+        if not passed:
+            row["diagnostics"] = [run.stderr or repr(run.stdout)]
+        tests[suite.HashLibTestCase(name).id()] = row
+    return tests
 
 
 def main():
@@ -96,16 +153,26 @@ def main():
 
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
-        source, program = work / "hash.py", work / "hash"
+        def build(source):
+            program = source.with_suffix("")
+            subprocess.run([args.imre.resolve(), "build", source, "-o", program, "--no-cache",
+                            "--opt-level", "3", "--clang", args.clang.resolve(), "--runtime", args.runtime.resolve()],
+                           cwd=work, check=True, timeout=120)
+            return program
+
+        source = work / "hash.py"
         source.write_text(DRIVER)
-        subprocess.run([args.imre.resolve(), "build", source, "-o", program, "--no-cache",
-                        "--opt-level", "3", "--clang", args.clang.resolve(), "--runtime", args.runtime.resolve()],
-                       check=True, timeout=120)
+        program = build(source)
         cases = dict(run_case(test_hashlib, f"test_case_sha256_{n}", program, work / "data") for n in range(4))
-    report = {"cpython_commit": commit, "whole_native_methods": 0, "tests": cases}
+        native = run_native_methods(test_hashlib, work, build)
+        cases.update(native)
+    report = {"cpython_commit": commit, "whole_native_methods": sum(r["status"] == "pass" for r in native.values()),
+              "tests": cases}
     args.result.write_text(json.dumps(report, indent=2) + "\n")
     for case, row in cases.items():
-        print(row["status"], case, row["native_one_shot_input_bytes"])
+        print(row["status"], case)
+        for diagnostic in row.get("diagnostics", ()):
+            print(diagnostic, file=sys.stderr)
     return int(any(row["status"] == "fail" for row in cases.values()))
 
 

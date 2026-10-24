@@ -98,6 +98,7 @@ impl Types {
             | Type::Semaphore
             | Type::Document(_)
             | Type::Logger
+            | Type::Sha256
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::JsonRoot
@@ -402,6 +403,7 @@ impl Types {
             | Type::Semaphore
             | Type::AsyncProcess(_)
             | Type::Logger
+            | Type::Sha256
             | Type::RegexPattern
             | Type::RegexMatch
             | Type::BinaryIO => Some(true),

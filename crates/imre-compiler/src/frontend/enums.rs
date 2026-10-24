@@ -152,12 +152,13 @@ impl Checker<'_> {
         if !(types
             .iter()
             .all(|ty| matches!(ty, Type::StrEnum(_) | Type::Enum(_)))
-            || types == [Type::Logger; 2])
+            || types == [Type::Logger; 2]
+            || types == [Type::Sha256; 2])
         {
             return Err(error(
                 self.source,
                 node,
-                "identity comparisons require None, enum members, or loggers",
+                "identity comparisons require None, enum members, loggers, or hash objects",
             ));
         }
         Ok(Self::identity_result(

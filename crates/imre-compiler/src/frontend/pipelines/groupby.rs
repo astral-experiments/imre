@@ -151,7 +151,7 @@ impl Checker<'_> {
         )];
         input.value = next_key;
         input.clear.extend([next_key, group_key, accumulating]);
-        self.invalidate_loop_facts(&loop_.body);
+        self.invalidate_loop_facts(&loop_.body, Some((&input, &loop_.iter)))?;
         self.lower_prepared_iteration(key_target, input, &loop_.orelse, Vec::new(), |checker| {
             let output = checker.declare(members.id.as_str(), list_type, members)?;
             checker.assigned.insert(output);
