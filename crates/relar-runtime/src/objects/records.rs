@@ -216,7 +216,11 @@ pub unsafe extern "C" fn relar_record_try_new(descriptor: *const RecordDescripto
     record
 }
 
-unsafe fn allocate_record(descriptor: *const RecordDescriptor) -> *mut usize {
+/// Returns a record with zeroed fields, or null on allocation failure.
+///
+/// # Safety
+/// The immutable descriptor and all field kinds must outlive the returned record.
+pub(super) unsafe fn allocate_record(descriptor: *const RecordDescriptor) -> *mut usize {
     // SAFETY: the caller provides immutable live metadata for this allocation.
     let descriptor_value = unsafe { &*descriptor };
     let allocation_layout = layout(descriptor_value.length);
