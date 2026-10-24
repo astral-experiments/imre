@@ -2,9 +2,11 @@
 
 The `upstream` directory contains the complete, unmodified CPython 3.14.5 test modules and packages used by these benchmarks. The [manifest](UPSTREAM.json) records the release commit and each unmodified Git blob. [Upstream source](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test) · [CPython license](upstream/LICENSE)
 
-## Native SHA-256 vector calls
+## Native SHA-256 tests
 
-`native_hashlib.py` takes the same arguments as the JSON runner. The four original `HashLibTestCase.test_case_sha256_*` methods and their shared helper run in full. Each method sends the public constructor's one-shot hexadecimal digest to native Imre. Raw digests, digest sizes, alternate constructors and file hashing execute on CPython. The JSON report counts the four native vector calls as mixed-method coverage and records the host calls separately.
+`native_hashlib.py` takes the same arguments as the JSON runner. In each of CPython’s four `test_case_sha256_*` vectors, the original unittest checks the hex digest, raw digest and digest size from a single native hash object. Alternate constructors and `file_digest` run on CPython and are counted separately.
+
+The runner also compiles the unchanged `test_sha256_gil` and `test_sha256_update_over_4gb` method bodies and their equality checks. CPython supplies the private extension threshold for the first fixture. The second updates the same object with a 1 MiB buffer 4,096 times, then adds a final 11 bytes and checks CPython’s expected digest.
 
 ## Native POSIX path cases
 

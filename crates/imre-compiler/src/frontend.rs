@@ -24,6 +24,7 @@ mod dispatch;
 mod documents;
 mod enums;
 mod expansions;
+mod hashlib;
 mod inference;
 mod iterables;
 mod json;
@@ -4767,6 +4768,9 @@ impl<'a> Checker<'a> {
                         _ => return self.class_attribute(attribute, class, Some(receiver), None),
                     }
                 }
+                if receiver.ty == Type::Sha256 {
+                    return self.sha256_attribute(receiver, attribute);
+                }
                 if receiver.ty == Type::Logger {
                     return self.logger_attribute(receiver, attribute);
                 }
@@ -5038,40 +5042,6 @@ impl<'a> Checker<'a> {
             return self.call_local_function(call, &function);
         }
         if let ast::Expr::Attribute(method) = &*call.func
-            && method.attr.as_str() == "hexdigest"
-            && let ast::Expr::Call(constructor) = &*method.value
-            && self.resolve(&constructor.func) == Some(Binding::Intrinsic(Intrinsic::Sha256))
-        {
-            self.reject_builtin_keywords(call)?;
-            self.reject_builtin_keywords(constructor)?;
-            calls::reject_unpacking(constructor, self.source)?;
-            if !call.arguments.args.is_empty() {
-                return Err(error(
-                    self.source,
-                    call,
-                    "sha256.hexdigest() takes no arguments",
-                ));
-            }
-            let data = match constructor.arguments.args.as_ref() {
-                [] => Expr {
-                    ty: Type::Bytes,
-                    kind: ExprKind::Bytes(Vec::new()),
-                },
-                [data] => self.expr_expected(data, Type::Bytes)?,
-                _ => {
-                    return Err(error(
-                        self.source,
-                        constructor,
-                        "sha256 accepts zero or one positional bytes argument",
-                    ));
-                }
-            };
-            return Ok(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::Sha256Hex, vec![data]),
-            });
-        }
-        if let ast::Expr::Attribute(method) = &*call.func
             && method.attr.as_str() == "keys"
             && let ast::Expr::Call(load) = &*method.value
             && self.resolve(&load.func) == Some(Binding::Intrinsic(Intrinsic::TomllibLoad))
@@ -5125,13 +5095,7 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.async_builtin(kind, call);
             }
-            Some(Binding::Intrinsic(Intrinsic::Sha256)) => {
-                return Err(error(
-                    self.source,
-                    call,
-                    "sha256 is supported only with an immediate .hexdigest()",
-                ));
-            }
+            Some(Binding::Intrinsic(Intrinsic::Sha256)) => return self.sha256_constructor(call),
             Some(Binding::Intrinsic(Intrinsic::Counter)) => return self.counter(call, None, None),
             Some(Binding::Intrinsic(Intrinsic::GroupBy)) => {
                 return Err(error(
@@ -5372,6 +5336,9 @@ impl<'a> Checker<'a> {
             }
             if matches!(receiver.ty, Type::RegexPattern | Type::RegexMatch) {
                 return self.regex_method(receiver, attribute, call);
+            }
+            if receiver.ty == Type::Sha256 {
+                return self.sha256_method(receiver, attribute, call);
             }
             if receiver.ty == Type::Logger {
                 return self.logger_method(receiver, attribute, call);

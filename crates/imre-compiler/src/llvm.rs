@@ -75,6 +75,7 @@ impl Type {
             | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::Logger
+            | Self::Sha256
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -118,6 +119,7 @@ impl Type {
             | Self::AsyncProcess(_)
             | Self::TextIO
             | Self::Logger
+            | Self::Sha256
             | Self::RegexPattern
             | Self::JsonRoot
             | Self::JsonValue
@@ -686,6 +688,7 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::AsyncProcess(_)
             | Type::Logger
+            | Type::Sha256
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -3180,6 +3183,7 @@ impl Emitter<'_, '_> {
                 Type::Bool
                 | Type::None
                 | Type::Class(_)
+                | Type::Sha256
                 | Type::Exception
                 | Type::ExitCode
                 | Type::TimeoutExpired
@@ -3954,6 +3958,20 @@ impl Emitter<'_, '_> {
             Builtin::Encode => self.call("imre_str_encode", Type::Bytes, &[&args[0].value]),
             Builtin::Decode => self.call("imre_bytes_decode", Type::Str, &[&args[0].value]),
             Builtin::Sha256Hex => self.call("imre_sha256_hex", Type::Str, &[&args[0].value]),
+            Builtin::Sha256New => self.call("imre_sha256_new", Type::Sha256, &[&args[0].value]),
+            Builtin::Sha256Update => {
+                self.void_call("imre_sha256_update", &[&args[0].value, &args[1].value]);
+                none()
+            }
+            Builtin::Sha256Digest { hex } => {
+                let symbol = if *hex {
+                    "imre_sha256_hexdigest"
+                } else {
+                    "imre_sha256_digest"
+                };
+                self.call(symbol, returns, &[&args[0].value])
+            }
+            Builtin::Sha256Copy => self.call("imre_sha256_copy", Type::Sha256, &[&args[0].value]),
             Builtin::BytesValidateUtf8 => {
                 self.call("imre_bytes_validate_utf8", Type::Bytes, &[&args[0].value])
             }
@@ -4611,6 +4629,7 @@ impl Emitter<'_, '_> {
                     | Type::Semaphore
                     | Type::AsyncProcess(_)
                     | Type::Logger
+                    | Type::Sha256
                     | Type::RegexPattern
                     | Type::JsonRoot
                     | Type::JsonValue
@@ -4829,6 +4848,7 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::AsyncProcess(_)
             | Type::Logger
+            | Type::Sha256
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -4883,6 +4903,7 @@ impl Emitter<'_, '_> {
             | Type::Semaphore
             | Type::AsyncProcess(_)
             | Type::Logger
+            | Type::Sha256
             | Type::RegexPattern
             | Type::JsonRoot
             | Type::JsonValue
@@ -5427,6 +5448,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Semaphore
         | Type::AsyncProcess(_)
         | Type::Logger
+        | Type::Sha256
         | Type::RegexPattern
         | Type::JsonRoot
         | Type::JsonValue
@@ -5671,6 +5693,11 @@ declare ptr @imre_str_encode(ptr)
 declare ptr @imre_bytes_decode_splitlines(ptr)
 declare ptr @imre_bytes_decode(ptr)
 declare ptr @imre_sha256_hex(ptr)
+declare ptr @imre_sha256_new(ptr)
+declare void @imre_sha256_update(ptr, ptr)
+declare ptr @imre_sha256_digest(ptr)
+declare ptr @imre_sha256_hexdigest(ptr)
+declare ptr @imre_sha256_copy(ptr)
 declare ptr @imre_bytes_validate_utf8(ptr)
 declare ptr @imre_binary_open(ptr, i32)
 declare ptr @imre_binary_read(ptr)

@@ -59,6 +59,7 @@ pub(crate) enum Type {
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
     Logger,
+    Sha256,
     RegexMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
     JsonRoot,
@@ -146,6 +147,7 @@ impl std::fmt::Display for Type {
             Self::Semaphore => "asyncio.Semaphore",
             Self::RegexPattern => "re.Pattern[str]",
             Self::Logger => "logging.Logger",
+            Self::Sha256 => "SHA-256 hash",
             Self::RegexMatch => "re.Match[str]",
             Self::JsonRoot => "JSON document",
             Self::JsonValue => "JSON value",
@@ -534,6 +536,12 @@ pub(crate) enum Builtin {
     Encode,
     Decode,
     Sha256Hex,
+    Sha256New,
+    Sha256Update,
+    Sha256Digest {
+        hex: bool,
+    },
+    Sha256Copy,
     /// Validates complete UTF-8 at the decode evaluation point and returns a
     /// retained bytes identity for an internal allocation-free character gather.
     BytesValidateUtf8,

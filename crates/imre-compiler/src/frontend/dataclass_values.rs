@@ -34,6 +34,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::Semaphore
         | Type::AsyncProcess(_)
         | Type::Logger
+        | Type::Sha256
         | Type::RegexPattern
         | Type::RegexMatch
         | Type::ExitCode
@@ -98,7 +99,7 @@ pub(super) fn validate(
             if options.eq && field.compare && contains_opaque(ty, types) {
                 return Err(module.error(
                     &field.annotation,
-                    "generated dataclass equality cannot compare loggers, regex or TOML key views; use field(compare=False) or dataclass(eq=False)",
+                    "generated dataclass equality cannot compare opaque standard-library objects; use field(compare=False) or dataclass(eq=False)",
                 ));
             }
             if !graph.reachable_only() && options.repr && field.repr && !repr_supported(ty, types) {
@@ -115,7 +116,7 @@ pub(super) fn validate(
 fn contains_opaque(ty: Type, types: &Types) -> bool {
     matches!(
         ty,
-        Type::Logger | Type::RegexPattern | Type::RegexMatch | Type::StringKeys
+        Type::Logger | Type::Sha256 | Type::RegexPattern | Type::RegexMatch | Type::StringKeys
     ) || types
         .children(ty)
         .into_iter()

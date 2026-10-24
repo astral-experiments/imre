@@ -69,6 +69,12 @@ impl Session {
         let intrinsic = SystemPathBuf::from(root).join("imre");
         for (name, stub) in [
             (
+                "hashlib",
+                // The bundled OpenSSL stub still names the input `string`. CPython
+                // 3.14 calls it `data`; the native constructor takes exact bytes.
+                "from _hashlib import HASH as _Hash\ndef sha256(data: bytes = b'', *, usedforsecurity: bool = True) -> _Hash: ...\n",
+            ),
+            (
                 "tomli",
                 "from tomllib import load as load, loads as loads\n",
             ),
