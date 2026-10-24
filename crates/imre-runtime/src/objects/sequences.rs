@@ -466,9 +466,9 @@ pub unsafe extern "C" fn imre_str_int_list(value: *const Str) -> *const List {
         text.chars().count()
     };
     let mut values = crate::take_list_buffer(length);
-    values
-        .try_reserve_exact(length)
-        .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+    if values.try_reserve_exact(length).is_err() {
+        return Error::allocation().returning(std::ptr::null());
+    }
     if ascii {
         let mut invalid = false;
         for (slot, &byte) in values.spare_capacity_mut()[..length]
