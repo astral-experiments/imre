@@ -22,6 +22,7 @@ mod tuples;
 mod types;
 #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
 mod verify;
+mod watch;
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -75,15 +76,16 @@ impl SourceInputs {
 
 /// Checks a closed first-party module graph, inferring its package root when omitted.
 pub fn check_file(path: &Path, module_root: Option<&Path>) -> Result<(), String> {
-    check_file_with(path, module_root, None)
+    check_file_with(path, module_root, None, Default::default())
 }
 
 fn check_file_with(
     path: &Path,
     module_root: Option<&Path>,
     cache: Option<&mut analysis::AnalysisCache>,
+    filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
-    let mut graph = modules::SourceGraph::load(path, module_root)?;
+    let mut graph = modules::SourceGraph::load_with(path, module_root, filesystem)?;
     let (module, _) = checked_lower_with(&mut graph, cache)?;
     verify_after(&module, "lowering")
 }
@@ -131,7 +133,18 @@ pub struct IncrementalCompiler {
 impl IncrementalCompiler {
     /// Checks the current revision, including unused definitions in every reachable file.
     pub fn check_file(&mut self, path: &Path, module_root: Option<&Path>) -> Result<(), String> {
-        check_file_with(path, module_root, Some(&mut self.cache))
+        check_file_with(path, module_root, Some(&mut self.cache), Default::default())
+    }
+
+    /// Reports an initial check and subsequent source changes until interrupted. Source
+    /// diagnostics are delivered to `report`, so fixing a failed check can produce the next result.
+    pub fn watch_file(
+        &mut self,
+        path: &Path,
+        module_root: Option<&Path>,
+        report: impl FnMut(Result<(), String>),
+    ) -> Result<(), String> {
+        watch::check(&mut self.cache, path, module_root, report)
     }
 
     /// Checks the current revision and emits the same codegen units as [`compile_file_units`].

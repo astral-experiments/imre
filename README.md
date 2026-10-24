@@ -145,6 +145,8 @@ relar run totals.py -- 10 20 12
 
 Arguments after `--` go into the script’s `sys.argv`. Use `build` to keep the compiled executable.
 
+Use `relar check --watch totals.py` to see diagnostics as you edit the script or its imports. Press Ctrl-C to stop.
+
 `build` and `run` share cached executables and module objects by default with
 the bundled Linux toolchain. Source builds on x86-64 Debian and Ubuntu also
 support this cache with the distribution's Clang 18 toolchain. The build summary

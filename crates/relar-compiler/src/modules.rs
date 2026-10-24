@@ -8,6 +8,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use crate::analysis::Session;
+use crate::watch::FileSystem;
 
 pub(crate) type ModuleId = usize;
 
@@ -270,7 +271,7 @@ impl SourceGraph {
     /// An isolated source API supports sealed imports only; first-party imports
     /// require the path API and its filesystem search root.
     pub(crate) fn single(source: &str) -> Result<Self, String> {
-        let mut loader = Loader::new(PathBuf::from("/"))?;
+        let mut loader = Loader::new(PathBuf::from("/"), FileSystem::default())?;
         loader.allow_imports = false;
         let entry = loader.add(
             PathBuf::from("/input.py"),
@@ -284,8 +285,16 @@ impl SourceGraph {
     }
 
     pub(crate) fn load(entry: &Path, module_root: Option<&Path>) -> Result<Self, String> {
-        let entry = entry
-            .canonicalize()
+        Self::load_with(entry, module_root, FileSystem::default())
+    }
+
+    pub(crate) fn load_with(
+        entry: &Path,
+        module_root: Option<&Path>,
+        mut fs: FileSystem<'_>,
+    ) -> Result<Self, String> {
+        let entry = fs
+            .canonicalize(entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
         if entry.extension().and_then(|value| value.to_str()) != Some("py") {
             return Err("entry source must be a .py file".into());
@@ -295,14 +304,14 @@ impl SourceGraph {
         }
         let inferred = module_root.is_none();
         let root = if let Some(root) = module_root {
-            root.canonicalize()
+            fs.canonicalize(root)
                 .map_err(|error| format!("{}: {error}", root.display()))?
         } else {
             let mut root = entry
                 .parent()
                 .ok_or("entry source has no parent")?
                 .to_path_buf();
-            while root.join("__init__.py").is_file() {
+            while fs.is_file(&root.join("__init__.py")) {
                 root = root
                     .parent()
                     .ok_or("package has no module root")?
@@ -310,7 +319,7 @@ impl SourceGraph {
             }
             root
         };
-        if !root.is_dir() {
+        if !fs.is_dir(&root) {
             return Err("module root must be a directory".into());
         }
         let relative = entry
@@ -326,9 +335,10 @@ impl SourceGraph {
             })
             .collect::<Result<Vec<_>, _>>()?
             .join(".");
-        let source = std::fs::read_to_string(&entry)
+        let source = fs
+            .read_to_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
-        let mut loader = Loader::new(root)?;
+        let mut loader = Loader::new(root, fs)?;
         if inferred {
             loader.inputs.missing.push(loader.root.join("__init__.py"));
         }
@@ -374,7 +384,8 @@ fn resolve_binding(
     }
 }
 
-struct Loader {
+struct Loader<'a> {
+    fs: FileSystem<'a>,
     inputs: crate::SourceInputs,
     root: PathBuf,
     session: Session,
@@ -387,9 +398,10 @@ struct Loader {
     initialization: Vec<ModuleId>,
 }
 
-impl Loader {
-    fn new(root: PathBuf) -> Result<Self, String> {
+impl<'a> Loader<'a> {
+    fn new(root: PathBuf, fs: FileSystem<'a>) -> Result<Self, String> {
         Ok(Self {
+            fs,
             session: Session::new(&root)?,
             inputs: crate::SourceInputs::default(),
             root,
@@ -669,7 +681,7 @@ impl Loader {
                 self.root.join(name.replace('.', "/")),
             ] {
                 for candidate in [base.with_extension("py"), base.join("__init__.py")] {
-                    if candidate.exists() {
+                    if self.fs.exists(&candidate) {
                         return Err(format!(
                             "standard-library shadowing is unsupported: {name:?}"
                         ));
@@ -761,19 +773,22 @@ impl Loader {
         }
         let base = self.root.join(name.replace('.', "/"));
         let package = base.join("__init__.py");
-        let (path, is_package) = if package.is_file() {
+        let (path, is_package) = if self.fs.is_file(&package) {
             (package, true)
         } else {
             self.inputs.missing.push(package);
             (base.with_extension("py"), false)
         };
-        if !path.is_file() {
+        if !self.fs.is_file(&path) {
             return Err(format!(
                 "cannot resolve first-party module {name:?} under {}; external and namespace-package imports are unsupported",
                 self.root.display()
             ));
         }
-        let identity = path.canonicalize().map_err(|error| error.to_string())?;
+        let identity = self
+            .fs
+            .canonicalize(&path)
+            .map_err(|error| error.to_string())?;
         if !identity.starts_with(&self.root) {
             return Err(format!(
                 "module {name:?} resolves outside the first-party module root"
@@ -786,7 +801,9 @@ impl Loader {
                 self.modules[previous].name
             ));
         }
-        let source = std::fs::read_to_string(&path)
+        let source = self
+            .fs
+            .read_to_string(&path)
             .map_err(|error| format!("{}: {error}", path.display()))?;
         // ty resolves logical import paths; canonical identities enforce containment
         // and uniqueness without breaking a single internal symlink's import name.
