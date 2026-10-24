@@ -75,6 +75,10 @@ consuming the first glob.
 read-only `Sequence[str]` parameters. Line alignment, intraline Unicode hints,
 and popular-line handling follow CPython 3.12 with its default junk filters.
 The compiler can also pass the result to a parameter consumed immediately by `list`.
+The list snapshots both inputs. Changing an input or a shallow copy afterward
+preserves ordinary list semantics. A program that selects added or removed rows
+and sorts by the text after the two-character tag can skip intraline comparisons.
+Reading the raw rows yields the original ordering and `? ` guides.
 
 `itertools.groupby(source, key=...)` groups consecutive items with equal keys. In a
 `for key, group` loop, the first statement must assign `list(group)` to a separate

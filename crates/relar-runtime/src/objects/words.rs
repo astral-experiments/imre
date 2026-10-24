@@ -6,31 +6,35 @@
 //! Bare float words hold all binary64 bits; nullable floats instead own an Rc<f64>.
 
 use smallvec::SmallVec;
+use std::cell::Cell;
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 
-use super::{Bytes, Int, List, Object, Str, fail, records, unions};
+use super::{Bytes, Int, List, Object, Str, deferred_diff::Deferred, fail, records, unions};
 
 pub(super) const NULLABLE: u32 = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
-pub(super) struct WordKind(u32);
+pub(super) struct WordKind(u16);
 
 impl WordKind {
+    // Private to Words. A deferred list stores a plan instead of element words.
+    const DEFERRED: Self = Self(u16::MAX);
+
     pub(super) fn new(kind: u32) -> Self {
         if kind & !NULLABLE > 10 {
             fail("SystemError", "invalid concrete word representation");
         }
-        Self(kind)
+        Self(kind as u16)
     }
 
     pub(super) fn raw(self) -> u32 {
-        self.0
+        u32::from(self.0)
     }
 
     fn base(self) -> u32 {
-        self.0 & !NULLABLE
+        self.raw() & !NULLABLE
     }
 
     /// Reads the compiler's concrete field storage without reinterpreting pointer
@@ -57,7 +61,7 @@ impl WordKind {
     /// Validates scalar and null encodings; handle provenance remains an ABI
     /// precondition, as it cannot be established from an address alone.
     fn validate(self, word: usize) {
-        let nullable = self.0 & NULLABLE != 0;
+        let nullable = self.raw() & NULLABLE != 0;
         let valid = match self.base() {
             0 => word == 0,
             1 => word <= if nullable { 2 } else { 1 },
@@ -99,7 +103,7 @@ impl WordKind {
                 4 => Rc::increment_strong_count(word as *const List),
                 5 => Rc::increment_strong_count(word as *const Object),
                 6 => records::relar_record_retain(word as *const usize),
-                7 if self.0 & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
+                7 if self.raw() & NULLABLE != 0 => Rc::increment_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::increment_strong_count(word as *const Bytes),
                 9 => unions::relar_union_retain(word),
@@ -124,7 +128,7 @@ impl WordKind {
                 4 => crate::relar_list_release(word as *const List),
                 5 => Rc::decrement_strong_count(word as *const Object),
                 6 => records::relar_record_release(word as *const usize),
-                7 if self.0 & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
+                7 if self.raw() & NULLABLE != 0 => Rc::decrement_strong_count(word as *const f64),
                 7 => {}
                 8 => Rc::decrement_strong_count(word as *const Bytes),
                 9 => unions::relar_union_release(word),
@@ -159,6 +163,14 @@ impl Drop for OwnedWord {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StringOrder {
+    Unknown,
+    Scanned,
+    Ascending,
+    Unsorted,
+}
+
 /// A homogeneous buffer; the descriptor is shared by all element words.
 /// Three words fit inline; spilling preserves their existing owned references.
 #[repr(C)]
@@ -166,6 +178,8 @@ pub(super) struct Words {
     // Twice the saturated length, plus one when the buffer lives inside the handle.
     header: u32,
     pub(super) kind: WordKind,
+    // Fits beside the nine-bit word kind without growing a sequence handle.
+    string_order: Cell<StringOrder>,
     pub(super) values: SmallVec<[usize; 3]>,
 }
 
@@ -174,8 +188,74 @@ impl Words {
         Self {
             header: 1,
             kind: WordKind::new(kind),
+            string_order: Cell::new(StringOrder::Unknown),
             values: SmallVec::new(),
         }
+    }
+
+    /// An inline buffer can never have a saturated length. Reserve its unused
+    /// header value for an owned plan, keeping the ordinary sequence layout.
+    pub(super) fn deferred(plan: Deferred) -> Self {
+        let mut words = Self::new(3);
+        words.header = u32::MAX;
+        words.kind = WordKind::DEFERRED;
+        words.values.push(Box::into_raw(Box::new(plan)) as usize);
+        words
+    }
+
+    pub(super) fn plan(&self) -> Option<&Deferred> {
+        if self.kind == WordKind::DEFERRED {
+            debug_assert_eq!(self.header, u32::MAX);
+            debug_assert_eq!(self.values.len(), 1);
+            // SAFETY: only deferred() installs this sentinel and owned box.
+            Some(unsafe { &*(self.values[0] as *const Deferred) })
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn resolved(&self) -> &Self {
+        self.plan().map_or(self, Deferred::ordered)
+    }
+
+    /// A mutating alias gets its own ordinary buffer. Copies share only the
+    /// immutable snapshot and retain independent list identities and contents.
+    pub(super) fn resolve_mut(&mut self) {
+        if let Some(plan) = self.plan() {
+            *self = plan.ordered().copy_strings();
+        }
+    }
+
+    pub(super) fn copy_strings(&self) -> Self {
+        debug_assert!(self.plan().is_none());
+        self.check_kind(3);
+        let mut result = Self::new(3);
+        result.values.reserve(self.values.len());
+        for &word in &self.values {
+            // SAFETY: the source independently owns this exact string.
+            result
+                .values
+                .push(unsafe { self.kind.acquire(word) }.into_word());
+        }
+        result.update_header();
+        result
+    }
+
+    /// Borrows each exact string together with its independently owned word.
+    pub(super) fn strings(&self) -> impl Iterator<Item = (usize, &Str)> {
+        self.check_kind(3);
+        self.values.iter().map(|&word| {
+            // SAFETY: the exact descriptor proves each element is a rooted string.
+            (word, unsafe { &*(word as *const Str) })
+        })
+    }
+
+    /// Deferred words live in their plan even when their resolved list is
+    /// small. Its inline bit must never address the plan pointer as an element.
+    pub(super) fn resolved_header(&self) -> u32 {
+        self.plan().map_or(self.header, |plan| {
+            Self::header_for(plan.ordered().values.len(), false)
+        })
     }
 
     /// An empty inline buffer normally has header 1. Publishing length zero
@@ -192,7 +272,9 @@ impl Words {
 
     /// Publish a fully initialized buffer after bulk initialization by a decoder or splitter.
     pub(super) fn into_object(mut self) -> Rc<Object> {
-        self.update_header();
+        if self.kind != WordKind::DEFERRED {
+            self.update_header();
+        }
         Rc::new(Object(super::StorageCell::new(super::Storage::Sequence(
             self,
         ))))
@@ -200,6 +282,7 @@ impl Words {
 
     /// A saturated header defers to the full-width buffer length in the runtime.
     pub(super) fn update_header(&mut self) {
+        debug_assert_ne!(self.kind, WordKind::DEFERRED);
         self.header = Self::header_for(self.values.len(), !self.values.spilled());
     }
 
@@ -213,6 +296,62 @@ impl Words {
         if self.kind != WordKind::new(kind) {
             fail("SystemError", "sequence element representation changed");
         }
+    }
+
+    /// Every mutation of a published sequence invalidates its ordering proof.
+    pub(super) fn forget_order(&mut self) {
+        *self.string_order.get_mut() = StringOrder::Unknown;
+    }
+
+    /// Checks ascending order once for a resolved string sequence. A mutable
+    /// borrow clears the proof before exposing its element words.
+    pub(super) fn strings_ascending(&self) -> bool {
+        match self.string_order.get() {
+            StringOrder::Ascending => true,
+            StringOrder::Unsorted => false,
+            StringOrder::Unknown | StringOrder::Scanned => {
+                let sorted = self.strings().map(|(_, text)| text).is_sorted();
+                self.string_order.set(if sorted {
+                    StringOrder::Ascending
+                } else {
+                    StringOrder::Unsorted
+                });
+                sorted
+            }
+        }
+    }
+
+    /// Tests exact string membership, checking for ascending order only after
+    /// a previous search read a substantial part of the list.
+    ///
+    /// # Safety
+    /// The caller roots every word as a non-null, immutable string throughout.
+    pub(super) unsafe fn contains_string(&self, needle: &Str) -> bool {
+        debug_assert_eq!(self.kind.raw(), 3);
+        // SAFETY: the list independently roots every exact string being compared.
+        let text = |word: usize| unsafe { &*(word as *const Str) };
+        let scan = || {
+            self.values.iter().position(|&word| {
+                let item = text(word);
+                std::ptr::eq(item, needle) || item == needle
+            })
+        };
+        if self.values.len() < 64 {
+            return scan().is_some();
+        }
+        if self.string_order.get() == StringOrder::Unknown {
+            let hit = scan();
+            if hit.unwrap_or(self.values.len()) >= self.values.len() / 2 {
+                self.string_order.set(StringOrder::Scanned);
+            }
+            return hit.is_some();
+        }
+        if !self.strings_ascending() {
+            return scan().is_some();
+        }
+        self.values
+            .binary_search_by(|&word| text(word).cmp(needle))
+            .is_ok()
     }
 }
 
@@ -242,6 +381,11 @@ pub extern "C" fn relar_seq_layout() -> SequenceLayout {
 
 impl Drop for Words {
     fn drop(&mut self) {
+        if self.kind == WordKind::DEFERRED {
+            // SAFETY: the deferred header owns exactly this one boxed plan.
+            drop(unsafe { Box::from_raw(self.values[0] as *mut Deferred) });
+            return;
+        }
         for word in self.values.drain(..) {
             // SAFETY: each buffer word owns its declared value independently.
             unsafe { self.kind.release(word) };
@@ -334,6 +478,41 @@ mod tests {
             drop(alias);
             assert_eq!(Rc::strong_count(&popped), 1);
             drop(popped);
+            assert!(weak.upgrade().is_none());
+        }
+    }
+
+    #[test]
+    fn deferred_header_never_exposes_the_plan_as_an_inline_string() {
+        use super::super::deferred_diff::{
+            relar_ndiff_deferred, relar_seq_resolve_header, relar_str_list_copy,
+        };
+        use super::super::{relar_seq_append, relar_seq_data_readonly};
+
+        let held = Rc::new(Str::new("rooted"));
+        let weak = Rc::downgrade(&held);
+        let input = Words::new(3).into_object();
+        // SAFETY: all handles remain rooted through their last access. The
+        // buffer pointer is read before either the list or a copy is changed.
+        unsafe {
+            relar_seq_append(Rc::as_ptr(&input), Rc::as_ptr(&held) as usize, 3);
+            let diff = Rc::from_raw(relar_ndiff_deferred(Rc::as_ptr(&input), Rc::as_ptr(&input)));
+            let copy = Rc::from_raw(relar_str_list_copy(Rc::as_ptr(&diff)));
+            drop(held);
+            drop(input);
+            let layout = relar_seq_layout();
+            let handle = Rc::as_ptr(&diff);
+            assert_eq!(
+                handle.byte_add(layout.header).cast::<u32>().read(),
+                u32::MAX
+            );
+            assert_eq!(relar_seq_resolve_header(handle), 2);
+            let data = relar_seq_data_readonly(handle);
+            assert_ne!(data, handle.byte_add(layout.inline_words).cast());
+            assert_eq!((&*(data.read() as *const Str)).as_str(), "  rooted");
+            drop(diff);
+            assert!(weak.upgrade().is_some());
+            drop(copy);
             assert!(weak.upgrade().is_none());
         }
     }

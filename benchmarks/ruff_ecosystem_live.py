@@ -1,14 +1,14 @@
 """Time Ruff's original ecosystem check on the same cached revisions as CPython."""
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 
 def git(directory, *arguments):
@@ -52,6 +52,7 @@ def main():
     p.add_argument("--cache", type=Path, required=True)
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--cpython-only", action="store_true")
+    p.add_argument("--force-preview", action="store_true", help="use Ruff preview rules on every project")
     p.add_argument("--rounds", type=int, default=1)
     p.add_argument("--cpu", type=int, help="Linux CPU for a deterministic Ruff file walk")
     args = p.parse_args()
@@ -66,7 +67,10 @@ def main():
         os.sched_setaffinity(0, {args.cpu})
     packages = Path(__file__).resolve().parents[1] / "examples" / "ruff_ecosystem"
     env = dict(os.environ, PYTHONPATH=str(packages), PYTHONHASHSEED="0", RAYON_NUM_THREADS="1" if args.cpu is not None else "2")
-    command = ["-v", "--cache", cache, "check", args.old_ruff.resolve(), args.new_ruff.resolve()]
+    command = ["-v", "--cache", cache]
+    if args.force_preview:
+        command.append("--force-preview")
+    command.extend(["check", args.old_ruff.resolve(), args.new_ruff.resolve()])
     arms = {"cpython": [args.python.absolute(), "-B", "-m", "ruff_ecosystem"]}
     if not args.cpython_only:
         if args.relar is None:
@@ -90,7 +94,7 @@ def main():
                     raise ValueError(f"{project} moved during {arm}")
         if "relar" in outputs and outputs["relar"] != outputs["cpython"]:
             raise ValueError(f"live reports differ in round {round_ + 1}; reports and stderr were saved to {out}")
-    evidence = {"cpu": args.cpu, "samples": samples, "revisions": revisions, "ruff": [
+    evidence = {"cpu": args.cpu, "force_preview": args.force_preview, "samples": samples, "revisions": revisions, "ruff": [
         subprocess.check_output([exe, "--version"], text=True).strip()
         for exe in (args.old_ruff, args.new_ruff)
     ]}

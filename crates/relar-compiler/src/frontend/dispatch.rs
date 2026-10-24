@@ -2,15 +2,16 @@
 
 use super::*;
 
-impl Checker<'_> {
+impl ClassInfo {
     pub(super) fn has_concrete_subclasses(&self, class: usize) -> bool {
-        self.classes
-            .declarations
+        self.declarations
             .definitions
             .iter()
             .any(|c| c.abstract_methods.is_empty() && c.bases.contains(&class))
     }
+}
 
+impl Checker<'_> {
     /// Evaluates the receiver once. Only the selected branch evaluates arguments
     /// or default factories. The record header already carries its concrete layout.
     pub(super) fn dispatch_record(

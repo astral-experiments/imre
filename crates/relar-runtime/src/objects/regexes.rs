@@ -1,12 +1,14 @@
 //! Fixed string patterns and immutable snapshots of participating capture spans.
 
+mod captures;
+
+use captures::AnchoredCaptures;
 use std::cell::Cell;
 use std::ptr;
 use std::rc::Rc;
 
 use memchr::memmem::Finder;
 use regex_automata::meta::{self, Regex};
-use regex_automata::nfa::thompson::backtrack::{self, BoundedBacktracker};
 use regex_automata::util::primitives::NonMaxUsize;
 use regex_automata::{Anchored, Input, PatternID};
 use regex_syntax::hir::{Hir, HirKind, literal::Extractor};
@@ -20,15 +22,9 @@ pub(super) struct Pattern {
     cache: meta::Cache,
     slots: Vec<Option<NonMaxUsize>>,
     required: Vec<(Finder<'static>, Option<Vec<u8>>)>,
-    anchored: Option<PrefixSearch>,
+    anchored: Option<AnchoredCaptures>,
     final_newline_slot: Option<usize>,
     named_groups: Vec<(usize, Rc<Str>)>,
-}
-
-struct PrefixSearch {
-    first: u8,
-    engine: BoundedBacktracker,
-    cache: backtrack::Cache,
 }
 
 /// Every match must contain this literal; branches and optional repetitions do
@@ -75,15 +71,11 @@ impl Pattern {
             .longest_common_prefix()
             .and_then(|s| s.first().copied())
             .filter(u8::is_ascii);
-        let anchored = first.and_then(|first| {
-            let engine = BoundedBacktracker::new(source).ok()?;
-            let cache = engine.create_cache();
-            Some(PrefixSearch {
-                first,
-                engine,
-                cache,
-            })
-        });
+        let anchored = if first.is_some() || hir.properties().explicit_captures_len() != 0 {
+            AnchoredCaptures::new(&hir, first)
+        } else {
+            None
+        };
         // At least one branch's mandatory substring must exist. An unguarded
         // branch disables the shortcut, as does an unusually wide alternation.
         let branches = match hir.kind() {
@@ -139,14 +131,33 @@ impl Pattern {
                 })
     }
 
+    /// The start is already known for match(). A single bounded capture pass
+    /// avoids rediscovering the match boundaries before extracting its groups.
+    fn match_start(&mut self, text: &str) -> bool {
+        if !self.could_match(text.as_bytes(), true) {
+            return false;
+        }
+        let input = Input::new(text).anchored(Anchored::Yes);
+        if let Some(bounded) = &mut self.anchored
+            && let Ok(found) = bounded.search(&input, &mut self.slots)
+        {
+            return found.is_some();
+        }
+        self.regex
+            .search_slots_with(&mut self.cache, &input, &mut self.slots)
+            .is_some()
+    }
+
     fn search(&mut self, text: &str) -> bool {
         let bytes = text.as_bytes();
         if !self.could_match(bytes, false) {
             return false;
         }
         let mut start = 0;
-        if let Some(prefix) = &mut self.anchored {
-            let Some(at) = memchr::memchr(prefix.first, bytes) else {
+        if let Some(prefix) = &mut self.anchored
+            && let Some(first) = prefix.first
+        {
+            let Some(at) = memchr::memchr(first, bytes) else {
                 return false;
             };
             let input = Input::new(text)
@@ -155,13 +166,10 @@ impl Pattern {
             // One anchored attempt avoids the general engine's forward/reverse
             // search on hits. A size-limit error or further candidates fall back
             // to one unanchored search, which preserves the worst-case time bound.
-            match prefix
-                .engine
-                .try_search_slots(&mut prefix.cache, &input, &mut self.slots)
-            {
+            match prefix.search(&input, &mut self.slots) {
                 Ok(Some(_)) => return true,
                 Ok(None) => {
-                    let Some(next) = memchr::memchr(prefix.first, &bytes[at + 1..]) else {
+                    let Some(next) = memchr::memchr(first, &bytes[at + 1..]) else {
                         return false;
                     };
                     start = at + 1 + next;
@@ -309,15 +317,7 @@ unsafe fn match_text(pattern: *const Object, text: *const Str, anchored: bool) -
                 fail("SystemError", "expected a compiled regex");
             };
             let found = if anchored {
-                compiled.could_match((&*text).as_bytes(), true)
-                    && compiled
-                        .regex
-                        .search_slots_with(
-                            &mut compiled.cache,
-                            &Input::new((&*text).as_str()).anchored(Anchored::Yes),
-                            &mut compiled.slots,
-                        )
-                        .is_some()
+                compiled.match_start((&*text).as_str())
             } else {
                 compiled.search(&*text)
             };
@@ -550,10 +550,33 @@ mod tests {
         let mut pattern = Pattern::new("a[ab]+Z");
         assert!(pattern.search("a!abc abbaZ"));
         assert_eq!(pattern.slots[0].unwrap().get(), 6);
-        let limit = pattern.anchored.as_ref().unwrap().engine.max_haystack_len();
+        let limit = pattern.anchored.as_ref().unwrap().max_haystack_len();
         let long = format!("a{}Z", "b".repeat(limit + 1));
         assert!(pattern.search(&long));
         assert_eq!(pattern.slots[1].unwrap().get(), long.len());
+    }
+
+    #[test]
+    fn anchored_captures_without_a_fixed_prefix_match_the_general_engine() {
+        let mut pattern = Pattern::new(r"(?P<sign>[+-])? *(?P<code>[A-Z]+):(.+)");
+        let bounded = pattern.anchored.as_ref().unwrap();
+        assert_eq!(bounded.first, None);
+        let long = format!("B:{}", "x".repeat(bounded.max_haystack_len() + 1));
+        for text in ["-  XY:é", "B:x", "bad A:x", long.as_str()] {
+            let mut expected = vec![None; pattern.slots.len()];
+            let found = pattern
+                .regex
+                .search_slots_with(
+                    &mut pattern.cache,
+                    &Input::new(text).anchored(Anchored::Yes),
+                    &mut expected,
+                )
+                .is_some();
+            assert_eq!(pattern.match_start(text), found);
+            if found {
+                assert_eq!(pattern.slots, expected);
+            }
+        }
     }
 
     #[test]

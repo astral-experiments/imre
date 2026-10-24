@@ -126,7 +126,8 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
         .declarations
         .definitions
         .iter()
-        .map(|class| ir::ClassMetadata {
+        .enumerate()
+        .map(|(id, class)| ir::ClassMetadata {
             name: class.name.clone(),
             enum_members: class
                 .enum_members
@@ -142,6 +143,11 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                 },
                 class.name
             ),
+            frozen_initializer: (class.generated_initializer
+                && class.dataclass.is_some_and(|options| options.frozen)
+                && !classes.methods[id].contains_key("__post_init__")
+                && !classes.has_concrete_subclasses(id))
+            .then(|| classes.methods[id]["__init__"].id),
             dataclass_eq: class.dataclass.as_ref().is_some_and(|options| options.eq),
             dataclass_repr: class.dataclass.as_ref().is_some_and(|options| options.repr),
             toml_hash: class.toml_hash,

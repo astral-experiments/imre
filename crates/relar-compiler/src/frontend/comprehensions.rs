@@ -399,6 +399,15 @@ impl Checker<'_> {
         expression: &ast::Expr,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
+        if let ast::Expr::ListComp(list) = expression
+            && let Some(filtered) = self.string_list_filter(
+                &list.generators,
+                &list.elt,
+                expected.and_then(|ty| self.types.element(ty)),
+            )?
+        {
+            return Ok(filtered);
+        }
         let display = Display::from_expr(expression)
             .ok_or_else(|| error(self.source, expression, "unsupported comprehension display"))?;
         self.comprehension_display(expression, display, expected)

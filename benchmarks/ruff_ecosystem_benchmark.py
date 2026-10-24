@@ -217,6 +217,91 @@ def measure(args):
         output.write((json.dumps(result, indent=2) + "\n").encode())
 
 
+def measure_preview(args):
+    """Check one upstream CPython run or a pinned report, then time three native arms."""
+    if platform.system() != "Linux":
+        raise ValueError("preview measurements require Linux process RSS and affinity")
+    os.sched_setaffinity(0, {args.cpu})
+    manifest = json.loads((HERE / "fixtures/ruff_ecosystem/preview.json").read_text())
+    commands = {
+        name: [str(getattr(args, name).resolve())]
+        for name in ("relar", "rust", "codon")
+    }
+    env = dict(
+        os.environ,
+        PYTHONHASHSEED="0",
+        PYTHONNOUSERSITE="1",
+        PYTHONPATH=str(SOURCE.parent),
+    )
+    evidence = {
+        "cpu": args.cpu,
+        "platform": platform.platform(),
+        "commands": commands,
+        "artifacts": [file_id(Path(command[0])) for command in commands.values()],
+        "cases": {},
+    }
+    if args.python:
+        evidence["python"] = subprocess.check_output(
+            [args.python, "--version"], text=True
+        ).strip()
+    schedule = orders(list(commands))
+    for project in manifest["projects"]:
+        directory = args.captures / project["name"]
+        expected_row = [
+            project["owner"],
+            project["name"],
+            project["revision"],
+            "old",
+            "new",
+        ]
+        if (directory / "projects.tsv").read_text().splitlines() != [
+            "\t".join(expected_row)
+        ]:
+            raise ValueError(
+                f"{directory}: wrong project name, revision or capture filenames"
+            )
+        for name, digest in zip(("old", "new"), project["sha256"], strict=True):
+            verify(directory / name, digest)
+        record = evidence["cases"][project["name"]] = dict(
+            project["report"], samples={k: [] for k in commands}
+        )
+        arguments = [directory, "1"]
+        # CPython 3.12's all-pairs intraline search is prohibitively expensive on the full inputs.
+        oracle = None
+        if args.python:
+            oracle, record["cpython"] = run(
+                [str(args.python.absolute()), "-B", str(SOURCE)], arguments, env
+            )
+        for i in range(-1, len(schedule)):
+            for engine in schedule[i % len(schedule)]:
+                out, sample = run(commands[engine], arguments, env)
+                if (
+                    hashlib.sha256(out).hexdigest() != record["sha256"]
+                    or len(out) != record["bytes"]
+                    or (oracle is not None and out != oracle)
+                ):
+                    raise ValueError(
+                        f"{engine} produced different Markdown for {project['name']}"
+                    )
+                if i >= 0:
+                    record["samples"][engine].append(sample)
+        record["median"] = {
+            engine: {
+                key: statistics.median(s[key] for s in samples) for key in samples[0]
+            }
+            for engine, samples in record["samples"].items()
+        }
+        record["relar_over_rust"] = (
+            record["median"]["relar"]["wall_ns"] / record["median"]["rust"]["wall_ns"]
+        )
+        print(
+            f"{project['name']}: Relar / Rust {record['relar_over_rust']:.3f}",
+            flush=True,
+        )
+    with gzip.GzipFile(filename=str(args.output), mode="wb", mtime=0) as output:
+        output.write((json.dumps(evidence, indent=2) + "\n").encode())
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     subs = parser.add_subparsers(dest="command", required=True)
@@ -229,8 +314,19 @@ def main():
     bench.add_argument("--python", type=Path, default=Path(sys.executable))
     bench.add_argument("--cpu", type=int, required=True)
     bench.add_argument("--rounds", type=int, default=4)
+    preview = subs.add_parser("preview")
+    for name in ("captures", "relar", "codon", "rust", "output"):
+        preview.add_argument("--" + name, type=Path, required=True)
+    preview.add_argument(
+        "--python",
+        type=Path,
+        help="also run unchanged CPython on each full project (use 3.14)",
+    )
+    preview.add_argument("--cpu", type=int, required=True)
     args = parser.parse_args()
-    (capture if args.command == "capture" else measure)(args)
+    {"capture": capture, "bench": measure, "preview": measure_preview}[args.command](
+        args
+    )
 
 
 if __name__ == "__main__":

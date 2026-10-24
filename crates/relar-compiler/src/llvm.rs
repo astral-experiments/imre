@@ -4117,7 +4117,45 @@ impl Emitter<'_, '_> {
                 self.call("relar_bytes_decode_splitlines", returns, &[&args[0].value])
             }
             Builtin::SplitLines => self.call("relar_str_splitlines", returns, &[&args[0].value]),
-            Builtin::Ndiff => self.call("relar_ndiff", returns, &[&args[0].value, &args[1].value]),
+            Builtin::Ndiff => self.call(
+                "relar_ndiff_deferred",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::StringListCopy => self.call("relar_str_list_copy", returns, &[&args[0].value]),
+            Builtin::StringListNonempty => {
+                let found = self.instruction(format!(
+                    "call i32 @relar_str_list_nonempty(ptr {})",
+                    args[0].value.operand
+                ));
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!("icmp ne i32 {found}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::StringListFilter(strip) => {
+                let second =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
+                let exclude =
+                    self.instruction(format!("inttoptr i64 {} to ptr", args[3].value.operand));
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_str_list_filter(ptr {}, ptr {}, ptr {second}, ptr {exclude}, i32 {strip})",
+                        args[0].value.operand, args[1].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::StringListSortSuffix(skip) => Value {
+                ty: returns,
+                operand: self.instruction(format!(
+                    "call ptr @relar_str_list_sorted_suffix(ptr {}, i32 {skip})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::RStrip => {
                 let chars = if let Some(arg) = args.get(1) {
                     let word = self.word(&arg.value);
@@ -5216,9 +5254,9 @@ declare ptr @relar_json_encode(i64, ptr, i64, i32)
 declare ptr @relar_record_cached_result(ptr)
 declare void @relar_record_retain(ptr)
 declare void @relar_record_release(ptr)
-declare i32 @relar_record_equal(ptr, ptr) nounwind memory(read)
-declare i32 @relar_sequence_equal(ptr, ptr) nounwind memory(read)
-declare i32 @relar_tuple_compare(ptr, ptr) nounwind memory(read)
+declare i32 @relar_record_equal(ptr, ptr) nounwind
+declare i32 @relar_sequence_equal(ptr, ptr) nounwind
+declare i32 @relar_tuple_compare(ptr, ptr) nounwind
 declare ptr @relar_value_repr(i64, i32)
 declare void @relar_object_retain(ptr)
 declare void @relar_object_release(ptr)
@@ -5226,19 +5264,26 @@ declare ptr @relar_seq_new(i32)
 declare i64 @relar_seq_get(ptr, i64)
 declare void @relar_seq_set(ptr, i64, i64, i32)
 declare i64 @relar_seq_get_index(ptr, i64)
-declare i64 @relar_seq_borrow_index_proven(ptr, i64) nounwind memory(argmem: read)
-declare ptr @relar_seq_data_readonly(ptr) nounwind memory(argmem: read)
+declare i64 @relar_seq_borrow_index_proven(ptr, i64) nounwind
+declare ptr @relar_seq_data_readonly(ptr) nounwind
 declare void @relar_seq_set_index(ptr, i64, i64, i32)
 declare void @relar_seq_append(ptr, i64, i32)
 declare i64 @relar_seq_pop(ptr)
-declare i64 @relar_seq_len(ptr) nounwind memory(argmem: read)
+declare i64 @relar_seq_len(ptr) nounwind
 declare { i64, i64 } @relar_seq_layout() nounwind willreturn memory(none)
+declare i32 @relar_seq_resolve_header(ptr) nounwind
 @sequence_layout = internal global { i64, i64 } zeroinitializer
 define internal i32 @sequence_header(ptr %sequence) alwaysinline nounwind {
   %offset = load i64, ptr @sequence_layout
   %field = getelementptr inbounds i8, ptr %sequence, i64 %offset
   %length = load i32, ptr %field, align 4
+  %ordinary = icmp ne i32 %length, -1
+  br i1 %ordinary, label %cached, label %deferred, !prof !1
+cached:
   ret i32 %length
+deferred:
+  %resolved = call i32 @relar_seq_resolve_header(ptr %sequence)
+  ret i32 %resolved
 }
 define internal i64 @relar_seq_len_fast(ptr %sequence) alwaysinline nounwind {
   %length = call i32 @sequence_header(ptr %sequence)
@@ -5314,7 +5359,11 @@ declare i64 @relar_str_find(ptr, ptr, i64)
 declare void @relar_str_partition(ptr, ptr, ptr)
 declare ptr @relar_str_unquote(ptr)
 declare ptr @relar_str_splitlines(ptr)
-declare ptr @relar_ndiff(ptr, ptr)
+declare ptr @relar_ndiff_deferred(ptr, ptr)
+declare ptr @relar_str_list_copy(ptr)
+declare ptr @relar_str_list_filter(ptr, ptr, ptr, ptr, i32)
+declare ptr @relar_str_list_sorted_suffix(ptr, i32)
+declare i32 @relar_str_list_nonempty(ptr)
 declare ptr @relar_str_rstrip(ptr, ptr)
 declare void @relar_list_extend_unhinted(ptr, i32)
 declare ptr @relar_sort_detach(ptr, i32)
