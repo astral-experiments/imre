@@ -208,6 +208,7 @@ impl Builtin {
             | Self::Slice
             | Self::StringFormat
             | Self::StringJoin
+            | Self::StringReplace
             | Self::StringGet
             | Self::StringIntList
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
@@ -262,7 +263,6 @@ impl Builtin {
             | Self::EnumString
             | Self::StringListContains
             | Self::StringContains
-            | Self::StringReplace
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
             Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
@@ -553,6 +553,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
                 | "imre_str_join"
+                | "imre_str_replace"
                 | "imre_print_str"
                 | "imre_print_bytes"
                 | "imre_bytes_count"
