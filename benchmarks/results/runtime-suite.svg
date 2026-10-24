@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="600pt" height="537pt" viewBox="0 0 600 537" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="600pt" height="666pt" viewBox="0 0 600 666" xmlns="http://www.w3.org/2000/svg" version="1.1">
  <title>Median runtime by workload</title>
  <metadata>
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
@@ -18,502 +18,725 @@
   </rdf:RDF>
  </metadata>
  <defs>
-  <style>:root {--ink: #0a0a0a; --muted: #525252; --faint: #707070; --rule: #e2e2e2; --surface: #ffffff; --bar: #181818; --accent: #ff1f8f; --accent-ink: #d60066} @media (prefers-color-scheme: dark) {:root {--ink: #e6edf3; --muted: #a8b1bb; --faint: #919ba5; --rule: #30363d; --surface: #0d1117; --bar: #969694; --accent: #ff2e97; --accent-ink: #ff5cb0}}</style>
+  <style>
+    :root {--ink: #192b28; --muted: #667772; --rule: #dee7e2; --surface: #ffffff; --bar: #b5c2be; --track: #eef2f0; --accent: #127b67}
+    text {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+      font-variant-numeric: tabular-nums;
+    }
+    @media (prefers-color-scheme: dark) {:root {--ink: #e5eeeb; --muted: #9eaea8; --rule: #2c3934; --surface: #111a16; --bar: #667b71; --track: #233029; --accent: #64d3b2}}
+  </style>
   <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
  </defs>
  <g id="figure_1">
   <g id="patch_1">
-   <path d="M 0 537
-L 600 537
+   <path d="M 0 666
+L 600 666
 L 600 0
 L 0 0
-L 0 537
+L 0 666
 z
 " style="fill: none"/>
   </g>
   <g id="axes_1">
    <g id="patch_2">
-    <path d="M 0.375 0.375
-L 293.625 0.375
-L 293.625 161.625
-L 0.375 161.625
+    <path d="M 9.375 0.375
+L 281.625 0.375
+Q 290.625 0.375 290.625 9.375
+L 290.625 191.625
+Q 290.625 200.625 281.625 200.625
+L 9.375 200.625
+Q 0.375 200.625 0.375 191.625
+L 0.375 9.375
+Q 0.375 0.375 9.375 0.375
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
    </g>
    <g id="patch_3">
-    <path d="M 63 59.25
-L 113.201048 59.25
-L 113.201048 69.75
-L 63 69.75
+    <path d="M 21 90
+L 270 90
+Q 273 90 273 93
+L 273 93
+Q 273 96 270 96
+L 21 96
+Q 18 96 18 93
+L 18 93
+Q 18 90 21 90
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--bar)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
    <g id="patch_4">
-    <path d="M 63 83.25
-L 122.608013 83.25
-L 122.608013 93.75
-L 63 93.75
+    <path d="M 21 90
+L 98.668414 90
+Q 101.668414 90 101.668414 93
+L 101.668414 93
+Q 101.668414 96 98.668414 96
+L 21 96
+Q 18 96 18 93
+L 18 93
+Q 18 90 21 90
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--accent)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_5">
-    <path d="M 63 107.25
-L 216 107.25
-L 216 117.75
-L 63 117.75
+    <path d="M 21 132
+L 270 132
+Q 273 132 273 135
+L 273 135
+Q 273 138 270 138
+L 21 138
+Q 18 138 18 135
+L 18 135
+Q 18 132 21 132
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--bar)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
    <g id="patch_6">
-    <path d="M 306.375 0.375
-L 599.625 0.375
-L 599.625 161.625
-L 306.375 161.625
+    <path d="M 21 132
+L 114.346688 132
+Q 117.346688 132 117.346688 135
+L 117.346688 135
+Q 117.346688 138 114.346688 138
+L 21 138
+Q 18 138 18 135
+L 18 135
+Q 18 132 21 132
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--accent)"/>
    </g>
    <g id="patch_7">
-    <path d="M 369 59.25
-L 431.239496 59.25
-L 431.239496 69.75
-L 369 69.75
+    <path d="M 21 174
+L 270 174
+Q 273 174 273 177
+L 273 177
+Q 273 180 270 180
+L 21 180
+Q 18 180 18 177
+L 18 177
+Q 18 174 21 174
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--bar)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
    <g id="patch_8">
-    <path d="M 369 83.25
-L 441.263646 83.25
-L 441.263646 93.75
-L 369 93.75
+    <path d="M 21 174
+L 270 174
+Q 273 174 273 177
+L 273 177
+Q 273 180 270 180
+L 21 180
+Q 18 180 18 177
+L 18 177
+Q 18 174 21 174
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--accent)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_9">
-    <path d="M 369 107.25
-L 522 107.25
-L 522 117.75
-L 369 117.75
+    <path d="M 318.375 0.375
+L 590.625 0.375
+Q 599.625 0.375 599.625 9.375
+L 599.625 191.625
+Q 599.625 200.625 590.625 200.625
+L 318.375 200.625
+Q 309.375 200.625 309.375 191.625
+L 309.375 9.375
+Q 309.375 0.375 318.375 0.375
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--bar)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
    </g>
    <g id="patch_10">
-    <path d="M 0.375 174.375
-L 293.625 174.375
-L 293.625 335.625
-L 0.375 335.625
+    <path d="M 330 90
+L 579 90
+Q 582 90 582 93
+L 582 93
+Q 582 96 579 96
+L 330 96
+Q 327 96 327 93
+L 327 93
+Q 327 90 330 90
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
    <g id="patch_11">
-    <path d="M 63 233.25
-L 70.687964 233.25
-L 70.687964 243.75
-L 63 243.75
+    <path d="M 330 90
+L 427.732493 90
+Q 430.732493 90 430.732493 93
+L 430.732493 93
+Q 430.732493 96 427.732493 96
+L 330 96
+Q 327 96 327 93
+L 327 93
+Q 327 90 330 90
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--bar)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_12">
-    <path d="M 63 257.25
-L 75.938662 257.25
-L 75.938662 267.75
-L 63 267.75
+    <path d="M 330 132
+L 579 132
+Q 582 132 582 135
+L 582 135
+Q 582 138 579 138
+L 330 138
+Q 327 138 327 135
+L 327 135
+Q 327 132 330 132
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--accent)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
    <g id="patch_13">
-    <path d="M 63 281.25
-L 216 281.25
-L 216 291.75
-L 63 291.75
+    <path d="M 330 132
+L 444.43941 132
+Q 447.43941 132 447.43941 135
+L 447.43941 135
+Q 447.43941 138 444.43941 138
+L 330 138
+Q 327 138 327 135
+L 327 135
+Q 327 132 330 132
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--bar)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--accent)"/>
    </g>
    <g id="patch_14">
-    <path d="M 306.375 174.375
-L 599.625 174.375
-L 599.625 335.625
-L 306.375 335.625
+    <path d="M 330 174
+L 579 174
+Q 582 174 582 177
+L 582 177
+Q 582 180 579 180
+L 330 180
+Q 327 180 327 177
+L 327 177
+Q 327 174 330 174
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
    <g id="patch_15">
-    <path d="M 369 233.25
-L 374.398887 233.25
-L 374.398887 243.75
-L 369 243.75
+    <path d="M 330 174
+L 579 174
+Q 582 174 582 177
+L 582 177
+Q 582 180 579 180
+L 330 180
+Q 327 180 327 177
+L 327 177
+Q 327 174 330 174
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--bar)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_16">
-    <path d="M 369 257.25
-L 382.388202 257.25
-L 382.388202 267.75
-L 369 267.75
+    <path d="M 9.375 219.375
+L 281.625 219.375
+Q 290.625 219.375 290.625 228.375
+L 290.625 410.625
+Q 290.625 419.625 281.625 419.625
+L 9.375 419.625
+Q 0.375 419.625 0.375 410.625
+L 0.375 228.375
+Q 0.375 219.375 9.375 219.375
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--accent)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
    </g>
    <g id="patch_17">
-    <path d="M 369 281.25
-L 522 281.25
-L 522 291.75
-L 369 291.75
+    <path d="M 21 309
+L 270 309
+Q 273 309 273 312
+L 273 312
+Q 273 315 270 315
+L 21 315
+Q 18 315 18 312
+L 18 312
+Q 18 309 21 309
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--bar)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
    <g id="patch_18">
-    <path d="M 0.375 348.375
-L 293.625 348.375
-L 293.625 509.625
-L 0.375 509.625
+    <path d="M 21 309
+L 27.813273 309
+Q 30.813273 309 30.813273 312
+L 30.813273 312
+Q 30.813273 315 27.813273 315
+L 21 315
+Q 18 315 18 312
+L 18 312
+Q 18 309 21 309
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_19">
-    <path d="M 63 407.25
-L 74.89073 407.25
-L 74.89073 417.75
-L 63 417.75
+    <path d="M 21 351
+L 270 351
+Q 273 351 273 354
+L 273 354
+Q 273 357 270 357
+L 21 357
+Q 18 357 18 354
+L 18 354
+Q 18 351 21 351
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--bar)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
    <g id="patch_20">
-    <path d="M 63 431.25
-L 79.948421 431.25
-L 79.948421 441.75
-L 63 441.75
+    <path d="M 21 351
+L 36.564436 351
+Q 39.564436 351 39.564436 354
+L 39.564436 354
+Q 39.564436 357 36.564436 357
+L 21 357
+Q 18 357 18 354
+L 18 354
+Q 18 351 21 351
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--accent)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--accent)"/>
    </g>
    <g id="patch_21">
-    <path d="M 63 455.25
-L 216 455.25
-L 216 465.75
-L 63 465.75
+    <path d="M 21 393
+L 270 393
+Q 273 393 273 396
+L 273 396
+Q 273 399 270 399
+L 21 399
+Q 18 399 18 396
+L 18 396
+Q 18 393 21 393
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--bar)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
    <g id="patch_22">
-    <path d="M 306.375 348.375
-L 599.625 348.375
-L 599.625 509.625
-L 306.375 509.625
+    <path d="M 21 393
+L 270 393
+Q 273 393 273 396
+L 273 396
+Q 273 399 270 399
+L 21 399
+Q 18 399 18 396
+L 18 396
+Q 18 393 21 393
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
    </g>
    <g id="patch_23">
-    <path d="M 369 407.25
-L 383.610366 407.25
-L 383.610366 417.75
-L 369 417.75
+    <path d="M 318.375 219.375
+L 590.625 219.375
+Q 599.625 219.375 599.625 228.375
+L 599.625 410.625
+Q 599.625 419.625 590.625 419.625
+L 318.375 419.625
+Q 309.375 419.625 309.375 410.625
+L 309.375 228.375
+Q 309.375 219.375 318.375 219.375
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--bar)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
    </g>
    <g id="patch_24">
-    <path d="M 369 431.25
-L 389.462084 431.25
-L 389.462084 441.75
-L 369 441.75
+    <path d="M 330 309
+L 579 309
+Q 582 309 582 312
+L 582 312
+Q 582 315 579 315
+L 330 315
+Q 327 315 327 312
+L 327 312
+Q 327 309 330 309
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--accent)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
    <g id="patch_25">
-    <path d="M 369 455.25
-L 522 455.25
-L 522 465.75
-L 369 465.75
+    <path d="M 330 309
+L 332.998145 309
+Q 335.998145 309 335.998145 312
+L 335.998145 312
+Q 335.998145 315 332.998145 315
+L 330 315
+Q 327 315 327 312
+L 327 312
+Q 327 309 330 309
 z
-" clip-path="url(#p0fe9399d5d)" style="fill: var(--bar)"/>
+" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
    </g>
-   <g id="LineCollection_1">
-    <path d="M 63 69.75
-L 216 69.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_26">
+    <path d="M 330 351
+L 579 351
+Q 582 351 582 354
+L 582 354
+Q 582 357 579 357
+L 330 357
+Q 327 357 327 354
+L 327 354
+Q 327 351 330 351
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
-   <g id="LineCollection_2">
-    <path d="M 63 93.75
-L 216 93.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_27">
+    <path d="M 330 351
+L 346.31367 351
+Q 349.31367 351 349.31367 354
+L 349.31367 354
+Q 349.31367 357 346.31367 357
+L 330 357
+Q 327 357 327 354
+L 327 354
+Q 327 351 330 351
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--accent)"/>
    </g>
-   <g id="LineCollection_3">
-    <path d="M 63 117.75
-L 216 117.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_28">
+    <path d="M 330 393
+L 579 393
+Q 582 393 582 396
+L 582 396
+Q 582 399 579 399
+L 330 399
+Q 327 399 327 396
+L 327 396
+Q 327 393 330 393
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
-   <g id="LineCollection_4">
-    <path d="M 15 130.5
-L 279 130.5
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_29">
+    <path d="M 330 393
+L 579 393
+Q 582 393 582 396
+L 582 396
+Q 582 399 579 399
+L 330 399
+Q 327 399 327 396
+L 327 396
+Q 327 393 330 393
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
    </g>
-   <g id="LineCollection_5">
-    <path d="M 369 69.75
-L 522 69.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_30">
+    <path d="M 9.375 438.375
+L 281.625 438.375
+Q 290.625 438.375 290.625 447.375
+L 290.625 629.625
+Q 290.625 638.625 281.625 638.625
+L 9.375 638.625
+Q 0.375 638.625 0.375 629.625
+L 0.375 447.375
+Q 0.375 438.375 9.375 438.375
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
    </g>
-   <g id="LineCollection_6">
-    <path d="M 369 93.75
-L 522 93.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_31">
+    <path d="M 21 528
+L 270 528
+Q 273 528 273 531
+L 273 531
+Q 273 534 270 534
+L 21 534
+Q 18 534 18 531
+L 18 531
+Q 18 528 21 528
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
-   <g id="LineCollection_7">
-    <path d="M 369 117.75
-L 522 117.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_32">
+    <path d="M 21 528
+L 34.817884 528
+Q 37.817884 528 37.817884 531
+L 37.817884 531
+Q 37.817884 534 34.817884 534
+L 21 534
+Q 18 534 18 531
+L 18 531
+Q 18 528 21 528
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
    </g>
-   <g id="LineCollection_8">
-    <path d="M 321 130.5
-L 585 130.5
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_33">
+    <path d="M 21 570
+L 270 570
+Q 273 570 273 573
+L 273 573
+Q 273 576 270 576
+L 21 576
+Q 18 576 18 573
+L 18 573
+Q 18 570 21 570
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
-   <g id="LineCollection_9">
-    <path d="M 63 243.75
-L 216 243.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_34">
+    <path d="M 21 570
+L 43.247369 570
+Q 46.247369 570 46.247369 573
+L 46.247369 573
+Q 46.247369 576 43.247369 576
+L 21 576
+Q 18 576 18 573
+L 18 573
+Q 18 570 21 570
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--accent)"/>
    </g>
-   <g id="LineCollection_10">
-    <path d="M 63 267.75
-L 216 267.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_35">
+    <path d="M 21 612
+L 270 612
+Q 273 612 273 615
+L 273 615
+Q 273 618 270 618
+L 21 618
+Q 18 618 18 615
+L 18 615
+Q 18 612 21 612
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
-   <g id="LineCollection_11">
-    <path d="M 63 291.75
-L 216 291.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_36">
+    <path d="M 21 612
+L 270 612
+Q 273 612 273 615
+L 273 615
+Q 273 618 270 618
+L 21 618
+Q 18 618 18 615
+L 18 615
+Q 18 612 21 612
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
    </g>
-   <g id="LineCollection_12">
-    <path d="M 15 304.5
-L 279 304.5
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_37">
+    <path d="M 318.375 438.375
+L 590.625 438.375
+Q 599.625 438.375 599.625 447.375
+L 599.625 629.625
+Q 599.625 638.625 590.625 638.625
+L 318.375 638.625
+Q 309.375 638.625 309.375 629.625
+L 309.375 447.375
+Q 309.375 438.375 318.375 438.375
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--surface); stroke: var(--rule); stroke-width: 0.75; stroke-linejoin: miter"/>
    </g>
-   <g id="LineCollection_13">
-    <path d="M 369 243.75
-L 522 243.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_38">
+    <path d="M 330 528
+L 579 528
+Q 582 528 582 531
+L 582 531
+Q 582 534 579 534
+L 330 534
+Q 327 534 327 531
+L 327 531
+Q 327 528 330 528
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
-   <g id="LineCollection_14">
-    <path d="M 369 267.75
-L 522 267.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_39">
+    <path d="M 330 528
+L 348.350611 528
+Q 351.350611 528 351.350611 531
+L 351.350611 531
+Q 351.350611 534 348.350611 534
+L 330 534
+Q 327 534 327 531
+L 327 531
+Q 327 528 330 528
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
    </g>
-   <g id="LineCollection_15">
-    <path d="M 369 291.75
-L 522 291.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_40">
+    <path d="M 330 570
+L 579 570
+Q 582 570 582 573
+L 582 573
+Q 582 576 579 576
+L 330 576
+Q 327 576 327 573
+L 327 573
+Q 327 570 330 570
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
-   <g id="LineCollection_16">
-    <path d="M 321 304.5
-L 585 304.5
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_41">
+    <path d="M 330 570
+L 358.103474 570
+Q 361.103474 570 361.103474 573
+L 361.103474 573
+Q 361.103474 576 358.103474 576
+L 330 576
+Q 327 576 327 573
+L 327 573
+Q 327 570 330 570
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--accent)"/>
    </g>
-   <g id="LineCollection_17">
-    <path d="M 63 417.75
-L 216 417.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_42">
+    <path d="M 330 612
+L 579 612
+Q 582 612 582 615
+L 582 615
+Q 582 618 579 618
+L 330 618
+Q 327 618 327 615
+L 327 615
+Q 327 612 330 612
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--track)"/>
    </g>
-   <g id="LineCollection_18">
-    <path d="M 63 441.75
-L 216 441.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
-   </g>
-   <g id="LineCollection_19">
-    <path d="M 63 465.75
-L 216 465.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
-   </g>
-   <g id="LineCollection_20">
-    <path d="M 15 478.5
-L 279 478.5
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
-   </g>
-   <g id="LineCollection_21">
-    <path d="M 369 417.75
-L 522 417.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
-   </g>
-   <g id="LineCollection_22">
-    <path d="M 369 441.75
-L 522 441.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
-   </g>
-   <g id="LineCollection_23">
-    <path d="M 369 465.75
-L 522 465.75
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
-   </g>
-   <g id="LineCollection_24">
-    <path d="M 321 478.5
-L 585 478.5
-" clip-path="url(#p0fe9399d5d)" style="fill: none; stroke: var(--rule); stroke-width: 0.6"/>
+   <g id="patch_43">
+    <path d="M 330 612
+L 579 612
+Q 582 612 582 615
+L 582 615
+Q 582 618 579 618
+L 330 618
+Q 327 618 327 615
+L 327 615
+Q 327 612 330 612
+z
+" clip-path="url(#p42b040a49b)" style="fill: var(--bar)"/>
    </g>
    <g id="text_1">
-    <text style="font-weight: 700; font-size: 11.25px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="15" y="23.90918" transform="rotate(-0 15 23.90918)">Inventory · repeated products</text>
+    <text style="font-weight: 600; font-size: 15px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="29.580469" transform="rotate(-0 18 29.580469)">Inventory · repeated</text>
    </g>
    <g id="text_2">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--faint)" x="15" y="39.924316" transform="rotate(-0 15 39.924316)">16,384 requests, 64 SKUs</text>
+    <text style="font-size: 9.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="18" y="48.440391" transform="rotate(-0 18 48.440391)">16,384 requests, 64 SKUs</text>
    </g>
    <g id="text_3">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="15" y="66.924316" transform="rotate(-0 15 66.924316)">Rust</text>
+    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="78.854297" transform="rotate(-0 18 78.854297)">Rust</text>
    </g>
    <g id="text_4">
-    <text style="font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--muted)" x="279" y="67.021289" transform="rotate(-0 279 67.021289)">25.30 ms</text>
+    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="273" y="79.268203" transform="rotate(-0 273 79.268203)">25.30 ms</text>
    </g>
    <g id="text_5">
-    <text style="font-weight: 700; font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="15" y="90.924316" transform="rotate(-0 15 90.924316)">Relar</text>
+    <text style="font-weight: 600; font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--accent)" x="18" y="120.854297" transform="rotate(-0 18 120.854297)">Relar</text>
    </g>
    <g id="text_6">
-    <text style="font-weight: 700; font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--ink)" x="279" y="91.021289" transform="rotate(-0 279 91.021289)">30.04 ms</text>
+    <text style="font-weight: 600; font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--accent)" x="273" y="121.268203" transform="rotate(-0 273 121.268203)">30.04 ms</text>
    </g>
    <g id="text_7">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="15" y="114.924316" transform="rotate(-0 15 114.924316)">CPython</text>
+    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="162.854297" transform="rotate(-0 18 162.854297)">CPython</text>
    </g>
    <g id="text_8">
-    <text style="font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--muted)" x="279" y="115.021289" transform="rotate(-0 279 115.021289)">77.11 ms</text>
+    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="273" y="163.268203" transform="rotate(-0 273 163.268203)">77.11 ms</text>
    </g>
    <g id="text_9">
-    <text style="font-size: 9px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent-ink)" x="15" y="147.827344" transform="rotate(-0 15 147.827344)">2.57× faster than CPython</text>
+    <text style="font-weight: 600; font-size: 15px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="29.580469" transform="rotate(-0 327 29.580469)">Inventory · distinct</text>
    </g>
    <g id="text_10">
-    <text style="font-weight: 700; font-size: 11.25px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="321" y="23.90918" transform="rotate(-0 321 23.90918)">Inventory · distinct products</text>
+    <text style="font-size: 9.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="327" y="48.440391" transform="rotate(-0 327 48.440391)">16,384 requests, 16,384 SKUs</text>
    </g>
    <g id="text_11">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--faint)" x="321" y="39.924316" transform="rotate(-0 321 39.924316)">16,384 requests, 16,384 SKUs</text>
+    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="78.854297" transform="rotate(-0 327 78.854297)">Rust</text>
    </g>
    <g id="text_12">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="321" y="66.924316" transform="rotate(-0 321 66.924316)">Rust</text>
+    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="582" y="79.268203" transform="rotate(-0 582 79.268203)">45.69 ms</text>
    </g>
    <g id="text_13">
-    <text style="font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--muted)" x="585" y="67.021289" transform="rotate(-0 585 67.021289)">45.69 ms</text>
+    <text style="font-weight: 600; font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--accent)" x="327" y="120.854297" transform="rotate(-0 327 120.854297)">Relar</text>
    </g>
    <g id="text_14">
-    <text style="font-weight: 700; font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="321" y="90.924316" transform="rotate(-0 321 90.924316)">Relar</text>
+    <text style="font-weight: 600; font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--accent)" x="582" y="121.268203" transform="rotate(-0 582 121.268203)">53.05 ms</text>
    </g>
    <g id="text_15">
-    <text style="font-weight: 700; font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--ink)" x="585" y="91.021289" transform="rotate(-0 585 91.021289)">53.05 ms</text>
+    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="162.854297" transform="rotate(-0 327 162.854297)">CPython</text>
    </g>
    <g id="text_16">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="321" y="114.924316" transform="rotate(-0 321 114.924316)">CPython</text>
+    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="582" y="163.268203" transform="rotate(-0 582 163.268203)">112.32 ms</text>
    </g>
    <g id="text_17">
-    <text style="font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--muted)" x="585" y="115.021289" transform="rotate(-0 585 115.021289)">112.32 ms</text>
+    <text style="font-weight: 600; font-size: 15px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="248.639063" transform="rotate(-0 18 248.639063)">Base45 decode</text>
    </g>
    <g id="text_18">
-    <text style="font-size: 9px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent-ink)" x="321" y="147.827344" transform="rotate(-0 321 147.827344)">2.12× faster than CPython</text>
+    <text style="font-size: 9.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="18" y="267.440391" transform="rotate(-0 18 267.440391)">64 × 16 KiB decoded</text>
    </g>
    <g id="text_19">
-    <text style="font-weight: 700; font-size: 11.25px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="15" y="197.90918" transform="rotate(-0 15 197.90918)">Base45 decode</text>
+    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="297.854297" transform="rotate(-0 18 297.854297)">Rust</text>
    </g>
    <g id="text_20">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--faint)" x="15" y="213.924316" transform="rotate(-0 15 213.924316)">64 × 16 KiB decoded</text>
+    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="273" y="298.268203" transform="rotate(-0 273 298.268203)">9.24 ms</text>
    </g>
    <g id="text_21">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="15" y="240.924316" transform="rotate(-0 15 240.924316)">Rust</text>
+    <text style="font-weight: 600; font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--accent)" x="18" y="339.854297" transform="rotate(-0 18 339.854297)">Relar</text>
    </g>
    <g id="text_22">
-    <text style="font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--muted)" x="279" y="241.021289" transform="rotate(-0 279 241.021289)">9.24 ms</text>
+    <text style="font-weight: 600; font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--accent)" x="273" y="340.268203" transform="rotate(-0 273 340.268203)">15.54 ms</text>
    </g>
    <g id="text_23">
-    <text style="font-weight: 700; font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="15" y="264.924316" transform="rotate(-0 15 264.924316)">Relar</text>
+    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="381.854297" transform="rotate(-0 18 381.854297)">CPython</text>
    </g>
    <g id="text_24">
-    <text style="font-weight: 700; font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--ink)" x="279" y="265.021289" transform="rotate(-0 279 265.021289)">15.54 ms</text>
+    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="273" y="382.268203" transform="rotate(-0 273 382.268203)">183.81 ms</text>
    </g>
    <g id="text_25">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="15" y="288.924316" transform="rotate(-0 15 288.924316)">CPython</text>
+    <text style="font-weight: 600; font-size: 15px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="248.639063" transform="rotate(-0 327 248.639063)">Luhn checksum</text>
    </g>
    <g id="text_26">
-    <text style="font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--muted)" x="279" y="289.021289" transform="rotate(-0 279 289.021289)">183.81 ms</text>
+    <text style="font-size: 9.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="327" y="267.440391" transform="rotate(-0 327 267.440391)">65,536 × 16 digits</text>
    </g>
    <g id="text_27">
-    <text style="font-size: 9px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent-ink)" x="15" y="321.827344" transform="rotate(-0 15 321.827344)">11.83× faster than CPython</text>
+    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="297.854297" transform="rotate(-0 327 297.854297)">Rust</text>
    </g>
    <g id="text_28">
-    <text style="font-weight: 700; font-size: 11.25px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="321" y="197.90918" transform="rotate(-0 321 197.90918)">Luhn checksum</text>
+    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="582" y="298.268203" transform="rotate(-0 582 298.268203)">5.28 ms</text>
    </g>
    <g id="text_29">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--faint)" x="321" y="213.924316" transform="rotate(-0 321 213.924316)">65,536 × 16 digits</text>
+    <text style="font-weight: 600; font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--accent)" x="327" y="339.854297" transform="rotate(-0 327 339.854297)">Relar</text>
    </g>
    <g id="text_30">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="321" y="240.924316" transform="rotate(-0 321 240.924316)">Rust</text>
+    <text style="font-weight: 600; font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--accent)" x="582" y="340.268203" transform="rotate(-0 582 340.268203)">13.08 ms</text>
    </g>
    <g id="text_31">
-    <text style="font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--muted)" x="585" y="241.021289" transform="rotate(-0 585 241.021289)">5.28 ms</text>
+    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="381.854297" transform="rotate(-0 327 381.854297)">CPython</text>
    </g>
    <g id="text_32">
-    <text style="font-weight: 700; font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="321" y="264.924316" transform="rotate(-0 321 264.924316)">Relar</text>
+    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="582" y="382.268203" transform="rotate(-0 582 382.268203)">149.53 ms</text>
    </g>
    <g id="text_33">
-    <text style="font-weight: 700; font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--ink)" x="585" y="265.021289" transform="rotate(-0 585 265.021289)">13.08 ms</text>
+    <text style="font-weight: 600; font-size: 15px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="467.580469" transform="rotate(-0 18 467.580469)">Telemetry report</text>
    </g>
    <g id="text_34">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="321" y="288.924316" transform="rotate(-0 321 288.924316)">CPython</text>
+    <text style="font-size: 9.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="18" y="486.440391" transform="rotate(-0 18 486.440391)">81 × 4,096 aligned pairs</text>
    </g>
    <g id="text_35">
-    <text style="font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--muted)" x="585" y="289.021289" transform="rotate(-0 585 289.021289)">149.53 ms</text>
+    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="516.854297" transform="rotate(-0 18 516.854297)">Rust</text>
    </g>
    <g id="text_36">
-    <text style="font-size: 9px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent-ink)" x="321" y="321.827344" transform="rotate(-0 321 321.827344)">11.43× faster than CPython</text>
+    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="273" y="517.268203" transform="rotate(-0 273 517.268203)">9.34 ms</text>
    </g>
    <g id="text_37">
-    <text style="font-weight: 700; font-size: 11.25px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="15" y="371.90918" transform="rotate(-0 15 371.90918)">Telemetry report</text>
+    <text style="font-weight: 600; font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--accent)" x="18" y="558.854297" transform="rotate(-0 18 558.854297)">Relar</text>
    </g>
    <g id="text_38">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--faint)" x="15" y="387.924316" transform="rotate(-0 15 387.924316)">81 × 4,096 aligned pairs</text>
+    <text style="font-weight: 600; font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--accent)" x="273" y="559.268203" transform="rotate(-0 273 559.268203)">13.31 ms</text>
    </g>
    <g id="text_39">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="15" y="414.924316" transform="rotate(-0 15 414.924316)">Rust</text>
+    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="18" y="600.854297" transform="rotate(-0 18 600.854297)">CPython</text>
    </g>
    <g id="text_40">
-    <text style="font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--muted)" x="279" y="415.021289" transform="rotate(-0 279 415.021289)">9.34 ms</text>
+    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="273" y="601.268203" transform="rotate(-0 273 601.268203)">120.19 ms</text>
    </g>
    <g id="text_41">
-    <text style="font-weight: 700; font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="15" y="438.924316" transform="rotate(-0 15 438.924316)">Relar</text>
+    <text style="font-weight: 600; font-size: 15px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="467.639063" transform="rotate(-0 327 467.639063)">Offline conformance report</text>
    </g>
    <g id="text_42">
-    <text style="font-weight: 700; font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--ink)" x="279" y="439.021289" transform="rotate(-0 279 439.021289)">13.31 ms</text>
+    <text style="font-size: 9.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="327" y="486.440391" transform="rotate(-0 327 486.440391)">146 files, two captured ty runs</text>
    </g>
    <g id="text_43">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="15" y="462.924316" transform="rotate(-0 15 462.924316)">CPython</text>
+    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="516.854297" transform="rotate(-0 327 516.854297)">Rust</text>
    </g>
    <g id="text_44">
-    <text style="font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--muted)" x="279" y="463.021289" transform="rotate(-0 279 463.021289)">120.19 ms</text>
+    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="582" y="517.268203" transform="rotate(-0 582 517.268203)">23.59 ms</text>
    </g>
    <g id="text_45">
-    <text style="font-size: 9px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent-ink)" x="15" y="495.827344" transform="rotate(-0 15 495.827344)">9.03× faster than CPython</text>
+    <text style="font-weight: 600; font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--accent)" x="327" y="558.854297" transform="rotate(-0 327 558.854297)">Relar</text>
    </g>
    <g id="text_46">
-    <text style="font-weight: 700; font-size: 11.25px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="321" y="371.90918" transform="rotate(-0 321 371.90918)">Offline conformance report</text>
+    <text style="font-weight: 600; font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--accent)" x="582" y="559.268203" transform="rotate(-0 582 559.268203)">33.04 ms</text>
    </g>
    <g id="text_47">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--faint)" x="321" y="387.924316" transform="rotate(-0 321 387.924316)">146 files, two captured ty runs</text>
+    <text style="font-size: 11.25px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="327" y="600.854297" transform="rotate(-0 327 600.854297)">CPython</text>
    </g>
    <g id="text_48">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="321" y="414.924316" transform="rotate(-0 321 414.924316)">Rust</text>
+    <text style="font-size: 12.75px; font-family: 'DejaVu Sans', sans-serif; text-anchor: end; fill: var(--ink)" x="582" y="601.268203" transform="rotate(-0 582 601.268203)">247.01 ms</text>
    </g>
    <g id="text_49">
-    <text style="font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--muted)" x="585" y="415.021289" transform="rotate(-0 585 415.021289)">23.59 ms</text>
-   </g>
-   <g id="text_50">
-    <text style="font-weight: 700; font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--ink)" x="321" y="438.924316" transform="rotate(-0 321 438.924316)">Relar</text>
-   </g>
-   <g id="text_51">
-    <text style="font-weight: 700; font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--ink)" x="585" y="439.021289" transform="rotate(-0 585 439.021289)">33.04 ms</text>
-   </g>
-   <g id="text_52">
-    <text style="font-size: 9.375px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="321" y="462.924316" transform="rotate(-0 321 462.924316)">CPython</text>
-   </g>
-   <g id="text_53">
-    <text style="font-size: 9.75px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: end; fill: var(--muted)" x="585" y="463.021289" transform="rotate(-0 585 463.021289)">247.01 ms</text>
-   </g>
-   <g id="text_54">
-    <text style="font-size: 9px; font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace; text-anchor: start; fill: var(--accent-ink)" x="321" y="495.827344" transform="rotate(-0 321 495.827344)">7.48× faster than CPython</text>
-   </g>
-   <g id="text_55">
-    <text style="font-size: 8.625px; font-family: 'Arial', 'Liberation Sans', sans-serif; text-anchor: start; fill: var(--faint)" x="0" y="530.230371" transform="rotate(-0 0 530.230371)">Median of 12 runs. Lower is faster. Each panel has its own zero-based scale.</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: var(--muted)" x="3" y="660.983438" transform="rotate(-0 3 660.983438)">Median of 12 runs · Lower is faster · Each panel has its own zero-based scale</text>
    </g>
   </g>
  </g>
  <defs>
-  <clipPath id="p0fe9399d5d">
-   <rect x="0" y="0" width="600" height="537"/>
+  <clipPath id="p42b040a49b">
+   <rect x="0" y="0" width="600" height="666"/>
   </clipPath>
  </defs>
 </svg>
