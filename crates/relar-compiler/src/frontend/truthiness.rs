@@ -46,58 +46,65 @@ impl Checker<'_> {
     pub(super) fn boolean_value(
         &mut self,
         boolean: &ast::ExprBoolOp,
-        expected: Option<Type>,
+        mut expected: Option<Type>,
     ) -> Result<Expr, String> {
-        self.boolean_operands(&boolean.values, boolean.op == ast::BoolOp::And, expected)
-    }
-
-    /// The left result is captured before any RHS writes. Its selected type is
-    /// narrowed from that value, independently of the local's later contents.
-    fn boolean_operands(
-        &mut self,
-        values: &[ast::Expr],
-        and: bool,
-        expected: Option<Type>,
-    ) -> Result<Expr, String> {
-        let (first, rest) = values.split_first().expect("boolean operands are nonempty");
-        let left = self.boolean_operand(first, expected)?;
-        if rest.is_empty() {
-            return Ok(left);
+        let and = boolean.op == ast::BoolOp::And;
+        let (last, prefix) = boolean
+            .values
+            .split_last()
+            .expect("boolean operands are nonempty");
+        let mut operands = Vec::with_capacity(prefix.len());
+        let mut exit = None;
+        let mut reachable = true;
+        for first in prefix {
+            let left = self.boolean_operand(first, expected)?;
+            let known = self.types.truthiness(left.ty);
+            let selected = self.types.truth_branch(left.ty, !and);
+            if reachable && known != Some(and) {
+                let after = self.local_state();
+                self.apply_facts(first, !and);
+                self.merge_exit(&mut exit);
+                self.restore_state(after);
+                reachable = known != Some(!and);
+            }
+            self.apply_facts(first, and);
+            expected = expected
+                .or_else(|| (selected != Type::None && known != Some(and)).then_some(selected));
+            operands.push((first, left, known, selected));
         }
-        let known = self.types.truthiness(left.ty);
-        let selected = self.types.truth_branch(left.ty, !and);
-        let after = self.local_state();
-        self.apply_facts(first, !and);
-        let stopped = self.local_state();
-        self.restore_state(after);
-        self.apply_facts(first, and);
-        let hint =
-            expected.or_else(|| (selected != Type::None && known != Some(and)).then_some(selected));
-        let right = self.boolean_operands(rest, and, hint)?;
-        let ty = if known == Some(and) {
-            right.ty
-        } else if known == Some(!and) {
-            self.restore_state(stopped);
-            selected
-        } else {
-            self.join_states([stopped, self.local_state()]);
-            self.types.join(selected, right.ty).ok_or_else(|| {
-                error(
-                    self.source,
-                    first,
-                    "and/or results require the same concrete type or its optional form",
-                )
-            })?
-        };
-        let right = if known.is_none() {
-            self.coerce(right, ty, rest.last().unwrap())?
-        } else {
-            right
-        };
-        Ok(Expr {
-            ty,
-            kind: ExprKind::BooleanValue(and, Box::new(left), Box::new(right)),
-        })
+        let mut right = self.boolean_operand(last, expected)?;
+        if let Some(mut exit) = exit {
+            if reachable {
+                exit.retain_common(&self.assigned, &self.narrowed);
+            }
+            self.restore_state(exit);
+        }
+
+        // A skipped right operand can still affect type checking. Build each
+        // right-hand result before its enclosing short-circuit expression.
+        for (first, left, known, selected) in operands.into_iter().rev() {
+            let ty = if known == Some(and) {
+                right.ty
+            } else if known == Some(!and) {
+                selected
+            } else {
+                self.types.join(selected, right.ty).ok_or_else(|| {
+                    error(
+                        self.source,
+                        first,
+                        "and/or results require the same concrete type or its optional form",
+                    )
+                })?
+            };
+            if known.is_none() {
+                right = self.coerce(right, ty, last)?;
+            }
+            right = Expr {
+                ty,
+                kind: ExprKind::BooleanValue(and, Box::new(left), Box::new(right)),
+            };
+        }
+        Ok(right)
     }
 
     /// A result hint determines empty container literals without forcing an
@@ -148,5 +155,17 @@ impl Checker<'_> {
             }
         }
         self.expr(expression)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn joins_only_reachable_boolean_value_exits() {
+        let falls = "def check(flag: bool) -> bool:\n    result = None or (written := flag) or flag\n    return written\n";
+        crate::check(falls).unwrap();
+        let stops = "def check(flag: bool) -> bool:\n    result = (first := flag) and None and (late := flag)\n    return first\n";
+        crate::check(stops).unwrap();
+        assert!(crate::check(&stops.replace("return first", "return late")).is_err());
     }
 }
