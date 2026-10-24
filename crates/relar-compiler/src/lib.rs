@@ -243,6 +243,17 @@ mod tests {
     }
 
     #[test]
+    fn joins_conditional_writes_in_boolean_conditions() {
+        for operator in ["and", "or"] {
+            let source = format!(
+                "def check(flag: bool) -> bool:\n    if (first := flag) {operator} (last := flag):\n        pass\n    return first\n"
+            );
+            super::check(&source).unwrap();
+            assert!(super::check(&source.replace("return first", "return last")).is_err());
+        }
+    }
+
+    #[test]
     fn elif_chains_count_toward_branch_depth() {
         let flat = format!("if False: pass\n{}", "elif False: pass\n".repeat(10_000));
         let nested = format!(
