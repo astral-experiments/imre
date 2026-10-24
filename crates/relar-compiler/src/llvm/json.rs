@@ -27,7 +27,11 @@ impl Emitter<'_, '_> {
             Type::JsonObject => 1,
             Type::Str => 2,
             Type::Int => 3,
-            Type::Bool => 4,
+            Type::Bool if args.len() > 1 => 4,
+            Type::Bool => 7,
+            Type::Float => 8,
+            ty if self.module.types.element(ty) == Some(Type::JsonObject) => 5,
+            ty if self.module.types.element(ty) == Some(Type::JsonValue) => 6,
             _ => unreachable!("checked JSON selection"),
         } | if payload.is_some() { 256 } else { 0 };
         let literal = args.get(1).map_or("null", |arg| arg.value.operand.as_str());
@@ -41,7 +45,11 @@ pub(super) fn schemas(module: &Module, output: &mut Output) {
     for function in module.functions.iter().chain([&module.entry]) {
         ir::walk_expressions(&function.body, &mut |value| {
             if let ExprKind::Builtin(
-                Builtin::JsonDecode(ty) | Builtin::TomlDecode(ty) | Builtin::JsonEncode(ty),
+                Builtin::JsonDecode(ty)
+                | Builtin::TomlDecode(ty)
+                | Builtin::JsonEncode(ty)
+                | Builtin::JsonDumps(ty)
+                | Builtin::JsonDump(ty),
                 _,
             ) = value.kind
             {
@@ -74,6 +82,13 @@ pub(super) fn schema_name(ty: Type) -> String {
         Type::ListInt => "json_list_int".to_owned(),
         Type::List(id) => format!("json_list_{id}"),
         Type::Dict(id) => format!("json_dict_{id}"),
+        Type::Tuple(id) => format!("json_tuple_{id}"),
+        Type::JsonRoot => "json_root".to_owned(),
+        Type::JsonObject => "json_object".to_owned(),
+        Type::JsonValue => "json_value".to_owned(),
+        Type::Bytes => "json_bytes".to_owned(),
+        Type::Set(id) => format!("json_set_{id}"),
+        Type::Path => "json_path".to_owned(),
         Type::Optional(id) => format!("json_optional_{id}"),
         _ => unreachable!("JSON schemas contain only validated concrete types"),
     }
@@ -116,6 +131,10 @@ impl Schemas<'_> {
             Type::Bool => (3, None, None, 0, None),
             Type::Float => (4, None, None, 0, None),
             Type::None => (5, None, None, 0, None),
+            Type::JsonRoot | Type::JsonValue | Type::JsonObject => (15, None, None, 0, None),
+            Type::Bytes => (12, None, None, 0, None),
+            Type::Set(_) => (13, None, None, 0, None),
+            Type::Path => (14, None, None, 0, None),
             Type::ListInt | Type::List(_) => {
                 let child = self.schema(self.module.types.element(ty).unwrap());
                 (6, Some(child), None, 0, None)
@@ -125,19 +144,44 @@ impl Schemas<'_> {
                 (8, Some(child), None, 0, None)
             }
             Type::Dict(_) => {
-                let (_, value) = self.module.types.mapping(ty).unwrap();
+                let (key, value) = self.module.types.mapping(ty).unwrap();
                 let child = self.schema(value);
-                (9, Some(child), None, 0, None)
+                (
+                    if key == Type::Int { 11 } else { 9 },
+                    Some(child),
+                    None,
+                    0,
+                    None,
+                )
+            }
+            Type::Tuple(_) => {
+                let parts = self.module.types.fields(ty).unwrap();
+                let fields_name = format!("{name}_fields");
+                let fields: Vec<_> = parts.iter().map(|&part| {
+                    let child = self.schema(part);
+                    format!("%json_field {{ ptr null, i64 0, ptr @{child}, i32 0, ptr null, i64 0 }}")
+                }).collect();
+                let count = fields.len();
+                writeln!(
+                    self.output.entry_buffer(),
+                    "@{fields_name} = private constant [{count} x %json_field] [{}]",
+                    fields.join(", ")
+                )
+                .unwrap();
+                (10, None, None, count, Some(fields_name))
             }
             Type::Class(class) => {
                 let record = self
                     .module
                     .json_records
                     .iter()
-                    .find(|schema| schema.class == class)
-                    .unwrap();
+                    .find(|schema| schema.class == class);
                 let mut fields = Vec::new();
-                for (index, field) in record.fields.iter().enumerate() {
+                for (index, field) in record
+                    .into_iter()
+                    .flat_map(|record| &record.fields)
+                    .enumerate()
+                {
                     let child = self.schema(self.module.class_fields[class][index]);
                     let prefix = format!("json_field_{class}_{index}");
                     self.bytes(&format!("{prefix}_name"), &field.name);

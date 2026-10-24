@@ -43,6 +43,7 @@ pub(crate) enum Type {
     RegexPattern,
     RegexMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
+    JsonRoot,
     JsonValue,
     JsonObject,
     None,
@@ -83,6 +84,7 @@ impl std::fmt::Display for Type {
             Self::CompletedProcess => "subprocess.CompletedProcess[str]",
             Self::RegexPattern => "re.Pattern[str]",
             Self::RegexMatch => "re.Match[str]",
+            Self::JsonRoot => "JSON document",
             Self::JsonValue => "JSON value",
             Self::JsonObject => "dict[str, Any]",
             Self::StrLiteral(_)
@@ -450,6 +452,13 @@ pub(crate) enum Builtin {
     /// Decodes one string into a checked record, list, or string-key dictionary.
     JsonDecode(Type),
     JsonLoads,
+    JsonIndex,
+    JsonIter,
+    JsonLen,
+    JsonGetReceiver,
+    JsonGet(String),
+    JsonAdd,
+    JsonIsInt,
     /// A literal-key path rooted in a readonly JSON owner. The result type selects
     /// an owned view, an exact scalar, or comparison with a supplied string literal.
     JsonSelect(Vec<String>),
@@ -458,6 +467,8 @@ pub(crate) enum Builtin {
     TomlKeys,
     /// Encodes rooted concrete storage using immutable, compiler-emitted metadata.
     JsonEncode(Type),
+    JsonDumps(Type),
+    JsonDump(Type),
     Path(PathOperation),
     Process(ProcessOperation),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.

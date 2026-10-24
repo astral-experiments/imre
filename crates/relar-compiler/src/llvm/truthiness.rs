@@ -41,7 +41,7 @@ impl Emitter<'_, '_> {
             }
         } else {
             match value.ty {
-                Type::JsonValue | Type::JsonObject => {
+                Type::JsonRoot | Type::JsonValue | Type::JsonObject => {
                     let byte = self
                         .instruction(format!("call i32 @relar_json_truth(ptr {})", value.operand));
                     self.instruction(format!("icmp ne i32 {byte}, 0"))

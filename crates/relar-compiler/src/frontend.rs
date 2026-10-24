@@ -1337,11 +1337,12 @@ impl<'a> Checker<'a> {
         if value.ty == expected {
             return Ok(value);
         }
-        if value.ty == Type::JsonValue
-            && matches!(
-                self.types.payload(expected).unwrap_or(expected),
-                Type::JsonObject | Type::Int | Type::Str
-            )
+        let target = self.types.payload(expected).unwrap_or(expected);
+        if matches!(value.ty, Type::JsonValue | Type::JsonRoot)
+            && (matches!(
+                target,
+                Type::JsonObject | Type::Int | Type::Str | Type::Bool | Type::Float
+            ) || self.types.element(target) == Some(Type::JsonObject))
         {
             return Ok(json::select(value, expected, None, None));
         }
@@ -1894,7 +1895,19 @@ impl<'a> Checker<'a> {
                 return Ok((receiver, true));
             }
         }
-        Ok((self.expr(expression)?, false))
+        let value = self.expr(expression)?;
+        let value = if matches!(
+            value.ty,
+            Type::JsonRoot | Type::JsonValue | Type::JsonObject
+        ) {
+            Expr {
+                ty: self.types.list(Type::JsonValue),
+                kind: ExprKind::Builtin(Builtin::JsonIter, vec![value]),
+            }
+        } else {
+            value
+        };
+        Ok((value, false))
     }
 
     /// Checks an iterable in its current lexical scope, before target binding.
@@ -2502,6 +2515,7 @@ impl<'a> Checker<'a> {
             ast::Stmt::AugAssign(assign) => {
                 if let ast::Expr::Subscript(target) = &*assign.target {
                     let list = self.expr(&target.value)?;
+                    let list = self.json_mutation_receiver(list, target)?;
                     let (key, element) = if let Some(mapping) = self.types.mapping(list.ty) {
                         mapping
                     } else {
@@ -3372,6 +3386,15 @@ impl<'a> Checker<'a> {
                     (self.expr(&binary.left)?, self.expr(&binary.right)?)
                 };
                 if binary.op == ast::Operator::Add
+                    && left.ty == Type::JsonValue
+                    && right.ty == Type::JsonValue
+                {
+                    return Ok(Expr {
+                        ty: Type::JsonValue,
+                        kind: ExprKind::Builtin(Builtin::JsonAdd, vec![left, right]),
+                    });
+                }
+                if binary.op == ast::Operator::Add
                     && matches!(left.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
                     && matches!(right.ty, Type::Str | Type::StrEnum(_) | Type::StrLiteral(_))
                 {
@@ -3526,10 +3549,12 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.restore_state(exit.expect("comparisons have at least two operands"));
-                if values
-                    .iter()
-                    .any(|value| matches!(value.ty, Type::JsonValue | Type::JsonObject))
-                {
+                if values.iter().any(|value| {
+                    matches!(
+                        value.ty,
+                        Type::JsonRoot | Type::JsonValue | Type::JsonObject
+                    )
+                }) {
                     return json::compare(values, &compare.ops, self.source, expression);
                 }
                 if let [left, right] = values.as_slice()
@@ -3616,8 +3641,15 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Subscript(subscript) => {
                 let list = Self::enum_text(self.expr(&subscript.value)?);
-                if matches!(list.ty, Type::JsonValue | Type::JsonObject) {
+                if matches!(list.ty, Type::JsonRoot | Type::JsonValue | Type::JsonObject) {
                     let ast::Expr::StringLiteral(key) = subscript.slice.as_ref() else {
+                        let index = self.expr(&subscript.slice)?;
+                        if index.ty == Type::Int {
+                            return Ok(Expr {
+                                ty: Type::JsonValue,
+                                kind: ExprKind::Builtin(Builtin::JsonIndex, vec![list, index]),
+                            });
+                        }
                         return Err(error(
                             self.source,
                             expression,
@@ -4000,8 +4032,10 @@ impl<'a> Checker<'a> {
         ) {
             return self.json_decode(call);
         }
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::JsonLoads)) {
-            return self.json_loads(call);
+        if let Some(Binding::Intrinsic(operation @ (Intrinsic::JsonLoads | Intrinsic::JsonLoad))) =
+            self.resolve(&call.func)
+        {
+            return self.json_loads(call, operation == Intrinsic::JsonLoad);
         }
         if matches!(
             self.resolve(&call.func),
@@ -4009,11 +4043,11 @@ impl<'a> Checker<'a> {
         ) {
             return self.toml_decode(call);
         }
-        if matches!(
-            self.resolve(&call.func),
-            Some(Binding::Intrinsic(Intrinsic::JsonEncode))
-        ) {
-            return self.json_encode(call);
+        if let Some(Binding::Intrinsic(
+            op @ (Intrinsic::JsonEncode | Intrinsic::JsonDumps | Intrinsic::JsonDump),
+        )) = self.resolve(&call.func)
+        {
+            return self.json_encode(call, op);
         }
         let gzip = matches!(
             self.resolve(&call.func),
@@ -4095,6 +4129,21 @@ impl<'a> Checker<'a> {
                 return self.class_method_call(call, attribute, class, Some(receiver));
             }
             let receiver = Self::enum_text(receiver);
+            if matches!(
+                receiver.ty,
+                Type::JsonRoot | Type::JsonValue | Type::JsonObject
+            ) && attribute.attr.as_str() == "get"
+            {
+                return self.json_get(receiver, call);
+            }
+            let receiver = if matches!(
+                attribute.attr.as_str(),
+                "append" | "pop" | "extend" | "sort"
+            ) {
+                self.json_mutation_receiver(receiver, call)?
+            } else {
+                receiver
+            };
             if receiver.ty == Type::Path {
                 return self.path_method(receiver, attribute, call);
             }
@@ -4527,6 +4576,15 @@ impl<'a> Checker<'a> {
                 if args.len() == 1
                     && matches!(
                         args[0].ty,
+                        Type::JsonRoot | Type::JsonValue | Type::JsonObject
+                    ) =>
+            {
+                (Builtin::JsonLen, Type::Int)
+            }
+            "len"
+                if args.len() == 1
+                    && matches!(
+                        args[0].ty,
                         Type::Str
                             | Type::Bytes
                             | Type::ListInt
@@ -4562,18 +4620,23 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// Explicit UTF-8 and literal mode keep this builtin's semantics sealed;
-    /// only the path is dynamic, and it is evaluated once in source order.
+    /// Text uses UTF-8 and defaults to reading; explicit modes stay literal.
     fn open(&mut self, call: &ast::ExprCall, gzip: bool) -> Result<Expr, String> {
-        let [path, ast::Expr::StringLiteral(mode)] = call.arguments.args.as_ref() else {
-            return Err(error(
-                self.source,
-                call,
-                "open requires a path and a literal supported text or binary mode",
-            ));
+        let (path, mode) = match call.arguments.args.as_ref() {
+            [path] if !gzip => (path, "r"),
+            [path, ast::Expr::StringLiteral(mode)] => {
+                check_string(mode, self.source)?;
+                (path, mode.value.to_str())
+            }
+            _ => {
+                return Err(error(
+                    self.source,
+                    call,
+                    "open requires a path and a literal supported text or binary mode",
+                ));
+            }
         };
-        check_string(mode, self.source)?;
-        let (ty, builtin) = match (gzip, mode.value.to_str()) {
+        let (ty, builtin) = match (gzip, mode) {
             (true, "rt") => (Type::TextIO, Builtin::GzipOpen),
             (true, "rb") => (Type::BinaryIO, Builtin::GzipOpen),
             (true, _) => {
@@ -4593,7 +4656,7 @@ impl<'a> Checker<'a> {
         };
         if ty == Type::BinaryIO {
             self.reject_builtin_keywords(call)?;
-        } else {
+        } else if gzip || !call.arguments.keywords.is_empty() {
             self.utf8_encoding(call)?;
         }
         Ok(Expr {

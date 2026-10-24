@@ -285,6 +285,7 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                 (Storage::Dictionary(left), Storage::Dictionary(right)) => {
                     left.compare_entry(right, position)
                 }
+                (Storage::Json(left), Storage::Json(right)) => Comparison::Done(left.equal(right)),
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
                 (left @ Storage::Path { .. }, right @ Storage::Path { .. }) => {
                     Comparison::Done(left.path() == right.path())
@@ -352,6 +353,10 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         }
                         Storage::Set(set) => {
                             format_entry(owner, set.repr_entry(output, position), &mut pending)
+                        }
+                        Storage::Json(view) => {
+                            view.write_repr(output);
+                            None
                         }
                         path @ Storage::Path { .. } => {
                             output.push_str("PosixPath(");

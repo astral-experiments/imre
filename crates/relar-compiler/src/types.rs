@@ -69,6 +69,7 @@ impl Types {
             | Type::CompletedProcess
             | Type::RegexPattern
             | Type::RegexMatch
+            | Type::JsonRoot
             | Type::JsonValue
             | Type::JsonObject
             | Type::None => true,
