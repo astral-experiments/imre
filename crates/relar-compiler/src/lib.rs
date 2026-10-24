@@ -316,6 +316,24 @@ def first(stream: Stream) -> str:
     }
 
     #[test]
+    fn limits_match_flow_snapshots_within_the_enclosing_scope() {
+        let locals: String = (0..4000).map(|i| format!("    a{i}=0\n")).collect();
+        let case = "        case 0: pass\n";
+        let wide = case.repeat(600);
+        let header = "def big(value: int) -> None:\n";
+        let subject = "    match value:\n";
+        let error = super::check(&format!("{header}{locals}{subject}{wide}")).unwrap_err();
+        assert!(
+            error.contains("match statement exceeds the flow analysis limit"),
+            "{error}"
+        );
+        super::check(&format!(
+            "{header}{locals}{subject}{case}def small(value: int) -> None:\n{subject}{wide}"
+        ))
+        .unwrap();
+    }
+
+    #[test]
     fn context_manager_depth_counts_flat_and_nested_items() {
         let managers = |n| vec!["f"; n].join(", ");
         let file = "f = open('/dev/null', 'rb')\n";

@@ -12,7 +12,7 @@ use ruff_python_ast::token::{TokenKind, Tokens};
 use ruff_python_ast::visitor::{Visitor, walk_stmt};
 use ruff_python_ast::{Expr, Stmt};
 use ruff_python_parser::{Mode, lexer::lex};
-use ruff_text_size::{Ranged, TextSize};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 use ty_python_core::program::ProgramSettings;
 use ty_python_core::{Program, ProgramFile};
 use ty_python_semantic::dependency::DependencyMetadata;
@@ -118,12 +118,15 @@ impl Session {
             return Err(format!("{path}: {error}"));
         }
         check_indentation(source, parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
-        let mut managers = WithDepth::default();
-        managers.visit_body(&parsed.syntax().body);
-        if managers.exceeded {
-            return Err(format!(
-                "{path}: Relar: context manager nesting exceeds {MAX_WITH_DEPTH} levels"
-            ));
+        let mut limits = SuiteLimits {
+            tokens: parsed.tokens(),
+            scope_start: TextSize::default(),
+            active_managers: 0,
+            error: None,
+        };
+        limits.visit_body(&parsed.syntax().body);
+        if let Some(error) = limits.error {
+            return Err(format!("{path}: {error}"));
         }
         self.files.push(file);
         Ok(parsed)
@@ -228,30 +231,54 @@ impl Session {
 }
 
 const MAX_WITH_DEPTH: usize = 96;
+const MAX_MATCH_FLOW_WORK: usize = 8 * 1024 * 1024;
 
-/// Each manager contributes a nested protected scope, even when several
-/// managers share one statement. Expressions cannot contain a with statement.
-#[derive(Default)]
-struct WithDepth {
-    active: usize,
-    exceeded: bool,
+struct SuiteLimits<'t> {
+    tokens: &'t Tokens,
+    scope_start: TextSize,
+    active_managers: usize,
+    error: Option<String>,
 }
 
-impl<'a> Visitor<'a> for WithDepth {
+impl<'a> Visitor<'a> for SuiteLimits<'_> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        if self.exceeded {
+        if self.error.is_some() {
             return;
         }
+        // ty saves a copy of the current scope's flow state for each case.
+        // Tokens through the last case conservatively bound prior places,
+        // including bindings introduced inside the match.
+        if let Stmt::Match(node) = stmt
+            && node.cases.len() > 1
+            && self
+                .tokens
+                .in_range(TextRange::new(self.scope_start, node.end()))
+                .len()
+                > MAX_MATCH_FLOW_WORK / node.cases.len()
+        {
+            self.error = Some("Relar: match statement exceeds the flow analysis limit".into());
+            return;
+        }
+        let outer = self.scope_start;
+        if matches!(stmt, Stmt::FunctionDef(_) | Stmt::ClassDef(_)) {
+            self.scope_start = stmt.start();
+        }
         if let Stmt::With(scope) = stmt {
-            self.active += scope.items.len();
-            self.exceeded = self.active > MAX_WITH_DEPTH;
-            if !self.exceeded {
+            // Each manager contributes a protected scope, including managers
+            // that share one statement.
+            self.active_managers += scope.items.len();
+            if self.active_managers > MAX_WITH_DEPTH {
+                self.error = Some(format!(
+                    "Relar: context manager nesting exceeds {MAX_WITH_DEPTH} levels"
+                ));
+            } else {
                 self.visit_body(&scope.body);
             }
-            self.active -= scope.items.len();
+            self.active_managers -= scope.items.len();
         } else {
             walk_stmt(self, stmt);
         }
+        self.scope_start = outer;
     }
 
     fn visit_expr(&mut self, _expr: &'a Expr) {}
