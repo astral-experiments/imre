@@ -14,7 +14,7 @@ use std::cell::Cell;
 use std::mem::ManuallyDrop;
 use std::rc::{Rc, Weak};
 
-use super::exceptions::{Error, Kind, string_repr};
+use super::exceptions::{Error, Kind};
 use super::words::{NULLABLE, OwnedWord, WordKind};
 use super::{Bytes, Int, List, Object, Storage, StorageCell, Str, acquire_rc, fail, object};
 
@@ -966,11 +966,8 @@ unsafe fn lookup(value: *const Object, key: usize) -> Option<OwnedWord> {
 unsafe fn missing_key(value: *const Object, key: usize) -> Error {
     // SAFETY: only copied key-kind metadata leaves storage.
     let kind = unsafe { object(value).0.with(|s| s.dictionary().tables.key_kind()) };
-    // SAFETY: the caller roots the exact immutable key kind.
-    let mut message = String::new();
-    // SAFETY: no callback or mutation overlaps formatting this rooted key.
-    unsafe { super::values::write_repr(&mut message, key, WordKind::new(kind)) };
-    Error::new(Kind::KeyError, Str::from(message))
+    // SAFETY: the caller roots the missing key until we acquire its exact kind.
+    Error::key(unsafe { WordKind::new(kind).acquire(key) })
 }
 /// # Safety
 /// Inputs are rooted exact kinds; success transfers a value owner. Check pending
@@ -1081,7 +1078,7 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                     if word == 0 {
                         let mut key = Str::new("");
                         key.push(char::from(character));
-                        return Err(Error::new(Kind::KeyError, string_repr(&key)));
+                        return Err(Error::string_key(key));
                     }
                     slot.write(Int(word));
                 }
@@ -1107,7 +1104,7 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                 if word == 0 {
                     let mut key = Str::new("");
                     key.push(character);
-                    return Err(Error::new(Kind::KeyError, string_repr(&key)));
+                    return Err(Error::string_key(key));
                 }
                 // SAFETY: this exact integer remains rooted by the dictionary;
                 // the copied owner belongs to the fresh result or its cleanup.

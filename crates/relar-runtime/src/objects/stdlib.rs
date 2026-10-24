@@ -406,8 +406,7 @@ fn format_named<'a>(template: &str, field: impl Fn(&str) -> Option<&'a str>) -> 
                 ),
             ));
         }
-        let text = field(name)
-            .ok_or_else(|| Error::new(Kind::KeyError, super::exceptions::string_repr(name)))?;
+        let text = field(name).ok_or_else(|| Error::string_key(Str::new(name)))?;
         if !supported {
             return Err(Error::new(
                 Kind::ValueError,
