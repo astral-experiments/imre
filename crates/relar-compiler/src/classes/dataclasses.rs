@@ -25,6 +25,7 @@ pub(crate) enum FieldDefault {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ContainerFactory {
+    Counter,
     List,
     Dict,
     Set,
@@ -209,6 +210,11 @@ fn factory(
     value: &ast::Expr,
     class_names: &HashSet<String>,
 ) -> Result<ContainerFactory, String> {
+    if !shadowed(value, class_names)
+        && graph.resolve(module_id, value) == Some(Binding::Intrinsic(Intrinsic::Counter))
+    {
+        return Ok(ContainerFactory::Counter);
+    }
     if graph.resolve(module_id, value).is_none()
         && !shadowed(value, class_names)
         && let ast::Expr::Name(name) = value
@@ -222,7 +228,7 @@ fn factory(
     }
     Err(graph.modules[module_id].error(
         value,
-        "default_factory must name the unshadowed list, dict, or set builtin",
+        "default_factory must name list, dict, set, or collections.Counter",
     ))
 }
 

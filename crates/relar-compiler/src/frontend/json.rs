@@ -625,7 +625,7 @@ pub(super) fn schemas(
 }
 
 fn check_type(ty: Type, types: &Types, pending: &mut Vec<usize>) -> Result<(), &'static str> {
-    if types.is_default_list_dict(ty) {
+    if types.is_default_list_dict(ty) || types.is_counter(ty) {
         return Err("JSON schemas require ordinary dictionaries");
     }
     if let Some(inner) = types.payload(ty).or_else(|| types.element(ty)) {
