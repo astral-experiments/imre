@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use num_traits::ToPrimitive;
 use ruff_python_literal::escape::{AsciiEscape, Escape};
+use sha2::{Digest, Sha256};
 
 use super::exceptions::{Error, Kind, Result, finish};
 use super::sequences::SliceIndices;
@@ -476,6 +477,21 @@ pub unsafe extern "C" fn relar_str_encode(value: *const Str) -> *const Bytes {
     let value = unsafe { &*value };
     // SAFETY: the UTF-8 byte slice satisfies the literal helper's initialized range.
     unsafe { relar_bytes_literal(value.as_ptr(), value.len()) }
+}
+
+/// # Safety
+/// The caller roots an exact bytes handle while the digest reads its contents.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_sha256_hex(value: *const Bytes) -> *const Str {
+    // SAFETY: the compiler roots the immutable bytes until hashing returns.
+    let digest = Sha256::digest(unsafe { &*value });
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut result = Str::with_capacity(digest.len() * 2);
+    for byte in digest {
+        result.push(char::from(HEX[(byte >> 4) as usize]));
+        result.push(char::from(HEX[(byte & 15) as usize]));
+    }
+    Rc::into_raw(Rc::new(result))
 }
 
 /// Renders Python's strict UTF-8 decode error from the invalid sequence bounds.

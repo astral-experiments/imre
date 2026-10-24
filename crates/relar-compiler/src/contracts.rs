@@ -155,6 +155,7 @@ impl Builtin {
             | Self::DictGetDefault
             | Self::DictTryGet(_)
             | Self::Encode
+            | Self::Sha256Hex
             | Self::ExceptionCause
             | Self::ExceptionMessage
             | Self::ExceptionSuppressContext
