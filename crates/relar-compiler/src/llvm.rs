@@ -11,7 +11,7 @@ use crate::contracts::{
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
     Binary, Builtin, CallArgs, Compare, ExceptHandler, Expr, ExprKind, Function, InstanceType,
-    Module, RegexCapture, Statement, Type,
+    Module, RegexCapture, Statement, TUPLE_PROBE_ARITY, Type,
 };
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
@@ -176,8 +176,9 @@ fn emit_program(
     sanitize: bool,
     output: &mut Output,
 ) -> Result<(), String> {
-    let borrows = borrows::analyze(module);
-    let effects = effects::analyze(module);
+    let callable_targets = crate::callables::Targets::analyze(module);
+    let borrows = borrows::analyze(module, &callable_targets);
+    let effects = effects::analyze(module, &callable_targets);
     let inline_dispatch = string_enums::inline_dispatch(module, &effects);
     let mut emitter = Emitter {
         module,
@@ -213,7 +214,7 @@ fn emit_program(
         ranges,
         effects,
         inline_dispatch,
-        callable_targets: crate::callables::Targets::analyze(module),
+        callable_targets,
         integer_regions: integer_regions::analyze(module),
         uses_sys_argv: module.uses_sys_argv(),
     };
@@ -3099,11 +3100,7 @@ impl Emitter<'_, '_> {
             self.store(*slot, &value);
             return self.truth(&value);
         }
-        let probe_index = match builtin {
-            Builtin::DictGetDefault | Builtin::DictTryGet(_) => Some(1),
-            Builtin::DictContains | Builtin::SetContains => Some(0),
-            _ => None,
-        };
+        let probe_index = builtin.tuple_probe_index();
         let mut probe_fields = Vec::new();
         let args = expressions
             .iter()
@@ -3111,9 +3108,14 @@ impl Emitter<'_, '_> {
             .map(|(index, arg)| {
                 if probe_index == Some(index)
                     && let ExprKind::Tuple(fields) = &arg.kind
-                    && (1..=16).contains(&fields.len())
+                    && TUPLE_PROBE_ARITY.contains(&fields.len())
                 {
-                    self.tuple_probe(arg.ty, fields, &mut probe_fields)
+                    self.tuple_probe(
+                        arg.ty,
+                        fields,
+                        index + 1 == expressions.len(),
+                        &mut probe_fields,
+                    )
                 } else if index == 0
                     && matches!(
                         builtin,
@@ -3931,7 +3933,13 @@ impl Emitter<'_, '_> {
 
     /// Read-only lookups never take ownership of the key, even on a miss in a
     /// defaultdict. Keep the field owners across subsequent arguments and errors.
-    fn tuple_probe(&mut self, ty: Type, fields: &[Expr], roots: &mut Vec<Value>) -> Operand {
+    fn tuple_probe(
+        &mut self,
+        ty: Type,
+        fields: &[Expr],
+        last_arg: bool,
+        roots: &mut Vec<Value>,
+    ) -> Operand {
         let scratch = self.entry_alloca(format!("[{} x i64]", fields.len() + 2));
         let layout = self
             .output
@@ -3944,12 +3952,27 @@ impl Emitter<'_, '_> {
             operand: payload,
             small_integer: false,
         };
+        // An immediate probe of local snapshots executes only loads between the
+        // first field and the lookup. Their slots keep every word alive.
+        let borrow_locals = last_arg
+            && fields
+                .iter()
+                .all(|field| matches!(field.kind, ExprKind::Local(_)));
         for (index, field) in fields.iter().enumerate() {
-            let field = self.expr(field);
+            let field = if borrow_locals {
+                self.operand(field)
+            } else {
+                Operand {
+                    value: self.expr(field),
+                    ownership: Ownership::Owned,
+                }
+            };
             let pointer = self.field_pointer(&value, index);
-            let word = self.word(&field);
+            let word = self.word(&field.value);
             self.line(format!("store i64 {word}, ptr {pointer}"));
-            roots.push(field);
+            if matches!(field.ownership, Ownership::Owned) {
+                roots.push(field.value);
+            }
         }
         Operand {
             value,
@@ -5370,6 +5393,55 @@ mod tests {
         );
         assert_eq!(body.matches("call ptr @relar_tuple_probe(").count(), 3);
         assert_eq!(body.matches("call ptr @relar_record_new(").count(), 1);
+    }
+
+    #[test]
+    fn named_tuple_keys_materialize_at_the_single_insertion() {
+        let body = function_body(
+            "def probe(d: dict[tuple[str, str], int], x: str, y: str, write: bool) -> int:\n    key = (x, y)\n    found = d.get(key, 0)\n    if write:\n        d[key] = found + 1\n    return found\n",
+        );
+        let (_, after_probe) = body.split_once("call ptr @relar_tuple_probe(").unwrap();
+        assert_eq!(body.matches("call ptr @relar_record_new(").count(), 1);
+        assert!(after_probe.contains("call ptr @relar_record_new("));
+    }
+
+    #[test]
+    fn immediate_tuple_probes_borrow_local_components() {
+        for (args, retains) in [("key", 0), ("key, 0", 2)] {
+            let body = function_body(&format!(
+                "def probe(d: dict[tuple[str, str], int], x: str, y: str) -> None:\n    key = (x, y)\n    d.get({args})\n"
+            ));
+            let (_, probe) = body.split_once("call ptr @relar_tuple_probe(").unwrap();
+            let (fields, _) = probe.split_once("@relar_dict_").unwrap();
+            assert_eq!(
+                fields.matches("call void @relar_str_retain(").count(),
+                retains
+            );
+        }
+    }
+
+    #[test]
+    fn named_probe_preserves_tuple_producer_calls() {
+        let llvm = compile(
+            "def make(x: str, y: str) -> tuple[str, str]:\n    return (x, y)\n\ndef probe(d: dict[tuple[str, str], int], x: str, y: str) -> None:\n    key = make(x, y)\n    d.get(key)\n",
+            &CompileOptions::default(),
+        ).unwrap();
+        assert!(llvm.contains("call ptr @fn_0("));
+        assert!(!llvm.contains("call ptr @relar_tuple_probe("));
+    }
+
+    #[test]
+    fn repeated_insertions_keep_one_owned_tuple() {
+        for stores in [
+            "    for i in range(3):\n        d[key] = i",
+            "    d[key] = 1\n    other[key] = 2",
+        ] {
+            let body = function_body(&format!(
+                "def probe(d: dict[tuple[str, int], int], other: dict[tuple[str, int], int], x: str) -> int:\n    key = (x, 0)\n    found = d.get(key, 0)\n{stores}\n    return found\n"
+            ));
+            assert!(!body.contains("call ptr @relar_tuple_probe("));
+            assert_eq!(body.matches("call ptr @relar_record_new(").count(), 1);
+        }
     }
 
     #[test]

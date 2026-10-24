@@ -127,14 +127,16 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
         let directory = std::env::current_dir().map_err(files::os_error)?;
         path_utf8(directory.into_os_string())?
     };
-    let mut remaining = path.split('/').count();
-    let mut parts: Vec<_> = path
-        .split('/')
-        .rev()
-        .map(|part| ResolvePart::Component(Str::from(part)))
-        .collect();
+    let mut source = path.split('/');
+    let mut remaining = source.clone().count();
+    // Only expanded symlink targets and their completion markers need a stack.
+    let mut parts = Vec::new();
     let mut links: HashMap<Str, Option<Str>> = HashMap::new();
-    while let Some(part) = parts.pop() {
+    while let Some(part) = parts.pop().or_else(|| {
+        source
+            .next()
+            .map(|part| ResolvePart::Component(Str::from(part)))
+    }) {
         let part = match part {
             ResolvePart::Component(part) => part,
             ResolvePart::ResolvedLink(link) => {
@@ -638,8 +640,8 @@ impl PathIterator {
             else {
                 unreachable!()
             };
-            if pattern.literal {
-                let path = join(&self.root, &pattern.text);
+            if let Pattern::Literal(text) = &pattern {
+                let path = join(&self.root, text);
                 // Literal globbing uses lexists, so dangling symlinks are included
                 // without scanning or inspecting unrelated directory names.
                 return Ok(if fs::symlink_metadata(path.as_str()).is_ok() {
@@ -719,10 +721,9 @@ pub unsafe extern "C" fn relar_path_next(iterator: *const Object) -> *const Obje
     finish(result, std::ptr::null())
 }
 
-struct Pattern {
-    text: Str,
-    tokens: Vec<Token>,
-    literal: bool,
+enum Pattern {
+    Literal(Str),
+    Wildcard(Vec<Token>),
 }
 
 enum Token {
@@ -749,6 +750,9 @@ impl Pattern {
                 "glob requires a nonrecursive single-component pattern",
             ));
         }
+        if !pattern.contains(['*', '?', '[']) {
+            return Ok(Self::Literal(Str::from(pattern)));
+        }
         let chars: Vec<_> = pattern.chars().collect();
         let mut tokens = Vec::new();
         let mut index = 0;
@@ -774,27 +778,26 @@ impl Pattern {
                 character => tokens.push(Token::Literal(character)),
             }
         }
-        Ok(Self {
-            text: Str::from(pattern),
-            tokens,
-            literal: !pattern.contains(['*', '?', '[']),
-        })
+        Ok(Self::Wildcard(tokens))
     }
 
     /// Greedy star matching remembers the most recent star and advances its
     /// Unicode-scalar boundary on mismatch, avoiding recursive backtracking.
     fn matches(&self, name: &str) -> bool {
+        let tokens = match self {
+            Self::Literal(text) => return text == name,
+            Self::Wildcard(tokens) => tokens,
+        };
         let (mut token, mut at) = (0, 0);
         let mut star = None;
         while at < name.len() {
-            if matches!(self.tokens.get(token), Some(Token::Star)) {
+            if matches!(tokens.get(token), Some(Token::Star)) {
                 star = Some((token, at));
                 token += 1;
                 continue;
             }
             let character = name[at..].chars().next().unwrap();
-            if self
-                .tokens
+            if tokens
                 .get(token)
                 .is_some_and(|token| token.matches(character))
             {
@@ -811,10 +814,10 @@ impl Pattern {
                 return false;
             }
         }
-        while matches!(self.tokens.get(token), Some(Token::Star)) {
+        while matches!(tokens.get(token), Some(Token::Star)) {
             token += 1;
         }
-        token == self.tokens.len()
+        token == tokens.len()
     }
 }
 
@@ -1208,7 +1211,8 @@ mod tests {
 
     #[test]
     fn wildcard_patterns_match_unicode_hidden_names_and_character_classes() {
-        for (pattern, yes, no) in [
+        for (spelling, yes, no) in [
+            ("literal.β", "literal.β", "other.β"),
             ("*.json", ".hidden.json", "plain.txt"),
             ("?.json", "🦀.json", "aa.json"),
             ("[a-c]?", "bβ", "dβ"),
@@ -1223,9 +1227,9 @@ mod tests {
             ("[-a]", "-", "b"),
             ("[a-]", "-", "b"),
         ] {
-            let pattern = Pattern::new(pattern).unwrap_or_else(|_| panic!());
-            assert!(pattern.matches(yes), "{} {yes}", pattern.text);
-            assert!(!pattern.matches(no), "{} {no}", pattern.text);
+            let pattern = Pattern::new(spelling).unwrap_or_else(|_| panic!());
+            assert!(pattern.matches(yes), "{spelling} {yes}");
+            assert!(!pattern.matches(no), "{spelling} {no}");
         }
     }
 }

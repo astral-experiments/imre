@@ -927,7 +927,7 @@ struct LineIterator {
 impl LineIterator {
     fn next(&mut self) -> Option<(OwnedWord, Option<OwnedWord>)> {
         let range = self.offsets.next(&self.owner)?;
-        let line = Rc::new(Str::new(&self.owner[range]));
+        let line = text::owned_string(&self.owner[range]);
         // SAFETY: the new string transfers one owner of the exact element kind.
         let line =
             unsafe { OwnedWord::from_owned(Rc::into_raw(line) as usize, words::WordKind::new(3)) };
@@ -968,7 +968,7 @@ pub unsafe extern "C" fn relar_str_splitlines(value: *const Str) -> *const Objec
             .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
         result
             .values
-            .push(Rc::into_raw(Rc::new(Str::new(&value[range]))) as usize);
+            .push(Rc::into_raw(text::owned_string(&value[range])) as usize);
     }
     Rc::into_raw(result.into_object())
 }
@@ -1843,6 +1843,23 @@ mod tests {
                 lines.iter().map(|line| line.as_str()).collect::<Vec<_>>(),
                 expected
             );
+        }
+    }
+
+    #[test]
+    fn repeated_short_split_fields_share_independent_owners() {
+        for value in ["", "a", "\0", "\u{80}", "ÿ"] {
+            let left = text::owned_string(value);
+            let right = text::owned_string(value);
+            assert!(Rc::ptr_eq(&left, &right));
+            drop(left);
+            assert_eq!(right.as_str(), value);
+        }
+        for value in ["aa", "Ā"] {
+            assert!(!Rc::ptr_eq(
+                &text::owned_string(value),
+                &text::owned_string(value)
+            ));
         }
     }
 

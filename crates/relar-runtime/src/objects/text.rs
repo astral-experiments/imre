@@ -44,6 +44,25 @@ pub unsafe extern "C" fn relar_str_dedent(text: *const Str) -> *const Str {
     Rc::into_raw(Rc::new(result))
 }
 
+thread_local! {
+    static SHORT_STRINGS: std::cell::RefCell<[Option<Rc<Str>>; 257]> =
+        const { std::cell::RefCell::new([const { None }; 257]) };
+}
+
+/// Reuses immutable owners for empty and single Latin-1 strings.
+pub(super) fn owned_string(value: &str) -> Rc<Str> {
+    let index = match value.as_bytes() {
+        [] => 256,
+        [byte] => usize::from(*byte),
+        // These UTF-8 lead bytes encode U+0080 through U+00FF.
+        [0xc2 | 0xc3, _] => value.chars().next().unwrap() as usize,
+        _ => return Rc::new(Str::new(value)),
+    };
+    SHORT_STRINGS.with_borrow_mut(|strings| {
+        Rc::clone(strings[index].get_or_insert_with(|| Rc::new(Str::new(value))))
+    })
+}
+
 /// Appends an owned slice of source, retaining its allocation for a full slice.
 fn push_part(parts: &mut Words, source: &Rc<Str>, value: &str) {
     parts
@@ -53,7 +72,7 @@ fn push_part(parts: &mut Words, source: &Rc<Str>, value: &str) {
     let value = if value.len() == source.len() {
         Rc::clone(source)
     } else {
-        Rc::new(Str::new(value))
+        owned_string(value)
     };
     parts.values.push(Rc::into_raw(value) as usize);
 }

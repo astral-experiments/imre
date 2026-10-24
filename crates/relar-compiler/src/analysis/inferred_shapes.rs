@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use ruff_python_ast::visitor::{Visitor, walk_body, walk_expr, walk_stmt};
 use ruff_python_ast::{Comprehension, Expr, Number, Stmt, UnaryOp};
+use ruff_text_size::TextSize;
 
 const MAX_DEPTH: usize = 256;
 
@@ -15,6 +16,7 @@ pub(super) fn check(body: &[Stmt], tokens: usize) -> Result<(), &'static str> {
     let mut shapes = Shapes {
         scopes: vec![HashMap::new()],
         straight_line: HashMap::new(),
+        read_shapes: HashMap::new(),
         fixed: body
             .iter()
             .filter_map(|stmt| match stmt {
@@ -53,7 +55,10 @@ struct Shape {
 enum Contents {
     #[default]
     Unknown,
-    List,
+    List(usize),
+    Dict {
+        key_depth: usize,
+    },
     UniformTuple(usize),
     Tuple(Rc<[Shape]>),
 }
@@ -66,10 +71,31 @@ impl Shape {
         }
     }
 
-    fn list(depth: usize) -> Self {
+    fn list(depth: usize, layers: usize) -> Self {
         Self {
             depth,
-            contents: Contents::List,
+            contents: Contents::List(layers),
+        }
+    }
+
+    fn list_layers(&self) -> usize {
+        match self.contents {
+            Contents::List(layers) => layers,
+            _ => 0,
+        }
+    }
+
+    fn item_list_layers(&self) -> usize {
+        match &self.contents {
+            Contents::Tuple(fields) => fields.iter().map(Self::list_layers).min().unwrap_or(0),
+            _ => self.list_layers().saturating_sub(1),
+        }
+    }
+
+    fn iteration_depth(&self) -> usize {
+        match self.contents {
+            Contents::Dict { key_depth } => key_depth,
+            _ => self.depth.saturating_sub(1),
         }
     }
 
@@ -97,7 +123,14 @@ impl Shape {
                 return field.clone();
             }
         }
-        Self::plain(self.depth.saturating_sub(1))
+        let depth = self.depth.saturating_sub(1);
+        if let Contents::List(layers) = self.contents
+            && layers > 1
+        {
+            Self::list(depth, layers - 1)
+        } else {
+            Self::plain(depth)
+        }
     }
 }
 
@@ -125,7 +158,7 @@ fn bind_target<'a>(target: &'a Expr, shape: Shape, bind: &mut impl FnMut(&'a str
         Expr::Name(node) => return bind(node.id.as_str(), shape),
         // A starred target receives a list of the remaining elements.
         Expr::Starred(node) => {
-            return bind_target(&node.value, Shape::list(shape.depth + 1), bind);
+            return bind_target(&node.value, Shape::list(shape.depth + 1, 1), bind);
         }
         Expr::Tuple(node) => &node.elts,
         Expr::List(node) => &node.elts,
@@ -152,6 +185,7 @@ struct Shapes<'a> {
     fixed: HashSet<&'a str>,
     scopes: Vec<HashMap<&'a str, Shape>>,
     straight_line: HashMap<&'a str, Shape>,
+    read_shapes: HashMap<TextSize, Shape>,
     conditional: bool,
     exceeded: bool,
 }
@@ -175,7 +209,10 @@ impl<'a> Shapes<'a> {
                 .iter()
                 .rev()
                 .find(|(name, _)| *name == node.id.as_str())
-                .map_or_else(|| self.lookup(node.id.as_str()), |(_, shape)| shape.clone()),
+                .map(|(_, shape)| shape)
+                .or_else(|| self.read_shapes.get(&node.range.start()))
+                .cloned()
+                .unwrap_or_else(|| self.lookup(node.id.as_str())),
             Expr::Tuple(node) if !node.elts.iter().any(|elt| matches!(elt, Expr::Starred(_))) => {
                 let fields: Vec<_> = node
                     .elts
@@ -196,7 +233,101 @@ impl<'a> Shapes<'a> {
                     },
                 }
             }
-            Expr::List(_) | Expr::ListComp(_) => Shape::list(self.depth_in(value, locals)),
+            Expr::Dict(node) => {
+                let mut depth = 1;
+                let mut key_depth = 0;
+                for item in &node.items {
+                    if let Some(key) = &item.key {
+                        let key = self.depth_in(key, locals);
+                        key_depth = key_depth.max(key);
+                        depth = depth.max(1 + key.max(self.depth_in(&item.value, locals)));
+                    } else {
+                        let mapping = self.shape(&item.value, locals);
+                        depth = depth.max(mapping.depth);
+                        key_depth = key_depth.max(mapping.iteration_depth());
+                    }
+                }
+                Shape {
+                    depth,
+                    contents: Contents::Dict { key_depth },
+                }
+            }
+            Expr::DictComp(node) => {
+                let bindings = self.comprehension_bindings(&node.generators, locals);
+                let key_depth =
+                    self.depth_in(node.key.as_deref().unwrap_or(&node.value), &bindings);
+                let depth = 1 + key_depth.max(self.depth_in(&node.value, &bindings));
+                Shape {
+                    depth,
+                    contents: Contents::Dict { key_depth },
+                }
+            }
+            Expr::List(node) => {
+                let mut depth = 0;
+                let mut common = None::<usize>;
+                for item in &node.elts {
+                    let item = self.shape(item, locals);
+                    depth = depth.max(item.depth);
+                    let layers = item.list_layers();
+                    common = Some(common.map_or(layers, |old| old.min(layers)));
+                }
+                Shape::list(depth + 1, common.unwrap_or(0) + 1)
+            }
+            Expr::ListComp(_) => Shape::list(self.depth_in(value, locals), 1),
+            Expr::Call(node) => {
+                let rank = |arg: &Expr| self.depth_in(arg, locals);
+                let max_depth = |args: &[Expr]| args.iter().map(rank).max().unwrap_or(0);
+                let name = node.func.as_name_expr().map(|name| name.id.as_str());
+                let args = &node.arguments.args;
+                let unknown_call_depth = |receiver| {
+                    max_depth(args).max(receiver).max(
+                        node.arguments
+                            .keywords
+                            .iter()
+                            .map(|kw| rank(&kw.value))
+                            .max()
+                            .unwrap_or(0),
+                    )
+                };
+                if let Some(attr) = node.func.as_attribute_expr()
+                    && attr.attr.as_str() == "pop"
+                {
+                    let receiver = self.shape(&attr.value, locals);
+                    return if receiver.list_layers() > 0 {
+                        receiver.element(None)
+                    } else {
+                        Shape::plain(unknown_call_depth(receiver.depth))
+                    };
+                }
+                if matches!(name, Some("list" | "sorted")) {
+                    let input = args
+                        .first()
+                        .map(|arg| self.shape(arg, locals))
+                        .unwrap_or_default();
+                    return Shape::list(1 + input.iteration_depth(), input.item_list_layers() + 1);
+                }
+                let item_depth = |arg: &Expr| self.shape(arg, locals).iteration_depth();
+                Shape::plain(match name {
+                    // Both the iterator and the tuple around its items add a level.
+                    Some("zip") => 2 + args.iter().map(item_depth).max().unwrap_or(0),
+                    Some("enumerate") => 2 + args.first().map_or(0, item_depth),
+                    Some("tuple" | "set" | "frozenset" | "iter" | "reversed") => {
+                        1 + args.first().map_or(0, item_depth)
+                    }
+                    Some("dict") => args.first().map_or(1, |e| rank(e).max(1)),
+                    Some("next") => args.first().map_or(0, |e| rank(e).saturating_sub(1)),
+                    Some(
+                        "len" | "int" | "float" | "str" | "repr" | "bool" | "bytes" | "sum"
+                        | "print",
+                    ) => 0,
+                    Some(name) if self.fixed.contains(name) => 0,
+                    _ => unknown_call_depth(
+                        node.func
+                            .as_attribute_expr()
+                            .map_or(0, |attr| rank(&attr.value)),
+                    ),
+                })
+            }
             Expr::Subscript(node) if !matches!(&*node.slice, Expr::Slice(_)) => self
                 .shape(&node.value, locals)
                 .element(literal_index(&node.slice)),
@@ -236,9 +367,9 @@ impl<'a> Shapes<'a> {
                         let depth = old.depth.max(field.depth);
                         *old = if matches!(
                             (&old.contents, &field.contents),
-                            (Contents::List, Contents::List)
+                            (Contents::List(_), Contents::List(_))
                         ) {
-                            Shape::list(depth)
+                            Shape::list(depth, old.list_layers().min(field.list_layers()))
                         } else {
                             Shape::plain(depth)
                         };
@@ -247,8 +378,21 @@ impl<'a> Shapes<'a> {
             }
             (deepest, names)
         } else {
-            bindings(self.shape(iter, locals).element(None))
+            bindings(Shape::plain(self.shape(iter, locals).iteration_depth()))
         }
+    }
+
+    fn comprehension_bindings<'v>(
+        &self,
+        generators: &'v [Comprehension],
+        locals: &[(&'v str, Shape)],
+    ) -> Vec<(&'v str, Shape)> {
+        let mut bindings = locals.to_vec();
+        for gen_ in generators {
+            let (_, names) = self.iteration_bindings(&gen_.target, &gen_.iter, &bindings);
+            bindings.extend(names);
+        }
+        bindings
     }
 
     fn comprehension<'v>(
@@ -257,11 +401,7 @@ impl<'a> Shapes<'a> {
         values: &[&'v Expr],
         locals: &[(&'v str, Shape)],
     ) -> usize {
-        let mut bindings = locals.to_vec();
-        for gen_ in generators {
-            let (_, names) = self.iteration_bindings(&gen_.target, &gen_.iter, &bindings);
-            bindings.extend(names);
-        }
+        let bindings = self.comprehension_bindings(generators, locals);
         1 + values
             .iter()
             .map(|e| self.depth_in(e, &bindings))
@@ -277,17 +417,7 @@ impl<'a> Shapes<'a> {
             Expr::Tuple(node) => 1 + max_depth(&node.elts),
             Expr::List(node) => 1 + max_depth(&node.elts),
             Expr::Set(node) => 1 + max_depth(&node.elts),
-            Expr::Dict(node) => node
-                .items
-                .iter()
-                .map(|item| {
-                    let value_depth = rank(&item.value);
-                    item.key
-                        .as_ref()
-                        .map_or(value_depth, |key| 1 + value_depth.max(rank(key)))
-                })
-                .max()
-                .unwrap_or(1),
+            Expr::Dict(_) | Expr::DictComp(_) => self.shape(value, locals).depth,
             Expr::BoolOp(node) => max_depth(&node.values),
             Expr::If(node) => rank(&node.body).max(rank(&node.orelse)),
             Expr::Named(node) => rank(&node.value),
@@ -297,52 +427,7 @@ impl<'a> Shapes<'a> {
             Expr::ListComp(node) => self.comprehension(&node.generators, &[&node.elt], locals),
             Expr::SetComp(node) => self.comprehension(&node.generators, &[&node.elt], locals),
             Expr::Generator(node) => self.comprehension(&node.generators, &[&node.elt], locals),
-            Expr::DictComp(node) => self.comprehension(
-                &node.generators,
-                &[node.key.as_deref().unwrap_or(&node.value), &node.value],
-                locals,
-            ),
-            Expr::Call(node) => {
-                if let Some(attr) = node.func.as_attribute_expr()
-                    && attr.attr.as_str() == "pop"
-                {
-                    let receiver = self.shape(&attr.value, locals);
-                    if matches!(receiver.contents, Contents::List) {
-                        return receiver.depth.saturating_sub(1);
-                    }
-                }
-                let name = node.func.as_name_expr().map(|name| name.id.as_str());
-                let args = &node.arguments.args;
-                match name {
-                    // Each yielded tuple adds a level around the input elements.
-                    Some("zip") => max_depth(args).max(1) + 1,
-                    Some("enumerate") => args.first().map_or(1, |e| rank(e).max(1)) + 1,
-                    Some(
-                        "tuple" | "list" | "set" | "frozenset" | "dict" | "sorted" | "iter"
-                        | "reversed",
-                    ) => args.first().map_or(1, |e| rank(e).max(1)),
-                    Some("next") => args.first().map_or(0, |e| rank(e).saturating_sub(1)),
-                    Some(
-                        "len" | "int" | "float" | "str" | "repr" | "bool" | "bytes" | "sum"
-                        | "print",
-                    ) => 0,
-                    Some(name) if self.fixed.contains(name) => 0,
-                    _ => max_depth(args)
-                        .max(
-                            node.func
-                                .as_attribute_expr()
-                                .map_or(0, |attr| rank(&attr.value)),
-                        )
-                        .max(
-                            node.arguments
-                                .keywords
-                                .iter()
-                                .map(|kw| rank(&kw.value))
-                                .max()
-                                .unwrap_or(0),
-                        ),
-                }
-            }
+            Expr::Call(_) => self.shape(value, locals).depth,
             Expr::BinOp(node) => rank(&node.left).max(rank(&node.right)),
             _ => 0,
         }
@@ -372,9 +457,9 @@ impl<'a> Shapes<'a> {
                     let depth = old.depth.max(shape.depth);
                     if matches!(
                         (&old.contents, &shape.contents),
-                        (Contents::List, Contents::List)
+                        (Contents::List(_), Contents::List(_))
                     ) {
-                        Shape::list(depth)
+                        Shape::list(depth, old.list_layers().min(shape.list_layers()))
                     } else {
                         Shape::plain(depth)
                     }
@@ -452,10 +537,76 @@ impl<'a> Visitor<'a> for Shapes<'a> {
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
-        walk_expr(self, expr);
-        if let Expr::Named(node) = expr {
-            self.bind(&node.target, self.shape(&node.value, &[]), false);
+        self.read_shapes.clear();
+        let writes = crate::narrowing::expression_assignments(expr);
+        if writes.is_empty() {
+            return;
         }
+        // A later assignment expression can rebind a name whose previous
+        // value was already captured in a tuple. Record each affected read at
+        // evaluation time so positional projection sees the captured value.
+        struct Evaluation<'s, 'a> {
+            shapes: &'s mut Shapes<'a>,
+            writes: HashSet<String>,
+            may_skip: bool,
+        }
+        impl Evaluation<'_, '_> {
+            fn optional(&mut self, visit: impl FnOnce(&mut Self)) {
+                let previous = std::mem::replace(&mut self.may_skip, true);
+                visit(self);
+                self.may_skip = previous;
+            }
+        }
+        impl<'a> Visitor<'a> for Evaluation<'_, 'a> {
+            fn visit_expr(&mut self, expr: &'a Expr) {
+                match expr {
+                    Expr::Name(node) if self.writes.contains(node.id.as_str()) => {
+                        let value = self.shapes.lookup(node.id.as_str());
+                        self.shapes.read_shapes.insert(node.range.start(), value);
+                    }
+                    Expr::Named(node) => {
+                        self.visit_expr(&node.value);
+                        let value = self.shapes.shape(&node.value, &[]);
+                        let outer = self.shapes.conditional;
+                        self.shapes.conditional |= self.may_skip;
+                        self.shapes.bind(&node.target, value, !self.may_skip);
+                        self.shapes.conditional = outer;
+                    }
+                    Expr::BoolOp(node) => {
+                        if let Some((first, rest)) = node.values.split_first() {
+                            self.visit_expr(first);
+                            self.optional(|v| rest.iter().for_each(|item| v.visit_expr(item)));
+                        }
+                    }
+                    Expr::If(node) => {
+                        self.visit_expr(&node.test);
+                        self.optional(|v| {
+                            v.visit_expr(&node.body);
+                            v.visit_expr(&node.orelse);
+                        });
+                    }
+                    Expr::Compare(node) if node.operands.len() > 2 => {
+                        let (first, rest) = node.operands.split_at(2);
+                        first.iter().for_each(|item| self.visit_expr(item));
+                        self.optional(|v| rest.iter().for_each(|item| v.visit_expr(item)));
+                    }
+                    Expr::ListComp(_)
+                    | Expr::SetComp(_)
+                    | Expr::DictComp(_)
+                    | Expr::Generator(_) => {
+                        self.optional(|v| walk_expr(v, expr));
+                    }
+                    Expr::Lambda(_) => {}
+                    _ => walk_expr(self, expr),
+                }
+            }
+        }
+        Evaluation {
+            shapes: self,
+            writes,
+            may_skip: false,
+        }
+        .visit_expr(expr);
     }
 }
 
@@ -524,6 +675,43 @@ mod tests {
             let last = wrap.replace("{p}", &format!("v{}", MAX_DEPTH - 1));
             assert!(limited(&format!("{body}result = {last}\n")), "{wrap}");
         }
+    }
+
+    #[test]
+    fn chained_pop_calls_visit_each_unknown_receiver_once() {
+        let levels = 36;
+        let annotation = format!("{}int{}", "list[".repeat(levels), "]".repeat(levels));
+        let source = format!(
+            "def f(x: {annotation}) -> int:\n{}    value = x{}\n    return value\n",
+            "    pass\n".repeat(115),
+            ".pop()".repeat(levels),
+        );
+        crate::check(&source).unwrap();
+    }
+
+    #[test]
+    fn dictionary_iteration_counts_only_key_nesting() {
+        for step in [
+            "x = list(zip({0: x}))",
+            "d = {0: x}\nalias = d\nx = list(enumerate(alias))",
+            "d = {0: x}\nx = list(zip([0], {**d}))",
+            "x = list(enumerate({k: x for k in [0]}))",
+        ] {
+            assert!(
+                !limited(&format!("x = [1]\n{}", format!("{step}\n").repeat(300))),
+                "{step}"
+            );
+        }
+        let deep = format!("x = 0\n{}", "x = (x,)\n".repeat(MAX_DEPTH - 2));
+        assert!(!limited(&format!(
+            "{deep}d = {{x: 0}}\nitems = list(zip(d))\n"
+        )));
+        assert!(limited(&format!(
+            "{deep}d = {{x: 0}}\nitems = (list(zip(d)),)\n"
+        )));
+        assert!(limited(&format!(
+            "{deep}d = {{0: x}}\ncopy = ((dict(d),),)\n"
+        )));
     }
 
     #[test]
@@ -643,5 +831,58 @@ mod tests {
                 .map(|i| format!("def f{i}():\n    value = (1,)\n"))
                 .collect::<String>()
         ));
+    }
+
+    #[test]
+    fn tuple_fields_capture_names_before_their_assignment_expressions() {
+        for (fields, index, too_deep) in [
+            ("$name, ($name := None), $previous", 0, true),
+            ("($name := None), $name, $previous", 1, false),
+            (
+                "flag or (($name := None) is None), $name, $previous",
+                1,
+                true,
+            ),
+            (
+                "False if flag else (($name := None) is None), $name, $previous",
+                1,
+                true,
+            ),
+        ] {
+            let mut source = String::from("def f(flag: bool) -> None:\n    v0 = (1,)\n");
+            for i in 1..=MAX_DEPTH + 1 {
+                let previous = format!("v{}", i - 1);
+                let name = format!("t{i}");
+                let fields = fields
+                    .replace("$name", &name)
+                    .replace("$previous", &previous);
+                source.push_str(&format!(
+                    "    {name} = {previous} if flag else None\n    pair{i} = ({fields})\n    v{i} = (pair{i}[{index}],)\n"
+                ));
+            }
+            let result = crate::check(&source);
+            if too_deep {
+                assert!(result.unwrap_err().contains("inferred container nesting"));
+            } else {
+                result.unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn list_copies_and_projections_preserve_nested_pop_shapes() {
+        for expr in [
+            "[[v]].pop().pop()",
+            "[[v]][0].pop()",
+            "list([v]).pop()",
+            "sorted([v]).pop()",
+        ] {
+            let mut source = String::from("def f() -> int:\n    v = 1\n");
+            for _ in 0..MAX_DEPTH + 1 {
+                source.push_str(&format!("    v = {expr}\n"));
+            }
+            source.push_str("    return v\n");
+            crate::check(&source).unwrap();
+        }
     }
 }

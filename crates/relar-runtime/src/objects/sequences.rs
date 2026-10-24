@@ -4,6 +4,7 @@ use num_traits::{Signed, ToPrimitive};
 use std::rc::Rc;
 
 use super::exceptions::{Error, Kind, Result, finish};
+use super::text::owned_string;
 use super::words::{OwnedWord, WordKind, Words};
 use super::{Int, List, Object, Storage, StorageCell, Str, acquire_rc, fail, object};
 
@@ -142,9 +143,7 @@ pub unsafe extern "C" fn relar_str_get(value: *const Str, at: usize) -> *const S
         Ok(character) => character,
         Err(error) => return error.returning(std::ptr::null()),
     };
-    let mut result = Str::new("");
-    result.push(character);
-    Rc::into_raw(Rc::new(result))
+    Rc::into_raw(owned_string(character.encode_utf8(&mut [0; 4])))
 }
 
 /// Shares Unicode indexing and exact failure messages between owned strings and
@@ -395,10 +394,9 @@ impl StringIterator {
             self.position += character.len_utf8();
             character
         };
-        let mut value = Str::new("");
-        value.push(character);
-        let word = Rc::into_raw(Rc::new(value)) as usize;
-        // SAFETY: the fresh string transfers one owner of the exact string kind.
+        let value = owned_string(character.encode_utf8(&mut [0; 4]));
+        let word = Rc::into_raw(value) as usize;
+        // SAFETY: the string transfers one owner of the exact string kind.
         let value = unsafe { OwnedWord::from_owned(word, WordKind::new(3)) };
         Some((value, None))
     }
@@ -931,6 +929,7 @@ mod tests {
         // once before reusing its slot. Exhausted calls must not touch outputs.
         unsafe {
             let iterator = Rc::from_raw(relar_str_iter(Rc::as_ptr(&source)));
+            let indexed = Rc::from_raw(relar_str_get(Rc::as_ptr(&source), integer(1)));
             drop(source);
             assert_eq!(weak.strong_count(), 1);
             let mut output = 73;
@@ -948,6 +947,7 @@ mod tests {
             assert_eq!(output, 73);
             drop(iterator);
             assert!(weak.upgrade().is_none());
+            assert!(Rc::ptr_eq(&indexed, &values[1]));
             assert_eq!(
                 values
                     .iter()
