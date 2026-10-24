@@ -72,11 +72,18 @@ impl Shape {
     }
 }
 
-fn literal_index(expr: &Expr) -> Option<isize> {
-    let (expr, negative) = match expr {
-        Expr::UnaryOp(node) if node.op == UnaryOp::USub => (&*node.operand, true),
-        expr => (expr, false),
-    };
+fn literal_index(mut expr: &Expr) -> Option<isize> {
+    let mut negative = false;
+    loop {
+        match expr {
+            Expr::UnaryOp(node) if node.op == UnaryOp::UAdd => expr = &node.operand,
+            Expr::UnaryOp(node) if node.op == UnaryOp::USub => {
+                negative = !negative;
+                expr = &node.operand;
+            }
+            _ => break,
+        }
+    }
     let Expr::NumberLiteral(node) = expr else {
         return None;
     };
@@ -436,6 +443,9 @@ mod tests {
     fn tuple_indices_and_unpacking_keep_the_selected_field_depth() {
         for step in [
             "x = ((x, 1)[1],)",
+            "x = ((x, 1)[+1],)",
+            "x = ((x, 1)[--1],)",
+            "x = ((x, 1)[-+1],)",
             "pair = (x, 1)\nalias = pair\nx = (alias[-1],)",
             "pair = ((x, 1),)\nx = (pair[0][1],)",
             "pair = (x, 1)\nignored, item = pair\nx = (item,)",
