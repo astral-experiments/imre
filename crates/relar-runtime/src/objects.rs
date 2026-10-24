@@ -810,19 +810,13 @@ pub unsafe extern "C" fn relar_str_rstrip(value: *const Str, chars: *const Str) 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_str_split_whitespace(value: *const Str) -> *const Object {
     // SAFETY: the caller roots the immutable string throughout the split.
-    let value = unsafe { &*value };
+    let value = unsafe { std::mem::ManuallyDrop::new(Rc::from_raw(value)) };
     let mut result = Words::new(3);
     for part in value
         .split(python_whitespace)
         .filter(|part| !part.is_empty())
     {
-        result
-            .values
-            .try_reserve(1)
-            .unwrap_or_else(|_| fail("MemoryError", "sequence allocation failed"));
-        result
-            .values
-            .push(Rc::into_raw(Rc::new(Str::new(part))) as usize);
+        text::push_part(&mut result, &value, part);
     }
     Rc::into_raw(result.into_object())
 }
@@ -1860,6 +1854,20 @@ mod tests {
                 &text::owned_string(value),
                 &text::owned_string(value)
             ));
+        }
+    }
+
+    #[test]
+    fn whitespace_split_retains_a_complete_field() {
+        let source = Rc::new(Str::from("word".repeat(1024)));
+        // SAFETY: source roots the call, and both ABI results transfer one owner.
+        unsafe {
+            let parts = relar_str_split_whitespace(Rc::as_ptr(&source));
+            let word = Rc::from_raw(relar_seq_get(parts, Int::small(0).unwrap().0) as *const Str);
+            relar_object_release(parts);
+            assert!(Rc::ptr_eq(&word, &source));
+            drop(source);
+            assert_eq!(word.len(), 4096);
         }
     }
 
