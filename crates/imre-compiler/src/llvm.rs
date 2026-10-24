@@ -62,7 +62,7 @@ impl Type {
             | Self::ExitCode
             | Self::TimeoutExpired
             | Self::Path
-            | Self::CompletedProcess
+            | Self::CompletedProcess(_)
             | Self::EventLoop
             | Self::Coroutine(_)
             | Self::Task(_)
@@ -105,7 +105,7 @@ impl Type {
             | Self::ExitCode
             | Self::TimeoutExpired
             | Self::Path
-            | Self::CompletedProcess
+            | Self::CompletedProcess(_)
             | Self::EventLoop
             | Self::Coroutine(_)
             | Self::Task(_)
@@ -661,7 +661,7 @@ impl Emitter<'_, '_> {
             Type::Str | Type::StrLiteral(_) => "str",
             Type::Bytes => "bytes",
             Type::ListInt => "list",
-            Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess => {
+            Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(_) => {
                 "record"
             }
             Type::List(_)
@@ -3183,7 +3183,7 @@ impl Emitter<'_, '_> {
                 | Type::ExitCode
                 | Type::TimeoutExpired
                 | Type::TextIO
-                | Type::CompletedProcess
+                | Type::CompletedProcess(_)
                 | Type::BinaryIO => self.instruction(format!(
                     "icmp {predicate} {} {}, {}",
                     left.ty.llvm(),
@@ -4616,7 +4616,7 @@ impl Emitter<'_, '_> {
                     | Type::JsonObject
                     | Type::RegexMatch
                     | Type::BinaryIO
-                    | Type::CompletedProcess
+                    | Type::CompletedProcess(_)
                     | Type::Tuple(_)
                     | Type::Optional(_)
                     | Type::Callable(_)
@@ -4833,7 +4833,7 @@ impl Emitter<'_, '_> {
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
-            | Type::CompletedProcess
+            | Type::CompletedProcess(_)
             | Type::Tuple(_) => self.instruction(format!("ptrtoint ptr {} to i64", value.operand)),
         }
     }
@@ -4887,7 +4887,7 @@ impl Emitter<'_, '_> {
             | Type::JsonValue
             | Type::JsonObject
             | Type::RegexMatch
-            | Type::CompletedProcess
+            | Type::CompletedProcess(_)
             | Type::Tuple(_) => self.instruction(format!("inttoptr i64 {word} to ptr")),
         };
         Value {
@@ -5404,7 +5404,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         Type::Bytes => 8,
         Type::Union(_) => 9,
         Type::ListInt => 4,
-        Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess => 6,
+        Type::Class(_) | Type::Tuple(_) | Type::Callable(_) | Type::CompletedProcess(_) => 6,
         Type::List(_)
         | Type::Dict(_)
         | Type::Set(_)
@@ -5441,7 +5441,15 @@ fn record_name(ty: Type) -> String {
         Type::Class(id) => format!("class_{id}"),
         Type::Tuple(id) => format!("tuple_{id}"),
         Type::Callable(_) => "callable".to_owned(),
-        Type::CompletedProcess => "completed_process".to_owned(),
+        Type::CompletedProcess(c) if c == crate::ir::ProcessCapture::TEXT => {
+            "completed_process".to_owned()
+        }
+        Type::CompletedProcess(c) => format!(
+            "completed_process_{}{}{}",
+            u8::from(c.text),
+            u8::from(c.stdout),
+            u8::from(c.stderr)
+        ),
         _ => unreachable!("only fixed record types have layout names"),
     }
 }
@@ -5466,19 +5474,31 @@ fn record_layouts(module: &Module, output: &mut Output) {
         .iter()
         .enumerate()
         .map(|(id, fields)| (Type::Class(id), fields.clone()));
-    let process = (
-        Type::CompletedProcess,
-        vec![
-            module.types.list(Type::Str),
-            Type::Int,
-            Type::Str,
-            Type::Str,
-        ],
-    );
-    for (ty, fields) in classes
-        .chain(module.types.tuples())
-        .chain(std::iter::once(process))
-    {
+    let mut captures = std::collections::BTreeSet::from([crate::ir::ProcessCapture::TEXT]);
+    for function in module.functions.iter().chain([&module.entry]) {
+        for ty in function.locals.iter().chain([&function.returns]) {
+            if let Type::CompletedProcess(c) = ty {
+                captures.insert(*c);
+            }
+        }
+        crate::ir::walk_expressions(&function.body, &mut |value| {
+            if let Type::CompletedProcess(c) = value.ty {
+                captures.insert(c);
+            }
+        });
+    }
+    let processes = captures.into_iter().map(|c| {
+        (
+            Type::CompletedProcess(c),
+            vec![
+                module.types.list(Type::Str),
+                Type::Int,
+                c.stream(true),
+                c.stream(false),
+            ],
+        )
+    });
+    for (ty, fields) in classes.chain(module.types.tuples()).chain(processes) {
         let name = record_name(ty);
         let storage = fields
             .iter()
@@ -5533,7 +5553,7 @@ fn write_declarations(units: &mut Output) {
     units.common().push_str(
         r#"
 declare ptr @imre_subprocess_check_output(ptr)
-declare ptr @imre_subprocess_run(ptr, ptr, ptr, i32, ptr)
+declare ptr @imre_subprocess_run_modes(ptr, ptr, ptr, i32, i32, i32, i64, ptr)
 declare ptr @imre_async_coroutine(ptr, ptr, i32)
 declare ptr @imre_context_new(ptr, ptr)
 declare void @imre_context_enter(ptr)
@@ -5569,8 +5589,6 @@ declare i64 @imre_projected_hash(ptr)
 declare ptr @imre_async_process_spawn(ptr, ptr, ptr, i32, i32)
 declare i64 @imre_async_process_status(ptr, i1 zeroext)
 declare ptr @imre_async_process_communicate(ptr, ptr)
-declare ptr @imre_subprocess_run_timeout(ptr, ptr, ptr, i32, ptr, ptr)
-declare ptr @imre_subprocess_run_timeout_int(ptr, ptr, ptr, i32, i64, ptr)
 declare ptr @imre_environ_copy()
 declare ptr @imre_environ_get(ptr, ptr)
 declare ptr @imre_getcwd()

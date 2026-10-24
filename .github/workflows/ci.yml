@@ -94,6 +94,8 @@ jobs:
           persist-credentials: false
       - name: Check sys streams and exits with vendored CPython methods
         run: python3 benchmarks/cpython_stdlib/native_sys.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
+      - name: Check subprocess.run with vendored CPython methods
+        run: python3 benchmarks/cpython_stdlib/native_subprocess.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Run vendored CPython methods against native Imre
         run: |
           python3 benchmarks/cpython_stdlib/native_hashlib.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/cpython-hashlib.json"

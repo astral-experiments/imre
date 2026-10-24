@@ -298,7 +298,9 @@ impl Checker<'_> {
                             paths::operation(ir::PathOperation::Text, Type::Str, vec![item])
                         }
                         Type::Str => item,
-                        Type::Class(_) | Type::CompletedProcess => self.record_text(item, call)?,
+                        Type::Class(_) | Type::CompletedProcess(_) => {
+                            self.record_text(item, call)?
+                        }
                         Type::Int | Type::Bool | Type::Float | Type::None | Type::Bytes => Expr {
                             ty: Type::Str,
                             kind: ExprKind::Builtin(Builtin::Str, vec![item]),

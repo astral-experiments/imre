@@ -806,10 +806,15 @@ pub unsafe extern "C" fn imre_system_exit_code_truth(value: *const Object) -> u3
 ///
 /// # Safety
 /// `value` is a rooted exception, `field` is 0 through 4, and pending is clear.
-/// Success returns one owned word of kind 5, 2, 3, 3, or 3 respectively. Check pending
+/// Bit 3 selects a tagged str/bytes representation for heterogeneous capture sites.
+/// Bit 4 allows timeout stream snapshots when the caller's field can represent them.
+/// Success returns the acquired argv, integer, or correctly typed stream field. Check pending
 /// before interpreting zero, then release the result using that exact kind.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_subprocess_error_field(value: *const Object, field: u32) -> usize {
+    let tagged = field & 8 != 0;
+    let timeouts = field & 16 != 0;
+    let field = field & !(8 | 16);
     if field > 4 {
         fail("SystemError", "invalid process exception field");
     }
@@ -818,8 +823,12 @@ pub unsafe extern "C" fn imre_subprocess_error_field(value: *const Object, field
         object(value).0.with(|storage| {
             let exception = storage.exception();
             match &exception.payload {
-                Payload::Process(process) => Ok(process.field(field)),
+                Payload::Process(process) => Ok(process.field(field, tagged)),
                 Payload::Timeout(timeout) if field == 0 => Ok(timeout.field(0)),
+                Payload::Timeout(timeout) if timeouts && (2..=4).contains(&field) => {
+                    let word = timeout.field(field);
+                    Ok(if word != 0 && tagged { word | 1 } else { word })
+                }
                 _ => {
                     let name = ["cmd", "returncode", "stdout", "stderr", "output"][field as usize];
                     Err(Error::new(

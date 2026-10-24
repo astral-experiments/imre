@@ -134,8 +134,7 @@ impl Builtin {
                 ProcessOperation::Executable
                 | ProcessOperation::CheckOutput
                 | ProcessOperation::RunToStderr
-                | ProcessOperation::Run
-                | ProcessOperation::RunTimeout
+                | ProcessOperation::Run { .. }
                 | ProcessOperation::AsyncSpawn { .. }
                 | ProcessOperation::AsyncStatus { wait: false }
                 | ProcessOperation::Coroutine { .. }
