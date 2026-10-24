@@ -23,12 +23,20 @@ fn has_container_float(ty: Type, inside: bool, types: &Types) -> bool {
 pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
     match ty {
         Type::Exception
-        | Type::JsonValue
-        | Type::JsonObject
         | Type::StringKeys
         | Type::TimeoutExpired
+        | Type::EventLoop
+        | Type::Coroutine(_)
+        | Type::Task(_)
+        | Type::TaskGroup
+        | Type::GeneratorContext
+        | Type::DirectoryContext(_)
+        | Type::Semaphore
+        | Type::AsyncProcess(_)
+        | Type::Logger
         | Type::RegexPattern
         | Type::RegexMatch
+        | Type::ExitCode
         | Type::TextIO
         | Type::BinaryIO
         | Type::Iterator
@@ -43,6 +51,33 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
 
 /// Rejects only generated operations whose supported field representations cannot
 /// retain Python semantics; ignored fields and disabled operations remain valid.
+/// An unused generated repr does not constrain a closed entry. Check its full
+/// field tree on each operation that can actually format the value.
+pub(super) fn can_format(ty: Type, types: &Types, classes: &ClassInfo) -> bool {
+    fn check(ty: Type, types: &Types, classes: &ClassInfo, seen: &mut HashSet<usize>) -> bool {
+        if let Type::Class(id) = ty {
+            if !seen.insert(id) {
+                return true;
+            }
+            let class = &classes.declarations.definitions[id];
+            return class.dataclass.is_none_or(|d| !d.repr)
+                || class
+                    .fields
+                    .iter()
+                    .zip(&classes.fields[id])
+                    .all(|(field, &ty)| !field.repr || check(ty, types, classes, seen));
+        }
+        repr_supported(ty, types)
+            && types
+                .children(ty)
+                .into_iter()
+                .all(|ty| check(ty, types, classes, seen))
+    }
+    check(ty, types, classes, &mut HashSet::new())
+}
+
+/// Rejects only generated operations whose supported field representations cannot
+/// retain Python semantics; ignored fields and disabled operations remain valid.
 pub(super) fn validate(
     classes: &ClassInfo,
     graph: &SourceGraph,
@@ -52,8 +87,8 @@ pub(super) fn validate(
         let Some(options) = &declaration.dataclass else {
             continue;
         };
-        let module = &graph.modules[declaration.definition.module];
         for (field, &ty) in declaration.fields.iter().zip(&classes.fields[class]) {
+            let module = &graph.modules[field.module];
             if options.eq && field.compare && has_container_float(ty, false, types) {
                 return Err(module.error(
                     &field.annotation,
@@ -63,10 +98,10 @@ pub(super) fn validate(
             if options.eq && field.compare && contains_opaque(ty, types) {
                 return Err(module.error(
                     &field.annotation,
-                    "generated dataclass equality cannot compare regex, readonly JSON objects, or TOML key views; use field(compare=False) or dataclass(eq=False)",
+                    "generated dataclass equality cannot compare regex or TOML key views; use field(compare=False) or dataclass(eq=False)",
                 ));
             }
-            if options.repr && field.repr && !repr_supported(ty, types) {
+            if !graph.reachable_only() && options.repr && field.repr && !repr_supported(ty, types) {
                 return Err(module.error(
                     &field.annotation,
                     "generated dataclass repr does not support resource or callable fields; use field(repr=False) or dataclass(repr=False)",
@@ -78,17 +113,11 @@ pub(super) fn validate(
 }
 
 fn contains_opaque(ty: Type, types: &Types) -> bool {
-    matches!(
-        ty,
-        Type::RegexPattern
-            | Type::RegexMatch
-            | Type::JsonValue
-            | Type::JsonObject
-            | Type::StringKeys
-    ) || types
-        .children(ty)
-        .into_iter()
-        .any(|child| contains_opaque(child, types))
+    matches!(ty, Type::RegexPattern | Type::RegexMatch | Type::StringKeys)
+        || types
+            .children(ty)
+            .into_iter()
+            .any(|child| contains_opaque(child, types))
 }
 
 /// Names the entry module like CPython while keeping imported class names
@@ -98,7 +127,8 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
         .declarations
         .definitions
         .iter()
-        .map(|class| ir::ClassMetadata {
+        .enumerate()
+        .map(|(id, class)| ir::ClassMetadata {
             name: class.name.clone(),
             enum_members: class
                 .enum_members
@@ -114,8 +144,14 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                 },
                 class.name
             ),
+            frozen_initializer: (class.generated_initializer
+                && class.dataclass.is_some_and(|options| options.frozen)
+                && !classes.methods[id].contains_key("__post_init__")
+                && !classes.has_concrete_subclasses(id))
+            .then(|| classes.methods[id]["__init__"].id),
             dataclass_eq: class.dataclass.as_ref().is_some_and(|options| options.eq),
             dataclass_repr: class.dataclass.as_ref().is_some_and(|options| options.repr),
+            toml_hash: class.toml_hash,
             fields: class
                 .fields
                 .iter()

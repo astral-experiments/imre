@@ -7,6 +7,73 @@ use crate::ir::{self, JsonDefault};
 use super::*;
 
 impl Emitter<'_, '_> {
+    fn json_mode(&self, result: Type, compare_string: bool) -> u32 {
+        let payload = self.module.types.payload(result);
+        let concrete = payload.unwrap_or(result);
+        let tag = match concrete {
+            Type::JsonValue => 0,
+            Type::JsonObject => 1,
+            Type::Str => 2,
+            Type::Int => 3,
+            Type::Bool if compare_string => 4,
+            Type::Bool => 7,
+            Type::Float => 8,
+            _ if self.module.types.element(concrete) == Some(Type::JsonObject) => 5,
+            _ if self.module.types.element(concrete) == Some(Type::JsonValue) => 6,
+            _ => unreachable!("checked JSON selection"),
+        };
+        tag | if payload.is_some() { 256 } else { 0 }
+    }
+
+    fn json_key(&mut self, key: &str) -> String {
+        let name = self.byte_array(key.as_bytes().to_vec());
+        format!("ptr @{name}, i64 {}", key.len())
+    }
+
+    pub(super) fn json_add_fields(&mut self, a: &str, b: &str, args: &[Operand]) -> Value {
+        let a = self.json_key(a);
+        let b = self.json_key(b);
+        let operand = self.checked_instruction(format!(
+            "call ptr @relar_json_add_fields(ptr {}, {a}, i64 {}, {b}, i64 {})",
+            args[0].value.operand, args[1].value.operand, args[2].value.operand
+        ));
+        Value {
+            ty: Type::JsonValue,
+            operand,
+            small_integer: false,
+        }
+    }
+
+    pub(super) fn json_get(
+        &mut self,
+        key: &str,
+        empty_list: bool,
+        result: Type,
+        args: &[Operand],
+    ) -> Value {
+        let key = self.json_key(key);
+        let mode = self.json_mode(result, false);
+        let (kind, fallback) = if empty_list {
+            (1, "0".to_owned())
+        } else {
+            let value = &args[1].value;
+            let kind = match value.ty {
+                Type::None => 0,
+                Type::Int => 2,
+                Type::Str | Type::StrLiteral(_) => 3,
+                Type::Bool => 4,
+                Type::Float => 5,
+                _ => unreachable!("checked JSON default"),
+            };
+            (kind, self.word(value))
+        };
+        let word = self.checked_instruction(format!(
+            "call i64 @relar_json_get(ptr {}, {key}, i32 {mode}, i32 {kind}, i64 {fallback})",
+            args[0].value.operand
+        ));
+        self.decode_word(word, result)
+    }
+
     pub(super) fn json_select(&mut self, path: &[String], result: Type, args: &[Operand]) -> Value {
         // Each literal has its UTF-8 byte length followed by its bytes, so
         // empty names and embedded NULs need no escaping or runtime allocation.
@@ -21,15 +88,7 @@ impl Emitter<'_, '_> {
         }
         let size = bytes.len();
         let name = self.byte_array(bytes);
-        let payload = self.module.types.payload(result);
-        let mode = match payload.unwrap_or(result) {
-            Type::JsonValue => 0,
-            Type::JsonObject => 1,
-            Type::Str => 2,
-            Type::Int => 3,
-            Type::Bool => 4,
-            _ => unreachable!("checked JSON selection"),
-        } | if payload.is_some() { 256 } else { 0 };
+        let mode = self.json_mode(result, args.len() > 1);
         let literal = args.get(1).map_or("null", |arg| arg.value.operand.as_str());
         let word = self.checked_instruction(format!("call i64 @relar_json_select(ptr {}, ptr @{name}, i64 {size}, i32 {mode}, ptr {literal})", args[0].value.operand));
         self.decode_word(word, result)
@@ -41,7 +100,11 @@ pub(super) fn schemas(module: &Module, output: &mut Output) {
     for function in module.functions.iter().chain([&module.entry]) {
         ir::walk_expressions(&function.body, &mut |value| {
             if let ExprKind::Builtin(
-                Builtin::JsonDecode(ty) | Builtin::TomlDecode(ty) | Builtin::JsonEncode(ty),
+                Builtin::JsonDecode(ty)
+                | Builtin::TomlDecode(ty)
+                | Builtin::JsonEncode(ty)
+                | Builtin::JsonDumps(ty)
+                | Builtin::JsonDump(ty),
                 _,
             ) = value.kind
             {
@@ -74,6 +137,13 @@ pub(super) fn schema_name(ty: Type) -> String {
         Type::ListInt => "json_list_int".to_owned(),
         Type::List(id) => format!("json_list_{id}"),
         Type::Dict(id) => format!("json_dict_{id}"),
+        Type::Tuple(id) => format!("json_tuple_{id}"),
+        Type::JsonRoot => "json_root".to_owned(),
+        Type::JsonObject => "json_object".to_owned(),
+        Type::JsonValue => "json_value".to_owned(),
+        Type::Bytes => "json_bytes".to_owned(),
+        Type::Set(id) => format!("json_set_{id}"),
+        Type::Path => "json_path".to_owned(),
         Type::Optional(id) => format!("json_optional_{id}"),
         _ => unreachable!("JSON schemas contain only validated concrete types"),
     }
@@ -116,6 +186,10 @@ impl Schemas<'_> {
             Type::Bool => (3, None, None, 0, None),
             Type::Float => (4, None, None, 0, None),
             Type::None => (5, None, None, 0, None),
+            Type::JsonRoot | Type::JsonValue | Type::JsonObject => (15, None, None, 0, None),
+            Type::Bytes => (12, None, None, 0, None),
+            Type::Set(_) => (13, None, None, 0, None),
+            Type::Path => (14, None, None, 0, None),
             Type::ListInt | Type::List(_) => {
                 let child = self.schema(self.module.types.element(ty).unwrap());
                 (6, Some(child), None, 0, None)
@@ -125,19 +199,44 @@ impl Schemas<'_> {
                 (8, Some(child), None, 0, None)
             }
             Type::Dict(_) => {
-                let (_, value) = self.module.types.mapping(ty).unwrap();
+                let (key, value) = self.module.types.mapping(ty).unwrap();
                 let child = self.schema(value);
-                (9, Some(child), None, 0, None)
+                (
+                    if key == Type::Int { 11 } else { 9 },
+                    Some(child),
+                    None,
+                    0,
+                    None,
+                )
+            }
+            Type::Tuple(_) => {
+                let parts = self.module.types.fields(ty).unwrap();
+                let fields_name = format!("{name}_fields");
+                let fields: Vec<_> = parts.iter().map(|&part| {
+                    let child = self.schema(part);
+                    format!("%json_field {{ ptr null, i64 0, ptr @{child}, i32 0, ptr null, i64 0 }}")
+                }).collect();
+                let count = fields.len();
+                writeln!(
+                    self.output.entry_buffer(),
+                    "@{fields_name} = private constant [{count} x %json_field] [{}]",
+                    fields.join(", ")
+                )
+                .unwrap();
+                (10, None, None, count, Some(fields_name))
             }
             Type::Class(class) => {
                 let record = self
                     .module
                     .json_records
                     .iter()
-                    .find(|schema| schema.class == class)
-                    .unwrap();
+                    .find(|schema| schema.class == class);
                 let mut fields = Vec::new();
-                for (index, field) in record.fields.iter().enumerate() {
+                for (index, field) in record
+                    .into_iter()
+                    .flat_map(|record| &record.fields)
+                    .enumerate()
+                {
                     let child = self.schema(self.module.class_fields[class][index]);
                     let prefix = format!("json_field_{class}_{index}");
                     self.bytes(&format!("{prefix}_name"), &field.name);

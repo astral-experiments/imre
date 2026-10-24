@@ -55,9 +55,13 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
+            // Even a zero-argument call may mutate a retained native list or reenter Python.
+            Self::ExtensionImport(_) | Self::ExtensionCall { .. } => Contract::new(true, Unknown),
             Self::Text(operation) => Contract::new(
                 match operation {
-                    TextOperation::Split(_) | TextOperation::Partition => true,
+                    TextOperation::Split(_)
+                    | TextOperation::Partition
+                    | TextOperation::ShlexSplit => true,
                     TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
@@ -67,14 +71,23 @@ impl Builtin {
                 },
                 PreservesLists,
             ),
+            Self::PosixPath(operation) => Contract::new(
+                match operation {
+                    crate::ir::PosixPathOperation::MixedJoin { .. } => true,
+                    crate::ir::PosixPathOperation::Splitext => true, // Tuple allocation is fallible.
+                    _ => false,
+                },
+                PreservesLists,
+            ),
             Self::Path(operation) => Contract::new(
                 match operation {
-                    PathOperation::ReadText
+                    PathOperation::ContextExit
+                    | PathOperation::ReadText
+                    | PathOperation::ReadBytes
                     | PathOperation::Absolute
+                    | PathOperation::WithName
                     | PathOperation::Resolve
                     | PathOperation::WriteText
-                    | PathOperation::WithName
-                    | PathOperation::ReadBytes
                     | PathOperation::WriteBytes
                     | PathOperation::Mkdir
                     | PathOperation::Unlink
@@ -84,7 +97,12 @@ impl Builtin {
                     | PathOperation::CleanupTemporaryDirectory
                     | PathOperation::Iterdir
                     | PathOperation::Next => true,
-                    PathOperation::New
+                    PathOperation::ContextNew { .. }
+                    | PathOperation::ContextEnter
+                    | PathOperation::UnionText
+                    | PathOperation::Scripts
+                    | PathOperation::OsExists
+                    | PathOperation::New
                     | PathOperation::Join
                     | PathOperation::Text
                     | PathOperation::Name
@@ -100,17 +118,54 @@ impl Builtin {
                 PreservesLists,
             ),
             Self::Process(operation) => match operation {
-                ProcessOperation::Run
+                ProcessOperation::RunUntilComplete
+                | ProcessOperation::CloseLoop
+                | ProcessOperation::Gather { .. }
+                | ProcessOperation::AsyncStatus { wait: true }
+                | ProcessOperation::AsyncCommunicate
+                | ProcessOperation::Await
+                | ProcessOperation::RunLoop
+                | ProcessOperation::JoinGroup
+                | ProcessOperation::Acquire => Contract::new(true, Unknown),
+                ProcessOperation::Executable
+                | ProcessOperation::CheckOutput
+                | ProcessOperation::RunToStderr
+                | ProcessOperation::Run
                 | ProcessOperation::RunTimeout
+                | ProcessOperation::AsyncSpawn { .. }
+                | ProcessOperation::AsyncStatus { wait: false }
+                | ProcessOperation::Coroutine { .. }
+                | ProcessOperation::IndirectCoroutine { .. }
+                | ProcessOperation::TaskGroup
+                | ProcessOperation::ContextNew { .. }
+                | ProcessOperation::ContextEnter
+                | ProcessOperation::ContextExit
+                | ProcessOperation::ContextThrow
+                | ProcessOperation::ContextYield
+                | ProcessOperation::CreateTask
+                | ProcessOperation::NewLoop
+                | ProcessOperation::SetLoop
+                | ProcessOperation::EnsureTask
+                | ProcessOperation::LoopSignal
+                | ProcessOperation::CancelTask
+                | ProcessOperation::EnterGroup
+                | ProcessOperation::AbortGroup
+                | ProcessOperation::MemberCause
+                | ProcessOperation::ExceptionAt
+                | ProcessOperation::TaskResult
+                | ProcessOperation::Semaphore
+                | ProcessOperation::Release
                 | ProcessOperation::EnvironCopy
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
+                | ProcessOperation::Which
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
                 | ProcessOperation::TimeoutField(_) => Contract::new(true, PreservesLists),
             },
             Self::RegexCapture { known, .. } => Contract::new(!known, PreservesLists),
+            Self::Document(_) => Contract::new(true, Unknown),
             Self::Bytes => Contract::new(
                 args.first().is_none_or(|arg| arg.ty != Type::Bytes),
                 PreservesLists,
@@ -127,10 +182,21 @@ impl Builtin {
             ),
             Self::BytesGet
             | Self::Decode
+            | Self::DecodeSplitLines
             | Self::DictGet
             | Self::JsonDecode(_)
             | Self::JsonEncode(_)
             | Self::JsonLoads
+            | Self::HashRecord
+            | Self::JsonGet { .. }
+            | Self::JsonGetReceiver
+            | Self::JsonAdd
+            | Self::JsonAddFields(_, _)
+            | Self::JsonDumps(_)
+            | Self::JsonDump(_)
+            | Self::JsonIndex
+            | Self::JsonIter
+            | Self::JsonLen
             | Self::JsonSelect(_)
             | Self::ListGet
             | Self::ListGetBounded { .. }
@@ -145,8 +211,12 @@ impl Builtin {
             | Self::Bool
             | Self::DictContains
             | Self::DictGetDefault
+            | Self::CounterUpdate
+            | Self::EnumLookup(_)
+            | Self::DictSumValues
             | Self::DictTryGet(_)
             | Self::Encode
+            | Self::Sha256Hex
             | Self::ExceptionCause
             | Self::ExceptionMessage
             | Self::ExceptionSuppressContext
@@ -156,24 +226,42 @@ impl Builtin {
             | Self::IntSignAsFloat
             | Self::IsInstance(_)
             | Self::IsNone
+            | Self::JsonIsInt
             | Self::Len
+            | Self::JsonEmptyObject
+            | Self::WallTime
+            | Self::FunctionCache(_)
+            | Self::HashStr
             | Self::ListGetBoundedInBounds { .. }
             | Self::ListSum
+            | Self::DirectoryContextView
             | Self::LiteralStringView
             | Self::RStrip
             | Self::RegexCompile(_)
+            | Self::GetLogger
+            | Self::LogLevel
+            | Self::LogWrite(_)
             | Self::RegexSearch
+            | Self::RegexGroupDict
+            | Self::RegexMatchStart
             | Self::SequenceGetInBounds
             | Self::SetContains
             | Self::Split
             | Self::SplitLines
+            | Self::Ndiff
+            | Self::StringListCopy
+            | Self::StringListFilter(_)
+            | Self::StringListSortSuffix(_)
+            | Self::StringListNonempty
             | Self::Str
             | Self::StrEnumIdentity
             | Self::StrEnumMember { .. }
             | Self::StrEnumName
             | Self::StrEnumValue
+            | Self::EnumString
             | Self::StringJoin
             | Self::StringListContains
+            | Self::StringContains
             | Self::StringReplace
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
@@ -190,11 +278,18 @@ impl Builtin {
             | Self::FileReadline
             | Self::GzipOpen
             | Self::Input
-            | Self::ParseArgs
+            | Self::ParseArgs(_)
             | Self::Pop
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
+            | Self::SysStreamWrite { .. }
+            | Self::SysStreamFlush { .. }
+            | Self::SysExit
+            | Self::SystemExitNew { .. }
+            | Self::SystemExitCode
+            | Self::SystemExitCodeEqual { .. }
+            | Self::SysPlatform
             | Self::SysArgv
             | Self::TextClose
             | Self::TextEnter
@@ -205,11 +300,17 @@ impl Builtin {
             | Self::TomlKeys => Contract::new(true, Unknown),
             Self::BytesIter
             | Self::DefaultListDict
+            | Self::CounterNew
+            | Self::CounterTotal
             | Self::DictAsBase
             | Self::DictIter(_)
             | Self::ExceptionWithCause
             | Self::GlobalSet(_)
             | Self::KeyUnion
+            | Self::KeySet
+            | Self::KeyIntersection
+            | Self::ExactRecord(_)
+            | Self::RecordView
             | Self::ListAllI32
             | Self::ListDistinct
             | Self::ListExtendUnhinted
@@ -350,7 +451,6 @@ const TAGGED_INT: RuntimeParam = RuntimeParam::Value(Type::Int);
 pub(crate) struct OwnedIntOrError;
 /// The word borrows the rooted list element until consumption. Raw zero signals a pending error.
 pub(crate) struct BorrowedIntOrError;
-pub(crate) struct InfallibleVoid;
 /// One signals success. Zero signals a pending error.
 pub(crate) struct StatusOrError;
 
@@ -369,10 +469,15 @@ pub(crate) const LIST_BORROW_INDEX: RuntimeCall<BorrowedIntOrError, 2> = Runtime
     params: [INT_LIST, RuntimeParam::NativeIndex],
     result: BorrowedIntOrError,
 };
-pub(crate) const LIST_APPEND: RuntimeCall<InfallibleVoid, 2> = RuntimeCall {
+pub(crate) const LIST_APPEND: RuntimeCall<StatusOrError, 2> = RuntimeCall {
     symbol: "relar_list_append",
     params: [INT_LIST, TAGGED_INT],
-    result: InfallibleVoid,
+    result: StatusOrError,
+};
+pub(crate) const LIST_APPEND_PAIR: RuntimeCall<StatusOrError, 3> = RuntimeCall {
+    symbol: "relar_list_append_pair",
+    params: [INT_LIST, TAGGED_INT, TAGGED_INT],
+    result: StatusOrError,
 };
 pub(crate) const BYTE_OUTPUT_APPEND: RuntimeCall<StatusOrError, 2> = RuntimeCall {
     symbol: "relar_byte_output_append",
@@ -423,21 +528,29 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
         || matches!(
             name,
             "int_floordiv"
+                | "relar_json_index"
+                | "relar_json_iter"
+                | "relar_json_len"
+                | "relar_json_get_receiver"
+                | "relar_json_add"
                 | "int_mod"
                 | "int_lshift"
                 | "int_rshift"
                 | "relar_flush_stdout"
+                | "relar_subprocess_check_output"
                 | "relar_subprocess_run"
                 | "relar_subprocess_run_timeout"
                 | "relar_subprocess_run_timeout_int"
                 | "relar_environ_get"
                 | "relar_getcwd"
+                | "relar_shutil_which"
                 | "relar_environ_copy"
                 | "relar_subprocess_check"
                 | "relar_subprocess_error_field"
                 | "relar_print_int"
                 | "relar_print_float"
                 | "relar_stderr_line"
+                | "relar_enum_lookup"
                 | "relar_print_str"
                 | "relar_print_bytes"
                 | "relar_bytes_count"
@@ -448,6 +561,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_bytes_slice"
                 | "relar_bytes_concat"
                 | "relar_bytes_repeat"
+                | "relar_bytes_decode_splitlines"
                 | "relar_bytes_decode"
                 | "relar_toml_keys"
                 | "relar_bytes_validate_utf8"
@@ -461,16 +575,16 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_print_none"
                 | "relar_input"
                 | "relar_sys_argv"
+                | "relar_path_read_bytes"
                 | "relar_path_read_text"
                 | "relar_path_write_text"
-                | "relar_path_with_name"
-                | "relar_path_read_bytes"
                 | "relar_path_write_bytes"
                 | "relar_path_mkdir"
                 | "relar_path_unlink"
                 | "relar_path_rmdir"
                 | "relar_path_replace"
                 | "relar_path_absolute"
+                | "relar_path_with_name"
                 | "relar_path_resolve"
                 | "relar_tempdir_new"
                 | "relar_tempdir_cleanup"
@@ -502,6 +616,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_seq_set_index"
                 | "relar_seq_pop"
                 | "relar_seq_repeat"
+                | "relar_str_repeat"
                 | "relar_seq_slice"
                 | "relar_dict_get"
                 | "relar_dict_gather_str_int"

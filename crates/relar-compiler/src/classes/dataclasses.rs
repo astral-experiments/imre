@@ -6,7 +6,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use super::Field;
-use crate::modules::{Binding, Intrinsic, SourceGraph, SourceModule};
+use crate::modules::{Binding, DefinitionId, Intrinsic, SourceGraph, SourceModule};
 
 #[derive(Clone, Copy)]
 pub(crate) struct DataclassOptions {
@@ -21,10 +21,12 @@ pub(crate) struct DataclassOptions {
 pub(crate) enum FieldDefault {
     Scalar(ast::Expr),
     Factory(ContainerFactory),
+    Record(DefinitionId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ContainerFactory {
+    Counter,
     List,
     Dict,
     Set,
@@ -104,6 +106,7 @@ pub(super) fn field(
 ) -> Result<Field, String> {
     let module = &graph.modules[module_id];
     let mut field = Field {
+        module: module_id,
         name: name.to_owned(),
         annotation: (*node.annotation).clone(),
         default: None,
@@ -143,12 +146,7 @@ pub(super) fn field(
                             "field cannot specify both default and default_factory",
                         ));
                     }
-                    field.default = Some(FieldDefault::Factory(factory(
-                        graph,
-                        module_id,
-                        &keyword.value,
-                        class_names,
-                    )?));
+                    field.default = Some(factory(graph, module_id, &keyword.value, class_names)?);
                 }
                 "kw_only" => field.kw_only = boolean(module, &keyword.value)?,
                 "repr" => field.repr = boolean(module, &keyword.value)?,
@@ -208,21 +206,54 @@ fn factory(
     module_id: usize,
     value: &ast::Expr,
     class_names: &HashSet<String>,
-) -> Result<ContainerFactory, String> {
+) -> Result<FieldDefault, String> {
+    let constructor = if let ast::Expr::Lambda(lambda) = value
+        && lambda
+            .parameters
+            .as_ref()
+            .is_none_or(|params| params.is_empty())
+        && let ast::Expr::Call(call) = &*lambda.body
+        && call.arguments.is_empty()
+    {
+        Some(&*call.func)
+    } else {
+        (!shadowed(value, class_names)).then_some(value)
+    };
+    if let Some(Binding::Definition(id)) =
+        constructor.and_then(|target| graph.resolve(module_id, target))
+        && matches!(
+            graph.modules[id.module].parsed.syntax().body[id.statement],
+            ast::Stmt::ClassDef(_)
+        )
+    {
+        if id.module == module_id
+            && !matches!(value, ast::Expr::Lambda(_))
+            && graph.modules[id.module].parsed.syntax().body[id.statement].start() >= value.start()
+        {
+            return Err(graph.modules[module_id]
+                .error(value, "a direct default factory must already be defined"));
+        }
+        return Ok(FieldDefault::Record(id));
+    }
+    if !shadowed(value, class_names)
+        && graph.resolve(module_id, value) == Some(Binding::Intrinsic(Intrinsic::Counter))
+    {
+        return Ok(FieldDefault::Factory(ContainerFactory::Counter));
+    }
     if graph.resolve(module_id, value).is_none()
         && !shadowed(value, class_names)
         && let ast::Expr::Name(name) = value
     {
         match name.id.as_str() {
-            "list" => return Ok(ContainerFactory::List),
-            "dict" => return Ok(ContainerFactory::Dict),
-            "set" => return Ok(ContainerFactory::Set),
+            "list" => return Ok(FieldDefault::Factory(ContainerFactory::List)),
+            "dict" => return Ok(FieldDefault::Factory(ContainerFactory::Dict)),
+            "set" => return Ok(FieldDefault::Factory(ContainerFactory::Set)),
             _ => {}
         }
     }
     Err(graph.modules[module_id].error(
         value,
-        "default_factory must name the unshadowed list, dict, or set builtin",
+        "default_factory requires a supported container or a zero-argument dataclass constructor",
     ))
 }
 

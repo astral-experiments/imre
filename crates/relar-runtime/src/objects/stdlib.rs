@@ -62,8 +62,24 @@ pub(super) unsafe fn sort_strings(values: &mut [usize], mode: StringSort) {
     let skip = shared_prefix(values.iter().map(|&word| bytes(word)));
     let compare = |&left: &usize, &right: &usize| bytes(left)[skip..].cmp(&bytes(right)[skip..]);
     match mode {
-        StringSort::Stable { reverse: false } => values.sort_by(compare),
-        StringSort::Stable { reverse: true } => values.sort_by(|left, right| compare(right, left)),
+        StringSort::Stable { reverse } => {
+            // Glidesort needs at least 48 scratch words to avoid internal allocation.
+            // A stack buffer also lets a large sort finish when the heap is full.
+            let mut local = [std::mem::MaybeUninit::uninit(); 64];
+            let mut heap = Vec::<usize>::new();
+            let scratch = if values.len() <= 128 || heap.try_reserve_exact(values.len()).is_err() {
+                local.as_mut_slice()
+            } else {
+                heap.spare_capacity_mut()
+            };
+            glidesort::sort_with_buffer_by(values, scratch, |left, right| {
+                if reverse {
+                    compare(right, left)
+                } else {
+                    compare(left, right)
+                }
+            });
+        }
         StringSort::Distinct => sort_distinct_words(values, compare),
     }
 }
@@ -591,6 +607,16 @@ pub extern "C" fn relar_float_format(value: f64, precision: u32, flags: u32) -> 
     Rc::into_raw(Rc::new(result))
 }
 
+/// Seconds since the Unix epoch, including the subsecond fraction.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_wall_time() -> f64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs_f64(),
+        Err(before) => -before.duration().as_secs_f64(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -685,8 +711,8 @@ mod tests {
 
     #[test]
     fn sorting_shared_prefixes_uses_unicode_byte_order_and_stable_ties() {
-        for prefix in ["", "a-long-directory-name/"] {
-            let keys: Vec<_> = (0..96)
+        for (prefix, count) in [("", 96), ("a-long-directory-name/", 1025)] {
+            let keys: Vec<_> = (0..count)
                 .map(|i| Rc::new(Str::from(format!("{prefix}{}", ["é", "è", "ê"][i % 3]))))
                 .collect();
             for reverse in [false, true] {

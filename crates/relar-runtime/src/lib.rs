@@ -9,16 +9,17 @@
 //! their respective types. ABI arguments borrow these handles; results transfer
 //! one owned reference unless an entry point explicitly documents a borrowed
 //! result. Release functions consume one reference. Generated code
-//! must never forge, confuse, or reuse released handles. There are no callbacks
-//! or user-defined finalizers, so a container access cannot reenter user code.
+//! must never forge, confuse, or reuse released handles. Container operations
+//! run without calling user code. Rebuilt C extensions can invoke callbacks
+//! after the individual container operation has released all storage borrows.
 //! Final resource release may close a file, but never installs a language error.
 //! Handles belong to one execution thread. An operation must finish before
 //! another operation accesses the same mutable storage; no storage reference may
 //! escape. Buffer addresses stay private except for explicitly documented readonly
 //! loop views whose compiler proof keeps the owner rooted and prevents all storage
 //! mutation. Such views never enter language values or escape the loop. Aliased
-//! handles are allowed and observe sequential mutations. Future callback or threaded
-//! extension boundaries must uphold these invariants before entering this ABI.
+//! handles are allowed and observe sequential mutations. Python.h APIs and
+//! callbacks run on the same thread as the originating extension call.
 //!
 //! Recoverable calls enter with pending state clear. Language errors install an
 //! owned thread-local exception; generated code checks the entry point's error
@@ -31,6 +32,7 @@
 //! Cleanup/error-state entry points remain valid while pending. Invalid ABI
 //! inputs and allocator exhaustion remain fatal; neither uses Rust unwinding.
 
+mod extensions;
 mod floats;
 mod integer_text;
 mod objects;
@@ -375,6 +377,18 @@ struct Output<W = io::Stdout> {
 }
 
 impl<W: Write> Output<W> {
+    fn with_stream(stream: W, line_buffered: bool) -> Self {
+        let mut buffer = Vec::new();
+        // With zero capacity every write goes directly to the stream.
+        let _ = buffer.try_reserve_exact(8 * 1024);
+        Self {
+            stdout: stream,
+            buffer,
+            written: 0,
+            line_buffered,
+        }
+    }
+
     #[cold]
     fn write_all_slow(&mut self, bytes: &[u8]) -> io::Result<()> {
         self.flush_buffer()?;
@@ -432,16 +446,10 @@ static OUTPUT: LazyLock<Mutex<Output>> = LazyLock::new(|| {
     initialize_io();
     let stdout = io::stdout();
     let line_buffered = stdout.is_terminal();
-    let mut buffer = Vec::new();
-    // With zero capacity every write goes directly to stdout.
-    let _ = buffer.try_reserve_exact(8 * 1024);
-    Mutex::new(Output {
-        stdout,
-        buffer,
-        written: 0,
-        line_buffered,
-    })
+    Mutex::new(Output::with_stream(stdout, line_buffered))
 });
+
+mod sys;
 
 /// Prints one value and a newline, returning with the writer lock released.
 /// Only primitive formatters run here; they cannot call user code.
@@ -470,12 +478,7 @@ fn output(write: impl FnOnce(&mut Output) -> io::Result<()>) {
 pub unsafe extern "C" fn relar_stderr_line(text: *const Str) {
     // SAFETY: the caller owns the text for this call.
     let text = unsafe { &*text };
-    let mut writer = io::stderr().lock();
-    if writer
-        .write_all(text.as_bytes())
-        .and_then(|()| writer.write_all(b"\n"))
-        .is_err()
-    {
+    if sys::write_stderr(text, true).is_err() {
         Error::new(Kind::OSError, "could not write standard error").raise();
     }
 }
@@ -503,6 +506,7 @@ fn fail(kind: &str, message: &str) -> ! {
     // Preserve pending output and the original exception category. A failed
     // best-effort flush must neither recurse through fail nor hold this lock.
     let _ = flush_stdout();
+    let _ = sys::flush_stderr();
     let _ = writeln!(io::stderr().lock(), "{kind}: {message}");
     std::process::exit(1)
 }
@@ -512,6 +516,8 @@ fn fail(kind: &str, message: &str) -> ! {
 pub extern "C" fn relar_flush_stdout() {
     if flush_stdout().is_err() {
         Error::new(Kind::OSError, "could not write standard output").raise();
+    } else if sys::flush_stderr().is_err() {
+        Error::new(Kind::OSError, "could not write standard error").raise();
     }
 }
 
@@ -829,6 +835,29 @@ pub unsafe extern "C" fn relar_str_truthy(value: *const Str) -> u32 {
 pub unsafe extern "C" fn relar_str_equal(a: *const Str, b: *const Str) -> u32 {
     // SAFETY: both immutable strings are rooted by the caller.
     u32::from(unsafe { *a == *b })
+}
+
+/// # Safety
+/// Both words are absent zero or a rooted canonical integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_optional_int_equal(a: usize, b: usize) -> u32 {
+    if a == 0 || b == 0 {
+        return u32::from(a == b);
+    }
+    // SAFETY: both nonzero canonical inputs remain rooted through comparison.
+    u32::from(unsafe { relar_int_compare(a, b) } == 0)
+}
+
+/// # Safety
+/// Each argument must be null (Python `None`) or a live string handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_optional_str_equal(a: usize, b: usize) -> u32 {
+    if a == 0 || b == 0 {
+        u32::from(a == b)
+    } else {
+        // SAFETY: both handles are non-null, rooted strings.
+        unsafe { relar_str_equal(a as *const Str, b as *const Str) }
+    }
 }
 
 /// Parses Python's base-ten text grammar with Unicode 16.0 decimal digits.
@@ -1153,19 +1182,26 @@ pub unsafe extern "C" fn relar_list_copy_index(
     )
 }
 
+fn try_append_int(list: &mut Vec<Int>, value: &Int) -> bool {
+    if list.try_reserve(1).is_err() {
+        objects::exceptions::sequence_allocation_failed();
+        return false;
+    }
+    list.push(value.clone());
+    true
+}
+
 /// # Safety
 /// The arguments must be live list and integer handles.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_list_append(list: *const List, value: usize) {
+pub unsafe extern "C" fn relar_list_append(list: *const List, value: usize) -> i32 {
     // SAFETY: the caller roots both handles; allocation and acquisition cannot
     // reenter the runtime, and no storage reference escapes the closure.
     unsafe {
         let value = Int::borrow(value);
-        (&*list).0.with_mut(|list| {
-            list.try_reserve(1)
-                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
-            list.push((*value).clone());
-        });
+        (&*list)
+            .0
+            .with_mut(|list| i32::from(try_append_int(list, &value)))
     }
 }
 
@@ -1176,23 +1212,30 @@ pub unsafe extern "C" fn relar_list_append(list: *const List, value: usize) {
 /// Root the exact list and both canonical integer handles throughout the call.
 /// Each stored element acquires its own owner, including repeated BigInts.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_list_append_pair(list: *const List, first: usize, second: usize) {
+pub unsafe extern "C" fn relar_list_append_pair(
+    list: *const List,
+    first: usize,
+    second: usize,
+) -> i32 {
     // SAFETY: these borrowed words remain rooted even when resizing moves the
     // list's buffer. Acquisition and allocation cannot call user code.
     unsafe {
         let first = Int::borrow(first);
         let second = Int::borrow(second);
         (&*list).0.with_mut(|list| {
-            list.try_reserve(2)
-                .unwrap_or_else(|_| fail("MemoryError", "list allocation failed"));
+            if list.capacity() - list.len() < 2 {
+                // The first source append can fit even if growing for the second fails.
+                return i32::from(try_append_int(list, &first) && try_append_int(list, &second));
+            }
             let length = list.len();
-            // Successful reservation proves that both slots fit. Cloning exact
+            // The capacity check proves that both slots fit. Cloning exact
             // Int owners cannot unwind; publish only after both are initialized.
             let output = list.as_mut_ptr().add(length);
             output.write((*first).clone());
             output.add(1).write((*second).clone());
             list.set_len(length + 2);
-        });
+            1
+        })
     }
 }
 
@@ -1524,10 +1567,16 @@ mod tests {
         // SAFETY: both inputs and the exact list remain rooted. The second call
         // borrows its repeated input from the list itself across buffer growth.
         unsafe {
-            relar_list_append_pair(Rc::as_ptr(&list), big_word, negative);
+            assert_eq!(
+                relar_list_append_pair(Rc::as_ptr(&list), big_word, negative),
+                1
+            );
             assert_eq!(Rc::strong_count(&big), 2);
             let borrowed = list.0.with(|values| values[1].0);
-            relar_list_append_pair(Rc::as_ptr(&list), borrowed, borrowed);
+            assert_eq!(
+                relar_list_append_pair(Rc::as_ptr(&list), borrowed, borrowed),
+                1
+            );
             assert_eq!(Rc::strong_count(&big), 4);
             list.0.with(|values| {
                 assert_eq!(values.len(), 5);

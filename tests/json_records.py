@@ -19,8 +19,14 @@ IMPORT = "from relar.json import decode\n"
 ITEM = "class Item:\n    value: int\n    def __init__(self, value: int) -> None:\n        self.value = value\n"
 
 REJECTED = {
+    "mutate_json_rows": 'from typing import Any\ndef mutate(rows: list[dict[str, Any]], other: dict[str, Any]) -> None:\n    rows[0] = other\n',
+    "sort_json_alias": 'from typing import Any\ndef mutate(rows: list[dict[str, Any]]) -> None:\n    rows.sort(key=lambda row: 1)\ndef pass_alias(rows: list[dict[str, Any]]) -> None:\n    alias = rows\n    mutate(alias)\n',
+    "append_json_rows": 'from typing import Any\ndef mutate(rows: list[dict[str, Any]]) -> None:\n    rows.append(rows[0])\n',
     "dynamic_json_key": 'import json\nkey = "field"\nrows = json.loads("[]")\nvalue = rows[0][key]\n',
     "write_json_object": 'from typing import Any\ndef write(row: dict[str, Any]) -> None:\n    row["field"] = 1\n',
+    "nested_json_list_mutation": 'import json\nfrom typing import Any\nrows: list[dict[str, Any]] = json.loads("{}").get("rows", [])\nrows.pop()\n',
+    "nested_json_item_mutation": 'import json\nfrom typing import Any\nrows: list[dict[str, Any]] = json.loads("{}").get("rows", [])\nrows[0] = rows[1]\n',
+    "root_json_cycle": 'import json\nroot = json.loads("[]")\nroot.append(root)\n',
     "general_any": "from typing import Any\ndef identity(value: Any) -> Any:\n    return value\n",
     "json_comparison": 'import json\nrows = json.loads("[]")\nprint(rows[0] == rows[1])\n',
     "json_instances": 'import json\nfor value in json.loads("[]"):\n    print(isinstance(value, str))\n',

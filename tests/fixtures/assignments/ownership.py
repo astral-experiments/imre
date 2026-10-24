@@ -61,7 +61,13 @@ def paired_parameter(text: str) -> tuple[str, str]:
     return ((text := text + " changed"), text)
 
 
+def first_name(rows: list[str]) -> str:
+    rows: str = rows[0]
+    return rows
+
+
 execute()
+print(first_name(["row " + str(4)]))
 first, second = paired_parameter("tuple")
 print(first)
 print(second)

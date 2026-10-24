@@ -7,6 +7,16 @@ use std::rc::Rc;
 use super::exceptions::{Error, Kind, Result, finish};
 use super::{Int, Object, Str, Words, fail, python_whitespace};
 
+/// Returns Python's substring membership for two exact strings.
+///
+/// # Safety
+/// Both operands are rooted for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_str_contains(needle: *const Str, text: *const Str) -> u32 {
+    // SAFETY: the caller roots both immutable strings through the search.
+    unsafe { u32::from((&*text).contains((&*needle).as_str())) }
+}
+
 /// Removes the common space/tab prefix after the caller has evaluated its text.
 /// Python 3.14 normalizes whitespace-only lines, including Unicode whitespace.
 ///
@@ -213,6 +223,66 @@ pub unsafe extern "C" fn relar_str_split(
             reverse != 0,
         )
         .map(|parts| Rc::into_raw(parts.into_object())),
+        std::ptr::null(),
+    )
+}
+
+/// Splits POSIX shell words with Python's default comments=False. Inside double
+/// quotes only another double quote or a backslash loses its preceding escape.
+fn shell_words(source: &str) -> Result<Words> {
+    let mut parts = Words::new(3);
+    let mut word = Str::default();
+    let mut quote = None;
+    let mut started = false;
+    let mut chars = source.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            c if quote == Some(c) => quote = None,
+            '\'' | '"' if quote.is_none() => {
+                quote = Some(c);
+                started = true;
+            }
+            '\\' if quote != Some('\'') => {
+                let escaped = chars
+                    .next()
+                    .ok_or_else(|| Error::new(Kind::ValueError, "No escaped character"))?;
+                if quote == Some('"') && !matches!(escaped, '"' | '\\') {
+                    word.push('\\');
+                }
+                word.push(escaped);
+                started = true;
+            }
+            ' ' | '\r' | '\n' | '\t' if quote.is_none() => {
+                if started {
+                    parts
+                        .values
+                        .push(Rc::into_raw(Rc::new(std::mem::take(&mut word))) as usize);
+                    started = false;
+                }
+            }
+            other => {
+                word.push(other);
+                started = true;
+            }
+        }
+    }
+    if quote.is_some() {
+        return Err(Error::new(Kind::ValueError, "No closing quotation"));
+    }
+    if started {
+        parts.values.push(Rc::into_raw(Rc::new(word)) as usize);
+    }
+    Ok(parts)
+}
+
+/// # Safety
+/// The caller roots the input string. Success transfers a fresh list of strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_shlex_split(value: *const Str) -> *const Object {
+    // SAFETY: the input is immutable and rooted throughout tokenization.
+    let parts = shell_words(unsafe { &*value });
+    finish(
+        parts.map(|parts| Rc::into_raw(parts.into_object())),
         std::ptr::null(),
     )
 }

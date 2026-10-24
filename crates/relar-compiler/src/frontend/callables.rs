@@ -33,8 +33,24 @@ pub(super) fn validate_storage(function: &ir::Function, types: &Types) -> Result
             .locals
             .iter()
             .any(|&ty| invalid_aggregate(ty, types));
+    // A cold indirect call owns a private argument frame for its continuation.
+    // Its callable cannot enter a language-visible tuple or container.
+    let mut frames = HashSet::new();
     ir::walk_expressions(&function.body, &mut |value| {
-        invalid |= invalid_aggregate(value.ty, types);
+        if let ExprKind::Builtin(
+            Builtin::Process(
+                ir::ProcessOperation::IndirectCoroutine { .. }
+                | ir::ProcessOperation::Coroutine { .. }
+                | ir::ProcessOperation::ContextNew { .. },
+            ),
+            args,
+        ) = &value.kind
+        {
+            frames.insert(std::ptr::from_ref(&args[0]));
+        }
+        if !frames.contains(&std::ptr::from_ref(value)) {
+            invalid |= invalid_aggregate(value.ty, types);
+        }
     });
     if invalid {
         Err("callable values cannot be stored in containers or tuples".into())
@@ -43,12 +59,25 @@ pub(super) fn validate_storage(function: &ir::Function, types: &Types) -> Result
     }
 }
 
+/// Synchronous or cold indirect calls both have a closed possible target set.
+pub(super) fn invoked_signature(value: &Expr) -> Option<Type> {
+    match &value.kind {
+        ExprKind::Invoke { callable, .. } => Some(callable.ty),
+        ExprKind::Builtin(
+            Builtin::Process(ir::ProcessOperation::IndirectCoroutine { signature, .. }),
+            _,
+        ) => Some(*signature),
+        _ => None,
+    }
+}
+
 /// Creation does not call a function. Every compatible constructed target is
 /// nevertheless a possible edge at an indirect invocation, including dead code.
 pub(super) fn targets(
     functions: &[ir::Function],
     entry: &ir::Function,
-) -> HashMap<Type, HashSet<usize>> {
+    types: &Types,
+) -> Result<HashMap<Type, HashSet<usize>>, String> {
     let mut targets = HashMap::<Type, HashSet<usize>>::new();
     for function in functions.iter().chain([entry]) {
         ir::walk_expressions(&function.body, &mut |value| {
@@ -57,7 +86,19 @@ pub(super) fn targets(
             }
         });
     }
-    targets
+    // A cold callback adapter executes an async body and returns the awaited
+    // result. An eager factory returns a coroutine object through a different ABI.
+    for (signature, candidates) in &targets {
+        let (_, returns) = types.signature(*signature).unwrap();
+        if matches!(returns, Type::Coroutine(_))
+            && candidates
+                .iter()
+                .any(|&id| functions[id].returns == returns)
+        {
+            return Err("an Awaitable callback must be defined with async def".into());
+        }
+    }
+    Ok(targets)
 }
 
 impl Checker<'_> {
@@ -82,11 +123,21 @@ impl Checker<'_> {
         }
         let mut signature = signature.clone();
         if let Some(inference) = self.inference {
+            let asynchronous = signature.asynchronous;
             inference
                 .callable_signature(
                     &mut signature,
                     skip,
-                    expected.and_then(|ty| self.types.signature(ty)),
+                    expected
+                        .and_then(|ty| self.types.signature(ty))
+                        .map(|(params, result)| {
+                            let returns = if asynchronous {
+                                self.types.awaited(result).unwrap_or(result)
+                            } else {
+                                result
+                            };
+                            (params, returns)
+                        }),
                 )
                 .map_err(|message| error(self.source, node, message))?;
         }
@@ -95,7 +146,11 @@ impl Checker<'_> {
                 .iter()
                 .map(|parameter| parameter.ty)
                 .collect(),
-            signature.returns,
+            if signature.asynchronous {
+                self.types.coroutine(signature.returns)
+            } else {
+                signature.returns
+            },
         );
         Ok(Expr {
             ty,
@@ -237,6 +292,9 @@ impl Checker<'_> {
             .zip(params)
             .map(|(argument, ty)| self.expr_expected(argument, ty))
             .collect::<Result<Vec<_>, _>>()?;
+        if let Type::Coroutine(_) = returns {
+            return Ok(self.indirect_coroutine(callable, values, returns));
+        }
         Ok(Expr {
             ty: returns,
             kind: ExprKind::Invoke {
@@ -244,5 +302,31 @@ impl Checker<'_> {
                 args: ir::CallArgs::positional(values),
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn eager_coroutine_factories_remain_direct_calls() {
+        let source = "from collections.abc import Awaitable, Callable\nasync def cold(x: int) -> int:\n    return x\ndef factory(x: int) -> Awaitable[int]:\n    return cold(x)\n";
+        for callback in ["cold", "factory", "lambda x: cold(x)"] {
+            let program = format!(
+                "{source}async def run() -> int:\n    cb: Callable[[int], Awaitable[int]] = {callback}\n    return await cb(7)\n"
+            );
+            if callback == "cold" {
+                crate::check(&program).unwrap();
+            } else {
+                assert!(
+                    crate::check(&program)
+                        .unwrap_err()
+                        .contains("Awaitable callback must be defined with async def")
+                );
+            }
+        }
+        crate::check(&format!(
+            "{source}async def run() -> int:\n    return await factory(7)\n"
+        ))
+        .unwrap();
     }
 }

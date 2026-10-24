@@ -24,6 +24,7 @@ enum Fact {
     Exists(bool),
     Identity(Result<PathBuf, String>),
     Content(Result<blake3::Hash, String>),
+    Bytes(Result<blake3::Hash, String>),
 }
 
 fn outcome<T, U>(result: &io::Result<T>, map: impl FnOnce(&T) -> U) -> Result<U, String> {
@@ -68,6 +69,12 @@ impl FileSystem<'_> {
         });
         value
     }
+
+    pub(crate) fn read(&mut self, path: &Path) -> io::Result<Vec<u8>> {
+        let value = std::fs::read(path);
+        self.record(path, || Fact::Bytes(outcome(&value, |b| blake3::hash(b))));
+        value
+    }
 }
 
 impl Inputs {
@@ -82,6 +89,7 @@ impl Inputs {
                     blake3::hash(s.as_bytes())
                 }) == *value
             }
+            Fact::Bytes(value) => outcome(&std::fs::read(path), |b| blake3::hash(b)) == *value,
         })
     }
 
@@ -282,6 +290,7 @@ pub(crate) fn check(
     cache: &mut AnalysisCache,
     path: &Path,
     module_root: Option<&Path>,
+    options: &crate::CompileOptions,
     mut report: impl FnMut(Result<(), String>),
 ) -> Result<(), String> {
     let mut subscription = None;
@@ -290,6 +299,7 @@ pub(crate) fn check(
         let result = crate::check_file_with(
             path,
             module_root,
+            options,
             Some(cache),
             FileSystem(Some(&mut inputs)),
         );
@@ -300,6 +310,28 @@ pub(crate) fn check(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creating_or_editing_an_entry_profile_invalidates_the_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("main.py");
+        std::fs::write(&entry, "print(1)\n").unwrap();
+        let profile = dir.path().join("profile.json");
+        let options = crate::CompileOptions {
+            reachable_only: true,
+            entry_profile: Some(profile.clone()),
+            ..Default::default()
+        };
+        for (success, replacement) in [(false, "{"), (false, "{}"), (true, "")] {
+            let mut inputs = Inputs::default();
+            let result =
+                crate::check_file_with(&entry, None, &options, None, FileSystem(Some(&mut inputs)));
+            assert_eq!(result.is_ok(), success, "{result:?}");
+            assert!(inputs.fresh());
+            std::fs::write(&profile, replacement).unwrap();
+            assert!(!inputs.fresh());
+        }
+    }
 
     #[test]
     fn edits_and_new_imports_in_watched_directories_reuse_the_subscription() {
@@ -319,7 +351,14 @@ mod tests {
         ] {
             std::fs::write(&entry, source).unwrap();
             let mut inputs = Inputs::default();
-            crate::check_file_with(&entry, None, None, FileSystem(Some(&mut inputs))).unwrap();
+            crate::check_file_with(
+                &entry,
+                None,
+                &Default::default(),
+                None,
+                FileSystem(Some(&mut inputs)),
+            )
+            .unwrap();
             let current = Subscription::for_inputs(subscription, &inputs).unwrap();
             assert!(Arc::ptr_eq(
                 first.get_or_insert_with(|| Arc::clone(&current.names)),
@@ -336,7 +375,13 @@ mod tests {
         let dep = dir.path().join("dep.py");
         std::fs::write(&entry, "from dep import value\nprint(value())\n").unwrap();
         let mut inputs = Inputs::default();
-        let missing = crate::check_file_with(&entry, None, None, FileSystem(Some(&mut inputs)));
+        let missing = crate::check_file_with(
+            &entry,
+            None,
+            &Default::default(),
+            None,
+            FileSystem(Some(&mut inputs)),
+        );
         assert!(missing.unwrap_err().contains("cannot resolve"));
         std::fs::write(&dep, "def value() -> int:\n    return 1\n").unwrap();
         inputs
@@ -344,7 +389,14 @@ mod tests {
             .unwrap();
 
         let mut inputs = Inputs::default();
-        crate::check_file_with(&entry, None, None, FileSystem(Some(&mut inputs))).unwrap();
+        crate::check_file_with(
+            &entry,
+            None,
+            &Default::default(),
+            None,
+            FileSystem(Some(&mut inputs)),
+        )
+        .unwrap();
         std::fs::write(&dep, "def value() -> int:\n    return 'one'\n").unwrap();
         inputs
             .wait_for_change(None, || panic!("reported a stale success"))

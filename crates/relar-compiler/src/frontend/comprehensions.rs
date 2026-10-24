@@ -399,9 +399,72 @@ impl Checker<'_> {
         expression: &ast::Expr,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
+        if let ast::Expr::ListComp(list) = expression
+            && let Some(filtered) = self.string_list_filter(
+                &list.generators,
+                &list.elt,
+                expected.and_then(|ty| self.types.element(ty)),
+            )?
+        {
+            return Ok(filtered);
+        }
         let display = Display::from_expr(expression)
             .ok_or_else(|| error(self.source, expression, "unsupported comprehension display"))?;
         self.comprehension_display(expression, display, expected)
+    }
+
+    /// A dict can consume an exact two-column zip in the same order as a
+    /// dictionary comprehension; the iterator itself never escapes.
+    pub(super) fn dict_from_zip(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+        let [source @ ast::Expr::Call(zip)] = call.arguments.args.as_ref() else {
+            return Ok(None);
+        };
+        if !call.arguments.keywords.is_empty()
+            || zip.arguments.args.len() != 2
+            || !matches!(&*zip.func,ast::Expr::Name(n) if n.id == "zip" && !self.names.contains_key("zip"))
+            || self.resolve(&zip.func).is_some()
+        {
+            return Ok(None);
+        }
+        let range = call.range();
+        let node_index = || ast::AtomicNodeIndex::NONE;
+        let item = |name: &str, ctx| {
+            ast::Expr::Name(ast::ExprName {
+                range,
+                node_index: node_index(),
+                id: name.into(),
+                ctx,
+            })
+        };
+        let target = ast::Expr::Tuple(ast::ExprTuple {
+            range,
+            node_index: node_index(),
+            parenthesized: false,
+            ctx: ast::ExprContext::Store,
+            elts: vec![
+                item("@zipkey", ast::ExprContext::Store),
+                item("@zipvalue", ast::ExprContext::Store),
+            ],
+        });
+        let clauses = [ast::Comprehension {
+            range,
+            node_index: node_index(),
+            target,
+            iter: source.clone(),
+            ifs: Vec::new(),
+            is_async: false,
+        }];
+        let key = item("@zipkey", ast::ExprContext::Load);
+        let value = item("@zipvalue", ast::ExprContext::Load);
+        self.comprehension_display(
+            &call.func,
+            Display {
+                clauses: &clauses,
+                value: Yield::Dict(&key, &value),
+            },
+            None,
+        )
+        .map(Some)
     }
 
     /// Reduces an immediately consumed integer comprehension in its original
@@ -1011,7 +1074,7 @@ mod tests {
             "mapping: dict[str, int] = {'x': 1}\ndef gather(data: bytes) -> list[int]:\n    return [mapping[c] for c in data.decode()]\n",
         )
         .unwrap();
-        let graph = crate::modules::SourceGraph::load(&entry, Some(directory.path())).unwrap();
+        let graph = crate::modules::SourceGraph::load(&entry, Some(directory.path()), &[]).unwrap();
         let module = crate::frontend::lower(&graph).unwrap();
         let mut helper = None;
         walk_expressions(&module.functions[0].body, &mut |value| {

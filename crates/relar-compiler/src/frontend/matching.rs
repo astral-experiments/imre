@@ -130,7 +130,7 @@ impl Checker<'_> {
                 ));
             }
         }
-        let mut value = self.expr(&branch.subject)?;
+        let mut value = self.typed_expr(&branch.subject)?;
         let exhaustive = self.enum_exhaustive(value.ty, &branch.cases);
         if exhaustive && let ExprKind::Call(_, args) = &mut value.kind {
             args.exhaustive_enum_match = true;
@@ -160,7 +160,7 @@ impl Checker<'_> {
         }
         if matches!(
             self.types.payload(value.ty).unwrap_or(value.ty),
-            Type::JsonValue | Type::JsonObject
+            Type::JsonRoot | Type::JsonValue | Type::JsonObject
         ) {
             return Err(error(
                 self.source,
@@ -168,6 +168,22 @@ impl Checker<'_> {
                 "match requires an exact type selected from JSON",
             ));
         }
+        // A saved command name only identifies this receiver while patterns and
+        // guards leave the local bound to the same immutable namespace.
+        let dispatch = if let ast::Expr::Attribute(attr) = &*branch.subject
+            && let Some(name) = attr.value.as_name_expr()
+            && !branch.cases.iter().any(|case| {
+                case.guard
+                    .as_deref()
+                    .is_some_and(|guard| expression_rebinds(guard, name.id.as_str()))
+                    || self
+                        .pattern_names(&case.pattern)
+                        .is_ok_and(|names| names.iter().any(|bound| bound == name.id.as_str()))
+            }) {
+            Some(attr)
+        } else {
+            None
+        };
         let subject = self.hidden(value.ty);
         let selected = self.hidden(Type::Bool);
         let mut body = vec![
@@ -216,6 +232,12 @@ impl Checker<'_> {
                 }
             }
 
+            if let Some(attribute) = dispatch
+                && let ast::Pattern::MatchValue(pattern) = &case.pattern
+                && let ast::Expr::StringLiteral(text) = &*pattern.value
+            {
+                self.narrow_command(attribute, text.value.to_str());
+            }
             let guard = case
                 .guard
                 .as_deref()

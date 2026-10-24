@@ -20,6 +20,23 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
+        if matches!(value.ty, Type::Document(_)) {
+            return if ty == Type::Str {
+                documents::op(ir::DocumentOp::AsStr, Type::Str, vec![value])
+            } else {
+                Expr {
+                    ty,
+                    kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+                }
+            };
+        }
+        if matches!((value.ty, ty), (Type::Class(parent), Type::Class(child)) if self.classes.parsers.child_of(child, parent))
+        {
+            return Expr {
+                ty,
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+            };
+        }
         if matches!(ty, Type::StrLiteral(_)) && matches!(value.ty, Type::Str | Type::StrLiteral(_))
         {
             return literals::view(value, ty);
@@ -89,9 +106,14 @@ impl Checker<'_> {
         if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(&class) = self.classes.declarations.ids.get(&definition)
         {
-            return Ok(vec![InstanceType::Exact(
-                self.classes.declarations.instance(class),
-            )]);
+            let records = &self.classes.declarations;
+            return Ok(records
+                .definitions
+                .iter()
+                .enumerate()
+                .filter(|(id, record)| *id == class || record.bases.contains(&class))
+                .map(|(id, _)| InstanceType::Exact(records.instance(id)))
+                .collect());
         }
         if let ast::Expr::Name(name) = expression {
             let ty = match name.id.as_str() {
@@ -131,9 +153,35 @@ impl Checker<'_> {
             ));
         };
         let value = self.expr(value)?;
+        if matches!(value.ty, Type::Document(_)) {
+            let op = match self.instance_types(classes)?.as_slice() {
+                [InstanceType::Dict] => ir::DocumentOp::IsMap,
+                [InstanceType::List] => ir::DocumentOp::IsList,
+                [InstanceType::Exact(Type::Str)] => ir::DocumentOp::IsStr,
+                _ => {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "document isinstance requires a dict, list, or str class",
+                    ));
+                }
+            };
+            return Ok(documents::op(op, Type::Bool, vec![value]));
+        }
+        if matches!(value.ty, Type::JsonRoot | Type::JsonValue)
+            && matches!(
+                self.instance_types(classes)?.as_slice(),
+                [InstanceType::Exact(Type::Int)]
+            )
+        {
+            return Ok(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::JsonIsInt, vec![value]),
+            });
+        }
         if matches!(
             self.types.payload(value.ty).unwrap_or(value.ty),
-            Type::JsonValue | Type::JsonObject
+            Type::JsonRoot | Type::JsonValue | Type::JsonObject
         ) {
             return Err(error(
                 self.source,
@@ -162,8 +210,11 @@ impl Checker<'_> {
 
     /// Exception categories below Exception need a runtime hierarchy test;
     /// other category checks are exact for every admitted concrete layout.
-    /// BaseException itself is catch-only, so every admitted value is an Exception.
+    /// A stored builtin exception can be either a SystemExit or an Exception.
     fn instance_member_matches(ty: Type, classes: &[InstanceType]) -> Option<bool> {
+        if ty == Type::ExitCode {
+            return None;
+        }
         let mut unknown = false;
         for &class in classes {
             if let InstanceType::Exception(kind) = class
@@ -176,7 +227,7 @@ impl Checker<'_> {
             }
             if let InstanceType::Exception(kind) = class
                 && ty == Type::Exception
-                && !matches!(kind, 0 | 1)
+                && kind != 0
             {
                 unknown = true;
             } else if class.accepts(ty) {
@@ -271,6 +322,21 @@ impl Checker<'_> {
                 .get(&slot)
                 .copied()
                 .unwrap_or(self.locals[slot]);
+            if matches!(current, Type::Document(_)) {
+                for (classes, truth) in &constraints {
+                    if !*truth {
+                        continue;
+                    }
+                    let ty = match classes.as_slice() {
+                        [InstanceType::List] => documents::LIST,
+                        [InstanceType::Dict] => documents::MAP,
+                        [InstanceType::Exact(Type::Str)] => Type::Str,
+                        _ => continue,
+                    };
+                    self.narrowed.insert_mut(slot, ty);
+                }
+                continue;
+            }
             let mut members = self.instance_members(current);
             for (classes, truth) in &constraints {
                 members.retain(|&ty| {

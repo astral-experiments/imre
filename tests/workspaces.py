@@ -20,9 +20,8 @@ import files
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "workspaces"
 IMPORTS = "from pathlib import Path\nfrom tempfile import TemporaryDirectory\n"
 REJECTED = {
-    "escaped_manager": "manager = TemporaryDirectory()",
-    "returned_manager": "def make():\n    return TemporaryDirectory()",
-    "stored_manager": "managers = [TemporaryDirectory()]",
+    "nullcontext_integer": "from contextlib import nullcontext\nwith nullcontext(1):\n    pass",
+    "nullcontext_two_args": "from contextlib import nullcontext\nwith nullcontext('a', 'b'):\n    pass",
     "constructor_value": "factory = TemporaryDirectory",
     "manager_annotation": "def use(value: TemporaryDirectory) -> None:\n    pass",
     "manual_enter": "print(TemporaryDirectory().__enter__())",

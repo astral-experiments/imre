@@ -2,6 +2,7 @@
 //! keep conditional writes from becoming unconditional initialization facts.
 
 use super::*;
+use ruff_python_ast::visitor::transformer::{self, Transformer};
 use ruff_python_ast::visitor::{Visitor, walk_comprehension, walk_expr};
 
 /// Previously allocated slots keep their facts throughout an expression unless
@@ -51,6 +52,11 @@ impl<'a> ConditionalFacts<'a> {
                         for value in &node.operands {
                             if matches!(value, ast::Expr::Name(_) | ast::Expr::Named(_)) {
                                 self.predicate(value);
+                            } else if let ast::Expr::Attribute(field) = value
+                                && let ast::Expr::Name(receiver) = &*field.value
+                            {
+                                // A subcommand comparison narrows its namespace receiver.
+                                self.0.insert(receiver.id.as_str());
                             }
                         }
                     }
@@ -328,6 +334,100 @@ pub(super) fn intersect(
     }
 }
 
+/// Keep a parameter's public keyword while giving its lexical references an
+/// internal spelling. Builtin fast paths can then match names without ever
+/// interpreting a local `bytes`, `map`, or `len` as the builtin.
+pub(super) fn alias_builtin_parameters(
+    function: &mut ast::StmtFunctionDef,
+    bindings: &HashMap<String, Binding>,
+) {
+    let params = &mut function.parameters;
+    for parameter in params
+        .posonlyargs
+        .iter_mut()
+        .chain(&mut params.args)
+        .chain(&mut params.kwonlyargs)
+    {
+        let name = &mut parameter.parameter.name.id;
+        if RESERVED.contains(&name.as_str())
+            && name.starts_with(|c: char| c.is_ascii_lowercase())
+            && !bindings.contains_key(name.as_str())
+        {
+            let alias = BuiltinAlias {
+                original: name.clone(),
+                local: format!("$param:{name}").into(),
+            };
+            *name = alias.local.clone();
+            alias.visit_body(&mut function.body);
+        }
+    }
+}
+
+struct BuiltinAlias {
+    original: ast::name::Name,
+    local: ast::name::Name,
+}
+
+impl BuiltinAlias {
+    fn rename(&self, name: &mut ast::name::Name) {
+        if name == &self.original {
+            *name = self.local.clone();
+        }
+    }
+}
+
+impl Transformer for BuiltinAlias {
+    // Local annotations use the static type namespace, never the parameter value.
+    fn visit_annotation(&self, _: &mut ast::Expr) {}
+
+    fn visit_expr(&self, expr: &mut ast::Expr) {
+        match expr {
+            ast::Expr::Name(name) => self.rename(&mut name.id),
+            ast::Expr::Lambda(lambda)
+                if lambda
+                    .parameters
+                    .as_ref()
+                    .is_some_and(|p| p.find(&self.original).is_some()) =>
+            {
+                self.visit_parameters(lambda.parameters.as_mut().unwrap());
+            }
+            _ => transformer::walk_expr(self, expr),
+        }
+    }
+
+    fn visit_stmt(&self, stmt: &mut ast::Stmt) {
+        if let ast::Stmt::FunctionDef(nested) = stmt {
+            self.rename(&mut nested.name.id);
+            if nested.parameters.find(&self.original).is_some() {
+                self.visit_parameters(&mut nested.parameters);
+                return;
+            }
+        }
+        transformer::walk_stmt(self, stmt);
+    }
+
+    fn visit_except_handler(&self, handler: &mut ast::ExceptHandler) {
+        let ast::ExceptHandler::ExceptHandler(h) = handler;
+        if let Some(name) = &mut h.name {
+            self.rename(&mut name.id);
+        }
+        transformer::walk_except_handler(self, handler);
+    }
+
+    fn visit_pattern(&self, pattern: &mut ast::Pattern) {
+        let binding = match pattern {
+            ast::Pattern::MatchAs(p) => &mut p.name,
+            ast::Pattern::MatchStar(p) => &mut p.name,
+            ast::Pattern::MatchMapping(p) => &mut p.rest,
+            _ => return transformer::walk_pattern(self, pattern),
+        };
+        if let Some(name) = binding {
+            self.rename(&mut name.id);
+        }
+        transformer::walk_pattern(self, pattern);
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct LocalState {
     pub(super) assigned: Assigned,
@@ -443,6 +543,16 @@ impl Checker<'_> {
             ast::Expr::Attribute(attribute) => probe.field(attribute).ok().map(|(_, _, ty)| ty),
             ast::Expr::Subscript(subscript) => {
                 let receiver = probe.expr(&subscript.value).ok()?;
+                if matches!(receiver.ty, Type::Document(_)) {
+                    return Some(if matches!(&*subscript.slice, ast::Expr::Slice(_)) {
+                        self.types.list(documents::ANY)
+                    } else {
+                        documents::ANY
+                    });
+                }
+                if receiver.ty == Type::JsonRoot {
+                    return Some(Type::JsonValue);
+                }
                 self.types
                     .mapping(receiver.ty)
                     .map(|(_, value)| value)
@@ -453,9 +563,60 @@ impl Checker<'_> {
     }
 }
 
+/// Reserve an optional slot when a later assignment calls a function with that
+/// declared return type. The ordinary checker still enforces every assignment.
+pub(super) fn nullable_assignments(
+    checker: &Checker<'_>,
+    body: &[ast::Stmt],
+) -> HashMap<String, Type> {
+    use ruff_python_ast::visitor::{Visitor, walk_stmt};
+    struct Scan<'a, 'b> {
+        checker: &'a Checker<'b>,
+        found: HashMap<String, Type>,
+    }
+    impl<'a> Visitor<'a> for Scan<'_, '_> {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if matches!(stmt, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_)) {
+                return;
+            }
+            if let ast::Stmt::Assign(a) = stmt
+                && let [ast::Expr::Name(target)] = a.targets.as_slice()
+                && let ast::Expr::Call(call) = &*a.value
+                && let Some(Binding::Definition(def)) = self.checker.resolve(&call.func)
+                && let Some(sig) = self.checker.functions.get(&def)
+                && self.checker.types.payload(sig.returns).is_some()
+            {
+                self.found.insert(target.id.to_string(), sig.returns);
+            }
+            walk_stmt(self, stmt);
+        }
+    }
+    let mut scan = Scan {
+        checker,
+        found: HashMap::new(),
+    };
+    for stmt in body {
+        scan.visit_stmt(stmt);
+    }
+    scan.found
+}
+
 #[cfg(test)]
 mod tests {
     use super::Assigned;
+
+    #[test]
+    fn subcommand_fields_stay_inside_their_conditional_arm() {
+        let source = include_str!("../../../../tests/fixtures/argparse/commands.py");
+        let checked = |expr: &str| crate::check(&source.replace("    print(args.label)", expr));
+        checked("    print(args.text if args.command == 'write' else args.label)").unwrap();
+        for expr in [
+            "    print(args.text if args.command == 'write' else args.text)",
+            "    print(args.command == 'write' and args.text != '')\n    print(args.text)",
+        ] {
+            assert!(checked(expr).unwrap_err().contains("unknown field"));
+        }
+    }
 
     #[test]
     fn snapshots_merge_assignments_across_word_boundaries() {

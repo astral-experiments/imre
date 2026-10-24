@@ -27,6 +27,37 @@ fn with_member<R>(tag: usize, f: impl FnOnce([&Str; 3]) -> R) -> R {
     f(unsafe { (*members.add(tag - 1)).map(|root| &**root) })
 }
 
+/// Selects the canonical member of an ordinary string-valued Enum by value.
+///
+/// # Safety
+/// The caller roots the text and supplies a nonempty range in the installed member table.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_enum_lookup(text: *const Str, first: usize, count: usize) -> usize {
+    // SAFETY: the caller roots the immutable lookup value.
+    let text = unsafe { &*text };
+    for tag in first..first + count {
+        if with_member(tag, |[_, _, value]| value == text) {
+            return tag;
+        }
+    }
+    with_member(first, |[class, _, _]| {
+        super::exceptions::Error::new(
+            super::exceptions::Kind::ValueError,
+            format!("{} is not a valid {class}", string_repr(text)),
+        )
+        .raise();
+    });
+    0
+}
+
+/// Formats an ordinary Enum using its canonical member name.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_enum_string(tag: usize) -> *const Str {
+    with_member(tag, |[class, name, _]| {
+        std::rc::Rc::into_raw(std::rc::Rc::new(Str::new(format!("{class}.{name}"))))
+    })
+}
+
 pub(super) fn compare(left: usize, right: usize) -> std::cmp::Ordering {
     with_member(left, |a| with_member(right, |b| a[2].cmp(b[2])))
 }

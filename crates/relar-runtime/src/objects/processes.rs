@@ -7,7 +7,7 @@
 use std::ffi::{CStr, CString, OsStr};
 use std::fs;
 use std::io::{self, Read};
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -21,6 +21,9 @@ use super::records::{RecordDescriptor, relar_record_new};
 use super::words::WordKind;
 use super::{Bytes, Int, Object, Storage, Str, acquire_rc, fail, object};
 
+mod asynchronous;
+pub(super) use asynchronous::AsyncProcess;
+
 #[cfg(target_os = "linux")]
 unsafe extern "C" {
     static environ: *const *const libc::c_char;
@@ -28,11 +31,12 @@ unsafe extern "C" {
 
 /// Rich failures keep the original argv list, so later aliases affect str(error).
 /// The sealed string list cannot point back to the exception or form a cycle.
+#[derive(Clone)]
 pub(super) struct ProcessError {
     cmd: Rc<Object>,
     returncode: i32,
-    stdout: Rc<Str>,
-    stderr: Rc<Str>,
+    stdout: Option<Rc<Str>>,
+    stderr: Option<Rc<Str>>,
 }
 
 impl ProcessError {
@@ -40,8 +44,14 @@ impl ProcessError {
         match field {
             0 => Rc::into_raw(self.cmd.clone()) as usize,
             1 => exit_word(self.returncode),
-            2 | 4 => Rc::into_raw(self.stdout.clone()) as usize,
-            3 => Rc::into_raw(self.stderr.clone()) as usize,
+            2 | 4 => self
+                .stdout
+                .clone()
+                .map_or(0, |text| Rc::into_raw(text) as usize),
+            3 => self
+                .stderr
+                .clone()
+                .map_or(0, |text| Rc::into_raw(text) as usize),
             _ => fail("SystemError", "invalid process exception field"),
         }
     }
@@ -72,6 +82,7 @@ impl ProcessError {
     }
 }
 
+#[derive(Clone)]
 enum Deadline {
     Integer(Int),
     Float(f64),
@@ -79,6 +90,7 @@ enum Deadline {
 
 /// A deadline failure owns the original argv and undecoded pipe snapshots.
 /// Empty streams distinguish an observed EOF from no data observed before expiry.
+#[derive(Clone)]
 pub(super) struct TimeoutError {
     cmd: Rc<Object>,
     timeout: Deadline,
@@ -399,11 +411,20 @@ impl Launch {
     }
 
     fn spawn(self, cwd: Option<&CString>) -> io::Result<Child> {
+        self.spawn_with_output(cwd, Stdio::piped(), Stdio::piped())
+    }
+
+    fn spawn_with_output(
+        self,
+        cwd: Option<&CString>,
+        stdout: Stdio,
+        stderr: Stdio,
+    ) -> io::Result<Child> {
         let mut command = Command::new(OsStr::from_bytes(self.argv.strings[0].as_bytes()));
         command
             .stdin(Stdio::inherit())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stdout(stdout)
+            .stderr(stderr);
         if let Some(cwd) = cwd {
             command.current_dir(OsStr::from_bytes(cwd.as_bytes()));
         }
@@ -645,29 +666,29 @@ fn nonblocking(fd: RawFd) -> io::Result<()> {
 /// Polls both streams fairly, including HUP buffers, before collecting status.
 /// Decoding happens afterward so every failure still closes pipes and reaps.
 fn capture(child: Child) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
-    let mut child = ChildGuard {
+    capture_guard(ChildGuard {
         child,
         reaped: false,
-    };
-    let mut stdout = child
-        .child
-        .stdout
-        .take()
-        .expect("captured stdout was configured");
-    let mut stderr = child
-        .child
-        .stderr
-        .take()
-        .expect("captured stderr was configured");
-    nonblocking(stdout.as_raw_fd())?;
-    nonblocking(stderr.as_raw_fd())?;
-    let mut polls = [stdout.as_raw_fd(), stderr.as_raw_fd()].map(|fd| libc::pollfd {
-        fd,
+    })
+}
+
+fn capture_guard(mut child: ChildGuard) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
+    let mut stdout = child.child.stdout.take();
+    let mut stderr = child.child.stderr.take();
+    let fds = [
+        stdout.as_ref().map(AsRawFd::as_raw_fd),
+        stderr.as_ref().map(AsRawFd::as_raw_fd),
+    ];
+    for fd in fds.into_iter().flatten() {
+        nonblocking(fd)?;
+    }
+    let mut polls = fds.map(|fd| libc::pollfd {
+        fd: fd.unwrap_or(-1),
         events: libc::POLLIN,
         revents: 0,
     });
     let mut outputs = [Vec::new(), Vec::new()];
-    let mut remaining = 2;
+    let mut remaining = fds.iter().flatten().count();
     let mut buffer = [0_u8; 16 * 1024];
     while remaining != 0 {
         // SAFETY: poll has exactly two writable descriptors and waits without
@@ -687,9 +708,15 @@ fn capture(child: Child) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
                 continue;
             }
             let result = if index == 0 {
-                stdout.read(&mut buffer)
+                stdout
+                    .as_mut()
+                    .expect("poll only signals captured stdout")
+                    .read(&mut buffer)
             } else {
-                stderr.read(&mut buffer)
+                stderr
+                    .as_mut()
+                    .expect("poll only signals captured stderr")
+                    .read(&mut buffer)
             };
             match result {
                 Ok(0) => {
@@ -901,6 +928,166 @@ pub unsafe extern "C" fn relar_subprocess_run_timeout_int(
     }
 }
 
+/// # Safety
+/// The caller roots an exact argv list whose elements are all strings.
+unsafe fn native_argv(args: *const Object) -> Result<Vec<CString>> {
+    // SAFETY: only independent native strings escape the immutable list borrow.
+    unsafe {
+        object(args).0.with(|storage| {
+            let values = storage.sequence();
+            values.check_kind(3);
+            values
+                .values
+                .iter()
+                .map(|&word| cstring((&*(word as *const Str)).as_bytes()))
+                .collect()
+        })
+    }
+}
+
+/// # Safety
+/// The caller roots an exact list of strings, Paths, or their closed union.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_subprocess_check_output(args: *const Object) -> *const Str {
+    // SAFETY: inspect only the exact runtime representations admitted by this call.
+    let argv = unsafe {
+        object(args).0.with(|storage| -> Result<Vec<CString>> {
+            let list = storage.sequence();
+            list.values
+                .iter()
+                .map(|&word| {
+                    let (word, ty) = if list.kind.raw() == 9 {
+                        super::unions::member(word)
+                    } else {
+                        (word, list.kind)
+                    };
+                    match ty.raw() {
+                        3 => cstring((&*(word as *const Str)).as_bytes()),
+                        5 => object(word as *const Object)
+                            .0
+                            .with(|storage| match storage {
+                                Storage::Path { .. } => cstring(storage.path().as_bytes()),
+                                _ => fail("SystemError", "expected a subprocess Path argument"),
+                            }),
+                        _ => fail("SystemError", "invalid subprocess argument kind"),
+                    }
+                })
+                .collect()
+        })
+    };
+    let run = argv.and_then(|argv| {
+        if argv.is_empty() {
+            return Err(Error::new(Kind::IndexError, "list index out of range"));
+        }
+        let child = Launch::new(argv, None)?
+            .spawn_with_output(None, Stdio::piped(), Stdio::inherit())
+            .map_err(os_error)?;
+        let (status, stdout, _) = capture(child).map_err(os_error)?;
+        Ok((status, Rc::new(decode_utf8_text(stdout)?)))
+    });
+    match run {
+        Ok((status, stdout)) if status.success() => Rc::into_raw(stdout),
+        Ok((status, stdout)) => {
+            raise_process(ProcessError {
+                // SAFETY: the exception acquires the original rooted argv.
+                cmd: unsafe { acquire_rc(args as usize) },
+                returncode: status
+                    .code()
+                    .unwrap_or_else(|| -status.signal().unwrap_or(0)),
+                stdout: Some(stdout),
+                stderr: None,
+            });
+            std::ptr::null()
+        }
+        Err(error) => error.returning(std::ptr::null()),
+    }
+}
+
+/// Runs a child with its output forwarded directly to the parent's stderr.
+///
+/// # Safety
+/// The caller roots an exact list[str] until launch and checks pending on return.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_subprocess_to_stderr(args: *const Object, check: u32) {
+    let run = || -> Result<ExitStatus> {
+        // SAFETY: all argv owners are rooted by the caller.
+        let argv = unsafe { native_argv(args)? };
+        if argv.is_empty() {
+            return Err(Error::new(Kind::IndexError, "list index out of range"));
+        }
+        let launch = Launch::new(argv, None)?;
+        let output = io::stderr()
+            .as_fd()
+            .try_clone_to_owned()
+            .map_err(os_error)?;
+        let child = launch
+            .spawn_with_output(None, output.into(), Stdio::inherit())
+            .map_err(os_error)?;
+        ChildGuard {
+            child,
+            reaped: false,
+        }
+        .wait()
+        .map_err(os_error)
+    };
+    match run() {
+        Ok(status) if check != 0 && !status.success() => raise_process(ProcessError {
+            // SAFETY: the original list remains rooted while acquiring our owner.
+            cmd: unsafe { acquire_rc(args as usize) },
+            returncode: status
+                .code()
+                .unwrap_or_else(|| -status.signal().unwrap_or(0)),
+            stdout: None,
+            stderr: None,
+        }),
+        Ok(_) => {}
+        Err(error) => error.raise(),
+    }
+}
+
+/// Validate rooted language arguments and materialize an independent native launch.
+unsafe fn prepare_process(
+    args: *const Object,
+    cwd: *const Str,
+    env: *const Object,
+) -> Result<(Launch, Option<CString>)> {
+    // SAFETY: the caller roots the exact argv, optional directory and environment.
+    unsafe {
+        // Python selects args[0], validates every environment name, then
+        // converts native strings. Preserve that order for mixed failures.
+        if object(args)
+            .0
+            .with(|storage| storage.sequence().values.is_empty())
+        {
+            return Err(Error::new(Kind::IndexError, "list index out of range"));
+        }
+        let env = if env.is_null() {
+            None
+        } else {
+            Some(object(env).0.with(|storage| {
+                let Storage::Dictionary(mapping) = storage else {
+                    fail("SystemError", "expected an environment dictionary");
+                };
+                mapping.string_pairs()
+            }))
+        };
+        if env
+            .as_ref()
+            .is_some_and(|pairs| pairs.iter().any(|(key, _)| key.contains('=')))
+        {
+            return Err(Error::new(
+                Kind::ValueError,
+                "illegal environment variable name",
+            ));
+        }
+        let argv = native_argv(args)?;
+        let cwd = (!cwd.is_null())
+            .then(|| cstring((&*cwd).as_bytes()))
+            .transpose()?;
+        Ok((Launch::new(argv, env)?, cwd))
+    }
+}
+
 /// Shares launch validation and successful records without changing no-timeout IO.
 unsafe fn run_process(
     args: *const Object,
@@ -911,50 +1098,7 @@ unsafe fn run_process(
     descriptor: *const RecordDescriptor,
 ) -> *mut usize {
     // SAFETY: only independent native strings escape the exact input storage.
-    let prepared = unsafe {
-        (|| {
-            // Python selects args[0], validates every environment name, then
-            // converts native strings. Preserve that order for mixed failures.
-            if object(args)
-                .0
-                .with(|storage| storage.sequence().values.is_empty())
-            {
-                return Err(Error::new(Kind::IndexError, "list index out of range"));
-            }
-            let env = if env.is_null() {
-                None
-            } else {
-                Some(object(env).0.with(|storage| {
-                    let Storage::Dictionary(mapping) = storage else {
-                        fail("SystemError", "expected an environment dictionary");
-                    };
-                    mapping.string_pairs()
-                }))
-            };
-            if env
-                .as_ref()
-                .is_some_and(|pairs| pairs.iter().any(|(key, _)| key.contains('=')))
-            {
-                return Err(Error::new(
-                    Kind::ValueError,
-                    "illegal environment variable name",
-                ));
-            }
-            let argv = object(args).0.with(|storage| {
-                let values = storage.sequence();
-                values.check_kind(3);
-                values
-                    .values
-                    .iter()
-                    .map(|&word| cstring((&*(word as *const Str)).as_bytes()))
-                    .collect::<Result<Vec<_>>>()
-            })?;
-            let cwd = (!cwd.is_null())
-                .then(|| cstring((&*cwd).as_bytes()))
-                .transpose()?;
-            Ok((Launch::new(argv, env)?, cwd))
-        })()
-    };
+    let prepared = unsafe { prepare_process(args, cwd, env) };
     let (launch, cwd) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => return error.returning(std::ptr::null_mut()),
@@ -1007,8 +1151,8 @@ unsafe fn run_process(
         raise_process(ProcessError {
             cmd: args,
             returncode,
-            stdout,
-            stderr,
+            stdout: Some(stdout),
+            stderr: Some(stderr),
         });
         return std::ptr::null_mut();
     }
@@ -1049,8 +1193,12 @@ pub unsafe extern "C" fn relar_subprocess_check(record: *const usize) {
         ProcessError {
             cmd: acquire_rc(record.cast::<*const Object>().read() as usize),
             returncode,
-            stdout: acquire_rc(record.add(2).cast::<*const Str>().read() as usize),
-            stderr: acquire_rc(record.add(3).cast::<*const Str>().read() as usize),
+            stdout: Some(acquire_rc(
+                record.add(2).cast::<*const Str>().read() as usize
+            )),
+            stderr: Some(acquire_rc(
+                record.add(3).cast::<*const Str>().read() as usize
+            )),
         }
     };
     raise_process(error);
@@ -1145,6 +1293,69 @@ mod tests {
             }
         }
         result
+    }
+
+    #[test]
+    fn async_children_rendezvous_and_drain_both_pipes() {
+        use super::asynchronous::{
+            relar_async_process_communicate, relar_async_process_spawn, relar_async_process_status,
+        };
+
+        let dir = Directory::new();
+        let cwd = Str::new(dir.0.to_str().unwrap());
+        let script = r#"
+            touch "$1"
+            retries=0
+            while ! test -f "$2"; do
+                retries=$((retries + 1))
+                test "$retries" -lt 500 || exit 91
+                sleep .01
+            done
+            dd if=/dev/zero bs=65536 count=4 2>/dev/null
+            dd if=/dev/zero bs=65536 count=5 1>&2 2>/dev/null
+            exit 7
+        "#;
+        let spawn = |name, partner| {
+            let argv = args(&["/bin/sh", "-c", script, "barrier", name, partner]);
+            // SAFETY: the exact list and cwd remain rooted until spawn returns.
+            unsafe {
+                let child =
+                    relar_async_process_spawn(Rc::as_ptr(&argv), &cwd, std::ptr::null(), 1, 1);
+                assert!(!child.is_null());
+                Rc::from_raw(child)
+            }
+        };
+        let first = spawn("first", "second");
+        assert_eq!(
+            // SAFETY: the first process is rooted and waits for a missing file.
+            unsafe { relar_async_process_status(Rc::as_ptr(&first), false) },
+            0
+        );
+        let second = spawn("second", "first");
+        const KINDS: [u32; 2] = [8, 8];
+        let descriptor = RecordDescriptor {
+            length: 2,
+            kinds: KINDS.as_ptr(),
+            semantics: std::ptr::null(),
+        };
+        for owner in [first, second] {
+            let process = Rc::as_ptr(&owner);
+            // SAFETY: each newly owned pair roots two immutable byte buffers
+            // until its release. Its descriptor outlives both communications.
+            unsafe {
+                assert_eq!(relar_async_process_status(process, true), exit_word(7));
+                for lengths in [[4 * 65536, 5 * 65536], [0, 0]] {
+                    let pair = relar_async_process_communicate(process, &descriptor);
+                    assert!(!pair.is_null());
+                    for (slot, length) in lengths.into_iter().enumerate() {
+                        let bytes = &*pair.add(slot).cast::<*const Bytes>().read();
+                        assert_eq!(bytes.len(), length);
+                    }
+                    relar_record_release(pair);
+                }
+                assert_eq!(relar_async_process_status(process, false), exit_word(7));
+            }
+        }
     }
 
     fn run(

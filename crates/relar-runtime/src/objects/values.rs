@@ -124,7 +124,7 @@ unsafe fn record_field(left: *const usize, right: *const usize, position: usize)
             let kind = WordKind::new(*left_layout.kinds.add(index));
             let left_word = kind.read_record_field(left.add(index));
             let right_word = kind.read_record_field(right.add(index));
-            if !matches!(kind.raw() & !NULLABLE, 5 | 6) {
+            if !matches!(kind.raw() & !NULLABLE, 5 | 6 | 9) {
                 if !scalar_equal(left_word, right_word, kind) {
                     return Comparison::Done(false);
                 }
@@ -178,6 +178,20 @@ pub(super) unsafe fn equal(left: usize, right: usize, kind: WordKind) -> bool {
                 match raw & !NULLABLE {
                     5 => object_element(left as *const Object, right as *const Object, position),
                     6 => record_field(left as *const usize, right as *const usize, position),
+                    9 => {
+                        let (left, left_kind) = super::unions::member(left);
+                        let (right, right_kind) = super::unions::member(right);
+                        if left_kind != right_kind {
+                            Comparison::Done(false)
+                        } else {
+                            Comparison::Child {
+                                left,
+                                right,
+                                kind: left_kind,
+                                resume: None,
+                            }
+                        }
+                    }
                     _ => Comparison::Done(scalar_equal(left, right, kind)),
                 }
             }
@@ -233,19 +247,16 @@ unsafe fn scalar_equal(left: usize, right: usize, kind: WordKind) -> bool {
             7 if raw & NULLABLE != 0 => *(left as *const f64) == *(right as *const f64),
             7 => f64::from_bits(left as u64) == f64::from_bits(right as u64),
             8 => *(left as *const Bytes) == *(right as *const Bytes),
-            9 if left & 1 != right & 1 => false,
-            9 if left & 1 == 0 => *(left as *const Str) == *(right as *const Str),
-            9 => *((left & !1) as *const Bytes) == *((right & !1) as *const Bytes),
             _ => unreachable!("WordKind validates concrete representations"),
         }
     }
 }
 
-/// Compares lists of the same checked immutable tuple type in element order.
+/// Compares checked containers, including ordered sequences and integer counters.
 ///
 /// # Safety
-/// Both inputs are rooted sequence objects of the same concrete type. Element
-/// comparisons have no user callbacks and neither list changes during this call.
+/// Both inputs are rooted objects of the same checked container type. Element
+/// comparisons have no user callbacks and neither container changes during this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_sequence_equal(left: *const Object, right: *const Object) -> u32 {
     // SAFETY: the compiler verified both sequence layouts before calling.
@@ -262,10 +273,11 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
         object(left).0.with(|left| {
             object(right).0.with(|right| match (left, right) {
                 (Storage::Sequence(left), Storage::Sequence(right)) => {
+                    let (left, right) = (left.resolved(), right.resolved());
                     if left.kind != right.kind || left.values.len() != right.values.len() {
                         return Comparison::Done(false);
                     }
-                    if !matches!(left.kind.raw() & !NULLABLE, 5 | 6) {
+                    if !matches!(left.kind.raw() & !NULLABLE, 5 | 6 | 9) {
                         return Comparison::Done(left.values.iter().zip(&right.values).all(
                             |(&left_word, &right_word)| {
                                 scalar_equal(left_word, right_word, left.kind)
@@ -286,6 +298,10 @@ unsafe fn object_element(left: *const Object, right: *const Object, position: us
                     left.compare_entry(right, position)
                 }
                 (Storage::Set(left), Storage::Set(right)) => Comparison::Done(left.equal(right)),
+                (Storage::Json(left), Storage::Json(right)) => Comparison::Done(left.equal(right)),
+                (Storage::Document(left), Storage::Document(right)) => {
+                    Comparison::Done(left.view().equal(&right.view()))
+                }
                 (left @ Storage::Path { .. }, right @ Storage::Path { .. }) => {
                     Comparison::Done(left.path() == right.path())
                 }
@@ -323,6 +339,10 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 ReprTask::Word(word, kind) => match kind.raw() & !NULLABLE {
                     5 if word != 0 => Some(ReprTask::Object(word as *const Object, 0)),
                     6 if word != 0 => Some(ReprTask::Record(word as *const usize, 0, 0)),
+                    9 if word != 0 => {
+                        let (member, kind) = super::unions::member(word);
+                        Some(ReprTask::Word(member, kind))
+                    }
                     _ => {
                         write_scalar(output, word, kind);
                         None
@@ -331,6 +351,7 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
                         Storage::Sequence(values) => {
+                            let values = values.resolved();
                             if position == 0 {
                                 output.push('[');
                             }
@@ -338,7 +359,8 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                                 if index != 0 {
                                     output.push_str(", ");
                                 }
-                                if value != 0 && matches!(values.kind.raw() & !NULLABLE, 5 | 6) {
+                                if value != 0 && matches!(values.kind.raw() & !NULLABLE, 5 | 6 | 9)
+                                {
                                     pending.push(ReprTask::Object(owner, index + 1));
                                     return Some(ReprTask::Word(value, values.kind));
                                 }
@@ -352,6 +374,14 @@ pub(super) unsafe fn write_repr(output: &mut String, word: usize, kind: WordKind
                         }
                         Storage::Set(set) => {
                             format_entry(owner, set.repr_entry(output, position), &mut pending)
+                        }
+                        Storage::Json(value) => {
+                            value.write_repr(output);
+                            None
+                        }
+                        Storage::Document(value) => {
+                            value.view().write_repr(output);
+                            None
                         }
                         path @ Storage::Path { .. } => {
                             output.push_str("PosixPath(");
@@ -446,10 +476,6 @@ unsafe fn write_scalar(output: &mut String, word: usize, kind: WordKind) {
                 output.push_str(&crate::floats::render(value));
             }
             8 => super::bytes::write_repr(output, &*(word as *const Bytes)),
-            9 if word & 1 == 0 => {
-                write_scalar(output, word, WordKind::new(3));
-            }
-            9 => write_scalar(output, word & !1, WordKind::new(8)),
             _ => unreachable!("WordKind validates concrete representations"),
         }
     }
@@ -509,7 +535,7 @@ unsafe fn record_field_repr(
             let kind = WordKind::new(*layout.kinds.add(index));
             let word = kind.read_record_field(payload.add(index));
             written += 1;
-            if word != 0 && matches!(kind.raw() & !NULLABLE, 5 | 6) {
+            if word != 0 && matches!(kind.raw() & !NULLABLE, 5 | 6 | 9) {
                 pending.push(ReprTask::Record(payload, index + 1, written));
                 return Some(ReprTask::Word(word, kind));
             }

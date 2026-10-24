@@ -46,11 +46,80 @@ pub(super) fn first_append<'ast>(
     appends.value
 }
 
+impl Checker<'_> {
+    /// Join direct assignments across an exhaustive conditional before its first
+    /// suite fixes a local's storage. This supplies a layout for empty-list arms
+    /// and nullable scalar arms while retaining normal definite-assignment checks.
+    pub(super) fn branch_layouts(
+        &mut self,
+        body: &[ast::Stmt],
+        clauses: &[ast::ElifElseClause],
+    ) -> Result<(), String> {
+        if !clauses.last().is_some_and(|c| c.test.is_none())
+            || !body.iter().any(|stmt| matches!(stmt, ast::Stmt::Assign(assign)
+                if matches!(assign.targets.as_slice(), [ast::Expr::Name(name)] if !self.names.contains_key(name.id.as_str()))))
+        {
+            return Ok(());
+        }
+        let mut arms: HashMap<&str, Vec<&ast::Expr>> = HashMap::new();
+        for suite in std::iter::once(body).chain(clauses.iter().map(|c| c.body.as_slice())) {
+            for stmt in suite {
+                if let ast::Stmt::Assign(a) = stmt
+                    && let [ast::Expr::Name(n)] = a.targets.as_slice()
+                    && !self.names.contains_key(n.id.as_str())
+                {
+                    arms.entry(n.id.as_str()).or_default().push(&a.value);
+                }
+            }
+        }
+        for (name, values) in arms {
+            if values.len() != clauses.len() + 1 {
+                continue;
+            }
+            let site = values[0];
+            if values.iter().all(|e| matches!(e, ast::Expr::List(_)))
+                && values
+                    .iter()
+                    .any(|e| matches!(e, ast::Expr::List(l) if l.elts.is_empty()))
+            {
+                let mut elements = values.iter().flat_map(|e| {
+                    let ast::Expr::List(list) = e else {
+                        unreachable!()
+                    };
+                    list.elts
+                        .iter()
+                        .map(|element| self.graph.session.scalar_type(self.module, element))
+                });
+                if let Some(Some(first)) = elements.next()
+                    && elements.all(|ty| ty == Some(first))
+                {
+                    self.declare(name, self.types.list(first), site)?;
+                }
+            } else if values
+                .iter()
+                .any(|e| matches!(e, ast::Expr::NoneLiteral(_)))
+            {
+                let mut concrete = values
+                    .iter()
+                    .filter(|e| !matches!(e, ast::Expr::NoneLiteral(_)))
+                    .map(|e| self.graph.session.scalar_type(self.module, e));
+                if let Some(Some(first)) = concrete.next()
+                    && concrete.all(|ty| ty == Some(first))
+                {
+                    self.declare(name, self.types.optional(first), site)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 const DEFERRED: &str = "inference is waiting for a function return type";
 
 struct Pending {
     params: Vec<Option<Type>>,
     returns: Option<Type>,
+    infer_return: bool,
 }
 
 /// Each missing slot is filled once from a checked call or a fully checked body.
@@ -60,13 +129,18 @@ struct Pending {
 pub(super) struct Inference {
     pending: RefCell<Vec<Pending>>,
     revision: Cell<usize>,
+    widened: Cell<bool>,
 }
 
 impl Inference {
     pub fn register(&self, params: Vec<Option<Type>>, returns: Option<Type>) -> usize {
         let mut pending = self.pending.borrow_mut();
         let id = pending.len();
-        pending.push(Pending { params, returns });
+        pending.push(Pending {
+            params,
+            returns,
+            infer_return: returns.is_none(),
+        });
         id
     }
 
@@ -103,6 +177,23 @@ impl Inference {
         }
     }
 
+    /// A later call from a different subcommand replaces a child layout with
+    /// its stable parent prefix. Revisit helpers whose result may pass it on.
+    fn widen_namespace(&self, id: usize, index: usize, parent: Type, parsers: &argparse::Parsers) {
+        let mut pending = self.pending.borrow_mut();
+        pending[id].params[index] = Some(parent);
+        for function in &mut *pending {
+            if function.infer_return
+                && let (Some(Type::Class(child)), Type::Class(parent)) = (function.returns, parent)
+                && parsers.child_of(child, parent)
+            {
+                function.returns = None;
+            }
+        }
+        self.widened.set(true);
+        self.revision.set(self.revision.get() + 1);
+    }
+
     /// An exact callback boundary can supply missing formal types. The ordinary
     /// final body check still enforces every inferred parameter and return.
     pub(super) fn callable_signature(
@@ -137,7 +228,7 @@ impl Inference {
     }
 
     /// Stops when every signature is concrete, or no new type evidence is available.
-    /// A round can only fill missing slots, so a finite call graph terminates.
+    /// A slot can widen from a command to its common namespace only once.
     pub fn solve(
         &self,
         graph: &SourceGraph,
@@ -146,7 +237,7 @@ impl Inference {
         classes: &mut ClassInfo,
         types: &Types,
     ) -> Result<(), String> {
-        while self.unresolved() {
+        while self.widened.replace(false) || self.unresolved() {
             for (_, _, signature) in definitions.iter_mut() {
                 self.update(signature);
             }
@@ -176,6 +267,9 @@ impl Inference {
                 }
             }
             for (module, function, signature) in definitions.iter() {
+                if graph.modules[*module].archive.is_some() {
+                    continue; // Native declarations must be fully annotated.
+                }
                 let (ready, infer_return) = {
                     let pending = self.pending.borrow();
                     let pending = &pending[signature.id];
@@ -195,6 +289,7 @@ impl Inference {
                 );
                 checker.inference = Some(self);
                 checker.returns = signature.returns;
+                checker.asynchronous = signature.asynchronous;
                 checker.method_context(signature.method);
                 checker.inferred_returns = infer_return.then(Vec::new);
                 let result = (|| {
@@ -215,7 +310,7 @@ impl Inference {
                         }
                         let mut ty = returns[0];
                         for &other in &returns[1..] {
-                            ty = types.join(ty, other).ok_or_else(|| {
+                            ty = types.join(ty, other).or_else(|| classes.parsers.common_namespace(ty, other)).ok_or_else(|| {
                                 error(
                                     checker.source,
                                     function,
@@ -256,6 +351,9 @@ impl Inference {
                 errors.push(format!("{}:{diagnostic}", module.path.display()));
             }
             if self.revision.get() == before {
+                if !self.unresolved() {
+                    break;
+                }
                 if let Some(diagnostic) = errors.into_iter().find(|error| !error.contains(DEFERRED))
                 {
                     return Err(diagnostic);
@@ -315,7 +413,30 @@ impl Checker<'_> {
             |checker, index, argument| {
                 let index = index + skip;
                 let value = if let Some(ty) = inference.parameter(signature.id, index) {
-                    checker.direct_argument(argument, ty, signature.params[index].sign_only)?
+                    if matches!(ty, Type::Class(class) if checker.classes.parsers.namespace(class))
+                    {
+                        let value = checker.expr(argument)?;
+                        let expected = if value.ty == ty {
+                            ty
+                        } else if let Some(parent) =
+                            checker.classes.parsers.common_namespace(ty, value.ty)
+                        {
+                            if parent != ty {
+                                inference.widen_namespace(
+                                    signature.id,
+                                    index,
+                                    parent,
+                                    &checker.classes.parsers,
+                                );
+                            }
+                            parent
+                        } else {
+                            ty
+                        };
+                        checker.coerce(value, expected, argument)?
+                    } else {
+                        checker.direct_argument(argument, ty, signature.params[index].sign_only)?
+                    }
                 } else {
                     checker.expr(argument)?
                 };

@@ -44,10 +44,18 @@ def callee_error(left: BinaryIO, right: BinaryIO) -> None:
     raise ValueError("callee")
 
 
-class Holder:
+class Base:
+    flag: int
+
+    def __init__(self) -> None:
+        self.flag = 1
+
+
+class Holder(Base):
     stream: BinaryIO
 
     def __init__(self, stream: BinaryIO) -> None:
+        super().__init__()
         self.stream = stream
 
     def consume(self, other: BinaryIO) -> None:
@@ -67,6 +75,11 @@ def invoke(callback: Callable[[BinaryIO], None], path: str) -> None:
 
 def ignore_one(other: BinaryIO) -> None:
     pass
+
+
+def rebind_base(left: Base, right: Base) -> None:
+    left = right
+    show("base")
 
 
 def mapping(path: str) -> dict[int, BinaryIO]:
@@ -96,6 +109,7 @@ call(rebind, "rebind")
 rebind_list([buffered("nested", b"A")], [buffered("nested", b"B")], "nested")
 keep(buffered("returned", b"A"), buffered("returned", b"B")).write(b"C")
 invoke(Holder(buffered("bound", b"A")).consume, "bound")
+rebind_base(Holder(buffered("base", b"A")), Holder(buffered("base", b"B")))
 invoke(ignore_one, "plain")
 Ignore(right=buffered("constructor", b"A"), left=buffered("constructor", b"B"))
 shared = buffered("shared", b"A")

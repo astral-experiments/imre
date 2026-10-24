@@ -369,7 +369,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
     Ok(resolved)
 }
 
-fn path_utf8(path: OsString) -> Result<Str> {
+pub(super) fn path_utf8(path: OsString) -> Result<Str> {
     path.into_string()
         .map(Str::from)
         .map_err(|_| Error::new(Kind::UnicodeDecodeError, "resolved path is not valid UTF-8"))
@@ -406,6 +406,29 @@ pub unsafe extern "C" fn relar_path_new(text: *const Str) -> *const Object {
     } else {
         new_path(normalize(spelling))
     }
+}
+
+/// # Safety
+/// The word is a rooted str | Path value. Both branches return an owned string
+/// without resolving links or modifying the path's lexical spelling.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_union_path_text(value: usize) -> *const Str {
+    // SAFETY: clearing tag six restores the exact pathlib object address.
+    unsafe {
+        if value & 7 == 6 {
+            relar_path_text((value & !7) as *const Object)
+        } else {
+            Rc::into_raw(super::acquire_rc::<Str>(value))
+        }
+    }
+}
+
+/// # Safety
+/// The unnormalized path spelling is a live string through the filesystem call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_path_text_exists(path: *const Str) -> u32 {
+    // SAFETY: The path string is borrowed through the stat call.
+    u32::from(fs::metadata(unsafe { &*path }.as_str()).is_ok())
 }
 
 /// # Safety

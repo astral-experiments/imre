@@ -67,6 +67,11 @@ impl Checker<'_> {
             return;
         }
         let (name, text) = match compare.operands.as_ref() {
+            [ast::Expr::Attribute(attr), ast::Expr::StringLiteral(text)]
+            | [ast::Expr::StringLiteral(text), ast::Expr::Attribute(attr)] => {
+                self.narrow_command(attr, text.value.to_str());
+                return;
+            }
             [ast::Expr::Name(name), ast::Expr::StringLiteral(text)]
             | [ast::Expr::StringLiteral(text), ast::Expr::Name(name)] => (name, text),
             _ => return,

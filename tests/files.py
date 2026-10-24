@@ -552,7 +552,6 @@ ERRORS = {
 }
 
 REJECTED = {
-    "missing_encoding": 'open("input.txt", "r")',
     "dynamic_mode": 'mode = "r"\nopen("input.txt", mode, encoding="utf-8")',
     "binary_mode": 'open("input.txt", "rb", encoding="utf-8")',
     "append_mode": 'open("input.txt", "a", encoding="utf-8")',

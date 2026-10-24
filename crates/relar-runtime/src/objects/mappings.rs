@@ -7,6 +7,7 @@
 use std::hash::{BuildHasher, Hash, Hasher, RandomState};
 use std::sync::LazyLock;
 
+mod record_hash;
 mod sorted_rows;
 
 use hashbrown::HashTable;
@@ -62,8 +63,8 @@ impl Hash for PathKey {
     }
 }
 
-/// An immutable tuple owns its concrete record without copying its fields into
-/// a second allocation. Lookup borrows that owner; hashing cannot call user code.
+/// An immutable tuple or dataclass key roots its concrete record without
+/// copying its fields into a second allocation.
 struct TupleKey(*const usize);
 
 impl Clone for TupleKey {
@@ -102,13 +103,27 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) {
         let (value, position) = current;
         // SAFETY: the root owns every tuple in the traversal and its descriptor.
         let layout = unsafe { super::records::descriptor(value) };
+        if layout.has_toml_hash() {
+            // SAFETY: the key boundary prepares this frozen record's cached hash.
+            let cached = unsafe { *value.add(layout.length) };
+            debug_assert_ne!(cached, 0);
+            cached.hash(state);
+            let Some(next) = pending.pop() else { return };
+            current = next;
+            continue;
+        }
         if position == 0 {
             // Tuple equality requires the same descriptor. Hash it once per tuple.
             std::ptr::from_ref(layout).hash(state);
         }
+        // SAFETY: a rooted record's semantic metadata is immutable and static.
+        let semantics = unsafe { layout.semantics.as_ref() };
         for index in position..layout.length {
             // SAFETY: the static layout covers each initialized concrete field.
             unsafe {
+                if semantics.is_some_and(|s| s.kind == 0 && (*s.fields.add(index)).flags & 1 == 0) {
+                    continue;
+                }
                 let kind = WordKind::new(*layout.kinds.add(index));
                 let word = kind.read_record_field(value.add(index));
                 let raw = kind.raw();
@@ -411,7 +426,7 @@ impl<K: ScalarKey> Table<K, usize> {
         &mut self,
         word: usize,
         kind: WordKind,
-        factory: Option<WordKind>,
+        missing: Missing,
     ) -> Option<OwnedWord> {
         // SAFETY: the incoming key remains rooted for this whole operation.
         let key = unsafe { K::borrow(word) };
@@ -421,7 +436,14 @@ impl<K: ScalarKey> Table<K, usize> {
             // SAFETY: the table roots the stored value of the declared kind.
             return Some(unsafe { kind.acquire(value) });
         }
-        let element = factory?;
+        let element = match missing {
+            Missing::Raise => return None,
+            Missing::Zero => {
+                // SAFETY: a Counter has exact integer values. Zero is immediate.
+                return Some(unsafe { kind.acquire(Int::small(0).unwrap().0) });
+            }
+            Missing::List(element) => element,
+        };
         let list = if element.raw() == 2 {
             crate::relar_list_new() as usize
         } else {
@@ -580,11 +602,18 @@ impl AsciiIntCache {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Missing {
+    Raise,
+    List(WordKind),
+    Zero,
+}
+
 pub(super) struct Mapping {
     tables: Tables<usize>,
     value_kind: WordKind,
-    /// A sealed list factory is invoked only by a missing subscription.
-    default_list_element: Option<WordKind>,
+    /// Only subscription consults this policy; membership and get inspect stored keys.
+    missing: Missing,
     /// Present only after a string-to-integer gather. Words borrow current table
     /// values; ASCII mutation updates the corresponding slot before old owners drop.
     ascii_int: Option<Box<AsciiIntCache>>,
@@ -605,6 +634,17 @@ impl Mapping {
             .iter()
             .flatten()
             .map(|entry| (&*entry.key, entry.value))
+    }
+
+    pub(super) fn integer_entries(&self) -> impl Iterator<Item = (&Int, usize)> {
+        let Tables::Int(table) = &self.tables else {
+            fail("SystemError", "expected an integer-key dictionary");
+        };
+        table
+            .entries
+            .iter()
+            .flatten()
+            .map(|entry| (&entry.key.0, entry.value))
     }
 
     /// Transfers two exact owners only for a new key. Duplicate inputs are
@@ -641,6 +681,33 @@ impl Mapping {
         pairs
     }
 
+    pub(super) fn is_empty(&self) -> bool {
+        self.tables.len() == 0
+    }
+
+    /// A typed dict of None can initialize a mutable document's removal values.
+    pub(super) fn document_null_keys(&self) -> Vec<Rc<Str>> {
+        assert_eq!((self.tables.key_kind(), self.value_kind.raw()), (3, 0));
+        let mut keys = Vec::with_capacity(self.tables.len());
+        self.tables.all(|key, _| {
+            // SAFETY: the mapping holds a strong reference to each exact string key.
+            keys.push(unsafe { acquire_rc(key) });
+            true
+        });
+        keys
+    }
+
+    pub(super) fn document_pairs(&self) -> Vec<(Rc<Str>, Rc<Object>)> {
+        assert_eq!((self.tables.key_kind(), self.value_kind.raw()), (3, 5));
+        let mut pairs = Vec::with_capacity(self.tables.len());
+        self.tables.all(|key, value| {
+            // SAFETY: the exact native mapping roots each typed key and value.
+            pairs.push(unsafe { (acquire_rc(key), acquire_rc(value)) });
+            true
+        });
+        pairs
+    }
+
     /// # Safety
     /// Both tables and all values are rooted and immutable for this traversal.
     pub(super) unsafe fn compare_entry(
@@ -649,6 +716,24 @@ impl Mapping {
         position: usize,
     ) -> super::values::Comparison {
         use super::values::Comparison;
+        if self.missing == Missing::Zero && other.missing == Missing::Zero {
+            // Counts of absent keys are zero in either direction, including
+            // for another Counter nested in a record or in a sequence.
+            let agrees = |left: &Self, right: &Self| {
+                left.tables.all(|key, value| {
+                    let count = if left.tables.key_kind() == right.tables.key_kind() {
+                        // SAFETY: immutable source tables root equal key kinds.
+                        unsafe { right.tables.lookup(key) }
+                    } else {
+                        None
+                    };
+                    let count = count.unwrap_or(Int::small(0).unwrap().0);
+                    // SAFETY: both Counter values are rooted canonical integers.
+                    unsafe { crate::relar_int_compare(value, count) == 0 }
+                })
+            };
+            return Comparison::Done(agrees(self, other) && agrees(other, self));
+        }
         if self.tables.key_kind() != other.tables.key_kind()
             || self.value_kind != other.value_kind
             || self.tables.len() != other.tables.len()
@@ -676,15 +761,47 @@ impl Mapping {
         output: &mut String,
         position: usize,
     ) -> Option<super::values::ReprEntry> {
+        if self.missing == Missing::Zero {
+            output.push_str("Counter(");
+            if self.tables.len() != 0 {
+                let mut entries = Vec::with_capacity(self.tables.len());
+                self.tables.all(|key, count| {
+                    entries.push((key, count));
+                    true
+                });
+                // Stable sorting preserves first appearance for ties.
+                // SAFETY: the immutable table roots both exact integer counts.
+                entries.sort_by(|a, b| unsafe { crate::relar_int_compare(b.1, a.1) }.cmp(&0));
+                output.push('{');
+                for (index, (key, count)) in entries.into_iter().enumerate() {
+                    if index != 0 {
+                        output.push_str(", ");
+                    }
+                    // SAFETY: only immutable scalar keys and integer counts are supported.
+                    unsafe {
+                        super::values::write_repr(
+                            output,
+                            key,
+                            WordKind::new(self.tables.key_kind()),
+                        );
+                        output.push_str(": ");
+                        super::values::write_repr(output, count, self.value_kind);
+                    }
+                }
+                output.push('}');
+            }
+            output.push(')');
+            return None;
+        }
         if position == 0 {
-            if self.default_list_element.is_some() {
+            if matches!(self.missing, Missing::List(_)) {
                 output.push_str("defaultdict(<class 'list'>, ");
             }
             output.push('{');
         }
         let Some((next, key, value)) = self.tables.next(position) else {
             output.push('}');
-            if self.default_list_element.is_some() {
+            if matches!(self.missing, Missing::List(_)) {
                 output.push(')');
             }
             return None;
@@ -703,7 +820,7 @@ impl Mapping {
         Self {
             tables: Tables::new(key_kind),
             value_kind: WordKind::new(value_kind),
-            default_list_element: None,
+            missing: Missing::Raise,
             ascii_int: None,
         }
     }
@@ -917,6 +1034,24 @@ impl Storage {
     }
 }
 
+/// Each statically decorated module function owns one typed cache for the
+/// lifetime of the program. A failed call never reaches the wrapper's insert.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_function_cache(id: usize, key: u32, value: u32) -> *const Object {
+    thread_local! { static CACHES: std::cell::RefCell<std::collections::HashMap<usize, Rc<Object>>> = std::cell::RefCell::default(); }
+    CACHES.with_borrow_mut(|caches| {
+        Rc::into_raw(
+            caches
+                .entry(id)
+                .or_insert_with(|| {
+                    // SAFETY: relar_dict_new returns an independent strong owner.
+                    unsafe { Rc::from_raw(relar_dict_new(key, value)) }
+                })
+                .clone(),
+        )
+    })
+}
+
 /// Creates a dictionary with concrete scalar keys and one shared value descriptor.
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_dict_new(key_kind: u32, value_kind: u32) -> *const Object {
@@ -924,11 +1059,72 @@ pub extern "C" fn relar_dict_new(key_kind: u32, value_kind: u32) -> *const Objec
         Box::new(Mapping::new(key_kind, value_kind)),
     )))))
 }
+
+/// Constructs an integer-valued Counter with non-inserting zero subscriptions.
+#[unsafe(no_mangle)]
+pub extern "C" fn relar_counter_new(key_kind: u32) -> *const Object {
+    let mut mapping = Mapping::new(key_kind, 2);
+    mapping.missing = Missing::Zero;
+    Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
+        Box::new(mapping),
+    )))))
+}
+
+/// Add the source counts in insertion order. Updating a counter from itself doubles each count.
+///
+/// # Safety
+/// Both arguments root dictionaries with the same immutable key type and integer values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_counter_update(target: *const Object, source: *const Object) {
+    // SAFETY: the iterator acquires the source and each pair before mutating the target.
+    // When the handles alias, replacing a count leaves the source's keys intact.
+    unsafe {
+        let iter = Rc::from_raw(relar_dict_iter(source, 1));
+        while let Some((key, Some(count))) = iter
+            .0
+            .with_mut(|s| s.mapping_iterator_mut().next())
+            .expect("only counter values change during update")
+        {
+            let current = Int(relar_dict_get_default(target, key.word, 1));
+            let total = Int(crate::relar_int_binary(current.0, count.word, 0));
+            relar_dict_set(target, key.word, total.0);
+        }
+    }
+}
+
+/// Sums exact integers after evaluating the dictionary and the start value.
+///
+/// # Safety
+/// The caller roots a dictionary of integers and a tagged integer start.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_dict_sum_values(mapping: *const Object, start: usize) -> usize {
+    // SAFETY: no callbacks occur while reading these immutable integer values.
+    unsafe {
+        crate::relar_int_retain(start);
+        let mut total = Int(start);
+        object(mapping).0.with(|s| {
+            s.dictionary().tables.all(|_, word| {
+                total = Int(crate::relar_int_binary(total.0, word, 0));
+                true
+            })
+        });
+        total.into_raw()
+    }
+}
+
+/// # Safety
+/// `value` roots an exact Counter; addition only reads its immutable integer words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_counter_total(value: *const Object) -> usize {
+    // SAFETY: the caller roots this integer mapping and the zero start is immediate.
+    unsafe { relar_dict_sum_values(value, Int::small(0).unwrap().0) }
+}
+
 /// Attaches the exact element descriptor to a native `defaultdict(list)`.
 #[unsafe(no_mangle)]
 pub extern "C" fn relar_default_list_dict_new(key_kind: u32, element_kind: u32) -> *const Object {
     let mut mapping = Mapping::new(key_kind, if element_kind == 2 { 4 } else { 5 });
-    mapping.default_list_element = Some(WordKind::new(element_kind));
+    mapping.missing = Missing::List(WordKind::new(element_kind));
     Rc::into_raw(Rc::new(Object(StorageCell::new(Storage::Dictionary(
         Box::new(mapping),
     )))))
@@ -979,7 +1175,7 @@ pub unsafe extern "C" fn relar_dict_get(value: *const Object, key: usize) -> usi
     let owned = unsafe {
         object(value).0.with_mut(|storage| {
         let mapping = storage.dictionary_mut();
-        table!(&mut mapping.tables, table => table.subscript(key, mapping.value_kind, mapping.default_list_element))
+        table!(&mut mapping.tables, table => table.subscript(key, mapping.value_kind, mapping.missing))
     })
     };
     if let Some(owned) = owned {
@@ -1032,7 +1228,7 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
     // SAFETY: exact immutable keys, integer acquisition, and buffer allocation
     // cannot reenter. Only the internal lookup cache changes, and no borrowed
     // key/value or table address escapes this access.
-    let result = unsafe {
+    let result: Result<Vec<Int>, Error> = unsafe {
         object(value).0.with_mut(|storage| {
             let mapping = storage.dictionary_mut();
             let Tables::Str(table) = &mapping.tables else {
@@ -1056,6 +1252,15 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                 }
                 mapping.ascii_int = Some(ascii);
             }
+            let missing = |character| {
+                if mapping.missing == Missing::Zero {
+                    Ok(Int::small(0).unwrap().0)
+                } else {
+                    let mut key = Str::new("");
+                    key.push(character);
+                    Err(Error::string_key(key))
+                }
+            };
             let ascii = mapping.ascii_int.as_ref().unwrap();
             let ascii_small = ascii.heap_values == 0 && text.is_ascii();
             let length = if ascii_small {
@@ -1075,12 +1280,11 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                     // SAFETY: ascii_small proved this immutable text is ASCII,
                     // so every byte indexes within the 128-entry lookup cache.
                     let word = *ascii.values.get_unchecked(usize::from(character));
-                    if word == 0 {
-                        let mut key = Str::new("");
-                        key.push(char::from(character));
-                        return Err(Error::string_key(key));
-                    }
-                    slot.write(Int(word));
+                    slot.write(Int(if word == 0 {
+                        missing(char::from(character))?
+                    } else {
+                        word
+                    }));
                 }
                 // SAFETY: the equal-length zip initialized every slot. The
                 // cache proves all words are small integers, so an earlier
@@ -1101,11 +1305,7 @@ unsafe fn gather_str_int(text: &str, value: *const Object) -> *const List {
                         })
                 };
                 // Canonical Int words are nonzero, including the integer zero.
-                if word == 0 {
-                    let mut key = Str::new("");
-                    key.push(character);
-                    return Err(Error::string_key(key));
-                }
+                let word = if word == 0 { missing(character)? } else { word };
                 // SAFETY: this exact integer remains rooted by the dictionary;
                 // the copied owner belongs to the fresh result or its cleanup.
                 values.push((*Int::borrow(word)).clone());
@@ -1183,22 +1383,23 @@ pub unsafe extern "C" fn relar_dict_set(value: *const Object, key: usize, word: 
     drop(old);
 }
 /// # Safety
-/// Root the dictionary and its exact key. Missing sets KeyError; removal drops
-/// the key and value owners only after mutable storage access has ended.
+/// Root the dictionary and its exact key. Missing raises KeyError in ordinary
+/// dictionaries and is a no-op for a Counter. Drop removed owners after mutation.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_dict_delete(value: *const Object, key: usize) {
     // SAFETY: lookup/removal cannot reenter; returned values own their references.
-    let old = unsafe {
+    let (old, missing) = unsafe {
         object(value).0.with_mut(|s| {
             let mapping = s.dictionary_mut();
             mapping.update_ascii_int(key, 0);
-            mapping
+            let old = mapping
                 .tables
                 .remove(key)
-                .map(|(key, word)| (key, OwnedWord::from_owned(word, mapping.value_kind)))
+                .map(|(key, word)| (key, OwnedWord::from_owned(word, mapping.value_kind)));
+            (old, mapping.missing)
         })
     };
-    if old.is_none() {
+    if old.is_none() && missing != Missing::Zero {
         // SAFETY: the missing input remains rooted after the failed lookup.
         unsafe { missing_key(value, key) }.raise();
     }
@@ -1331,7 +1532,7 @@ pub unsafe extern "C" fn relar_key_union(
     // SAFETY: the exact key descriptor is copied from the rooted left operand.
     let kind = unsafe { object(left).0.with(key_kind) };
     let mut result = Tables::new(kind);
-    for source in [left, right] {
+    for source in std::iter::once(left).chain((left != right).then_some(right)) {
         // SAFETY: the destination is private and distinct from both inputs. All
         // hash operations use sealed immutable keys and cannot call user code.
         unsafe {
@@ -1348,6 +1549,49 @@ pub unsafe extern "C" fn relar_key_union(
         Set { tables: result },
     ))))))
 }
+/// Builds an intersection directly from two key views or sets. The output owns
+/// each selected key, including when the inputs alias each other.
+///
+/// # Safety
+/// Both operands must remain rooted and share the same immutable key type.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_key_intersection(
+    left: *const Object,
+    right: *const Object,
+) -> *const Object {
+    // SAFETY: the operands are immutably borrowed. All inserts target the fresh
+    // result, and exact scalar key hashing cannot reenter user code.
+    unsafe {
+        object(left).0.with(|left| {
+            let kind = match left {
+                Storage::Dictionary(dict) => dict.tables.key_kind(),
+                Storage::Set(set) => set.tables.key_kind(),
+                _ => unreachable!("expected dictionary keys or set"),
+            };
+            let result = relar_set_new(kind);
+            object(right).0.with(|right| {
+                let select = |key| {
+                    let present = match right {
+                        Storage::Dictionary(dict) => dict.tables.lookup(key).is_some(),
+                        Storage::Set(set) => set.tables.lookup(key).is_some(),
+                        _ => unreachable!("expected dictionary keys or set"),
+                    };
+                    if present {
+                        relar_set_add(result, key);
+                    }
+                    true
+                };
+                match left {
+                    Storage::Dictionary(dict) => dict.tables.all(|key, _| select(key)),
+                    Storage::Set(set) => set.tables.all(|key, ()| select(key)),
+                    _ => unreachable!(),
+                };
+            });
+            result
+        })
+    }
+}
+
 /// # Safety
 /// `value` is a rooted set.
 #[unsafe(no_mangle)]

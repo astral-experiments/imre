@@ -119,7 +119,7 @@ impl FileState {
         self.input()?.read_bytes(usize::try_from(size).ok())
     }
 
-    fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+    pub(super) fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
         if self.kind == FileKind::BinaryRead {
             return Err(Error::new(Kind::UnsupportedOperation, "write"));
         }
@@ -145,7 +145,7 @@ impl FileState {
         writer.write(bytes).map_err(os_error)
     }
 
-    fn write(&mut self, text: &str) -> Result<()> {
+    pub(super) fn write(&mut self, text: &str) -> Result<()> {
         self.write_bytes(text.as_bytes())
     }
 
@@ -195,7 +195,7 @@ impl Storage {
         }
     }
 
-    fn file_mut(&mut self) -> &mut FileState {
+    pub(super) fn file_mut(&mut self) -> &mut FileState {
         match self {
             Self::File(file) => file,
             _ => fail("SystemError", "expected a file stream object"),
