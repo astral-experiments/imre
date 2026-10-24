@@ -13,20 +13,15 @@ impl Checker<'_> {
         if let ast::Expr::BoolOp(boolean) = expression {
             let and = boolean.op == ast::BoolOp::And;
             let mut values = Vec::new();
-            let mut exit = None;
+            let mut exits = assignments::BooleanExits::new(self, boolean);
             for (index, value) in boolean.values.iter().enumerate() {
                 values.push(self.condition(value)?);
-                if index + 1 == boolean.values.len() {
-                    self.merge_exit(&mut exit);
-                } else {
-                    let after = self.local_state();
-                    self.apply_facts(value, !and);
-                    self.merge_exit(&mut exit);
-                    self.restore_state(after);
+                if index + 1 < boolean.values.len() {
+                    exits.short_circuit(self, value, !and);
                     self.apply_facts(value, and);
                 }
             }
-            self.restore_state(exit.expect("boolean conditions have operands"));
+            exits.finish(self, true);
             return Ok(Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Boolean(and, values),
@@ -54,17 +49,14 @@ impl Checker<'_> {
             .split_last()
             .expect("boolean operands are nonempty");
         let mut operands = Vec::with_capacity(prefix.len());
-        let mut exit = None;
+        let mut exits = assignments::BooleanExits::new(self, boolean);
         let mut reachable = true;
         for first in prefix {
             let left = self.boolean_operand(first, expected)?;
             let known = self.types.truthiness(left.ty);
             let selected = self.types.truth_branch(left.ty, !and);
             if reachable && known != Some(and) {
-                let after = self.local_state();
-                self.apply_facts(first, !and);
-                self.merge_exit(&mut exit);
-                self.restore_state(after);
+                exits.short_circuit(self, first, !and);
                 reachable = known != Some(!and);
             }
             self.apply_facts(first, and);
@@ -73,12 +65,7 @@ impl Checker<'_> {
             operands.push((first, left, known, selected));
         }
         let mut right = self.boolean_operand(last, expected)?;
-        if let Some(mut exit) = exit {
-            if reachable {
-                exit.retain_common(&self.assigned, &self.narrowed);
-            }
-            self.restore_state(exit);
-        }
+        exits.finish(self, reachable);
 
         // A skipped right operand can still affect type checking. Build each
         // right-hand result before its enclosing short-circuit expression.

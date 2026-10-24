@@ -7,6 +7,7 @@ use ruff_python_ast::visitor::{Visitor, walk_comprehension, walk_expr};
 /// Previously allocated slots keep their facts throughout an expression unless
 /// the expression can write the name or use it in a narrowing test. Names
 /// introduced by a walrus may acquire a slot while checking the first arm.
+#[derive(Clone)]
 pub(super) struct ConditionalFacts<'a> {
     writes: Vec<(String, bool)>,
     narrowed: Vec<(&'a str, Option<Type>)>,
@@ -14,6 +15,18 @@ pub(super) struct ConditionalFacts<'a> {
 
 impl<'a> ConditionalFacts<'a> {
     pub(super) fn capture(checker: &Checker<'_>, value: &'a ast::ExprIf) -> Self {
+        Self::for_expressions(
+            checker,
+            [&*value.test, &*value.body, &*value.orelse],
+            [&*value.test],
+        )
+    }
+
+    fn for_expressions(
+        checker: &Checker<'_>,
+        expressions: impl IntoIterator<Item = &'a ast::Expr>,
+        tests: impl IntoIterator<Item = &'a ast::Expr>,
+    ) -> Self {
         struct Names<'a>(HashSet<&'a str>);
         impl<'a> Names<'a> {
             /// Names that apply_facts can narrow when testing this expression.
@@ -80,9 +93,11 @@ impl<'a> ConditionalFacts<'a> {
         let mut flow = FlowNames {
             names: Names(HashSet::new()),
         };
-        flow.names.predicate(&value.test);
+        for test in tests {
+            flow.names.predicate(test);
+        }
         let mut writes = HashSet::new();
-        for expr in [&*value.test, &*value.body, &*value.orelse] {
+        for expr in expressions {
             flow.visit_expr(expr);
             writes.extend(narrowing::expression_assignments(expr));
         }
@@ -110,6 +125,42 @@ impl<'a> ConditionalFacts<'a> {
                     (name, ty)
                 })
                 .collect(),
+        }
+    }
+
+    fn read(&mut self, checker: &Checker<'_>) {
+        for (name, assigned) in &mut self.writes {
+            *assigned = checker
+                .names
+                .get(name)
+                .is_some_and(|slot| checker.assigned.contains(slot));
+        }
+        for (name, ty) in &mut self.narrowed {
+            *ty = checker
+                .names
+                .get(*name)
+                .and_then(|slot| checker.narrowed.get(slot))
+                .copied();
+        }
+    }
+
+    fn retain_common(&mut self, checker: &Checker<'_>) {
+        for (name, assigned) in &mut self.writes {
+            *assigned &= checker
+                .names
+                .get(name)
+                .is_some_and(|slot| checker.assigned.contains(slot));
+        }
+        for (name, ty) in &mut self.narrowed {
+            if checker
+                .names
+                .get(*name)
+                .and_then(|slot| checker.narrowed.get(slot))
+                .copied()
+                != *ty
+            {
+                *ty = None;
+            }
         }
     }
 
@@ -147,6 +198,50 @@ impl<'a> ConditionalFacts<'a> {
                 && checker.narrowed.get(slot).copied() != ty
             {
                 checker.narrowed.remove(slot);
+            }
+        }
+    }
+}
+
+/// Each boolean operator joins the exits that skip the remaining operands.
+/// Nested operators retain only the names their operands can affect.
+pub(super) struct BooleanExits<'a> {
+    after: ConditionalFacts<'a>,
+    exit: Option<ConditionalFacts<'a>>,
+}
+
+impl<'a> BooleanExits<'a> {
+    pub(super) fn new(checker: &Checker<'_>, boolean: &'a ast::ExprBoolOp) -> Self {
+        Self {
+            after: ConditionalFacts::for_expressions(checker, &boolean.values, &boolean.values),
+            exit: None,
+        }
+    }
+
+    pub(super) fn short_circuit(
+        &mut self,
+        checker: &mut Checker<'_>,
+        operand: &ast::Expr,
+        truth: bool,
+    ) {
+        self.after.read(checker);
+        checker.apply_facts(operand, truth);
+        if let Some(exit) = &mut self.exit {
+            exit.retain_common(checker);
+        } else {
+            let mut first = self.after.clone();
+            first.read(checker);
+            self.exit = Some(first);
+        }
+        self.after.switch_arm(checker);
+    }
+
+    pub(super) fn finish(self, checker: &mut Checker<'_>, reachable: bool) {
+        if let Some(mut exit) = self.exit {
+            if reachable {
+                exit.join(checker);
+            } else {
+                exit.switch_arm(checker);
             }
         }
     }
