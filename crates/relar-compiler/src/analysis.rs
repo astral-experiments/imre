@@ -234,11 +234,49 @@ impl Session {
 const MAX_WITH_DEPTH: usize = 96;
 const MAX_MATCH_FLOW_WORK: usize = 8 * 1024 * 1024;
 
+// A loop transfer retains one semantic-index snapshot until its loop closes.
+const MAX_LOOP_FLOW_WORK: usize = 64 * 1024 * 1024;
+
+#[derive(Default)]
+struct LoopTransfers {
+    count: usize,
+    last: TextSize,
+}
+
+impl<'a> Visitor<'a> for LoopTransfers {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        match stmt {
+            Stmt::Break(_) | Stmt::Continue(_) => {
+                self.count += 1;
+                self.last = self.last.max(stmt.end());
+            }
+            // A transfer in a nested loop's else belongs to the outer loop.
+            Stmt::For(node) => self.visit_body(&node.orelse),
+            Stmt::While(node) => self.visit_body(&node.orelse),
+            Stmt::FunctionDef(_) | Stmt::ClassDef(_) => {}
+            _ => walk_stmt(self, stmt),
+        }
+    }
+
+    fn visit_expr(&mut self, _expr: &'a Expr) {}
+}
+
 struct SuiteLimits<'t> {
     tokens: &'t Tokens,
     scope_start: TextSize,
     active_managers: usize,
     error: Option<String>,
+}
+
+impl SuiteLimits<'_> {
+    fn exceeds_flow_work(&self, end: TextSize, exits: usize, budget: usize) -> bool {
+        exits > 1
+            && self
+                .tokens
+                .in_range(TextRange::new(self.scope_start, end))
+                .len()
+                > budget / exits
+    }
 }
 
 impl<'a> Visitor<'a> for SuiteLimits<'_> {
@@ -250,15 +288,23 @@ impl<'a> Visitor<'a> for SuiteLimits<'_> {
         // Tokens through the last case conservatively bound prior places,
         // including bindings introduced inside the match.
         if let Stmt::Match(node) = stmt
-            && node.cases.len() > 1
-            && self
-                .tokens
-                .in_range(TextRange::new(self.scope_start, node.end()))
-                .len()
-                > MAX_MATCH_FLOW_WORK / node.cases.len()
+            && self.exceeds_flow_work(node.end(), node.cases.len(), MAX_MATCH_FLOW_WORK)
         {
             self.error = Some("Relar: match statement exceeds the flow analysis limit".into());
             return;
+        }
+        let loop_body = match stmt {
+            Stmt::For(node) => Some(&node.body),
+            Stmt::While(node) => Some(&node.body),
+            _ => None,
+        };
+        if let Some(body) = loop_body {
+            let mut transfers = LoopTransfers::default();
+            transfers.visit_body(body);
+            if self.exceeds_flow_work(transfers.last, transfers.count, MAX_LOOP_FLOW_WORK) {
+                self.error = Some("Relar: loop transfers exceed the flow analysis limit".into());
+                return;
+            }
         }
         let outer = self.scope_start;
         if matches!(stmt, Stmt::FunctionDef(_) | Stmt::ClassDef(_)) {

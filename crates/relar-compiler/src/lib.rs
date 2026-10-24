@@ -339,6 +339,22 @@ def first(stream: Stream) -> str:
     }
 
     #[test]
+    fn limits_semantic_snapshots_for_loop_transfers() {
+        let mut source = String::from("def check(value: int) -> None:\n");
+        for slot in 0..6_000 {
+            source.push_str(&format!("    a{slot} = 0\n"));
+        }
+        for transfer in ["break", "continue"] {
+            let body = format!("        if value: {transfer}\n").repeat(3_000);
+            let error = super::check(&format!("{source}    while value:\n{body}")).unwrap_err();
+            assert!(
+                error.contains("loop transfers exceed the flow analysis limit"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
     fn limits_match_flow_snapshots_within_the_enclosing_scope() {
         let locals: String = (0..4000).map(|i| format!("    a{i}=0\n")).collect();
         let case = "        case 0: pass\n";
