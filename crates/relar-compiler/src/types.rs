@@ -95,6 +95,20 @@ impl Types {
         }
     }
 
+    /// Scalar fields for which copying an asdict value needs no recursive copy.
+    pub(crate) fn asdict_scalar(&self, ty: Type) -> bool {
+        matches!(
+            self.payload(ty).unwrap_or(ty),
+            Type::None
+                | Type::Bool
+                | Type::Int
+                | Type::Float
+                | Type::Str
+                | Type::StrLiteral(_)
+                | Type::Bytes
+        )
+    }
+
     /// Hash keys have immutable value semantics. Tuple and frozen record fields
     /// may be nullable, including nested immutable records.
     pub(crate) fn hashable_key(&self, ty: Type) -> bool {

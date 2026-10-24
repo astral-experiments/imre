@@ -1,12 +1,14 @@
 //! Fixed string patterns and immutable snapshots of participating capture spans.
 
+mod captures;
+
+use captures::AnchoredCaptures;
 use std::cell::Cell;
 use std::ptr;
 use std::rc::Rc;
 
 use memchr::memmem::Finder;
 use regex_automata::meta::{self, Regex};
-use regex_automata::nfa::thompson::backtrack::{self, BoundedBacktracker};
 use regex_automata::util::primitives::NonMaxUsize;
 use regex_automata::{Anchored, Input, PatternID};
 use regex_syntax::hir::{Hir, HirKind, literal::Extractor};
@@ -23,12 +25,6 @@ pub(super) struct Pattern {
     anchored: Option<AnchoredCaptures>,
     final_newline_slot: Option<usize>,
     named_groups: Vec<(usize, Rc<Str>)>,
-}
-
-struct AnchoredCaptures {
-    first: Option<u8>,
-    engine: BoundedBacktracker,
-    cache: backtrack::Cache,
 }
 
 /// Every match must contain this literal; branches and optional repetitions do
@@ -76,14 +72,7 @@ impl Pattern {
             .and_then(|s| s.first().copied())
             .filter(u8::is_ascii);
         let anchored = if first.is_some() || hir.properties().explicit_captures_len() != 0 {
-            BoundedBacktracker::new(source).ok().map(|engine| {
-                let cache = engine.create_cache();
-                AnchoredCaptures {
-                    first,
-                    engine,
-                    cache,
-                }
-            })
+            AnchoredCaptures::new(&hir, first)
         } else {
             None
         };
@@ -150,10 +139,7 @@ impl Pattern {
         }
         let input = Input::new(text).anchored(Anchored::Yes);
         if let Some(bounded) = &mut self.anchored
-            && let Ok(found) =
-                bounded
-                    .engine
-                    .try_search_slots(&mut bounded.cache, &input, &mut self.slots)
+            && let Ok(found) = bounded.search(&input, &mut self.slots)
         {
             return found.is_some();
         }
@@ -180,10 +166,7 @@ impl Pattern {
             // One anchored attempt avoids the general engine's forward/reverse
             // search on hits. A size-limit error or further candidates fall back
             // to one unanchored search, which preserves the worst-case time bound.
-            match prefix
-                .engine
-                .try_search_slots(&mut prefix.cache, &input, &mut self.slots)
-            {
+            match prefix.search(&input, &mut self.slots) {
                 Ok(Some(_)) => return true,
                 Ok(None) => {
                     let Some(next) = memchr::memchr(first, &bytes[at + 1..]) else {
@@ -567,7 +550,7 @@ mod tests {
         let mut pattern = Pattern::new("a[ab]+Z");
         assert!(pattern.search("a!abc abbaZ"));
         assert_eq!(pattern.slots[0].unwrap().get(), 6);
-        let limit = pattern.anchored.as_ref().unwrap().engine.max_haystack_len();
+        let limit = pattern.anchored.as_ref().unwrap().max_haystack_len();
         let long = format!("a{}Z", "b".repeat(limit + 1));
         assert!(pattern.search(&long));
         assert_eq!(pattern.slots[1].unwrap().get(), long.len());
@@ -578,7 +561,7 @@ mod tests {
         let mut pattern = Pattern::new(r"(?P<sign>[+-])? *(?P<code>[A-Z]+):(.+)");
         let bounded = pattern.anchored.as_ref().unwrap();
         assert_eq!(bounded.first, None);
-        let long = format!("B:{}", "x".repeat(bounded.engine.max_haystack_len() + 1));
+        let long = format!("B:{}", "x".repeat(bounded.max_haystack_len() + 1));
         for text in ["-  XY:é", "B:x", "bad A:x", long.as_str()] {
             let mut expected = vec![None; pattern.slots.len()];
             let found = pattern

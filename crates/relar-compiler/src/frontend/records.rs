@@ -630,7 +630,7 @@ impl Checker<'_> {
     /// Records without an override use their existing Python representation.
     pub(super) fn record_text(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
         if let Type::Class(class) = value.ty
-            && self.has_concrete_subclasses(class)
+            && self.classes.has_concrete_subclasses(class)
         {
             return self.dispatch_record(class, value, at, |checker, _, receiver| {
                 checker.direct_record_text(receiver, at)
@@ -668,7 +668,7 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
-        if self.has_concrete_subclasses(class)
+        if self.classes.has_concrete_subclasses(class)
             && let Some(receiver) = receiver
         {
             return self.dispatch_record(class, receiver, attribute, |checker, class, receiver| {
@@ -732,7 +732,7 @@ impl Checker<'_> {
         class: usize,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
-        if self.has_concrete_subclasses(class)
+        if self.classes.has_concrete_subclasses(class)
             && let Some(receiver) = receiver
         {
             self.dispatch_record(class, receiver, call, |checker, class, receiver| {
@@ -1075,18 +1075,9 @@ impl Checker<'_> {
         if !asdict.arguments.keywords.is_empty()
             || !declaration.generated_initializer
             || !declaration.dataclass.is_some_and(|options| options.frozen)
-            || !self.classes.fields[class].iter().all(|&ty| {
-                matches!(
-                    self.types.payload(ty).unwrap_or(ty),
-                    Type::None
-                        | Type::Bool
-                        | Type::Int
-                        | Type::Float
-                        | Type::Str
-                        | Type::StrLiteral(_)
-                        | Type::Bytes
-                )
-            })
+            || !self.classes.fields[class]
+                .iter()
+                .all(|&ty| self.types.asdict_scalar(ty))
         {
             return Err(error(
                 self.source,
