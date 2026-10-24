@@ -207,6 +207,7 @@ impl Builtin {
             | Self::ListSliceSum
             | Self::Slice
             | Self::StringFormat
+            | Self::StringJoin
             | Self::StringGet
             | Self::StringIntList
             | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
@@ -259,7 +260,6 @@ impl Builtin {
             | Self::StrEnumName
             | Self::StrEnumValue
             | Self::EnumString
-            | Self::StringJoin
             | Self::StringListContains
             | Self::StringContains
             | Self::StringReplace
@@ -552,6 +552,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_config"
                 | "imre_stderr_line"
                 | "imre_enum_lookup"
+                | "imre_str_join"
                 | "imre_print_str"
                 | "imre_print_bytes"
                 | "imre_bytes_count"
