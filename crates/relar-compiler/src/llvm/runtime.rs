@@ -2,10 +2,12 @@
 
 use std::fmt;
 
-use crate::contracts::{InfallibleVoid, OwnedIntOrError, RuntimeCall, RuntimeParam, StatusOrError};
+use crate::contracts::{
+    BorrowedIntOrError, InfallibleVoid, OwnedIntOrError, RuntimeCall, RuntimeParam, StatusOrError,
+};
 use crate::ir::Type;
 
-use super::{Emitter, Value};
+use super::{Emitter, Operand, Ownership, Value};
 
 impl RuntimeParam {
     fn llvm(self) -> &'static str {
@@ -47,15 +49,45 @@ pub(super) trait RuntimeReturn {
     fn emit(&self, emitter: &mut Emitter<'_, '_>, instruction: String) -> Self::Output;
 }
 
+/// Register the transferred reference unless range analysis proves the word is immediate.
+#[must_use]
+pub(super) struct OwnedIntWord(String);
+
+impl OwnedIntWord {
+    pub(super) fn into_value(self, emitter: &mut Emitter<'_, '_>) -> Value {
+        emitter.unpack_word(self.0, Type::Int)
+    }
+
+    pub(super) fn into_proven_small_word(self) -> String {
+        self.0
+    }
+}
+
 impl RuntimeReturn for OwnedIntOrError {
-    type Output = String;
+    type Output = OwnedIntWord;
 
     fn llvm(&self) -> &'static str {
         Type::Int.llvm()
     }
 
-    fn emit(&self, emitter: &mut Emitter<'_, '_>, instruction: String) -> String {
-        emitter.checked_int_list_word(instruction)
+    fn emit(&self, emitter: &mut Emitter<'_, '_>, instruction: String) -> OwnedIntWord {
+        OwnedIntWord(emitter.checked_int_list_word(instruction))
+    }
+}
+
+impl RuntimeReturn for BorrowedIntOrError {
+    type Output = Operand;
+
+    fn llvm(&self) -> &'static str {
+        Type::Int.llvm()
+    }
+
+    fn emit(&self, emitter: &mut Emitter<'_, '_>, instruction: String) -> Operand {
+        let word = emitter.checked_int_list_word(instruction);
+        Operand {
+            value: emitter.decode_word(word, Type::Int),
+            ownership: Ownership::Borrowed,
+        }
     }
 }
 

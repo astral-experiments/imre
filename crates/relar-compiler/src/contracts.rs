@@ -343,6 +343,8 @@ const TAGGED_INT: RuntimeParam = RuntimeParam::Value(Type::Int);
 
 /// A successful call transfers one integer word. Raw zero signals a pending error.
 pub(crate) struct OwnedIntOrError;
+/// The word borrows the rooted list element until consumption. Raw zero signals a pending error.
+pub(crate) struct BorrowedIntOrError;
 pub(crate) struct InfallibleVoid;
 /// One signals success. Zero signals a pending error.
 pub(crate) struct StatusOrError;
@@ -351,6 +353,16 @@ pub(crate) const LIST_GET: RuntimeCall<OwnedIntOrError, 2> = RuntimeCall {
     symbol: "relar_list_get",
     params: [INT_LIST, TAGGED_INT],
     result: OwnedIntOrError,
+};
+pub(crate) const LIST_GET_INDEX: RuntimeCall<OwnedIntOrError, 2> = RuntimeCall {
+    symbol: "relar_list_get_index",
+    params: [INT_LIST, RuntimeParam::NativeIndex],
+    result: OwnedIntOrError,
+};
+pub(crate) const LIST_BORROW_INDEX: RuntimeCall<BorrowedIntOrError, 2> = RuntimeCall {
+    symbol: "relar_list_borrow_index",
+    params: [INT_LIST, RuntimeParam::NativeIndex],
+    result: BorrowedIntOrError,
 };
 pub(crate) const LIST_APPEND: RuntimeCall<InfallibleVoid, 2> = RuntimeCall {
     symbol: "relar_list_append",
@@ -454,8 +466,6 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_int_true_divide"
                 | "relar_assert_fail"
                 | "relar_range_step_zero"
-                | "relar_list_get_index"
-                | "relar_list_borrow_index"
                 | "relar_list_repeat"
                 | "relar_list_slice"
                 | "relar_list_slice_sum"
