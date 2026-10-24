@@ -54,6 +54,9 @@ enum Contents {
     #[default]
     Unknown,
     List,
+    Dict {
+        key_depth: usize,
+    },
     UniformTuple(usize),
     Tuple(Rc<[Shape]>),
 }
@@ -70,6 +73,13 @@ impl Shape {
         Self {
             depth,
             contents: Contents::List,
+        }
+    }
+
+    fn iteration_depth(&self) -> usize {
+        match self.contents {
+            Contents::Dict { key_depth } => key_depth,
+            _ => self.depth.saturating_sub(1),
         }
     }
 
@@ -196,6 +206,35 @@ impl<'a> Shapes<'a> {
                     },
                 }
             }
+            Expr::Dict(node) => {
+                let mut depth = 1;
+                let mut key_depth = 0;
+                for item in &node.items {
+                    if let Some(key) = &item.key {
+                        let key = self.depth_in(key, locals);
+                        key_depth = key_depth.max(key);
+                        depth = depth.max(1 + key.max(self.depth_in(&item.value, locals)));
+                    } else {
+                        let mapping = self.shape(&item.value, locals);
+                        depth = depth.max(mapping.depth);
+                        key_depth = key_depth.max(mapping.iteration_depth());
+                    }
+                }
+                Shape {
+                    depth,
+                    contents: Contents::Dict { key_depth },
+                }
+            }
+            Expr::DictComp(node) => {
+                let bindings = self.comprehension_bindings(&node.generators, locals);
+                let key_depth =
+                    self.depth_in(node.key.as_deref().unwrap_or(&node.value), &bindings);
+                let depth = 1 + key_depth.max(self.depth_in(&node.value, &bindings));
+                Shape {
+                    depth,
+                    contents: Contents::Dict { key_depth },
+                }
+            }
             Expr::List(_) | Expr::ListComp(_) => Shape::list(self.depth_in(value, locals)),
             Expr::Subscript(node) if !matches!(&*node.slice, Expr::Slice(_)) => self
                 .shape(&node.value, locals)
@@ -247,8 +286,21 @@ impl<'a> Shapes<'a> {
             }
             (deepest, names)
         } else {
-            bindings(self.shape(iter, locals).element(None))
+            bindings(Shape::plain(self.shape(iter, locals).iteration_depth()))
         }
+    }
+
+    fn comprehension_bindings<'v>(
+        &self,
+        generators: &'v [Comprehension],
+        locals: &[(&'v str, Shape)],
+    ) -> Vec<(&'v str, Shape)> {
+        let mut bindings = locals.to_vec();
+        for gen_ in generators {
+            let (_, names) = self.iteration_bindings(&gen_.target, &gen_.iter, &bindings);
+            bindings.extend(names);
+        }
+        bindings
     }
 
     fn comprehension<'v>(
@@ -257,11 +309,7 @@ impl<'a> Shapes<'a> {
         values: &[&'v Expr],
         locals: &[(&'v str, Shape)],
     ) -> usize {
-        let mut bindings = locals.to_vec();
-        for gen_ in generators {
-            let (_, names) = self.iteration_bindings(&gen_.target, &gen_.iter, &bindings);
-            bindings.extend(names);
-        }
+        let bindings = self.comprehension_bindings(generators, locals);
         1 + values
             .iter()
             .map(|e| self.depth_in(e, &bindings))
@@ -277,17 +325,7 @@ impl<'a> Shapes<'a> {
             Expr::Tuple(node) => 1 + max_depth(&node.elts),
             Expr::List(node) => 1 + max_depth(&node.elts),
             Expr::Set(node) => 1 + max_depth(&node.elts),
-            Expr::Dict(node) => node
-                .items
-                .iter()
-                .map(|item| {
-                    let value_depth = rank(&item.value);
-                    item.key
-                        .as_ref()
-                        .map_or(value_depth, |key| 1 + value_depth.max(rank(key)))
-                })
-                .max()
-                .unwrap_or(1),
+            Expr::Dict(_) | Expr::DictComp(_) => self.shape(value, locals).depth,
             Expr::BoolOp(node) => max_depth(&node.values),
             Expr::If(node) => rank(&node.body).max(rank(&node.orelse)),
             Expr::Named(node) => rank(&node.value),
@@ -297,11 +335,6 @@ impl<'a> Shapes<'a> {
             Expr::ListComp(node) => self.comprehension(&node.generators, &[&node.elt], locals),
             Expr::SetComp(node) => self.comprehension(&node.generators, &[&node.elt], locals),
             Expr::Generator(node) => self.comprehension(&node.generators, &[&node.elt], locals),
-            Expr::DictComp(node) => self.comprehension(
-                &node.generators,
-                &[node.key.as_deref().unwrap_or(&node.value), &node.value],
-                locals,
-            ),
             Expr::Call(node) => {
                 if let Some(attr) = node.func.as_attribute_expr()
                     && attr.attr.as_str() == "pop"
@@ -313,14 +346,15 @@ impl<'a> Shapes<'a> {
                 }
                 let name = node.func.as_name_expr().map(|name| name.id.as_str());
                 let args = &node.arguments.args;
+                let item_depth = |arg: &Expr| self.shape(arg, locals).iteration_depth();
                 match name {
-                    // Each yielded tuple adds a level around the input elements.
-                    Some("zip") => max_depth(args).max(1) + 1,
-                    Some("enumerate") => args.first().map_or(1, |e| rank(e).max(1)) + 1,
+                    // Both the iterator and the tuple around its items add a level.
+                    Some("zip") => 2 + args.iter().map(item_depth).max().unwrap_or(0),
+                    Some("enumerate") => 2 + args.first().map_or(0, item_depth),
                     Some(
-                        "tuple" | "list" | "set" | "frozenset" | "dict" | "sorted" | "iter"
-                        | "reversed",
-                    ) => args.first().map_or(1, |e| rank(e).max(1)),
+                        "tuple" | "list" | "set" | "frozenset" | "sorted" | "iter" | "reversed",
+                    ) => 1 + args.first().map_or(0, item_depth),
+                    Some("dict") => args.first().map_or(1, |e| rank(e).max(1)),
                     Some("next") => args.first().map_or(0, |e| rank(e).saturating_sub(1)),
                     Some("len" | "int" | "float" | "str" | "bool" | "bytes" | "sum" | "print") => 0,
                     Some(name) if self.fixed.contains(name) => 0,
@@ -509,6 +543,31 @@ mod tests {
             let last = wrap.replace("{p}", &format!("v{}", MAX_DEPTH - 1));
             assert!(limited(&format!("{body}result = {last}\n")), "{wrap}");
         }
+    }
+
+    #[test]
+    fn dictionary_iteration_counts_only_key_nesting() {
+        for step in [
+            "x = list(zip({0: x}))",
+            "d = {0: x}\nalias = d\nx = list(enumerate(alias))",
+            "d = {0: x}\nx = list(zip([0], {**d}))",
+            "x = list(enumerate({k: x for k in [0]}))",
+        ] {
+            assert!(
+                !limited(&format!("x = [1]\n{}", format!("{step}\n").repeat(300))),
+                "{step}"
+            );
+        }
+        let deep = format!("x = 0\n{}", "x = (x,)\n".repeat(MAX_DEPTH - 2));
+        assert!(!limited(&format!(
+            "{deep}d = {{x: 0}}\nitems = list(zip(d))\n"
+        )));
+        assert!(limited(&format!(
+            "{deep}d = {{x: 0}}\nitems = (list(zip(d)),)\n"
+        )));
+        assert!(limited(&format!(
+            "{deep}d = {{0: x}}\ncopy = ((dict(d),),)\n"
+        )));
     }
 
     #[test]
