@@ -210,6 +210,10 @@ pub(super) fn os_error(error: io::Error) -> Error {
     {
         return Error::new(gzip.0, gzip.to_string());
     }
+    // Read::read_to_end reports a failed Vec reservation without an OS errno.
+    if error.kind() == io::ErrorKind::OutOfMemory && error.raw_os_error().is_none() {
+        return Error::new(Kind::MemoryError, "");
+    }
     Error::new(os_error_kind(error.kind()), error.to_string())
 }
 
@@ -608,6 +612,14 @@ mod tests {
         relar_exception_new,
     };
     use super::super::{relar_object_release, relar_seq_append, relar_seq_new};
+
+    #[test]
+    fn buffer_allocation_failure_is_distinct_from_os_enomem() {
+        os_error(io::Error::from(io::ErrorKind::OutOfMemory)).raise();
+        take_error(Kind::MemoryError);
+        os_error(io::Error::from_raw_os_error(libc::ENOMEM)).raise();
+        take_error(Kind::OSError);
+    }
 
     struct Directory(PathBuf);
 
