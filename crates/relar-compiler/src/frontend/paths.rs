@@ -157,15 +157,10 @@ impl Checker<'_> {
                 Type::Bool,
                 vec![self.path_argument(arg)?],
             )),
-            (Intrinsic::Which, [arg]) => Ok(operation(
-                PathOperation::Which,
-                self.types.optional(Type::Str),
-                vec![self.path_argument(arg)?],
-            )),
             _ => Err(error(
                 self.source,
                 call,
-                "supported path calls are sysconfig.get_path('scripts'), os.path.exists(path), and shutil.which(command)",
+                "supported path calls are sysconfig.get_path('scripts') and os.path.exists(path)",
             )),
         }
     }

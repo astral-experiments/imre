@@ -1,6 +1,6 @@
 # CPython standard-library compatibility benchmark
 
-The `upstream` directory contains the complete CPython 3.14.5 test entries for `sys`, `os`, `genericpath`, `posixpath`, `pathlib`, `json`, `subprocess` and `hashlib`, including files in the two test packages. The [manifest](UPSTREAM.json) records the release commit and each unmodified Git blob. [Upstream source](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test) · [CPython license](upstream/LICENSE)
+The `upstream` directory contains the complete, unmodified CPython 3.14.5 test modules and packages used by these benchmarks. The [manifest](UPSTREAM.json) records the release commit and each unmodified Git blob. [Upstream source](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test) · [CPython license](upstream/LICENSE)
 
 ## Native SHA-256 vector calls
 
@@ -19,6 +19,10 @@ python3 benchmarks/cpython_stdlib/native_paths.py \
 The runner verifies the upstream blob hashes and copies each complete method from CPython's `JoinTestBase` or `ReadTestBase` verbatim into a temporary source file. A typed fixture supplies the path constructor, working directory and `assertEqual`. The read fixture seeds `fileA` with the bytes used by CPython's local filesystem fixture. Both operands, path operations, equality checks and assertion counts execute in the compiled program. The concrete POSIX fixture uses Relar's native `pathlib.Path`. The selected methods check the name, stem, suffix, parent, slash operator, `joinpath` and `read_bytes`. Each result includes the upstream ID, the SHA-256 of the unmodified method and its assertion count. A rejected program or a failed native assertion gives the command a nonzero exit status.
 
 Methods that require setup, decorators, process fixtures or a richer assertion helper need a corresponding adapter before the benchmark can credit them. Each added adapter should preserve the entire upstream method, including every operand and exception assertion. Keep platform skips, deliberate compatibility exclusions, unavailable test infrastructure and actual native failures separate in reports.
+
+## Native POSIX shutil.which
+
+`native_shutil.py` runs the vendored `TestWhich` and `TestWhichBytes` cases. Use the same command-line options as the JSON runner. CPython creates the original filesystem fixtures, changes the environment and working directory, and checks the results. Each `which` lookup runs in Relar with those process settings. Upstream platform skips retain their reasons. The two inherited `test_environ_path_missing` cases monkeypatch Python's `os.confstr` and `os.defpath` in-process. The report marks them as excluded and checks real missing-PATH behavior separately for strings and bytes.
 
 ## Native JSON calls with upstream unittest assertions
 
@@ -48,11 +52,12 @@ Stream assertions receive the bytes that the native program wrote to its file.
 
 ## Full CPython reference run
 
-Use a CPython interpreter built from the exact release in the manifest with its normal test modules installed. Its `Lib/test` provides the shared `test.support`, helper programs and reference runner for the vendored suites.
+Use a test-enabled CPython interpreter built from the release in the manifest. Discover the suite names in the vendored directory, then run their matching copies in the release tree. This lets unittest discover the JSON and pathlib package tests with their original support modules.
 
 ```sh
-/path/to/cpython-3.14.5/python -m test -j1 \
-    test_sys test_os test_genericpath test_posixpath test_pathlib test_json test_subprocess test_hashlib
+reference_python=/path/to/cpython-3.14.5/python
+"$reference_python" -m test --list-tests --testdir benchmarks/cpython_stdlib/upstream/Lib/test |
+    "$reference_python" -m test -j1 --fromfile /dev/stdin
 ```
 
 This run records what upstream passes and skips on the host. Native compatibility uses the separate Relar results. An infrastructure error in a stripped interpreter is visible until it is reproduced with a test-enabled CPython build.

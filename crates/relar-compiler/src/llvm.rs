@@ -5,8 +5,8 @@ use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
 use crate::contracts::{
-    LIST_APPEND, LIST_BORROW_INDEX, LIST_COPY_INDEX, LIST_GET, LIST_GET_INDEX, LIST_POP, LIST_SET,
-    LIST_SET_INDEX, runtime_call_may_raise,
+    LIST_APPEND, LIST_APPEND_PAIR, LIST_BORROW_INDEX, LIST_COPY_INDEX, LIST_GET, LIST_GET_INDEX,
+    LIST_POP, LIST_SET, LIST_SET_INDEX, runtime_call_may_raise,
 };
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
@@ -59,6 +59,7 @@ impl Type {
             | Self::Iterator
             | Self::ByteOutput
             | Self::Exception
+            | Self::ExitCode
             | Self::TimeoutExpired
             | Self::Path
             | Self::CompletedProcess
@@ -101,6 +102,7 @@ impl Type {
             | Self::Iterator
             | Self::ByteOutput
             | Self::Exception
+            | Self::ExitCode
             | Self::TimeoutExpired
             | Self::Path
             | Self::CompletedProcess
@@ -651,6 +653,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
+            | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
             | Type::TextIO
@@ -1714,12 +1717,17 @@ impl Emitter<'_, '_> {
         let receiver = self.operand(receiver);
         let first = self.operand(first);
         let second = self.operand(second);
-        let name = if receiver.value.ty == Type::ByteOutput {
-            "relar_byte_output_append_pair"
+        if receiver.value.ty == Type::ByteOutput {
+            self.void_call(
+                "relar_byte_output_append_pair",
+                &[&receiver.value, &first.value, &second.value],
+            );
         } else {
-            "relar_list_append_pair"
-        };
-        self.void_call(name, &[&receiver.value, &first.value, &second.value]);
+            self.runtime_call(
+                &LIST_APPEND_PAIR,
+                [&receiver.value, &first.value, &second.value],
+            );
+        }
         for operand in [&receiver, &first, &second] {
             self.release_operand(operand);
         }
@@ -3151,6 +3159,7 @@ impl Emitter<'_, '_> {
                 | Type::None
                 | Type::Class(_)
                 | Type::Exception
+                | Type::ExitCode
                 | Type::TimeoutExpired
                 | Type::TextIO
                 | Type::CompletedProcess
@@ -3735,6 +3744,66 @@ impl Emitter<'_, '_> {
             Builtin::Bool => self.truth(&args[0].value),
             Builtin::Input => self.call("relar_input", Type::Str, &[]),
             Builtin::SysArgv => self.call("relar_sys_argv", returns, &[]),
+            Builtin::SysPlatform => self.call("relar_sys_platform", returns, &[]),
+            Builtin::SysStreamWrite { stderr } => Value {
+                ty: returns,
+                operand: self.checked_instruction(format!(
+                    "call i64 @relar_sys_stream_write(i32 {}, ptr {})",
+                    u32::from(*stderr),
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::SysStreamFlush { stderr } => {
+                self.checked_line(format!(
+                    "call void @relar_sys_stream_flush(i32 {})",
+                    u32::from(*stderr)
+                ));
+                none()
+            }
+            Builtin::SystemExitNew { omit_none } => {
+                let (kind, word) = args
+                    .first()
+                    .filter(|arg| !omit_none || arg.value.ty != Type::None)
+                    .map_or((4, "0".to_owned()), |arg| {
+                        (
+                            representation_kind(arg.value.ty, &self.module.types),
+                            self.word(&arg.value),
+                        )
+                    });
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!(
+                        "call ptr @relar_system_exit_new(i32 {kind}, i64 {word})"
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::SystemExitCode => {
+                self.call("relar_system_exit_code", returns, &[&args[0].value])
+            }
+            Builtin::SystemExitCodeEqual { reversed } => {
+                let i = usize::from(*reversed);
+                let other = &args[1 - i].value;
+                let kind = representation_kind(other.ty, &self.module.types);
+                let word = self.word(other);
+                let bit = self.instruction(format!(
+                    "call i32 @relar_system_exit_code_equal(ptr {}, i32 {kind}, i64 {word})",
+                    args[i].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {bit}, 0")),
+                    small_integer: false,
+                }
+            }
+            Builtin::SysExit => {
+                self.checked_line(format!(
+                    "call void @relar_error_set(ptr {})",
+                    args[0].value.operand
+                ));
+                none()
+            }
             Builtin::ParseArgs(children) => {
                 let Type::Class(class) = returns else {
                     unreachable!()
@@ -3919,6 +3988,9 @@ impl Emitter<'_, '_> {
                     }
                 }
                 Type::None => self.call("relar_none_str", Type::Str, &[]),
+                Type::ExitCode => {
+                    self.call("relar_system_exit_code_text", Type::Str, &[&args[0].value])
+                }
                 Type::Exception | Type::TimeoutExpired => {
                     self.call("relar_exception_message", Type::Str, &[&args[0].value])
                 }
@@ -4419,11 +4491,17 @@ impl Emitter<'_, '_> {
                         self.instruction(format!("icmp eq i64 {}, 0", args[0].value.operand))
                     }
                     Type::None => "true".to_owned(),
+                    Type::ExitCode => {
+                        let bit = self.instruction(format!(
+                            "call i32 @relar_system_exit_code_equal(ptr {}, i32 0, i64 0)",
+                            args[0].value.operand
+                        ));
+                        self.instruction(format!("icmp ne i32 {bit}, 0"))
+                    }
                     _ => "false".to_owned(),
                 },
                 small_integer: false,
             },
-            Builtin::StdoutWrite => self.call("relar_stdout_write", returns, &[&args[0].value]),
             Builtin::StderrLine => {
                 self.void_call("relar_stderr_line", &[&args[0].value]);
                 none()
@@ -4461,6 +4539,7 @@ impl Emitter<'_, '_> {
                     | Type::Iterator
                     | Type::ByteOutput
                     | Type::Exception
+                    | Type::ExitCode
                     | Type::TimeoutExpired
                     | Type::Path
                     | Type::TextIO
@@ -4677,6 +4756,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
+            | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
             | Type::TextIO
@@ -4730,6 +4810,7 @@ impl Emitter<'_, '_> {
             | Type::Iterator
             | Type::ByteOutput
             | Type::Exception
+            | Type::ExitCode
             | Type::TimeoutExpired
             | Type::Path
             | Type::TextIO
@@ -5272,6 +5353,7 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
         | Type::Iterator
         | Type::ByteOutput
         | Type::Exception
+        | Type::ExitCode
         | Type::TimeoutExpired
         | Type::Path
         | Type::TextIO
@@ -5433,6 +5515,7 @@ declare ptr @relar_subprocess_run_timeout_int(ptr, ptr, ptr, i32, i64, ptr)
 declare ptr @relar_environ_copy()
 declare ptr @relar_environ_get(ptr, ptr)
 declare ptr @relar_getcwd()
+declare ptr @relar_shutil_which(ptr, i64, ptr, i32, i32)
 declare void @relar_subprocess_check(ptr)
 declare i64 @relar_subprocess_error_field(ptr, i32)
 declare i64 @relar_subprocess_timeout_field(ptr, i32)
@@ -5456,10 +5539,8 @@ declare ptr @relar_directory_context_new(i64, i32)
 declare i64 @relar_directory_context_enter(ptr)
 declare void @relar_directory_context_exit(ptr)
 declare ptr @relar_union_path_text(i64)
-declare ptr @relar_sys_platform()
 declare ptr @relar_sysconfig_scripts()
 declare i32 @relar_path_text_exists(ptr)
-declare i64 @relar_shutil_which(ptr)
 declare i32 @relar_path_exists(ptr)
 declare i32 @relar_path_is_file(ptr)
 declare i32 @relar_path_is_dir(ptr)
@@ -5693,7 +5774,6 @@ declare ptr @relar_str_replace(ptr, ptr, ptr)
 declare ptr @relar_str_dedent(ptr)
 declare ptr @relar_shlex_split(ptr)
 declare ptr @relar_sys_executable()
-declare void @relar_sys_exit(i64)
 declare void @relar_subprocess_to_stderr(ptr, i32)
 declare ptr @relar_float_format(double, i32, i32)
 declare double @llvm.fabs.f64(double)
@@ -5713,6 +5793,15 @@ declare i32 @relar_text_closed(ptr)
 declare void @relar_args_init(i32, ptr)
 declare ptr @relar_argparse_parse(ptr, ptr, ptr, ptr, ptr)
 declare ptr @relar_sys_argv()
+declare ptr @relar_sys_platform()
+declare i64 @relar_sys_stream_write(i32, ptr)
+declare void @relar_sys_stream_flush(i32)
+declare ptr @relar_system_exit_new(i32, i64)
+declare ptr @relar_system_exit_code(ptr)
+declare i32 @relar_system_exit_code_kind(ptr)
+declare ptr @relar_system_exit_code_text(ptr)
+declare i32 @relar_system_exit_code_equal(ptr, i32, i64)
+declare i32 @relar_system_exit_code_truth(ptr)
 declare void @relar_args_clear()
 declare void @relar_int_retain(i64)
 declare void @relar_int_release(i64)
@@ -5742,7 +5831,6 @@ declare void @relar_str_retain(ptr)
 declare void @relar_str_release(ptr)
 declare void @relar_print_str(ptr)
 declare void @relar_stderr_line(ptr)
-declare i64 @relar_stdout_write(ptr)
 declare i64 @relar_str_len(ptr)
 declare i32 @relar_str_truthy(ptr)
 declare i32 @relar_bytes_truthy(ptr)
@@ -5775,7 +5863,7 @@ declare i64 @relar_list_borrow_index_proven(ptr, i64) nounwind memory(argmem: re
 declare ptr @relar_list_data_readonly(ptr) nounwind memory(argmem: read)
 {LIST_COPY_INDEX}
 {LIST_APPEND}
-declare void @relar_list_append_pair(ptr, i64, i64)
+{LIST_APPEND_PAIR}
 {LIST_POP}"
     )
     .unwrap();
@@ -6759,12 +6847,15 @@ def total(text: str) -> int:
             ),
         ] {
             let body = function_body(source);
+            assert_eq!(body.matches("call i32 @relar_list_append_pair(").count(), 1);
+            for (call, check) in body.lines().zip(body.lines().skip(1)) {
+                if call.contains("call i32 @relar_list_append") {
+                    let status = call.trim().split_once(" = ").unwrap().0;
+                    assert!(check.contains(&format!("icmp eq i32 {status}, 0")));
+                }
+            }
             assert_eq!(
-                body.matches("call void @relar_list_append_pair(").count(),
-                1
-            );
-            assert_eq!(
-                body.matches("call void @relar_list_append(").count(),
+                body.matches("call i32 @relar_list_append(").count(),
                 singles
             );
         }
@@ -6783,19 +6874,19 @@ def total(text: str) -> int:
             let body = function_body(&format!(
                 "def push(output: list[int], other: list[int], first: int, second: int) -> None:\n{statements}"
             ));
-            assert!(!body.contains("call void @relar_list_append_pair("));
-            assert_eq!(body.matches("call void @relar_list_append(").count(), 2);
+            assert!(!body.contains("call i32 @relar_list_append_pair("));
+            assert_eq!(body.matches("call i32 @relar_list_append(").count(), 2);
         }
         let body = function_body(
             "def push(output: list[str], first: str, second: str) -> None:\n    output.append(first)\n    output.append(second)\n",
         );
-        assert!(!body.contains("call void @relar_list_append_pair("));
+        assert!(!body.contains("call i32 @relar_list_append_pair("));
         assert_eq!(body.matches("call void @relar_seq_append(").count(), 2);
         let body = function_body(
             "def push(outputs: list[list[int]], first: int, second: int) -> None:\n    outputs[0].append(first)\n    outputs[0].append(second)\n",
         );
-        assert!(!body.contains("call void @relar_list_append_pair("));
-        assert_eq!(body.matches("call void @relar_list_append(").count(), 2);
+        assert!(!body.contains("call i32 @relar_list_append_pair("));
+        assert_eq!(body.matches("call i32 @relar_list_append(").count(), 2);
     }
 
     #[test]

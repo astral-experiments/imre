@@ -369,7 +369,7 @@ fn resolve(path: &str, strict: bool) -> Result<Str> {
     Ok(resolved)
 }
 
-fn path_utf8(path: OsString) -> Result<Str> {
+pub(super) fn path_utf8(path: OsString) -> Result<Str> {
     path.into_string()
         .map(Str::from)
         .map_err(|_| Error::new(Kind::UnicodeDecodeError, "resolved path is not valid UTF-8"))
@@ -429,59 +429,6 @@ pub unsafe extern "C" fn relar_union_path_text(value: usize) -> *const Str {
 pub unsafe extern "C" fn relar_path_text_exists(path: *const Str) -> u32 {
     // SAFETY: The path string is borrowed through the stat call.
     u32::from(fs::metadata(unsafe { &*path }.as_str()).is_ok())
-}
-
-fn executable_candidate(directory: &std::path::Path, command: &str) -> Option<std::path::PathBuf> {
-    use rustix::fs::{Access, access};
-    let path = directory.join(command);
-    (fs::metadata(&path).is_ok_and(|metadata| !metadata.is_dir())
-        && access(&path, Access::EXEC_OK).is_ok())
-    .then_some(path)
-}
-
-fn default_search_path() -> OsString {
-    use std::os::unix::ffi::OsStringExt;
-    // SAFETY: confstr with zero capacity returns the size including the terminator.
-    let length = unsafe { libc::confstr(libc::_CS_PATH, std::ptr::null_mut(), 0) };
-    if length > 0 {
-        let mut buffer = vec![0_u8; length];
-        // SAFETY: buffer has room for the full reported C string.
-        if unsafe { libc::confstr(libc::_CS_PATH, buffer.as_mut_ptr().cast(), length) } == length {
-            buffer.pop();
-            return OsString::from_vec(buffer);
-        }
-    }
-    OsString::from("/bin:/usr/bin")
-}
-
-/// # Safety
-/// The command string stays rooted through lookup. Return an owned string word
-/// or zero when the file is missing. Direct paths bypass the search environment.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn relar_shutil_which(command: *const Str) -> usize {
-    // SAFETY: The caller owns this immutable string throughout path resolution.
-    let command = unsafe { &*command }.as_str();
-    let candidate = if let Some(last) = command.rfind('/') {
-        let (directory, command) = command.split_at(last + 1);
-        let stripped = directory.trim_end_matches('/');
-        let directory = if stripped.is_empty() {
-            directory
-        } else {
-            stripped
-        };
-        executable_candidate(std::path::Path::new(directory), command)
-    } else {
-        let path = std::env::var_os("PATH").unwrap_or_else(default_search_path);
-        if path.is_empty() {
-            return 0;
-        }
-        std::env::split_paths(&path).find_map(|directory| executable_candidate(&directory, command))
-    };
-    let Some(path) = candidate else { return 0 };
-    finish(
-        path_utf8(path.into_os_string()).map(|name| Rc::into_raw(Rc::new(name)) as usize),
-        0,
-    )
 }
 
 /// # Safety

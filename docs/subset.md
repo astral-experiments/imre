@@ -614,6 +614,8 @@ Keep each builder local. Declare parent options first, followed by each subparse
 
 ## Synchronous subprocesses
 
+On POSIX, `shutil.which(cmd, mode=os.F_OK | os.X_OK, path=None)` searches for a non-directory accessible with the requested mode. It returns an owned string, bytes, or `None`. String and native `Path` commands produce string paths, and bytes commands preserve arbitrary filename bytes. The search path accepts strings, bytes, native paths, or `None`. A command containing a directory component is checked directly. A missing `PATH` uses the platform default, an empty search path finds nothing, and empty entries in a nonempty colon-separated path search the current directory. Native string results must be representable as UTF-8. `os.F_OK`, `os.R_OK`, `os.W_OK` and `os.X_OK` are available for mode expressions.
+
 The runtime supports a sealed `subprocess.run` boundary with exact `list[str]` arguments. Capture requires literal `capture_output=True` and either `text=True` or `encoding="utf-8"`. Both forms decode strict UTF-8. `check` is a boolean expression, defaulting to false. `cwd` accepts a string, native `Path`, or a nullable form of either, and `env` accepts `dict[str, str]` or `None`. Arguments may be positional or named `args`; the other parameters are keyword-only. All supplied expressions evaluate once in source order before launching the child, even when keyword order differs from parameter order.
 
 ```python
@@ -655,10 +657,16 @@ is `str | None`.
 For programs that explicitly launch Python helpers, `sys.executable` is the
 absolute interpreter path selected by `RELAR_PYTHON`, or the first executable
 `python3` on `PATH`. It is an empty string if neither is available. The
-native program itself has no Python runtime dependency. `sysconfig.get_path("scripts")` locates the console scripts directory for that interpreter on standard POSIX installations and in virtual environments. `shutil.which(command)` checks executable permissions on PATH. `os.path.exists(path)` checks whether the supplied path exists. `sys.platform` reports `linux` or `darwin` for the native build. `__file__` refers to
+native program itself has no Python runtime dependency. `sysconfig.get_path("scripts")`
+locates the console scripts directory for that interpreter on standard POSIX
+installations and in virtual environments. `os.path.exists(path)` checks
+whether the supplied path exists. `__file__` refers to
 the module’s source location at build time, so neighboring resources must
-remain available when the program accesses them. `sys.exit(status)` raises
-`SystemExit` and runs the usual exception cleanup.
+remain available when the program accesses them.
+
+`sys.platform` gives the target platform name. `sys.stdout.write(text)` and `sys.stderr.write(text)` return the number of Unicode characters written. Each stream’s `flush()` flushes that stream.
+
+`sys.exit()` raises `SystemExit` through the ordinary exception and `finally` paths. It accepts an optional `None`, boolean, integer or string. An uncaught string prints to stderr and exits with status 1. An omitted or `None` code exits with status 0. A caught `SystemExit.code` preserves the scalar for printing, truth tests, equality, and type tests.
 
 `os.environ.copy()` returns an independent `dict[str, str]` snapshot. Passing a dictionary as `env` replaces the child's environment; use a snapshot to preserve inherited variables before making overrides. `env=None` inherits the existing environment. Snapshotting undecodable Unix names or values raises `UnicodeDecodeError`; surrogateescaped strings remain outside Relar's string domain. NUL-containing arguments, directories, or environment entries, and environment keys containing `=`, raise `ValueError`. Relar accepts an empty environment name through `execve`, as does CPython's fork/exec path. CPython's `posix_spawn` path raises `ValueError` for that name.
 

@@ -76,6 +76,22 @@ impl Emitter<'_, '_> {
                 "phi i1 [ false, %{absent} ], [ {result}, %{inspected} ]"
             ));
         }
+        if value.ty == Type::ExitCode {
+            // The view retains its heterogeneous payload. None is not a class
+            // accepted by this subset, and bool is also an instance of int.
+            let mask = [Type::None, Type::Bool, Type::Int, Type::Str]
+                .iter()
+                .enumerate()
+                .filter(|(_, ty)| classes.iter().any(|class| class.accepts(**ty)))
+                .fold(0, |mask, (kind, _)| mask | 1 << kind);
+            let kind = self.instruction(format!(
+                "call i32 @relar_system_exit_code_kind(ptr {})",
+                value.operand
+            ));
+            let bit = self.instruction(format!("shl i32 1, {kind}"));
+            let matched = self.instruction(format!("and i32 {bit}, {mask}"));
+            return self.instruction(format!("icmp ne i32 {matched}, 0"));
+        }
         let mut result = "false".to_owned();
         for &class in classes {
             let current = if let Some(members) = self.module.types.members(value.ty) {

@@ -80,7 +80,6 @@ impl Builtin {
             Self::Path(operation) => Contract::new(
                 match operation {
                     PathOperation::ContextExit
-                    | PathOperation::Which
                     | PathOperation::ReadText
                     | PathOperation::ReadBytes
                     | PathOperation::Absolute
@@ -99,7 +98,6 @@ impl Builtin {
                     PathOperation::ContextNew { .. }
                     | PathOperation::ContextEnter
                     | PathOperation::UnionText
-                    | PathOperation::Platform
                     | PathOperation::Scripts
                     | PathOperation::OsExists
                     | PathOperation::New
@@ -128,7 +126,6 @@ impl Builtin {
                 | ProcessOperation::JoinGroup
                 | ProcessOperation::Acquire => Contract::new(true, Unknown),
                 ProcessOperation::Executable
-                | ProcessOperation::Exit
                 | ProcessOperation::CheckOutput
                 | ProcessOperation::RunToStderr
                 | ProcessOperation::Run
@@ -159,6 +156,7 @@ impl Builtin {
                 | ProcessOperation::EnvironCopy
                 | ProcessOperation::EnvironGet
                 | ProcessOperation::GetCwd
+                | ProcessOperation::Which
                 | ProcessOperation::CheckReturnCode
                 | ProcessOperation::ExceptionView
                 | ProcessOperation::ErrorField(_)
@@ -266,8 +264,8 @@ impl Builtin {
             | Self::StringReplace
             | Self::UnionInject
             | Self::UnionProject => Contract::new(false, PreservesLists),
-            Self::SortByKeys => Contract::new(true, PreservesOwners),
-            Self::Append | Self::ListReserveRange => Contract::new(false, PreservesOwners),
+            Self::Append | Self::SortByKeys => Contract::new(true, PreservesOwners),
+            Self::ListReserveRange => Contract::new(false, PreservesOwners),
             Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize
@@ -284,7 +282,13 @@ impl Builtin {
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
-            | Self::StdoutWrite
+            | Self::SysStreamWrite { .. }
+            | Self::SysStreamFlush { .. }
+            | Self::SysExit
+            | Self::SystemExitNew { .. }
+            | Self::SystemExitCode
+            | Self::SystemExitCodeEqual { .. }
+            | Self::SysPlatform
             | Self::SysArgv
             | Self::TextClose
             | Self::TextEnter
@@ -444,7 +448,6 @@ const TAGGED_INT: RuntimeParam = RuntimeParam::Value(Type::Int);
 pub(crate) struct OwnedIntOrError;
 /// The word borrows the rooted list element until consumption. Raw zero signals a pending error.
 pub(crate) struct BorrowedIntOrError;
-pub(crate) struct InfallibleVoid;
 /// One signals success. Zero signals a pending error.
 pub(crate) struct StatusOrError;
 
@@ -463,10 +466,15 @@ pub(crate) const LIST_BORROW_INDEX: RuntimeCall<BorrowedIntOrError, 2> = Runtime
     params: [INT_LIST, RuntimeParam::NativeIndex],
     result: BorrowedIntOrError,
 };
-pub(crate) const LIST_APPEND: RuntimeCall<InfallibleVoid, 2> = RuntimeCall {
+pub(crate) const LIST_APPEND: RuntimeCall<StatusOrError, 2> = RuntimeCall {
     symbol: "relar_list_append",
     params: [INT_LIST, TAGGED_INT],
-    result: InfallibleVoid,
+    result: StatusOrError,
+};
+pub(crate) const LIST_APPEND_PAIR: RuntimeCall<StatusOrError, 3> = RuntimeCall {
+    symbol: "relar_list_append_pair",
+    params: [INT_LIST, TAGGED_INT, TAGGED_INT],
+    result: StatusOrError,
 };
 pub(crate) const LIST_POP: RuntimeCall<OwnedIntOrError, 1> = RuntimeCall {
     symbol: "relar_list_pop",
@@ -518,6 +526,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_subprocess_run_timeout_int"
                 | "relar_environ_get"
                 | "relar_getcwd"
+                | "relar_shutil_which"
                 | "relar_environ_copy"
                 | "relar_subprocess_check"
                 | "relar_subprocess_error_field"
@@ -525,7 +534,6 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_print_float"
                 | "relar_stderr_line"
                 | "relar_enum_lookup"
-                | "relar_stdout_write"
                 | "relar_print_str"
                 | "relar_print_bytes"
                 | "relar_bytes_count"
@@ -552,7 +560,6 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "relar_sys_argv"
                 | "relar_path_read_bytes"
                 | "relar_path_read_text"
-                | "relar_shutil_which"
                 | "relar_path_write_text"
                 | "relar_path_write_bytes"
                 | "relar_path_mkdir"
