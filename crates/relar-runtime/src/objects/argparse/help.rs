@@ -4,6 +4,8 @@ use std::collections::VecDeque;
 use std::fmt::Write;
 use std::io::IsTerminal;
 
+use icu_properties::props::{EnumeratedProperty, GeneralCategory, GeneralCategoryGroup};
+
 use super::super::python_whitespace;
 use super::{Kind, OptionSpec, Parser};
 
@@ -125,8 +127,18 @@ impl OptionSpec {
 
 /// Group words and punctuation as textwrap does before fitting each line.
 fn word_chunks(word: &str, chunks: &mut VecDeque<String>) {
+    // textwrap's "letter" matches [^\d\W], including nondecimal numbers.
+    const NON_DECIMAL: GeneralCategoryGroup = GeneralCategoryGroup::Letter
+        .union(GeneralCategoryGroup::LetterNumber)
+        .union(GeneralCategoryGroup::OtherNumber);
+    let word_char = |ch: char, categories: GeneralCategoryGroup| {
+        ch == '_'
+            || categories.contains(GeneralCategory::for_char(ch))
+                && (ch.is_ascii() || !crate::integer_text::newer_printable(ch))
+    };
+    let letter = |ch| word_char(ch, NON_DECIMAL);
+    let is_word = |ch| word_char(ch, NON_DECIMAL.union(GeneralCategoryGroup::DecimalNumber));
     let chars = word.chars().collect::<Vec<_>>();
-    let letter = |ch: char| ch.is_alphabetic() || ch == '_';
     let mut start = 0;
     let mut i = 0;
     while i < chars.len() {
@@ -137,9 +149,9 @@ fn word_chunks(word: &str, chunks: &mut VecDeque<String>) {
             }
             if end - i >= 2
                 && i > 0
-                && (chars[i - 1].is_alphanumeric() || "_!\"'&.,?".contains(chars[i - 1]))
+                && (is_word(chars[i - 1]) || "!\"'&.,?".contains(chars[i - 1]))
                 && end < chars.len()
-                && (chars[end].is_alphanumeric() || chars[end] == '_')
+                && is_word(chars[end])
             {
                 if i != start {
                     chunks.push_back(chars[start..i].iter().collect())
