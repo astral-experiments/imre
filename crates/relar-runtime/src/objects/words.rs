@@ -245,7 +245,7 @@ pub extern "C" fn relar_seq_layout() -> SequenceLayout {
 
 impl Drop for Words {
     fn drop(&mut self) {
-        for word in self.values.drain(..) {
+        for word in self.values.drain(..).rev() {
             // SAFETY: each buffer word owns its declared value independently.
             unsafe { self.kind.release(word) };
         }

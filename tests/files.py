@@ -364,6 +364,7 @@ class Group:
     first: Leaf
     direct: BinaryIO
     nested: list[Leaf]
+    pair: tuple[Leaf, Leaf]
     last: Leaf
 
 def writer(mark: bytes) -> BinaryIO:
@@ -374,11 +375,36 @@ def writer(mark: bytes) -> BinaryIO:
 def group(shared: bool) -> Group:
     first = Leaf(writer(b"A"))
     last = first if shared else Leaf(writer(b"D"))
-    return Group(first, writer(b"B"), [Leaf(writer(b"C"))], last)
+    return Group(first, writer(b"B"), [Leaf(writer(b"C")), Leaf(writer(b"E"))],
+                 (Leaf(writer(b"F")), Leaf(writer(b"G"))), last)
 
 def discard(shared: bool) -> None:
     owner = group(shared)
     print(owner.first.stream.closed)
+
+with open("order.bin", "wb") as empty:
+    pass
+discard(False)
+discard(True)
+with open("order.bin", "rb") as result:
+    print(result.read())
+""",
+    "list_release_order": r"""
+from typing import BinaryIO
+
+def writer(mark: bytes) -> BinaryIO:
+    stream = open("order.bin", "ab")
+    stream.write(mark)
+    return stream
+
+def discard(shared: bool) -> None:
+    streams: list[BinaryIO] = [writer(b"A"), writer(b"B")]
+    if shared:
+        streams.append(streams[0])
+    else:
+        streams.append(writer(b"C"))
+    streams.append(writer(b"D"))
+    print(len(streams))
 
 with open("order.bin", "wb") as empty:
     pass

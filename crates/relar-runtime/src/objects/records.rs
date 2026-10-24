@@ -351,7 +351,16 @@ unsafe fn release_record_owner(payload: *const usize) {
 /// # Safety
 /// The caller transfers the final record's fields with their original descriptor.
 unsafe fn release_fields<const PACKED: bool>(payload: *const usize, descriptor: &RecordDescriptor) {
-    for index in 0..descriptor.length {
+    // Dataclass fields release in definition order. Tuples release their last
+    // element first. Both kinds use the same native record layout.
+    // SAFETY: semantic metadata, when present, lives as long as the descriptor.
+    let is_tuple = unsafe { descriptor.semantics.as_ref() }.is_some_and(|value| value.kind == 1);
+    for field in 0..descriptor.length {
+        let index = if is_tuple {
+            descriptor.length - 1 - field
+        } else {
+            field
+        };
         // SAFETY: each nonzero owning word transfers the field's final reference.
         unsafe {
             let kind = WordKind::new(descriptor.kinds.add(index).read());
