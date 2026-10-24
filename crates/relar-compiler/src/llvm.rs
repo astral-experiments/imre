@@ -6231,6 +6231,24 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_sort_checks_permutation_allocation_failure() {
+        let llvm = compile(
+            "def ordered(values: list[int]) -> list[int]:\n    try:\n        return sorted(values)\n    except MemoryError:\n        return values\n",
+            &CompileOptions::default(),
+        ).unwrap();
+        let mut lines = llvm.lines();
+        lines
+            .find(|line| line.contains("call void @relar_sort_by_keys("))
+            .unwrap();
+        assert!(
+            lines
+                .next()
+                .unwrap()
+                .contains("call i32 @relar_error_pending()")
+        );
+    }
+
+    #[test]
     fn sorted_key_union_fuses_only_local_dictionary_reads() {
         let llvm = compile(
             "def add(d: dict[str, int]) -> dict[str, int]:\n    d['late'] = 1\n    return {}\ndef keys(a: dict[str, int], b: dict[str, int]) -> list[str]:\n    first = sorted(a.keys() | b.keys())\n    later = sorted(a.keys() | b.keys() | add(a).keys())\n    return first if first else later\n",
