@@ -18,6 +18,20 @@ impl Storage {
         self.path_text()
     }
 
+    fn path_name(&self) -> &Rc<Str> {
+        let Self::Path { text, name: cached } = self else {
+            fail("SystemError", "expected a path object");
+        };
+        cached.get_or_init(|| {
+            let component = name(text);
+            if component.len() == text.len() {
+                Rc::clone(text)
+            } else {
+                Rc::new(Str::from(component))
+            }
+        })
+    }
+
     fn path_text(&self) -> &Rc<Str> {
         match self {
             Self::Path { text, .. } => text,
@@ -289,19 +303,9 @@ pub unsafe extern "C" fn relar_path_name(path: *const Object) -> *const Str {
     // SAFETY: spelling is fixed. The one per-path cached component and the
     // returned handle each own their reference across subsequent operations.
     let text = unsafe {
-        object(path).0.with(|storage| {
-            let Storage::Path { text, name: cached } = storage else {
-                fail("SystemError", "expected a path object");
-            };
-            Rc::clone(cached.get_or_init(|| {
-                let component = name(text);
-                if component.len() == text.len() {
-                    Rc::clone(text)
-                } else {
-                    Rc::new(Str::from(component))
-                }
-            }))
-        })
+        object(path)
+            .0
+            .with(|storage| Rc::clone(storage.path_name()))
     };
     Rc::into_raw(text)
 }
@@ -311,14 +315,17 @@ pub unsafe extern "C" fn relar_path_name(path: *const Object) -> *const Str {
 /// names consisting entirely of dots and leading-dot names have no such suffix.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_path_stem(path: *const Object) -> *const Str {
-    // SAFETY: only an owned substring escapes this immutable storage access.
-    let text = unsafe {
+    // SAFETY: the rooted path owns its spelling and cached basename.
+    let stem = unsafe {
         object(path).0.with(|storage| {
-            let name = name(storage.path());
-            Str::from(&name[..suffix_start(name).unwrap_or(name.len())])
+            let component = name(storage.path());
+            match suffix_start(component) {
+                Some(end) => Rc::new(Str::from(&component[..end])),
+                None => Rc::clone(storage.path_name()),
+            }
         })
     };
-    Rc::into_raw(Rc::new(text))
+    Rc::into_raw(stem)
 }
 
 /// # Safety
@@ -937,12 +944,15 @@ mod tests {
             let path = Rc::from_raw(relar_path_new(Rc::as_ptr(&source)));
             let first = Rc::from_raw(relar_path_text(Rc::as_ptr(&path)));
             let component = Rc::from_raw(relar_path_name(Rc::as_ptr(&path)));
+            let stem = Rc::from_raw(relar_path_stem(Rc::as_ptr(&path)));
+            assert!(Rc::ptr_eq(&stem, &component));
             let mut other = Rc::from_raw(relar_path_name(Rc::as_ptr(&path)));
             assert!(Rc::ptr_eq(&first, &source));
             assert!(Rc::ptr_eq(&other, &component));
             Rc::make_mut(&mut source).push('!');
             Rc::make_mut(&mut other).push('?');
             drop(path);
+            assert_eq!(*stem, *component);
             assert_eq!(*first, original);
             assert_eq!(
                 component.as_str(),
