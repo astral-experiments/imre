@@ -116,7 +116,7 @@ print(label(S.ON))
         assert!(
             !llvm
                 .lines()
-                .any(|line| line.contains("call ptr @relar_record_new("))
+                .any(|line| line.contains("call ptr @relar_record_try_new("))
         );
     }
 

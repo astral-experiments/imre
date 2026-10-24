@@ -193,6 +193,30 @@ impl<'a> RecordBatch<'a> {
 /// reading them, preserve each declared representation, and prevent heap cycles.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_record_new(descriptor: *const RecordDescriptor) -> *mut usize {
+    // SAFETY: the caller supplies a live descriptor and its immutable field kinds.
+    let record = unsafe { allocate_record(descriptor) };
+    if record.is_null() {
+        // SAFETY: the descriptor remains live after a failed allocation.
+        handle_alloc_error(layout(unsafe { (*descriptor).length }));
+    }
+    record
+}
+
+/// Returns null with MemoryError pending when the record allocation fails.
+///
+/// # Safety
+/// The descriptor satisfies the same lifetime and field requirements as `relar_record_new`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_record_try_new(descriptor: *const RecordDescriptor) -> *mut usize {
+    // SAFETY: the caller supplies a live descriptor and its immutable field kinds.
+    let record = unsafe { allocate_record(descriptor) };
+    if record.is_null() {
+        super::exceptions::record_allocation_failed();
+    }
+    record
+}
+
+unsafe fn allocate_record(descriptor: *const RecordDescriptor) -> *mut usize {
     // SAFETY: the caller provides immutable live metadata for this allocation.
     let descriptor_value = unsafe { &*descriptor };
     let allocation_layout = layout(descriptor_value.length);
@@ -204,7 +228,7 @@ pub unsafe extern "C" fn relar_record_new(descriptor: *const RecordDescriptor) -
     // SAFETY: layout is nonzero and correctly aligned for the header and words.
     let allocation = unsafe { alloc(allocation_layout) };
     if allocation.is_null() {
-        handle_alloc_error(allocation_layout);
+        return std::ptr::null_mut();
     }
     // SAFETY: the allocation has room for this header and its declared payload.
     unsafe {
@@ -249,6 +273,25 @@ pub unsafe extern "C" fn relar_record_retain(payload: *const usize) {
 /// representation. A reused record may be mutated only through this result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn relar_record_cached_result(payload: *const usize) -> *mut usize {
+    // SAFETY: the caller borrows its rooted cache without a temporary owner.
+    unsafe { cached_result(payload, relar_record_new) }
+}
+
+/// Returns a retained cache or a fresh record, raising MemoryError on allocation failure.
+///
+/// # Safety
+/// The cache and returned record have the same ownership and initialization
+/// requirements as `relar_record_cached_result`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn relar_record_try_cached_result(payload: *const usize) -> *mut usize {
+    // SAFETY: the caller borrows its rooted cache without a temporary owner.
+    unsafe { cached_result(payload, relar_record_try_new) }
+}
+
+unsafe fn cached_result(
+    payload: *const usize,
+    allocate: unsafe extern "C" fn(*const RecordDescriptor) -> *mut usize,
+) -> *mut usize {
     // SAFETY: the caller roots this cache and its immutable descriptor.
     let header = unsafe { &*payload.cast::<Header>().sub(1) };
     if header.references.get() == 1 {
@@ -257,7 +300,7 @@ pub unsafe extern "C" fn relar_record_cached_result(payload: *const usize) -> *m
     } else {
         // SAFETY: a fresh record uses the cache's static descriptor; it does not
         // expose or mutate any existing tuple's observable field values.
-        unsafe { relar_record_new(header.descriptor()) }
+        unsafe { allocate(header.descriptor()) }
     }
 }
 

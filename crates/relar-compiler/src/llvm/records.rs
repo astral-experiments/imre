@@ -166,12 +166,12 @@ mod tests {
         let eligible = compile(include_str!(
             "../../../../tests/fixtures/classes/record_reuse.py"
         ));
-        assert!(eligible.contains("call ptr @relar_record_cached_result("));
+        assert!(eligible.contains("call ptr @relar_record_try_cached_result("));
 
         let list_fields = compile(include_str!(
             "../../../../tests/fixtures/classes/record_reuse_list.py"
         ));
-        let cached = "call ptr @relar_record_cached_result(";
+        let cached = "call ptr @relar_record_try_cached_result(";
         assert!(list_fields.contains(cached));
         let streams = list_fields
             .split("\ndefine ")
@@ -202,6 +202,6 @@ def keep(streams: list[TextIO]) -> None:
         print(len(holder.handles) + logged.number)
 "#,
         );
-        assert!(!ordinary.contains("call ptr @relar_record_cached_result("));
+        assert!(!ordinary.contains("call ptr @relar_record_try_cached_result("));
     }
 }
